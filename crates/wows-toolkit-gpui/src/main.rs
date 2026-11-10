@@ -43,6 +43,7 @@ mod search;
 mod search_pills;
 mod settings;
 mod settings_store;
+mod slider_field;
 mod stats;
 mod tactics;
 mod theme;

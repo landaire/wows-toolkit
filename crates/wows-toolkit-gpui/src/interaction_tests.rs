@@ -574,6 +574,139 @@ fn a_rail_section_is_built_only_while_it_is_expanded(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// The rail's filter keeps the controls whose names match and drops the
+/// rest, and says so when nothing is left.
+#[gpui_kit::test]
+fn the_options_filter_keeps_only_the_matching_controls(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-show-hidden").is_some());
+
+        window.click("armor-options-filter", cx);
+        window.input("pen ch", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-analysis").is_some(), "Pen Check matches");
+        assert!(window.try_find("armor-show-hidden").is_none(), "Show Hidden does not");
+        assert!(
+            window.try_find("armor-options-section-Display").is_none(),
+            "a section with nothing matched is not drawn"
+        );
+
+        window.input("zzz", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-analysis").is_none(), "nothing is left");
+        let said = rust_i18n::t!("ui.armor.no_matching_options");
+        assert_eq!(window.find("armor-options-no-match").label(), Some(&*said), "the rail says nothing matched");
+    })
+    .expect("the test window stays open");
+}
+
+/// While filtering, every section is held open, so a click on a section's
+/// head changes nothing on screen; clearing the filter brings back the open
+/// state the reader left.
+#[gpui_kit::test]
+fn a_section_head_clicked_while_filtering_keeps_its_open_state(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-body-Display").is_some(), "the display section starts expanded");
+
+        let query = rust_i18n::t!("ui.armor.display").to_lowercase();
+        window.click("armor-options-filter", cx);
+        window.input(&query, cx);
+        window.render_frame(cx);
+        window.click("armor-options-section-Display", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-body-Display").is_some(), "a filtered section stays open");
+
+        window.click("armor-options-filter", cx);
+        window.press("end", cx);
+        for _ in query.chars() {
+            window.press("backspace", cx);
+        }
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-body-Display").is_some(), "the section is open as it was left");
+    })
+    .expect("the test window stays open");
+}
+
+/// A number typed into a slider's field is taken when focus moves off it by
+/// a click, not only on Enter. The field is unfocused for a frame before it
+/// is told so, and that frame must not put the old value back.
+#[gpui_kit::test]
+fn a_typed_slider_value_is_kept_when_focus_moves_away(cx: &mut TestAppContext) {
+    use crate::slider_field::SliderField;
+    use crate::slider_field::SliderRange;
+    use gpui_kit::component::input::Input;
+    use gpui_kit::component::input::InputState;
+
+    struct Probe {
+        field: gpui_kit::Entity<SliderField>,
+        other: gpui_kit::Entity<InputState>,
+    }
+    impl gpui_kit::Render for Probe {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::ParentElement as _;
+            use gpui_kit::Styled as _;
+            gpui_kit::div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .p(px(20.))
+                .gap_4()
+                .child(self.field.clone())
+                .child(Input::new(&self.other).id("probe-other"))
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let field = cx.new(|cx| SliderField::new(SliderRange::new(0.0, 10.0, 1.0), 5.0, 5.0, cx));
+    let shown_field = field.clone();
+    let window = cx.open_window(size(px(400.), px(200.)), move |window, cx| {
+        let other = cx.new(|cx| InputState::new(window, cx));
+        let probe: gpui_kit::AnyView = cx.new(|_| Probe { field: shown_field, other }).into();
+        gpui_kit::component::Root::new(probe, window, cx)
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        // Focus and blur are only reported to an active window.
+        window.activate_window();
+        window.render_frame(cx);
+        window.click("slider-field-number", cx);
+        window.press("end", cx);
+        window.press("backspace", cx);
+        window.input("7", cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("slider-field-number").value(), Some("7"));
+
+        window.click("probe-other", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(field.read(cx).value(cx), 7.0, "the typed value reached the slider");
+        assert_eq!(window.find("slider-field-number").value(), Some("7"), "and the field still shows it");
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn typing_in_the_ship_search_records_the_query(cx: &mut TestAppContext) {
     let window = open_app(cx);

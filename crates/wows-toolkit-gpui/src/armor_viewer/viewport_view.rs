@@ -27,13 +27,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::slider_field::SliderField;
+use crate::slider_field::SliderFieldChange;
+use crate::slider_field::SliderRange;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::slider::SliderEvent;
-use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -230,6 +231,7 @@ pub(crate) struct SplashState {
 }
 
 /// Whether clicks cast shells, and what has been cast so far.
+#[derive(Clone, Copy)]
 pub(crate) struct TrajectoryState {
     pub(crate) shown: bool,
     pub(crate) count: usize,
@@ -425,31 +427,31 @@ struct HoverInfo {
 
 /// The display-settings popover's two numeric sliders (`popover.rs`),
 /// backing `ViewportView::display_settings`'s `waterline_opacity`/
-/// `armor_opacity` fields. A persistent `Entity<SliderState>` per slider so
+/// `armor_opacity` fields. A persistent `Entity<SliderField>` per slider so
 /// its thumb position survives the popover closing and reopening (the
 /// popover's `.content()` closure only runs while open, see `popover.rs`'s
-/// module doc); rebuilt wholesale (not `set_value`d) whenever the seed
-/// changes outside a drag (`apply_armor_defaults`), since `SliderState::
-/// set_value` needs a `&mut Window` that isn't available there -- mirrors
-/// `app.rs`'s own `zoom_slider` reseed-by-recreation.
+/// module doc); rebuilt wholesale whenever the seed changes outside a drag
+/// (`apply_armor_defaults`), since moving a slider needs a `&mut Window` that
+/// isn't available there -- mirrors `app.rs`'s own `zoom_slider`
+/// reseed-by-recreation.
 pub(crate) struct DisplaySettingsSliders {
-    pub(crate) waterline_opacity: Entity<SliderState>,
-    pub(crate) armor_opacity: Entity<SliderState>,
+    pub(crate) waterline_opacity: Entity<SliderField>,
+    pub(crate) armor_opacity: Entity<SliderField>,
     /// How solid the impact markers are drawn.
-    pub(crate) marker_opacity: Entity<SliderState>,
+    pub(crate) marker_opacity: Entity<SliderField>,
     /// How wide the locked camera sees, in degrees.
-    pub(crate) perspective_fov: Entity<SliderState>,
+    pub(crate) perspective_fov: Entity<SliderField>,
     /// How far the hull is heeled over, in degrees. A property of the model
     /// on screen rather than of the armor, so it is not written back with the
     /// display defaults.
-    pub(crate) model_roll_deg: Entity<SliderState>,
+    pub(crate) model_roll_deg: Entity<SliderField>,
     /// Where between the field-of-view extremes the drawn camera orbits sit.
-    pub(crate) camera_fov: Entity<SliderState>,
+    pub(crate) camera_fov: Entity<SliderField>,
     /// How far those orbits are raised.
-    pub(crate) camera_height: Entity<SliderState>,
+    pub(crate) camera_height: Entity<SliderField>,
     /// The range a cast shell is fired from, in kilometres, which sets how
     /// steeply it comes down onto the armor.
-    pub(crate) cast_range: Entity<SliderState>,
+    pub(crate) cast_range: Entity<SliderField>,
 }
 
 /// The display-settings popover's lighting sliders, same persistent-entity
@@ -467,13 +469,13 @@ pub(crate) struct LightingColors {
 }
 
 pub(crate) struct LightingSliders {
-    pub(crate) flat_intensity: Entity<SliderState>,
-    pub(crate) key_intensity: Entity<SliderState>,
-    pub(crate) azimuth_deg: Entity<SliderState>,
-    pub(crate) elevation_deg: Entity<SliderState>,
-    pub(crate) rim_strength: Entity<SliderState>,
-    pub(crate) specular_strength: Entity<SliderState>,
-    pub(crate) shininess: Entity<SliderState>,
+    pub(crate) flat_intensity: Entity<SliderField>,
+    pub(crate) key_intensity: Entity<SliderField>,
+    pub(crate) azimuth_deg: Entity<SliderField>,
+    pub(crate) elevation_deg: Entity<SliderField>,
+    pub(crate) rim_strength: Entity<SliderField>,
+    pub(crate) specular_strength: Entity<SliderField>,
+    pub(crate) shininess: Entity<SliderField>,
 }
 
 /// What a Milestone 4 Task 8c background reload needs: the shared
@@ -776,7 +778,7 @@ pub struct ViewportView {
     show_hidden_only: bool,
     /// The display section's waterline/armor opacity slider state.
     pub(crate) display_sliders: DisplaySettingsSliders,
-    /// Kept alive so `display_sliders`' `SliderEvent::Change` subscriptions
+    /// Kept alive so `display_sliders`' change subscriptions
     /// keep firing; replaced wholesale (dropping and canceling the old ones)
     /// whenever `apply_armor_defaults` rebuilds the sliders.
     _display_slider_subscriptions: Vec<Subscription>,
@@ -785,7 +787,7 @@ pub struct ViewportView {
     /// The ambient and key light colours, which the shader multiplies each term
     /// by; the sliders beside them set how much of each there is.
     pub(crate) lighting_colors: LightingColors,
-    /// Kept alive so `lighting_sliders`' `SliderEvent::Change` subscriptions
+    /// Kept alive so `lighting_sliders`' change subscriptions
     /// keep firing; replaced wholesale whenever `set_lighting_preset` rebuilds
     /// the sliders.
     _lighting_slider_subscriptions: Vec<Subscription>,
@@ -928,27 +930,24 @@ impl ViewportView {
         }
     }
 
-    /// Creates a `SliderState` entity seeded to `default` (min/max/step), for
+    /// A slider over `range` showing `value`, which its reset button puts
+    /// back to `reset_to`. For
     /// [`build_display_sliders`](Self::build_display_sliders)/
     /// [`build_lighting_sliders`](Self::build_lighting_sliders).
-    fn new_slider(cx: &mut Context<Self>, min: f32, max: f32, step: f32, default: f32) -> Entity<SliderState> {
-        cx.new(|_| SliderState::new().min(min).max(max).step(step).default_value(default))
+    fn new_slider(cx: &mut Context<Self>, range: SliderRange, value: f32, reset_to: f32) -> Entity<SliderField> {
+        cx.new(|cx| SliderField::new(range, value, reset_to, cx))
     }
 
-    /// Subscribes so every `SliderEvent::Change` on `state` (fired
-    /// continuously while the user drags the thumb, matching egui's own
-    /// per-frame `Slider::changed()`) invokes `on_change` with the slider's
-    /// current value.
+    /// Subscribes so every change on `state` (fired continuously while the
+    /// user drags the thumb, matching egui's own per-frame
+    /// `Slider::changed()`, and once for a typed value or a reset) invokes
+    /// `on_change` with the new value.
     fn subscribe_slider(
         cx: &mut Context<Self>,
-        state: &Entity<SliderState>,
+        state: &Entity<SliderField>,
         on_change: impl Fn(&mut Self, f32, &mut Context<Self>) + 'static,
     ) -> Subscription {
-        cx.subscribe(state, move |this, _state, event, cx| {
-            if let SliderEvent::Change(value) = event {
-                on_change(this, value.end(), cx);
-            }
-        })
+        cx.subscribe(state, move |this, _state, SliderFieldChange(value), cx| on_change(this, *value, cx))
     }
 
     /// Builds [`DisplaySettingsSliders`] seeded from `display`, wired so a
@@ -959,19 +958,47 @@ impl ViewportView {
         cx: &mut Context<Self>,
         display: upload::DisplaySettings,
     ) -> (DisplaySettingsSliders, Vec<Subscription>) {
-        let waterline_opacity = Self::new_slider(cx, 0.05, 1.0, 0.01, display.waterline_opacity);
-        let armor_opacity = Self::new_slider(cx, 0.1, 1.0, 0.01, display.armor_opacity);
-        let marker_opacity = Self::new_slider(cx, 0.0, 1.0, 0.01, display.marker_opacity);
-        let perspective_fov = Self::new_slider(cx, 30.0, 120.0, 1.0, CameraPerspective::default().fov_deg);
+        // What each reset puts back: the settings a fresh install starts on.
+        let factory = upload::DisplaySettings::default();
+        let waterline_opacity = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.05, 1.0, 0.01) },
+            display.waterline_opacity,
+            factory.waterline_opacity,
+        );
+        let armor_opacity = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.1, 1.0, 0.01) },
+            display.armor_opacity,
+            factory.armor_opacity,
+        );
+        let marker_opacity = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 1.0, 0.01) },
+            display.marker_opacity,
+            factory.marker_opacity,
+        );
+        let perspective_fov = Self::new_slider(
+            cx,
+            const { SliderRange::new(30.0, 120.0, 1.0) },
+            CameraPerspective::default().fov_deg,
+            CameraPerspective::default().fov_deg,
+        );
         // The range the egui slider uses: a hull heels this far in a hard
         // turn, and further than that reads as a capsize rather than a
         // camera angle worth checking armor against.
-        let model_roll_deg = Self::new_slider(cx, -ROLL_LIMIT_DEG, ROLL_LIMIT_DEG, 0.5, 0.0);
+        let model_roll_deg =
+            Self::new_slider(cx, const { SliderRange::new(-ROLL_LIMIT_DEG, ROLL_LIMIT_DEG, 0.5) }, 0.0, 0.0);
         // The ranges the trajectory itself is resolved over.
-        let camera_fov = Self::new_slider(cx, 0.0, 1.0, 0.01, 0.0);
-        let camera_height = Self::new_slider(cx, -1.0, 1.0, 0.01, 0.0);
+        let camera_fov = Self::new_slider(cx, const { SliderRange::new(0.0, 1.0, 0.01) }, 0.0, 0.0);
+        let camera_height = Self::new_slider(cx, const { SliderRange::new(-1.0, 1.0, 0.01) }, 0.0, 0.0);
         // The span the egui viewer's own range slider offers, in kilometres.
-        let cast_range = Self::new_slider(cx, 0.0, 30.0, 0.5, DEFAULT_CAST_RANGE.value());
+        let cast_range = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 30.0, 0.5) },
+            DEFAULT_CAST_RANGE.value(),
+            DEFAULT_CAST_RANGE.value(),
+        );
         let subs = vec![
             Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
@@ -1050,13 +1077,45 @@ impl ViewportView {
         cx: &mut Context<Self>,
         lighting: &LightingSettings,
     ) -> (LightingSliders, Vec<Subscription>) {
-        let flat_intensity = Self::new_slider(cx, 0.0, 1.5, 0.01, lighting.flat_intensity);
-        let key_intensity = Self::new_slider(cx, 0.0, 1.5, 0.01, lighting.key_intensity);
-        let azimuth_deg = Self::new_slider(cx, 0.0, 360.0, 1.0, lighting.azimuth_deg);
-        let elevation_deg = Self::new_slider(cx, -90.0, 90.0, 1.0, lighting.elevation_deg);
-        let rim_strength = Self::new_slider(cx, 0.0, 1.0, 0.01, lighting.rim_strength);
-        let specular_strength = Self::new_slider(cx, 0.0, 1.0, 0.01, lighting.specular_strength);
-        let shininess = Self::new_slider(cx, 1.0, 128.0, 1.0, lighting.shininess);
+        let factory = LightingSettings::default();
+        let flat_intensity = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 1.5, 0.01) },
+            lighting.flat_intensity,
+            factory.flat_intensity,
+        );
+        let key_intensity = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 1.5, 0.01) },
+            lighting.key_intensity,
+            factory.key_intensity,
+        );
+        let azimuth_deg = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 360.0, 1.0) },
+            lighting.azimuth_deg,
+            factory.azimuth_deg,
+        );
+        let elevation_deg = Self::new_slider(
+            cx,
+            const { SliderRange::new(-90.0, 90.0, 1.0) },
+            lighting.elevation_deg,
+            factory.elevation_deg,
+        );
+        let rim_strength = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 1.0, 0.01) },
+            lighting.rim_strength,
+            factory.rim_strength,
+        );
+        let specular_strength = Self::new_slider(
+            cx,
+            const { SliderRange::new(0.0, 1.0, 0.01) },
+            lighting.specular_strength,
+            factory.specular_strength,
+        );
+        let shininess =
+            Self::new_slider(cx, const { SliderRange::new(1.0, 128.0, 1.0) }, lighting.shininess, factory.shininess);
         let subs = vec![
             Self::subscribe_slider(cx, &flat_intensity, |this, v, cx| {
                 this.mutate_lighting(cx, |l| l.flat_intensity = v)
@@ -2861,17 +2920,25 @@ impl ViewportView {
         });
     }
 
-    /// Toggles an entire zone's parts from the popover's zone-header checkbox
-    /// (`checked`), or -- when `solo` is set (Ctrl/Cmd-click) -- solos this
-    /// zone: its parts on, every other zone's parts off, and every zone's
-    /// plate overrides cleared. Ports `tab.rs:4482-4511`.
-    pub(crate) fn toggle_zone(&mut self, zone: String, checked: bool, solo: bool, cx: &mut Context<Self>) {
+    /// Toggles a zone's `parts` from the popover's zone-header checkbox
+    /// (`checked`), or -- when `solo` is set (Ctrl/Cmd-click) -- solos them:
+    /// those parts on, every other part off, and every zone's plate overrides
+    /// cleared. Ports `tab.rs:4482-4511`. `parts` is every part of the zone,
+    /// or while the rail is filtered, the ones it lists.
+    pub(crate) fn toggle_zone(
+        &mut self,
+        zone: String,
+        parts: Vec<String>,
+        checked: bool,
+        solo: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(armor) = self.current_armor.clone() else { return };
         self.snapshot_and_mutate(cx, move |this| {
             if solo {
                 for z in &armor.zone_part_plates {
-                    let on = z.name == zone;
                     for p in &z.parts {
+                        let on = z.name == zone && parts.contains(&p.name);
                         this.part_visibility.insert((z.name.clone(), p.name.clone()), on);
                         for &t in &p.plates {
                             this.plate_visibility.remove(&PlateKey {
@@ -2885,7 +2952,7 @@ impl ViewportView {
                 return;
             }
             let Some(z) = armor.zone_part_plates.iter().find(|z| z.name == zone) else { return };
-            for p in &z.parts {
+            for p in z.parts.iter().filter(|p| parts.contains(&p.name)) {
                 this.part_visibility.insert((zone.clone(), p.name.clone()), checked);
                 if checked {
                     for &t in &p.plates {

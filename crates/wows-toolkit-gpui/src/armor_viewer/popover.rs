@@ -13,10 +13,12 @@
 //! renders inside that pane's own render, and reading it there panics on the
 //! lease it already holds. Anything a section needs from the pane is passed
 //! in (see `render_display_popover_content`'s `legend_visible`).
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::slider_field::SliderField;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -35,7 +37,8 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::Slider;
-use gpui_kit::component::slider::SliderState;
+
+use super::options_filter::OptionsFilter;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -73,6 +76,7 @@ use super::visibility::zone_all_on;
 use super::visibility::zone_any_on;
 use crate::armor_viewer::analysis;
 use crate::armor_viewer::pane::ArmorViewerPane;
+use crate::armor_viewer::pane::OptionSection;
 use wowsunpack::game_params::types::Km;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
@@ -89,23 +93,32 @@ pub(super) fn render_tools(
     entity: &Entity<ViewportView>,
     pen: PenCheckButton,
     pane: &Entity<ArmorViewerPane>,
-) -> AnyElement {
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
+    let tools: Vec<AnyElement> = [
+        render_hidden_plates_button(view, entity, filter),
+        render_gaps_button(view, entity, filter),
+        render_splash_button(view, entity, filter),
+        render_splash_boxes_button(view, entity, filter),
+        render_trajectory_button(view, entity, filter),
+        render_penetration_button(pen, pane.clone(), filter),
+        render_export_button(view, entity, filter),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if tools.is_empty() {
+        return None;
+    }
+
     // Two even columns rather than wrapped rows: the labels differ in length,
     // and wrapping leaves a ragged edge that moves as the rail is resized.
-    div()
-        .id("armor-options-tools")
-        .test_support()
-        .grid()
-        .grid_cols(2)
-        .gap_1()
-        .child(render_hidden_plates_button(view, entity))
-        .child(render_gaps_button(view, entity))
-        .child(render_splash_button(view, entity))
-        .child(render_splash_boxes_button(view, entity))
-        .child(render_trajectory_button(view, entity))
-        .child(render_penetration_button(pen, pane.clone()))
-        .child(render_export_button(view, entity))
-        .into_any_element()
+    Some(div().id("armor-options-tools").test_support().grid().grid_cols(2).gap_1().children(tools).into_any_element())
+}
+
+/// What a filter match is marked with.
+pub(super) fn mark() -> Hsla {
+    gpui_kit::Hsla::from(gpui_kit::rgb(crate::theme::semantic().notice)).opacity(0.3)
 }
 
 /// What the Pen Check toggle shows, read from the pane by the caller.
@@ -193,194 +206,240 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
 /// model but that the game's own armor viewer never draws.
 ///
 /// A mode rather than an addition, so it reads as selected while it is on.
-fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_hidden_plates_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let showing = view.show_hidden_only();
     let has_armor = view.has_armor();
     let entity = entity.clone();
 
-    crate::ui::selectable(
-        "armor-show-hidden",
-        showing,
-        Button::new("armor-show-hidden-button")
-            .icon(crate::icons::Glyph::EyeOff)
-            .label(t!("ui.armor.show_hidden").to_string())
-            .compact()
-            .w_full()
-            .selected(showing)
-            .disabled(!has_armor)
-            .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
-            }),
+    let label_text = filter.label(t!("ui.armor.show_hidden").to_string(), mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-show-hidden",
+            showing,
+            Button::new("armor-show-hidden-button")
+                .icon(crate::icons::Glyph::EyeOff)
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(showing)
+                .disabled(!has_armor)
+                .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
-/// The camera-rings section of the display popover: whether the orbits are
+/// The camera-rings group of the display section: whether the orbits are
 /// drawn, which mode's, and where on them the camera sits.
 ///
 /// Every control but the first is refused while the rings are off, and the
-/// whole section says so when the ship names no modes: a slider that moves
-/// nothing is worse than one that will not move.
-fn render_camera_rings_section(
+/// group says so when the ship names no modes: a slider that moves nothing is
+/// worse than one that will not move.
+fn camera_rings_group(
     entity: &Entity<ViewportView>,
-    rings: &CameraRingSettings,
-    modes: &[String],
-    perspective: &PerspectiveSettings,
-    fov_slider: &Entity<SliderState>,
-    height_slider: &Entity<SliderState>,
-    perspective_fov_slider: &Entity<SliderState>,
-) -> AnyElement {
+    snapshot: &DisplayPopoverSnapshot,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let rings = &snapshot.camera_rings;
+    let modes = &snapshot.camera_modes;
     let has_modes = !modes.is_empty();
     let on = rings.shown && has_modes;
 
-    let mut section = v_flex()
-        .gap_1()
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.camera_rings").to_string()))
-        .child({
-            let entity = entity.clone();
-            let rings = rings.clone();
-            Checkbox::new("armor-camera-rings")
-                .label(t!("ui.armor.show_camera_rings").to_string())
-                .checked(rings.shown)
-                .disabled(!has_modes)
-                .on_click(move |checked, _window, cx| {
-                    let shown = *checked;
-                    let next = CameraRingSettings { shown, ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
-                })
-        });
-
+    let shown = {
+        let entity = entity.clone();
+        let rings = rings.clone();
+        filtered_checkbox(
+            "armor-camera-rings",
+            t!("ui.armor.show_camera_rings").into_owned(),
+            rings.shown,
+            !has_modes,
+            filter,
+            move |checked, _window, cx| {
+                let next = CameraRingSettings { shown: *checked, ..rings.clone() };
+                entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+            },
+        )
+    };
     if !has_modes {
-        return section
-            .child(
-                div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.armor.no_ship_loaded").to_string()),
-            )
-            .into_any_element();
+        return shown.map(|shown| {
+            v_flex()
+                .gap_1()
+                .child(shown)
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.armor.no_ship_loaded").to_string()),
+                )
+                .into_any_element()
+        });
     }
 
     // One button per mode rather than a combo: a ship names two or three, and
     // which one is showing is the thing being read.
-    section = section.child(h_flex().flex_wrap().gap_1().children(modes.iter().enumerate().map(|(ix, mode)| {
-        let chosen = rings.mode.as_ref() == Some(mode);
-        let entity = entity.clone();
-        let rings = rings.clone();
-        let mode = mode.clone();
-        crate::ui::selectable(
-            ("armor-camera-mode", ix),
-            chosen,
-            Button::new(("armor-camera-mode-button", ix))
-                .label(mode.clone())
-                .compact()
-                .selected(chosen)
-                .disabled(!on)
-                .on_click(move |_event, _window, cx: &mut App| {
-                    let next = CameraRingSettings { mode: Some(mode.clone()), ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
-                }),
-        )
-    })));
-
-    section
-        .child(labeled_slider_row(t!("ui.armor.camera_fov").into_owned(), fov_slider, rings.fov, !on))
-        .child(labeled_slider_row(t!("ui.armor.camera_height").into_owned(), height_slider, rings.height, !on))
-        .child({
+    let mode_buttons: Vec<AnyElement> = modes
+        .iter()
+        .enumerate()
+        .filter_map(|(ix, mode)| {
+            let label = filter.label(mode.clone(), mark())?;
+            let chosen = rings.mode.as_ref() == Some(mode);
             let entity = entity.clone();
             let rings = rings.clone();
-            Checkbox::new("armor-camera-zoom-path")
-                .label(t!("ui.armor.show_camera_zoom_path").to_string())
-                .checked(rings.zoom_path)
-                .disabled(!on)
-                .on_click(move |checked, _window, cx| {
-                    let zoom_path = *checked;
-                    let next = CameraRingSettings { zoom_path, ..rings.clone() };
-                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
-                })
+            let mode = mode.clone();
+            let button = crate::ui::selectable(
+                ("armor-camera-mode", ix),
+                chosen,
+                Button::new(("armor-camera-mode-button", ix))
+                    .child(label)
+                    .compact()
+                    .selected(chosen)
+                    .disabled(!on)
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        let next = CameraRingSettings { mode: Some(mode.clone()), ..rings.clone() };
+                        entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                    }),
+            );
+            Some(button.into_any_element())
         })
-        .when(rings.zoom_path, |this| {
-            this.child(div().pl(px(20.)).child(h_flex().gap_4().flex_wrap().children([
-                zoom_path_checkbox(
-                    entity,
-                    "armor-camera-zoom-path-fov",
-                    t!("ui.armor.zoom_path_regular_fov").into_owned(),
-                    rings,
-                    rings.zoom_path_at_fov,
-                    on,
-                    |settings, value| settings.zoom_path_at_fov = value,
-                ),
-                zoom_path_checkbox(
-                    entity,
-                    "armor-camera-zoom-path-max",
-                    t!("ui.armor.zoom_path_max_fov").into_owned(),
-                    rings,
-                    rings.zoom_path_at_max_fov,
-                    on,
-                    |settings, value| settings.zoom_path_at_max_fov = value,
-                ),
-            ])))
-        })
-        .child(render_perspective_rows(entity, perspective, perspective_fov_slider))
-        .into_any_element()
+        .collect();
+
+    let zoom_path = {
+        let entity = entity.clone();
+        let rings = rings.clone();
+        filtered_checkbox(
+            "armor-camera-zoom-path",
+            t!("ui.armor.show_camera_zoom_path").into_owned(),
+            rings.zoom_path,
+            !on,
+            filter,
+            move |checked, _window, cx| {
+                let next = CameraRingSettings { zoom_path: *checked, ..rings.clone() };
+                entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+            },
+        )
+    };
+    let zoom_path_choices: Vec<AnyElement> = if rings.zoom_path {
+        [
+            zoom_path_checkbox(
+                entity,
+                "armor-camera-zoom-path-fov",
+                t!("ui.armor.zoom_path_regular_fov").into_owned(),
+                rings,
+                rings.zoom_path_at_fov,
+                on,
+                filter,
+                |settings, value| settings.zoom_path_at_fov = value,
+            ),
+            zoom_path_checkbox(
+                entity,
+                "armor-camera-zoom-path-max",
+                t!("ui.armor.zoom_path_max_fov").into_owned(),
+                rings,
+                rings.zoom_path_at_max_fov,
+                on,
+                filter,
+                |settings, value| settings.zoom_path_at_max_fov = value,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    } else {
+        Vec::new()
+    };
+
+    let rows: Vec<AnyElement> = [
+        shown,
+        (!mode_buttons.is_empty()).then(|| h_flex().flex_wrap().gap_1().children(mode_buttons).into_any_element()),
+        labeled_slider_row(t!("ui.armor.camera_fov").into_owned(), &snapshot.camera_fov_slider, !on, filter, cx),
+        labeled_slider_row(t!("ui.armor.camera_height").into_owned(), &snapshot.camera_height_slider, !on, filter, cx),
+        zoom_path,
+        (!zoom_path_choices.is_empty()).then(|| {
+            div().pl(px(20.)).child(h_flex().gap_4().flex_wrap().children(zoom_path_choices)).into_any_element()
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(perspective_rows(entity, &snapshot.perspective, &snapshot.perspective_fov_slider, filter, cx))
+    .collect();
+
+    (!rows.is_empty()).then(|| v_flex().gap_1().children(rows).into_any_element())
 }
 
 /// The camera lock: put the eye on the ship's own orbit and look out from it.
 ///
 /// Under the orbits because it follows the same trajectory and the same two
 /// sliders: which orbit is drawn is which orbit the eye rides.
-fn render_perspective_rows(
+fn perspective_rows(
     entity: &Entity<ViewportView>,
     perspective: &PerspectiveSettings,
-    fov_slider: &Entity<SliderState>,
-) -> impl IntoElement + use<> {
+    fov_slider: &Entity<SliderField>,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Vec<AnyElement> {
     let toggled = entity.clone();
     let on = perspective.enabled;
-    v_flex()
-        .gap_1()
-        .child(
-            Checkbox::new("armor-camera-perspective")
-                .label(t!("ui.armor.camera_perspective").to_string())
-                .checked(on)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    toggled.update(cx, |view, cx| view.set_perspective_enabled(checked, cx));
-                }),
-        )
-        .when(on, |this| {
-            this.child(labeled_slider_row(
-                t!("ui.armor.perspective_fov").into_owned(),
-                fov_slider,
-                perspective.camera.fov_deg,
-                false,
-            ))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().w(px(96.)).text_xs().child(t!("ui.armor.perspective_projection").into_owned()))
-                    .child(h_flex().gap_1().children([
-                        look_mode_button(
-                            entity,
-                            "armor-perspective-proj-game",
-                            t!("ui.armor.perspective_proj_game").into_owned(),
-                            LookMode::Game,
-                            perspective.camera.look_mode,
-                        ),
-                        look_mode_button(
-                            entity,
-                            "armor-perspective-proj-center",
-                            t!("ui.armor.perspective_proj_center").into_owned(),
-                            LookMode::ThroughCenter,
-                            perspective.camera.look_mode,
-                        ),
-                    ])),
-            )
+    let mut rows: Vec<AnyElement> = filtered_checkbox(
+        "armor-camera-perspective",
+        t!("ui.armor.camera_perspective").into_owned(),
+        on,
+        false,
+        filter,
+        move |checked, _window, cx| {
+            let checked = *checked;
+            toggled.update(cx, |view, cx| view.set_perspective_enabled(checked, cx));
+        },
+    )
+    .into_iter()
+    .collect();
+    if !on {
+        return rows;
+    }
+
+    rows.extend(labeled_slider_row(t!("ui.armor.perspective_fov").into_owned(), fov_slider, false, filter, cx));
+    let projection = t!("ui.armor.perspective_projection").into_owned();
+    let modes = [
+        ("armor-perspective-proj-game", t!("ui.armor.perspective_proj_game").into_owned(), LookMode::Game),
+        ("armor-perspective-proj-center", t!("ui.armor.perspective_proj_center").into_owned(), LookMode::ThroughCenter),
+    ];
+    // The heading names the choice, so a match on it keeps both buttons.
+    let heading = filter.label(projection.clone(), mark());
+    let inner = if heading.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let buttons: Vec<AnyElement> = modes
+        .into_iter()
+        .filter_map(|(id, label, mode)| {
+            let label = inner.label(label, mark())?;
+            Some(look_mode_button(entity, id, label, mode, perspective.camera.look_mode))
         })
+        .collect();
+    if !buttons.is_empty() {
+        let heading = heading.unwrap_or_else(|| StyledText::new(projection));
+        rows.push(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().w(px(88.)).text_xs().child(heading))
+                .child(h_flex().gap_1().children(buttons))
+                .into_any_element(),
+        );
+    }
+    rows
 }
 
 /// One of the two ways the locked camera can aim.
 fn look_mode_button(
     entity: &Entity<ViewportView>,
     id: &'static str,
-    label: String,
+    label: StyledText,
     mode: LookMode,
     chosen: LookMode,
 ) -> AnyElement {
@@ -389,7 +448,7 @@ fn look_mode_button(
     crate::ui::selectable(
         id,
         selected,
-        Button::new(id).label(label).compact().selected(selected).on_click(move |_event, _window, cx: &mut App| {
+        Button::new(id).child(label).compact().selected(selected).on_click(move |_event, _window, cx: &mut App| {
             entity.update(cx, |view, cx| view.set_perspective_look_mode(mode, cx));
         }),
     )
@@ -397,6 +456,7 @@ fn look_mode_button(
 }
 
 /// One of the zoom path's two field-of-view checkboxes.
+#[allow(clippy::too_many_arguments)]
 fn zoom_path_checkbox(
     entity: &Entity<ViewportView>,
     id: &'static str,
@@ -404,20 +464,57 @@ fn zoom_path_checkbox(
     rings: &CameraRingSettings,
     checked: bool,
     enabled: bool,
+    filter: &OptionsFilter,
     apply: fn(&mut CameraRingSettings, bool),
-) -> AnyElement {
+) -> Option<AnyElement> {
     let entity = entity.clone();
     let rings = rings.clone();
-    Checkbox::new(id)
-        .label(label)
-        .checked(checked)
-        .disabled(!enabled)
-        .on_click(move |checked, _window, cx| {
-            let mut next = rings.clone();
-            apply(&mut next, *checked);
-            entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
-        })
-        .into_any_element()
+    filtered_checkbox(id, label, checked, !enabled, filter, move |checked, _window, cx| {
+        let mut next = rings.clone();
+        apply(&mut next, *checked);
+        entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+    })
+}
+
+/// A checkbox kept only when `filter` keeps its label.
+///
+/// While filtering, the label is drawn beside the box rather than by it, so
+/// the matched letters can be marked; a click on it toggles the box as the
+/// box's own label would.
+fn filtered_checkbox(
+    id: impl Into<SharedString>,
+    label: String,
+    checked: bool,
+    disabled: bool,
+    filter: &OptionsFilter,
+    on_click: impl Fn(&bool, &mut Window, &mut App) + 'static,
+) -> Option<AnyElement> {
+    let id: SharedString = id.into();
+    let checkbox = Checkbox::new(id.clone()).checked(checked).disabled(disabled);
+    if !filter.is_active() {
+        return Some(checkbox.label(label).on_click(on_click).into_any_element());
+    }
+    let marked = filter.label(label, mark())?;
+
+    let on_click = std::rc::Rc::new(on_click);
+    let from_label = std::rc::Rc::clone(&on_click);
+    Some(
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(checkbox.on_click(move |checked, window, cx| on_click(checked, window, cx)))
+            .child(
+                div()
+                    .id(SharedString::from(format!("{id}-label")))
+                    .text_sm()
+                    .when(disabled, |label| label.text_color(crate::theme::text_dim()))
+                    .when(!disabled, |label| {
+                        label.cursor_pointer().on_click(move |_event, window, cx| from_label(&!checked, window, cx))
+                    })
+                    .child(marked),
+            )
+            .into_any_element(),
+    )
 }
 
 /// The trajectory section of the display popover: the range a cast shell is
@@ -429,25 +526,20 @@ fn zoom_path_checkbox(
 fn render_trajectory_section(
     entity: &Entity<ViewportView>,
     state: &TrajectoryState,
-    cast_range: Km,
-    range_slider: &Entity<SliderState>,
+    range_slider: &Entity<SliderField>,
+    cx: &mut App,
 ) -> AnyElement {
     let on = state.shown;
 
     v_flex()
         .gap_1()
-        .child(
-            v_flex()
-                .gap_1()
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .text_sm()
-                        .child(t!("ui.armor.trajectory_range").to_string())
-                        .child(format!("{:.1}", cast_range.value())),
-                )
-                .child(div().w_full().h(crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(range_slider).disabled(!on))),
-        )
+        .children(labeled_slider_row(
+            t!("ui.armor.trajectory_range").into_owned(),
+            range_slider,
+            !on,
+            &OptionsFilter::default(),
+            cx,
+        ))
         .child({
             let entity = entity.clone();
             let continuing = state.continue_on_ricochet;
@@ -476,7 +568,11 @@ fn render_trajectory_section(
 
 /// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
-fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_gaps_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let gaps = view.gaps();
     let has_armor = view.has_armor();
     let entity = entity.clone();
@@ -487,27 +583,36 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
     // been looked at, is worth saying so quietly.
     let found = gaps.shown && gaps.count > 0;
 
-    crate::ui::selectable(
-        "armor-show-gaps",
-        gaps.shown,
-        Button::new("armor-show-gaps-button")
-            .icon(if found { crate::icons::Glyph::TriangleAlert } else { crate::icons::Glyph::EyeOff })
-            .label(label)
-            .compact()
-            .w_full()
-            .selected(gaps.shown)
-            .disabled(!has_armor)
-            .tooltip(t!("ui.armor.gaps_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_gaps(!gaps.shown, cx));
-            }),
+    let label_text = filter.label(label, mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-show-gaps",
+            gaps.shown,
+            Button::new("armor-show-gaps-button")
+                .icon(if found { crate::icons::Glyph::TriangleAlert } else { crate::icons::Glyph::EyeOff })
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(gaps.shown)
+                .disabled(!has_armor)
+                .tooltip(t!("ui.armor.gaps_tooltip").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.set_show_gaps(!gaps.shown, cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
 /// Rail toggle for trajectory mode, which carries how many shells have
 /// been cast: while the mode is on a click casts rather than hides a plate,
 /// and the count is what says whether the last click landed.
-fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_trajectory_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let state = view.trajectory_state();
     let has_armor = view.has_armor();
     let entity = entity.clone();
@@ -518,21 +623,28 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
         t!("ui.armor.trajectory").into_owned()
     };
 
-    crate::ui::selectable(
-        "armor-trajectory",
-        state.shown,
-        Button::new("armor-trajectory-button")
-            .icon(crate::icons::Glyph::Crosshair)
-            .label(label)
-            .compact()
-            .w_full()
-            .selected(state.shown)
-            .when(state.shown, |button| button.bg(crate::theme::accent()).text_color(crate::theme::accent_foreground()))
-            .disabled(!has_armor)
-            .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
-            }),
+    let label_text = filter.label(label, mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-trajectory",
+            state.shown,
+            Button::new("armor-trajectory-button")
+                .icon(crate::icons::Glyph::Crosshair)
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(state.shown)
+                .when(state.shown, |button| {
+                    button.bg(crate::theme::accent()).text_color(crate::theme::accent_foreground())
+                })
+                .disabled(!has_armor)
+                .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
@@ -635,11 +747,10 @@ pub(super) fn render_trajectory_panel(
     view: &ArmorViewerPane,
     pane: &Entity<ArmorViewerPane>,
     viewport: &Entity<ViewportView>,
-    cx: &App,
+    cx: &mut App,
 ) -> AnyElement {
     let viewport_view = viewport.read(cx);
     let state = viewport_view.trajectory_state();
-    let range = viewport_view.cast_range();
     let slider = viewport_view.display_sliders.cast_range.clone();
     v_flex()
         .gap_2()
@@ -675,7 +786,7 @@ pub(super) fn render_trajectory_panel(
                         }),
                 )
         }))
-        .child(render_trajectory_section(viewport, &state, range, &slider))
+        .child(render_trajectory_section(viewport, &state, &slider, cx))
         .child(
             div()
                 .text_xs()
@@ -691,7 +802,11 @@ pub(super) fn render_trajectory_panel(
 ///
 /// Refused on a hull that ships no splash file, and on one where the chosen
 /// attacker carries nothing that bursts; the tooltip says which.
-fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_splash_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
 
@@ -706,43 +821,57 @@ fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
         t!("ui.armor.splash_no_data").into_owned()
     };
 
-    crate::ui::selectable(
-        "armor-splash",
-        state.shown,
-        Button::new("armor-splash-button")
-            .icon(crate::icons::Glyph::Bomb)
-            .label(label)
-            .compact()
-            .w_full()
-            .selected(state.shown)
-            .disabled(!state.has_data)
-            .tooltip(tooltip)
-            .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_splash_mode(!state.shown, cx));
-            }),
+    let label_text = filter.label(label, mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-splash",
+            state.shown,
+            Button::new("armor-splash-button")
+                .icon(crate::icons::Glyph::Bomb)
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(state.shown)
+                .disabled(!state.has_data)
+                .tooltip(tooltip)
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.set_splash_mode(!state.shown, cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
 /// Rail toggle for the splash-box outlines, which stand on their own: they
 /// are worth seeing while placing a burst and after it.
-fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_splash_boxes_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
 
-    crate::ui::selectable(
-        "armor-splash-boxes",
-        state.boxes_shown,
-        Button::new("armor-splash-boxes-button")
-            .icon(crate::icons::Glyph::Box)
-            .label(t!("ui.armor.splash_boxes").to_string())
-            .compact()
-            .w_full()
-            .selected(state.boxes_shown)
-            .disabled(!state.has_data)
-            .tooltip(t!("ui.armor.splash_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
-            }),
+    let label_text = filter.label(t!("ui.armor.splash_boxes").to_string(), mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-splash-boxes",
+            state.boxes_shown,
+            Button::new("armor-splash-boxes-button")
+                .icon(crate::icons::Glyph::Box)
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(state.boxes_shown)
+                .disabled(!state.has_data)
+                .tooltip(t!("ui.armor.splash_tooltip").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
@@ -754,7 +883,11 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
 /// plate the pointer is on, so the panel has to stay up while the pointer is
 /// on the hull; a popover closes on the first click and swallows the pointer
 /// moves that would move the plate.
-fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>) -> impl IntoElement + use<> {
+fn render_penetration_button(
+    pen: PenCheckButton,
+    pane: Entity<ArmorViewerPane>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let open = pen.open;
     let label = if pen.ship_count > 0 {
         format!("{} ({})", t!("ui.armor.pen_check"), pen.ship_count)
@@ -762,22 +895,27 @@ fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>)
         t!("ui.armor.pen_check").into_owned()
     };
 
-    crate::ui::selectable(
-        "armor-analysis",
-        open,
-        Button::new("armor-analysis-toggle")
-            .icon(IconName::Search)
-            .label(label)
-            .compact()
-            .w_full()
-            .selected(open)
-            // Not gated on a loaded hull, as the egui button is not: the
-            // list is of attackers, and it is worth building before a target
-            // is opened.
-            .tooltip(t!("ui.armor.pen_check_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
-            }),
+    let label_text = filter.label(label, mark())?;
+
+    Some(
+        crate::ui::selectable(
+            "armor-analysis",
+            open,
+            Button::new("armor-analysis-toggle")
+                .icon(IconName::Search)
+                .child(label_text)
+                .compact()
+                .w_full()
+                .selected(open)
+                // Not gated on a loaded hull, as the egui button is not: the
+                // list is of attackers, and it is worth building before a target
+                // is opened.
+                .tooltip(t!("ui.armor.pen_check_tooltip").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
+                }),
+        )
+        .into_any_element(),
     )
 }
 
@@ -786,27 +924,40 @@ fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>)
 /// pane, at its current hull/LOD/module selection. Ports the egui app's
 /// "Export Ship Model" tab button (`tab.rs:1696-1709`), which is likewise
 /// gated on a ship being loaded.
-fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+fn render_export_button(
+    view: &ViewportView,
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let has_armor = view.current_armor.is_some();
     let click_entity = entity.clone();
 
-    Button::new("armor-export-trigger")
-        .icon(IconName::HardDrive)
-        .label(t!("ui.replay.section_export").to_string())
-        .compact()
-        .w_full()
-        .tooltip(t!("ui.armor.export_tooltip").to_string())
-        .disabled(!has_armor)
-        .on_click(move |_, _window, cx| {
-            click_entity.update(cx, |view, cx| view.open_export_confirm(cx));
-        })
+    let label_text = filter.label(t!("ui.replay.section_export").to_string(), mark())?;
+
+    Some(
+        Button::new("armor-export-trigger")
+            .icon(IconName::HardDrive)
+            .child(label_text)
+            .compact()
+            .w_full()
+            .tooltip(t!("ui.armor.export_tooltip").to_string())
+            .disabled(!has_armor)
+            .on_click(move |_, _window, cx| {
+                click_entity.update(cx, |view, cx| view.open_export_confirm(cx));
+            })
+            .into_any_element(),
+    )
 }
 
 /// Builds the popover's whole tree from a snapshot of `entity`'s current
 /// state, read once up front (see the module doc: the `.content()` closure
 /// re-runs on every open-render, so this clone is cheap and short-lived, not
 /// held across the click/hover closures built below).
-pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App) -> AnyElement {
+pub(crate) fn render_popover_content(
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
         let view = entity.read(cx);
         (
@@ -821,12 +972,14 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
     };
 
     let Some(armor) = armor else {
-        return div()
-            .text_sm()
-            .text_color(crate::theme::text_dim())
-            .p_2()
-            .child(t!("ui.armor.no_ship_loaded").to_string())
-            .into_any_element();
+        return (!filter.is_active()).then(|| {
+            div()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .p_2()
+                .child(t!("ui.armor.no_ship_loaded").to_string())
+                .into_any_element()
+        });
     };
 
     let warn = cx.theme().warning;
@@ -865,31 +1018,42 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
     let shown = entity.read(cx);
     let names = TreeNames { bundle: shown.reload_bundle(), species: shown.shown_species() };
 
-    let mut tree = v_flex().gap_1();
-    for zone in &armor.zone_part_plates {
-        tree = tree.child(render_zone_row(
-            entity,
-            zone,
-            &part_visibility,
-            &plate_visibility,
-            &expanded_zones,
-            &expanded_parts,
-            warn,
-            show_zero_mm,
-            &names,
-        ));
+    let zones: Vec<AnyElement> = armor
+        .zone_part_plates
+        .iter()
+        .filter_map(|zone| {
+            render_zone_row(
+                entity,
+                zone,
+                &part_visibility,
+                &plate_visibility,
+                &expanded_zones,
+                &expanded_parts,
+                warn,
+                show_zero_mm,
+                &names,
+                filter,
+            )
+        })
+        .collect();
+    if zones.is_empty() && filter.is_active() {
+        return None;
     }
+    let tree = v_flex().gap_1().children(zones);
 
     let scroll_area =
         div().id("armor-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().track_scroll(&scroll).child(tree);
 
-    v_flex()
-        .w(px(280.))
-        .gap_2()
-        .child(header)
-        .child(div().h(px(1.)).bg(border))
-        .child(div().relative().max_h(px(360.)).child(scroll_area).child(Scrollbar::vertical(&scroll)))
-        .into_any_element()
+    Some(
+        v_flex()
+            .w_full()
+            .gap_2()
+            // The bulk switches act on every plate, not only the ones a filter
+            // left showing, so they are put away while one is typed.
+            .when(!filter.is_active(), |this| this.child(header).child(div().h(px(1.)).bg(border)))
+            .child(div().relative().max_h(px(360.)).child(scroll_area).child(Scrollbar::vertical(&scroll)))
+            .into_any_element(),
+    )
 }
 
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
@@ -909,7 +1073,11 @@ pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App
 /// **Deferred.** The sidebar-hover highlight for a hovered hull row (egui's
 /// `SidebarHighlightKey::HullMeshes`) is out of this port's scope -- see
 /// `upload_hull.rs`'s module doc.
-pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mut App) -> AnyElement {
+pub(crate) fn render_hull_popover_content(
+    entity: &Entity<ViewportView>,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
     let (
         armor,
         hull_visibility,
@@ -936,12 +1104,14 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
     };
 
     let Some(armor) = armor else {
-        return div()
-            .text_sm()
-            .text_color(crate::theme::text_dim())
-            .p_2()
-            .child(t!("ui.armor.no_ship_loaded").to_string())
-            .into_any_element();
+        return (!filter.is_active()).then(|| {
+            div()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .p_2()
+                .child(t!("ui.armor.no_ship_loaded").to_string())
+                .into_any_element()
+        });
     };
 
     let warn = cx.theme().warning;
@@ -980,18 +1150,44 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
                     })
                 });
             },
-        ))
-        .child(
-            Checkbox::new("armor-hull-vis-opaque")
-                .label(t!("ui.armor.opaque").to_string())
-                .checked(hull_opaque)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
-                }),
-        );
+        ));
 
-    let mut col = v_flex().w(px(260.)).gap_2().child(header);
+    let groups: Vec<AnyElement> = armor
+        .hull_part_groups
+        .iter()
+        .filter_map(|(group, names)| {
+            render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn, filter)
+        })
+        .collect();
+
+    // While filtering only what can be matched by name is drawn: the opaque
+    // switch and the hull groups. The selectors below choose a model rather
+    // than show or hide part of one.
+    if filter.is_active() {
+        let opaque = filtered_checkbox(
+            "armor-hull-vis-opaque",
+            t!("ui.armor.opaque").into_owned(),
+            hull_opaque,
+            false,
+            filter,
+            move |checked, _window, cx| {
+                let checked = *checked;
+                opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+            },
+        );
+        let rows: Vec<AnyElement> = opaque.into_iter().chain(groups).collect();
+        return (!rows.is_empty()).then(|| v_flex().w_full().gap_1().children(rows).into_any_element());
+    }
+
+    let header = header.child(
+        Checkbox::new("armor-hull-vis-opaque").label(t!("ui.armor.opaque").to_string()).checked(hull_opaque).on_click(
+            move |checked, _window, cx| {
+                let checked = *checked;
+                opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+            },
+        ),
+    );
+    let mut col = v_flex().w_full().gap_2().child(header);
 
     if armor.hull_upgrade_names.len() > 1 {
         col = col.child(render_hull_upgrade_row(entity, &armor, &selected_hull));
@@ -1018,16 +1214,13 @@ pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mu
         col = col.child(render_lod_row(entity, &armor, hull_lod));
     }
 
-    let mut tree = v_flex().gap_1();
-    for (group, names) in &armor.hull_part_groups {
-        tree = tree.child(render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn));
-    }
+    let tree = v_flex().gap_1().children(groups);
 
     col = col
         .child(div().h(px(1.)).bg(border))
         .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree));
 
-    col.into_any_element()
+    Some(col.into_any_element())
 }
 
 /// Hull-upgrade selector row: a "Hull:" label followed by one selectable
@@ -1262,17 +1455,38 @@ fn render_hull_group_row(
     hull_visibility: &HashMap<String, bool>,
     expanded_hull_groups: &HashSet<String>,
     warn: Hsla,
-) -> AnyElement {
-    let all_on = hull_group_all_on(hull_visibility, names);
-    let any_on = hull_group_any_on(hull_visibility, names);
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
+    let title = filter.label(group.to_string(), mark());
+    // A match on the group keeps every mesh in it.
+    let mesh_filter = if title.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let expanded = filter.is_active() || expanded_hull_groups.contains(group);
+
+    let mut shown: Vec<String> = Vec::new();
+    let mut rows: Vec<AnyElement> = Vec::new();
+    if expanded {
+        for name in names {
+            if let Some(row) = render_hull_mesh_row(entity, name, hull_visibility, &mesh_filter) {
+                shown.push(name.clone());
+                rows.push(row);
+            }
+        }
+    }
+    if filter.is_active() && shown.is_empty() && title.is_none() {
+        return None;
+    }
+
+    // While filtering, the group box reads and sets only the meshes listed
+    // under it.
+    let acted_on = if filter.is_active() { shown } else { names.to_vec() };
+    let all_on = hull_group_all_on(hull_visibility, &acted_on);
+    let any_on = hull_group_any_on(hull_visibility, &acted_on);
     let state = TriState::from_all_any(all_on, any_on);
-    let expanded = expanded_hull_groups.contains(group);
 
     let toggle_entity = entity.clone();
-    let toggle_names = names.to_vec();
     let checkbox = tri_checkbox(format!("armor-hull-vis-group-{group}"), state, warn, move |checked, _window, cx| {
         let checked = *checked;
-        let names = toggle_names.clone();
+        let names = acted_on.clone();
         toggle_entity.update(cx, |view, cx| {
             view.mutate_hull_visibility(cx, |hull_visibility| {
                 for name in names {
@@ -1282,33 +1496,33 @@ fn render_hull_group_row(
         });
     });
 
+    // Inert while filtering, where every group is open whatever it was left at.
     let expand_entity = entity.clone();
     let expand_group = group.to_string();
     let chevron = div()
         .id(format!("armor-hull-vis-group-expand-{group}"))
         .flex_none()
         .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
-        .on_click(move |_, _window, cx| {
-            expand_entity.update(cx, |view, cx| view.toggle_hull_group_expanded(expand_group.clone(), cx));
+        .when(!filter.is_active(), |chevron| {
+            chevron.on_click(move |_, _window, cx| {
+                expand_entity.update(cx, |view, cx| view.toggle_hull_group_expanded(expand_group.clone(), cx));
+            })
         });
 
+    let title = title.unwrap_or_else(|| StyledText::new(group.to_string()));
     let header = h_flex()
         .id(format!("armor-hull-vis-group-row-{group}"))
         .gap_1()
         .items_center()
         .child(chevron)
         .child(checkbox)
-        .child(div().text_sm().child(group.to_string()));
+        .child(div().text_sm().child(title));
 
     let mut column = v_flex().gap_1().child(header);
     if expanded {
-        let mut body = v_flex().gap_1().pl(px(20.));
-        for name in names {
-            body = body.child(render_hull_mesh_row(entity, name, hull_visibility));
-        }
-        column = column.child(body);
+        column = column.child(v_flex().gap_1().pl(px(20.)).children(rows));
     }
-    column.into_any_element()
+    Some(column.into_any_element())
 }
 
 /// One hull-mesh checkbox row. Ports `tab.rs:3300-3310`.
@@ -1316,14 +1530,18 @@ fn render_hull_mesh_row(
     entity: &Entity<ViewportView>,
     name: &str,
     hull_visibility: &HashMap<String, bool>,
-) -> AnyElement {
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
     let visible = hull_visibility.get(name).copied().unwrap_or(false);
     let toggle_entity = entity.clone();
     let toggle_name = name.to_string();
-    Checkbox::new(format!("armor-hull-vis-mesh-{name}"))
-        .label(name.to_string())
-        .checked(visible)
-        .on_click(move |checked, _window, cx| {
+    filtered_checkbox(
+        format!("armor-hull-vis-mesh-{name}"),
+        name.to_string(),
+        visible,
+        false,
+        filter,
+        move |checked, _window, cx| {
             let checked = *checked;
             let name = toggle_name.clone();
             toggle_entity.update(cx, |view, cx| {
@@ -1331,99 +1549,81 @@ fn render_hull_mesh_row(
                     hull_visibility.insert(name, checked);
                 })
             });
-        })
-        .into_any_element()
+        },
+    )
 }
 
-/// Builds the display-settings popover's content from a snapshot of
-/// `entity`'s current state (same lazy-`.content()` rationale as
-/// `render_popover_content`'s doc). Reproduces the egui app's
-/// `draw_display_settings_popover` V1 subset in order: plate edges,
-/// waterline (+ its own opacity slider when on), zero-mm plates, armor
-/// opacity, then the Hull Lighting section (enabled, In-Game/Flat/Studio
-/// presets, and the flat/key intensity, azimuth, elevation, rim, specular,
-/// and shininess sliders). Every slider here is a persistent `Entity<
-/// SliderState>` already wired (in `viewport_view.rs`'s `build_display_
-/// sliders`/`build_lighting_sliders`) to mutate the right field on its own
-/// `SliderEvent::Change`, so this function only needs to render each one
-/// alongside a live numeric readout -- it never attaches its own change
-/// handler to a slider the way the checkboxes below attach `on_click`.
+/// What the display section draws, read off the viewport in one pass.
 ///
-/// **Deferred** (later milestones or out of this task's scope, matching the
-/// M3 Task 7b brief): the ship-center toggle and the hull-visibility master
-/// toggle (the egui original's duplicate `hull_opaque` checkbox here,
-/// `tab.rs:4911`, is likewise not mirrored -- the Hull popover's own
-/// `hull_opaque` checkbox, `render_hull_popover_content`, is this port's only
-/// control for it), the entire camera-rings/camera-perspective analysis section
-/// (`tab.rs:4924-5043`), the save-defaults button (this port has no settings
-/// write-back path yet -- same limitation `legend.rs`'s `end_legend_drag`
-/// documents), the key/ambient color pickers (`gpui_kit::component::color_picker`
-/// exists, but wiring two more persistent picker entities is left for later
-/// polish -- the flat-intensity slider already covers the egui popover's
-/// numeric ambient-intensity control), and the transient light-source marker
-/// (`light_moved`/`light_changed_at`) the egui app shows for a few seconds
-/// after a light change.
-/// What the display popover draws, read off the viewport in one pass.
-///
-/// Taken as a snapshot because the content builder runs while the popover is
-/// open and must not hold a borrow of the view it came from.
+/// Taken as a snapshot so no borrow of the view is held while the rows below
+/// are built.
 struct DisplayPopoverSnapshot {
     display: super::upload::DisplaySettings,
     lighting: LightingSettings,
-    waterline_slider: Entity<SliderState>,
-    marker_slider: Entity<SliderState>,
+    waterline_slider: Entity<SliderField>,
+    marker_slider: Entity<SliderField>,
     /// Whether any impact marker is drawn, since a marker control with nothing
     /// to act on is what the egui popover hides.
     has_markers: bool,
-    armor_slider: Entity<SliderState>,
-    roll_slider: Entity<SliderState>,
-    /// How far the hull is currently heeled over, for the readout beside its
-    /// slider.
-    roll_deg: f32,
+    armor_slider: Entity<SliderField>,
+    roll_slider: Entity<SliderField>,
     camera_rings: CameraRingSettings,
     /// The modes this ship's own GameParams name.
     camera_modes: Vec<String>,
-    camera_fov_slider: Entity<SliderState>,
-    camera_height_slider: Entity<SliderState>,
+    camera_fov_slider: Entity<SliderField>,
+    camera_height_slider: Entity<SliderField>,
     /// Whether the camera is locked to the ship's own orbit, and how it aims
     /// from there.
     perspective: PerspectiveSettings,
-    perspective_fov_slider: Entity<SliderState>,
-    flat_slider: Entity<SliderState>,
+    perspective_fov_slider: Entity<SliderField>,
+    flat_slider: Entity<SliderField>,
     /// The colour each of the two lighting terms is tinted by. A picker keeps its
     /// own state, so these are the view's own rather than rebuilt per frame.
     flat_color: Entity<gpui_kit::component::color_picker::ColorPickerState>,
     key_color: Entity<gpui_kit::component::color_picker::ColorPickerState>,
-    key_slider: Entity<SliderState>,
-    azimuth_slider: Entity<SliderState>,
-    elevation_slider: Entity<SliderState>,
-    rim_slider: Entity<SliderState>,
-    specular_slider: Entity<SliderState>,
-    shininess_slider: Entity<SliderState>,
+    key_slider: Entity<SliderField>,
+    azimuth_slider: Entity<SliderField>,
+    elevation_slider: Entity<SliderField>,
+    rim_slider: Entity<SliderField>,
+    specular_slider: Entity<SliderField>,
+    shininess_slider: Entity<SliderField>,
 }
 
-/// `legend_visible` is passed in rather than read off the pane here: the
-/// options rail renders inside `ArmorViewerPane`'s own render, and reading the
-/// pane entity there panics on the borrow it already holds.
+/// The pane's say in the display section: the legend it owns, and which of
+/// the section's groups the reader left open.
+pub(crate) struct DisplayGroups {
+    pub pane: Entity<ArmorViewerPane>,
+    pub legend_visible: bool,
+    pub open: super::pane::OptionSectionsOpen,
+}
+
+/// The display section: the model settings, then the camera rings and the
+/// lighting, each a group that folds away.
+///
+/// Every slider is a persistent `SliderField` already wired (in
+/// `viewport_view.rs`'s `build_display_sliders`/`build_lighting_sliders`) to
+/// mutate the right field when it moves, so this only lays them out.
+///
+/// `None` when `filter` keeps nothing here.
 pub(crate) fn render_display_popover_content(
     entity: &Entity<ViewportView>,
-    legend_visible: bool,
+    groups: &DisplayGroups,
+    filter: &OptionsFilter,
     cx: &mut App,
-) -> AnyElement {
-    // The trigger button carried `.disabled(!has_armor)`; the rail has no
-    // button, so the guard the other two sections already had belongs here.
-    // The egui app draws none of the three without a loaded hull
+) -> Option<AnyElement> {
+    // The egui app draws none of this without a loaded hull
     // (`ui/tab.rs`'s `if let Some(armor) = pane.loaded_armor.take()`).
     if !entity.read(cx).has_armor() {
-        return div()
-            .text_sm()
-            .text_color(crate::theme::text_dim())
-            .p_2()
-            .child(t!("ui.armor.no_ship_loaded").to_string())
-            .into_any_element();
+        return (!filter.is_active()).then(|| {
+            div()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .p_2()
+                .child(t!("ui.armor.no_ship_loaded").to_string())
+                .into_any_element()
+        });
     }
 
-    let pane = entity.read(cx).pane();
     let snapshot = {
         let view = entity.read(cx);
         DisplayPopoverSnapshot {
@@ -1432,7 +1632,6 @@ pub(crate) fn render_display_popover_content(
             waterline_slider: view.display_sliders.waterline_opacity.clone(),
             armor_slider: view.display_sliders.armor_opacity.clone(),
             roll_slider: view.display_sliders.model_roll_deg.clone(),
-            roll_deg: view.model_roll_deg(),
             camera_rings: view.camera_rings(),
             camera_modes: view.camera_modes(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
@@ -1452,231 +1651,256 @@ pub(crate) fn render_display_popover_content(
             shininess_slider: view.lighting_sliders.shininess.clone(),
         }
     };
-    let DisplayPopoverSnapshot {
-        display,
-        lighting,
-        camera_rings,
-        camera_modes,
-        camera_fov_slider,
-        camera_height_slider,
-        perspective,
-        perspective_fov_slider,
-        waterline_slider,
-        marker_slider,
-        has_markers,
-        armor_slider,
-        roll_slider,
-        roll_deg,
-        flat_slider,
-        flat_color,
-        key_color,
-        key_slider,
-        azimuth_slider,
-        elevation_slider,
-        rim_slider,
-        specular_slider,
-        shininess_slider,
-    } = snapshot;
 
-    let border = cx.theme().border;
+    let model = model_rows(entity, groups, &snapshot, filter, cx);
+    let camera = display_group(
+        groups,
+        OptionSection::CameraRings,
+        t!("ui.armor.camera_rings").into_owned(),
+        filter,
+        cx,
+        |filter, cx| camera_rings_group(entity, &snapshot, filter, cx),
+    );
+    let lighting = display_group(
+        groups,
+        OptionSection::Lighting,
+        t!("ui.armor.lighting").into_owned(),
+        filter,
+        cx,
+        |filter, cx| lighting_group(entity, &snapshot, filter, cx),
+    );
 
-    let edges_entity = entity.clone();
-    let waterline_entity = entity.clone();
-    let zero_mm_entity = entity.clone();
-    let ship_center_entity = entity.clone();
-    let lighting_enabled_entity = entity.clone();
-    let preset_ingame_entity = entity.clone();
-    let preset_flat_entity = entity.clone();
-    let preset_studio_entity = entity.clone();
+    let parts: Vec<AnyElement> = model.into_iter().chain(camera).chain(lighting).collect();
+    (!parts.is_empty()).then(|| v_flex().w_full().gap_2().children(parts).into_any_element())
+}
 
-    let mut col = v_flex()
-        .w(px(260.))
-        .gap_2()
-        // The legend belongs to the pane, not to this viewport, but the
-        // reader looks for it here: the egui display popover carries the same
-        // checkbox (`ui.armor.show_armor_thickness`).
-        .when_some(pane, |this, pane| {
-            this.child(
-                Checkbox::new("armor-display-legend")
-                    .label(t!("ui.armor.show_armor_thickness").to_string())
-                    .checked(legend_visible)
-                    .on_click(move |checked: &bool, _window, cx: &mut App| {
-                        let checked = *checked;
-                        pane.update(cx, |pane, cx| pane.set_legend_visible(checked, cx));
-                    }),
+/// The settings at the top of the display section, about the model itself.
+fn model_rows(
+    entity: &Entity<ViewportView>,
+    groups: &DisplayGroups,
+    snapshot: &DisplayPopoverSnapshot,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let display = snapshot.display;
+    let setting = |apply: fn(&mut super::upload::DisplaySettings, bool)| {
+        let entity = entity.clone();
+        move |checked: &bool, _window: &mut Window, cx: &mut App| {
+            let checked = *checked;
+            entity.update(cx, |view, cx| view.mutate_display_settings(cx, |d| apply(d, checked)));
+        }
+    };
+
+    // The legend belongs to the pane, not to this viewport, but the reader
+    // looks for it here: the egui display popover carries the same checkbox
+    // (`ui.armor.show_armor_thickness`).
+    let legend = {
+        let pane = groups.pane.clone();
+        filtered_checkbox(
+            "armor-display-legend",
+            t!("ui.armor.show_armor_thickness").into_owned(),
+            groups.legend_visible,
+            false,
+            filter,
+            move |checked, _window, cx| {
+                let checked = *checked;
+                pane.update(cx, |pane, cx| pane.set_legend_visible(checked, cx));
+            },
+        )
+    };
+    let waterline = t!("ui.armor.waterline").into_owned();
+    // The opacity row belongs to the waterline, so a match on either keeps
+    // both, and the row is indented under it.
+    let waterline_matched = filter.keeps(&waterline);
+    let waterline_filter = if waterline_matched { OptionsFilter::default() } else { filter.clone() };
+    let waterline_opacity = display
+        .show_waterline
+        .then(|| {
+            labeled_slider_row(
+                t!("ui.armor.opacity").into_owned(),
+                &snapshot.waterline_slider,
+                false,
+                &waterline_filter,
+                cx,
             )
         })
-        .child(
-            Checkbox::new("armor-display-plate-edges")
-                .label(t!("ui.armor.plate_edges").to_string())
-                .checked(display.show_plate_edges)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    edges_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_plate_edges = checked));
-                }),
-        )
-        .child(
-            Checkbox::new("armor-display-waterline")
-                .label(t!("ui.armor.waterline").to_string())
-                .checked(display.show_waterline)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    waterline_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_waterline = checked));
-                }),
-        );
+        .flatten();
+    // Kept beside a kept opacity row even when its own label does not match.
+    let waterline_box_filter =
+        if waterline_opacity.is_some() && !waterline_matched { OptionsFilter::default() } else { filter.clone() };
+    let waterline_box = filtered_checkbox(
+        "armor-display-waterline",
+        waterline,
+        display.show_waterline,
+        false,
+        &waterline_box_filter,
+        setting(|d, on| d.show_waterline = on),
+    );
 
-    if display.show_waterline {
-        col = col.child(div().pl(px(20.)).child(labeled_slider_row(
-            t!("ui.armor.opacity").into_owned(),
-            &waterline_slider,
-            display.waterline_opacity,
+    let rows: Vec<AnyElement> = [
+        legend,
+        filtered_checkbox(
+            "armor-display-plate-edges",
+            t!("ui.armor.plate_edges").into_owned(),
+            display.show_plate_edges,
             false,
-        )));
-    }
-
-    col = col
-        .child(
-            Checkbox::new("armor-display-zero-mm")
-                .label(t!("ui.armor.zero_mm_plates").to_string())
-                .checked(display.show_zero_mm)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    zero_mm_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
-                }),
-        )
-        .child(
-            Checkbox::new("armor-display-ship-center")
-                .label(t!("ui.armor.ship_center").to_string())
-                .checked(display.show_ship_center)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    ship_center_entity
-                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_ship_center = checked));
-                }),
-        )
-        .child(labeled_slider_row(
-            t!("ui.armor.armor_opacity").into_owned(),
-            &armor_slider,
-            display.armor_opacity,
+            filter,
+            setting(|d, on| d.show_plate_edges = on),
+        ),
+        waterline_box,
+        waterline_opacity.map(|row| div().pl(px(20.)).child(row).into_any_element()),
+        filtered_checkbox(
+            "armor-display-zero-mm",
+            t!("ui.armor.zero_mm_plates").into_owned(),
+            display.show_zero_mm,
             false,
-        ))
-        .when(has_markers, |this| {
-            this.child(labeled_slider_row(
-                t!("ui.armor.marker_opacity").into_owned(),
-                &marker_slider,
-                display.marker_opacity,
-                false,
-            ))
-        })
+            filter,
+            setting(|d, on| d.show_zero_mm = on),
+        ),
+        filtered_checkbox(
+            "armor-display-ship-center",
+            t!("ui.armor.ship_center").into_owned(),
+            display.show_ship_center,
+            false,
+            filter,
+            setting(|d, on| d.show_ship_center = on),
+        ),
+        labeled_slider_row(t!("ui.armor.armor_opacity").into_owned(), &snapshot.armor_slider, false, filter, cx),
+        snapshot
+            .has_markers
+            .then(|| {
+                labeled_slider_row(
+                    t!("ui.armor.marker_opacity").into_owned(),
+                    &snapshot.marker_slider,
+                    false,
+                    filter,
+                    cx,
+                )
+            })
+            .flatten(),
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
-        .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
-        .child(div().h(px(1.)).bg(border))
-        .child(render_camera_rings_section(
-            entity,
-            &camera_rings,
-            &camera_modes,
-            &perspective,
-            &camera_fov_slider,
-            &camera_height_slider,
-            &perspective_fov_slider,
-        ))
-        .child(div().h(px(1.)).bg(border))
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.lighting").to_string()))
-        .child(
-            Checkbox::new("armor-display-lighting-enabled")
-                .label(t!("ui.armor.lighting_enabled").to_string())
-                .checked(lighting.enabled)
-                .on_click(move |checked, _window, cx| {
-                    let checked = *checked;
-                    lighting_enabled_entity.update(cx, |view, cx| view.mutate_lighting(cx, |l| l.enabled = checked));
-                }),
-        )
-        .child(
-            h_flex()
-                .gap_1()
-                .child(
-                    Button::new("armor-lighting-preset-ingame")
-                        .label(t!("ui.armor.lighting_preset_ingame").to_string())
-                        .compact()
-                        .disabled(!lighting.enabled)
-                        .on_click(move |_, window, cx| {
-                            preset_ingame_entity.update(cx, |view, cx| {
-                                view.set_lighting_preset(LightingSettings::in_game(), window, cx)
-                            });
-                        }),
-                )
-                .child(
-                    Button::new("armor-lighting-preset-flat")
-                        .label(t!("ui.armor.lighting_preset_flat").to_string())
-                        .compact()
-                        .disabled(!lighting.enabled)
-                        .on_click(move |_, window, cx| {
-                            preset_flat_entity
-                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::flat(), window, cx));
-                        }),
-                )
-                .child(
-                    Button::new("armor-lighting-preset-studio")
-                        .label(t!("ui.armor.lighting_preset_studio").to_string())
-                        .compact()
-                        .disabled(!lighting.enabled)
-                        .on_click(move |_, window, cx| {
-                            preset_studio_entity.update(cx, |view, cx| {
-                                view.set_lighting_preset(LightingSettings::studio(), window, cx)
-                            });
-                        }),
-                ),
-        )
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_flat").into_owned(),
-            &flat_slider,
-            lighting.flat_intensity,
-            !lighting.enabled,
-        ))
-        .child(labeled_color_row(t!("ui.armor.lighting_ambient_color").into_owned(), &flat_color, !lighting.enabled))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_intensity").into_owned(),
-            &key_slider,
-            lighting.key_intensity,
-            !lighting.enabled,
-        ))
-        .child(labeled_color_row(t!("ui.armor.lighting_key_color").into_owned(), &key_color, !lighting.enabled))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_azimuth").into_owned(),
-            &azimuth_slider,
-            lighting.azimuth_deg,
-            !lighting.enabled,
-        ))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_elevation").into_owned(),
-            &elevation_slider,
-            lighting.elevation_deg,
-            !lighting.enabled,
-        ))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_rim").into_owned(),
-            &rim_slider,
-            lighting.rim_strength,
-            !lighting.enabled,
-        ))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_specular").into_owned(),
-            &specular_slider,
-            lighting.specular_strength,
-            !lighting.enabled,
-        ))
-        .child(labeled_slider_row(
-            t!("ui.armor.lighting_shininess").into_owned(),
-            &shininess_slider,
-            lighting.shininess,
-            !lighting.enabled,
-        ));
+        labeled_slider_row(t!("ui.armor.roll").into_owned(), &snapshot.roll_slider, false, filter, cx),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
-    col.into_any_element()
+    (!rows.is_empty()).then(|| v_flex().gap_2().children(rows).into_any_element())
+}
+
+/// The lighting group: whether the hull is lit, three presets, and the
+/// terms the presets set.
+fn lighting_group(
+    entity: &Entity<ViewportView>,
+    snapshot: &DisplayPopoverSnapshot,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let lighting = &snapshot.lighting;
+    let off = !lighting.enabled;
+
+    let enabled = {
+        let entity = entity.clone();
+        filtered_checkbox(
+            "armor-display-lighting-enabled",
+            t!("ui.armor.lighting_enabled").into_owned(),
+            lighting.enabled,
+            false,
+            filter,
+            move |checked, _window, cx| {
+                let checked = *checked;
+                entity.update(cx, |view, cx| view.mutate_lighting(cx, |l| l.enabled = checked));
+            },
+        )
+    };
+
+    let presets: Vec<AnyElement> = [
+        (
+            "armor-lighting-preset-ingame",
+            t!("ui.armor.lighting_preset_ingame").into_owned(),
+            LightingSettings::in_game as fn() -> LightingSettings,
+        ),
+        ("armor-lighting-preset-flat", t!("ui.armor.lighting_preset_flat").into_owned(), LightingSettings::flat),
+        ("armor-lighting-preset-studio", t!("ui.armor.lighting_preset_studio").into_owned(), LightingSettings::studio),
+    ]
+    .into_iter()
+    .filter_map(|(id, label, preset)| {
+        let label = filter.label(label, mark())?;
+        let entity = entity.clone();
+        let button = Button::new(id).child(label).compact().disabled(off).on_click(move |_, window, cx| {
+            entity.update(cx, |view, cx| view.set_lighting_preset(preset(), window, cx));
+        });
+        Some(button.into_any_element())
+    })
+    .collect();
+
+    let rows: Vec<AnyElement> = [
+        enabled,
+        (!presets.is_empty()).then(|| h_flex().gap_1().children(presets).into_any_element()),
+        labeled_slider_row(t!("ui.armor.lighting_flat").into_owned(), &snapshot.flat_slider, off, filter, cx),
+        labeled_color_row(t!("ui.armor.lighting_ambient_color").into_owned(), &snapshot.flat_color, off, filter),
+        labeled_slider_row(t!("ui.armor.lighting_intensity").into_owned(), &snapshot.key_slider, off, filter, cx),
+        labeled_color_row(t!("ui.armor.lighting_key_color").into_owned(), &snapshot.key_color, off, filter),
+        labeled_slider_row(t!("ui.armor.lighting_azimuth").into_owned(), &snapshot.azimuth_slider, off, filter, cx),
+        labeled_slider_row(t!("ui.armor.lighting_elevation").into_owned(), &snapshot.elevation_slider, off, filter, cx),
+        labeled_slider_row(t!("ui.armor.lighting_rim").into_owned(), &snapshot.rim_slider, off, filter, cx),
+        labeled_slider_row(t!("ui.armor.lighting_specular").into_owned(), &snapshot.specular_slider, off, filter, cx),
+        labeled_slider_row(t!("ui.armor.lighting_shininess").into_owned(), &snapshot.shininess_slider, off, filter, cx),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    (!rows.is_empty()).then(|| v_flex().gap_2().children(rows).into_any_element())
+}
+
+/// One folding group inside the display section.
+///
+/// While filtering the group is open whatever the reader left it at, and a
+/// match on its title keeps everything in it; with nothing matched it is not
+/// drawn at all. Its head is inert then, so the open state the reader left is
+/// what comes back when the filter is cleared.
+fn display_group(
+    groups: &DisplayGroups,
+    which: OptionSection,
+    title: String,
+    filter: &OptionsFilter,
+    cx: &mut App,
+    body: impl FnOnce(&OptionsFilter, &mut App) -> Option<AnyElement>,
+) -> Option<AnyElement> {
+    let marked = filter.label(title.clone(), mark());
+    let (open, content) = if filter.is_active() {
+        let inner = if marked.is_some() { OptionsFilter::default() } else { filter.clone() };
+        let content = body(&inner, cx);
+        if content.is_none() && marked.is_none() {
+            return None;
+        }
+        (true, content)
+    } else {
+        let open = groups.open.is_open(which);
+        (open, if open { body(filter, cx) } else { None })
+    };
+    let title = marked.unwrap_or_else(|| StyledText::new(title));
+
+    let pane = groups.pane.clone();
+    let head = h_flex()
+        .id(SharedString::from(format!("armor-options-group-{which:?}")))
+        .test_support()
+        .gap_1()
+        .items_center()
+        .pt_1()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall())
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+        .when(!filter.is_active(), |head| {
+            head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
+            })
+        });
+
+    Some(v_flex().gap_2().child(head).children(content).into_any_element())
 }
 
 /// One labelled colour row: what it tints, and the picker that sets it.
@@ -1684,37 +1908,60 @@ fn labeled_color_row(
     label: String,
     picker: &Entity<gpui_kit::component::color_picker::ColorPickerState>,
     lighting_off: bool,
-) -> impl IntoElement + use<> {
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
+    let marked = filter.label(label.clone(), mark())?;
     // Dimmed rather than taken away when the lighting is off: the colour it would
     // be lit in is still what this sets, and a row that vanished would read as a
     // setting that had gone.
-    h_flex()
-        .gap_2()
-        .items_center()
-        .when(lighting_off, |row| row.opacity(0.5))
-        .child(div().w(px(96.)).text_xs().child(label.clone()))
-        .child(
-            gpui_kit::component::color_picker::ColorPicker::new(picker)
-                .small()
-                .accessibility_label(SharedString::from(label)),
-        )
+    Some(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .when(lighting_off, |row| row.opacity(0.5))
+            .child(div().flex_none().w(px(88.)).text_sm().child(marked))
+            .child(
+                gpui_kit::component::color_picker::ColorPicker::new(picker)
+                    .small()
+                    .accessibility_label(SharedString::from(label)),
+            )
+            .into_any_element(),
+    )
 }
 
-/// One labeled slider row: `label`, the slider itself, and a live numeric
-/// readout. `slider` is always a persistent `Entity<SliderState>` already
-/// subscribed (see `render_display_popover_content`'s doc) to mutate the
-/// right domain field on drag, so this is purely presentational. `disabled`
-/// matches the egui original's `ui.add_enabled_ui(pane.lighting.enabled, ..)`
-/// wrapping the lighting sliders (`tab.rs:5053`); always `false` for the
-/// waterline/armor-opacity rows, which aren't lighting-gated.
-fn labeled_slider_row(label: String, slider: &Entity<SliderState>, value: f32, disabled: bool) -> AnyElement {
-    h_flex()
-        .gap_2()
-        .items_center()
-        .child(div().text_sm().w(px(110.)).child(label))
-        .child(crate::ui::boxed(px(110.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(slider).disabled(disabled)))
-        .child(div().text_sm().w(px(40.)).child(format!("{value:.2}")))
-        .into_any_element()
+/// One labeled slider row: `label`, the slider, and the field's number and
+/// reset. `disabled` matches the egui original's
+/// `ui.add_enabled_ui(pane.lighting.enabled, ..)` wrapping the lighting sliders
+/// (`tab.rs:5053`).
+fn labeled_slider_row(
+    label: String,
+    field: &Entity<SliderField>,
+    disabled: bool,
+    filter: &OptionsFilter,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let marked = filter.label(label, mark())?;
+    field.update(cx, |field, cx| field.set_disabled(disabled, cx));
+    let slider = field.read(cx).slider().clone();
+    Some(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .child(div().flex_none().w(px(88.)).text_sm().child(marked))
+            // Boxed at a row's height with the thumb centred in it: unboxed, the
+            // slider sits at the top of the row and the label beside it does not.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(48.))
+                    .h(crate::ui::SELECT_SMALL_HEIGHT)
+                    .flex()
+                    .items_center()
+                    .child(Slider::new(&slider).disabled(disabled)),
+            )
+            .child(field.clone())
+            .into_any_element(),
+    )
 }
 
 /// Names the tree's zones and parts the way the game names them, as the egui
@@ -1755,28 +2002,61 @@ fn render_zone_row(
     warn: Hsla,
     show_zero_mm: bool,
     names: &TreeNames,
-) -> AnyElement {
-    let all_on = zone_all_on(zone, part_visibility, plate_visibility, show_zero_mm);
-    let any_on = zone_any_on(zone, part_visibility);
+    filter: &OptionsFilter,
+) -> Option<AnyElement> {
+    let zone_label = names.zone(&zone.name);
+    let title = filter.label(zone_label.clone(), mark());
+    // A match on the zone keeps every part in it; otherwise only the parts
+    // that match are kept, under their zone.
+    let part_filter = if title.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let expanded = filter.is_active() || expanded_zones.contains(&zone.name);
+    let parts: Vec<(&ZonePart, StyledText)> = if expanded {
+        zone.parts.iter().filter_map(|part| Some((part, part_filter.label(names.part(&part.name), mark())?))).collect()
+    } else {
+        Vec::new()
+    };
+    if filter.is_active() && parts.is_empty() && title.is_none() {
+        return None;
+    }
+
+    // While filtering, the zone box reads and sets only the parts listed
+    // under it.
+    let acted_on = if filter.is_active() {
+        Cow::Owned(ArmorZone {
+            name: zone.name.clone(),
+            parts: parts.iter().map(|(part, _)| (*part).clone()).collect(),
+        })
+    } else {
+        Cow::Borrowed(zone)
+    };
+    let all_on = zone_all_on(&acted_on, part_visibility, plate_visibility, show_zero_mm);
+    let any_on = zone_any_on(&acted_on, part_visibility);
     let state = TriState::from_all_any(all_on, any_on);
-    let expanded = expanded_zones.contains(&zone.name);
 
     let toggle_entity = entity.clone();
     let toggle_zone_name = zone.name.clone();
+    let toggle_parts: Vec<String> = acted_on.parts.iter().map(|part| part.name.clone()).collect();
     let checkbox = tri_checkbox(format!("armor-vis-zone-{}", zone.name), state, warn, move |checked, window, cx| {
         let solo = window.modifiers().secondary(cx);
-        toggle_entity.update(cx, |view, cx| view.toggle_zone(toggle_zone_name.clone(), *checked, solo, cx));
+        toggle_entity.update(cx, |view, cx| {
+            view.toggle_zone(toggle_zone_name.clone(), toggle_parts.clone(), *checked, solo, cx)
+        });
     });
 
+    // Inert while filtering, where every zone is open whatever it was left at.
     let expand_entity = entity.clone();
     let expand_zone_name = zone.name.clone();
     let chevron = div()
         .id(format!("armor-vis-zone-expand-{}", zone.name))
         .flex_none()
         .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
-        .on_click(move |_, _window, cx| {
-            expand_entity.update(cx, |view, cx| view.toggle_zone_expanded(expand_zone_name.clone(), cx));
+        .when(!filter.is_active(), |chevron| {
+            chevron.on_click(move |_, _window, cx| {
+                expand_entity.update(cx, |view, cx| view.toggle_zone_expanded(expand_zone_name.clone(), cx));
+            })
         });
+
+    let title = title.unwrap_or_else(|| StyledText::new(zone_label));
 
     // Matches egui's own `ctrl_click_solo` hover-text on the zone label
     // (`tab.rs:4512`); generic rows have no public tooltip hook in this
@@ -1785,24 +2065,15 @@ fn render_zone_row(
         format!("armor-vis-zone-row-{}", zone.name),
         entity,
         SidebarHighlightKey::Zone(zone.name.clone()),
-        h_flex()
-            .gap_1()
-            .items_center()
-            .child(chevron)
-            .child(checkbox)
-            .child(div().text_sm().child(names.zone(&zone.name)))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(crate::theme::text_faint())
-                    .child(t!("ui.armor.ctrl_click_solo").to_string()),
-            ),
+        h_flex().gap_1().items_center().child(chevron).child(checkbox).child(div().text_sm().child(title)).child(
+            div().text_xs().text_color(crate::theme::text_faint()).child(t!("ui.armor.ctrl_click_solo").to_string()),
+        ),
     );
 
     let mut column = v_flex().gap_1().child(header);
     if expanded {
         let mut body = v_flex().gap_1().pl(px(20.));
-        for part in &zone.parts {
+        for (part, label) in parts {
             body = body.child(render_part_row(
                 entity,
                 &zone.name,
@@ -1812,17 +2083,17 @@ fn render_zone_row(
                 expanded_parts,
                 warn,
                 show_zero_mm,
-                names,
+                label,
             ));
         }
         column = column.child(body);
     }
-    column.into_any_element()
+    Some(column.into_any_element())
 }
 
 /// One material/part row: a single checkbox if it has at most one visible
 /// plate thickness, otherwise a collapsible header + plate rows. Ports
-/// `tab.rs:4518-4606`.
+/// `tab.rs:4518-4606`. `label` is the part's name as the filter marked it.
 #[allow(clippy::too_many_arguments)]
 fn render_part_row(
     entity: &Entity<ViewportView>,
@@ -1833,7 +2104,7 @@ fn render_part_row(
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
     show_zero_mm: bool,
-    names: &TreeNames,
+    label: StyledText,
 ) -> AnyElement {
     let part_key = (zone_name.to_string(), part.name.clone());
     let part_visible = part_on(part_visibility, zone_name, &part.name);
@@ -1871,7 +2142,7 @@ fn render_part_row(
             format!("armor-vis-part-row-{}-{}", zone_name, part.name),
             entity,
             SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
-            h_flex().gap_1().items_center().child(checkbox).child(div().text_sm().child(names.part(&part.name))),
+            h_flex().gap_1().items_center().child(checkbox).child(div().text_sm().child(label)),
         )
         .into_any_element();
     }
@@ -1909,12 +2180,7 @@ fn render_part_row(
         format!("armor-vis-part-row-{}-{}", zone_name, part.name),
         entity,
         SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
-        h_flex()
-            .gap_1()
-            .items_center()
-            .child(chevron)
-            .child(checkbox)
-            .child(div().text_sm().child(names.part(&part.name))),
+        h_flex().gap_1().items_center().child(chevron).child(checkbox).child(div().text_sm().child(label)),
     );
 
     let mut column = v_flex().gap_1().child(header);

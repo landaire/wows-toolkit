@@ -191,6 +191,8 @@ pub struct ArmorViewerPane {
     sidebar_collapsed: bool,
     /// Which of the rail's sections are expanded.
     option_sections: OptionSectionsOpen,
+    /// What the rail's filter field holds.
+    options_filter: Entity<gpui_kit::component::input::InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -200,6 +202,10 @@ pub(crate) enum OptionSection {
     Visibility,
     Hull,
     Display,
+    /// The camera ring and camera lock controls inside Display.
+    CameraRings,
+    /// The lighting controls inside Display.
+    Lighting,
 }
 
 /// Which sections of the options rail are expanded.
@@ -213,13 +219,16 @@ pub(crate) struct OptionSectionsOpen {
     pub visibility: bool,
     pub hull: bool,
     pub display: bool,
+    pub camera_rings: bool,
+    pub lighting: bool,
 }
 
 impl Default for OptionSectionsOpen {
     /// Display alone: it is the one read most often and the cheapest of the
-    /// three to build.
+    /// three to build. Its camera and lighting groups start closed, since
+    /// most readers only ever touch the model settings above them.
     fn default() -> Self {
-        Self { visibility: false, hull: false, display: true }
+        Self { visibility: false, hull: false, display: true, camera_rings: false, lighting: false }
     }
 }
 
@@ -229,6 +238,8 @@ impl OptionSectionsOpen {
             OptionSection::Visibility => self.visibility,
             OptionSection::Hull => self.hull,
             OptionSection::Display => self.display,
+            OptionSection::CameraRings => self.camera_rings,
+            OptionSection::Lighting => self.lighting,
         }
     }
 
@@ -237,6 +248,8 @@ impl OptionSectionsOpen {
             OptionSection::Visibility => &mut self.visibility,
             OptionSection::Hull => &mut self.hull,
             OptionSection::Display => &mut self.display,
+            OptionSection::CameraRings => &mut self.camera_rings,
+            OptionSection::Lighting => &mut self.lighting,
         };
         *open = !*open;
     }
@@ -274,6 +287,14 @@ impl ArmorViewerPane {
         let show_analysis = false;
         let pen_search_sub =
             cx.subscribe(&pen.search, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| cx.notify());
+        let options_filter = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx)
+                .placeholder(t!("ui.armor.filter_options").into_owned())
+        });
+        let options_filter_sub = cx
+            .subscribe(&options_filter, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| {
+                cx.notify()
+            });
 
         Self {
             sidebar,
@@ -297,8 +318,10 @@ impl ArmorViewerPane {
             show_options: true,
             sidebar_collapsed: false,
             option_sections: OptionSectionsOpen::default(),
+            options_filter,
             _subscriptions: vec![
                 pen_search_sub,
+                options_filter_sub,
                 ship_selected_sub,
                 compare_split_sub,
                 collapse_sidebar_sub,
@@ -514,6 +537,16 @@ impl ArmorViewerPane {
     /// Whether the options rail is up.
     pub(crate) fn options_open(&self) -> bool {
         self.show_options
+    }
+
+    /// The rail's filter field.
+    pub(crate) fn options_filter_input(&self) -> &Entity<gpui_kit::component::input::InputState> {
+        &self.options_filter
+    }
+
+    /// What the rail's filter field asks for.
+    pub(crate) fn options_filter(&self, cx: &App) -> super::options_filter::OptionsFilter {
+        super::options_filter::OptionsFilter::new(&self.options_filter.read(cx).value())
     }
 
     /// Which of the rail's sections are expanded.

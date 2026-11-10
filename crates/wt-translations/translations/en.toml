@@ -1567,6 +1567,8 @@ init_failed = "Armor viewport failed to initialize: %{reason}"
 loading_named_ship = "Loading %{ship}..."
 rendering = "Rendering..."
 options = "Options"
+filter_options = "Filter options..."
+no_matching_options = "No options match the filter"
 
 # -- Armor Viewer: penetration checker --
 

@@ -19,12 +19,15 @@
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::Input;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use super::options_filter::OptionsFilter;
 use super::pane::ArmorViewerPane;
 use super::pane::OptionSection;
 use super::popover;
@@ -35,7 +38,6 @@ pub const PANEL_WIDTH: Pixels = px(300.);
 
 pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
     let viewport = view.active_viewport(cx);
-    let legend_visible = view.legend_visible();
     let position = view.active_pane_position(cx);
     let border = cx.theme().border;
     let accent = cx.theme().primary;
@@ -65,8 +67,11 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         (false, None) => None,
     };
 
+    let filter = view.options_filter(cx);
+    let filter_input = view.options_filter_input().clone();
     let header = v_flex()
         .flex_none()
+        .gap_1()
         .px_2()
         .py_1()
         .border_b_1()
@@ -78,31 +83,70 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
                 .child(collapse),
         )
-        .children(target);
+        .children(target)
+        .child(
+            Input::new(&filter_input)
+                .id("armor-options-filter")
+                .small()
+                .prefix(Icon::new(IconName::Search).small())
+                .cleanable(true),
+        );
 
     let pen = popover::PenCheckButton { open: view.analysis_open(), ship_count: view.comparison_count() };
-    let tools = popover::render_tools(viewport.read(cx), &viewport, pen, pane);
+    let tools = popover::render_tools(viewport.read(cx), &viewport, pen, pane, &filter);
 
     let visibility = viewport.clone();
     let hull = viewport.clone();
     let display = viewport.clone();
+    let groups = popover::DisplayGroups {
+        pane: pane.clone(),
+        legend_visible: view.legend_visible(),
+        open: view.option_sections_open(),
+    };
+
+    let sections: Vec<AnyElement> = [
+        section(
+            view,
+            pane,
+            OptionSection::Visibility,
+            t!("ui.armor.armor_options").as_ref(),
+            &filter,
+            cx,
+            |filter, cx| popover::render_popover_content(&visibility, filter, cx),
+        ),
+        section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), &filter, cx, |filter, cx| {
+            popover::render_hull_popover_content(&hull, filter, cx)
+        }),
+        section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), &filter, cx, |filter, cx| {
+            popover::render_display_popover_content(&display, &groups, filter, cx)
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let nothing_matched = filter.is_active() && tools.is_none() && sections.is_empty();
 
     let body = v_flex()
         .gap_2()
         .p_2()
-        .child(tools)
-        .when(viewport.read(cx).trajectory_state().shown, |panel| {
+        .children(tools)
+        // A mode's own panel, not a setting: put away while a filter is typed.
+        .when(!filter.is_active() && viewport.read(cx).trajectory_state().shown, |panel| {
             panel.child(popover::render_trajectory_panel(view, pane, &viewport, cx))
         })
-        .child(section(view, pane, OptionSection::Visibility, t!("ui.armor.armor_options").as_ref(), cx, |cx| {
-            popover::render_popover_content(&visibility, cx)
-        }))
-        .child(section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), cx, |cx| {
-            popover::render_hull_popover_content(&hull, cx)
-        }))
-        .child(section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), cx, |cx| {
-            popover::render_display_popover_content(&display, legend_visible, cx)
-        }));
+        .children(sections)
+        .when(nothing_matched, |body| {
+            let said: SharedString = t!("ui.armor.no_matching_options").into_owned().into();
+            body.child(
+                div()
+                    .id("armor-options-no-match")
+                    .test_support()
+                    .aria_label(said.clone())
+                    .text_sm()
+                    .text_color(crate::theme::text_dim())
+                    .child(said),
+            )
+        });
 
     v_flex()
         .id("armor-options-panel")
@@ -134,15 +178,33 @@ pub fn render_expand_rail(pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElemen
 
 /// One section, labelled as its popover button was. `body` is called only while
 /// the section is expanded, which is what the collapse is for.
+///
+/// While filtering, every section is open whatever the reader left it at, a
+/// match on its title keeps everything in it, and one with nothing matched is
+/// not drawn at all. Its head is inert then, so the open state the reader left
+/// is what comes back when the filter is cleared.
 fn section(
     view: &ArmorViewerPane,
     pane: &Entity<ArmorViewerPane>,
     which: OptionSection,
     title: &str,
+    filter: &OptionsFilter,
     cx: &mut App,
-    body: impl FnOnce(&mut App) -> AnyElement,
-) -> AnyElement {
-    let expanded = view.option_sections_open().is_open(which);
+    body: impl FnOnce(&OptionsFilter, &mut App) -> Option<AnyElement>,
+) -> Option<AnyElement> {
+    let marked = filter.label(title.to_string(), popover::mark());
+    let (expanded, content) = if filter.is_active() {
+        let inner = if marked.is_some() { OptionsFilter::default() } else { filter.clone() };
+        let content = body(&inner, cx);
+        if content.is_none() && marked.is_none() {
+            return None;
+        }
+        (true, content)
+    } else {
+        let expanded = view.option_sections_open().is_open(which);
+        (expanded, if expanded { body(filter, cx) } else { None })
+    };
+    let title = marked.unwrap_or_else(|| StyledText::new(title.to_string()));
     let pane = pane.clone();
 
     let head = h_flex()
@@ -150,7 +212,6 @@ fn section(
         .test_support()
         .gap_1()
         .items_center()
-        .cursor_pointer()
         // A band, not dim small caps: the trees inside carry their own group
         // labels, and a section title has to read above them.
         .px_2()
@@ -158,18 +219,20 @@ fn section(
         .rounded(cx.theme().radius)
         .bg(cx.theme().muted)
         .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
-        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title.to_string()))
-        .on_click(move |_event, _window, cx: &mut App| {
-            pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+        .when(!filter.is_active(), |head| {
+            head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
+            })
         });
 
-    v_flex()
-        .gap_1()
-        .child(head)
-        .when(expanded, |this| {
-            this.child(
-                div().id(SharedString::from(format!("armor-options-body-{which:?}"))).test_support().child(body(cx)),
-            )
-        })
-        .into_any_element()
+    Some(
+        v_flex()
+            .gap_1()
+            .child(head)
+            .children(content.map(|content| {
+                div().id(SharedString::from(format!("armor-options-body-{which:?}"))).test_support().child(content)
+            }))
+            .into_any_element(),
+    )
 }
