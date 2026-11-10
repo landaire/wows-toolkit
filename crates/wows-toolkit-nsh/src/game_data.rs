@@ -1202,6 +1202,12 @@ fn snapshot() -> GameDataSnapshot {
             StatusView { phase: GameDataPhase::Failed, version: None, build: None, reason: Some(error.to_string()) }
         }
     };
+    #[cfg(feature = "test-support")]
+    let status = if test_support::REPORT_READY.load(Ordering::Relaxed) {
+        StatusView { phase: GameDataPhase::Ready, version: None, build: None, reason: None }
+    } else {
+        status
+    };
     let settings = state.binding.as_ref().map(|binding| &binding.settings);
     // No pass running reads as zero progress, which the view hides.
     let progress = state.index.progress.unwrap_or_default();
@@ -1590,6 +1596,23 @@ fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), GameDataError> 
     run_cache_job(CacheJob::Downloading, move |client, base, _tip, report| async move {
         cache::download(&client, &base, &builds, report).await
     })
+}
+
+/// Hooks for tests that have no game install.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+
+    pub(super) static REPORT_READY: AtomicBool = AtomicBool::new(false);
+
+    /// Reports the game data as loaded to the interface, which then offers
+    /// what waits for a loaded build. Nothing is loaded: reads still go
+    /// through the bound cache, which has no install behind it.
+    pub fn report_ready() {
+        REPORT_READY.store(true, Ordering::Relaxed);
+        super::update(|_| ());
+    }
 }
 
 #[cfg(test)]
