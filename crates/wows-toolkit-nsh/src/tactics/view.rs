@@ -8,7 +8,12 @@ use wt_collab_client::drawing::Tool;
 
 use crate::tactics::board::Board;
 use crate::tactics::board::MapStatus;
+use crate::tactics::board::ModeEntry;
 use crate::tactics::board::map_value;
+use crate::tactics::ids::InkIndex;
+use crate::tactics::ids::NoticeId;
+use crate::tactics::ids::ShipMatchIndex;
+use crate::tactics::ids::ViewRevision;
 
 /// A board tool, as the toolbar and the shortcuts name it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -94,7 +99,7 @@ pub struct PlacingView {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct ShipMatchView {
     /// What `pickShip` takes.
-    pub index: u32,
+    pub index: ShipMatchIndex,
     /// Its tier and name.
     pub label: String,
 }
@@ -114,8 +119,7 @@ pub struct RangeView {
 /// A message about something the board did on its own time.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 pub struct NoticeView {
-    /// Counts up, so the same text said twice is shown twice.
-    pub id: u32,
+    pub id: NoticeId,
     pub text: String,
 }
 
@@ -123,7 +127,7 @@ pub struct NoticeView {
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct TacticsView {
     /// Changes whenever anything here does.
-    pub revision: u32,
+    pub revision: ViewRevision,
     pub status: MapStatusName,
     pub maps: Vec<PickerItem>,
     /// The map the board is on.
@@ -148,7 +152,7 @@ pub struct TacticsView {
     /// The tool in hand.
     pub tool: Option<ToolName>,
     /// Which of the offered inks is in use.
-    pub ink: Option<u32>,
+    pub ink: Option<InkIndex>,
     pub nib: f64,
     pub can_thin: bool,
     pub can_thicken: bool,
@@ -171,7 +175,7 @@ pub struct TacticsView {
 }
 
 /// What `board` shows, at `revision`.
-pub fn of(board: &Board, revision: u32) -> TacticsView {
+pub fn of(board: &Board, revision: ViewRevision) -> TacticsView {
     let titles = board::map_titles(board.maps());
     let maps: Vec<PickerItem> = board
         .maps()
@@ -181,11 +185,11 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
         .collect();
     let map = board.map().map(map_value).and_then(|value| maps.iter().find(|item| item.value == value).cloned());
 
-    let mode_item = |entry: &crate::tactics::board::ModeEntry| PickerItem {
+    let mode_item = |entry: &ModeEntry| PickerItem {
         value: entry.value(),
         title: match entry {
-            crate::tactics::board::ModeEntry::Blank => rust_i18n::t!("ui.replay.hover.blank_mode").into_owned(),
-            crate::tactics::board::ModeEntry::Layout(mode) => mode.label.clone(),
+            ModeEntry::Blank => rust_i18n::t!("ui.replay.hover.blank_mode").into_owned(),
+            ModeEntry::Layout(mode) => mode.label.clone(),
         },
     };
     let modes = board.mode_entries().iter().map(mode_item).collect();
@@ -239,7 +243,7 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
         selected_cap,
         has_removable_caps: board.caps().iter().any(|cap| !cap.frozen),
         tool: tool_name(board.tool()),
-        ink: board::INKS.iter().position(|(ink, _)| *ink == board.ink()).map(|at| at as u32),
+        ink: board::INKS.iter().position(|(ink, _)| *ink == board.ink()).map(InkIndex::from_position),
         nib: f64::from(nib),
         can_thin: !locked && nib > board::MIN_NIB,
         can_thicken: !locked && nib < board::MAX_NIB,
@@ -258,7 +262,7 @@ pub fn of(board: &Board, revision: u32) -> TacticsView {
             .iter()
             .enumerate()
             .map(|(index, (_, ship))| ShipMatchView {
-                index: index as u32,
+                index: ShipMatchIndex::from_position(index),
                 label: format!("{} {}", tier_roman(ship.tier), ship.display_name),
             })
             .collect(),

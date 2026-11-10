@@ -18,12 +18,15 @@ use crate::frames::Modifiers;
 use crate::frames::PixelPoint;
 use crate::frames::PixelSize;
 use crate::frames::PointerButton;
+use crate::frames::ScaleFactor;
+use crate::frames::ScrollSteps;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
 use crate::tactics::board::Board;
 use crate::tactics::board::MapStatus;
 use crate::tactics::board::map_value;
 use crate::tactics::game::BoardGame;
+use crate::tactics::ids::ViewRevision;
 use crate::tactics::producer::Shared;
 use crate::tactics::view;
 use crate::tactics::view::ToolName;
@@ -115,7 +118,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 fn board_on_map(name: &str) -> Arc<Shared> {
     crate::isolate_test_storage();
     let shared = Shared::start(&SurfaceId::new(name), Board::new(Some(test_game()), CapLayoutDb::default(), None));
-    shared.surface().send_input(SurfaceInput::Resized { size: SIZE, scale: 1.0 });
+    shared.surface().send_input(SurfaceInput::Resized { size: SIZE, scale: ScaleFactor::new(1.0) });
     let value = {
         let board = shared.lock();
         let map = board.maps().iter().find(|map| map.space == SPACE).expect("the test map is offered");
@@ -163,7 +166,7 @@ fn the_map_is_drawn_letterboxed_at_the_reported_size() {
     let margin = frame_pixel(&shared, PixelPoint { x: 10.0, y: 150.0 });
     assert!(!close(margin), "the left margin does not: {margin:?}");
 
-    send(&shared, SurfaceInput::Resized { size: PixelSize { width: 300, height: 500 }, scale: 2.0 });
+    send(&shared, SurfaceInput::Resized { size: PixelSize { width: 300, height: 500 }, scale: ScaleFactor::new(2.0) });
     wait_until("a frame at the new size", || {
         shared.surface().latest().is_some_and(|frame| frame.size == PixelSize { width: 300, height: 500 })
     });
@@ -250,11 +253,11 @@ fn a_picked_shape_moves_and_turns() {
     let handle = {
         let board = shared.lock();
         let Some(super::board::Frame::Map(job)) = board.frame() else { panic!("a map frame") };
-        job.handle.expect("a picked rectangle has a handle").0
+        job.handle.expect("a picked rectangle has a handle").center
     };
-    press(&shared, PixelPoint { x: handle.0, y: handle.1 });
-    drag_to(&shared, PixelPoint { x: handle.0 + 80.0, y: handle.1 + 60.0 });
-    release(&shared, PixelPoint { x: handle.0 + 80.0, y: handle.1 + 60.0 });
+    press(&shared, handle);
+    drag_to(&shared, PixelPoint { x: handle.x + 80.0, y: handle.y + 60.0 });
+    release(&shared, PixelPoint { x: handle.x + 80.0, y: handle.y + 60.0 });
     wait_until("the rectangle to turn", || {
         matches!(shared.lock().shapes()[0], Annotation::Rectangle { rotation: turned, .. } if turned != rotation)
     });
@@ -266,7 +269,12 @@ fn a_picked_shape_moves_and_turns() {
 fn the_wheel_zooms_a_drag_pans_and_a_double_click_resets() {
     let shared = board_on_map("tactics-test-view");
 
-    send(&shared, SurfaceInput::Wheel { at: Some(on_frame(384.0, 384.0)), dx: 0.0, dy: -5.0, modifiers: Modifiers::default() });
+    send(&shared, SurfaceInput::Wheel {
+        at: Some(on_frame(384.0, 384.0)),
+        dx: ScrollSteps::new(0.0),
+        dy: ScrollSteps::new(-5.0),
+        modifiers: Modifiers::default(),
+    });
     wait_until("a zoom", || shared.lock().view().zoom() > 1.0);
     let zoomed = shared.lock().view();
 
@@ -302,7 +310,7 @@ fn the_context_menu_picks_the_cap_under_it() {
     let board = shared.lock();
     assert_eq!(board.tool(), &wt_collab_client::drawing::Tool::None);
     assert_eq!(board.selected_cap().map(|cap| cap.letter()), Some("A".to_owned()));
-    let shown = view::of(&board, 0);
+    let shown = view::of(&board, ViewRevision::default());
     assert!(shown.has_map_info && shown.can_edit_caps);
     assert_eq!(shown.selected_cap.map(|cap| cap.radius_km), Some("4.5".to_owned()));
 }
@@ -313,7 +321,7 @@ fn frame_keys_change_nothing() {
     let shared = board_on_map("tactics-test-keys");
     shared.update(|board| board.set_tool(view::tool_of(Some(ToolName::Line))));
     send(&shared, SurfaceInput::Key { key: "Escape".to_owned(), pressed: true, modifiers: Modifiers::default() });
-    send(&shared, SurfaceInput::Resized { size: SIZE, scale: 1.0 });
+    send(&shared, SurfaceInput::Resized { size: SIZE, scale: ScaleFactor::new(1.0) });
     std::thread::sleep(Duration::from_millis(50));
 
     assert_eq!(shared.lock().tool(), &wt_collab_client::drawing::Tool::Line);

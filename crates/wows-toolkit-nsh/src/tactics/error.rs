@@ -1,5 +1,9 @@
 use wows_toolkit_viewmodel::tactics::PresetError;
 
+use crate::game_data::GameDataError;
+use crate::tactics::ids::InkIndex;
+use crate::tactics::ids::ShipMatchIndex;
+
 /// Why a tactics board command could not be carried out.
 #[derive(Debug, thiserror::Error)]
 pub enum TacticsError {
@@ -34,7 +38,19 @@ pub enum TacticsError {
     #[error("the map has no mode {value:?}")]
     UnknownMode { value: String },
     #[error("there is no ship match {index}")]
-    UnknownShip { index: u32 },
+    UnknownShip { index: ShipMatchIndex },
     #[error("there is no ink {index}")]
-    UnknownInk { index: u32 },
+    UnknownInk { index: InkIndex },
+    #[error("tactics layout task failed: {source}")]
+    LayoutTask {
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[error("tactics game data task failed: {source}")]
+    GameDataTask {
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[error(transparent)]
+    GameData(GameDataError),
 }

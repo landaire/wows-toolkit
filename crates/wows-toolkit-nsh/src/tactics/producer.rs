@@ -16,11 +16,13 @@ use crate::frames;
 use crate::frames::Surface;
 use crate::frames::SurfaceId;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
 use crate::tactics::board::Announcement;
 use crate::tactics::board::Board;
 use crate::tactics::board::Frame;
+use crate::tactics::board::MapDrawn;
 use crate::tactics::board::ScanStart;
-use crate::tactics::board::Viewport;
+use crate::tactics::ids::ViewRevision;
 use crate::tactics::raster;
 use crate::tactics::raster::Rastered;
 use crate::tactics::raster::Rasteriser;
@@ -38,7 +40,7 @@ enum Message {
 pub struct Shared {
     board: Mutex<Board>,
     surface: Arc<Surface>,
-    revision: watch::Sender<u32>,
+    revision: watch::Sender<ViewRevision>,
     wake: mpsc::Sender<Message>,
 }
 
@@ -50,7 +52,7 @@ impl Shared {
     pub fn start(id: &SurfaceId, board: Board) -> Arc<Self> {
         let surface = frames::surface(id);
         let (wake, messages) = mpsc::channel();
-        let (revision, _) = watch::channel(0);
+        let (revision, _) = watch::channel(ViewRevision::default());
         let shared = Arc::new(Self { board: Mutex::new(board), surface: Arc::clone(&surface), revision, wake });
 
         if let Some(mut input) = surface.take_input() {
@@ -105,12 +107,12 @@ impl Shared {
     }
 
     /// The revision the view last heard of, and a way to wait for the next.
-    pub fn subscribe(&self) -> watch::Receiver<u32> {
+    pub fn subscribe(&self) -> watch::Receiver<ViewRevision> {
         self.revision.subscribe()
     }
 
     fn bump(&self) {
-        self.revision.send_modify(|revision| *revision = revision.wrapping_add(1));
+        self.revision.send_modify(|revision| *revision = revision.next());
     }
 
     /// Hands the board its end of a session.
@@ -158,8 +160,7 @@ impl Shared {
                 report,
             );
             save_layouts(&outcome.fresh);
-            let added = outcome.fresh.len();
-            shared.update(|board| board.finish_scan(&cancelled, outcome.found, added, outcome.total));
+            shared.update(|board| board.finish_scan(&cancelled, outcome));
         });
     }
 
@@ -216,26 +217,26 @@ impl Shared {
         let drawn = match frame {
             Frame::Empty => {
                 self.surface.clear();
-                (false, false)
+                MapDrawn::NotShown
             }
             Frame::Map(job) => match rasteriser.draw(&job) {
                 Ok(Rastered::Map(frame)) => {
                     self.surface.present(frame);
-                    (true, false)
+                    MapDrawn::Shown
                 }
                 Ok(Rastered::NoArt) => {
                     self.surface.clear();
-                    (false, true)
+                    MapDrawn::NoArt
                 }
                 Err(err) => {
                     log::warn!("tactics board: a frame could not be built: {err}");
-                    (false, false)
+                    MapDrawn::NotShown
                 }
             },
         };
 
         let mut board = self.lock();
-        board.drew(drawn.0, drawn.1);
+        board.drew(drawn);
         if board.take_changed() {
             self.bump();
         }
@@ -246,7 +247,7 @@ impl Shared {
 /// view's keymap's to handle, so the frame's own are not read here.
 fn apply(board: &mut Board, input: SurfaceInput) {
     match input {
-        SurfaceInput::Resized { size, scale } => board.resize(Viewport { size, scale }),
+        SurfaceInput::Resized { size, scale } => board.resize(ViewSize { size, scale }),
         SurfaceInput::PointerDown { at, button, clicks, modifiers } => board.pointer_down(at, button, clicks, modifiers),
         SurfaceInput::PointerUp { at, button, .. } => board.pointer_up(at, button),
         SurfaceInput::PointerMoved { at, .. } => board.pointer_moved(at),

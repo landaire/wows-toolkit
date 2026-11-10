@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use image::RgbImage;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MapInfo;
+use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
@@ -23,16 +24,21 @@ use wows_toolkit_viewmodel::tactics::board;
 use wows_toolkit_viewmodel::tactics::board::BoardCapPoint;
 use wows_toolkit_viewmodel::tactics::board::BoardState;
 use wows_toolkit_viewmodel::tactics::board::CapDrag;
+use wows_toolkit_viewmodel::tactics::board::ElementPos;
+use wows_toolkit_viewmodel::tactics::board::Extent;
+use wows_toolkit_viewmodel::tactics::board::FramePos;
 use wows_toolkit_viewmodel::tactics::board::Letterbox;
 use wows_toolkit_viewmodel::tactics::board::MapChoice;
 use wows_toolkit_viewmodel::tactics::board::MapChoiceKey;
 use wows_toolkit_viewmodel::tactics::board::ModeChoice;
 use wows_toolkit_viewmodel::tactics::board::PlacedShip;
 use wows_toolkit_viewmodel::tactics::board::RangeCircle;
+use wows_toolkit_viewmodel::tactics::board::ScanOutcome;
 use wows_toolkit_viewmodel::tactics::board::ScanProgress;
 use wows_toolkit_viewmodel::tactics::naming;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::WorldPos2D;
 use wt_collab_client::drawing::Drawing;
 use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Selection;
@@ -49,10 +55,14 @@ use wt_collab_client::types::AnnotationShipConfig;
 
 use crate::frames::Modifiers;
 use crate::frames::PixelPoint;
-use crate::frames::PixelSize;
 use crate::frames::PointerButton;
+use crate::frames::ScaleFactor;
+use crate::frames::ScrollSteps;
+use crate::frames::ViewSize;
 use crate::tactics::error::TacticsError;
 use crate::tactics::game::BoardGame;
+use crate::tactics::ids::NoticeId;
+use crate::tactics::ids::ShipMatchIndex;
 
 /// How big a turning handle is drawn, how far above the shape it sits, and how
 /// far from it a press still takes it, in points at any zoom.
@@ -64,14 +74,6 @@ const HANDLE_REACH: f32 = HANDLE_RADIUS + 8.0;
 /// a line of text: the zoom per notch is stated per pixel.
 const WHEEL_STEP_PX: f32 = 20.0;
 
-/// The view the frame surface reports: its size in device pixels and how many
-/// of them make a point.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Viewport {
-    pub size: PixelSize,
-    pub scale: f32,
-}
-
 /// What the map area shows in place of the map, or that it shows the map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapStatus {
@@ -82,12 +84,40 @@ pub enum MapStatus {
     Shown,
 }
 
+/// What the producer's last attempt at drawing the map came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapDrawn {
+    /// Not drawn yet, cleared, or the frame could not be built.
+    NotShown,
+    Shown,
+    /// The build ships no art for the map.
+    NoArt,
+}
+
 /// A message for the reader about something the board did on its own time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    /// Counts up, so the same text said twice is shown twice.
-    pub id: u32,
+    pub id: NoticeId,
     pub text: String,
+}
+
+/// A capture point's place in the board's list, which is not its letter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CapSlot(usize);
+
+/// Where a shape's turning handle sits on the frame, and the foot of its
+/// stem, in device pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TurnHandle {
+    pub center: PixelPoint,
+    pub anchor: PixelPoint,
+}
+
+/// The one picked shape that can be turned, as it stands, with its handle.
+struct Turnable {
+    index: usize,
+    annotation: Annotation,
+    handle: TurnHandle,
 }
 
 /// What the session lets this end do. Held so a change is noticed once.
@@ -127,9 +157,8 @@ pub struct RasterJob {
     pub caps: Vec<BoardCapPoint>,
     /// Halos first, then the shapes, then the part-drawn one.
     pub annotations: Vec<Annotation>,
-    pub viewport: Viewport,
-    /// Where the turning handle and the foot of its stem sit, in device pixels.
-    pub handle: Option<((f32, f32), (f32, f32))>,
+    pub view_size: ViewSize,
+    pub handle: Option<TurnHandle>,
 }
 
 /// What a frame is drawn as.
@@ -157,19 +186,19 @@ pub struct Board {
     modes: Vec<ModeChoice>,
     mode: Option<CapLayoutKey>,
     caps: Vec<BoardCapPoint>,
-    /// Which capture point the reader is working on, by its place in `caps`.
-    selected: Option<usize>,
+    /// Which capture point the reader is working on.
+    selected: Option<CapSlot>,
 
     /// Where the pointer is on the map, which the part-drawn shape is built
     /// against. `None` while it is off the map.
-    pointer_at: Option<[f32; 2]>,
-    dragging: Option<(usize, CapDrag)>,
+    pointer_at: Option<MinimapPos>,
+    dragging: Option<(CapSlot, CapDrag)>,
     /// Whether the next click on the map places a capture point.
     adding: bool,
     drawing: Drawing,
     picked: Selection,
     /// A move in progress: where it began, and what was on the board then.
-    moving: Option<([f32; 2], Vec<Annotation>)>,
+    moving: Option<(MinimapPos, Vec<Annotation>)>,
     /// A turn in progress: which shape, and how it stood before the handle
     /// was taken. Read as a bearing from the shape's middle each move.
     turning: Option<(usize, Annotation)>,
@@ -205,16 +234,14 @@ pub struct Board {
     range_filter: AnnotationRangeFilter,
 
     view: MapViewport,
-    viewport: Option<Viewport>,
+    view_size: Option<ViewSize>,
     history: Vec<BoardState>,
     undone: Vec<BoardState>,
 
-    /// Whether the last frame drawn showed the map, and whether the last
-    /// attempt found no art for it.
-    shown: bool,
-    no_art: bool,
+    /// What the last frame drawn came to.
+    drawn: MapDrawn,
     notice: Option<Notice>,
-    next_notice: u32,
+    next_notice: NoticeId,
 
     /// Whether the frame needs drawing again, and whether what the toolbar
     /// shows changed.
@@ -269,13 +296,12 @@ impl Board {
             matched_ships: Vec::new(),
             range_filter: AnnotationRangeFilter::default(),
             view: MapViewport::default(),
-            viewport: None,
+            view_size: None,
             history: Vec::new(),
             undone: Vec::new(),
-            shown: false,
-            no_art: false,
+            drawn: MapDrawn::NotShown,
             notice: None,
-            next_notice: 1,
+            next_notice: NoticeId::FIRST,
             dirty: true,
             changed: true,
         }
@@ -285,7 +311,7 @@ impl Board {
     /// directory and the frame's size: what reopening it starts from.
     pub fn reopened(&self) -> Self {
         let mut fresh = Self::new(self.game.clone(), self.layouts.clone(), self.replays_dir.clone());
-        fresh.viewport = self.viewport;
+        fresh.view_size = self.view_size;
         fresh
     }
 
@@ -310,7 +336,7 @@ impl Board {
 
     pub fn say(&mut self, text: impl Into<String>) {
         self.notice = Some(Notice { id: self.next_notice, text: text.into() });
-        self.next_notice = self.next_notice.wrapping_add(1);
+        self.next_notice = self.next_notice.next();
         self.notify();
     }
 }
@@ -332,6 +358,7 @@ impl Board {
     pub fn mode_entry(&self) -> ModeEntry {
         match &self.mode {
             None => ModeEntry::Blank,
+            // A key the mode list no longer holds has no layout to show.
             Some(key) => self
                 .modes
                 .iter()
@@ -346,7 +373,7 @@ impl Board {
     }
 
     pub fn selected_cap(&self) -> Option<&BoardCapPoint> {
-        self.selected.and_then(|at| self.caps.get(at))
+        self.selected.and_then(|slot| self.caps.get(slot.0))
     }
 
     pub fn adding(&self) -> bool {
@@ -438,8 +465,8 @@ impl Board {
         self.view
     }
 
-    pub fn viewport(&self) -> Option<Viewport> {
-        self.viewport
+    pub fn view_size(&self) -> Option<ViewSize> {
+        self.view_size
     }
 
     pub fn has_map_info(&self) -> bool {
@@ -458,13 +485,11 @@ impl Board {
         if self.game.is_none() {
             return MapStatus::NoGameData;
         }
-        if self.no_art {
-            return MapStatus::NoArt;
+        match self.drawn {
+            MapDrawn::NoArt => MapStatus::NoArt,
+            MapDrawn::NotShown => MapStatus::Drawing,
+            MapDrawn::Shown => MapStatus::Shown,
         }
-        if !self.shown {
-            return MapStatus::Drawing;
-        }
-        MapStatus::Shown
     }
 
     /// Whether a drawing tool is in hand, which takes the pointer away from the
@@ -489,35 +514,39 @@ impl Board {
 /// Where a position on the frame lands.
 impl Board {
     fn letterbox(&self) -> Option<Letterbox> {
-        let viewport = self.viewport?;
+        let view_size = self.view_size?;
         let side = MINIMAP_SIZE as f32;
         Letterbox::fitting(
-            (0.0, 0.0),
-            (viewport.size.width as f32, viewport.size.height as f32),
-            (side, side),
+            ElementPos { x: 0.0, y: 0.0 },
+            Extent { width: view_size.size.width as f32, height: view_size.size.height as f32 },
+            Extent { width: side, height: side },
         )
     }
 
     /// Where a frame position falls in the drawn map, before the zoom is
     /// undone. `None` before the map has been drawn, and in the margin beside
     /// it.
-    fn drawn_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
-        if !self.shown {
+    fn drawn_point(&self, at: PixelPoint) -> Option<FramePos> {
+        if self.drawn != MapDrawn::Shown {
             return None;
         }
-        self.letterbox()?.to_frame((at.x, at.y))
+        self.letterbox()?.to_frame(ElementPos { x: at.x, y: at.y })
     }
 
     /// Where a frame position falls on the map, in the map's own pixels.
-    fn map_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
-        let (x, y) = self.drawn_point(at)?;
-        Some(self.view.to_map(x, y))
+    fn map_point(&self, at: PixelPoint) -> Option<MinimapPos> {
+        let drawn = self.drawn_point(at)?;
+        let (x, y) = self.view.to_map(drawn.x, drawn.y);
+
+        Some(MinimapPos { x, y })
     }
 
     /// Where a map point lands on the frame, `None` where the zoom has
     /// scrolled it off.
-    fn frame_point(&self, at: (f32, f32)) -> Option<(f32, f32)> {
-        self.letterbox()?.to_element((self.view.x(at.0), self.view.y(at.1)))
+    fn frame_point(&self, at: MinimapPos) -> Option<PixelPoint> {
+        let element = self.letterbox()?.to_element(FramePos { x: self.view.x(at.x), y: self.view.y(at.y) })?;
+
+        Some(PixelPoint { x: element.x, y: element.y })
     }
 
     fn current_map_info(&self) -> Option<MapInfo> {
@@ -525,38 +554,43 @@ impl Board {
     }
 
     /// Where a frame position falls in the world.
-    fn world_point(&self, at: PixelPoint) -> Option<(f32, f32)> {
-        let (x, y) = self.map_point(at)?;
+    fn world_point(&self, at: PixelPoint) -> Option<WorldPos2D> {
+        let at = self.map_point(at)?;
         let map = self.current_map_info()?;
-        let world = map.minimap_to_world_f32(x, y, MINIMAP_SIZE);
-        Some((world.x, world.z))
+        let world = map.minimap_to_world(at, MINIMAP_SIZE);
+
+        Some(WorldPos2D { x: world.x, z: world.z })
     }
 
-    fn cap_under(&self, at: PixelPoint) -> Option<(usize, CapDrag)> {
-        board::cap_under(&self.caps, self.world_point(at)?, &self.current_map_info()?)
+    fn cap_under(&self, at: PixelPoint) -> Option<(CapSlot, CapDrag)> {
+        let (slot, what) = board::cap_under(&self.caps, self.world_point(at)?, &self.current_map_info()?)?;
+
+        Some((CapSlot(slot), what))
     }
 
     fn shape_under(&self, at: PixelPoint) -> Option<usize> {
         let at = self.map_point(at)?;
-        wt_collab_client::drawing::nearest_within(&self.shapes(), [at.0, at.1], board::SHAPE_REACH_PX)
+        wt_collab_client::drawing::nearest_within(&self.shapes(), map_array(at), board::SHAPE_REACH_PX)
     }
 
-    fn scale(&self) -> f32 {
-        self.viewport.map_or(1.0, |viewport| viewport.scale)
+    fn scale(&self) -> Option<ScaleFactor> {
+        self.view_size.map(|view_size| view_size.scale)
     }
 
     /// Where a shape's turning handle sits on the frame, and the foot of its
     /// stem: a fixed distance above the shape on screen, so the handle keeps
     /// its size and reach at every zoom.
-    fn rotation_handle(&self, annotation: &Annotation) -> Option<((f32, f32), (f32, f32))> {
+    fn rotation_handle(&self, annotation: &Annotation) -> Option<TurnHandle> {
         let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
-        let anchor = self.frame_point(((left + right) / 2.0, top))?;
+        let anchor = self.frame_point(MinimapPos { x: (left + right) / 2.0, y: top })?;
+        let scale = self.scale()?;
+        let center = PixelPoint { x: anchor.x, y: anchor.y - HANDLE_DISTANCE * scale.get() };
 
-        Some(((anchor.0, anchor.1 - HANDLE_DISTANCE * self.scale()), anchor))
+        Some(TurnHandle { center, anchor })
     }
 
     /// The one picked shape that can be turned, with its handle.
-    fn turnable(&self) -> Option<(usize, Annotation, ((f32, f32), (f32, f32)))> {
+    fn turnable(&self) -> Option<Turnable> {
         let index = self.picked.single()?;
         let annotation = self.collab.annotation_at(index)?;
         if !wt_collab_client::drawing::can_rotate(&annotation) {
@@ -564,35 +598,35 @@ impl Board {
         }
         let handle = self.rotation_handle(&annotation)?;
 
-        Some((index, annotation, handle))
+        Some(Turnable { index, annotation, handle })
     }
 
     fn handle_under(&self, at: PixelPoint) -> Option<(usize, Annotation)> {
-        let (index, annotation, (handle, _)) = self.turnable()?;
-        let away = (at.x - handle.0).hypot(at.y - handle.1);
+        let Turnable { index, annotation, handle } = self.turnable()?;
+        let scale = self.scale()?;
+        let away = (at.x - handle.center.x).hypot(at.y - handle.center.y);
 
-        (away < HANDLE_REACH * self.scale()).then_some((index, annotation))
+        (away < HANDLE_REACH * scale.get()).then_some((index, annotation))
     }
 }
 
 /// Setting the board up.
 impl Board {
     /// The frame's size changed.
-    pub fn resize(&mut self, viewport: Viewport) {
-        if self.viewport == Some(viewport) {
+    pub fn resize(&mut self, view_size: ViewSize) {
+        if self.view_size == Some(view_size) {
             return;
         }
-        self.viewport = Some(viewport);
+        self.view_size = Some(view_size);
         self.redraw();
     }
 
     /// What the producer found drawing the last frame.
-    pub fn drew(&mut self, shown: bool, no_art: bool) {
-        if self.shown == shown && self.no_art == no_art {
+    pub fn drew(&mut self, drawn: MapDrawn) {
+        if self.drawn == drawn {
             return;
         }
-        self.shown = shown;
-        self.no_art = no_art;
+        self.drawn = drawn;
         self.notify();
     }
 
@@ -619,6 +653,7 @@ impl Board {
         // The first mode the map has, so a board opens with capture points on
         // it rather than empty.
         self.mode = self.modes.first().map(|mode| mode.key.clone());
+        // A board with no mode has no capture points.
         let caps = self.mode.as_ref().map(|key| board::caps_of(&self.layouts, key)).unwrap_or_default();
         self.set_caps(caps);
         self.selected = None;
@@ -627,8 +662,7 @@ impl Board {
             .as_deref()
             .and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
         self.map = Some(map);
-        self.shown = false;
-        self.no_art = false;
+        self.drawn = MapDrawn::NotShown;
         self.view = MapViewport::default();
         self.redraw();
 
@@ -740,6 +774,8 @@ impl Board {
             .find(|map| map.space == read.map_name && map.map_id == map_id)
             .cloned()
             .or_else(|| if map_id.is_none() { board::unique_map_for_space(&self.maps, &read.map_name) } else { None });
+        // A map the list does not offer is opened as the preset names it and
+        // added to the list.
         let map = matching.unwrap_or_else(|| MapChoice {
             map_id,
             label: naming::map_label(&read.map_name, metadata),
@@ -757,8 +793,7 @@ impl Board {
                 .game
                 .as_deref()
                 .and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
-            self.shown = false;
-            self.no_art = false;
+            self.drawn = MapDrawn::NotShown;
         }
         self.map = Some(map);
         let caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
@@ -787,6 +822,7 @@ impl Board {
         if !self.collab.may_steer() || self.collab.annotations_locked() {
             return;
         }
+        // A board with no mode has no capture points.
         let caps = self.mode.as_ref().map(|key| board::caps_of(&self.layouts, key)).unwrap_or_default();
         let caps_match = self.caps.len() == caps.len()
             && self.caps.iter().zip(&caps).all(|(current, default)| current.same_layout(default));
@@ -829,12 +865,14 @@ impl Board {
         self.notify();
     }
 
-    pub fn finish_scan(&mut self, cancelled: &Arc<AtomicBool>, found: CapLayoutDb, added: usize, total: usize) {
+    pub fn finish_scan(&mut self, cancelled: &Arc<AtomicBool>, outcome: ScanOutcome) {
         if !Arc::ptr_eq(cancelled, &self.scan_cancelled) {
             return;
         }
+        let added = outcome.fresh.len();
+        let total = outcome.total;
         self.scanning = None;
-        self.adopt_layouts(found);
+        self.adopt_layouts(outcome.found);
         self.say(rust_i18n::t!("ui.tactics.scan_done", total = total, added = added).into_owned());
     }
 }
@@ -909,8 +947,8 @@ impl Board {
         self.caps = caps;
     }
 
-    fn report_cap(&self, index: usize) {
-        if let Some(cap) = self.caps.get(index) {
+    fn report_cap(&self, slot: CapSlot) {
+        if let Some(cap) = self.caps.get(slot.0) {
             self.collab.set_cap(cap.to_wire());
         }
     }
@@ -923,7 +961,7 @@ impl Board {
         self.notify();
     }
 
-    fn add_cap_at(&mut self, world: (f32, f32)) {
+    fn add_cap_at(&mut self, world: WorldPos2D) {
         if !self.can_edit_caps() {
             return;
         }
@@ -932,14 +970,15 @@ impl Board {
         self.caps.push(BoardCapPoint {
             id: CapPointId::fresh(),
             index,
-            world_x: world.0,
-            world_z: world.1,
+            world_x: world.x,
+            world_z: world.z,
             radius: board::NEW_CAP_RADIUS,
             team: None,
             frozen: false,
         });
-        self.report_cap(self.caps.len() - 1);
-        self.selected = Some(self.caps.len() - 1);
+        let added = CapSlot(self.caps.len() - 1);
+        self.report_cap(added);
+        self.selected = Some(added);
         self.adding = false;
         self.redraw();
     }
@@ -950,14 +989,14 @@ impl Board {
         if !self.can_edit_caps() {
             return;
         }
-        let Some(at) = self.selected else { return };
-        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
+        let Some(slot) = self.selected else { return };
+        if self.caps.get(slot.0).is_none_or(|cap| cap.frozen) {
             return;
         }
         self.remember();
         self.selected = None;
         // The letters the others carry stand: renumbering would rename them.
-        let gone = self.caps.remove(at);
+        let gone = self.caps.remove(slot.0);
         self.collab.remove_cap(gone.id);
         self.redraw();
     }
@@ -967,12 +1006,12 @@ impl Board {
         if !self.can_edit_caps() {
             return;
         }
-        let Some(at) = self.selected.filter(|at| *at < self.caps.len()) else { return };
+        let Some(slot) = self.selected.filter(|slot| slot.0 < self.caps.len()) else { return };
         self.remember();
-        let cap = &mut self.caps[at];
+        let cap = &mut self.caps[slot.0];
         cap.radius =
             (cap.radius + by_km * board::WORLD_UNITS_PER_KM).clamp(board::MIN_CAP_RADIUS, board::MAX_CAP_RADIUS);
-        self.report_cap(at);
+        self.report_cap(slot);
         self.redraw();
     }
 
@@ -980,11 +1019,11 @@ impl Board {
         if !self.can_edit_caps() {
             return;
         }
-        let Some(at) = self.selected.filter(|at| *at < self.caps.len()) else { return };
+        let Some(slot) = self.selected.filter(|slot| slot.0 < self.caps.len()) else { return };
         self.remember();
-        let cap = &mut self.caps[at];
+        let cap = &mut self.caps[slot.0];
         cap.team = board::next_team(cap.team);
-        self.report_cap(at);
+        self.report_cap(slot);
         self.redraw();
     }
 
@@ -1000,7 +1039,7 @@ impl Board {
         for id in removed {
             self.collab.remove_cap(id);
         }
-        self.selected = selected_id.and_then(|id| self.caps.iter().position(|cap| cap.id == id));
+        self.selected = selected_id.and_then(|id| self.caps.iter().position(|cap| cap.id == id)).map(CapSlot);
         self.redraw();
     }
 }
@@ -1105,7 +1144,7 @@ impl Board {
             && let Some(placed) = self.placing.clone()
         {
             *config = Some(AnnotationShipConfig {
-                param_id: placed.param_id,
+                param_id: placed.param_id.raw(),
                 ship_name: placed.name,
                 range_filter: self.range_filter.clone(),
                 // Stock hull and no modifiers, which is where the egui
@@ -1151,17 +1190,19 @@ impl Board {
     }
 
     /// Takes up the matched ship at `index`, so the next click places it.
-    pub fn pick_ship(&mut self, index: u32) -> Result<(), TacticsError> {
+    pub fn pick_ship(&mut self, index: ShipMatchIndex) -> Result<(), TacticsError> {
         if self.collab.annotations_locked() {
             return Ok(());
         }
         let (species, ship) =
-            self.matched_ships.get(index as usize).cloned().ok_or(TacticsError::UnknownShip { index })?;
+            self.matched_ships.get(index.position()).cloned().ok_or(TacticsError::UnknownShip { index })?;
         let game = self.game.clone().ok_or(TacticsError::NoGameData)?;
         let param = game.metadata().game_param_by_index(&ship.param_index).ok_or(TacticsError::UnknownShip { index })?;
 
+        // The first ship placed is friendly; later ones keep the side last
+        // chosen.
         let friendly = self.placing.as_ref().is_none_or(|placed| placed.friendly);
-        let placed = PlacedShip { param_id: param.id().raw(), name: ship.display_name, species, friendly };
+        let placed = PlacedShip { param_id: param.id(), name: ship.display_name, species, friendly };
         self.drawing.set_tool(placed.tool());
         self.placing = Some(placed);
         self.adding = false;
@@ -1216,7 +1257,7 @@ impl Board {
     fn zoom_about(&mut self, notches: f32, at: PixelPoint) {
         let Some(drawn) = self.drawn_point(at) else { return };
         let zoom = self.view.zoom() * (1.0 + notches * board::ZOOM_PER_NOTCH);
-        let view = self.view.zoomed_about(zoom, drawn);
+        let view = self.view.zoomed_about(zoom, (drawn.x, drawn.y));
         if view == self.view {
             return;
         }
@@ -1252,7 +1293,7 @@ impl Board {
         if self.has_tool() {
             let Some(point) = self.map_point(at) else { return };
             self.remember();
-            self.stroke(Stroke::Began { at: [point.0, point.1] });
+            self.stroke(Stroke::Began { at: map_array(point) });
             return;
         }
         if self.adding && self.can_edit_caps() {
@@ -1283,13 +1324,13 @@ impl Board {
             if !self.picked.is_empty() && self.shape_under(at).is_some_and(|found| self.picked.picked().contains(&found))
             {
                 self.remember();
-                self.moving = Some(([point.0, point.1], self.shapes()));
+                self.moving = Some((point, self.shapes()));
                 return;
             }
             // Otherwise a press on one picks it out, and ctrl adds it to what
             // is already picked.
             let was: Vec<usize> = self.picked.picked().to_vec();
-            self.picked.click(&self.shapes(), [point.0, point.1], modifiers.control || modifiers.meta);
+            self.picked.click(&self.shapes(), map_array(point), modifiers.control || modifiers.meta);
             if self.picked.picked() != was.as_slice() {
                 self.redraw();
                 return;
@@ -1297,13 +1338,13 @@ impl Board {
         }
 
         match self.can_edit_caps().then(|| self.cap_under(at)).flatten() {
-            Some((index, what)) => {
-                self.selected = Some(index);
+            Some((slot, what)) => {
+                self.selected = Some(slot);
                 if what != CapDrag::None {
                     // Taken as the drag begins: all of the drag is one change.
                     self.remember();
                 }
-                self.dragging = Some((index, what));
+                self.dragging = Some((slot, what));
             }
             // A drag past every zone moves the map; the click alone puts the
             // selection down.
@@ -1318,10 +1359,10 @@ impl Board {
     /// The secondary button picks out the capture point under it, which is
     /// what the context menu then speaks of.
     fn secondary_down(&mut self, at: PixelPoint) {
-        if let Some((index, _)) = self.cap_under(at)
-            && self.selected != Some(index)
+        if let Some((slot, _)) = self.cap_under(at)
+            && self.selected != Some(slot)
         {
-            self.selected = Some(index);
+            self.selected = Some(slot);
             self.redraw();
         }
     }
@@ -1341,9 +1382,8 @@ impl Board {
         }
 
         let point = self.map_point(at);
-        let moved_over = point.map(|(x, y)| [x, y]);
-        if self.pointer_at != moved_over {
-            self.pointer_at = moved_over;
+        if self.pointer_at.map(map_array) != point.map(map_array) {
+            self.pointer_at = point;
             // The part-drawn shape follows the pointer.
             if self.drawing.is_drawing() {
                 self.redraw();
@@ -1354,7 +1394,7 @@ impl Board {
             let Some(point) = point else { return };
             if !self.collab.annotations_locked()
                 && let Some(Drawn::Added(annotation)) =
-                    self.drawing.handle(Stroke::Moved { at: [point.0, point.1], straight: false }, &self.shapes())
+                    self.drawing.handle(Stroke::Moved { at: map_array(point), straight: false }, &self.shapes())
             {
                 self.add_shape(annotation);
             }
@@ -1370,7 +1410,7 @@ impl Board {
             let mut turned = before;
             wt_collab_client::drawing::rotate_annotation(
                 &mut turned,
-                wt_collab_client::drawing::bearing(middle, [point.0, point.1]),
+                wt_collab_client::drawing::bearing(middle, map_array(point)),
             );
             self.collab.update_annotation(index, turned);
             self.redraw();
@@ -1383,7 +1423,7 @@ impl Board {
             let Some(point) = point else { return };
             // Measured from where the drag began, so the shape does not creep
             // as the pointer stutters.
-            let delta = [point.0 - from[0], point.1 - from[1]];
+            let delta = [point.x - from.x, point.y - from.y];
             for index in self.picked.picked() {
                 let Some(annotation) = was.get(*index) else { continue };
                 let mut moved = annotation.clone();
@@ -1395,13 +1435,15 @@ impl Board {
         }
 
         if let Some(from) = self.panning {
-            let delta = (at.x - from.x, at.y - from.y);
+            let dx = at.x - from.x;
+            let dy = at.y - from.y;
             self.panning = Some(at);
             // The view pans in drawn pixels, so the pointer's travel is
-            // undone of the letterbox's scale first.
+            // undone of the letterbox's scale first. A view too small to
+            // letterbox draws nothing, so its pan is taken one to one.
             let scale = self.letterbox().map_or(1.0, |letterbox| letterbox.scale);
-            if delta != (0.0, 0.0) {
-                self.view = self.view.dragged((delta.0 / scale, delta.1 / scale));
+            if dx != 0.0 || dy != 0.0 {
+                self.view = self.view.dragged((dx / scale, dy / scale));
                 self.redraw();
             }
             return;
@@ -1411,17 +1453,17 @@ impl Board {
             self.dragging = None;
             return;
         }
-        let Some((index, what)) = self.dragging else { return };
-        let Some((x, z)) = self.world_point(at) else { return };
-        let Some(cap) = self.caps.get_mut(index) else { return };
+        let Some((slot, what)) = self.dragging else { return };
+        let Some(world) = self.world_point(at) else { return };
+        let Some(cap) = self.caps.get_mut(slot.0) else { return };
         match what {
             CapDrag::None => return,
             CapDrag::Move => {
-                cap.world_x = x;
-                cap.world_z = z;
+                cap.world_x = world.x;
+                cap.world_z = world.z;
             }
             CapDrag::Resize => {
-                let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
+                let away = ((world.x - cap.world_x).powi(2) + (world.z - cap.world_z).powi(2)).sqrt();
                 cap.radius = away.clamp(board::MIN_CAP_RADIUS, board::MAX_CAP_RADIUS);
             }
         }
@@ -1442,11 +1484,11 @@ impl Board {
         if self.has_tool() {
             let Some(point) = self.map_point(at) else { return };
             let stroke = if self.drawing.is_drawing() {
-                Stroke::Ended { at: [point.0, point.1] }
+                Stroke::Ended { at: map_array(point) }
             } else {
                 // A ship and the eraser are used by a click, which never
                 // begins a drag.
-                Stroke::Clicked { at: [point.0, point.1] }
+                Stroke::Clicked { at: map_array(point) }
             };
             self.stroke(stroke);
             return;
@@ -1463,9 +1505,9 @@ impl Board {
     }
 
     /// Wheel travel in scroll steps, positive down: down zooms out.
-    pub fn wheel(&mut self, at: Option<PixelPoint>, dy: f32) {
+    pub fn wheel(&mut self, at: Option<PixelPoint>, dy: ScrollSteps) {
         let Some(at) = at else { return };
-        let notches = -dy * WHEEL_STEP_PX;
+        let notches = -dy.get() * WHEEL_STEP_PX;
         if notches != 0.0 {
             self.zoom_about(notches, at);
         }
@@ -1491,9 +1533,9 @@ impl Board {
     /// Says one completed cap drag to the session, once, when it is let go.
     fn finish_cap_drag(&mut self) -> bool {
         let allowed = self.can_edit_caps();
-        let Some((index, _)) = self.dragging.take() else { return false };
+        let Some((slot, _)) = self.dragging.take() else { return false };
         if allowed {
-            self.report_cap(index);
+            self.report_cap(slot);
         } else {
             self.selected = None;
             self.adopted_caps = None;
@@ -1545,7 +1587,7 @@ impl Board {
         let link = self.joining.take().unwrap_or_else(|| self.collab.clone());
         self.collab = link.on_board(shared.board_id);
         let map = MapChoice {
-            map_id: (shared.map.map_id > 0).then_some(shared.map.map_id),
+            map_id: shared.map.map_id,
             space: shared.map.space,
             label: shared.map.label,
         };
@@ -1560,8 +1602,7 @@ impl Board {
             .as_deref()
             .and_then(|game| wows_minimap_renderer::assets::load_map_info(&map.space, game.vfs()));
         self.map = Some(map);
-        self.shown = false;
-        self.no_art = false;
+        self.drawn = MapDrawn::NotShown;
         // Already in the session by definition, so nothing is announced back.
         self.announced = true;
         self.peer_map_info = shared.map.info;
@@ -1610,8 +1651,7 @@ impl Board {
         session.announce_board(wt_collab_client::link::BoardMap {
             space: map.space,
             label: map.label,
-            // The wire states a map with no recorded layout as the id zero.
-            map_id: map.map_id.unwrap_or(0),
+            map_id: map.map_id,
             art_png,
             info,
         });
@@ -1704,7 +1744,7 @@ impl Board {
 impl Board {
     /// What the next frame is drawn from.
     pub fn frame(&self) -> Option<Frame> {
-        let viewport = self.viewport?;
+        let view_size = self.view_size?;
         let Some(map) = &self.map else { return Some(Frame::Empty) };
         let Some(game) = self.game.clone() else { return Some(Frame::Empty) };
         let Some(map_info) = self.current_map_info() else { return Some(Frame::Empty) };
@@ -1717,7 +1757,7 @@ impl Board {
         annotations.extend(shapes);
         // The shape under the pointer is drawn the way the finished one will
         // be, so what the reader sees while dragging is what they get.
-        if let Some(part_drawn) = self.pointer_at.and_then(|at| self.drawing.in_progress(at)) {
+        if let Some(part_drawn) = self.pointer_at.and_then(|at| self.drawing.in_progress(map_array(at))) {
             annotations.push(part_drawn);
         }
 
@@ -1730,8 +1770,8 @@ impl Board {
             view: self.view,
             caps: self.caps.clone(),
             annotations,
-            viewport,
-            handle: self.turnable().map(|(_, _, handle)| handle),
+            view_size,
+            handle: self.turnable().map(|turnable| turnable.handle),
         })))
     }
 }
@@ -1742,4 +1782,9 @@ pub fn map_value(map: &MapChoice) -> String {
         Some(id) => format!("{}#{id}", map.space),
         None => map.space.clone(),
     }
+}
+
+/// A map point as the drawing API takes it.
+fn map_array(at: MinimapPos) -> [f32; 2] {
+    [at.x, at.y]
 }

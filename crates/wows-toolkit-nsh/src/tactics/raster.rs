@@ -17,15 +17,18 @@ use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_toolkit_viewmodel::tactics::board;
+use wows_toolkit_viewmodel::tactics::board::ElementPos;
+use wows_toolkit_viewmodel::tactics::board::Extent;
 use wows_toolkit_viewmodel::tactics::board::Letterbox;
 use wt_collab_client::ids::BoardId;
 
 use crate::frames::AlphaMode;
 use crate::frames::Frame;
 use crate::frames::FrameError;
-use crate::frames::PixelSize;
+use crate::frames::ScaleFactor;
 use crate::tactics::board::HANDLE_RADIUS;
 use crate::tactics::board::RasterJob;
+use crate::tactics::board::TurnHandle;
 
 /// What the map area is filled with beside a map that does not fill it.
 const MARGIN: [u8; 3] = [0x17, 0x17, 0x15];
@@ -80,6 +83,7 @@ impl Rasteriser {
             let vfs = job.game.vfs();
             let renderer = match &job.art {
                 Some(art) => PreviewRenderer::with_art(RgbImage::clone(art), vfs, None, SidePanelLayout::None),
+                // A map whose art cannot be read is shown as having none.
                 None => PreviewRenderer::with_layout(vfs, None, &job.space, SidePanelLayout::None).ok()?,
             };
             self.kept = Some((key, renderer));
@@ -112,16 +116,19 @@ fn commands(job: &RasterJob) -> Vec<DrawCommand> {
 /// The map fitted into the frame without stretching, with the turning handle
 /// drawn over it in device pixels.
 fn compose(map: &RgbImage, job: &RasterJob) -> Result<Frame, FrameError> {
-    let size = job.viewport.size;
+    let size = job.view_size.size;
     let Some(mut canvas) = Pixmap::new(size.width, size.height) else {
         return Frame::new(size, AlphaMode::Premultiplied, Vec::new());
     };
     canvas.fill(Color::from_rgba8(MARGIN[0], MARGIN[1], MARGIN[2], 0xff));
 
     let side = map.width() as f32;
-    if let (Some(fit), Some(layer)) =
-        (Letterbox::fitting((0.0, 0.0), (size.width as f32, size.height as f32), (side, side)), map_pixmap(map))
-    {
+    let fit = Letterbox::fitting(
+        ElementPos { x: 0.0, y: 0.0 },
+        Extent { width: size.width as f32, height: size.height as f32 },
+        Extent { width: side, height: side },
+    );
+    if let (Some(fit), Some(layer)) = (fit, map_pixmap(map)) {
         canvas.draw_pixmap(
             0,
             0,
@@ -132,11 +139,11 @@ fn compose(map: &RgbImage, job: &RasterJob) -> Result<Frame, FrameError> {
         );
     }
 
-    if let Some((handle, anchor)) = job.handle {
-        draw_handle(&mut canvas, handle, anchor, job.viewport.scale);
+    if let Some(handle) = job.handle {
+        draw_handle(&mut canvas, handle, job.view_size.scale);
     }
 
-    Frame::new(PixelSize { width: size.width, height: size.height }, AlphaMode::Premultiplied, canvas.take())
+    Frame::new(size, AlphaMode::Premultiplied, canvas.take())
 }
 
 fn map_pixmap(map: &RgbImage) -> Option<Pixmap> {
@@ -150,19 +157,20 @@ fn map_pixmap(map: &RgbImage) -> Option<Pixmap> {
 
 /// The handle a picked shape is turned by, and the stem back to the shape so
 /// it reads as belonging to it.
-fn draw_handle(canvas: &mut Pixmap, handle: (f32, f32), anchor: (f32, f32), scale: f32) {
+fn draw_handle(canvas: &mut Pixmap, handle: TurnHandle, scale: ScaleFactor) {
+    let scale = scale.get();
     let mut paint = Paint::default();
     paint.set_color_rgba8(HANDLE_COLOR[0], HANDLE_COLOR[1], HANDLE_COLOR[2], 0xff);
     paint.anti_alias = true;
 
     let mut stem = PathBuilder::new();
-    stem.move_to(handle.0, handle.1);
-    stem.line_to(anchor.0, anchor.1);
+    stem.move_to(handle.center.x, handle.center.y);
+    stem.line_to(handle.anchor.x, handle.anchor.y);
     if let Some(stem) = stem.finish() {
         canvas.stroke_path(&stem, &paint, &Stroke { width: scale.max(1.0), ..Stroke::default() }, Transform::identity(), None);
     }
 
-    if let Some(dot) = PathBuilder::from_circle(handle.0, handle.1, HANDLE_RADIUS * scale) {
+    if let Some(dot) = PathBuilder::from_circle(handle.center.x, handle.center.y, HANDLE_RADIUS * scale) {
         canvas.fill_path(&dot, &paint, FillRule::Winding, Transform::identity(), None);
     }
 }
