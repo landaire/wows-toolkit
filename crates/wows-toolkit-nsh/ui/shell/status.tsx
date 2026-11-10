@@ -1,5 +1,7 @@
 import { signal, Text, View } from "nsh";
+import { Spinner } from "../components";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, semantic } from "../theme";
 
 /** One running job on the status strip: what it is, read in the current language, and how far it has got. */
@@ -37,7 +39,12 @@ export function StatusBar() {
               const { done, total } = job();
               return done !== undefined && total !== undefined && total > 0 ? ` ${t("ui.app.status_of", { done, total })}` : "";
             };
-            return <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{`${job().label()}${counted()}`}</Text>;
+            return (
+              <View testID={`status-job-${entry()[0]}`} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Spinner size={12} label={job().label()}/>
+                <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{`${job().label()}${counted()}`}</Text>
+              </View>
+            );
           }}
         </Each>
       </View>
@@ -50,9 +57,9 @@ export function DebugNotice() {
   return (
     <If when={debugMode()}>
       <View accessibilityLabel={t("ui.app.debug_build")} style={{ minHeight: 24, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
-        <Text style={{ fontSize: 12.5, fontWeight: "700", color: semantic.warn }}>!</Text>
+        <Icon name="triangle-alert" size={14} color={semantic.warn}/>
         <Text style={{ fontSize: 12.5, fontWeight: "700", color: semantic.warn }}>{t("ui.app.debug_build")}</Text>
-        <Text style={{ fontSize: 12.5, fontWeight: "700", color: semantic.warn }}>!</Text>
+        <Icon name="triangle-alert" size={14} color={semantic.warn}/>
       </View>
     </If>
   );

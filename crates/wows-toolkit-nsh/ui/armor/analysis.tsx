@@ -109,7 +109,7 @@ function ArcRow(props: { arc: ArcView; index: number }) {
         <Swatch color={arc().color} width={12} height={12}/>
         <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "600", color: colors.cardForeground }}>{arc().heading}</Text>
         <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{arc().summary}</Text>
-        <IconButton id={`armor-arc-delete-${props.index}`} icon="x" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
+        <IconButton id={`armor-arc-delete-${props.index}`} icon="trash" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
         <ToolButton

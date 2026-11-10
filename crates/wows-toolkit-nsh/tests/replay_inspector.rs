@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use nsh_core::Points;
 use nsh_core::Size;
@@ -20,6 +23,8 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_config::index::rows::SourceId;
+use wows_toolkit_nsh::game_data::GameDataState;
 use wows_toolkit_viewmodel::settings::keys;
 
 const FIRST: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
@@ -161,10 +166,44 @@ fn start() -> nsh_testing::Headless {
     nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
 }
 
+/// Takes the copies the app makes in place of the system clipboard, so no
+/// test writes the user's clipboard.
+struct RecordingClipboard {
+    copied: Mutex<Vec<Vec<PathBuf>>>,
+    refuse: AtomicBool,
+}
+
+impl RecordingClipboard {
+    fn last(&self) -> Option<Vec<PathBuf>> {
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).last().cloned()
+    }
+}
+
+impl wows_toolkit_nsh::clipboard::FileClipboard for RecordingClipboard {
+    fn copy_files(&self, files: &[PathBuf]) -> Result<(), arboard::Error> {
+        if self.refuse.load(Ordering::SeqCst) {
+            return Err(arboard::Error::ClipboardNotSupported);
+        }
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(files.to_vec());
+        Ok(())
+    }
+}
+
+static CLIPBOARD: RecordingClipboard =
+    RecordingClipboard { copied: Mutex::new(Vec::new()), refuse: AtomicBool::new(false) };
+
+/// Sends the app's file copies to [`CLIPBOARD`], emptied and accepting.
+fn record_clipboard() {
+    wows_toolkit_nsh::clipboard::replace(&CLIPBOARD);
+    CLIPBOARD.refuse.store(false, Ordering::SeqCst);
+    CLIPBOARD.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+}
+
 /// The app, every replay it opens read as the sample report.
 fn app() -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
+    record_clipboard();
     wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
@@ -188,18 +227,23 @@ fn install_with(name: &str, replays: &[&str]) -> TestDirectory {
 /// sample report. The download offer for the replays' builds is declined; a
 /// build is offered once per process, so each test lists builds of its own.
 fn app_with_install(install: &Path, autoload: bool) -> TestApp {
-    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    configure_test_storage();
-    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
-    let settings = InstallSettings::bind(install, autoload);
-    let mut app = start();
-    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    let mut app = TestApp { app, _install: Some(settings), _guard: guard };
-
+    let mut app = app_bound_to(install, autoload);
     app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
     app.press("Cancel").unwrap();
     app.wait_for_gone("Download Game Data", GONE).unwrap();
     app
+}
+
+/// The app over `install`, every replay it opens read as the sample report.
+fn app_bound_to(install: &Path, autoload: bool) -> TestApp {
+    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    configure_test_storage();
+    record_clipboard();
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
+    let settings = InstallSettings::bind(install, autoload);
+    let mut app = start();
+    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
+    TestApp { app, _install: Some(settings), _guard: guard }
 }
 
 /// Writes an index row for `replay` in the live source, as a pass that read
@@ -207,37 +251,60 @@ fn app_with_install(install: &Path, autoload: bool) -> TestApp {
 fn index_row_for(replay: &Path) {
     runtime().block_on(async {
         let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
-        let now = jiff::Timestamp::now();
-        let arena_id = ArenaId::new(982_003);
         let root = replay.parent().expect("the replay is in a directory");
-        let source = query::ensure_default_source(&pool, root, now).await.expect("the live source exists");
-        let objective = ObjectiveMatch {
-            arena_id,
-            timestamp: now,
-            map: "Atoll".into(),
-            game_mode: "Domination".into(),
-            game_mode_id: None,
-            game_type: "pvp".into(),
-            match_group: "pvp".into(),
-            version_build: Some(1234),
-        };
-        query::upsert_match(&pool, &objective).await.expect("the match is written");
-        let record = ReplayRecord {
-            arena_id,
-            source_id: source,
-            replay_path: replay.to_path_buf(),
-            file_mtime: Some(now.as_second()),
-            outcome: MatchOutcome::Win,
-            self_account_id: Some(AccountId(99_011)),
-            self_ship_id: Some(GameParamId::from(999u64)),
-            self_survived: Some(true),
-            self_damage: Some(123_456),
-            self_kills: Some(2),
-            self_pr: None,
-            results_available: true,
-            indexed_at: now,
-        };
-        query::upsert_record(&pool, &record).await.expect("the replay record is written");
+        let source =
+            query::ensure_default_source(&pool, root, jiff::Timestamp::now()).await.expect("the live source exists");
+        write_index_row(&pool, replay, source).await;
+    });
+}
+
+/// Writes an index row for `replay` in `source`.
+async fn write_index_row(pool: &sqlx::SqlitePool, replay: &Path, source: SourceId) {
+    let now = jiff::Timestamp::now();
+    let arena_id = ArenaId::new(982_003);
+    let objective = ObjectiveMatch {
+        arena_id,
+        timestamp: now,
+        map: "Atoll".into(),
+        game_mode: "Domination".into(),
+        game_mode_id: None,
+        game_type: "pvp".into(),
+        match_group: "pvp".into(),
+        version_build: Some(1234),
+    };
+    query::upsert_match(pool, &objective).await.expect("the match is written");
+    let record = ReplayRecord {
+        arena_id,
+        source_id: source,
+        replay_path: replay.to_path_buf(),
+        file_mtime: Some(now.as_second()),
+        outcome: MatchOutcome::Win,
+        self_account_id: Some(AccountId(99_011)),
+        self_ship_id: Some(GameParamId::from(999u64)),
+        self_survived: Some(true),
+        self_damage: Some(123_456),
+        self_kills: Some(2),
+        self_pr: None,
+        results_available: true,
+        indexed_at: now,
+    };
+    query::upsert_record(pool, &record).await.expect("the replay record is written");
+}
+
+/// Set when a landed replay's held index row may be written.
+static LANDED_RELEASED: AtomicBool = AtomicBool::new(false);
+
+/// Writes a landed replay's index row once [`LANDED_RELEASED`] is set, so a
+/// test sees the listing before the row and after it.
+fn index_landed_once_released(replay: &Path, source: SourceId) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !LANDED_RELEASED.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    runtime().block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+        write_index_row(&pool, replay, source).await;
     });
 }
 
@@ -261,9 +328,37 @@ fn open_file(app: &mut TestApp, path: PathBuf) {
     app.press("Open Replay File...").unwrap();
 }
 
+/// Opens `directory` as a workspace of its own through the Open menu.
+fn open_directory(app: &mut TestApp, directory: &Path) -> OpenedDirectory {
+    app.on_pick_paths(vec![directory.to_path_buf()]).unwrap();
+    app.press("label:Open").unwrap();
+    app.press("Open Replay Directory...").unwrap();
+
+    OpenedDirectory(wows_toolkit_replay_data::directories::canonical_root(directory.to_path_buf()))
+}
+
+/// A directory opened as a workspace, closed when dropped: the registry is
+/// the process's, and a tab left open would stand in the next test.
+struct OpenedDirectory(PathBuf);
+
+impl Drop for OpenedDirectory {
+    fn drop(&mut self) {
+        // A test that closed the directory itself leaves nothing to close.
+        let _ = wows_toolkit_nsh::game_data::GameData::close_directory(self.0.display().to_string());
+    }
+}
+
 fn open_sample(app: &mut TestApp) {
     open_file(app, fixture(FIRST));
     app.wait_for(SAMPLE_TITLE).unwrap();
+}
+
+/// A selector name that matches `text` exactly, read as a regex with its
+/// special characters escaped.
+fn exactly(text: &str) -> String {
+    let escaped: String =
+        text.chars().flat_map(|c| r"\.+*?()|[]{}^$".contains(c).then_some('\\').into_iter().chain([c])).collect();
+    format!("/^{escaped}$/")
 }
 
 #[test]
@@ -410,9 +505,7 @@ fn a_directory_lists_its_replays_and_opens_them() {
 
     let mut app = app();
     on_linux_desktop(&mut app);
-    app.on_pick_paths(vec![directory.0.clone()]).unwrap();
-    app.press("label:Open").unwrap();
-    app.press("Open Replay Directory...").unwrap();
+    let _opened = open_directory(&mut app, &directory.0);
     let requests = app.screen().file_requests();
     assert!(
         matches!(requests.last(), Some(nsh_core::file_dialog::FileRequest::OpenDialog(dialog)) if dialog.picks_folders()),
@@ -427,11 +520,7 @@ fn a_directory_lists_its_replays_and_opens_them() {
     // Its label is a path, which a selector would read as a regex, so it is
     // matched as one.
     let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
-    let label: String = wows_toolkit_replay_data::directories::shortened_path(&root)
-        .chars()
-        .flat_map(|c| r"\.+*?()|[]{}^$".contains(c).then_some('\\').into_iter().chain([c]))
-        .collect();
-    let tab = format!("role:tab[/^{label}$/]");
+    let tab = format!("role:tab[{}]", exactly(&wows_toolkit_replay_data::directories::shortened_path(&root)));
     assert!(app.screen().selected(&tab).unwrap(), "the opened directory's tab is shown");
     app.press("role:tab[Replay Inspector]").unwrap();
     app.wait_for_gone(&format!("label:{FIRST}"), GONE).unwrap();
@@ -596,4 +685,127 @@ fn the_listing_reads_the_index_again_after_a_pass() {
     app.press("Index All Replays").unwrap();
     app.wait_for_within("text:/^Indexed 0 replays, 1 were already in/", Duration::from_secs(30)).unwrap();
     app.wait_for_gone("text:/not indexed/", GONE).unwrap();
+}
+
+/// "Copy Replay" puts the file itself on the clipboard, and says so when the
+/// clipboard refuses it.
+#[test]
+fn copying_a_listed_replay_puts_the_file_on_the_clipboard() {
+    let directory = TestDirectory::new("copy");
+    std::fs::copy(fixture(FIRST), directory.0.join(FIRST)).expect("the fixture is copied");
+
+    let mut app = app();
+    on_linux_desktop(&mut app);
+    let _opened = open_directory(&mut app, &directory.0);
+    let row = format!("label:{FIRST}");
+    app.wait_for(&row).unwrap();
+
+    app.right_click(&row).unwrap();
+    app.press("Copy Replay").unwrap();
+    app.wait_for("role:alert[Copy Replay]").unwrap();
+    let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
+    assert_eq!(CLIPBOARD.last(), Some(vec![root.join(FIRST)]), "the replay file is on the clipboard");
+
+    CLIPBOARD.refuse.store(true, Ordering::SeqCst);
+    app.right_click(&row).unwrap();
+    app.press("Copy Replay").unwrap();
+    app.wait_for("role:alert[/^the replay files could not be copied: /]").unwrap();
+}
+
+/// "Check game data" offers the builds an opened directory's replays need,
+/// again after the offer was declined, and says so when none is missing.
+#[test]
+fn checking_game_data_offers_the_directory_builds() {
+    const REPLAY: &str = "20190420_125057_PASB017-Montana-1945_15_NE_north.wowsreplay";
+
+    let empty = TestDirectory::new("check-empty");
+    let needing = TestDirectory::new("check-needing");
+    std::fs::copy(fixture(REPLAY), needing.0.join(REPLAY)).expect("the fixture is copied");
+
+    let mut app = app();
+    on_linux_desktop(&mut app);
+    let _empty = open_directory(&mut app, &empty.0);
+    app.wait_for("No replays found").unwrap();
+    app.press("Check game data").unwrap();
+    app.wait_for("role:alert[Game data is available for the listed replays.]").unwrap();
+
+    let _needing = open_directory(&mut app, &needing.0);
+    app.wait_for(&format!("label:{REPLAY}")).unwrap();
+    for _ in 0..2 {
+        app.press("Check game data").unwrap();
+        app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
+        app.press("Cancel").unwrap();
+        app.wait_for_gone("Download Game Data", GONE).unwrap();
+    }
+}
+
+/// An install whose build does not load says why, once as a notice and
+/// above the listing.
+#[test]
+fn game_data_that_fails_to_load_says_why() {
+    let install = install_with("load-fails", &[]);
+    let mut app = app_bound_to(&install.0, false);
+
+    let failure = || match wows_toolkit_nsh::game_data::status() {
+        GameDataState::Failed { error } => Some(error.to_string()),
+        _ => None,
+    };
+    app.wait_until("the load fails", Duration::from_secs(30), |_| failure().is_some()).unwrap();
+    let reason = failure().expect("the load failed");
+
+    app.wait_for(&format!("role:alert[{}]", exactly(&reason))).unwrap();
+    app.wait_for(&format!("text:{}", exactly(&format!("Game data failed to load: {reason}")))).unwrap();
+}
+
+/// Without a WoWs directory the inspector says so above the listing, and the
+/// listing says why it is empty.
+#[test]
+fn without_a_wows_directory_the_inspector_says_so() {
+    let mut app = app();
+
+    app.wait_for("Game data failed to load: World of Warships directory is not set").unwrap();
+    app.wait_for(&format!("text:{}", exactly("World of Warships directory is not set"))).unwrap();
+}
+
+/// A battle that lands in an opened directory is indexed there, and its row
+/// stops reading as not indexed.
+#[test]
+fn a_replay_landing_in_an_opened_directory_is_indexed() {
+    const REPLAY: &str = "20250117_004534_PWSD108-Oland_15_NE_north.wowsreplay";
+
+    let directory = TestDirectory::new("landed");
+
+    let mut app = app();
+    LANDED_RELEASED.store(false, Ordering::SeqCst);
+    let _hook = LandedIndexHook::install(index_landed_once_released);
+    on_linux_desktop(&mut app);
+    let _opened = open_directory(&mut app, &directory.0);
+    app.wait_for("No replays found").unwrap();
+
+    // The game renames a finished battle into place.
+    let staged = directory.0.join("landing.part");
+    std::fs::copy(fixture(REPLAY), &staged).expect("the fixture is copied");
+    std::fs::rename(&staged, directory.0.join(REPLAY)).expect("the replay is renamed into place");
+    app.wait_for(&format!("label:{REPLAY}")).unwrap();
+    app.wait_for("text:/not indexed/").unwrap();
+
+    LANDED_RELEASED.store(true, Ordering::SeqCst);
+    app.wait_for_gone("text:/not indexed/", Duration::from_secs(30)).unwrap();
+}
+
+/// A landed replay's index rows stored through a test function, the parse
+/// put back when dropped.
+struct LandedIndexHook;
+
+impl LandedIndexHook {
+    fn install(index: wows_toolkit_nsh::game_data::test_support::LandedIndex) -> Self {
+        wows_toolkit_nsh::game_data::test_support::index_landed_with(Some(index));
+        Self
+    }
+}
+
+impl Drop for LandedIndexHook {
+    fn drop(&mut self) {
+        wows_toolkit_nsh::game_data::test_support::index_landed_with(None);
+    }
 }

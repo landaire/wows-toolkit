@@ -1,4 +1,3 @@
-import type { JSX } from "nsh";
 import { colorScheme, Scroll, signal, Text, View } from "nsh";
 import { Select, Slider } from "nsh/base";
 import { Settings, Shell, Twitch } from "wows-toolkit/native";
@@ -12,6 +11,8 @@ import * as toast from "./shell/toast";
 import { restartTwitch, twitchStatus } from "./shell/twitch";
 import { colors, controlRadius, semantic } from "./theme";
 import { GameDataCacheSection, ReplayIndexSection } from "./game_data";
+import { Icon, type IconName } from "./icons";
+import { Field, Section } from "./settings_form";
 
 /** Where a Twitch credential with the permissions the poll needs is issued: Chatterino's login page, as the other front ends use. */
 const TWITCH_TOKEN_URL = "https://chatterino.com/client_login";
@@ -33,35 +34,6 @@ const themePreview = signal<string | null>(null);
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function Section(props: { title: string; description: string; children: JSX.Element }) {
-  return (
-    <View style={{ gap: 8 }}>
-      <View style={{ gap: 2 }}>
-        <Text role="header" style={{ fontSize: 14, fontWeight: "700", color: colors.foreground }}>{props.title}</Text>
-        <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{props.description}</Text>
-      </View>
-      <View style={{ padding: 12, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 6, backgroundColor: colors.surface }}>
-        {props.children}
-      </View>
-    </View>
-  );
-}
-
-/** One row of a section: the label in a column of its own, so the tab reads down one edge. */
-function Field(props: { label?: string; description?: string; invalid?: boolean; children: JSX.Element }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-      <Text style={{ width: 260, paddingTop: 6, fontSize: 12.5, color: colors.cardForeground }}>{props.label ?? ""}</Text>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-        {props.children}
-        <If when={props.description}>
-          <Text style={{ fontSize: 11.5, lineHeight: 16, color: props.invalid ? semantic.error : colors.mutedForeground }}>{props.description}</Text>
-        </If>
-      </View>
-    </View>
-  );
 }
 
 function LanguageField() {
@@ -112,6 +84,7 @@ function ThemeField() {
         <Each of={themes()}>
           {(theme) => (
             <View
+              tooltip={`${theme().label}  ${theme().swatches.map((swatch) => swatch.toUpperCase()).join(" ")}`}
               onMouseEnter={() => { themePreview.set(theme().id); show(theme().id); }}
               onMouseLeave={() => {
                 if (themePreview() !== theme().id) return;
@@ -174,7 +147,11 @@ function DataSharingField() {
     <Field label={t("ui.settings.app.data_sharing_mode")} description={modes.find((mode) => mode.id === chosen())?.description}>
       <View role="radiogroup" accessibilityLabel={t("ui.settings.app.data_sharing_mode")} style={{ flexDirection: "row", gap: 8 }}>
         <Each of={modes}>
-          {(mode) => <Choice label={mode().label} selected={chosen() === mode().id} onPress={() => void editSetting("dataSharing", mode().id)}/>}
+          {(mode) => (
+            <View tooltip={mode().description}>
+              <Choice label={mode().label} selected={chosen() === mode().id} onPress={() => void editSetting("dataSharing", mode().id)}/>
+            </View>
+          )}
         </Each>
       </View>
     </Field>
@@ -184,7 +161,7 @@ function DataSharingField() {
 function ApplicationSection() {
   const settings = () => appSettings()!;
   return (
-    <Section title={t("ui.settings.app.heading")} description={t("ui.settings.app.description")}>
+    <Section icon="settings" title={t("ui.settings.app.heading")} description={t("ui.settings.app.description")}>
       <LanguageField/>
       <ThemeField/>
       <ZoomField/>
@@ -235,7 +212,7 @@ export function applyWowsDir(path: string) {
 
 function GameSection() {
   return (
-    <Section title={t("ui.settings.wows.heading")} description={t("ui.settings.wows.description")}>
+    <Section icon="folder-open" title={t("ui.settings.wows.heading")} description={t("ui.settings.wows.description")}>
       <Field label={t("ui.settings.wows.directory_hint")} description={wowsDirInvalid() ? t("ui.messages.wows_dir_invalid") : ""} invalid={wowsDirInvalid()}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1 }}>
@@ -264,7 +241,7 @@ function GameSection() {
 function SessionSection() {
   const settings = () => appSettings()!;
   return (
-    <Section title={t("ui.settings.session.heading")} description={t("ui.settings.session.description")}>
+    <Section icon="users" title={t("ui.settings.session.heading")} description={t("ui.settings.session.description")}>
       <Field label={t("ui.settings.session.display_name")}>
         <CommitInput
           label={t("ui.settings.session.display_name")}
@@ -340,7 +317,7 @@ function ReplaySection() {
   const replay = () => appSettings()!.replay;
   const current = () => appSettings()!.currentReplayPath;
   return (
-    <Section title={t("ui.settings.replay.heading")} description={t("ui.settings.replay.description")}>
+    <Section icon="table" title={t("ui.settings.replay.heading")} description={t("ui.settings.replay.description")}>
       <Field label={t("ui.settings.replay.current_path")}>
         <View selectable style={{ paddingTop: 6 }}>
           <Text style={{ fontSize: 12.5, color: colors.foreground }}>{current() === "" ? t("ui.settings.not_set") : current()}</Text>
@@ -365,15 +342,15 @@ function ReplaySection() {
 }
 
 function TwitchSection() {
-  const status = () => twitchStatus();
-  const pasteLabel = () => {
-    const pasted = twitchPaste();
-    if (pasted?.problem) return t("ui.settings.twitch.paste_token_invalid");
-    const current = status();
-    if (current === null) return t("ui.settings.twitch.paste_token_unvalidated");
-    if (current.state === "accepted") return t("ui.settings.twitch.paste_token_valid");
-    if (current.state === "refused") return t("ui.settings.twitch.paste_token_invalid");
-    return t("ui.settings.twitch.paste_token_no_token");
+  /** What the paste button says of the credential, and the glyph and tone beside it. */
+  const pasteStatus = (): { label: string; icon: IconName; color: string } => {
+    const invalid = { label: t("ui.settings.twitch.paste_token_invalid"), icon: "circle-x" as IconName, color: semantic.error };
+    if (twitchPaste()?.problem) return invalid;
+    const current = twitchStatus();
+    if (current === null) return { label: t("ui.settings.twitch.paste_token_unvalidated"), icon: "clock", color: semantic.textDim };
+    if (current.state === "accepted") return { label: t("ui.settings.twitch.paste_token_valid"), icon: "circle-check", color: semantic.ok };
+    if (current.state === "refused") return invalid;
+    return { label: t("ui.settings.twitch.paste_token_no_token"), icon: "triangle-alert", color: semantic.warn };
   };
   const pasteNote = () => {
     const pasted = twitchPaste();
@@ -394,15 +371,16 @@ function TwitchSection() {
     }
   };
   return (
-    <Section title={t("ui.settings.twitch.heading")} description={t("ui.settings.twitch.description")}>
+    <Section icon="radio" title={t("ui.settings.twitch.heading")} description={t("ui.settings.twitch.description")}>
       <Field description={t("ui.settings.twitch.get_token_tooltip")}>
         <View style={{ flexDirection: "row" }}>
           <Button label={t("ui.settings.twitch.get_token")} onPress={() => void Shell.openUrl(TWITCH_TOKEN_URL)}/>
         </View>
       </Field>
       <Field description={pasteNote()} invalid={twitchPaste()?.problem !== undefined}>
-        <View style={{ flexDirection: "row" }}>
-          <Button label={pasteLabel()} onPress={() => void paste()}/>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Icon name={pasteStatus().icon} size={14} color={pasteStatus().color}/>
+          <Button label={pasteStatus().label} onPress={() => void paste()}/>
         </View>
       </Field>
       <Field label={t("ui.settings.twitch.monitored_channel")}>
@@ -426,7 +404,7 @@ function TwitchSection() {
 function ArmorSection() {
   const defaults = () => appSettings()!.armorDefaults;
   return (
-    <Section title={t("ui.settings.armor.heading")} description={t("ui.settings.armor.description")}>
+    <Section icon="shield" title={t("ui.settings.armor.heading")} description={t("ui.settings.armor.description")}>
       <Field>
         <If when={defaults()} else={<Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>{t("ui.settings.armor.no_defaults")}</Text>}>
           <View style={{ flexDirection: "row", gap: 16 }}>

@@ -384,7 +384,7 @@ async function readTab(tab: ReplayTab, alts: string[], trialAlt: string | null) 
 
   let summary: ReplaySummary;
   try {
-    summary = await ReplayInspectorService.open(tab.path, alts);
+    summary = await ReplayInspectorService.open(tab.path, alts, debugMode());
   } catch (error) {
     if (tab.closed || generation !== tab.generation) return;
     tab.reparsing.set(false);
@@ -472,7 +472,7 @@ function offerMissingBuilds(builds: ListedBuild[]) {
 /** A replay the game finished writing: exported, indexed and contributed, then opened when autoload is on. */
 async function replayLanded(ws: Workspace, path: string) {
   try {
-    const report = await ReplayInspectorService.processLanded(path);
+    const report = await ReplayInspectorService.processLanded(path, ws.directory, debugMode());
     if (report.exportError != null) toast.stuck(AUTO_EXPORT_FAILED, report.exportError);
     else if (report.exported != null) toast.resolved(AUTO_EXPORT_FAILED);
   } catch (error) {
@@ -559,8 +559,8 @@ function adoptGameData(next: GameDataSnapshot) {
     }
   }
 
-  if (before === null) return;
   followGameDataEdges(before, next);
+  if (before === null) return;
   if (next.phase === "ready" && before.phase !== "ready") void checkLatestConstants();
   // Rows are named from the game data, so a new install or build lists again.
   if (next.wowsDir !== before.wowsDir || next.phase !== before.phase || next.version !== before.version) {
@@ -601,10 +601,10 @@ function setListingCollapsed(collapsed: boolean) {
   });
 }
 
-async function checkGameData() {
+/** Offers the builds `directory`'s replays need and nothing here has, those already offered included. */
+async function checkGameData(directory: string) {
   try {
-    const offer = await GameData.checkMissingBuilds();
-    if (!offer.open && offer.rows.length === 0) toast.info("Game data is available for the listed replays.");
+    if (!(await GameData.checkDirectoryBuilds(directory))) toast.info("Game data is available for the listed replays.");
   } catch (error) {
     toast.failed(errorText(error));
   }
@@ -613,8 +613,11 @@ async function checkGameData() {
 /** Set when game data became ready, until the main listing next reports what it holds. */
 let awaitingListedReplays = false;
 
-/** What GPUI reports when the game data finishes loading, and the open replays rated once the PR table arrives. */
-function followGameDataEdges(before: GameDataSnapshot, next: GameDataSnapshot) {
+/** What GPUI reports when the game data finishes loading or fails to, and the open replays rated once the PR table arrives. */
+function followGameDataEdges(before: GameDataSnapshot | null, next: GameDataSnapshot) {
+  // A load that failed before the first snapshot was read failed all the same.
+  if (next.phase === "failed" && before?.phase !== "failed" && next.reason != null) toast.failed(next.reason);
+  if (before === null) return;
   if (next.phase === "ready" && before.phase !== "ready") {
     toast.ok(t("ui.messages.game_data_loaded"));
     awaitingListedReplays = true;
@@ -872,7 +875,7 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
       <Text style={{ flexShrink: 1, numberOfLines: 1, fontSize: 12.5 }}>{title()}</Text>
       <View
         role="button"
-        accessibilityLabel={`Close ${title()}`}
+        accessibilityLabel={t("ui.replay.close_replay_tab", { title: title() })}
         onPress={() => closeTab(props.ws, props.id)}
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
@@ -1082,7 +1085,7 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
 function MatchContext(props: { summary: ReplaySummary }) {
   const damage = () => props.summary.teamDamage;
   return (
-    <View selectable accessibilityLabel="Match context" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
+    <View selectable accessibilityLabel={t("ui.replay.match_context")} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
       <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
         {[...props.summary.matchContext, t("ui.replay.team_damage")].join(" - ")}
         <Text style={{ color: semantic.win }}>{damage().friendly}</Text>
@@ -1124,7 +1127,7 @@ function ChatPanel(props: { summary: ReplaySummary }) {
         <Button label={t("ui.replay.chat_save_to_file")} variant="ghost" onPress={() => void saveChat(props.summary)}/>
       </View>
       <Scroll style={{ flex: 1, minHeight: 0 }}>
-        <View selectable accessibilityLabel="Chat messages">
+        <View selectable accessibilityLabel={t("ui.replay.chat_messages")}>
           <Each of={props.summary.chat}>
             {(line) => (
               <View class="group" style={{ paddingHorizontal: 8, paddingVertical: 5, gap: 2, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -1313,7 +1316,7 @@ function PreviewCard(props: { ws: Workspace; previewSlot?: (path: string, mapNam
             style={{ width: 392, padding: 4, gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: controlRadius(), backgroundColor: colors.popover }}
           >
             {props.previewSlot ? props.previewSlot(hover().path, hover().mapName) : null}
-            <View accessibilityLabel="Replay preview facts" style={{ gap: 2, padding: 4 }}>
+            <View accessibilityLabel={t("ui.replay.renderer.preview_facts")} style={{ gap: 2, padding: 4 }}>
               <Each of={hover().facts}>
                 {(fact) => (
                   <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
@@ -1345,7 +1348,7 @@ function WorkspaceToolbar(props: { ws: Workspace; view: ReplayInspectorProps }) 
                 <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.mutedForeground }}>{path()}</Text>
               </View>
               <View tooltip={<Hint text={t("ui.replay.check_game_data_tooltip")}/>}>
-                <Button label={t("ui.replay.check_game_data")} variant="ghost" onPress={() => void checkGameData()}/>
+                <Button label={t("ui.replay.check_game_data")} variant="ghost" onPress={() => void checkGameData(path())}/>
               </View>
               <If when={props.view.onDirectoryStats !== undefined}>
                 <View tooltip={<Hint text={statsReady() ? t("ui.stats.open_directory_stats_tooltip") : t("ui.stats.directory_stats_unavailable")}/>}>
@@ -1366,7 +1369,13 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
   const render = slots
     ? (request: RenderRequest) => openViewport(ws, { kind: "renderer", path: request.path, alts: request.alts, title: replayStem(request.path) })
     : undefined;
-  const failure = () => (gameData()?.phase === "failed" ? gameData()?.reason ?? null : null);
+  const failure = () => {
+    const status = gameData();
+    if (status?.phase === "failed") return status.reason ?? null;
+    // A settings read that failed says why; otherwise no directory is set.
+    if (status?.phase === "notConfigured") return status.reason ?? t("ui.messages.wows_dir_not_set");
+    return null;
+  };
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <WorkspaceToolbar ws={ws} view={props.view}/>
@@ -1381,7 +1390,7 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
         axis="horizontal"
         style={{ flex: 1, minHeight: 0 }}
         handleStyle={{ backgroundColor: colors.border }}
-        handleAccessibilityLabel="Resize the replay listing"
+        handleAccessibilityLabel={t("ui.replay.resize_listing")}
       >
         <ResizablePanel size={280} minSize={180} maxSize={520} fixed visible={!listingCollapsed()}>
           <View style={{ flex: 1, minHeight: 0 }}>

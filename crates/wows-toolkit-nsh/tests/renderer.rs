@@ -149,3 +149,50 @@ fn the_timeline_fills_in_without_being_reopened() {
         .unwrap();
     app.wait_for("text:Event Timeline").unwrap();
 }
+
+#[test]
+fn a_language_change_rewords_the_transport() {
+    let replay = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FIXTURE);
+
+    let mut app = app();
+    render(&mut app, replay);
+    app.wait_for("id:renderer-transport >> label:Jump to start").unwrap();
+
+    app.press("Settings").unwrap();
+    app.press("label:Language").unwrap();
+    app.press("Deutsch").unwrap();
+    app.press("text:/^(Replay Inspector|Replay-Inspektor)$/").unwrap();
+    app.wait_for("id:renderer-transport >> label:Zum Anfang springen").unwrap();
+
+    // The next test starts in English. The choice is written in the
+    // background, so the test waits for the row to read English again.
+    app.press("Einstellungen").unwrap();
+    app.press("label:Sprache").unwrap();
+    app.press("English").unwrap();
+    app.wait_for("Settings").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while saved_locale().as_deref() != Some(r#""en""#) {
+        assert!(std::time::Instant::now() < deadline, "the locale row was not saved; saved: {:?}", saved_locale());
+        app.settle();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn saved_locale() -> Option<String> {
+    with_test_database(async |pool| {
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'locale'")
+            .fetch_optional(pool)
+            .await
+            .expect("the settings table is read")
+    })
+}
+
+/// Runs `work` against the test database.
+fn with_test_database<T>(work: impl AsyncFnOnce(&sqlx::SqlitePool) -> T) -> T {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            work(&pool).await
+        },
+    )
+}

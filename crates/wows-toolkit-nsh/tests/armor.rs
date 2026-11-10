@@ -1,6 +1,7 @@
 //! Headless interaction tests of the Armor Viewer tab over the real TSX bundle.
 //! They run without game data, so they cover the controls that work before a
-//! ship is loaded.
+//! ship is loaded; the views that need a ship run over a fake service state
+//! (`tests/armor/*.tsx`).
 
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -9,6 +10,7 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::time::Duration;
+use std::time::Instant;
 
 use nsh_core::Points;
 use nsh_core::Size;
@@ -67,16 +69,64 @@ fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
 
-fn start() -> TestApp {
+fn launch(entry: PathBuf) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     // The armor service outlives each app, so a panel the last test opened would still be open.
     wows_toolkit_nsh::armor::test_support::reset_panels();
-    let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
+    wows_toolkit_nsh::armor::test_support::take_pending_ship();
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");
     app.set_viewport(Size::new(Points(1600.0), Points(1000.0))).expect("the desktop viewport is applied");
-    app.wait_for("role:tab[Armor Viewer]").expect("the tab strip is drawn");
     TestApp { app, _guard: guard }
+}
+
+fn start() -> TestApp {
+    let mut app = launch(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx"));
+    app.wait_for("role:tab[Armor Viewer]").expect("the tab strip is drawn");
+    app
+}
+
+/// An armor view over the fake service state of `tests/armor/<name>`, on a
+/// desktop where a press gives a view the keyboard focus (the headless
+/// platform moves it to views only as macOS and the web do).
+fn fixture(name: &str) -> TestApp {
+    let mut app = launch(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/armor").join(name));
+    app.set_environment("desktop", |environment| {
+        environment.os = nsh_core::platform::Os::MacOs;
+        environment.idiom = nsh_core::platform::Idiom::Desktop;
+    })
+    .expect("the desktop environment is applied");
+    app
+}
+
+/// The ships list over a small catalog, its tree made on the desktop.
+fn ships_tree() -> TestApp {
+    let mut app = fixture("ships_tree.tsx");
+    app.press("id:fixture-load-catalog").unwrap();
+    app.wait_for("role:treeitem[U.S.A.]").unwrap();
+    app
+}
+
+fn wait_selected(app: &mut TestApp, label: &str) {
+    let selector = format!("role:treeitem[{label}]");
+    app.wait_for(&selector).unwrap();
+    let deadline = Instant::now() + GONE;
+    while !app.screen().selected(&selector).unwrap() {
+        assert!(Instant::now() < deadline, "the {label} row is never selected");
+        app.wait(Duration::from_millis(20)).unwrap();
+    }
+}
+
+/// The ship the viewer was asked to open, by its param index.
+fn wait_pending_ship(app: &mut TestApp) -> String {
+    let deadline = Instant::now() + GONE;
+    loop {
+        if let Some(ship) = wows_toolkit_nsh::armor::test_support::take_pending_ship() {
+            return ship;
+        }
+        assert!(Instant::now() < deadline, "no ship is opened");
+        app.wait(Duration::from_millis(20)).unwrap();
+    }
 }
 
 /// The app with the Armor Viewer tab selected and its first view drawn.
@@ -226,4 +276,94 @@ fn the_penetration_panel_scrolls_only_its_ship_list() {
         "the search sits above the list"
     );
     assert!(!app.screen().matches("id:armor-pen-clear").unwrap(), "Clear all needs a ship to clear");
+}
+
+#[test]
+fn a_partly_shown_zone_draws_its_mixed_checkbox() {
+    let mut app = fixture("options_rail.tsx");
+    app.press("id:armor-options-section-Visibility").unwrap();
+    app.wait_for("id:armor-vis-zone-Citadel").unwrap();
+    app.wait_for("id:armor-vis-zone-Citadel >> text:-").unwrap();
+}
+
+#[test]
+fn camos_take_changes_only_while_the_export_holds_the_mesh() {
+    let mut app = fixture("export_dialog.tsx");
+    app.wait_for("id:armor-export-camo-1").unwrap();
+    assert!(!app.screen().enabled("id:armor-export-camo-1").unwrap());
+    assert!(!app.screen().enabled("id:armor-export-camo-2").unwrap());
+    assert!(app.screen().enabled("id:armor-export-contents-mesh").unwrap(), "the contents stay choosable");
+
+    app.press("id:fixture-export-mesh").unwrap();
+    let deadline = Instant::now() + GONE;
+    while !app.screen().enabled("id:armor-export-camo-1").unwrap() {
+        assert!(Instant::now() < deadline, "a mesh export never takes camo changes");
+        app.wait(Duration::from_millis(20)).unwrap();
+    }
+    assert!(app.screen().enabled("id:armor-export-camo-2").unwrap());
+}
+
+#[test]
+fn the_arrow_keys_walk_the_ships_tree_and_return_opens_a_ship() {
+    let mut app = ships_tree();
+    app.press("role:treeitem[U.S.A.]").unwrap();
+    app.wait_for("role:treeitem[Destroyers]").unwrap();
+    wait_selected(&mut app, "U.S.A.");
+
+    app.press_key("down").unwrap();
+    wait_selected(&mut app, "Destroyers");
+    // A folded branch opens, then Right goes to its first child.
+    app.press_key("right").unwrap();
+    app.wait_for("role:treeitem[II Sampson]").unwrap();
+    assert!(app.screen().selected("role:treeitem[Destroyers]").unwrap());
+    app.press_key("right").unwrap();
+    wait_selected(&mut app, "II Sampson");
+    app.press_key("down").unwrap();
+    wait_selected(&mut app, "III Wickes");
+    // Left goes to the parent, then folds it.
+    app.press_key("left").unwrap();
+    wait_selected(&mut app, "Destroyers");
+    app.press_key("left").unwrap();
+    app.wait_for_gone("role:treeitem[II Sampson]", GONE).unwrap();
+    app.press_key("up").unwrap();
+    wait_selected(&mut app, "U.S.A.");
+    app.press_key("left").unwrap();
+    app.wait_for_gone("role:treeitem[Destroyers]", GONE).unwrap();
+    assert!(wows_toolkit_nsh::armor::test_support::take_pending_ship().is_none(), "moving opens no ship");
+
+    app.press_key("down").unwrap();
+    wait_selected(&mut app, "Japan");
+    for _ in 0..3 {
+        app.press_key("right").unwrap();
+    }
+    app.wait_for("role:treeitem[III Kawachi]").unwrap();
+    app.press_key("right").unwrap();
+    wait_selected(&mut app, "III Kawachi");
+    app.press_key("enter").unwrap();
+    assert_eq!(wait_pending_ship(&mut app), "PJSB001");
+}
+
+#[test]
+fn a_press_on_a_ship_opens_it_and_gives_the_tree_the_keys() {
+    let mut app = ships_tree();
+    app.press("role:treeitem[U.S.A.]").unwrap();
+    app.press("role:treeitem[Destroyers]").unwrap();
+    app.press("id:armor-ship-PASD001").unwrap();
+    assert_eq!(wait_pending_ship(&mut app), "PASD001");
+    wait_selected(&mut app, "II Sampson");
+
+    app.press_key("down").unwrap();
+    wait_selected(&mut app, "III Wickes");
+}
+
+#[test]
+fn a_ship_opened_elsewhere_becomes_the_selected_row() {
+    let mut app = ships_tree();
+    app.press("role:treeitem[Japan]").unwrap();
+    app.press("role:treeitem[Battleships]").unwrap();
+    app.press("role:treeitem[U.S.A.]").unwrap();
+    wait_selected(&mut app, "U.S.A.");
+
+    app.press("id:fixture-show-kawachi").unwrap();
+    wait_selected(&mut app, "III Kawachi");
 }

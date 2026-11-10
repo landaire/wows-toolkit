@@ -86,11 +86,16 @@ pub enum InspectorError {
         #[source]
         source: sqlx::Error,
     },
-    #[error("World of Warships directory is not set")]
+    #[error("{}", rust_i18n::t!("ui.messages.wows_dir_not_set"))]
     WowsDirMissing,
     #[error("{source}")]
     Launch {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("the replay files could not be copied: {source}")]
+    Clipboard {
+        #[source]
+        source: arboard::Error,
     },
 }

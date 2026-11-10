@@ -24,10 +24,10 @@ function Row(props: { label: string; hint?: string; children: JSX.Element }) {
   );
 }
 
-function Camos(props: { schemes: CamoView[] }) {
+function Camos(props: { schemes: CamoView[]; disabled: boolean }) {
   return (
     <Each of={props.schemes} key={(scheme) => scheme.id}>
-      {(scheme) => <CheckRow id={`armor-export-camo-${scheme().id}`} label={scheme().name} checked={scheme().selected} onChange={(on) => call(Armor.setExportCamo(scheme().id, on))}/>}
+      {(scheme) => <CheckRow id={`armor-export-camo-${scheme().id}`} label={scheme().name} checked={scheme().selected} disabled={props.disabled} onChange={(on) => call(Armor.setExportCamo(scheme().id, on))}/>}
     </Each>
   );
 }
@@ -115,14 +115,14 @@ export function ExportDialog() {
                       <ToolButton id="armor-export-camos-reset" label={t("ui.armor.export.camo_reset")} disabled={!mesh()} onPress={() => call(Armor.exportCamosReset())}/>
                     </View>
                     <Scroll style={{ maxHeight: 240 }}>
-                      <View style={{ gap: 3, opacity: mesh() ? 1 : 0.5 }}>
-                        <Text testID="armor-export-camo-stock" style={{ fontSize: 12, color: current().camos.noneTicked ? colors.popoverForeground : colors.mutedForeground }}>{t("ui.armor.camo_none")}</Text>
-                        <Camos schemes={current().camos.own}/>
+                      <View style={{ gap: 3 }}>
+                        <Text testID="armor-export-camo-stock" style={{ fontSize: 12, opacity: mesh() ? 1 : 0.5, color: current().camos.noneTicked ? colors.popoverForeground : colors.mutedForeground }}>{t("ui.armor.camo_none")}</Text>
+                        <Camos schemes={current().camos.own} disabled={!mesh()}/>
                         <Each of={current().camos.groups} key={(group) => group.heading}>
                           {(group) => (
                             <View style={{ gap: 3 }}>
-                              <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t(group().heading)}</Text>
-                              <Camos schemes={group().schemes}/>
+                              <Text style={{ fontSize: 12, opacity: mesh() ? 1 : 0.5, color: colors.mutedForeground }}>{t(group().heading)}</Text>
+                              <Camos schemes={group().schemes} disabled={!mesh()}/>
                             </View>
                           )}
                         </Each>

@@ -30,7 +30,7 @@ export function wowsDirInvalid(): boolean {
   return dir !== "" && !Settings.isGameDirectory(dir);
 }
 
-/** Scales the window's text to `zoom`. The window is the embedding app's, so the scale is its to apply. */
+/** Scales the whole window to `zoom`. The window is the embedding app's, so the scale is its to apply. */
 export function applyZoom(zoom: number) {
   void host.call("shell.zoom", { zoom }).catch(() => undefined);
 }
@@ -88,19 +88,79 @@ export function ApplicationMenu(props: { onCommandPalette: () => void; onTactics
 /** Whether files are being dragged over the window. */
 export const hoveringFiles = signal(false);
 
+/** The `file:` URIs the drag over the window carries, once the shell has read them; `null` until then. */
+export const hoveredUris = signal<string[] | null>(null);
+
 /**
- * Over the window while files are dragged onto it, so a drag says it will be
- * taken before it lands. nsh reports a drag's start and end but not which
- * files it carries, so this names the rule rather than the file.
+ * Set once nsh says the drag left or landed. GTK on X11 says nothing to the
+ * shell after a drop, so a file list it read late belongs to a drag that is
+ * over, until the shell says that drag left or nsh says another began.
+ */
+let dragEnded = false;
+
+// The shell reads the drag's file list as it enters the window, which nsh's
+// own drag events do not carry, and clears it as the drag leaves.
+host.on("shell.hoveredFiles", (data: unknown) => {
+  const uris = (data as { uris?: unknown } | null)?.uris;
+  if (!Array.isArray(uris)) {
+    dragEnded = false;
+    hoveredUris.set(null);
+    return;
+  }
+  if (dragEnded) return;
+  hoveredUris.set(uris.filter((uri): uri is string => typeof uri === "string"));
+});
+
+/** nsh's word that files are dragged over the window. */
+export function startFileDrag() {
+  dragEnded = false;
+  hoveringFiles.set(true);
+}
+
+/** nsh's word that the drag left the window or was dropped on it. */
+export function endFileDrag() {
+  dragEnded = true;
+  hoveringFiles.set(false);
+  hoveredUris.set(null);
+}
+
+/** The local replay files among `uris`, as paths: what a drop of them opens. */
+export function replayPaths(uris: string[]): string[] {
+  const replays: string[] = [];
+  for (const uri of uris) {
+    try {
+      const url = new URL(uri);
+      if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith(".wowsreplay")) replays.push(decodeURIComponent(url.pathname));
+    } catch {
+      continue;
+    }
+  }
+  return replays;
+}
+
+/** What the scrim says of a drag: what dropping it will do, or the rule until its files are known. */
+function scrimText(uris: string[] | null): string {
+  if (uris === null) return t("ui.app.drop_replay");
+  const replays = replayPaths(uris);
+  if (replays.length === 0) return t("ui.messages.drop_not_a_replay");
+  if (replays.length > 1) return t("ui.messages.drop_one_at_a_time");
+  const path = replays[0];
+  return t("ui.app.drop_to_load", { file: path.slice(path.lastIndexOf("/") + 1) });
+}
+
+/**
+ * Over the window while files are dragged onto it, so a drag says what it
+ * will do before it lands: the file it will open, or why it will not.
  */
 export function DropScrim() {
+  const said = () => scrimText(hoveredUris());
   return (
-    <If when={hoveringFiles()}>
+    <If when={hoveringFiles() || hoveredUris() !== null}>
       <View
-        accessibilityLabel={t("ui.app.drop_replay")}
+        accessibilityLabel={said()}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.75)" }}
       >
-        <Text style={{ fontSize: 18, color: "#ffffff" }}>{t("ui.app.drop_replay")}</Text>
+        <Text style={{ fontSize: 18, color: "#ffffff" }}>{said()}</Text>
       </View>
     </If>
   );

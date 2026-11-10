@@ -5,7 +5,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use url::Url;
 use wows_toolkit_config::queries::SessionStatRow;
 use wows_toolkit_config::queries::add_session_stat;
 use wows_toolkit_config::queries::clear_session_stats;
@@ -28,11 +27,6 @@ pub(super) enum Controls {
 /// `paths` one per line, as "Copy Path" puts them on the clipboard.
 pub(super) fn path_list(paths: &[PathBuf]) -> String {
     paths.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join("\n")
-}
-
-/// `paths` as a `text/uri-list`: what a file manager pastes as the files.
-pub(super) fn uri_list(paths: &[PathBuf]) -> String {
-    paths.iter().filter_map(|path| Url::from_file_path(path).ok()).map(|url| format!("{url}\r\n")).collect()
 }
 
 /// Shows `path` in the system file manager. A file manager that is not
@@ -97,10 +91,9 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn copied_replays_are_a_uri_list_and_copied_paths_are_lines() {
+    fn copied_paths_are_lines() {
         let paths = vec![PathBuf::from("/replays/a b.wowsreplay"), PathBuf::from("/replays/c.wowsreplay")];
 
-        assert_eq!(uri_list(&paths), "file:///replays/a%20b.wowsreplay\r\nfile:///replays/c.wowsreplay\r\n");
         assert_eq!(path_list(&paths), "/replays/a b.wowsreplay\n/replays/c.wowsreplay");
     }
 }

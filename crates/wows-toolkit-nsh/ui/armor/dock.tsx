@@ -22,7 +22,7 @@ export async function runExport(command: () => Promise<ExportResult | null>) {
       ? t("ui.armor.export.exported_with_size", { ship: result.ship, size: result.size })
       : t("ui.armor.export.exported", { ship: result.ship }));
   } catch (error) {
-    toast.failed(errorText(error));
+    toast.failed(t("ui.armor.export.export_failed", { error: errorText(error) }));
   }
 }
 

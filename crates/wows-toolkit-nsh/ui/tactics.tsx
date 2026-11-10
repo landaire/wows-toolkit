@@ -1,11 +1,11 @@
 import type { JSX } from "nsh";
-import { cleanup, keymap, Scroll, signal, Text, View } from "nsh";
+import { cleanup, effect, keymap, Scroll, signal, Text, untracked, View } from "nsh";
 import { Button as BaseButton, Checkbox, Combobox, Input, Popover, Tooltip } from "nsh/base";
 import { Menu } from "nsh/desktop";
 import { Tactics, type RangeName, type TacticsView, type ToolName } from "wows-toolkit/native";
-import { Surface } from "./components";
+import { Spinner, Surface } from "./components";
 import { Frame } from "./frame";
-import { t } from "./i18n";
+import { currentLocale, t } from "./i18n";
 import { CheckMark, Icon, type IconName } from "./icons";
 import { colors, controlRadius } from "./theme";
 
@@ -346,9 +346,12 @@ function Scan(props: { view: TacticsView }) {
         />
       }
     >
-      <Label text={props.view.scanning?.total != null
-        ? t("ui.tactics.scan_progress", { read: props.view.scanning!.read, total: props.view.scanning!.total })
-        : t("ui.tactics.scan_running")}/>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Spinner label={t("ui.tactics.scan_running")} size={14}/>
+        <Label text={props.view.scanning?.total != null
+          ? t("ui.tactics.scan_progress", { read: props.view.scanning!.read, total: props.view.scanning!.total })
+          : t("ui.tactics.scan_running")}/>
+      </View>
     </If>
   );
 }
@@ -404,8 +407,18 @@ function Shortcuts() {
       offset={4}
       margin={8}
       trigger={
-        <View accessibilityLabel={t("ui.renderer.annotations.shortcuts_title")} hoverStyle={{ backgroundColor: colors.accent }} style={{ minHeight: 26, paddingHorizontal: 8, justifyContent: "center", borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 12, color: colors.foreground }}>?</Text>
+        <View
+          accessibilityLabel={t("ui.renderer.annotations.shortcuts_title")}
+          role="button"
+          hoverStyle={{ backgroundColor: colors.accent }}
+          tooltip={
+            <Tooltip placement="bottom" style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.popover, borderWidth: 1, borderColor: colors.border }}>
+              <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{t("ui.renderer.annotations.shortcuts_title")}</Text>
+            </Tooltip>
+          }
+          style={{ minHeight: 26, minWidth: 26, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border }}
+        >
+          <Icon name="info" size={14} color={colors.foreground}/>
         </View>
       }
     >
@@ -601,6 +614,13 @@ function BoardKeys() {
 export function TacticsBoard() {
   openBoard();
   cleanup(() => Tactics.close());
+  // The board's own labels are said in Rust: read them again in a new language.
+  effect(() => {
+    currentLocale();
+    untracked(() => {
+      if (board()) adopt(Tactics.view());
+    });
+  });
   return (
     <View style={{ flex: 1, minHeight: 0, backgroundColor: colors.background }}>
       <BoardKeys/>

@@ -36,6 +36,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:humansize",
     "//third-party/rust:image",
     "//third-party/rust:reqwest",
+    "//third-party/rust:clap",
     "//third-party/rust:tracing",
     "//third-party/rust:tracing-appender",
     "//third-party/rust:tracing-subscriber",
@@ -55,13 +56,16 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:tiny-skia",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
-    "//third-party/rust:url",
     "//third-party/rust:tempfile",
 ]
 
 NSH_PLATFORM_DEPS = os_select(
     macos = [],
-    linux = ["//third-party/rust:nsh-platform-linux"],
+    linux = [
+        "//third-party/rust:gdk4-x11",
+        "//third-party/rust:nsh-platform-linux",
+        "//third-party/rust:x11rb",
+    ],
     windows = [],
 )
 
@@ -128,5 +132,6 @@ workspace_integration_tests(
         "//third-party/rust:nsh-testing",
         "//third-party/rust:nsh-engine",
         "//third-party/rust:parking_lot",
+        "//third-party/rust:url",
     ],
 )

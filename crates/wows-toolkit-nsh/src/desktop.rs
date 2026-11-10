@@ -1,35 +1,43 @@
 //! The app's GTK windows: the main one, and the tactics board and popped-out
 //! replay renderers, each an nsh view running the same bundle in a window of
-//! its own. This binary owns them so the shell can scale their text (the UI
-//! zoom) and remember each kind's geometry in the row every front end shares.
+//! its own. This binary owns them so the shell can scale them (the UI zoom)
+//! and remember each kind's geometry in the row every front end shares.
+
+mod error;
+mod position;
+mod zoom;
 
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use gtk::gdk;
 use gtk::gio::prelude::ActionMapExt as _;
 use gtk::gio::prelude::ApplicationExt as _;
 use gtk::gio::prelude::ApplicationExtManual as _;
+use gtk::gio::prelude::FileExt as _;
 use gtk::glib;
 use gtk::prelude::Cast as _;
 use gtk::prelude::EventControllerExt as _;
 use gtk::prelude::GtkApplicationExt as _;
 use gtk::prelude::GtkWindowExt as _;
 use gtk::prelude::ObjectExt as _;
+use gtk::prelude::StaticType as _;
 use gtk::prelude::WidgetExt as _;
 use nsh_platform_linux as platform;
 use platform::gtk4 as gtk;
 use wows_toolkit_config::WindowKind;
 
+use crate::desktop::zoom::ZoomBin;
 use crate::renderer::ReplayRenderer;
 use crate::shell::DEFAULT_ZOOM;
 use crate::shell::ZoomFactor;
 use crate::shell::window::WINDOW_PARAM;
 use crate::shell::window::WindowGeometry;
+use crate::shell::window::WindowPosition;
 use crate::shell::window::WindowRequest;
 use crate::shell::window::WindowSize;
 
@@ -38,8 +46,8 @@ struct Desktop {
     app: gtk::Application,
     bundle: platform::Bundle,
     options: platform::AppOptions,
-    /// Every open view, for the zoom, which applies to all of them.
-    views: RefCell<Vec<Weak<platform::AppView>>>,
+    /// Every open window's zoom, which applies to all of them.
+    zooms: RefCell<Vec<glib::WeakRef<ZoomBin>>>,
     /// The zoom last applied, which a window opened later starts at.
     zoom: Cell<ZoomFactor>,
     /// The open tactics board's window: asked for again, it comes forward
@@ -76,7 +84,7 @@ pub fn run(bundle: platform::Bundle, options: platform::AppOptions) -> glib::Exi
             app: app.clone(),
             bundle,
             options,
-            views: RefCell::default(),
+            zooms: RefCell::default(),
             zoom: Cell::new(saved_zoom()),
             tactics: RefCell::default(),
             closing: Cell::new(false),
@@ -91,11 +99,15 @@ pub fn run(bundle: platform::Bundle, options: platform::AppOptions) -> glib::Exi
 }
 
 fn open_main(desktop: &Desktop) {
-    const DEFAULT_SIZE: WindowSize = WindowSize { width: 1400.0, height: 1000.0 };
+    // What the other front ends use.
+    const DEFAULT_SIZE: WindowSize = WindowSize { width: 1200.0, height: 800.0 };
+    const MIN_SIZE: WindowSize = WindowSize { width: 640.0, height: 480.0 };
 
     let window = new_window(desktop, &desktop.options.title, WindowKind::Main, DEFAULT_SIZE);
-    let view = new_view(desktop, desktop.options.clone());
+    window.set_size_request(MIN_SIZE.width.round() as i32, MIN_SIZE.height.round() as i32);
+    let view = new_view(desktop.options.clone());
     handle_open_window(&view);
+    report_hovered_files(&view);
     // Closing the main window closes the app: the board and renderers are
     // beside it, not on their own.
     window.connect_close_request(|main| {
@@ -132,7 +144,7 @@ fn open_secondary(desktop: &Desktop, request: WindowRequest) {
 
     // A channel of its own, so the main window's handlers and events stay
     // with the main window.
-    let view = new_view(desktop, platform::AppOptions { host: Default::default(), ..desktop.options.clone() });
+    let view = new_view(platform::AppOptions { host: Default::default(), ..desktop.options.clone() });
     let mut params = serde_json::Map::new();
     params.insert(
         WINDOW_PARAM.to_owned(),
@@ -175,22 +187,30 @@ fn new_window(desktop: &Desktop, title: &str, kind: WindowKind, default: WindowS
     if remembered.is_some_and(|remembered| remembered.fullscreen) {
         window.fullscreen();
     }
+    if let Some(remembered) = remembered.filter(|remembered| !remembered.maximized && !remembered.fullscreen)
+        && let Some([x, y]) = remembered.outer_position_pixels
+    {
+        position::restore(&window, WindowPosition { x, y });
+    }
     window
 }
 
 /// A view for a new window.
-fn new_view(desktop: &Desktop, options: platform::AppOptions) -> Rc<platform::AppView> {
+fn new_view(options: platform::AppOptions) -> Rc<platform::AppView> {
     let view = platform::AppView::new(options);
-    // The current zoom applies before the first frame, so the window does not
-    // open at one size and jump to another once the settings are read.
-    view.set_font_scale(Some(font_scale(desktop.zoom.get())));
+    // The zoom scales text with everything else, and stands in for the
+    // system's text size as it does in the other front ends.
+    view.set_font_scale(Some(1.0));
     handle_zoom(&view);
-    desktop.views.borrow_mut().push(Rc::downgrade(&view));
     view
 }
 
 fn show(window: &gtk::ApplicationWindow, view: Rc<platform::AppView>, desktop: &Desktop, kind: WindowKind) {
-    window.set_child(Some(&view.widget()));
+    // Zoomed before the first frame, so the window does not open at one size
+    // and jump to another once the settings are read.
+    let zoomed = ZoomBin::new(&view.widget(), desktop.zoom.get());
+    desktop.zooms.borrow_mut().push(zoomed.downgrade());
+    window.set_child(Some(&zoomed));
     view.load(platform::App::Js(desktop.bundle.clone()));
     remember_geometry(window, kind);
     install_window_shortcuts(window);
@@ -201,7 +221,7 @@ fn show(window: &gtk::ApplicationWindow, view: Rc<platform::AppView>, desktop: &
             view.stop();
         }
         if let Some(desktop) = running() {
-            desktop.views.borrow_mut().retain(|view| view.strong_count() > 0);
+            desktop.zooms.borrow_mut().retain(|zoom| zoom.upgrade().is_some());
         }
     });
     window.present();
@@ -267,13 +287,6 @@ fn saved_zoom() -> ZoomFactor {
         .unwrap_or(DEFAULT_ZOOM)
 }
 
-/// The text scale a zoom factor draws at. The zoom factor is the one the other
-/// front ends store, whose default is 1.15; this view's sizes are designed at
-/// that default, so it is the 1.0 of this scale.
-fn font_scale(zoom: ZoomFactor) -> f32 {
-    zoom.get() / DEFAULT_ZOOM.get()
-}
-
 /// Applies a zoom the app sets to every open window.
 fn handle_zoom(view: &platform::AppView) {
     const ZOOM_CALL: &str = "shell.zoom";
@@ -289,12 +302,71 @@ fn handle_zoom(view: &platform::AppView) {
                 return;
             };
             desktop.zoom.set(zoom);
-            for view in desktop.views.borrow().iter().filter_map(Weak::upgrade) {
-                view.set_font_scale(Some(font_scale(zoom)));
+            for zoomed in desktop.zooms.borrow().iter().filter_map(glib::WeakRef::upgrade) {
+                zoomed.set_zoom(zoom);
             }
         });
         call.resolve(serde_json::Value::Null);
     });
+}
+
+/// Tells the app which files a drag over the window carries before they land,
+/// which nsh's `onFileDragEnter` does not: a motion controller observes the
+/// drag without taking it, so nsh's own drop target still receives the drop.
+/// The event carries `{ uris }`, the `file:` URIs `onFileDrop` would, and
+/// `null` once the drag leaves.
+fn report_hovered_files(view: &platform::AppView) {
+    const HOVERED_EVENT: &str = "shell.hoveredFiles";
+
+    let host = view.host();
+    let motion = gtk::DropControllerMotion::new();
+    let entered = host.clone();
+    motion.connect_enter(move |motion, _, _| {
+        let Some(drop) = motion.drop() else {
+            return;
+        };
+        if !drop.formats().contains_type(gdk::FileList::static_type()) {
+            return;
+        }
+
+        let watching = motion.downgrade();
+        let host = entered.clone();
+        glib::spawn_future_local(async move {
+            let read = drop.read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT).await;
+            // The drag may have left, or another begun, while the list was read.
+            if watching.upgrade().and_then(|motion| motion.drop()).as_ref() != Some(&drop) {
+                return;
+            }
+
+            let list = match read.map(|value| value.get::<gdk::FileList>()) {
+                Ok(Ok(list)) => list,
+                Ok(Err(err)) => {
+                    tracing::debug!("hovered files: not a file list: {err}");
+                    return;
+                }
+                Err(err) => {
+                    tracing::debug!("hovered files: unreadable: {err}");
+                    return;
+                }
+            };
+            // The same URIs nsh's drop names: local files only.
+            let uris: Vec<String> = list
+                .files()
+                .into_iter()
+                .filter(|file| file.path().is_some_and(|path| path.is_absolute()))
+                .map(|file| file.uri().to_string())
+                .collect();
+            if let Err(err) = host.send(HOVERED_EVENT, serde_json::json!({ "uris": uris })) {
+                tracing::warn!("hovered files: the app could not be told: {err}");
+            }
+        });
+    });
+    motion.connect_leave(move |_| {
+        if let Err(err) = host.send(HOVERED_EVENT, serde_json::Value::Null) {
+            tracing::warn!("hovered files: the app could not be told: {err}");
+        }
+    });
+    view.widget().add_controller(motion);
 }
 
 /// Opens the windows the main window's app asks for.
@@ -358,10 +430,15 @@ fn remember_geometry(window: &gtk::ApplicationWindow, kind: WindowKind) {
 
 fn store(window: &gtk::ApplicationWindow, kind: WindowKind) {
     let (width, height) = window.default_size();
+    let maximized = window.is_maximized();
+    let fullscreen = window.is_fullscreen();
+    // The size kept is the window's normal one, so the position kept is too.
+    let position = if maximized || fullscreen { None } else { position::outer(window) };
     let geometry = WindowGeometry {
         size: WindowSize { width: width as f32, height: height as f32 },
-        maximized: window.is_maximized(),
-        fullscreen: window.is_fullscreen(),
+        position,
+        maximized,
+        fullscreen,
     };
     if let Err(err) = crate::shell::window::store(kind, geometry) {
         tracing::error!("window geometry: {}", crate::shell::chain(&err));
@@ -416,15 +493,4 @@ fn prefer_gl_on_nvidia() {
     // SAFETY: called before GTK starts, while this thread is the only one
     // reading the environment.
     unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_shared_default_zoom_draws_at_the_designed_size() {
-        assert!((font_scale(DEFAULT_ZOOM) - 1.0).abs() < f32::EPSILON);
-        assert!(font_scale(ZoomFactor::new(2.0)) > 1.0 && font_scale(ZoomFactor::new(0.5)) < 1.0);
-    }
 }

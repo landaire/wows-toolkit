@@ -3,7 +3,7 @@ import { Checkbox, Input, Popover, Progress } from "nsh/base";
 import { Collab, type CollabState, type RosterEntry, type SharedWindowEntry } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
 import { t } from "./i18n";
-import { CheckMark } from "./icons";
+import { CheckMark, Icon } from "./icons";
 import { appSettings, editSetting } from "./settings_store";
 import { beforeRevealingAddress } from "./shell/notices";
 import * as toast from "./shell/toast";
@@ -343,10 +343,13 @@ export function SessionButton(props: {
             height: 30,
             paddingHorizontal: 10,
             borderRadius: controlRadius(),
-            justifyContent: "center",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
             backgroundColor: state().active ? colors.destructive : "transparent",
           }}
         >
+          <Icon name="radio" size={14} color={state().active ? colors.primaryForeground : colors.mutedForeground}/>
           <Text style={{ fontSize: 12.5, color: state().active ? colors.primaryForeground : colors.mutedForeground }}>
             {t("ui.collab.session")}
           </Text>

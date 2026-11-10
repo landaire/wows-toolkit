@@ -7,7 +7,7 @@ import { applyLocale, currentLocale, t } from "./i18n";
 import { loadAppSettings } from "./settings_store";
 import { SettingsView } from "./settings";
 import { AboutDialog, openAbout } from "./shell/about";
-import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, wowsDirInvalid } from "./shell/chrome";
+import { ApplicationMenu, applyZoom, DropScrim, endFileDrag, replayPaths, startFileDrag, wowsDirInvalid } from "./shell/chrome";
 import { hostTab, TabStrip, type TabTarget } from "./shell/tabs";
 import { CrashDialog, reportLastCrash } from "./shell/diagnostics";
 import { contributeAll, copyBugReportInfo, copyLatestLog, setTheme } from "./shell/actions";
@@ -95,16 +95,8 @@ function openReplayPath(path: string) {
 
 /** A replay dragged onto the window opens; only a replay, and only one, since the inspector opens a file, not a set. */
 function openDroppedReplay(uris: string[]) {
-  hoveringFiles.set(false);
-  const replays: string[] = [];
-  for (const uri of uris) {
-    try {
-      const url = new URL(uri);
-      if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith(".wowsreplay")) replays.push(decodeURIComponent(url.pathname));
-    } catch {
-      continue;
-    }
-  }
+  endFileDrag();
+  const replays = replayPaths(uris);
   if (replays.length === 0) {
     toast.warn(t("ui.messages.drop_not_a_replay"));
   } else if (replays.length > 1) {
@@ -240,8 +232,8 @@ function App() {
   return (
     <View
       onFileDrop={({ uris }) => openDroppedReplay(uris)}
-      onFileDragEnter={() => hoveringFiles.set(true)}
-      onFileDragLeave={() => hoveringFiles.set(false)}
+      onFileDragEnter={startFileDrag}
+      onFileDragLeave={endFileDrag}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
       <TabStrip

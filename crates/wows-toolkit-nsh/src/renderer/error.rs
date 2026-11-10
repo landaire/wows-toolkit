@@ -5,45 +5,95 @@ use wows_toolkit_replay_data::playback::ExportError;
 
 use crate::renderer::ids::RendererId;
 
-/// Why a renderer command could not be carried out.
+/// Why a renderer command could not be carried out. Its `Display` is
+/// [`RendererError::user_text`], which is what the view shows.
 #[derive(Debug, thiserror::Error)]
 pub enum RendererError {
-    #[error("there is no open renderer {id}")]
-    UnknownRenderer { id: RendererId },
-    #[error("there is no layer {id:?}")]
-    UnknownLayer { id: String },
-    #[error("there is no codec {value:?}")]
-    UnknownCodec { value: String },
-    #[error("there is no ink {index}")]
-    UnknownInk { index: u32 },
-    #[error("there is no speed {index}")]
-    UnknownSpeed { index: u32 },
-    #[error("there is no ship match {index}")]
-    UnknownShip { index: u32 },
-    #[error("there is no ship species {short:?}")]
-    UnknownSpecies { short: String },
-    #[error("the build does not know the ship {param_index:?}")]
-    UnknownShipParam { param_index: String },
-    #[error("there is no event kind {index}")]
-    UnknownKind { index: u32 },
-    #[error("the file dialog could not be shown: {reason}")]
-    Dialog { reason: String },
-    #[error("the replay is still being read")]
+    UnknownRenderer {
+        id: RendererId,
+    },
+    UnknownLayer {
+        id: String,
+    },
+    UnknownCodec {
+        value: String,
+    },
+    UnknownInk {
+        index: u32,
+    },
+    UnknownSpeed {
+        index: u32,
+    },
+    UnknownShip {
+        index: u32,
+    },
+    UnknownSpecies {
+        short: String,
+    },
+    UnknownShipParam {
+        param_index: String,
+    },
+    UnknownKind {
+        index: u32,
+    },
+    Dialog {
+        reason: String,
+    },
     NotReady,
-    #[error("no temporary file could be made for the clipboard")]
+    /// The single clipboard export found no temporary file to encode into.
     NoTemporaryFile,
-    #[error("a batch render is already running")]
+    /// The clipboard batch found no temporary directory to render into.
+    NoTemporaryDirectory,
     BatchRunning,
-    #[error("the session has no window {replay_id}")]
-    UnknownWindow { replay_id: String },
-    #[error("there is no replay to render")]
+    UnknownWindow {
+        replay_id: String,
+    },
     NothingToRender,
-    #[error("there is no ship with entity {entity_id:?} in this battle")]
-    UnknownEntity { entity_id: String },
-    #[error("ship {entity_id} took no recorded hits, so there is no armor to show")]
-    NoArmorToShow { entity_id: EntityId },
-    #[error("the settings database could not be read, so there is no game data to read the replay with")]
+    UnknownEntity {
+        entity_id: String,
+    },
+    NoArmorToShow {
+        entity_id: EntityId,
+    },
     NoGameData,
+}
+
+impl RendererError {
+    /// What the reader is told, in the reader's language. The variants that
+    /// only a defect in the view can raise stay in English.
+    pub fn user_text(&self) -> String {
+        match self {
+            Self::Dialog { reason } => t!("ui.replay.renderer.error_dialog", reason = reason).into_owned(),
+            Self::NotReady => t!("ui.replay.renderer.error_not_ready").into_owned(),
+            Self::NoTemporaryFile => t!("ui.replay.renderer.error_no_temporary_file").into_owned(),
+            Self::NoTemporaryDirectory => t!("ui.replay.renderer.export_path_unusable").into_owned(),
+            Self::BatchRunning => t!("ui.replay.renderer.error_batch_running").into_owned(),
+            Self::UnknownWindow { replay_id } => {
+                t!("ui.replay.renderer.error_unknown_window", window = replay_id).into_owned()
+            }
+            Self::NoGameData => t!("ui.replay.renderer.error_no_game_data").into_owned(),
+            Self::UnknownRenderer { id } => format!("there is no open renderer {id}"),
+            Self::UnknownLayer { id } => format!("there is no layer {id:?}"),
+            Self::UnknownCodec { value } => format!("there is no codec {value:?}"),
+            Self::UnknownInk { index } => format!("there is no ink {index}"),
+            Self::UnknownSpeed { index } => format!("there is no speed {index}"),
+            Self::UnknownShip { index } => format!("there is no ship match {index}"),
+            Self::UnknownSpecies { short } => format!("there is no ship species {short:?}"),
+            Self::UnknownShipParam { param_index } => format!("the build does not know the ship {param_index:?}"),
+            Self::UnknownKind { index } => format!("there is no event kind {index}"),
+            Self::NothingToRender => "there is no replay to render".to_owned(),
+            Self::UnknownEntity { entity_id } => format!("there is no ship with entity {entity_id:?} in this battle"),
+            Self::NoArmorToShow { entity_id } => {
+                format!("ship {entity_id} took no recorded hits, so there is no armor to show")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for RendererError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.user_text())
+    }
 }
 
 /// Why a replay's battle could not be read for drawing.

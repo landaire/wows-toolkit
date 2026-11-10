@@ -14,9 +14,7 @@ use crate::models;
 use crate::pow::PowChallenge;
 use crate::pow::PowError;
 use crate::pow::PowSolution;
-use crate::pow::{
-    self,
-};
+use crate::pow::{self};
 use crate::realm::AccountRealm;
 use crate::session::StoredSession;
 use crate::token::AccessToken;

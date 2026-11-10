@@ -12,3 +12,8 @@ pub fn reset_panels() {
         state.pen_open = false;
     });
 }
+
+/// Takes the ship asked for before the ship data loaded, by its param index.
+pub fn take_pending_ship() -> Option<String> {
+    state::update(|state| state.take_pending_open())
+}

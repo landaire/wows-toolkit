@@ -14,6 +14,7 @@ test-support = ["wows-toolkit-replay-data/test-support"]
 arboard = "3.6.1"
 image = { workspace = true, features = ["png"] }
 base64 = "0.22"
+clap = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 tracing = "0.1"
 tracing-appender = "0.2"
@@ -37,7 +38,6 @@ wows_replays = { path = "../wows-replays", default-features = false, features = 
 wows-core = { path = "../wows-core" }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 sqlx = { workspace = true }
-url = "2.5.8"
 wows-toolkit-armor = { path = "../wows-toolkit-armor" }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
@@ -61,6 +61,8 @@ notify = "8.2.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 #[cfg] The TSX interface runs through QuickJS.
 nsh-platform-linux = { version = "0.4.0", default-features = false, features = ["js"] }
+gdk4-x11 = { workspace = true }
+x11rb = { workspace = true }
 
 [dev-dependencies]
 wows-toolkit-launcher = { path = "../wows-toolkit-launcher", features = ["test-support"] }
@@ -69,4 +71,5 @@ nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = { version = "0.4.0", features = ["bundle"] }
 # The session state a tactics board test hands a link.
 parking_lot = "0.12"
+url = "2.5.8"
 wows-toolkit-nsh = { path = ".", default-features = false, features = ["test-support"] }
