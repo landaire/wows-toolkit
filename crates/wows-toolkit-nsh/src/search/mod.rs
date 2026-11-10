@@ -361,7 +361,7 @@ impl ReplaySearch {
 }
 
 fn copy_replay_file(path: PathBuf) -> Result<(), SearchError> {
-    crate::renderer::batch::copy_files(&[path]).map_err(|source| SearchError::Clipboard { source })
+    crate::clipboard::copy_files(&[path]).map_err(|source| SearchError::Clipboard { source })
 }
 
 fn run_search(text: &str, sort: SortSpec) -> Result<SearchPage, SearchError> {

@@ -578,7 +578,7 @@ fn start_export(session: &Arc<Session>, output: PathBuf, to_clipboard: bool) -> 
             session.update(|viewer| viewer.export_progressed(step));
         });
         let outcome = match outcome {
-            Ok(()) if to_clipboard => crate::renderer::batch::copy_files(&[output])
+            Ok(()) if to_clipboard => crate::clipboard::copy_files(&[output])
                 .map(|()| None)
                 .map_err(|reason| reason.to_string()),
             Ok(()) => Ok(Some(output.display().to_string())),

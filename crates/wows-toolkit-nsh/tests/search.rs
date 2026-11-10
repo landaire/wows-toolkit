@@ -2,6 +2,7 @@
 //! TSX bundle.
 
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -64,10 +65,37 @@ fn start() -> nsh_testing::Headless {
     nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
 }
 
+/// Takes the copies the app makes in place of the system clipboard, so no
+/// test writes the user's clipboard.
+struct RecordingClipboard {
+    copied: Mutex<Vec<Vec<std::path::PathBuf>>>,
+    refuse: AtomicBool,
+}
+
+impl RecordingClipboard {
+    fn last(&self) -> Option<Vec<std::path::PathBuf>> {
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).last().cloned()
+    }
+}
+
+impl wows_toolkit_nsh::clipboard::FileClipboard for RecordingClipboard {
+    fn copy_files(&self, files: &[std::path::PathBuf]) -> Result<(), arboard::Error> {
+        if self.refuse.load(Ordering::SeqCst) {
+            return Err(arboard::Error::ClipboardNotSupported);
+        }
+        self.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(files.to_vec());
+        Ok(())
+    }
+}
+
+static CLIPBOARD: RecordingClipboard = RecordingClipboard { copied: Mutex::new(Vec::new()), refuse: AtomicBool::new(false) };
+
 /// The app over an index holding one battle, with no saved Search state.
 fn app() -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
+    wows_toolkit_nsh::clipboard::replace(&CLIPBOARD);
+    CLIPBOARD.copied.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
     seed_index();
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
@@ -346,20 +374,29 @@ fn a_row_menu_copies_the_replay_path() {
 }
 
 #[test]
-fn a_row_menu_offers_copy_replay_and_reports_a_clipboard_failure() {
+fn a_row_menu_copies_the_replay_file() {
     let mut app = desktop_app();
-    // With no display to reach, the copy fails instead of writing the
-    // user's clipboard; the test app lock keeps other tests from racing it.
-    unsafe {
-        std::env::remove_var("DISPLAY");
-        std::env::remove_var("WAYLAND_DISPLAY");
-    }
+    CLIPBOARD.refuse.store(false, Ordering::SeqCst);
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    app.right_click(&format!("label:Open replay {}", replay().display())).unwrap();
+    app.choose_menu_item("Copy Replay").unwrap();
+    app.wait_until("the copied replay", GONE, |_| CLIPBOARD.last() == Some(vec![replay()])).unwrap();
+}
+
+#[test]
+fn a_row_menu_reports_a_clipboard_failure() {
+    let mut app = desktop_app();
+    CLIPBOARD.refuse.store(true, Ordering::SeqCst);
 
     app.press("Search").unwrap();
     app.wait_for("Harugumo").unwrap();
     app.right_click(&format!("label:Open replay {}", replay().display())).unwrap();
     app.choose_menu_item("Copy Replay").unwrap();
     app.wait_for("text:/^could not copy the replay to the clipboard: /").unwrap();
+    CLIPBOARD.refuse.store(false, Ordering::SeqCst);
+    assert_eq!(CLIPBOARD.last(), None, "a refused copy records nothing");
 }
 
 #[test]

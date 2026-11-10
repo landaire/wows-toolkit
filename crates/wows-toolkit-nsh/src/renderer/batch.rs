@@ -120,7 +120,7 @@ fn summary(outcome: &BatchOutcome, out_dir: &Path, target: BatchTarget) -> (Stri
     let written = outcome.written.len();
     let failed = outcome.failed.len();
     if target == BatchTarget::Clipboard && written > 0 {
-        return match copy_files(&outcome.written) {
+        return match crate::clipboard::copy_files(&outcome.written) {
             Ok(()) => (t!("ui.replay.renderer.batch_copied", written = written).into_owned(), failed > 0),
             Err(err) => (
                 t!("ui.replay.renderer.batch_not_copied", dir = out_dir.display().to_string(), reason = err.to_string())
@@ -134,10 +134,4 @@ fn summary(outcome: &BatchOutcome, out_dir: &Path, target: BatchTarget) -> (Stri
     }
 
     (t!("ui.replay.renderer.batch_finished", written = written, failed = failed).into_owned(), true)
-}
-
-/// Puts files on the clipboard as a file list, so they paste into a file
-/// manager rather than as their paths.
-pub fn copy_files(files: &[PathBuf]) -> Result<(), arboard::Error> {
-    arboard::Clipboard::new().and_then(|mut board| board.set().file_list(files))
 }
