@@ -164,6 +164,10 @@ struct BindingGeneration(u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GameDataRevision(u64);
 
+/// How many index passes have finished. Compared, never read for its value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IndexPassCount(u64);
+
 /// Numbers the job reports in the order they were made, so the interface
 /// says each one once.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -236,6 +240,7 @@ struct IndexState {
     outcome: Option<IndexOutcome>,
     /// Directories waiting for a pass while one runs.
     queued: Vec<QueuedPass>,
+    finished: IndexPassCount,
 }
 
 #[derive(Clone)]
@@ -401,6 +406,11 @@ pub fn status() -> GameDataState {
     state().status.clone()
 }
 
+/// How many index passes have finished: the index changes when one does.
+pub fn index_passes() -> IndexPassCount {
+    state().index.finished
+}
+
 /// The configured World of Warships directory.
 pub fn wows_dir() -> Option<PathBuf> {
     ensure_started();
@@ -466,8 +476,8 @@ pub fn start_indexing(mode: IndexMode) -> bool {
 }
 
 fn index_install(mode: IndexMode, origin: IndexOrigin) -> bool {
-    let Some(wows_dir) = wows_dir() else { return false };
-    queue_index(QueuedPass { root: wows_dir.join("replays"), mode, origin });
+    let Some(root) = replays_dir() else { return false };
+    queue_index(QueuedPass { root, mode, origin });
 
     true
 }
@@ -551,7 +561,7 @@ fn rebind() -> Result<(), GameDataError> {
 
 /// Loads the installed build and folds the outcome into the status, then runs
 /// the work that waits for it: pruning the per-build caches nothing opens and
-/// the index pass a stale index asks for.
+/// the index pass over the game's replay directory.
 fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: BindingGeneration) {
     let outcome = wows_toolkit_replay_data::load::preload_current_build(&wows_dir, &cache);
     let current = update(|state| {
@@ -564,26 +574,35 @@ fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: BindingGeneratio
         }
         current
     });
-    if !current || outcome.is_err() {
+    if !current {
+        return;
+    }
+    if let Err(error) = &outcome {
+        log::warn!("game data: the installed build did not load: {}", crate::shell::chain(error));
         return;
     }
 
     let dump_base = state().binding.as_ref().and_then(|binding| cache::base(&binding.settings.cache_dir));
     wows_toolkit_replay_data::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
 
-    // Rows written by an older parse than this one are read again, as the
-    // GPUI app does on the same check.
-    let root = wows_dir.join("replays");
+    // Waits for the installed build: a pass over a broken install would add
+    // every replay to the unreadable ledger, which a later pass skips. Rows an
+    // older parse wrote are read again by the same pass, which then reports.
+    let root = wows_toolkit_replay_data::load::resolve_replays_dir(&wows_dir);
     let stale = with_database(|runtime, pool| {
         runtime
             .block_on(wows_toolkit_config::index::query::has_stale_replay_records(pool, &root))
             .map_err(GameDataError::Index)
     });
-    match stale {
-        Ok(true) => queue_index(QueuedPass { root, mode: IndexMode::FillGaps, origin: IndexOrigin::Requested }),
-        Ok(false) => {}
-        Err(error) => log::warn!("replay index revision could not be checked: {}", crate::shell::chain(&error)),
-    }
+    let origin = match stale {
+        Ok(true) => IndexOrigin::Requested,
+        Ok(false) => IndexOrigin::Background,
+        Err(error) => {
+            log::warn!("replay index revision could not be checked: {}", crate::shell::chain(&error));
+            IndexOrigin::Background
+        }
+    };
+    queue_index(QueuedPass { root, mode: IndexMode::FillGaps, origin });
 }
 
 /// Once per process: tidy the game-data cache, load the personal-rating table
@@ -761,10 +780,21 @@ fn run_index(pass: QueuedPass, cancel: Arc<AtomicBool>) {
         (Ok(_), true) => JobReportLevel::Warn,
         (Ok(_), false) => JobReportLevel::Ok,
     };
+    match &built {
+        Ok(IndexPass { progress, .. }) => log::info!(
+            "replay index: {}: {} indexed, {} skipped, {} could not be read",
+            root.display(),
+            progress.indexed,
+            progress.skipped,
+            progress.failed
+        ),
+        Err(error) => log::warn!("replay index: {} was not indexed: {}", root.display(), crate::shell::chain(error)),
+    }
 
     let next = update(|state| {
         state.index.cancel = None;
         state.index.progress = None;
+        state.index.finished = IndexPassCount(state.index.finished.0.wrapping_add(1));
         if origin == IndexOrigin::Requested {
             report(state, level, outcome.text.clone());
         }

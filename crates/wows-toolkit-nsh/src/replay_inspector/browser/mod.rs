@@ -45,6 +45,7 @@ use wows_toolkit_viewmodel::theme::DARK_SEMANTIC;
 use wows_toolkit_viewmodel::theme::LIGHT_SEMANTIC;
 
 use crate::game_data::GameDataState;
+use crate::game_data::IndexPassCount;
 use crate::icons::Icon;
 use crate::icons::icon;
 use crate::replay_inspector::constants::BuildNumber;
@@ -236,6 +237,17 @@ impl ScanGeneration {
     }
 }
 
+/// Counts the reads of the index, so a read that finishes after a later one
+/// cannot write over its summaries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SummaryRead(u64);
+
+impl SummaryRead {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 impl GameView {
     fn same_naming(&self, other: &Self) -> bool {
         let same_current = match (&self.current, &other.current) {
@@ -246,6 +258,13 @@ impl GameView {
 
         same_current && self.has_cache == other.has_cache
     }
+}
+
+/// One read of the game-data service.
+struct ServiceLook {
+    status: GameDataState,
+    has_cache: bool,
+    index_passes: IndexPassCount,
 }
 
 /// The listing's state and what acts on it. `Copy`: handles only, so every
@@ -268,6 +287,7 @@ struct Browser {
     /// The install, for "Open in Game", whatever directory is listed.
     wows_dir: Stored<Option<PathBuf>>,
     generation: Stored<ScanGeneration>,
+    summary_read: Stored<SummaryRead>,
     /// Held because dropping it stops the watch.
     watcher: Stored<Option<RecommendedWatcher>>,
     hovered: Stored<Option<PathBuf>>,
@@ -297,6 +317,7 @@ pub fn ReplayBrowser(props: ReplayBrowserProps, cx: Scope<ReplayBrowserEvent>) -
         game: signal_with(GameView::default(), SignalEquals::Never),
         wows_dir: stored(None),
         generation: stored(ScanGeneration::default()),
+        summary_read: stored(SummaryRead::default()),
         watcher: stored(None),
         hovered: stored(None),
         focused: signal(false),
@@ -444,6 +465,10 @@ impl Browser {
     /// Reads what the replay index knows about the listed files: one query
     /// over the live source rather than one per row.
     fn load_summaries(self) {
+        let read = self.summary_read.with(|read| {
+            *read = read.next();
+            *read
+        });
         self.owner.run(|| {
             spawn(async move {
                 let loaded = blocking(|| {
@@ -458,6 +483,8 @@ impl Browser {
                 .await;
 
                 match loaded {
+                    // A later read is under way, and what it reads is newer.
+                    Ok(Ok(_)) if self.summary_read.get() != read => {}
                     Ok(Ok(summaries)) => self.listing.update(|listing| listing.set_summaries(summaries)),
                     Ok(Err(err)) => tracing::warn!("replay listing: the index summaries could not be read: {err}"),
                     Err(err) => tracing::warn!("replay listing: the index summaries did not load: {err}"),
@@ -497,18 +524,26 @@ impl Browser {
         });
     }
 
-    /// Names the rows against the game data as it loads and changes.
+    /// Names the rows against the game data as it loads and changes, and
+    /// reads the index again when a pass over it finishes.
     fn follow_game_data(self) {
         spawn(async move {
             let mut changes = crate::game_data::changes();
+            let mut passes_seen = None;
             loop {
-                let seen = blocking(|| {
-                    let status = crate::game_data::status();
-                    let has_cache = crate::game_data::cache().is_some();
-                    (status, has_cache)
+                let seen = blocking(|| ServiceLook {
+                    status: crate::game_data::status(),
+                    has_cache: crate::game_data::cache().is_some(),
+                    index_passes: crate::game_data::index_passes(),
                 })
                 .await;
-                let Ok((status, has_cache)) = seen else { return };
+                let Ok(ServiceLook { status, has_cache, index_passes }) = seen else { return };
+
+                // The first look only notes the count: the scan reads the index.
+                if passes_seen.is_some_and(|before| before != index_passes) {
+                    self.load_summaries();
+                }
+                passes_seen = Some(index_passes);
 
                 let next = match status {
                     GameDataState::Ready(loaded) => GameView { current: Some(loaded), has_cache, loading: None },

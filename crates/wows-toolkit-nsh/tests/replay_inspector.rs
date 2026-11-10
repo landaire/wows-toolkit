@@ -4,6 +4,7 @@
 
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::sync::Mutex;
@@ -12,6 +13,13 @@ use std::time::Duration;
 
 use nsh_core::Points;
 use nsh_core::Size;
+use wows_core::game_types::AccountId;
+use wows_core::game_types::ArenaId;
+use wows_core::game_types::GameParamId;
+use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::ObjectiveMatch;
+use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_viewmodel::settings::keys;
 
 const FIRST: &str = "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay";
@@ -39,7 +47,40 @@ impl Drop for TestDirectory {
 
 struct TestApp {
     app: nsh_testing::Headless,
+    /// Dropped before the lock, so the next test starts without it.
+    _install: Option<InstallSettings>,
     _guard: MutexGuard<'static, ()>,
+}
+
+/// A WoWs directory and autoload choice saved in the settings and bound by
+/// the game-data service, both put back when dropped: the other tests start
+/// with no WoWs directory.
+struct InstallSettings {
+    /// The stored autoload JSON before, `None` when it was never written.
+    autoload_before: Option<serde_json::Value>,
+}
+
+impl InstallSettings {
+    fn bind(install: &Path, autoload: bool) -> Self {
+        let autoload_before = stored(keys::AUTO_LOAD_LATEST_REPLAY);
+        save_setting(keys::WOWS_DIR, &install.display().to_string());
+        save_setting(keys::AUTO_LOAD_LATEST_REPLAY, &autoload);
+        wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
+        Self { autoload_before }
+    }
+}
+
+impl Drop for InstallSettings {
+    fn drop(&mut self) {
+        save_setting(keys::WOWS_DIR, &String::new());
+        match &self.autoload_before {
+            Some(value) => save_setting(keys::AUTO_LOAD_LATEST_REPLAY, value),
+            None => forget_setting(keys::AUTO_LOAD_LATEST_REPLAY),
+        }
+        if let Err(error) = wows_toolkit_nsh::game_data::reload_settings() {
+            eprintln!("the restored settings were not read: {error}");
+        }
+    }
 }
 
 impl Deref for TestApp {
@@ -93,6 +134,24 @@ fn stored(key: &str) -> Option<serde_json::Value> {
     })
 }
 
+fn save_setting<T: serde::Serialize>(key: &str, value: &T) {
+    runtime().block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+        wows_toolkit_config::queries::set_setting(&pool, key, value).await.expect("the setting is saved");
+    });
+}
+
+fn forget_setting(key: &str) {
+    runtime().block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+        sqlx::query("DELETE FROM settings WHERE key = ?1")
+            .bind(key)
+            .execute(&pool)
+            .await
+            .expect("the setting is forgotten");
+    });
+}
+
 fn registries() -> Vec<nsh_core::element::Registry> {
     vec![nsh_base::registry(), wows_toolkit_nsh::registry()]
 }
@@ -109,7 +168,77 @@ fn app() -> TestApp {
     wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
-    TestApp { app, _guard: guard }
+    TestApp { app, _install: None, _guard: guard }
+}
+
+/// A WoWs directory with no installed builds and `replays` in its replay
+/// directory.
+fn install_with(name: &str, replays: &[&str]) -> TestDirectory {
+    let install = TestDirectory::new(name);
+    std::fs::create_dir(install.0.join("bin")).expect("the bin directory is created");
+    let dir = install.0.join("replays");
+    std::fs::create_dir(&dir).expect("the replays directory is created");
+    for replay in replays {
+        std::fs::copy(fixture(replay), dir.join(replay)).expect("the fixture replay is copied");
+    }
+    install
+}
+
+/// The app over `install`'s replays, every replay it opens read as the
+/// sample report. The download offer for the replays' builds is declined; a
+/// build is offered once per process, so each test lists builds of its own.
+fn app_with_install(install: &Path, autoload: bool) -> TestApp {
+    let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    configure_test_storage();
+    wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
+    let settings = InstallSettings::bind(install, autoload);
+    let mut app = start();
+    app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
+    let mut app = TestApp { app, _install: Some(settings), _guard: guard };
+
+    app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
+    app.press("Cancel").unwrap();
+    app.wait_for_gone("Download Game Data", GONE).unwrap();
+    app
+}
+
+/// Writes an index row for `replay` in the live source, as a pass that read
+/// it would.
+fn index_row_for(replay: &Path) {
+    runtime().block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+        let now = jiff::Timestamp::now();
+        let arena_id = ArenaId::new(982_003);
+        let root = replay.parent().expect("the replay is in a directory");
+        let source = query::ensure_default_source(&pool, root, now).await.expect("the live source exists");
+        let objective = ObjectiveMatch {
+            arena_id,
+            timestamp: now,
+            map: "Atoll".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(1234),
+        };
+        query::upsert_match(&pool, &objective).await.expect("the match is written");
+        let record = ReplayRecord {
+            arena_id,
+            source_id: source,
+            replay_path: replay.to_path_buf(),
+            file_mtime: Some(now.as_second()),
+            outcome: MatchOutcome::Win,
+            self_account_id: Some(AccountId(99_011)),
+            self_ship_id: Some(GameParamId::from(999u64)),
+            self_survived: Some(true),
+            self_damage: Some(123_456),
+            self_kills: Some(2),
+            self_pr: None,
+            results_available: true,
+            indexed_at: now,
+        };
+        query::upsert_record(&pool, &record).await.expect("the replay record is written");
+    });
 }
 
 /// Makes the surface a Linux desktop's, which right-clicks and file drops need.
@@ -419,4 +548,21 @@ fn a_rating_table_that_loads_later_rates_the_open_replay() {
     );
     app.wait_for("text:/PR: /").unwrap();
     app.wait_for(SAMPLE_TITLE).unwrap();
+}
+
+/// A finished index pass reads the index again, so a listed replay the index
+/// now holds stops reading as not indexed.
+#[test]
+fn the_listing_reads_the_index_again_after_a_pass() {
+    const REPLAY: &str = "20241112_172819_PFSC510-Colbert_44_Path_warrior.wowsreplay";
+
+    let install = install_with("index-pass", &[REPLAY]);
+    let mut app = app_with_install(&install.0, false);
+    app.wait_for("text:/not indexed/").unwrap();
+
+    index_row_for(&install.0.join("replays").join(REPLAY));
+    app.press_key("mod+k").unwrap();
+    app.press("Index All Replays").unwrap();
+    app.wait_for_within("text:/^Indexed 0 replays, 1 were already in/", Duration::from_secs(30)).unwrap();
+    app.wait_for_gone("text:/not indexed/", GONE).unwrap();
 }
