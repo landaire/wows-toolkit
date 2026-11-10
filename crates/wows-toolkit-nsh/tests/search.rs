@@ -41,7 +41,21 @@ static TEST_STORAGE: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
 });
 
 fn configure_test_storage() {
+    use wows_toolkit_viewmodel::settings::keys;
+
     wows_toolkit_config::storage_override::set(TEST_STORAGE.clone());
+
+    // The first-run questions would stand in front of the tab, and the startup
+    // update check would ask the network and open its dialog whenever it is
+    // answered.
+    with_test_database(async |pool| {
+        for key in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
+            wows_toolkit_config::queries::set_setting_raw(pool, key, "true").await.expect("a question is answered");
+        }
+        wows_toolkit_config::queries::set_setting_raw(pool, keys::CHECK_FOR_UPDATES, "false")
+            .await
+            .expect("the startup update check is off");
+    });
 }
 
 fn registries() -> Vec<nsh_core::element::Registry> {
@@ -200,6 +214,34 @@ fn seed_index() {
             .expect("the searchable replay record is written");
         },
     );
+}
+
+/// Runs `work` against the test database.
+fn with_test_database<T>(work: impl AsyncFnOnce(&sqlx::SqlitePool) -> T) -> T {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            work(&pool).await
+        },
+    )
+}
+
+/// Waits until the stored locale row holds `json`.
+fn wait_for_saved_locale(app: &mut TestApp, json: &str) {
+    let saved = || {
+        with_test_database(async |pool| {
+            sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'locale'")
+                .fetch_optional(pool)
+                .await
+                .expect("the settings table reads")
+        })
+    };
+    let deadline = std::time::Instant::now() + GONE;
+    while saved().as_deref() != Some(json) {
+        assert!(std::time::Instant::now() < deadline, "the locale row was not saved; saved: {:?}", saved());
+        app.settle();
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]
@@ -478,13 +520,11 @@ fn a_language_change_rewords_the_rows_on_screen() {
     app.wait_for("Sieg").unwrap();
     assert!(app.shows("Harugumo"), "the same rows stay");
 
+    // The app writes the choice in the background. A reset made before that
+    // write lands is overwritten, and the next test starts in German.
+    wait_for_saved_locale(&mut app, r#""de""#);
     // The next test starts in English.
-    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
-        async {
-            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
-            wows_toolkit_config::queries::set_setting_raw(&pool, "locale", r#""en""#)
-                .await
-                .expect("the locale is reset");
-        },
-    );
+    with_test_database(async |pool| {
+        wows_toolkit_config::queries::set_setting_raw(pool, "locale", r#""en""#).await.expect("the locale is reset");
+    });
 }

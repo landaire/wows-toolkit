@@ -368,6 +368,9 @@ fn a_language_change_rewords_stats_tracker_and_search() {
     app.press("text:/^(Search|Suche)$/").unwrap();
     app.wait_for("id:search-run >> text:Suche").unwrap();
 
+    // The app writes the choice in the background. A reset made before that
+    // write lands is overwritten, and the next test starts in German.
+    wait_for_setting(&mut app, "locale", |value| value == r#""de""#);
     // The next test starts in English.
     with_test_database(async |pool| {
         wows_toolkit_config::queries::set_setting_raw(pool, "locale", r#""en""#).await.expect("the locale is reset");

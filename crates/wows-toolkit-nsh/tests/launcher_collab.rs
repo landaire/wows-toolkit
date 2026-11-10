@@ -52,11 +52,33 @@ fn app() -> TestApp {
     app_after(|| {})
 }
 
+/// Answers the first-run questions, which would stand in front of the tab,
+/// and turns off the startup update check, which would ask the network and
+/// open its dialog whenever it is answered.
+fn answer_startup_questions() {
+    use wows_toolkit_viewmodel::settings::keys;
+
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+            for key in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
+            }
+            wows_toolkit_config::queries::set_setting_raw(&pool, keys::CHECK_FOR_UPDATES, "false")
+                .await
+                .expect("the startup update check is off");
+        },
+    );
+}
+
 /// Starts the app once `prepare` has run against the test settings database,
 /// under the same lock, so no other test changes the database in between.
 fn app_after(prepare: impl FnOnce()) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     wows_toolkit_config::storage_override::set(test_storage().to_path_buf());
+    answer_startup_questions();
     prepare();
     let entry = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
     let mut app = nsh_testing::tsx(&entry, registries()).expect("the TSX app starts");

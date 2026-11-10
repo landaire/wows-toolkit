@@ -41,6 +41,27 @@ fn start() -> nsh_testing::Headless {
     nsh_testing::tsx(&entry, registries()).expect("the TSX app starts")
 }
 
+/// Answers the first-run questions, which would stand in front of the
+/// inspector, and turns off the startup update check, which would ask the
+/// network and open its dialog whenever it is answered.
+fn answer_startup_questions() {
+    use wows_toolkit_viewmodel::settings::keys;
+
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            for key in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
+                wows_toolkit_config::queries::set_setting_raw(&pool, key, "true")
+                    .await
+                    .expect("a question is answered");
+            }
+            wows_toolkit_config::queries::set_setting_raw(&pool, keys::CHECK_FOR_UPDATES, "false")
+                .await
+                .expect("the startup update check is off");
+        },
+    );
+}
+
 /// The app, every replay the inspector opens read as the sample report, so a
 /// renderer can be asked for without a game install.
 fn app() -> TestApp {
@@ -49,6 +70,7 @@ fn app() -> TestApp {
     let _ = std::fs::remove_dir_all(&storage);
     std::fs::create_dir(&storage).expect("the test settings directory is created");
     wows_toolkit_config::storage_override::set(storage);
+    answer_startup_questions();
     wows_toolkit_nsh::replay_inspector::test_support::read_replays_as_sample();
     let mut app = start();
     app.set_viewport(Size::new(Points(1400.0), Points(1000.0))).expect("the desktop viewport is applied");
