@@ -1757,9 +1757,8 @@ impl ArmorScene {
     /// A key went down. `key` is a lowercase key name; `command` is Ctrl (Cmd
     /// on macOS). Returns what the pane around the viewport should do.
     pub fn key_down(&mut self, key: &str, command: bool, shift: bool) -> Option<PaneCommand> {
-        if self.gpu.is_none() {
-            return None;
-        }
+        self.gpu.as_ref()?;
+
         if command {
             match key {
                 "s" => return Some(PaneCommand::ToggleOptions),

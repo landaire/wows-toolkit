@@ -43,9 +43,6 @@ pub fn storage_dir() -> Option<PathBuf> {
     if let Some(chosen) = storage_override::get() {
         return Some(chosen);
     }
-    // A test build that reaches the platform directory would read and write
-    // the running user's own database.
-    assert!(!cfg!(feature = "test-support"), "storage_dir called in a test-support build before storage_override::set");
 
     #[cfg(target_os = "windows")]
     {
@@ -102,8 +99,11 @@ pub mod storage_override {
         let _ = CHOSEN.set(dir);
     }
 
+    /// A test build that reached the platform directory would read and write
+    /// the running user's own database, so an unset override panics.
     pub(crate) fn get() -> Option<PathBuf> {
-        CHOSEN.get().cloned()
+        let chosen = CHOSEN.get().expect("storage_dir called in a test-support build before storage_override::set");
+        Some(chosen.clone())
     }
 }
 

@@ -305,8 +305,7 @@ mod tests {
 
     #[test]
     fn leaving_hides_the_token_again() {
-        let mut collab = CollabState::default();
-        collab.token_revealed = true;
+        let mut collab = CollabState { token_revealed: true, ..CollabState::default() };
 
         collab.leave();
 
