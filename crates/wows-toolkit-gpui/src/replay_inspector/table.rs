@@ -1658,12 +1658,19 @@ fn row_actions(
         build_actions_menu(menu, &row, debug, entity.clone(), MenuOrigin::RowDots, cx)
     });
 
+    // The full height of the row, with the dots centred on it like the cells
+    // beside them; an expanded row's cells start at its top instead, so there
+    // the dots sit on the first line, under the same padding as the row.
     div()
         .absolute()
-        .inset_0()
+        .top_0()
+        .bottom_0()
         .left(px((name_edge - ROW_ACTIONS_WIDTH).max(0.)))
         .w(px(ROW_ACTIONS_WIDTH))
-        .h(px(ROW_ACTIONS_WIDTH))
+        .flex()
+        .flex_col()
+        .items_center()
+        .map(|el| if layout.is_expanded { el.justify_start().pt_0p5() } else { el.justify_center() })
         .invisible()
         .group_hover(group, |this| this.visible())
         .child(menu_button)
@@ -2182,6 +2189,59 @@ mod tests {
             cx.update(|cx| table.read(cx).width_of(ship)) > ship_before,
             "the ship column's grip was in reach and the drag widened it"
         );
+    }
+
+    /// The row's dots sit on the row's centre line, as the cells beside them
+    /// do, rather than hanging from its top edge.
+    #[gpui_kit::test]
+    fn the_row_dots_are_centred_on_the_row(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let row = window.find(0usize).bounds();
+            let dots = window.find(("replay-row-actions", 0usize)).bounds();
+            let offset = (row.center().y - dots.center().y).abs();
+            assert!(offset <= px(0.5), "the dots sit {offset:?} off the row's centre line");
+        })
+        .expect("the window is open");
+    }
+
+    /// An expanded row is taller than its first line, and its cells start at
+    /// its top: the dots stay on that first line instead of drifting to the
+    /// middle of the detail below it.
+    #[gpui_kit::test]
+    fn an_expanded_rows_dots_stay_on_its_first_line(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
+            let mut model = two_row_model();
+            // Damage events give the Name column detail several lines tall.
+            for row in &mut model.rows {
+                row.fires = Some(3);
+                row.floods = Some(1);
+                row.citadels = Some(2);
+                row.crits = Some(4);
+            }
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(model, vfs, false, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("replay-row-caret", 0usize), cx);
+            window.render_frame(cx);
+            let row = window.find(0usize).bounds();
+            let dots = window.find(("replay-row-actions", 0usize)).bounds();
+            assert!(row.size.height > dots.size.height * 2., "the expanded row shows its detail");
+            // Centred on a row over twice their height, the dots would sit
+            // more than half their height down.
+            assert!(
+                dots.top() - row.top() < dots.size.height / 2.,
+                "the dots sit {:?} below the row's top",
+                dots.top() - row.top()
+            );
+        })
+        .expect("the window is open");
     }
 
     /// A column follows its content until the reader sets its width, and then
