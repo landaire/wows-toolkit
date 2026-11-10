@@ -194,16 +194,17 @@ impl StatsChartPanel {
 
         let rendered =
             plot_image::render(&plot, plot::colors(cx), plot_image::COPY_BACKGROUND, width, height, 1.0);
-        let Some((width, height, mut pixels)) = rendered else {
+        let Some(mut image) = rendered else {
             crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
             return;
         };
-        plot_image::unpremultiply(&mut pixels);
+        plot_image::unpremultiply(&mut image.rgba);
 
         // GPUI's clipboard carries no image format, so this goes through
         // `arboard` directly, as the file-list copy in the replay browser
         // does.
-        let image = arboard::ImageData { width: width as usize, height: height as usize, bytes: pixels.into() };
+        let image =
+            arboard::ImageData { width: image.width as usize, height: image.height as usize, bytes: image.rgba.into() };
         match arboard::Clipboard::new().and_then(|mut board| board.set_image(image)) {
             Ok(()) => crate::toast::ok(t!("ui.stats.copy_image_done").into_owned(), window, cx),
             Err(err) => {

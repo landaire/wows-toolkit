@@ -22,6 +22,7 @@ pub fn reveal(path: &Path, prepare: impl FnOnce(&mut Command)) -> std::io::Resul
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let mut command = {
         let mut command = Command::new("xdg-open");
+        // A path with no parent is a root, which is opened itself.
         command.arg(path.parent().unwrap_or(path));
         command
     };

@@ -22,7 +22,27 @@ pub const VALUE_LIMIT: i64 = 50;
 #[derive(Debug, thiserror::Error)]
 pub enum ValueLookupError {
     #[error("the {catalogue} lookup failed: {source}")]
-    Index { catalogue: &'static str, source: wows_toolkit_config::index::rows::IndexError },
+    Index { catalogue: ValueCatalogue, source: wows_toolkit_config::index::rows::IndexError },
+}
+
+/// Which index catalogue a value lookup reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueCatalogue {
+    Player,
+    Ship,
+    Map,
+    Source,
+}
+
+impl std::fmt::Display for ValueCatalogue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Player => "player",
+            Self::Ship => "ship",
+            Self::Map => "map",
+            Self::Source => "source",
+        })
+    }
 }
 
 /// A battle result as the table reads it.
@@ -83,9 +103,10 @@ pub async fn look_up_values(
     let options = match request {
         ValueRequest::Players { needle } => query::search_players(pool, needle, VALUE_LIMIT)
             .await
-            .map_err(|source| ValueLookupError::Index { catalogue: "player", source })?
+            .map_err(|source| ValueLookupError::Index { catalogue: ValueCatalogue::Player, source })?
             .iter()
             .map(|facet| ValueOption {
+                // The index stores a player with no clan as an empty clan tag.
                 label: if facet.clan.is_empty() {
                     facet.latest_name.clone()
                 } else {
@@ -96,19 +117,19 @@ pub async fn look_up_values(
             .collect(),
         ValueRequest::Ships { needle } => query::search_ships(pool, needle, VALUE_LIMIT)
             .await
-            .map_err(|source| ValueLookupError::Index { catalogue: "ship", source })?
+            .map_err(|source| ValueLookupError::Index { catalogue: ValueCatalogue::Ship, source })?
             .iter()
             .map(|facet| ValueOption { label: facet.ship_name.clone(), token: facet.ship_id.raw().to_string() })
             .collect(),
         ValueRequest::Maps => query::distinct_maps(pool, VALUE_LIMIT)
             .await
-            .map_err(|source| ValueLookupError::Index { catalogue: "map", source })?
+            .map_err(|source| ValueLookupError::Index { catalogue: ValueCatalogue::Map, source })?
             .iter()
             .map(|name| ValueOption { label: name.clone(), token: query_text::quote_if_needed(name) })
             .collect(),
         ValueRequest::Sources => query::list_sources(pool)
             .await
-            .map_err(|source| ValueLookupError::Index { catalogue: "source", source })?
+            .map_err(|source| ValueLookupError::Index { catalogue: ValueCatalogue::Source, source })?
             .iter()
             .map(|source| ValueOption { label: source.name.clone(), token: source.id.0.to_string() })
             .collect(),

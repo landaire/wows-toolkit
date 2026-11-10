@@ -147,7 +147,7 @@ pub struct ReplayInspectorView {
     open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
     /// The viewports onto battles the session is playing elsewhere, keyed by the
     /// window each draws, so a second ask brings the open one forward.
-    watched: HashMap<u64, WeakEntity<crate::watched_playback::WatchedPlayback>>,
+    watched: HashMap<wt_collab_client::ids::ReplayId, WeakEntity<crate::watched_playback::WatchedPlayback>>,
     install_dir: String,
     /// Held so a viewport's request for its own window still reaches this
     /// view; a dropped subscription is a silent button.
@@ -1570,7 +1570,11 @@ impl ReplayInspectorView {
         }
         let shared = self.collab.shared_windows();
         for window_id in asked {
-            let Some(found) = shared.iter().find(|one| one.replay_id == window_id).cloned() else { continue };
+            let Some(found) =
+                shared.iter().find(|one| wt_collab_client::link::WindowId::from(one.replay_id) == window_id).cloned()
+            else {
+                continue;
+            };
             self.watch_shared_window(found, window, cx);
         }
     }

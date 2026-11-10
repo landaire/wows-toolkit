@@ -25,11 +25,24 @@ use crate::twitch::Token;
 #[derive(Debug, thiserror::Error)]
 pub enum PollError {
     #[error("the stored credential was refused by Twitch: {0}")]
-    Credential(String),
+    Credential(
+        #[source]
+        Box<
+            twitch_api::twitch_oauth2::tokens::errors::ValidationError<
+                twitch_api::client::CompatError<reqwest::Error>,
+            >,
+        >,
+    ),
+    #[error("the channel {channel:?} could not be looked up: {source}")]
+    ChannelLookup {
+        channel: String,
+        #[source]
+        source: Box<twitch_api::helix::ClientRequestError<reqwest::Error>>,
+    },
     #[error("the channel {channel:?} is not one Twitch knows")]
     UnknownChannel { channel: String },
     #[error("the chatter list could not be read: {0}")]
-    Chatters(String),
+    Chatters(#[source] Box<twitch_api::helix::ClientRequestError<reqwest::Error>>),
     #[error("the observations could not be recorded: {0}")]
     Record(#[from] wows_toolkit_config::index::rows::IndexError),
 }
@@ -44,25 +57,26 @@ pub struct Session {
 impl Session {
     /// Validates `token` against Twitch and resolves which channel to watch.
     ///
-    /// An empty `channel` watches the credential's own, which is what the
-    /// egui app does: the common case is streaming under the account the
-    /// credential belongs to.
-    pub async fn open(token: &Token, channel: &str, client: reqwest::Client) -> Result<Self, PollError> {
+    /// No `channel` watches the credential's own, which is what the egui app
+    /// does: the common case is streaming under the account the credential
+    /// belongs to.
+    pub async fn open(token: &Token, channel: Option<&str>, client: reqwest::Client) -> Result<Self, PollError> {
         let client: HelixClient<'static, reqwest::Client> = HelixClient::with_client(client);
         let access = AccessToken::new(token.oauth_token().to_string());
         let token = UserToken::from_existing(&client, access, None, None)
             .await
-            .map_err(|err| PollError::Credential(err.to_string()))?;
+            .map_err(|err| PollError::Credential(Box::new(err)))?;
 
-        let channel = if channel.is_empty() {
-            token.user_id.clone()
-        } else {
-            client
-                .get_user_from_login(channel, &token)
-                .await
-                .map_err(|err| PollError::Chatters(err.to_string()))?
-                .ok_or_else(|| PollError::UnknownChannel { channel: channel.to_string() })?
-                .id
+        let channel = match channel {
+            None => token.user_id.clone(),
+            Some(channel) => {
+                client
+                    .get_user_from_login(channel, &token)
+                    .await
+                    .map_err(|source| PollError::ChannelLookup { channel: channel.to_string(), source: Box::new(source) })?
+                    .ok_or_else(|| PollError::UnknownChannel { channel: channel.to_string() })?
+                    .id
+            }
         };
 
         Ok(Self { client, token, channel })
@@ -76,7 +90,7 @@ impl Session {
     pub async fn poll_once(&self, pool: &SqlitePool, now: jiff::Timestamp) -> Result<usize, PollError> {
         let request = get_chatters::GetChattersRequest::new(&self.channel, &self.token.user_id);
         let chatters =
-            self.client.req_get(request, &self.token).await.map_err(|err| PollError::Chatters(err.to_string()))?.data;
+            self.client.req_get(request, &self.token).await.map_err(|err| PollError::Chatters(Box::new(err)))?.data;
 
         let seen_at = now.as_second();
         let observations: Vec<(String, i64)> =

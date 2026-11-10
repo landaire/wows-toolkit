@@ -317,7 +317,8 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                 .gap_1()
                 .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.collab.shared_windows").to_string()))
                 .children(shared.into_iter().map(|battle| {
-                    let replay_id = battle.replay_id;
+                    let replay_id = battle.replay_id.raw();
+                    let window_id = wt_collab_client::link::WindowId::from(battle.replay_id);
                     h_flex()
                         .id(SharedString::from(format!("collab-shared-{replay_id}")))
                         .test_support()
@@ -346,7 +347,7 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                                     .label(t!("ui.collab.open_for_everyone").to_string())
                                     .compact()
                                     .on_click(cx.listener(move |view: &mut V, _event, _window, cx| {
-                                        view.collab().link().open_for_everyone(replay_id);
+                                        view.collab().link().open_for_everyone(window_id);
                                         cx.notify();
                                     })),
                             )

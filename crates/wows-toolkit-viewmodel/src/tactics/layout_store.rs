@@ -20,31 +20,35 @@ pub enum LayoutStoreError {
         #[source]
         source: sqlx::Error,
     },
+    #[error("the capture layouts could not be read: {source}")]
+    Read {
+        #[source]
+        source: sqlx::Error,
+    },
 }
 
 /// Every recorded layout. A row that will not read is skipped and logged: the
 /// rest still offer their modes.
-pub async fn load_from_db(pool: &sqlx::SqlitePool) -> CapLayoutDb {
-    let mut db = CapLayoutDb::default();
-    let Ok(rows) = wows_toolkit_config::queries::get_all_cap_layouts(pool)
-        .await
-        .inspect_err(|err| tracing::warn!("failed to load cap layouts from SQLite: {err}"))
-    else {
-        return db;
-    };
+pub async fn load_from_db(pool: &sqlx::SqlitePool) -> Result<CapLayoutDb, LayoutStoreError> {
+    let rows =
+        wows_toolkit_config::queries::get_all_cap_layouts(pool).await.map_err(|source| LayoutStoreError::Read { source })?;
 
+    let mut db = CapLayoutDb::default();
     for (map_id, scenario_config_id, blob) in rows {
+        let (Ok(map_id), Ok(scenario_config_id)) = (u32::try_from(map_id), u32::try_from(scenario_config_id)) else {
+            tracing::warn!("skipping cap layout with out of range key ({map_id}, {scenario_config_id})");
+            continue;
+        };
         let Ok(layout) = rkyv::from_bytes::<CapLayout, rkyv::rancor::Error>(&blob).inspect_err(|err| {
             tracing::warn!("failed to deserialize cap layout ({map_id}, {scenario_config_id}): {err}")
         }) else {
             continue;
         };
-        db.layouts
-            .insert(CapLayoutKey { map_id: map_id as u32, scenario_config_id: scenario_config_id as u32 }, layout);
+        db.layouts.insert(CapLayoutKey { map_id, scenario_config_id }, layout);
     }
     tracing::info!("loaded {} cap layouts from SQLite", db.len());
 
-    db
+    Ok(db)
 }
 
 /// Writes one layout, leaving every other row as it is.

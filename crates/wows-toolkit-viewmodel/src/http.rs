@@ -23,7 +23,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// want.
 pub fn client(
     user_agent: &str,
-    proxy_url: &str,
+    proxy_url: Option<&str>,
     redirects: reqwest::redirect::Policy,
 ) -> Result<reqwest::Client, HttpError> {
     let mut builder = reqwest::Client::builder()
@@ -32,8 +32,7 @@ pub fn client(
         .read_timeout(READ_TIMEOUT)
         .redirect(redirects);
 
-    let manual = (!proxy_url.trim().is_empty()).then_some(proxy_url);
-    if let Some(config) = proxy::resolve_proxy(manual) {
+    if let Some(config) = proxy::resolve_proxy(proxy_url) {
         tracing::debug!(proxy = %config.redacted_url(), source = ?config.source, "routing through a proxy");
         let mut proxy = reqwest::Proxy::all(&config.url)
             .map_err(|source| HttpError::Proxy { url: config.redacted_url(), source })?;
@@ -46,6 +45,12 @@ pub fn client(
     }
 
     builder.build().map_err(HttpError::Build)
+}
+
+/// The manual proxy a settings field names. The settings store an unset proxy
+/// as a blank string.
+pub fn manual_proxy(setting: &str) -> Option<&str> {
+    (!setting.trim().is_empty()).then_some(setting)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -66,12 +71,12 @@ mod tests {
 
     #[test]
     fn an_unset_proxy_builds_a_direct_client() {
-        assert!(client("test", "", reqwest::redirect::Policy::none()).is_ok());
+        assert!(client("test", None, reqwest::redirect::Policy::none()).is_ok());
     }
 
     #[test]
     fn a_scheme_less_proxy_is_accepted_the_way_the_windows_dialog_stores_it() {
-        assert!(client("test", "proxy.corp:8080", reqwest::redirect::Policy::none()).is_ok());
+        assert!(client("test", Some("proxy.corp:8080"), reqwest::redirect::Policy::none()).is_ok());
     }
 
     /// A proxy the client cannot use is an error rather than a silent direct
@@ -79,7 +84,7 @@ mod tests {
     #[test]
     fn a_proxy_url_the_client_rejects_is_reported() {
         for raw in ["http://[::1", "http://user@:@host"] {
-            if let Err(error) = client("test", raw, reqwest::redirect::Policy::none()) {
+            if let Err(error) = client("test", Some(raw), reqwest::redirect::Policy::none()) {
                 assert!(matches!(error, HttpError::Proxy { .. }), "{raw} is refused as a proxy, not as a build");
                 return;
             }

@@ -97,7 +97,7 @@ impl WatchedPlayback {
         // waiting, so a depth of a few frames is a cushion against a slow raster
         // and not a queue to be played out later.
         let (tx, frames) = std::sync::mpsc::sync_channel(4);
-        let replay_id = ReplayId::new(shared.replay_id);
+        let replay_id = shared.replay_id;
         collab.watch_window(replay_id, tx);
 
         let art = shared.art_png.as_ref().and_then(|png| match image::load_from_memory(png) {
