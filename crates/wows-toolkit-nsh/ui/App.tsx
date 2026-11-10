@@ -43,7 +43,7 @@ function selectTab(id: string) {
     void loadSettings();
   }
   if (id === "statistics") activateStats();
-  if (id === "player-tracker") activatePlayerTracker();
+  if (id === "player-tracker") activatePlayerTracker(startup.locale);
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
 }
@@ -669,7 +669,14 @@ function Content() {
         <StatsView/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "player-tracker" ? "flex" : "none" }}>
-        <PlayerTrackerView/>
+        <PlayerTrackerView
+          onSearch={(query) => {
+            searchQuery.set(query);
+            selectTab("search");
+            void runSearch();
+          }}
+          onNotice={showNotice}
+        />
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "search" ? "flex" : "none" }}>
         <SearchView/>
