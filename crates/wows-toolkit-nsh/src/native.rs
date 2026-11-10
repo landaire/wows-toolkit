@@ -1,35 +1,18 @@
 use nsh_core::prelude::*;
-use rust_i18n::Backend as _;
 use wows_toolkit_viewmodel::settings::keys;
 
-/// One top-level application tab.
+use crate::icons::Icon;
+
+/// One fixed top-level application tab.
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct AppTab {
     /// Stable tab identifier.
     pub id: String,
-    /// Text shown in the tab strip.
-    pub label: String,
-    /// Short description shown in navigation search.
-    pub description: String,
-}
-
-/// Localized text used by the application shell.
-#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
-#[non_exhaustive]
-pub struct ShellText {
-    /// Label for the tactics board command.
-    pub tactics_board: String,
-    /// Label for the update command.
-    pub check_updates: String,
-    /// Label for the about command.
-    pub about: String,
-    /// Label for the quit command.
-    pub quit: String,
-    /// Label for opening a replay.
-    pub open_replay: String,
-    /// Message shown after an update check finds nothing.
-    pub app_up_to_date: String,
+    /// Catalog key of the tab's label, read in the current language on each draw.
+    pub label_key: String,
+    /// The glyph before the label, as GPUI's `AppTab::glyph`.
+    pub icon: Icon,
 }
 
 /// State required before the first application frame.
@@ -42,9 +25,7 @@ pub struct StartupState {
     pub version: String,
     /// Selected locale code.
     pub locale: String,
-    /// Localized shell text.
-    pub text: ShellText,
-    /// Top-level tabs in display order.
+    /// Fixed top-level tabs in display order.
     pub tabs: Vec<AppTab>,
 }
 
@@ -62,34 +43,19 @@ impl Toolkit {
             wows_toolkit_config::load_startup_setting::<Option<String>>(keys::LOCALE).ok().flatten().flatten()
         });
         let locale = selected_locale(persisted);
-        let backend = wt_translations::TranslationsBackend::load();
-        // The English text stands in for a key the locale lacks.
-        let text = |key: &str, fallback: &str| backend.translate(&locale, key).unwrap_or(fallback).to_owned();
         StartupState {
             title: "WoWs Toolkit".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            locale: locale.clone(),
-            text: ShellText {
-                tactics_board: text("ui.windows.tactics_board", "Tactics Board"),
-                check_updates: text("ui.menu.check_updates", "Check for Updates"),
-                about: text("ui.menu.about", "About"),
-                quit: text("ui.menu.quit", "Quit"),
-                open_replay: text("ui.replay.open_file", "Open Replay File..."),
-                app_up_to_date: text("ui.messages.app_up_to_date", "Application up-to-date"),
-            },
+            locale,
             tabs: vec![
-                tab(
-                    "replay-inspector",
-                    &text("ui.tabs.replay_parser", "Replay Inspector"),
-                    "Open and inspect a replay",
-                ),
-                tab("launcher", &text("ui.tabs.launcher", "Launcher"), "Manage and start game installations"),
-                tab("statistics", &text("ui.tabs.stats", "Stats"), "Analyze replay statistics"),
-                tab("player-tracker", &text("ui.tabs.player_tracker", "Player Tracker"), "Track player battle results"),
-                tab("search", &text("ui.tabs.search", "Search"), "Search game data"),
-                tab("armor-viewer", &text("ui.tabs.armor_viewer", "Armor Viewer"), "Inspect ship armor models"),
-                tab("unpacker", &text("ui.tabs.unpacker", "Resource Unpacker"), "Browse and extract game files"),
-                tab("settings", &text("ui.tabs.settings", "Settings"), "Configure WoWs Toolkit"),
+                tab("replay-inspector", "ui.tabs.replay_parser", Icon::Search),
+                tab("launcher", "ui.tabs.launcher", Icon::Rocket),
+                tab("statistics", "ui.tabs.stats", Icon::ChartColumn),
+                tab("player-tracker", "ui.tabs.player_tracker", Icon::VenetianMask),
+                tab("search", "ui.tabs.search", Icon::Search),
+                tab("armor-viewer", "ui.tabs.armor_viewer", Icon::Shield),
+                tab("unpacker", "ui.tabs.unpacker", Icon::Archive),
+                tab("settings", "ui.tabs.settings", Icon::Settings),
             ],
         }
     }
@@ -105,6 +71,6 @@ fn selected_locale(requested: Option<String>) -> String {
         .unwrap_or_else(|| "en".to_owned())
 }
 
-fn tab(id: &str, label: &str, description: &str) -> AppTab {
-    AppTab { id: id.to_owned(), label: label.to_owned(), description: description.to_owned() }
+fn tab(id: &str, label_key: &str, icon: Icon) -> AppTab {
+    AppTab { id: id.to_owned(), label_key: label_key.to_owned(), icon }
 }

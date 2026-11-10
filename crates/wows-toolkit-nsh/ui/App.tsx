@@ -1,13 +1,14 @@
 import { keymap, mount, signal, Storage, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { Collab, GameData, Palette, Shell, Toolkit } from "wows-toolkit/native";
-import { EmptyState, errorMessage } from "./components";
+import { errorMessage } from "./components";
 import { colors } from "./theme";
 import { applyLocale, t } from "./i18n";
 import { loadAppSettings } from "./settings_store";
 import { SettingsView } from "./settings";
 import { AboutDialog, openAbout } from "./shell/about";
-import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, TabStrip, wowsDirInvalid } from "./shell/chrome";
+import { ApplicationMenu, applyZoom, DropScrim, hoveringFiles, wowsDirInvalid } from "./shell/chrome";
+import { hostTab, TabStrip, type TabTarget } from "./shell/tabs";
 import { CrashDialog, reportLastCrash } from "./shell/diagnostics";
 import { contributeAll, copyBugReportInfo, copyLatestLog, setTheme } from "./shell/actions";
 import { askFirstRun, FirstRunDialog } from "./shell/first_run";
@@ -19,7 +20,7 @@ import { checkForUpdate, UpdateDialog } from "./shell/update";
 import { GameDataStatus } from "./game_data";
 import { SessionButton } from "./collab";
 import { LauncherView } from "./launcher";
-import { activateStats, openDirectoryStats, StatsView } from "./stats";
+import { activateStats, openDirectoryStats, showStatsScope, StatsView } from "./stats";
 import { activatePlayerTracker, PlayerTrackerView, setPlayerTrackerShown } from "./player_tracker";
 import { bindSearchRowActions, bindSearchTab, searchFor, SearchView } from "./search";
 import { bindPalette, CommandPalette, openPalette } from "./palette";
@@ -27,10 +28,10 @@ import { openTacticsBoard, TacticsBoard } from "./tactics";
 import { UnpackerView } from "./unpacker";
 import { BatchRenderStatus, followForcedWindows, MinimapPreview, renderReplaysToVideo, ReplayRendererView, WatchedPlaybackView } from "./renderer";
 import { armorShipList, ArmorView, onArmorReveal, viewArmorShip } from "./armor";
-import { importConstants, renderInInspector, ReplayInspectorView, watchSharedWindow } from "./replay_inspector";
+import { bindWorkspaceTabs, importConstants, renderInInspector, ReplayInspectorView, showReplayWorkspace, watchSharedWindow } from "./replay_inspector";
 
 const startup = Toolkit.startup();
-const activeTab = signal(startup.tabs[0].id);
+const activeTab = signal<TabTarget>({ kind: "fixed", id: startup.tabs[0].id });
 const replayOpenPath = signal<string | null>(null);
 const replayOpenRequestId = signal(0);
 
@@ -63,12 +64,22 @@ void loadAppSettings().then((loaded) => {
 });
 
 function selectTab(id: string) {
-  if (id === "statistics") activateStats();
-  if (id === "player-tracker") activatePlayerTracker(startup.locale);
-  setPlayerTrackerShown(id === "player-tracker");
-  activeTab.set(id);
-  void Storage.setItem(STORAGE_TAB, id);
+  selectTarget({ kind: "fixed", id });
 }
+
+function selectTarget(target: TabTarget) {
+  const shown = hostTab(target);
+  if (target.kind === "fixed" && shown === "statistics") activateStats();
+  if (shown === "player-tracker") activatePlayerTracker(startup.locale);
+  setPlayerTrackerShown(shown === "player-tracker");
+  showReplayWorkspace(target.kind === "directory" ? target.path : null);
+  showStatsScope(target.kind === "directoryStats" ? target.scope : "session");
+  activeTab.set(target);
+  // Directory tabs last one run, so only a fixed tab is restored.
+  if (target.kind === "fixed") void Storage.setItem(STORAGE_TAB, target.id);
+}
+
+bindWorkspaceTabs((directory) => selectTarget(directory === null ? { kind: "fixed", id: "replay-inspector" } : { kind: "directory", path: directory }));
 
 onArmorReveal(() => selectTab("armor-viewer"));
 
@@ -134,13 +145,8 @@ bindSearchRowActions({
 });
 bindPalette({
   tabs: startup.tabs,
-  activeTab: () => activeTab(),
+  activeTab: () => hostTab(activeTab()),
   armorShips: armorShipList,
-  shellLabels: {
-    tacticsBoard: startup.text.tacticsBoard,
-    checkUpdates: startup.text.checkUpdates,
-    about: `${startup.text.about} WoWs Toolkit`,
-  },
   handlers: {
     goTo: ({ tab }) => selectTab(tab),
     advancedSearch: () => selectTab("search"),
@@ -169,10 +175,9 @@ bindPalette({
   },
 });
 
-const SHOWN_TABS = ["replay-inspector", "launcher", "statistics", "player-tracker", "search", "unpacker", "armor-viewer", "settings"];
-
 function Content() {
-  const tab = () => startup.tabs.find((candidate) => candidate.id === activeTab()) ?? startup.tabs[0];
+  // A directory shows under the inspector, a directory's stats under Stats.
+  const tab = () => ({ id: hostTab(activeTab()) });
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
@@ -191,8 +196,10 @@ function Content() {
           previewSlot={(path) => <MinimapPreview path={path}/>}
           sessionControl={() => <SessionButton onOpenTacticsBoard={openTacticsBoard} onWatchSharedWindow={(window) => watchWindow(window.replayId)}/>}
           onDirectoryStats={(path) => {
-            selectTab("statistics");
-            void openDirectoryStats(path);
+            void openDirectoryStats(path).then(
+              (scope) => selectTarget({ kind: "directoryStats", scope }),
+              (error) => toast.warn(errorMessage(error)),
+            );
           }}
         />
       </View>
@@ -217,9 +224,6 @@ function Content() {
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "settings" ? "flex" : "none" }}>
         <SettingsView/>
       </View>
-      <If when={!SHOWN_TABS.includes(tab().id)}>
-        <EmptyState title={tab().label} description={tab().description}/>
-      </If>
     </View>
   );
 }
@@ -233,10 +237,10 @@ function App() {
       style={{ flex: 1, backgroundColor: colors.background }}
     >
       <TabStrip
-        tabs={startup.tabs}
+        fixed={startup.tabs}
         active={activeTab()}
         attention={(id) => id === "settings" && wowsDirInvalid()}
-        onSelect={selectTab}
+        onSelect={selectTarget}
         menu={<ApplicationMenu onCommandPalette={openPalette} onTacticsBoard={openTacticsBoard}/>}
       />
       <View style={{ flex: 1, minHeight: 0 }}><Content/></View>
@@ -254,7 +258,7 @@ function App() {
       <UpdateDialog/>
       <CrashDialog/>
       <FirstRunDialog/>
-      <TacticsBoard title={startup.text.tacticsBoard}/>
+      <TacticsBoard title={t("ui.windows.tactics_board")}/>
       <CommandPalette/>
     </View>
   );

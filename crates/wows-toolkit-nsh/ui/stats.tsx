@@ -113,7 +113,6 @@ const session = createStatsModel("session", true);
 type DirectoryView = { model: StatsModel; status: () => DirectoryStatus; setStatus: (status: DirectoryStatus) => void };
 const directories = signal<DirectoryView[]>([]);
 const activeScope = signal("session");
-const directoryError = signal<string | null>(null);
 const sessionLoading = signal(false);
 const sessionError = signal<string | null>(null);
 const layoutError = signal<string | null>(null);
@@ -167,17 +166,12 @@ async function refreshSession() {
 }
 
 function adoptDirectory(opened: DirectoryOpened) {
-  const known = directories().find((view) => view.model.scope === opened.scope);
-  if (known) {
-    activeScope.set(opened.scope);
-    return;
-  }
+  if (directories().some((view) => view.model.scope === opened.scope)) return;
   const model = createStatsModel(opened.scope, false);
   model.setView(opened.status.view);
   model.setLayout(opened.layout);
   const status = signal(opened.status);
   directories.set([...directories(), { model, status, setStatus: (next) => status.set(next) }]);
-  activeScope.set(opened.scope);
   void followDirectory(model, status);
 }
 
@@ -194,35 +188,33 @@ async function followDirectory(model: StatsModel, status: { (): DirectoryStatus;
   }
 }
 
-/// Opens a stats view over every replay below `path`, as a replay listing's
-/// Directory Stats action asks.
-export async function openDirectoryStats(path: string) {
-  directoryError.set(null);
-  try {
-    adoptDirectory(await Stats.openDirectory(path));
-  } catch (error) {
-    directoryError.set(errorMessage(error));
-  }
+/// Opens a stats view over every replay below `path`, or finds the one open
+/// over it, as a replay listing's Directory Stats action asks. Returns its
+/// scope.
+export async function openDirectoryStats(path: string): Promise<string> {
+  const opened = await Stats.openDirectory(path);
+  adoptDirectory(opened);
+  return opened.scope;
 }
 
-async function pickDirectoryStats() {
-  directoryError.set(null);
-  try {
-    const opened = await Stats.pickDirectory();
-    if (opened) adoptDirectory(opened);
-  } catch (error) {
-    directoryError.set(errorMessage(error));
-  }
+/// The open directory views, in the order they were opened.
+export function directoryStatsTabs(): { scope: string; root: string }[] {
+  return directories().map((view) => ({ scope: view.model.scope, root: view.status().root }));
 }
 
-function closeDirectory(scope: string) {
+/// Shows `scope`: the session's stats, or an open directory's.
+export function showStatsScope(scope: string) {
+  activeScope.set(scope);
+}
+
+/// Closes a directory view, which stops its read.
+export function closeDirectoryStats(scope: string) {
   try {
     Stats.closeDirectory(scope);
   } catch (error) {
     console.warn(`The directory view could not be closed: ${errorMessage(error)}`);
   }
   directories.set(directories().filter((view) => view.model.scope !== scope));
-  if (activeScope() === scope) activeScope.set("session");
 }
 
 function showNotice(message: string) {
@@ -338,13 +330,14 @@ async function copyChartImage(model: StatsModel, id: number) {
 export function StatsView() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
+      <If when={activeScope() === "session"}>
       <If when={sessionLoading() && !session.view()}>
         <EmptyState title="Loading statistics" description="Reading recorded battles."/>
       </If>
       <If when={!sessionLoading() && sessionError() && !session.view()}>
         <EmptyState title="Statistics unavailable" description={sessionError()!} action={<Button label={text.retry} onPress={() => void openSession()}/>}/>
       </If>
-      <ScopeBar/>
+      </If>
       <View style={{ flex: 1, minHeight: 0, display: activeScope() === "session" ? "flex" : "none" }}>
         <If when={session.view()}>
           <StatsScopeView model={session} header={null}/>
@@ -367,32 +360,6 @@ export function StatsView() {
   );
 }
 
-function ScopeBar() {
-  return (
-    <View style={{ minHeight: 36, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 6, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card }}>
-      <Chip label="Session" accessibilityLabel="Session stats" selected={activeScope() === "session"} onPress={() => activeScope.set("session")}/>
-      <Each of={directories()}>
-        {(view) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-            <Chip
-              label={view().status().root.split(/[\\/]/).filter(Boolean).pop() ?? view().status().root}
-              accessibilityLabel={`Directory stats ${view().status().root}`}
-              selected={activeScope() === view().model.scope}
-              onPress={() => activeScope.set(view().model.scope)}
-            />
-            <Chip label="x" accessibilityLabel={`Close directory stats ${view().status().root}`} selected={false} onPress={() => closeDirectory(view().model.scope)}/>
-          </View>
-        )}
-      </Each>
-      <View style={{ flex: 1 }}/>
-      <If when={directoryError()}>
-        <Text style={{ fontSize: 12, color: semantic.error }}>{directoryError()}</Text>
-      </If>
-      <Button label={text.openDirectoryStats} variant="ghost" onPress={() => void pickDirectoryStats()}/>
-    </View>
-  );
-}
-
 function DirectoryHeader(props: { view: DirectoryView }) {
   const status = () => props.view.status();
   return (
@@ -411,7 +378,7 @@ function DirectoryHeader(props: { view: DirectoryView }) {
               try {
                 Stats.reloadDirectory(props.view.model.scope);
               } catch (error) {
-                directoryError.set(errorMessage(error));
+                showNotice(errorMessage(error));
               }
             }}
           />

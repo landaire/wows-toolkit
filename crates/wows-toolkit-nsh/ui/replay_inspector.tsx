@@ -3,7 +3,6 @@ import { effect, Overlay, Scroll, signal, Text, untracked, View } from "nsh";
 import {
   Button as BaseButton,
   Checkbox,
-  ContextMenu,
   DockArea,
   Editor,
   Menu,
@@ -335,14 +334,29 @@ function replayStem(path: string): string {
 
 /** Docks a session window another end is playing in the game's own workspace. */
 export function watchSharedWindow(replayId: string, title: string) {
-  activeWorkspace.set(MAIN);
   openViewport(main, { kind: "watched", replayId, title });
 }
 
 /** Docks a renderer for `path` in the game's own workspace, for search results and the palette. */
 export function renderInInspector(path: string) {
-  activeWorkspace.set(MAIN);
   openViewport(main, { kind: "renderer", path, alts: [], title: replayStem(path) });
+}
+
+/** The opened replay directories, each an app tab after the Replay Inspector's. */
+export function replayDirectories(): GameDataSnapshot["directories"] {
+  return gameData()?.directories ?? [];
+}
+
+/** Shows the listing of `directory`, or the game's own when `null`, as the app's tab selection says. */
+export function showReplayWorkspace(directory: string | null) {
+  activeWorkspace.set(directory ?? MAIN);
+}
+
+let showWorkspaceTab: (directory: string | null) => void = showReplayWorkspace;
+
+/** Has the app select the tab of a workspace the inspector brings forward: a directory just opened, or the game's own when the shown directory closes. */
+export function bindWorkspaceTabs(show: (directory: string | null) => void) {
+  showWorkspaceTab = show;
 }
 
 /**
@@ -479,7 +493,7 @@ export async function openReplayDirectoryDialog() {
     pendingDirectory = { path, known: new Set((gameData()?.directories ?? []).map((entry) => entry.path)) };
     await GameData.openDirectory(path, false);
     if ((gameData()?.directories ?? []).some((entry) => entry.path === path)) {
-      activeWorkspace.set(path);
+      showWorkspaceTab(path);
       pendingDirectory = null;
     }
   } catch (error) {
@@ -516,12 +530,12 @@ function adoptGameData(next: GameDataSnapshot) {
   }
   const changed = kept.length !== existing.size || kept.some((ws, index) => directoryWorkspaces()[index] !== ws);
   if (changed) directoryWorkspaces.set(kept);
-  if (activeWorkspace() !== MAIN && !kept.some((ws) => ws.key === activeWorkspace())) activeWorkspace.set(MAIN);
+  if (activeWorkspace() !== MAIN && !kept.some((ws) => ws.key === activeWorkspace())) showWorkspaceTab(null);
   if (pendingDirectory !== null) {
     const pending = pendingDirectory;
     const shown = next.directories.find((entry) => entry.path === pending.path) ?? next.directories.find((entry) => !pending.known.has(entry.path));
     if (shown) {
-      activeWorkspace.set(shown.path);
+      showWorkspaceTab(shown.path);
       pendingDirectory = null;
     }
   }
@@ -576,7 +590,8 @@ async function checkGameData() {
   }
 }
 
-function closeDirectory(path: string) {
+/** Closes an opened directory's tab. A pinned one stays open. */
+export function closeReplayDirectory(path: string) {
   try {
     GameData.closeDirectory(path);
   } catch (error) {
@@ -584,7 +599,7 @@ function closeDirectory(path: string) {
   }
 }
 
-async function pinDirectory(path: string, pinned: boolean) {
+export async function pinReplayDirectory(path: string, pinned: boolean) {
   try {
     await GameData.pinDirectory(path, pinned);
   } catch (error) {
@@ -1308,76 +1323,6 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
   );
 }
 
-function WorkspaceTab(props: { label: string; selected: boolean; onSelect: () => void; children?: JSX.Element }) {
-  return (
-    <View
-      role="tab"
-      accessibilityState={{ selected: props.selected }}
-      onPress={props.onSelect}
-      hoverStyle={props.selected ? undefined : { backgroundColor: colors.accent }}
-      style={{
-        height: 30,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        paddingHorizontal: 10,
-        borderBottomWidth: 2,
-        borderBottomColor: props.selected ? colors.primary : "transparent",
-      }}
-    >
-      <Text style={{ fontSize: 12.5, fontWeight: props.selected ? "600" : "400", color: props.selected ? colors.foreground : colors.mutedForeground }}>{props.label}</Text>
-      {props.children}
-    </View>
-  );
-}
-
-/** The game's replays and every opened directory, one tab each; a directory is pinned or closed from its tab. */
-function WorkspaceStrip() {
-  const entries = () => gameData()?.directories ?? [];
-  return (
-    <View role="tablist" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 2, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface }}>
-      <WorkspaceTab label={t("ui.tabs.replay_parser")} selected={activeWorkspace() === MAIN} onSelect={() => activeWorkspace.set(MAIN)}/>
-      <Each of={entries()} key={(entry) => entry.path}>
-        {(entry) => (
-          <ContextMenu
-            trigger={
-              <View tooltip={<Hint text={entry().path}/>}>
-                <WorkspaceTab label={entry().label} selected={activeWorkspace() === entry().path} onSelect={() => activeWorkspace.set(entry().path)}>
-                  <If
-                    when={entry().pinned}
-                    else={
-                      <View
-                        role="button"
-                        accessibilityLabel={`Close directory ${entry().label}`}
-                        tooltip={<Hint text="Close directory"/>}
-                        onPress={() => closeDirectory(entry().path)}
-                        hoverStyle={{ backgroundColor: colors.accent }}
-                        style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
-                      >
-                        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
-                      </View>
-                    }
-                  >
-                    <Text style={{ fontSize: 11, color: colors.mutedForeground }}>[Pinned]</Text>
-                  </If>
-                </WorkspaceTab>
-              </View>
-            }
-          >
-            <Surface style={{ minWidth: 200, padding: 5, backgroundColor: colors.popover }}>
-              <ActionItem
-                label={entry().pinned ? "Unpin directory" : "Pin directory"}
-                onSelect={() => void pinDirectory(entry().path, !entry().pinned)}
-              />
-              <ActionItem label="Close directory" disabled={entry().pinned} onSelect={() => closeDirectory(entry().path)}/>
-            </Surface>
-          </ContextMenu>
-        )}
-      </Each>
-    </View>
-  );
-}
-
 /** The Replay Inspector tab: replay listings beside docks of open replays. */
 export function ReplayInspectorView(props: ReplayInspectorProps) {
   start();
@@ -1411,17 +1356,11 @@ export function ReplayInspectorView(props: ReplayInspectorProps) {
     const path = props.openPath;
     props.openRequestId;
     if (path == null) return;
-    untracked(() => {
-      activeWorkspace.set(MAIN);
-      openReplay(main, path, false);
-    });
+    untracked(() => openReplay(main, path, false));
   });
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
-      <If when={directoryWorkspaces().length > 0}>
-        <WorkspaceStrip/>
-      </If>
       <Each of={allWorkspaces()} key={(ws) => ws.key}>
         {(ws) => (
           <View style={{ flex: 1, minHeight: 0, display: activeWorkspace() === ws().key ? "flex" : "none" }}>

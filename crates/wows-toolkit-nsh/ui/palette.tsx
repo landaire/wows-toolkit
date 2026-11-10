@@ -2,6 +2,7 @@ import { effect, keymap, signal, Text, View, windowSize } from "nsh";
 import { Command, Dialog } from "nsh/base";
 import { Palette, type AppTab, type PaletteLayer, type ShipSearch } from "wows-toolkit/native";
 import { Surface } from "./components";
+import { t } from "./i18n";
 import { searchFor } from "./search";
 import { colors, controlRadius } from "./theme";
 
@@ -49,7 +50,6 @@ let tabs: AppTab[] = [];
 let handlers: PaletteHandlers = {};
 let armorShips: (() => ShipListState) | null = null;
 let activeTab: () => string = () => "";
-let shellLabels = { tacticsBoard: "", checkUpdates: "", about: "" };
 const paletteOpen = signal(false);
 const layer = signal<Layer | null>(null);
 const query = signal("");
@@ -65,18 +65,16 @@ export function bindPalette(options: {
   handlers: PaletteHandlers;
   activeTab: () => string;
   armorShips?: () => ShipListState;
-  /** The words of the shell's own entries, which the GPUI palette has no strings for. */
-  shellLabels: { tacticsBoard: string; checkUpdates: string; about: string };
 }) {
   tabs = options.tabs;
   handlers = options.handlers;
   activeTab = options.activeTab;
   armorShips = options.armorShips ?? null;
-  shellLabels = options.shellLabels;
 }
 
+/** The palette's words in the current language; reading it in a render re-renders on a language change. */
 function text() {
-  return Palette.text(tabs.map((tab) => tab.label));
+  return Palette.text(tabs.map((tab) => t(tab.labelKey)));
 }
 
 function rootEntries(): Entry[] {
@@ -108,9 +106,10 @@ function rootEntries(): Entry[] {
   offer(words.themeSystem, { kind: "setTheme", theme: "system" });
   offer(words.themeDark, { kind: "setTheme", theme: "dark" });
   offer(words.themeLight, { kind: "setTheme", theme: "light" });
-  offer(shellLabels.tacticsBoard, { kind: "tacticsBoard" });
-  offer(shellLabels.checkUpdates, { kind: "checkUpdates" });
-  offer(shellLabels.about, { kind: "about" });
+  // The shell's own entries, which the GPUI palette has no strings for.
+  offer(t("ui.windows.tactics_board"), { kind: "tacticsBoard" });
+  offer(t("ui.menu.check_updates"), { kind: "checkUpdates" });
+  offer(`${t("ui.menu.about")} WoWs Toolkit`, { kind: "about" });
   return entries;
 }
 

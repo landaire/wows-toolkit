@@ -112,8 +112,6 @@ pub struct StatsText {
     pub copy_image_failed: String,
     pub reset_view: String,
     pub nothing_to_plot: String,
-    pub open_directory_stats: String,
-    pub open_directory_stats_tooltip: String,
     pub directory_reload: String,
 }
 
@@ -594,17 +592,6 @@ impl Stats {
         .await
     }
 
-    /// Asks for a directory and opens a stats view over every replay in it.
-    /// `None` when the dialog is dismissed.
-    pub async fn pick_directory() -> Result<Option<DirectoryOpened>, StatsError> {
-        let picked = pick_paths(nsh_core::file_dialog::OpenDialog::folders().title(text("ui.stats.open_directory_stats")).button_label("Open"))
-            .await
-            .map_err(|reason| StatsError::Dialog { reason })?;
-        let Some(root) = picked.and_then(|mut paths| paths.pop()) else { return Ok(None) };
-
-        off_thread(move || open_directory(root).map(Some)).await
-    }
-
     /// Opens a stats view over every replay in `path`, as a replay listing's
     /// Directory Stats button does.
     pub async fn open_directory(path: String) -> Result<DirectoryOpened, StatsError> {
@@ -748,8 +735,6 @@ fn stats_text() -> StatsText {
         copy_image_failed: text("ui.stats.copy_image_failed"),
         reset_view: text("ui.stats.reset_view"),
         nothing_to_plot: text("ui.stats.nothing_to_plot"),
-        open_directory_stats: text("ui.stats.open_directory_stats"),
-        open_directory_stats_tooltip: text("ui.stats.open_directory_stats_tooltip"),
         directory_reload: text("ui.stats.directory_reload"),
     }
 }

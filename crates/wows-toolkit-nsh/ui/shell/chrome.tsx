@@ -1,4 +1,3 @@
-import type { JSX } from "nsh";
 import { host, keymap, signal, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { Menu, Toolbar } from "nsh/base";
@@ -77,57 +76,6 @@ export function ApplicationMenu(props: { onCommandPalette: () => void; onTactics
         </Surface>
       </Menu>
     </Toolbar>
-  );
-}
-
-/** The tab strip: every top-level tab, the selected one underlined, and the menu at its end. */
-export function TabStrip(props: {
-  tabs: readonly { id: string; label: string }[];
-  active: string;
-  /** Tabs that need looking at, marked as the other front ends mark them. */
-  attention: (id: string) => boolean;
-  onSelect: (id: string) => void;
-  menu: JSX.Element;
-}) {
-  return (
-    <View style={{ borderBottomWidth: 1, borderBottomColor: colors.borderBright, backgroundColor: colors.surface }}>
-      <View role="tablist" style={{ minHeight: 36, flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 6 }}>
-        <Each of={props.tabs}>
-          {(tab) => {
-            const selected = () => props.active === tab().id;
-            const flagged = () => props.attention(tab().id);
-            return (
-              <View
-                role="tab"
-                accessibilityLabel={tab().label}
-                accessibilityState={{ selected: selected() }}
-                onPress={() => props.onSelect(tab().id)}
-                hoverStyle={selected() ? undefined : { backgroundColor: colors.accent }}
-                activeStyle={{ opacity: 0.7 }}
-                style={{
-                  height: 32,
-                  paddingHorizontal: 10,
-                  justifyContent: "center",
-                  borderBottomWidth: 2,
-                  borderBottomColor: selected() ? colors.primary : "transparent",
-                  backgroundColor: selected() ? colors.background : "transparent",
-                }}
-              >
-                <Text style={{
-                  fontSize: 12.5,
-                  fontWeight: selected() ? "600" : "400",
-                  color: flagged() ? colors.destructive : selected() ? colors.textBright : colors.mutedForeground,
-                }}>
-                  {flagged() ? `! ${tab().label}` : tab().label}
-                </Text>
-              </View>
-            );
-          }}
-        </Each>
-        <View style={{ flex: 1 }}/>
-        {props.menu}
-      </View>
-    </View>
   );
 }
 

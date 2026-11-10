@@ -294,6 +294,22 @@ fn a_directory_lists_its_replays_and_opens_them() {
     app.wait_for(&format!("label:{SECOND}")).unwrap();
     app.wait_for("label:/^Close directory /").unwrap();
 
+    // The directory is an app tab of its own, right after the Replay Inspector's.
+    // Its label is a path, which a selector would read as a regex, so it is
+    // matched as one.
+    let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
+    let label: String = wows_toolkit_replay_data::directories::shortened_path(&root)
+        .chars()
+        .flat_map(|c| r"\.+*?()|[]{}^$".contains(c).then_some('\\').into_iter().chain([c]))
+        .collect();
+    let tab = format!("role:tab[/^{label}$/]");
+    assert!(app.screen().selected(&tab).unwrap(), "the opened directory's tab is shown");
+    app.press("role:tab[Replay Inspector]").unwrap();
+    app.wait_for_gone(&format!("label:{FIRST}"), GONE).unwrap();
+    app.press("role:tab >> nth=1").unwrap();
+    assert!(app.screen().selected(&tab).unwrap(), "the directory's tab follows the Replay Inspector's");
+    app.wait_for(&format!("label:{FIRST}")).unwrap();
+
     app.press(&format!("label:{FIRST}")).unwrap();
     app.press(&format!("label:{FIRST}")).unwrap();
     app.wait_for(SAMPLE_TITLE).unwrap();
@@ -314,6 +330,8 @@ fn a_directory_lists_its_replays_and_opens_them() {
 
     app.press("label:/^Close directory /").unwrap();
     app.wait_for_gone(&format!("label:{FIRST}"), GONE).unwrap();
+    app.wait_for_gone(&tab, GONE).unwrap();
+    assert!(app.screen().selected("role:tab[Replay Inspector]").unwrap(), "closing the shown directory shows the Replay Inspector");
 }
 
 #[test]
