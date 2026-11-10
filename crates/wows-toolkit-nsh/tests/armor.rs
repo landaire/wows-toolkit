@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::time::Duration;
+use std::time::Instant;
 
 use nsh_core::Points;
 use nsh_core::Size;
@@ -252,4 +253,21 @@ fn a_partly_shown_zone_draws_its_mixed_checkbox() {
     app.press("id:armor-options-section-Visibility").unwrap();
     app.wait_for("id:armor-vis-zone-Citadel").unwrap();
     app.wait_for("id:armor-vis-zone-Citadel >> text:-").unwrap();
+}
+
+#[test]
+fn camos_take_changes_only_while_the_export_holds_the_mesh() {
+    let mut app = fixture("export_dialog.tsx");
+    app.wait_for("id:armor-export-camo-1").unwrap();
+    assert!(!app.screen().enabled("id:armor-export-camo-1").unwrap());
+    assert!(!app.screen().enabled("id:armor-export-camo-2").unwrap());
+    assert!(app.screen().enabled("id:armor-export-contents-mesh").unwrap(), "the contents stay choosable");
+
+    app.press("id:fixture-export-mesh").unwrap();
+    let deadline = Instant::now() + GONE;
+    while !app.screen().enabled("id:armor-export-camo-1").unwrap() {
+        assert!(Instant::now() < deadline, "a mesh export never takes camo changes");
+        app.wait(Duration::from_millis(20)).unwrap();
+    }
+    assert!(app.screen().enabled("id:armor-export-camo-2").unwrap());
 }
