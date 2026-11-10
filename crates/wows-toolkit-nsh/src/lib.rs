@@ -5,11 +5,10 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 pub mod frames;
 pub mod game_data;
 mod native;
-mod replay;
+pub mod replay_inspector;
 pub mod shell;
 
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
-pub use replay::{ReplayInspector, ReplayInspectorProps};
 
 use nsh_core::prelude::{Registry, native_module};
 
@@ -22,5 +21,7 @@ fn native_module(registry: &mut Registry) {
     registry.module::<shell::Twitch>();
     registry.module::<shell::upload::Uploads>();
     registry.module::<game_data::GameData>();
-    registry.register::<ReplayInspector>();
+    registry.module::<replay_inspector::service::ReplayInspectorService>();
+    registry.register::<replay_inspector::table::PlayerTable>();
+    registry.register::<replay_inspector::browser::ReplayBrowser>();
 }

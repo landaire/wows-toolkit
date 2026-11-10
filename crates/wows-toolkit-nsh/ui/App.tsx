@@ -1,7 +1,7 @@
 import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
 import { Command, Dialog, Input, Menu } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Shell, Toolkit, type PlayerTrackerState, type SearchState, type StatisticsState } from "wows-toolkit/native";
+import { GameData, Shell, Toolkit, type PlayerTrackerState, type SearchState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
 import { applyLocale, t } from "./i18n";
@@ -18,6 +18,7 @@ import { restartTwitch } from "./shell/twitch";
 import { checkForUpdate, UpdateDialog } from "./shell/update";
 import { contributeAll } from "./shell/uploads";
 import { GameDataStatus } from "./game_data";
+import { importConstants, openReplayDirectoryDialog, openReplayFileDialog, ReplayInspectorView } from "./replay_inspector";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -569,7 +570,7 @@ function Content() {
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "replay-inspector" ? "flex" : "none" }}>
-        <NativeReplayInspector openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
+        <ReplayInspectorView openPath={replayOpenPath()} openRequestId={replayOpenRequestId()}/>
       </View>
       <View style={{ flex: 1, minHeight: 0, display: tab().id === "statistics" ? "flex" : "none" }}>
         <StatisticsView/>
@@ -619,6 +620,10 @@ const commandItems = [
   { id: "action:updates", label: startup.text.checkUpdates, keywords: ["release", "version"], group: "Actions" },
   { id: "action:about", label: `${startup.text.about} WoWs Toolkit`, keywords: ["version"], group: "Actions" },
   { id: "action:copy-log", label: t("ui.replay.copy_latest_log"), keywords: ["log", "bug", "report"], group: "Actions" },
+  { id: "action:open-replay-file", label: t("ui.replay.open_manually"), keywords: ["replay", "file", "open"], group: "Replays" },
+  { id: "action:open-replay-directory", label: t("ui.replay.open_directory"), keywords: ["replay", "folder", "directory"], group: "Replays" },
+  { id: "action:index-replays", label: t("ui.settings.replay.index_all_replays"), keywords: ["index", "search"], group: "Replays" },
+  { id: "action:import-constants", label: t("ui.replay.import_constants"), keywords: ["constants", "mapping", "results"], group: "Replays" },
   { id: "action:send-all", label: t("ui.palette.send_all_replays"), keywords: ["shipbuilds", "upload", "share"], group: "Actions" },
   { id: "action:send-all-again", label: t("ui.palette.send_all_replays_again"), keywords: ["shipbuilds", "upload", "share"], group: "Actions" },
 ];
@@ -639,6 +644,17 @@ function executeCommand(id: string) {
     void contributeAll("consult");
   } else if (id === "action:send-all-again") {
     void contributeAll("ignore");
+  } else if (id === "action:open-replay-file") {
+    selectTab("replay-inspector");
+    void openReplayFileDialog();
+  } else if (id === "action:open-replay-directory") {
+    selectTab("replay-inspector");
+    void openReplayDirectoryDialog();
+  } else if (id === "action:index-replays") {
+    void GameData.indexReplays("fillGaps").catch((error) => toast.failed(errorMessage(error)));
+  } else if (id === "action:import-constants") {
+    selectTab("replay-inspector");
+    void importConstants();
   }
 }
 

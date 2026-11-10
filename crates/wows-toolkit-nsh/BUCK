@@ -20,11 +20,12 @@ NSH_COMMON_DEPS = [
     "//crates/wt-translations:wt_translations",
     "//crates/wows-core:wows_core",
     "//crates/wows-replays:wows_replays",
+    "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-data-mgr:wows_data_mgr",
-    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wowsunpack:wowsunpack",
-    "//third-party/rust:reqwest",
     "//third-party/rust:base64",
+    "//third-party/rust:reqwest",
     "//third-party/rust:rustls",
     "//third-party/rust:tracing",
     "//third-party/rust:tracing-appender",
@@ -34,6 +35,7 @@ NSH_COMMON_DEPS = [
     "//third-party/rust:nsh-base",
     "//third-party/rust:nsh-core",
     "//third-party/rust:png",
+    "//third-party/rust:notify",
     "//third-party/rust:serde_json",
     "//third-party/rust:serde",
     "//third-party/rust:rust-i18n",
@@ -50,9 +52,15 @@ NSH_COMMON_DEPS = [
     windows = [],
 )
 
-NSH_DEPS = ["//crates/wows-toolkit-config:wows_toolkit_config"] + NSH_COMMON_DEPS
+NSH_DEPS = [
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
+] + NSH_COMMON_DEPS
 
-NSH_TEST_DEPS = ["//crates/wows-toolkit-config:wows_toolkit_config_test_support"] + NSH_COMMON_DEPS
+NSH_TEST_DEPS = [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+] + NSH_COMMON_DEPS
 
 workspace_library(
     name = "wows_toolkit_nsh",
@@ -68,6 +76,7 @@ workspace_library(
     crate = "wows_toolkit_nsh",
     package = "wows-toolkit-nsh",
     version = "1.0.3",
+    features = ["test-support"],
     env = {"CARGO_MANIFEST_DIR": "$(location :_cargo_manifest)/.."},
     deps = NSH_TEST_DEPS,
 )

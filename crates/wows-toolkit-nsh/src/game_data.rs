@@ -232,6 +232,11 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
     state().personal_rating.clone()
 }
 
+/// Changes whenever the game data's state does.
+pub fn changes() -> tokio::sync::watch::Receiver<u64> {
+    SERVICE.changed.subscribe()
+}
+
 /// The installed build's game data, waiting for the load when it is still
 /// running. Blocking: run it off the UI thread.
 pub fn wait_current_build() -> Result<Arc<LoadedGameData>, GameDataError> {

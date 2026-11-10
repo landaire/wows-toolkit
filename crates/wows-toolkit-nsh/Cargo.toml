@@ -7,7 +7,8 @@ license = "MIT"
 publish = false
 [features]
 buck = []
-
+# Lets tests read every replay as the fabricated sample report.
+test-support = ["wows-toolkit-replay-data/test-support"]
 
 [dependencies]
 base64 = "0.22"
@@ -24,6 +25,7 @@ nsh-base = "0.4.0"
 nsh-core = "0.4.0"
 nsh-bundler = "0.4.0"
 png = "0.18"
+notify = "8.2.0"
 rust-i18n = { workspace = true }
 sys-locale = { workspace = true }
 wt-translations = { workspace = true }
@@ -34,12 +36,14 @@ thiserror = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"] }
 tempfile = "3.27.0"
 wows_replays = { path = "../wows-replays", default-features = false, features = ["parsing", "arc"] }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "fire-sections"] }
 wows-core = { path = "../wows-core" }
 sqlx = { workspace = true }
 url = "2.5.8"
 wows-toolkit-config = { path = "../wows-toolkit-config" }
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
+wows-toolkit-launcher = { workspace = true }
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
 
@@ -51,3 +55,4 @@ nsh-platform-linux = { version = "0.4.0", default-features = false, features = [
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
 nsh-engine = { version = "0.4.0", default-features = false }
 nsh-testing = { version = "0.4.0", features = ["bundle"] }
+wows-toolkit-nsh = { path = ".", default-features = false, features = ["test-support"] }
