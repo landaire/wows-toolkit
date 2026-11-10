@@ -77,6 +77,12 @@ fn app_with(wows_dir: Option<&Path>) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     save_setting(keys::WOWS_DIR, &wows_dir.map(|dir| dir.display().to_string()).unwrap_or_default());
+    // The first-run questions and the startup update check are the shell's
+    // tests' to exercise; here they would stand in front of the sections.
+    for answered in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
+        save_setting(answered, &true);
+    }
+    save_setting(keys::CHECK_FOR_UPDATES, &false);
     wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
 
     let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/App.tsx");
@@ -90,6 +96,12 @@ fn app_with(wows_dir: Option<&Path>) -> TestApp {
     let guard = TEST_APP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     configure_test_storage();
     save_setting(keys::WOWS_DIR, &wows_dir.map(|dir| dir.display().to_string()).unwrap_or_default());
+    // The first-run questions and the startup update check are the shell's
+    // tests' to exercise; here they would stand in front of the sections.
+    for answered in [keys::BUILD_CONSENT_SHOWN, keys::REPLAY_CONSENT_SHOWN, keys::LANGUAGE_SELECTION_SHOWN] {
+        save_setting(answered, &true);
+    }
+    save_setting(keys::CHECK_FOR_UPDATES, &false);
     wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
 
     let path = std::env::var("NSH_BUNDLE_PATH").expect("Buck provides the generated TSX bundle");
@@ -194,15 +206,15 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
 
     app.press("Settings").unwrap();
     app.wait_for("Game data cache").unwrap();
-    // The second toggle with this name: the first is the Settings form's own.
-    app.press("label:Cache game data automatically >> nth=1").unwrap();
+    app.press("label:Cache game data automatically").unwrap();
     app.wait_until("the auto-dump flag is saved", Duration::from_secs(5), |_| {
         read_setting::<bool>(keys::AUTO_DUMP_GAME_DATA) == Some(true)
     })
     .unwrap();
 
     app.on_pick_paths(vec![cache_dir.0.clone()]).unwrap();
-    app.press("Browse...").unwrap();
+    // The second: the first is the game directory's.
+    app.press("Browse... >> nth=1").unwrap();
     wait_for_text(&mut app, &format!("Directory: {}", cache_dir.0.display()));
     app.wait_for("text:0 B in 0 cached builds").unwrap();
     assert_eq!(read_setting::<String>(keys::GAME_DATA_CACHE_DIR), Some(cache_dir.0.display().to_string()));
