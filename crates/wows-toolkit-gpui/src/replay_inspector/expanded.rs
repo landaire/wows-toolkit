@@ -604,7 +604,7 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
             .items_center()
             .font_weight(FontWeight::BOLD)
             .text_xs()
-            .child(crate::icons::icon(crate::icons::FIRE))
+            .child(crate::icons::icon(crate::icons::Glyph::Flame))
             .child(detail_text(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits))),
     );
     if let Some(expected) = fire_chance::expected_fires_text(fire_chance) {
@@ -703,7 +703,7 @@ fn tally_block(rows: &[fire_chance::TallyRow]) -> AnyElement {
 fn copy_breakdown_button(row_ix: usize, fire_chance: &EffectiveFireChance) -> AnyElement {
     let text = fire_chance::copy_text(fire_chance, &raw_source, &raw_ship_name);
     Button::new(("replay-fire-chance-copy", row_ix))
-        .child(crate::icons::icon(crate::icons::COPY))
+        .child(crate::icons::icon(crate::icons::Glyph::Copy))
         .compact()
         .ghost()
         .xsmall()

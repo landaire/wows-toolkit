@@ -1223,7 +1223,7 @@ impl Render for StatsView {
             .when(self.persists(), |this| {
                 this.child(
                     Button::new("stats-clear")
-                        .child(crate::icons::icon(crate::icons::ERASER))
+                        .icon(crate::icons::Glyph::Eraser)
                         .label(t!("ui.stats.clear").into_owned())
                         .compact()
                         .disabled(self.games().is_empty())

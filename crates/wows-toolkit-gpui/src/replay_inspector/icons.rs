@@ -53,6 +53,12 @@ pub fn decode_icon(bytes: &[u8]) -> anyhow::Result<RenderImage> {
     Ok(RenderImage::new(vec![Frame::new(buffer)]))
 }
 
+/// The tint that leaves a class icon as the game draws it: a dark outline
+/// around a white body, which reads on a dark and a light surface alike. A
+/// dark tint for light themes would multiply the body down to the outline's
+/// shade and leave a solid shape.
+pub const UNTINTED: u32 = 0xffffff;
+
 /// Rasterizes a ship-class SVG (`gui/fla/minimap/ship_icons`) into a
 /// `RenderImage` via gpui's `SvgRenderer`, rotates the raster 90 degrees
 /// clockwise to match the egui app's `Image::rotate(90.0_f32.to_radians(),

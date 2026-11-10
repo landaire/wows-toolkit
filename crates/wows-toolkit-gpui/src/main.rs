@@ -57,7 +57,6 @@ mod watched_playback;
 mod window_shell;
 
 use app::App;
-use gpui_kit::assets::Assets;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 use settings::GpuiSettings;
@@ -133,11 +132,10 @@ fn main() {
         tracing::info!("hardening: {mitigation} {outcome}");
     }
 
-    let app = gpui_kit::platform::application().with_assets(Assets);
+    let app = gpui_kit::platform::application().with_assets(icons::AppAssets);
     heap_profile::mark("app.run");
     app.run(move |cx| {
         gpui_kit::component::init(cx);
-        icons::register_font(cx);
         if let Err(err) = runtime::init(cx) {
             tracing::error!("failed to start the tokio runtime: {err}");
         }

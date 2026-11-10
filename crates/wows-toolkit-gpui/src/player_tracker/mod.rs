@@ -2116,7 +2116,11 @@ const MEMBER_ID_STRIDE: usize = 1024;
 /// The triangle that opens a row.
 fn expand_caret(id: (&'static str, usize), open: bool, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
     Button::new(id)
-        .child(crate::icons::icon(if open { crate::icons::CARET_DOWN } else { crate::icons::CARET_RIGHT }))
+        .child(crate::icons::icon(if open {
+            crate::icons::Glyph::ChevronDown
+        } else {
+            crate::icons::Glyph::ChevronRight
+        }))
         .ghost()
         .xsmall()
         .on_click(move |_event, _window, cx: &mut App| on_click(cx))
@@ -2126,7 +2130,7 @@ fn expand_caret(id: (&'static str, usize), open: bool, on_click: impl Fn(&mut Ap
 /// The button that looks a row up in the replay index.
 fn find_matches_cell(id: (&'static str, usize), hover: String, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
     Button::new(id)
-        .child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS))
+        .child(crate::icons::icon(crate::icons::Glyph::Search))
         .compact()
         .tooltip(hover)
         .on_click(move |_event, _window, cx: &mut App| on_click(cx))
@@ -2229,7 +2233,7 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
 
     Button::new(("tracker-note", ix))
         .child(
-            crate::icons::icon(crate::icons::NOTE_PENCIL)
+            crate::icons::icon(crate::icons::Glyph::NotebookPen)
                 .when(!has_note, |this| this.text_color(crate::theme::text_faint())),
         )
         .compact()
@@ -2513,11 +2517,11 @@ fn rating_cell(id: SharedString, pr: Option<f64>, mode: WinRateMode, pending: bo
 /// catalogue rather than as a bare English word in the cell.
 fn status_cell(id: SharedString, status: PlayerStatsStatus) -> AnyElement {
     let (glyph, hover) = match status {
-        PlayerStatsStatus::Hidden => (crate::icons::EYE_SLASH, t!("ui.player_tracker.stats_hidden")),
-        PlayerStatsStatus::Unavailable => (crate::icons::WARNING, t!("ui.player_tracker.stats_no_data")),
+        PlayerStatsStatus::Hidden => (crate::icons::Glyph::EyeOff, t!("ui.player_tracker.stats_hidden")),
+        PlayerStatsStatus::Unavailable => (crate::icons::Glyph::TriangleAlert, t!("ui.player_tracker.stats_no_data")),
         // Nothing has been asked yet, or the answer never came.
         PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => {
-            (crate::icons::INFO, t!("ui.player_tracker.stats_no_data"))
+            (crate::icons::Glyph::Info, t!("ui.player_tracker.stats_no_data"))
         }
     };
     let hover: SharedString = hover.into_owned().into();
@@ -2587,7 +2591,7 @@ fn notes_mark(side: &'static str, index: usize, tracked: Option<&TrackedPlayer>)
         .aria_label(hover.clone())
         .text_xs()
         .text_color(crate::theme::text_dim())
-        .child(crate::icons::icon(crate::icons::NOTE_PENCIL))
+        .child(crate::icons::icon(crate::icons::Glyph::NotebookPen))
         .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
         .into_any_element()
 }
@@ -2608,7 +2612,7 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
 
     let hover = SharedString::from(sniper_hover_text(candidates));
     let trigger = Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
-        .child(crate::icons::icon(crate::icons::TWITCH_LOGO))
+        .child(crate::icons::icon(crate::icons::Glyph::Twitch))
         .compact()
         .tooltip(hover);
 
@@ -2823,7 +2827,7 @@ impl Render for PlayerTrackerView {
                     Button::new("tracker-repopulate")
                         .ghost()
                         .small()
-                        .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
+                        .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
                         .tooltip(t!("ui.player_tracker.populate_from_replays").to_string())
                         .on_click(cx.listener(|this, _event, _window, cx| {
                             let Some(pool) = crate::settings_store::pool(cx) else { return };
@@ -2836,7 +2840,7 @@ impl Render for PlayerTrackerView {
                     Button::new("tracker-clear")
                         .ghost()
                         .small()
-                        .child(crate::icons::icon(crate::icons::TRASH))
+                        .child(crate::icons::icon(crate::icons::Glyph::Trash))
                         .tooltip(t!("ui.player_tracker.clear_stats").to_string())
                         .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear(window, cx))),
                 )

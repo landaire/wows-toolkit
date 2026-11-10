@@ -1031,7 +1031,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
 
     if row.is_hidden_profile {
         cell = cell.child(
-            crate::icons::icon(crate::icons::EYE_SLASH)
+            crate::icons::icon(crate::icons::Glyph::EyeOff)
                 .flex_none()
                 .id(("replay-hidden-profile", ix))
                 .test_support()
@@ -1048,7 +1048,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     if let Some(note) = row.connection.as_ref() {
         let hover: SharedString = connection_hover_text(note).into();
         cell = cell.child(
-            crate::icons::icon(crate::icons::PLUGS)
+            crate::icons::icon(crate::icons::Glyph::Plug)
                 .flex_none()
                 .id(("replay-disconnect", ix))
                 .test_support()
@@ -1102,7 +1102,7 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
     )
     .into();
 
-    let glyph = crate::icons::icon(crate::icons::TWITCH_LOGO)
+    let glyph = crate::icons::icon(crate::icons::Glyph::Twitch)
         .id(("replay-twitch", ix))
         .test_support()
         .cursor_pointer()
@@ -1180,8 +1180,8 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Ent
         // Two separate mistakes, so two separate glyphs: every point in tier
         // 1 is a turret, nothing above tier 2 is a plain warning.
         let glyph = match warning {
-            SkillWarning::TowerDefense => crate::icons::CASTLE_TURRET,
-            SkillWarning::NoHighTier => crate::icons::WARNING,
+            SkillWarning::TowerDefense => crate::icons::Glyph::Castle,
+            SkillWarning::NoHighTier => crate::icons::Glyph::TriangleAlert,
         };
         markers = markers.child(crate::icons::icon(glyph).text_color(color));
         has_markers = true;

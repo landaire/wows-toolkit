@@ -5,8 +5,7 @@
 //! (`ui/replay_parser/mod.rs` ~120/4749): the tab title is "{ship} - {map}"
 //! once loaded, `t!("ui.replay.loading")`'s "Loading..." until then. The
 //! outcome row mirrors `build_replay_view`'s Row 1: the Win/Loss/Draw label
-//! with the same trophy/sad-face/notches glyph, drawn from the same Phosphor
-//! font the egui app uses (see `crate::icons`).
+//! with a trophy, frowning face or equals sign beside it (see `crate::icons`).
 //!
 //! Beside it sits the single-battle PR badge, showing what
 //! `populate_personal_ratings` scored this replay's own row, in that band's
@@ -175,8 +174,7 @@ enum LoadState {
 
 struct TitleIcons {
     nation: Option<Arc<RenderImage>>,
-    class_dark: Option<Arc<RenderImage>>,
-    class_light: Option<Arc<RenderImage>>,
+    class: Option<Arc<RenderImage>>,
 }
 
 pub struct ReplayPanel {
@@ -661,14 +659,8 @@ impl ReplayPanel {
             {
                 icons.set_keyed("nation".to_string(), &bytes);
             }
-            for tint in [0xffffff, 0x303840] {
-                icons.load_ship_class(species, tint, &vfs, &renderer);
-            }
-            TitleIcons {
-                nation: icons.get_keyed("nation"),
-                class_dark: icons.get(species, 0xffffff),
-                class_light: icons.get(species, 0x303840),
-            }
+            icons.load_ship_class(species, super::icons::UNTINTED, &vfs, &renderer);
+            TitleIcons { nation: icons.get_keyed("nation"), class: icons.get(species, super::icons::UNTINTED) }
         });
         self.title_icon_task = Some(cx.spawn(async move |this, cx| {
             let icons = task.await;
@@ -768,9 +760,7 @@ impl Panel for ReplayPanel {
         };
         let images = matches!(self.state, LoadState::Loaded(_)).then_some(self.title_icons.as_ref()).flatten();
         let nation = images.and_then(|icons| icons.nation.clone());
-        let class = images.and_then(|icons| {
-            if crate::theme::is_dark_mode() { icons.class_dark.clone() } else { icons.class_light.clone() }
-        });
+        let class = images.and_then(|icons| icons.class.clone());
         h_flex()
             .gap_1()
             .items_center()
@@ -793,9 +783,9 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
     };
 
     let (glyph, label, outcome) = match result {
-        BattleResult::Win(_) => (icons::TROPHY, "Victory", BattleOutcome::Win),
-        BattleResult::Loss(_) => (icons::SMILEY_SAD, "Defeat", BattleOutcome::Loss),
-        BattleResult::Draw => (icons::NOTCHES, "Draw", BattleOutcome::Draw),
+        BattleResult::Win(_) => (icons::Glyph::Trophy, "Victory", BattleOutcome::Win),
+        BattleResult::Loss(_) => (icons::Glyph::FaceSlightlyFrowning, "Defeat", BattleOutcome::Loss),
+        BattleResult::Draw => (icons::Glyph::Equal, "Draw", BattleOutcome::Draw),
     };
     let color = resolve_color(ColorRole::WinLoss(outcome));
 
@@ -1298,7 +1288,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(crate::theme::semantic().warn))
-                            .child(crate::icons::icon(crate::icons::INFO))
+                            .child(crate::icons::icon(crate::icons::Glyph::Info))
                             .child(t!("ui.replay.incomplete_results").into_owned())
                             .tooltip(|window, cx| {
                                 Tooltip::new(t!("ui.replay.incomplete_results_tooltip").into_owned()).build(window, cx)

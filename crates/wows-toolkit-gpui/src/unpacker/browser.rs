@@ -819,14 +819,14 @@ fn is_viewable(label: &str) -> bool {
 /// (`ui/file_unpacker.rs`'s `file_icon_rich_text`).
 fn file_glyph(label: &str, is_dir: bool) -> impl IntoElement {
     if is_dir {
-        return crate::icons::icon(crate::icons::FOLDER).text_color(crate::theme::icon_accent());
+        return crate::icons::icon(crate::icons::Glyph::Folder).text_color(crate::theme::icon_accent());
     }
     let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
     let glyph = match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => crate::icons::IMAGE,
-        "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => crate::icons::FILE_TEXT,
-        "wem" | "bnk" | "ogg" | "wav" | "mp3" => crate::icons::MUSIC_NOTE,
-        _ => crate::icons::FILE,
+        "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => crate::icons::Glyph::Image,
+        "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => crate::icons::Glyph::FileText,
+        "wem" | "bnk" | "ogg" | "wav" | "mp3" => crate::icons::Glyph::Music,
+        _ => crate::icons::Glyph::File,
     };
     crate::icons::icon(glyph)
 }

@@ -90,24 +90,22 @@ pub(super) fn render_tools(
     pen: PenCheckButton,
     pane: &Entity<ArmorViewerPane>,
 ) -> AnyElement {
-    let toggles = h_flex()
-        .flex_wrap()
+    // Two even columns rather than wrapped rows: the labels differ in length,
+    // and wrapping leaves a ragged edge that moves as the rail is resized.
+    div()
+        .id("armor-options-tools")
+        .test_support()
+        .grid()
+        .grid_cols(2)
         .gap_1()
-        .items_center()
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
         .child(render_splash_button(view, entity))
-        .child(render_splash_boxes_button(view, entity));
-
-    let tools = h_flex()
-        .flex_wrap()
-        .gap_1()
-        .items_center()
+        .child(render_splash_boxes_button(view, entity))
         .child(render_trajectory_button(view, entity))
         .child(render_penetration_button(pen, pane.clone()))
-        .child(render_export_button(view, entity));
-
-    v_flex().id("armor-options-tools").test_support().gap_1().child(toggles).child(tools).into_any_element()
+        .child(render_export_button(view, entity))
+        .into_any_element()
 }
 
 /// What the Pen Check toggle shows, read from the pane by the caller.
@@ -204,9 +202,10 @@ fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView
         "armor-show-hidden",
         showing,
         Button::new("armor-show-hidden-button")
-            .child(crate::icons::icon(crate::icons::EYE_SLASH))
+            .icon(crate::icons::Glyph::EyeOff)
             .label(t!("ui.armor.show_hidden").to_string())
             .compact()
+            .w_full()
             .selected(showing)
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
@@ -492,9 +491,10 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
         "armor-show-gaps",
         gaps.shown,
         Button::new("armor-show-gaps-button")
-            .child(crate::icons::icon(if found { crate::icons::WARNING } else { crate::icons::EYE_SLASH }))
+            .icon(if found { crate::icons::Glyph::TriangleAlert } else { crate::icons::Glyph::EyeOff })
             .label(label)
             .compact()
+            .w_full()
             .selected(gaps.shown)
             .disabled(!has_armor)
             .tooltip(t!("ui.armor.gaps_tooltip").to_string())
@@ -522,9 +522,10 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
         "armor-trajectory",
         state.shown,
         Button::new("armor-trajectory-button")
-            .child(crate::icons::icon(crate::icons::CROSSHAIR))
+            .icon(crate::icons::Glyph::Crosshair)
             .label(label)
             .compact()
+            .w_full()
             .selected(state.shown)
             .when(state.shown, |button| button.bg(crate::theme::accent()).text_color(crate::theme::accent_foreground()))
             .disabled(!has_armor)
@@ -709,9 +710,10 @@ fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
         "armor-splash",
         state.shown,
         Button::new("armor-splash-button")
-            .child(crate::icons::icon(crate::icons::BOMB))
+            .icon(crate::icons::Glyph::Bomb)
             .label(label)
             .compact()
+            .w_full()
             .selected(state.shown)
             .disabled(!state.has_data)
             .tooltip(tooltip)
@@ -731,9 +733,10 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
         "armor-splash-boxes",
         state.boxes_shown,
         Button::new("armor-splash-boxes-button")
-            .child(crate::icons::icon(crate::icons::CUBE))
+            .icon(crate::icons::Glyph::Box)
             .label(t!("ui.armor.splash_boxes").to_string())
             .compact()
+            .w_full()
             .selected(state.boxes_shown)
             .disabled(!state.has_data)
             .tooltip(t!("ui.armor.splash_tooltip").to_string())
@@ -766,6 +769,7 @@ fn render_penetration_button(pen: PenCheckButton, pane: Entity<ArmorViewerPane>)
             .icon(IconName::Search)
             .label(label)
             .compact()
+            .w_full()
             .selected(open)
             // Not gated on a loaded hull, as the egui button is not: the
             // list is of attackers, and it is worth building before a target
@@ -790,6 +794,7 @@ fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
         .icon(IconName::HardDrive)
         .label(t!("ui.replay.section_export").to_string())
         .compact()
+        .w_full()
         .tooltip(t!("ui.armor.export_tooltip").to_string())
         .disabled(!has_armor)
         .on_click(move |_, _window, cx| {

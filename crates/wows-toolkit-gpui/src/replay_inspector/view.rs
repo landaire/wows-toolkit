@@ -2056,7 +2056,7 @@ impl Render for ReplayInspectorView {
                     .items_center()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(crate::icons::icon(crate::icons::FOLDER))
+                    .child(crate::icons::icon(crate::icons::Glyph::Folder))
                     .child(div().min_w_0().truncate().child(shown.clone()))
                     .tooltip(move |window, cx| Tooltip::new(shown.clone()).build(window, cx))
                     .into_any_element()

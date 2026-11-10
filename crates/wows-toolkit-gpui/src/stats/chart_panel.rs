@@ -585,7 +585,7 @@ impl StatsChartPanel {
         let modes = self.offered_modes();
 
         let trigger = Button::new(("chart-settings", id))
-            .child(crate::icons::icon(crate::icons::GEAR_FINE))
+            .child(crate::icons::icon(crate::icons::Glyph::Settings))
             .compact()
             .tooltip(t!("ui.stats.settings").to_string())
             .accessibility_label(t!("ui.stats.settings").to_string());
@@ -766,7 +766,7 @@ impl StatsChartPanel {
         let accessibility_label = format!("{}: {selection_count}", t!("ui.stats.filter_ships"));
 
         let trigger = Button::new(("chart-ship-filter", id))
-            .child(crate::icons::icon(crate::icons::FUNNEL))
+            .child(crate::icons::icon(crate::icons::Glyph::Funnel))
             .child(t!("ui.stats.ships").to_string())
             .child(div().text_xs().text_color(crate::theme::text_dim()).child(selection_count.clone()))
             .compact()
@@ -830,7 +830,7 @@ impl StatsChartPanel {
                         .when(!ship_query.is_empty(), |this| {
                             this.child(
                                 Button::new(("chart-ship-search-clear", id))
-                                    .child(crate::icons::icon(crate::icons::X))
+                                    .child(crate::icons::icon(crate::icons::Glyph::X))
                                     .compact()
                                     .tooltip(t!("ui.stats.clear").to_string())
                                     .accessibility_label(t!("ui.stats.clear").to_string())
@@ -906,9 +906,9 @@ impl Panel for StatsChartPanel {
             .gap_1()
             .items_center()
             .child(crate::icons::icon(if self.mode == ChartMode::Line {
-                crate::icons::CHART_LINE
+                crate::icons::Glyph::ChartLine
             } else {
-                crate::icons::CHART_BAR
+                crate::icons::Glyph::ChartColumn
             }))
             .child(self.tab_title())
     }

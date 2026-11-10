@@ -2878,7 +2878,7 @@ impl ReplayRendererPanel {
                 .pb_1()
                 .child(
                     Button::new("replay-renderer-jump-to-start")
-                        .child(crate::icons::icon(crate::icons::SKIP_BACK))
+                        .child(crate::icons::icon(crate::icons::Glyph::SkipBack))
                         .compact()
                         .disabled(!ready)
                         .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
@@ -2886,7 +2886,7 @@ impl ReplayRendererPanel {
                 )
                 .child(
                     Button::new("replay-renderer-previous-event")
-                        .child(crate::icons::icon(crate::icons::REWIND))
+                        .child(crate::icons::icon(crate::icons::Glyph::Rewind))
                         .compact()
                         .disabled(!ready || !has_previous)
                         .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
@@ -2894,7 +2894,7 @@ impl ReplayRendererPanel {
                 )
                 .child(
                     Button::new("replay-renderer-back-10s")
-                        .child(crate::icons::icon(crate::icons::CLOCK_COUNTER_CLOCKWISE))
+                        .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
                         .compact()
                         .disabled(!ready)
                         .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
@@ -2913,7 +2913,7 @@ impl ReplayRendererPanel {
                 )
                 .child(
                     Button::new("replay-renderer-forward-10s")
-                        .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
+                        .child(crate::icons::icon(crate::icons::Glyph::RotateCw))
                         .compact()
                         .disabled(!ready)
                         .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
@@ -2921,7 +2921,7 @@ impl ReplayRendererPanel {
                 )
                 .child(
                     Button::new("replay-renderer-next-event")
-                        .child(crate::icons::icon(crate::icons::FAST_FORWARD))
+                        .child(crate::icons::icon(crate::icons::Glyph::FastForward))
                         .compact()
                         .disabled(!ready || !has_next)
                         .tooltip(t!("ui.renderer.controls.next_event").into_owned())
@@ -2929,7 +2929,7 @@ impl ReplayRendererPanel {
                 )
                 .child(
                     Button::new("replay-renderer-jump-to-end")
-                        .child(crate::icons::icon(crate::icons::SKIP_FORWARD))
+                        .child(crate::icons::icon(crate::icons::Glyph::SkipForward))
                         .compact()
                         .disabled(!ready)
                         .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
@@ -2946,7 +2946,7 @@ impl ReplayRendererPanel {
                 // Everything past here is not playback, so it sits at the far
                 // end rather than between the reader and the transport.
                 .child(div().flex_1().min_w(px(0.)))
-                .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
+                .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::Glyph::Search)))
                 .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
                 .child(
                     Button::new("replay-renderer-zoom-reset")
@@ -2969,7 +2969,7 @@ impl ReplayRendererPanel {
                 .child(crate::ui::rule_v(cx))
                 .child(
                     Button::new("replay-renderer-export")
-                        .child(crate::icons::icon(crate::icons::DOWNLOAD_SIMPLE))
+                        .child(crate::icons::icon(crate::icons::Glyph::Download))
                         .compact()
                         .disabled(!ready || self.export.is_some())
                         .tooltip(t!("ui.replay.renderer.export_video").into_owned())
@@ -2983,7 +2983,7 @@ impl ReplayRendererPanel {
                 .when(!self.popped_out, |this| {
                     this.child(
                         Button::new("replay-renderer-pop-out")
-                            .child(crate::icons::icon(crate::icons::ARROW_SQUARE_OUT))
+                            .child(crate::icons::icon(crate::icons::Glyph::SquareArrowOutUpRight))
                             .compact()
                             .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
                             .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
@@ -2991,7 +2991,7 @@ impl ReplayRendererPanel {
                 })
                 .child(
                     Button::new("replay-renderer-clipboard")
-                        .child(crate::icons::icon(crate::icons::CLIPBOARD))
+                        .child(crate::icons::icon(crate::icons::Glyph::Clipboard))
                         .compact()
                         .disabled(!ready || self.export.is_some())
                         .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
@@ -3094,7 +3094,7 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
             .child({
                 let owner = owner.clone();
                 Button::new("replay-renderer-ship-menu-close")
-                    .child(crate::icons::icon(crate::icons::X))
+                    .child(crate::icons::icon(crate::icons::Glyph::X))
                     .compact()
                     .on_click(move |_event, _window, cx: &mut App| {
                         owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
@@ -3864,63 +3864,63 @@ const TOGGLES: &[Toggle] = &[
 const TOOLS: &[ToolButton] = &[
     ToolButton {
         id: "replay-renderer-tool-select",
-        glyph: crate::icons::CURSOR,
+        glyph: crate::icons::Glyph::MousePointer,
         label: "ui.renderer.annotations.tool_select",
         chord: None,
         tool: || Tool::None,
     },
     ToolButton {
         id: "replay-renderer-tool-arrow",
-        glyph: crate::icons::ARROW_BEND_UP_RIGHT,
+        glyph: crate::icons::Glyph::MoveUpRight,
         label: "ui.renderer.annotations.tool_arrow",
         chord: Some("Ctrl+1"),
         tool: || Tool::Arrow,
     },
     ToolButton {
         id: "replay-renderer-tool-freehand",
-        glyph: crate::icons::PAINT_BRUSH,
+        glyph: crate::icons::Glyph::Paintbrush,
         label: "ui.renderer.annotations.tool_freehand",
         chord: Some("Ctrl+2"),
         tool: || Tool::Freehand,
     },
     ToolButton {
         id: "replay-renderer-tool-eraser",
-        glyph: crate::icons::ERASER,
+        glyph: crate::icons::Glyph::Eraser,
         label: "ui.renderer.annotations.tool_eraser",
         chord: Some("Ctrl+3"),
         tool: || Tool::Eraser,
     },
     ToolButton {
         id: "replay-renderer-tool-line",
-        glyph: crate::icons::LINE_SEGMENT,
+        glyph: crate::icons::Glyph::Slash,
         label: "ui.renderer.annotations.tool_line",
         chord: Some("Ctrl+4"),
         tool: || Tool::Line,
     },
     ToolButton {
         id: "replay-renderer-tool-circle",
-        glyph: crate::icons::CIRCLE,
+        glyph: crate::icons::Glyph::Circle,
         label: "ui.renderer.annotations.tool_circle",
         chord: Some("Ctrl+5"),
         tool: || Tool::Circle { filled: false },
     },
     ToolButton {
         id: "replay-renderer-tool-rectangle",
-        glyph: crate::icons::SQUARE,
+        glyph: crate::icons::Glyph::Square,
         label: "ui.renderer.annotations.tool_rectangle",
         chord: Some("Ctrl+6"),
         tool: || Tool::Rectangle { filled: false },
     },
     ToolButton {
         id: "replay-renderer-tool-triangle",
-        glyph: crate::icons::TRIANGLE,
+        glyph: crate::icons::Glyph::Triangle,
         label: "ui.renderer.annotations.tool_triangle",
         chord: Some("Ctrl+7"),
         tool: || Tool::Triangle { filled: false },
     },
     ToolButton {
         id: "replay-renderer-tool-measure",
-        glyph: crate::icons::RULER,
+        glyph: crate::icons::Glyph::Ruler,
         label: "ui.renderer.annotations.tool_measurement",
         chord: Some("Ctrl+M"),
         tool: || Tool::Measurement,
@@ -3931,7 +3931,7 @@ const TOOLS: &[ToolButton] = &[
 /// takes it up, and what it puts in hand.
 struct ToolButton {
     id: &'static str,
-    glyph: &'static str,
+    glyph: crate::icons::Glyph,
     label: &'static str,
     /// `None` for the one tool that has no chord of its own: the selector, which
     /// escape goes back to.
@@ -4023,7 +4023,7 @@ fn tools_popover(
     Popover::new("replay-renderer-tools")
         .trigger(
             Button::new("replay-renderer-tools-toggle")
-                .child(crate::icons::icon(crate::icons::NOTE_PENCIL))
+                .child(crate::icons::icon(crate::icons::Glyph::NotebookPen))
                 .compact()
                 .disabled(!in_session)
                 .tooltip(t!("ui.renderer.annotations.title").into_owned()),
@@ -4064,7 +4064,7 @@ fn tools_popover(
                 .child({
                     let owner = owner.clone();
                     Button::new("replay-renderer-annotations-undo")
-                        .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
+                        .icon(crate::icons::Glyph::RotateCcw)
                         .label(t!("ui.renderer.annotations.undo").into_owned())
                         .compact()
                         .disabled(!undoable)
@@ -4266,7 +4266,7 @@ fn render_options_popover(
     Popover::new("replay-renderer-settings")
         .trigger(
             Button::new("replay-renderer-settings-toggle")
-                .child(crate::icons::icon(crate::icons::GEAR_FINE))
+                .child(crate::icons::icon(crate::icons::Glyph::Settings))
                 .compact()
                 // Until the bake lands the options are the ones it is baking
                 // under, not the reader's, and a Save Defaults would store
@@ -4445,7 +4445,7 @@ fn timeline_popover(
     Popover::new("replay-renderer-timeline")
         .trigger(
             Button::new("replay-renderer-timeline-toggle")
-                .child(crate::icons::icon(crate::icons::LIST_BULLETS))
+                .child(crate::icons::icon(crate::icons::Glyph::List))
                 .compact()
                 .tooltip(t!("ui.renderer.settings.event_timeline").into_owned()),
         )

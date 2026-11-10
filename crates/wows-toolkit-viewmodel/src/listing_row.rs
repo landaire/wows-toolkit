@@ -218,7 +218,7 @@ pub fn stats_line(identity: &RowIdentity, stats: &RowStats, grouping: ReplayGrou
         .iter()
         .map(|part| match part {
             LinePart::Text(text) => text.as_str(),
-            LinePart::Glyph(glyph) => glyph,
+            LinePart::Glyph(glyph) => glyph.codepoint(),
         })
         .collect()
 }
@@ -226,12 +226,31 @@ pub fn stats_line(identity: &RowIdentity, stats: &RowStats, grouping: ReplayGrou
 /// One piece of an assembled line.
 ///
 /// A front end whose text font carries the icon glyphs draws the joined
-/// [`stats_line`] and is done; one that keeps its icons in a separate font
-/// draws the parts, putting only the glyphs in it.
+/// [`stats_line`] and is done; one that draws its icons apart draws the
+/// parts, mapping each [`LineGlyph`] to its own icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinePart {
     Text(String),
-    Glyph(&'static str),
+    Glyph(LineGlyph),
+}
+
+/// An icon that introduces a figure on the stats line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineGlyph {
+    Clock,
+    Crosshair,
+    Sword,
+}
+
+impl LineGlyph {
+    /// The Phosphor codepoint for a front end whose text font carries them.
+    pub fn codepoint(self) -> &'static str {
+        match self {
+            Self::Clock => crate::glyphs::CLOCK,
+            Self::Crosshair => crate::glyphs::CROSSHAIR_SIMPLE,
+            Self::Sword => crate::glyphs::SWORD,
+        }
+    }
 }
 
 /// The stats line in pieces: which figures it carries, in what order, and
@@ -247,7 +266,7 @@ pub fn stats_line_parts(
     if !stats.known {
         return vec![
             LinePart::Text(format!("{}  ", t!("ui.replay.row_not_indexed"))),
-            LinePart::Glyph(crate::glyphs::CLOCK),
+            LinePart::Glyph(LineGlyph::Clock),
             LinePart::Text(format!(" {when}")),
         ];
     }
@@ -256,14 +275,14 @@ pub fn stats_line_parts(
     // line, so each figure carries its own trailing separator.
     let mut parts = Vec::new();
     if let Some(damage) = stats.damage {
-        parts.push(LinePart::Glyph(crate::glyphs::CROSSHAIR_SIMPLE));
+        parts.push(LinePart::Glyph(LineGlyph::Crosshair));
         parts.push(LinePart::Text(format!(" {}  ", separate_number(damage, locale))));
     }
     if let Some(kills) = stats.kills {
-        parts.push(LinePart::Glyph(crate::glyphs::SWORD));
+        parts.push(LinePart::Glyph(LineGlyph::Sword));
         parts.push(LinePart::Text(format!(" {kills}  ")));
     }
-    parts.push(LinePart::Glyph(crate::glyphs::CLOCK));
+    parts.push(LinePart::Glyph(LineGlyph::Clock));
     parts.push(LinePart::Text(format!(" {when}")));
     parts
 }

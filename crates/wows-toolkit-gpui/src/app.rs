@@ -419,17 +419,17 @@ impl AppTab {
 
     /// The glyph in front of the label, as the egui tab strip carries
     /// (`app.rs`'s `icon_t` pairs).
-    pub fn glyph(self) -> &'static str {
+    pub fn glyph(self) -> crate::icons::Glyph {
         match self {
-            AppTab::ReplayInspector => crate::icons::MAGNIFYING_GLASS,
-            AppTab::ReplayDirectory(_) => crate::icons::FOLDER_OPEN,
-            AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::CHART_BAR,
-            AppTab::PlayerTracker => crate::icons::DETECTIVE,
-            AppTab::Search => crate::icons::MAGNIFYING_GLASS,
-            AppTab::ArmorViewer => crate::icons::SHIELD,
-            AppTab::Unpacker => crate::icons::ARCHIVE,
-            AppTab::Settings => crate::icons::GEAR_FINE,
-            AppTab::Launcher => crate::icons::ROCKET_LAUNCH,
+            AppTab::ReplayInspector => crate::icons::Glyph::Search,
+            AppTab::ReplayDirectory(_) => crate::icons::Glyph::FolderOpen,
+            AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::Glyph::ChartColumn,
+            AppTab::PlayerTracker => crate::icons::Glyph::VenetianMask,
+            AppTab::Search => crate::icons::Glyph::Search,
+            AppTab::ArmorViewer => crate::icons::Glyph::Shield,
+            AppTab::Unpacker => crate::icons::Glyph::Archive,
+            AppTab::Settings => crate::icons::Glyph::Settings,
+            AppTab::Launcher => crate::icons::Glyph::Rocket,
         }
     }
 }
@@ -2171,16 +2171,16 @@ impl App {
     /// names the same four states.
     /// The glyph beside the token button, which is what the egui tab draws
     /// next to the same label.
-    fn twitch_status_glyph(&self) -> &'static str {
+    fn twitch_status_glyph(&self) -> crate::icons::Glyph {
         if matches!(self.twitch_paste, Some(Err(_))) {
-            return crate::icons::X_CIRCLE;
+            return crate::icons::Glyph::CircleX;
         }
         match self.twitch_status {
-            TwitchStatus::Unset => crate::icons::WARNING,
+            TwitchStatus::Unset => crate::icons::Glyph::TriangleAlert,
             // Nothing has been proven either way yet, so nothing is claimed.
-            TwitchStatus::Checking => crate::icons::CLOCK,
-            TwitchStatus::Accepted { .. } => crate::icons::CHECK_CIRCLE,
-            TwitchStatus::Refused => crate::icons::X_CIRCLE,
+            TwitchStatus::Checking => crate::icons::Glyph::Clock,
+            TwitchStatus::Accepted { .. } => crate::icons::Glyph::CircleCheck,
+            TwitchStatus::Refused => crate::icons::Glyph::CircleX,
         }
     }
 
@@ -2325,7 +2325,7 @@ const EXPORT_FORMATS: [ReplayExportFormat; 3] =
 /// controls, which is the shape the egui tab draws with `section_header` and
 /// `ui.group`.
 fn settings_section(
-    glyph: &'static str,
+    glyph: crate::icons::Glyph,
     title: String,
     description: String,
     border: Hsla,
@@ -2759,7 +2759,7 @@ impl App {
         let outcome = self.index_outcome.clone();
 
         settings_section(
-            crate::icons::DATABASE,
+            crate::icons::Glyph::Database,
             t!("ui.settings.index.heading").into_owned(),
             t!("ui.settings.index.description").into_owned(),
             cx.theme().border,
@@ -2885,7 +2885,7 @@ impl App {
 
         let Some(base) = self.cache_base() else {
             return settings_section(
-                crate::icons::ARCHIVE,
+                crate::icons::Glyph::Archive,
                 t!("ui.settings.wows.cache.heading").into_owned(),
                 t!("ui.settings.wows.cache.description").into_owned(),
                 border,
@@ -2910,7 +2910,7 @@ impl App {
         }
 
         settings_section(
-            crate::icons::ARCHIVE,
+            crate::icons::Glyph::Archive,
             t!("ui.settings.wows.cache.heading").into_owned(),
             t!("ui.settings.wows.cache.description").into_owned(),
             border,
@@ -3478,7 +3478,7 @@ impl App {
                     .child(
                         h_flex()
                             .gap_1()
-                            .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
+                            .child(crate::icons::icon(crate::icons::Glyph::FolderOpen))
                             .child(t!("ui.settings.app.open_data_dir").to_string()),
                     )
                     .compact()
@@ -3508,7 +3508,7 @@ impl App {
             .child(self.settings_data_directory_field());
 
         settings_section(
-            crate::icons::GEAR_FINE,
+            crate::icons::Glyph::Settings,
             t!("ui.settings.app.heading").into_owned(),
             t!("ui.settings.app.description").into_owned(),
             border,
@@ -3569,7 +3569,7 @@ impl App {
         );
 
         let game = settings_section(
-            crate::icons::FOLDER_OPEN,
+            crate::icons::Glyph::FolderOpen,
             t!("ui.settings.wows.heading").into_owned(),
             t!("ui.settings.wows.description").into_owned(),
             border,
@@ -3614,7 +3614,7 @@ impl App {
         let index = self.render_index_section(cx);
 
         let session = settings_section(
-            crate::icons::USERS,
+            crate::icons::Glyph::Users,
             t!("ui.settings.session.heading").into_owned(),
             t!("ui.settings.session.description").into_owned(),
             border,
@@ -3658,7 +3658,7 @@ impl App {
         .into_any_element();
 
         let replay_section = settings_section(
-            crate::icons::TABLE,
+            crate::icons::Glyph::Table,
             t!("ui.settings.replay.heading").into_owned(),
             t!("ui.settings.replay.description").into_owned(),
             border,
@@ -3738,7 +3738,7 @@ impl App {
         .into_any_element();
 
         let twitch = settings_section(
-            crate::icons::BROADCAST,
+            crate::icons::Glyph::Radio,
             t!("ui.settings.twitch.heading").into_owned(),
             t!("ui.settings.twitch.description").into_owned(),
             border,
@@ -3750,7 +3750,7 @@ impl App {
                                 .child(
                                     h_flex()
                                         .gap_1()
-                                        .child(crate::icons::icon(crate::icons::BROWSER))
+                                        .child(crate::icons::icon(crate::icons::Glyph::AppWindow))
                                         .child(t!("ui.settings.twitch.get_token").to_string()),
                                 )
                                 .compact()
@@ -3775,7 +3775,7 @@ impl App {
                                     .child(
                                         h_flex()
                                             .gap_1()
-                                            .child(crate::icons::icon(crate::icons::CLIPBOARD_TEXT))
+                                            .child(crate::icons::icon(crate::icons::Glyph::ClipboardList))
                                             .child(t!(self.twitch_paste_label_key()).to_string())
                                             .child(
                                                 div()
@@ -3802,7 +3802,7 @@ impl App {
         // The viewport writes these itself when a pane changes, so the tab
         // reports them rather than offering a second way to set them.
         let armor = settings_section(
-            crate::icons::SHIELD,
+            crate::icons::Glyph::Shield,
             t!("ui.settings.armor.heading").into_owned(),
             t!("ui.settings.armor.description").into_owned(),
             border,

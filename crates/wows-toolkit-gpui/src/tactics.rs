@@ -547,17 +547,17 @@ const MAX_NIB: f32 = 8.0;
 ///
 /// The shapes are drawn hollow: a board is read through, and a filled one hides
 /// the map it is about.
-fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str, &'static str, &'static str)> {
+fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str, crate::icons::Glyph, &'static str)> {
     use wt_collab_client::drawing::Tool;
     vec![
-        (Tool::Freehand, "ui.renderer.annotations.freehand", crate::icons::PAINT_BRUSH, "2"),
-        (Tool::Line, "ui.renderer.annotations.line", crate::icons::LINE_SEGMENT, "4"),
-        (Tool::Arrow, "ui.renderer.annotations.arrow", crate::icons::ARROW_BEND_UP_RIGHT, "1"),
-        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle", crate::icons::CIRCLE, "5"),
-        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle", crate::icons::SQUARE, "6"),
-        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle", crate::icons::TRIANGLE, "7"),
-        (Tool::Measurement, "ui.renderer.annotations.measure", crate::icons::RULER, "M"),
-        (Tool::Eraser, "ui.renderer.annotations.eraser", crate::icons::ERASER, "3"),
+        (Tool::Freehand, "ui.renderer.annotations.freehand", crate::icons::Glyph::Paintbrush, "2"),
+        (Tool::Line, "ui.renderer.annotations.line", crate::icons::Glyph::Slash, "4"),
+        (Tool::Arrow, "ui.renderer.annotations.arrow", crate::icons::Glyph::MoveUpRight, "1"),
+        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle", crate::icons::Glyph::Circle, "5"),
+        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle", crate::icons::Glyph::Square, "6"),
+        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle", crate::icons::Glyph::Triangle, "7"),
+        (Tool::Measurement, "ui.renderer.annotations.measure", crate::icons::Glyph::Ruler, "M"),
+        (Tool::Eraser, "ui.renderer.annotations.eraser", crate::icons::Glyph::Eraser, "3"),
     ]
 }
 
@@ -2871,7 +2871,7 @@ impl TacticsBoard {
             .gap_1()
             .flex_wrap()
             .items_center()
-            .when(locked, |this| this.child(crate::icons::icon(crate::icons::LOCK)))
+            .when(locked, |this| this.child(crate::icons::icon(crate::icons::Glyph::Lock)))
             .children(tools().into_iter().enumerate().map(|(index, (tool, key, glyph, shortcut))| {
                 let board = board.clone();
                 let chosen = in_hand == tool;
@@ -3031,7 +3031,7 @@ impl TacticsBoard {
         Popover::new("tactics-shortcuts")
             .trigger(
                 Button::new("tactics-shortcuts-trigger")
-                    .child(crate::icons::icon(crate::icons::INFO))
+                    .child(crate::icons::icon(crate::icons::Glyph::Info))
                     .compact()
                     .tooltip(t!("ui.renderer.annotations.shortcuts_title").into_owned())
                     .accessibility_label(t!("ui.renderer.annotations.shortcuts_title").into_owned()),

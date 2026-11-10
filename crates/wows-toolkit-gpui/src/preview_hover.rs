@@ -32,20 +32,10 @@ use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
 use crate::replay_inspector::GameDataCache;
 
-/// How long a preview goes without a new frame before the bake behind it
-/// reads as stuck rather than busy.
-///
-/// Comfortably longer than the gap between frames a bake produces, so a
-/// spinner never flickers over a preview that is merely slow.
-const STALLED_AFTER: std::time::Duration = std::time::Duration::from_millis(1500);
-
 /// A baked preview and where it is in its loop.
 struct Shown {
     frames: PreviewFrames,
     started: Instant,
-    /// When the newest frame arrived. A bake that has stopped producing them
-    /// is what a spinner over a playing preview is for.
-    last_frame: Instant,
     /// Whether this is the still map standing in for a track that has not
     /// arrived. The map goes up as soon as there is one, so without this the
     /// spinner would come down the moment it did and the reader would watch a
@@ -160,23 +150,20 @@ impl PreviewHover {
         self.expecting
     }
 
-    /// Whether the bake has stopped feeding the preview.
+    /// Whether the reader is still waiting for the preview to start playing.
     ///
-    /// A bake keeps running after the first frame, so a spinner shown for
-    /// the whole of it sits over a preview that is already playing and says
-    /// nothing. It is worth showing only once the frames stop arriving.
-    pub fn is_stalled(&self) -> bool {
+    /// Only before the first frame: a bake keeps running behind a preview that
+    /// is already playing, and a spinner raised each time it falls behind
+    /// playback blinks over the map.
+    pub fn awaits_first_frame(&self) -> bool {
         if !self.baking {
             return false;
         }
         match &self.shown {
-            // Nothing to play yet: the bake has produced nothing, which is
-            // what a reader is waiting on.
             None => true,
             // The still map is not a preview, so it is shown under a spinner
             // for as long as it stands in for one.
-            Some(shown) if shown.map_only => true,
-            Some(shown) => shown.last_frame.elapsed() > STALLED_AFTER,
+            Some(shown) => shown.map_only,
         }
     }
 
@@ -184,15 +171,6 @@ impl PreviewHover {
     #[cfg(test)]
     pub(crate) fn is_watching(&self) -> bool {
         self.dwell.is_watching()
-    }
-
-    /// Ages the newest frame by `by`, so a test can reach the case a bake
-    /// has stopped feeding the preview without waiting for one to.
-    #[cfg(test)]
-    pub(crate) fn age_last_frame_for_test(&mut self, by: std::time::Duration) {
-        if let Some(shown) = self.shown.as_mut() {
-            shown.last_frame -= by;
-        }
     }
 
     /// Seeds a bake in flight that has produced nothing yet. Test-only.
@@ -227,13 +205,7 @@ impl PreviewHover {
     pub(crate) fn seed_playing_for_test(&mut self, frames: PreviewFrames) {
         self.baking = true;
         // A track, not the still map: this seeds the playing case.
-        self.shown = Some(Shown {
-            frames,
-            started: Instant::now(),
-            last_frame: Instant::now(),
-            map_only: false,
-            presented: None,
-        });
+        self.shown = Some(Shown { frames, started: Instant::now(), map_only: false, presented: None });
     }
 
     /// How many frames the current preview has. Test-only.
@@ -354,13 +326,7 @@ impl PreviewHover {
         if self.shown.is_some() {
             return;
         }
-        self.shown = Some(Shown {
-            frames,
-            started: Instant::now(),
-            last_frame: Instant::now(),
-            map_only: true,
-            presented: None,
-        });
+        self.shown = Some(Shown { frames, started: Instant::now(), map_only: true, presented: None });
         let _ = self.present_current(cx);
         cx.notify();
     }
@@ -439,7 +405,6 @@ impl PreviewHover {
                         this.shown = Some(Shown {
                             frames: PreviewFrames::streaming(),
                             started: Instant::now(),
-                            last_frame: Instant::now(),
                             map_only: false,
                             presented: None,
                         });
@@ -447,7 +412,6 @@ impl PreviewHover {
                     }
                     if let Some(shown) = this.shown.as_mut() {
                         shown.frames.push(frame);
-                        shown.last_frame = Instant::now();
                     }
                     if this.present_current(cx) || first {
                         cx.notify();
@@ -497,7 +461,6 @@ impl PreviewHover {
     /// the clock, and nothing else in the view would ask for them.
     fn start_ticker<V: Render>(&mut self, cx: &mut Context<V>, field: fn(&mut V) -> &mut Self) {
         self._ticker = Some(cx.spawn(async move |view, cx| {
-            let mut stalled = false;
             loop {
                 cx.background_executor().timer(FRAME_INTERVAL).await;
                 let playing = view.update(cx, |view, cx| {
@@ -506,11 +469,8 @@ impl PreviewHover {
                         return false;
                     }
                     // A frame that could not reach the window yet goes up
-                    // with the next paint, and a stall that starts or ends
-                    // brings the spinner up or down.
-                    let missed = this.present_current(cx);
-                    let stall_changed = std::mem::replace(&mut stalled, this.is_stalled()) != stalled;
-                    if missed || stall_changed {
+                    // with the next paint.
+                    if this.present_current(cx) {
                         cx.notify();
                     }
                     true
@@ -528,21 +488,19 @@ mod tests {
     use super::*;
 
     /// A bake keeps running after the first frame, so a spinner shown for
-    /// all of it sits over a preview that is already playing. It is worth
-    /// showing only before there is anything to play, or once the frames
-    /// have stopped arriving.
+    /// all of it sits over a preview that is already playing.
     #[test]
-    fn the_spinner_waits_for_a_stall_rather_than_the_whole_bake() {
+    fn the_spinner_shows_only_until_the_preview_plays() {
         let mut hover = PreviewHover::default();
-        assert!(!hover.is_stalled(), "nothing is being baked");
+        assert!(!hover.awaits_first_frame(), "nothing is being baked");
 
         hover.baking = true;
-        assert!(hover.is_stalled(), "a bake with nothing to play yet is what a reader is waiting on");
+        assert!(hover.awaits_first_frame(), "a bake with nothing to play yet is what a reader is waiting on");
 
         hover.seed_playing_for_test(PreviewFrames::streaming());
-        assert!(!hover.is_stalled(), "a preview that is playing does not need one");
-
-        hover.age_last_frame_for_test(STALLED_AFTER + std::time::Duration::from_millis(1));
-        assert!(hover.is_stalled(), "until the frames stop arriving");
+        assert!(
+            !hover.awaits_first_frame(),
+            "a preview that is playing does not need one, however far the bake trails"
+        );
     }
 }

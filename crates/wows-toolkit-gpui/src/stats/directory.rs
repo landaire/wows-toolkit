@@ -257,7 +257,7 @@ pub(super) fn directory_header(scope: &DirectoryScope, view: Entity<StatsView>, 
                 .gap_1()
                 .items_center()
                 .min_w_0()
-                .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
+                .child(crate::icons::icon(crate::icons::Glyph::FolderOpen))
                 .child(div().text_sm().truncate().child(scope.root.display().to_string())),
         )
         .child(crate::ui::rule_v(cx))
@@ -267,7 +267,7 @@ pub(super) fn directory_header(scope: &DirectoryScope, view: Entity<StatsView>, 
         .when(scope.read == ReadState::Finished, |row| {
             row.child(
                 Button::new("directory-stats-reload")
-                    .child(crate::icons::icon(crate::icons::ARROW_CLOCKWISE))
+                    .icon(crate::icons::Glyph::RotateCw)
                     .label(t!("ui.stats.directory_reload").into_owned())
                     .compact()
                     .tooltip(t!("ui.stats.directory_reload_tooltip").into_owned())

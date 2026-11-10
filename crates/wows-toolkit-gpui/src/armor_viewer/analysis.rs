@@ -819,7 +819,7 @@ fn arc_block(shown: &ViewportView, viewport: &Entity<ViewportView>, index: usize
                 .child({
                     let viewport = viewport.clone();
                     Button::new(("armor-arc-delete", index))
-                        .child(crate::icons::icon(crate::icons::TRASH))
+                        .child(crate::icons::icon(crate::icons::Glyph::Trash))
                         .compact()
                         .tooltip(t!("ui.armor.arc_delete").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {
@@ -996,7 +996,7 @@ fn ship_block(
                 ))
                 .child(
                     Button::new(("armor-pen-remove", index))
-                        .child(crate::icons::icon(crate::icons::X))
+                        .child(crate::icons::icon(crate::icons::Glyph::X))
                         .compact()
                         .tooltip(t!("ui.armor.pen.remove").to_string())
                         .on_click(move |_event, _window, cx: &mut App| {

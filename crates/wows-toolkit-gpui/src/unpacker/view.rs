@@ -805,7 +805,7 @@ impl UnpackerView {
 /// opening a menu whose every item would fail.
 fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoElement {
     let trigger = Button::new("unpacker-dump-params")
-        .child(crate::icons::icon(crate::icons::DATABASE))
+        .child(crate::icons::icon(crate::icons::Glyph::Database))
         .xsmall()
         .ghost()
         .disabled(!enabled)

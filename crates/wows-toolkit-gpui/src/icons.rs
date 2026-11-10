@@ -1,208 +1,171 @@
-//! The icon glyphs the egui app draws, over the same Phosphor font.
+//! The icons the app draws: Lucide's (ISC, `assets/icons/LICENSE-LUCIDE`), and
+//! brand logos from Simple Icons (CC0, `assets/icons/LICENSE-SIMPLE-ICONS`),
+//! which Lucide does not draw.
 //!
-//! The egui app reaches these through `egui-phosphor`, which is an egui
-//! crate; this carries the font itself (`assets/fonts/Phosphor.ttf`, MIT) and
-//! the codepoints for the glyphs that app actually uses, so the two draw the
-//! same icons rather than approximations from a different set.
-//!
-//! Registered with the text system by [`register_font`]; a glyph is drawn by
-//! setting [`FONT_FAMILY`] on the element that carries it.
+//! Each is an SVG served by [`AppAssets`] and drawn by `gpui_kit`'s `Icon`, so
+//! it takes the size and colour of the text around it.
 
-// The table carries every glyph the egui app draws, so a surface being
-// ported finds its icon already here rather than having to look the
-// codepoint up again. The ones not yet drawn are the ports still to come.
-#![allow(dead_code)]
+use std::borrow::Cow;
 
-use gpui_kit::App;
+use gpui_kit::AssetSource;
 use gpui_kit::Div;
 use gpui_kit::ParentElement as _;
+use gpui_kit::SharedString;
 use gpui_kit::Styled as _;
+use gpui_kit::component::Icon;
 use gpui_kit::div;
 
-/// The family name the font declares, which is what an element asks for.
-pub const FONT_FAMILY: &str = "Phosphor";
+use wows_toolkit_viewmodel::listing_row::LineGlyph;
 
-/// The font itself, carried in the binary so no install is required.
-const FONT: &[u8] = include_bytes!("../assets/fonts/Phosphor.ttf");
+/// Where the vendored icons are served from, apart from `gpui_kit`'s own. A
+/// macro so `concat!` can build each icon's path from it.
+macro_rules! prefix {
+    () => {
+        "app-icons/"
+    };
+}
 
-/// Makes the icon glyphs drawable. Called once at startup; a failure leaves
-/// every icon as a missing-glyph box rather than stopping the app, which is
-/// recoverable in a way a panic during startup is not.
-pub fn register_font(cx: &App) {
-    if let Err(err) = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(FONT)]) {
-        tracing::error!("icons: the Phosphor font could not be registered: {err}");
+const PREFIX: &str = prefix!();
+
+/// Declares [`Glyph`], one variant per vendored `assets/icons/<name>.svg`.
+macro_rules! glyphs {
+    ($($variant:ident => $name:literal,)*) => {
+        /// One vendored icon.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Glyph {
+            $($variant,)*
+        }
+
+        impl Glyph {
+            /// The asset path [`AppAssets`] serves the icon at.
+            pub fn path(self) -> &'static str {
+                match self {
+                    $(Self::$variant => concat!(prefix!(), $name, ".svg"),)*
+                }
+            }
+
+            fn svg(self) -> &'static [u8] {
+                match self {
+                    $(Self::$variant => include_bytes!(concat!("../assets/icons/", $name, ".svg")),)*
+                }
+            }
+
+            fn from_path(path: &str) -> Option<Self> {
+                let name = path.strip_prefix(PREFIX)?.strip_suffix(".svg")?;
+                match name {
+                    $($name => Some(Self::$variant),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+glyphs! {
+    AppWindow => "app-window",
+    Archive => "archive",
+    Bomb => "bomb",
+    Box => "box",
+    Castle => "castle",
+    ChartColumn => "chart-column",
+    ChartLine => "chart-line",
+    ChevronDown => "chevron-down",
+    ChevronRight => "chevron-right",
+    Circle => "circle",
+    CircleCheck => "circle-check",
+    CircleX => "circle-x",
+    Clipboard => "clipboard",
+    ClipboardList => "clipboard-list",
+    Clock => "clock",
+    Copy => "copy",
+    Crosshair => "crosshair",
+    Database => "database",
+    Download => "download",
+    Equal => "equal",
+    Eraser => "eraser",
+    Eye => "eye",
+    EyeOff => "eye-off",
+    FaceSlightlyFrowning => "face-slightly-frowning",
+    FastForward => "fast-forward",
+    File => "file",
+    FileText => "file-text",
+    Flame => "flame",
+    Folder => "folder",
+    FolderOpen => "folder-open",
+    Funnel => "funnel",
+    Image => "image",
+    Info => "info",
+    List => "list",
+    Lock => "lock",
+    Monitor => "monitor",
+    MousePointer => "mouse-pointer",
+    MoveUpRight => "move-up-right",
+    Music => "music",
+    NotebookPen => "notebook-pen",
+    Paintbrush => "paintbrush",
+    Plug => "plug",
+    Radio => "radio",
+    Rewind => "rewind",
+    Rocket => "rocket",
+    RotateCcw => "rotate-ccw",
+    RotateCw => "rotate-cw",
+    Ruler => "ruler",
+    Search => "search",
+    Settings => "settings",
+    Shield => "shield",
+    SkipBack => "skip-back",
+    SkipForward => "skip-forward",
+    Slash => "slash",
+    Square => "square",
+    Sword => "sword",
+    SquareArrowOutUpRight => "square-arrow-out-up-right",
+    Table => "table",
+    Trash => "trash",
+    Triangle => "triangle",
+    TriangleAlert => "triangle-alert",
+    Trophy => "trophy",
+    Twitch => "twitch",
+    Users => "users",
+    VenetianMask => "venetian-mask",
+    X => "x",
+}
+
+impl From<LineGlyph> for Glyph {
+    fn from(glyph: LineGlyph) -> Self {
+        match glyph {
+            LineGlyph::Clock => Self::Clock,
+            LineGlyph::Crosshair => Self::Crosshair,
+            LineGlyph::Sword => Self::Sword,
+        }
     }
 }
 
-/// One icon glyph, sized to the surrounding text.
-///
-/// The glyph is a character in the icon family, so it takes the element's own
-/// colour and size like any other text; a caller that wants it larger or in
-/// another colour styles the returned element.
-pub fn icon(glyph: &'static str) -> Div {
-    div().flex_none().font_family(FONT_FAMILY).child(glyph)
+impl From<Glyph> for Icon {
+    fn from(glyph: Glyph) -> Self {
+        Icon::empty().path(SharedString::new_static(glyph.path()))
+    }
 }
 
-pub const ANCHOR: &str = "\u{E514}";
-pub const ARCHIVE: &str = "\u{E00C}";
-pub const ARROWS_OUT_SIMPLE: &str = "\u{E0A6}";
-pub const ARROW_BEND_UP_RIGHT: &str = "\u{E026}";
-pub const ARROW_CLOCKWISE: &str = "\u{E036}";
-pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{E038}";
-pub const ARROW_SQUARE_OUT: &str = "\u{E5DE}";
-pub const BOMB: &str = "\u{EE0A}";
-pub const BROADCAST: &str = "\u{E0F2}";
-pub const BROWSER: &str = "\u{E0F4}";
-pub const BUG: &str = "\u{E5F4}";
-pub const CAMERA: &str = "\u{E10E}";
-pub const CARET_DOWN: &str = "\u{E136}";
-pub const CARET_LEFT: &str = "\u{E138}";
-pub const CARET_RIGHT: &str = "\u{E13A}";
-pub const CASTLE_TURRET: &str = "\u{E9D0}";
-pub const CHART_BAR: &str = "\u{E150}";
-pub const CHART_LINE: &str = "\u{E154}";
-pub const CHAT_TEXT: &str = "\u{E17A}";
-pub const CHECK: &str = "\u{E182}";
-pub const CHECK_CIRCLE: &str = "\u{E184}";
-pub const CIRCLE: &str = "\u{E18A}";
-pub const CLIPBOARD: &str = "\u{E196}";
-pub const CLIPBOARD_TEXT: &str = "\u{E198}";
-pub const CLOCK: &str = "\u{E19A}";
-pub const CLOCK_CLOCKWISE: &str = "\u{E19E}";
-pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{E1A0}";
-pub const COPY: &str = "\u{E1CA}";
-pub const CROSSHAIR: &str = "\u{E1D6}";
-pub const CROSSHAIR_SIMPLE: &str = "\u{E1D8}";
-pub const CROWN: &str = "\u{E614}";
-pub const CUBE: &str = "\u{E1DA}";
-pub const CURSOR: &str = "\u{E1DC}";
-pub const DATABASE: &str = "\u{E1DE}";
-pub const DETECTIVE: &str = "\u{E83E}";
-pub const DISCORD_LOGO: &str = "\u{E61A}";
-pub const DOTS_THREE: &str = "\u{E1FE}";
-pub const DOWNLOAD_SIMPLE: &str = "\u{E20C}";
-pub const ERASER: &str = "\u{E21E}";
-pub const EXCLAMATION_MARK: &str = "\u{EE44}";
-pub const EYE: &str = "\u{E220}";
-pub const EYE_SLASH: &str = "\u{E224}";
-pub const FAST_FORWARD: &str = "\u{E6A6}";
-pub const FILE: &str = "\u{E230}";
-pub const FILE_TEXT: &str = "\u{E23A}";
-pub const FIRE: &str = "\u{E242}";
-pub const FLOPPY_DISK: &str = "\u{E248}";
-pub const FOLDER: &str = "\u{E24A}";
-pub const FOLDER_OPEN: &str = "\u{E256}";
-pub const FUNNEL: &str = "\u{E266}";
-pub const GAME_CONTROLLER: &str = "\u{E26E}";
-pub const GEAR_FINE: &str = "\u{E87C}";
-pub const GITHUB_LOGO: &str = "\u{E576}";
-pub const IMAGE: &str = "\u{E2CA}";
-pub const INFO: &str = "\u{E2CE}";
-pub const KEYBOARD: &str = "\u{E2D8}";
-pub const LINE_SEGMENT: &str = "\u{E6D2}";
-pub const LIST: &str = "\u{E2F0}";
-pub const LIST_BULLETS: &str = "\u{E2F2}";
-pub const LIST_CHECKS: &str = "\u{EADC}";
-pub const LOCK: &str = "\u{E2FA}";
-pub const MAGNIFYING_GLASS: &str = "\u{E30C}";
-pub const MAP_TRIFOLD: &str = "\u{E31A}";
-pub const MONITOR: &str = "\u{E32E}";
-pub const MUSIC_NOTE: &str = "\u{E33C}";
-pub const NOTCHES: &str = "\u{ED3A}";
-pub const NOTE_PENCIL: &str = "\u{E34C}";
-pub const PAINT_BRUSH: &str = "\u{E6F0}";
-pub const PAUSE: &str = "\u{E39E}";
-pub const PLAY: &str = "\u{E3D0}";
-pub const PLUGS: &str = "\u{EB56}";
-pub const PLUS_CIRCLE: &str = "\u{E3D6}";
-pub const PROHIBIT: &str = "\u{E3DE}";
-pub const REWIND: &str = "\u{E6A8}";
-pub const ROCKET_LAUNCH: &str = "\u{E3FE}";
-pub const RULER: &str = "\u{E6B8}";
-pub const SHARE: &str = "\u{E406}";
-pub const SHIELD: &str = "\u{E40A}";
-pub const SHIELD_STAR: &str = "\u{EC34}";
-pub const SIREN: &str = "\u{E9B8}";
-pub const SKIP_BACK: &str = "\u{E5A4}";
-pub const SKIP_FORWARD: &str = "\u{E5A6}";
-pub const SKULL: &str = "\u{E916}";
-pub const SMILEY_SAD: &str = "\u{E43E}";
-pub const SORT_ASCENDING: &str = "\u{E444}";
-pub const SORT_DESCENDING: &str = "\u{E446}";
-pub const SQUARE: &str = "\u{E45E}";
-pub const STAR: &str = "\u{E46A}";
-pub const SWORD: &str = "\u{E5BA}";
-pub const TABLE: &str = "\u{E476}";
-pub const THREE_D: &str = "\u{EA5A}";
-pub const TRASH: &str = "\u{E4A6}";
-pub const TRIANGLE: &str = "\u{E4B0}";
-pub const TROPHY: &str = "\u{E67E}";
-pub const TWITCH_LOGO: &str = "\u{E5CE}";
-pub const USERS: &str = "\u{E4D6}";
-pub const USERS_THREE: &str = "\u{E68E}";
-pub const WARNING: &str = "\u{E4E0}";
-pub const WRENCH: &str = "\u{E5D4}";
-pub const X: &str = "\u{E4F6}";
-pub const X_CIRCLE: &str = "\u{E4F8}";
+/// One icon, sized to and coloured like the surrounding text.
+///
+/// A caller that wants it larger or in another colour styles the returned
+/// element, as it would a line of text.
+pub fn icon(glyph: Glyph) -> Div {
+    div().flex_none().flex().items_center().child(Icon::from(glyph))
+}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    // Imported by name, not through the crate glob: that glob re-exports
-    // GPUI's own `test` macro, which would shadow Rust's `#[test]`.
-    use gpui_kit::AppContext as _;
-    use gpui_kit::Context;
-    use gpui_kit::InteractiveElement as _;
-    use gpui_kit::IntoElement;
-    use gpui_kit::Render;
-    use gpui_kit::TestAppContext;
-    use gpui_kit::TestSupportExt as _;
-    use gpui_kit::Window;
-    use gpui_kit::px;
-    use gpui_kit::size;
-    use gpui_kit::test::TestWindowExt;
+/// The vendored icons, then everything `gpui_kit` bundles.
+pub struct AppAssets;
 
-    /// Draws one glyph, so the font's own registration is exercised rather
-    /// than assumed.
-    struct IconProbe;
-
-    impl Render for IconProbe {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            div()
-                .id("icon-probe")
-                .test_support()
-                .size_full()
-                .child(icon(TROPHY).text_size(px(24.)))
-                .child(icon(SMILEY_SAD))
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> gpui_kit::Result<Option<Cow<'static, [u8]>>> {
+        match Glyph::from_path(path) {
+            Some(glyph) => Ok(Some(Cow::Borrowed(glyph.svg()))),
+            None => gpui_kit::assets::Assets.load(path),
         }
     }
 
-    /// GPUI panics on the first line it lays out in a family it cannot find,
-    /// so laying a glyph out is the check that the font registered.
-    #[gpui_kit::test]
-    fn the_icon_font_registers_and_its_glyphs_lay_out(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        cx.update(|cx| register_font(cx));
-
-        let window = cx.open_window(size(px(200.), px(100.)), |_window, _cx| IconProbe);
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            let bounds = window.find("icon-probe").bounds();
-            assert!(bounds.size.width > px(0.), "the glyphs took space, so the family resolved");
-        })
-        .expect("the window is open");
-    }
-
-    /// Pinned against `egui-phosphor` 0.13's regular variant, which is where
-    /// these were taken from and what the egui app draws. A regeneration that
-    /// moved a codepoint would otherwise draw a different icon here than
-    /// there, silently.
-    #[test]
-    fn the_glyphs_keep_the_codepoints_the_egui_app_draws() {
-        assert_eq!(TROPHY, "\u{E67E}");
-        assert_eq!(SMILEY_SAD, "\u{E43E}");
-        assert_eq!(NOTCHES, "\u{ED3A}");
-        assert_eq!(CROSSHAIR, "\u{E1D6}");
+    fn list(&self, path: &str) -> gpui_kit::Result<Vec<SharedString>> {
+        gpui_kit::assets::Assets.list(path)
     }
 }

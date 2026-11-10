@@ -51,7 +51,7 @@ pub enum BrowserNode {
     Leaf {
         label: String,
         /// The second line: damage, kills and the timestamp. In pieces, since
-        /// this front end keeps its icons in a font of their own.
+        /// this front end draws its glyphs as icons.
         stats: Vec<LinePart>,
         path: PathBuf,
         /// The map as the replay names it, for the hover preview's art.
@@ -221,7 +221,7 @@ mod tests {
                             .iter()
                             .map(|part| match part {
                                 LinePart::Text(text) => text.as_str(),
-                                LinePart::Glyph(glyph) => glyph,
+                                LinePart::Glyph(glyph) => glyph.codepoint(),
                             })
                             .collect(),
                     ),

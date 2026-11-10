@@ -113,7 +113,7 @@ struct LeafInfo {
     /// the replay has been read.
     map_name: String,
     /// The row's second line: damage, kills and the timestamp, in the pieces
-    /// it is drawn from (the glyphs go in the icon font).
+    /// it is drawn from (the glyphs are drawn as icons).
     stats: Rc<Vec<LinePart>>,
     outcome: MatchOutcome,
     in_division: bool,
@@ -216,11 +216,7 @@ const PREVIEW_SIZE: f32 = 384.;
 
 /// Closes the identity line of a battle played in a division, the way the
 /// egui row does (`listing_row::row_layout_job`).
-const DIVISION_GLYPH: &str = wows_toolkit_viewmodel::glyphs::USERS_THREE;
-
-/// The egui semantic palette's `division` (`ui/theme/semantic.rs`), which is
-/// what tints that glyph there.
-const DIVISION_COLOR: u32 = 0xE5C158;
+const DIVISION_GLYPH: crate::icons::Glyph = crate::icons::Glyph::Users;
 
 /// Background scan progress, driving the panel's content below the header.
 enum ScanStatus {
@@ -1174,18 +1170,18 @@ fn render_browser_item(
     let identity_el = h_flex().gap_1().items_center().child(identity_el.child(item.label.clone())).when_some(
         leaf.filter(|leaf| leaf.in_division),
         |row, _| {
-            row.child(crate::icons::icon(DIVISION_GLYPH).text_color(resolve_color(ColorRole::Fixed(DIVISION_COLOR))))
+            row.child(crate::icons::icon(DIVISION_GLYPH).text_color(gpui_kit::rgb(crate::theme::semantic().division)))
         },
     );
 
     let mut lines = v_flex().flex_1().justify_center().overflow_hidden().child(identity_el);
     if let Some(leaf) = leaf {
-        // The glyphs live in the icon font, the figures in the UI font, so
-        // the line is drawn from its pieces rather than as one string.
+        // The glyphs are icons and the figures text, so the line is drawn from
+        // its pieces rather than as one string.
         let stats = h_flex().text_xs().text_color(crate::theme::text_dim()).overflow_hidden().children(
             leaf.stats.iter().map(|part| match part {
                 LinePart::Text(text) => div().whitespace_nowrap().child(text.clone()).into_any_element(),
-                LinePart::Glyph(glyph) => crate::icons::icon(glyph).into_any_element(),
+                LinePart::Glyph(glyph) => crate::icons::icon((*glyph).into()).into_any_element(),
             }),
         );
         lines = lines.child(stats);
@@ -1561,11 +1557,10 @@ impl Render for ReplayBrowser {
         // build already open, with the spinner over it until the battle is
         // ready to play -- the same two stages the egui popup shows
         // (`preview_popup.rs`).
-        // Shown only while the bake has nothing to play, or has stopped
-        // feeding one: a spinner held over a preview that is already
-        // running says nothing, and the egui popup drops it the moment the
-        // first frame lands.
-        let stalled = self.preview.is_stalled();
+        // Shown only until the first frame plays: a spinner held over a
+        // preview that is already running says nothing, and the egui popup
+        // drops it the moment the first frame lands.
+        let waiting = self.preview.awaits_first_frame();
         let preview_map: Option<AnyElement> = match (self.preview.texture(), self.preview.awaits_preview()) {
             (Some(texture), _) => Some(
                 div()
@@ -1573,7 +1568,7 @@ impl Render for ReplayBrowser {
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
                     .child(crate::frame_texture::frame_view(texture, None).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
-                    .when(stalled, |this| {
+                    .when(waiting, |this| {
                         this.child(
                             h_flex().absolute().inset_0().items_center().justify_center().child(Spinner::new().large()),
                         )

@@ -269,9 +269,7 @@ impl StatsShipsPanel {
                 if let Some(species) = param.species().and_then(|species| species.known()).copied()
                     && classes.insert(species)
                 {
-                    for tint in [0xffffff, 0x303840] {
-                        icons.load_ship_class(species, tint, &vfs, &renderer);
-                    }
+                    icons.load_ship_class(species, crate::replay_inspector::icons::UNTINTED, &vfs, &renderer);
                 }
             }
             icons
@@ -365,8 +363,7 @@ impl Render for StatsShipsPanel {
                 param.as_ref().and_then(|param| self.icons.get_keyed(&format!("nation:{}", param.nation())));
             let class_icon = param.as_ref().and_then(|param| {
                 let species = param.species()?.known()?;
-                let tint = if crate::theme::is_dark_mode() { 0xffffff } else { 0x303840 };
-                self.icons.get(*species, tint)
+                self.icons.get(*species, crate::replay_inspector::icons::UNTINTED)
             });
             let record = h_flex()
                 .flex_wrap()
@@ -418,10 +415,11 @@ impl Render for StatsShipsPanel {
                                 .w_full()
                                 .gap_1()
                                 .items_center()
-                                // The caret is a glyph in the icon font, so it
-                                // goes through `icons::icon` rather than into a
-                                // label the UI font would render as a box.
-                                .child(icons::icon(if open { icons::CARET_DOWN } else { icons::CARET_RIGHT }))
+                                .child(icons::icon(if open {
+                                    icons::Glyph::ChevronDown
+                                } else {
+                                    icons::Glyph::ChevronRight
+                                }))
                                 .when_some(nation_icon, |row, image| {
                                     row.child(img(image).w(px(23.)).h(px(16.)).flex_none())
                                 })
@@ -458,7 +456,7 @@ impl Render for StatsShipsPanel {
                         label.clone()
                     };
                     Button::new(SharedString::from(format!("ship-clear-{ship_id}")))
-                        .child(icons::icon(if armed { icons::CHECK_CIRCLE } else { icons::ERASER }))
+                        .child(icons::icon(if armed { icons::Glyph::CircleCheck } else { icons::Glyph::Eraser }))
                         .ghost()
                         .compact()
                         .selected(armed)
@@ -551,7 +549,7 @@ impl Render for StatsShipsPanel {
                     .when(!ship_query.is_empty(), |this| {
                         this.child(
                             Button::new("stats-ships-clear-search")
-                                .child(icons::icon(icons::X))
+                                .child(icons::icon(icons::Glyph::X))
                                 .compact()
                                 .tooltip(t!("ui.stats.clear").to_string())
                                 .accessibility_label(t!("ui.stats.clear").to_string())
@@ -595,7 +593,7 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
     let ship_id = section.ship_id;
 
     let trigger = Button::new(SharedString::from(format!("ship-copy-{ship_id}")))
-        .child(icons::icon(icons::COPY))
+        .child(icons::icon(icons::Glyph::Copy))
         .compact()
         .tooltip(t!("ui.stats.copy_table").to_string());
 

@@ -88,7 +88,7 @@ pub fn render<V: SessionHost + Render>(view: &V, entity: &Entity<V>, cx: &mut Co
     Popover::new("collab-session-popover")
         .trigger(
             Button::new("collab-session-toggle")
-                .child(crate::icons::icon(crate::icons::BROADCAST))
+                .icon(crate::icons::Glyph::Radio)
                 .label(label)
                 .compact()
                 // A running session is the state worth seeing at a glance.
@@ -263,9 +263,9 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                         .child(
                             Button::new("collab-reveal")
                                 .child(crate::icons::icon(if revealed {
-                                    crate::icons::EYE_SLASH
+                                    crate::icons::Glyph::EyeOff
                                 } else {
-                                    crate::icons::EYE
+                                    crate::icons::Glyph::Eye
                                 }))
                                 .compact()
                                 .tooltip(t!("ui.collab.toggle_visibility").to_string())
@@ -325,7 +325,7 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                         .gap_1()
                         .items_center()
                         .text_xs()
-                        .child(crate::icons::icon(crate::icons::MONITOR))
+                        .child(crate::icons::icon(crate::icons::Glyph::Monitor))
                         .child(div().flex_1().min_w(px(0.)).truncate().child(battle.replay_name.clone()))
                         .child(div().text_color(crate::theme::text_dim()).child(battle.map.clone()))
                         // Drawn from the frames the end that owns the replay
