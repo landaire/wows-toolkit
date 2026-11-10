@@ -347,6 +347,11 @@ export function replayDirectories(): GameDataSnapshot["directories"] {
   return gameData()?.directories ?? [];
 }
 
+/** Whether the pinned directories were read at startup; a pin before then would drop them. */
+export function pinsRestored(): boolean {
+  return gameData()?.pinnedRestored ?? false;
+}
+
 /** Shows the listing of `directory`, or the game's own when `null`, as the app's tab selection says. */
 export function showReplayWorkspace(directory: string | null) {
   activeWorkspace.set(directory ?? MAIN);

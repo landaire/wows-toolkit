@@ -5,7 +5,7 @@ import { ReplayInspectorService, type AppTab } from "wows-toolkit/native";
 import { Surface } from "../components";
 import { t } from "../i18n";
 import { Icon, type IconName } from "../icons";
-import { closeReplayDirectory, pinReplayDirectory, replayDirectories } from "../replay_inspector";
+import { closeReplayDirectory, pinReplayDirectory, pinsRestored, replayDirectories } from "../replay_inspector";
 import { closeDirectoryStats, directoryStatsTabs } from "../stats";
 import { colors, controlRadius } from "../theme";
 
@@ -76,7 +76,11 @@ function directoryTab(entry: { path: string; label: string; pinned: boolean }): 
       : <CloseButton label={`Close directory ${entry.label}`} tooltip="Close directory" onPress={() => closeReplayDirectory(entry.path)}/>,
     menu: (
       <Surface style={{ minWidth: 200, padding: 5, backgroundColor: colors.popover }}>
-        <TabMenuItem label={entry.pinned ? "Unpin directory" : "Pin directory"} onSelect={() => void pinReplayDirectory(entry.path, !entry.pinned)}/>
+        <TabMenuItem
+          label={entry.pinned ? "Unpin directory" : "Pin directory"}
+          disabled={!pinsRestored()}
+          onSelect={() => void pinReplayDirectory(entry.path, !entry.pinned)}
+        />
         <TabMenuItem label="Close directory" disabled={entry.pinned} onSelect={() => closeReplayDirectory(entry.path)}/>
       </Surface>
     ),

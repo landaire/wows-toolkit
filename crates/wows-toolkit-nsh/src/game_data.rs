@@ -107,6 +107,9 @@ pub enum GameDataError {
     ReadPinned(#[source] SettingError),
     #[error("the pinned replay directories could not be saved")]
     SavePinned(#[source] sqlx::Error),
+    /// A pin saved before the stored set is read would drop the stored pins.
+    #[error("the pinned replay directories have not been read yet")]
+    PinsNotRestored,
     #[error("the replay index could not be read or written")]
     Index(#[source] IndexError),
     #[error("there is no storage directory for the game data cache")]
@@ -252,6 +255,9 @@ struct State {
     cache_message: Option<String>,
     directories: DirectoryRegistry,
     directories_error: Option<String>,
+    /// Whether the startup read of the pinned directories succeeded; pins
+    /// wait for it.
+    pinned_restored: bool,
     offered_builds: BTreeSet<u32>,
     offer: OfferState,
 }
@@ -274,6 +280,7 @@ static SERVICE: LazyLock<Service> = LazyLock::new(|| Service {
         cache_message: None,
         directories: DirectoryRegistry::new(),
         directories_error: None,
+        pinned_restored: false,
         offered_builds: BTreeSet::new(),
         offer: OfferState::default(),
     }),
@@ -514,6 +521,7 @@ fn startup_work() {
             for root in pinned.unwrap_or_default() {
                 state.directories.open(root, true);
             }
+            state.pinned_restored = true;
         }
         Err(error) => {
             let reason = crate::shell::sentence(&error);
@@ -1159,6 +1167,8 @@ pub struct GameDataSnapshot {
     pub cache: CacheSnapshot,
     pub directories: Vec<DirectoryEntry>,
     pub directories_error: Option<String>,
+    /// Whether the pinned directories were read at startup; pinning waits for it.
+    pub pinned_restored: bool,
     pub offer: MissingBuildOffer,
 }
 
@@ -1244,6 +1254,7 @@ fn snapshot() -> GameDataSnapshot {
             })
             .collect(),
         directories_error: state.directories_error.clone(),
+        pinned_restored: state.pinned_restored,
         offer: MissingBuildOffer {
             open: state.offer.open,
             planning: state.offer.planning,
@@ -1533,8 +1544,11 @@ impl GameData {
     pub async fn pin_directory(path: String, pinned: bool) -> Result<(), GameDataRequestError> {
         run_blocking(move || {
             let path = PathBuf::from(path);
-            if !update(|state| state.directories.set_pinned(&path, pinned)) {
-                return Err(GameDataError::DirectoryNotOpen { path });
+            let changed = update(|state| state.pinned_restored.then(|| state.directories.set_pinned(&path, pinned)));
+            match changed {
+                None => return Err(GameDataError::PinsNotRestored),
+                Some(false) => return Err(GameDataError::DirectoryNotOpen { path }),
+                Some(true) => {}
             }
             save_pinned()
         })
