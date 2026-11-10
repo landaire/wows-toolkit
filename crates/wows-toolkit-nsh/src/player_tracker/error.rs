@@ -34,6 +34,8 @@ pub enum TrackerError {
     WriteViewModes(#[source] sqlx::Error),
     #[error("{value:?} is not an account id")]
     AccountId { value: String },
+    #[error("the game data settings could not be read")]
+    GameData(#[source] crate::game_data::GameDataError),
     #[error("the tracker task did not complete")]
     Task(#[source] tokio::task::JoinError),
 }

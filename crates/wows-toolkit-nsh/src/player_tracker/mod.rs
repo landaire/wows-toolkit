@@ -171,14 +171,21 @@ impl PlayerTracker {
     }
 
     /// Watches the replays directory of the WoWs directory the settings
-    /// hold, restarting the watch when that has changed.
+    /// hold, restarting the watch when that has changed. The game data the
+    /// battle resolves against is rebound to the same settings first.
     pub async fn sync_live() -> Result<(), String> {
         run(|| {
-            let wows_dir = database::run(async |pool| database::wows_dir(pool).await)?;
-            live::watch(&wows_dir);
+            crate::game_data::reload_settings().map_err(TrackerError::GameData)?;
+            live::watch(crate::game_data::wows_dir().as_deref());
             Ok(())
         })
         .await
+    }
+
+    /// Whether the Current Match section is on screen. The battle's stats
+    /// lookup is a request to an outside service, so it waits until it is.
+    pub fn set_current_match_shown(shown: bool) {
+        live::set_shown(shown);
     }
 
     /// Bumped whenever the Current Match section has something new to show.

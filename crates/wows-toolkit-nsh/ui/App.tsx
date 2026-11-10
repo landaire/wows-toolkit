@@ -3,7 +3,7 @@ import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
 import { ReplayInspector as NativeReplayInspector, Toolkit, type SearchState, type SettingsState } from "wows-toolkit/native";
 import { Button, EmptyState, errorMessage, inputStyle, MenuRow, Surface } from "./components";
-import { activatePlayerTracker, PlayerTrackerView } from "./player_tracker";
+import { activatePlayerTracker, PlayerTrackerView, setPlayerTrackerShown } from "./player_tracker";
 import { activateStats, StatsView } from "./stats";
 import { colors, controlRadius } from "./theme";
 import { GameDataCacheSection, GameDataStatus, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
@@ -44,6 +44,7 @@ function selectTab(id: string) {
   }
   if (id === "statistics") activateStats();
   if (id === "player-tracker") activatePlayerTracker(startup.locale);
+  setPlayerTrackerShown(id === "player-tracker");
   activeTab.set(id);
   void Storage.setItem(STORAGE_TAB, id);
 }
