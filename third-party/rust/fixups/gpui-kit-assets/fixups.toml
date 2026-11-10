@@ -1,2 +1,7 @@
 # Generates the icon name enum and the embedded default asset list.
 buildscript.run = true
+
+# The crate sits under crates/assets of its git checkout, and its generated
+# icon list reads the icons relative to its own manifest directory.
+[env]
+CARGO_MANIFEST_DIR = "gpui-component-612a4e35e10905a2/crates/assets"

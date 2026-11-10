@@ -6,7 +6,7 @@
 features = ["vendored"]
 
 [buildscript.build]
-extra_deps = ["//third-party/rust:cc-1"]
+extra_deps = [":cc-1.4.7"]
 
 [buildscript.run]
 rustc_link_lib = true

@@ -7,5 +7,5 @@ buildscript.run = false
 # shipped binaries build without it.
 # leak-detection, proptest and test-support need these. They stay unused, and
 # so unlinked, elsewhere.
-extra_deps = [":backtrace-0.3", ":futures-concurrency-7", ":postage-0.5", ":proptest-1", ":web-time-1"]
+extra_deps = [":backtrace-0.3.76", ":futures-concurrency-7.7.1", ":postage-0.5.0", ":proptest-1.12.0", ":web-time-1.1.0"]
 rustc_flags_select = [{ "DEFAULT" = [], "root//build-support/buck/test-support:enabled" = ["--cfg=feature=\"backtrace\"", "--cfg=feature=\"leak-detection\"", "--cfg=feature=\"proptest\"", "--cfg=feature=\"test-support\""] }]
