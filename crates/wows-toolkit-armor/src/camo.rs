@@ -390,12 +390,49 @@ pub fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>,
 mod tests {
     use std::collections::HashMap;
 
+    use wowsunpack::export::camo_textures::CamoSchemeId;
+    use wowsunpack::export::camo_textures::CamoSchemeInfo;
     use wowsunpack::export::camouflage::UvTransform;
+    use wowsunpack::export::gltf_export::CamoOrigin;
 
     use super::RgbaTexture;
     use super::bilinear_rgba;
     use super::build_active_camo;
+    use super::remap_camo_selection;
     use super::smoothstep;
+
+    fn scheme(id: usize, display_name: &str, origin: CamoOrigin) -> CamoSchemeInfo {
+        CamoSchemeInfo {
+            id: CamoSchemeId(id),
+            display_name: display_name.to_string(),
+            raw_name: display_name.to_string(),
+            origin,
+            use_color_scheme: false,
+            uv_transforms: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn remap_camo_selection_follows_name_across_shuffled_ids() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific), scheme(1, "Camo B", CamoOrigin::Universal)];
+        // A reload rebuilt the list in another order, so "Camo A" moved from id 0 to id 1.
+        let new = vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), Some(CamoSchemeId(1)));
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_name_gone_from_new_list() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new = vec![scheme(0, "Camo B", CamoOrigin::Universal)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(0)), None);
+    }
+
+    #[test]
+    fn remap_camo_selection_none_when_old_id_unknown() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        let new = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific)];
+        assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(5)), None);
+    }
 
     /// A single-pixel PNG (repeated as the whole image) so `image::
     /// load_from_memory` has real bytes to decode.

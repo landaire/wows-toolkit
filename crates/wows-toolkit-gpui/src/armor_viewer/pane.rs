@@ -562,7 +562,7 @@ impl ArmorViewerPane {
         self.pen.firing_ship = first.as_ref().map(|ship| ship.param_index.clone());
         let shell_index = self.pen.firing_shell;
         let viewport = self.dock.read(cx).active_viewport().clone();
-        viewport.update(cx, |view, cx| view.set_cast_ship(first, shell_index, cx));
+        viewport.update(cx, |view, cx| view.update_scene(cx, |scene| scene.set_cast_ship(first, shell_index)));
     }
 
     /// Whether the checker's panel is up.
@@ -603,7 +603,7 @@ impl ArmorViewerPane {
         // what it describes. The popover triggers cleared it on close.
         if !self.show_options {
             for pane in self.dock.read(cx).panes().to_vec() {
-                pane.update(cx, |view, cx| view.clear_sidebar_hover(cx));
+                pane.update(cx, |view, cx| view.update_scene(cx, |scene| scene.clear_sidebar_hover()));
             }
         }
         cx.notify();
@@ -724,10 +724,9 @@ impl ArmorViewerPane {
     ) {
         let active = self.dock.read(cx).active_viewport();
         let clone_source = {
-            let source = active.read(cx);
-            source
-                .current_armor()
-                .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
+            let scene = active.read(cx).scene();
+            let reload_source = active.read(cx).reload_source();
+            scene.current_armor().cloned().map(|armor| (armor, scene.camera(), scene.synced_settings(), reload_source))
         };
 
         let viewport = self.fresh_viewport(window, cx);
@@ -763,7 +762,7 @@ impl ArmorViewerPane {
     fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportChange, cx: &mut Context<Self>) {
         match event {
             ViewportChange::TrajectoryMode => {
-                if source.read(cx).trajectory_state().shown {
+                if source.read(cx).scene().trajectory_state().shown {
                     self.show_options = true;
                 }
                 cx.notify();
@@ -788,7 +787,7 @@ impl ArmorViewerPane {
     fn push_camera_from(&self, source: &Entity<ViewportView>, cx: &mut Context<Self>) {
         let panes = self.dock.read(cx).panes().to_vec();
         let Some(source_ix) = panes.iter().position(|pane| pane == source) else { return };
-        let camera = source.read(cx).camera();
+        let camera = source.read(cx).scene().camera();
         for ix in other_pane_indices(panes.len(), source_ix) {
             panes[ix].update(cx, |view, cx| view.set_camera(camera.clone(), cx));
         }
@@ -802,7 +801,7 @@ impl ArmorViewerPane {
     fn push_settings_from(&self, source: &Entity<ViewportView>, cx: &mut Context<Self>) {
         let panes = self.dock.read(cx).panes().to_vec();
         let Some(source_ix) = panes.iter().position(|pane| pane == source) else { return };
-        let settings = source.read(cx).synced_settings();
+        let settings = source.read(cx).scene().synced_settings();
         for ix in other_pane_indices(panes.len(), source_ix) {
             panes[ix].update(cx, |view, cx| view.apply_synced(&settings, cx));
         }
@@ -950,7 +949,7 @@ impl ArmorViewerPane {
         let display_name = event.display_name.clone();
         // The hull the pane is showing, which is the one the reader is looking
         // at. A sidebar menu opened with no ship loaded seeds nothing.
-        let seed_hull = self.dock.read(cx).active_viewport().read(cx).selected_hull();
+        let seed_hull = self.dock.read(cx).active_viewport().read(cx).scene().hull_selection().hull;
 
         cx.spawn_in(window, async move |this, cx| {
             let Ok(asked) = cx.update(|_window, cx| export_defaults(cx)) else { return };
@@ -1101,7 +1100,7 @@ impl ArmorViewerPane {
             // Already showing it, so only what it has taken has changed.
             let hits = std::mem::take(&mut self.pending_hits);
             active.update(cx, |view, cx| {
-                view.show_hits(hits, cx);
+                view.update_scene(cx, |scene| scene.show_hits(hits));
                 let incoming = &self.incoming.context;
                 view.compare_incoming(&incoming.taken, &incoming.shells, cx);
             });
@@ -1128,8 +1127,8 @@ impl ArmorViewerPane {
         self.playback_at = Some(at);
         let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
-            view.set_hit_health(health, cx);
-            view.show_hits(hits, cx);
+            view.update_scene(cx, |scene| scene.set_hit_health(health));
+            view.update_scene(cx, |scene| scene.show_hits(hits));
         });
     }
 
@@ -1199,7 +1198,7 @@ impl ArmorViewerPane {
                     // again and would drop them.
                     let hits = std::mem::take(&mut self.pending_hits);
                     if !hits.is_empty() {
-                        viewport.show_hits(hits, cx);
+                        viewport.update_scene(cx, |scene| scene.show_hits(hits));
                     }
                     if comparing {
                         let incoming = &self.incoming.context;
@@ -1292,11 +1291,11 @@ impl ArmorViewerPane {
     pub(crate) fn save_defaults(&self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         let active = self.dock.read(cx).active_viewport();
-        let display = active.read(cx).display_settings;
+        let display = active.read(cx).scene().display_settings();
         // Derived from what the pane is showing, the way the egui app derives
         // them when it saves: they are a record of the current state rather
         // than a setting of their own.
-        let all_visible = active.read(cx).all_visible();
+        let all_visible = active.read(cx).scene().all_visible();
         let (visible, collapsed, pos) = (self.legend.visible, self.legend.collapsed, self.legend.pos);
         let unported = self.unported_defaults;
         let row = ArmorViewerDefaultsRow {

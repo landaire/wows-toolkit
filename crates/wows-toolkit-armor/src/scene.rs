@@ -1650,6 +1650,12 @@ impl ArmorScene {
         }
     }
 
+    /// A press ended outside the viewport: the drag ends without a click.
+    pub fn pointer_cancel(&mut self) {
+        self.drag = None;
+        self.gizmo_press_in_box = false;
+    }
+
     /// A pointer button came up at `at`. A plain left click snaps the gizmo,
     /// casts or bursts in their modes, or toggles the hovered plate.
     pub fn pointer_up(&mut self, at: Vec2, button: Button, shift: bool) {
