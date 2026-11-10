@@ -10,6 +10,9 @@ buck = []
 
 
 [dependencies]
+# Rendered videos go on the clipboard as a file list.
+arboard = "3.6.1"
+image = { workspace = true }
 base64 = "0.22"
 env_logger = "0.11"
 log = "0.4"
@@ -32,6 +35,12 @@ wows-core = { path = "../wows-core" }
 sqlx = { workspace = true }
 url = "2.5.8"
 wows-toolkit-config = { path = "../wows-toolkit-config" }
+wows-toolkit-replay-data = { path = "../wows-toolkit-replay-data" }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "fire-sections"] }
+# The CPU encoders, so an export works on a machine with no GPU encoder.
+wows_minimap_renderer = { path = "../minimap-renderer", default-features = false, features = ["rendering", "cpu", "cpu-av1"] }
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+wt-collab-client = { workspace = true }
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
