@@ -19,6 +19,8 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
@@ -32,6 +34,7 @@ use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::download_repo::RemoteAvailability;
 use wows_toolkit_config::index::query as index_query;
 use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::queries::SettingError;
 use wows_toolkit_replay_data::cache;
 use wows_toolkit_replay_data::cache::CacheJob;
@@ -39,6 +42,7 @@ use wows_toolkit_replay_data::cache::CacheOutcome;
 use wows_toolkit_replay_data::cache::CacheState;
 use wows_toolkit_replay_data::directories::CloseRefusal;
 use wows_toolkit_replay_data::directories::DirectoryRegistry;
+use wows_toolkit_replay_data::error::IndexOneError;
 use wows_toolkit_replay_data::error::PreloadError;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::GameDataCache;
@@ -115,6 +119,12 @@ pub enum GameDataError {
     PinsNotRestored,
     #[error("the replay index could not be read or written")]
     Index(#[source] IndexError),
+    #[error("{} could not be indexed", path.display())]
+    IndexReplay {
+        path: PathBuf,
+        #[source]
+        source: IndexOneError,
+    },
     #[error("there is no storage directory for the game data cache")]
     NoStorageDirectory,
     #[error("another game data cache job is running")]
@@ -164,9 +174,17 @@ struct BindingGeneration(u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GameDataRevision(u64);
 
-/// How many index passes have finished. Compared, never read for its value.
+/// How many index passes have finished, counting the one-replay index of a
+/// battle that landed in an opened directory. Compared, never read for its
+/// value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct IndexPassCount(u64);
+
+impl IndexPassCount {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
 
 /// Numbers the job reports in the order they were made, so the interface
 /// says each one once.
@@ -482,6 +500,80 @@ fn index_install(mode: IndexMode, origin: IndexOrigin) -> bool {
     true
 }
 
+/// A battle that landed in an opened directory.
+#[derive(Debug)]
+pub struct LandedReplay {
+    /// The opened directory the battle landed in.
+    pub root: PathBuf,
+    pub path: PathBuf,
+}
+
+/// Where landed battles wait for the one thread that takes them.
+static LANDED: LazyLock<Sender<LandedReplay>> = LazyLock::new(|| {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    spawn("replay-landed", move || take_landed_batches(&receiver));
+
+    sender
+});
+
+/// Queues `landed` to be indexed and, while data sharing is on, contributed.
+pub fn take_landed(landed: LandedReplay) {
+    if let Err(unsent) = LANDED.send(landed) {
+        log::warn!("replay index: {} was not queued: no thread takes landed replays", unsent.0.path.display());
+    }
+}
+
+/// Indexes and contributes landed battles a batch at a time: what landed
+/// while one batch ran is the next, and the listing reads the index again
+/// once per batch.
+fn take_landed_batches(receiver: &Receiver<LandedReplay>) {
+    while let Ok(first) = receiver.recv() {
+        let batch: Vec<LandedReplay> = std::iter::once(first).chain(receiver.try_iter()).collect();
+
+        let indexed = batch
+            .iter()
+            .filter(|landed| {
+                index_landed(landed).map_err(|error| log::warn!("replay index: {}", crate::shell::chain(&error))).is_ok()
+            })
+            .count();
+        if indexed > 0 {
+            update(|state| state.index.finished = state.index.finished.next());
+        }
+
+        let sharing = with_database(|runtime, pool| Ok(sharing_mode(runtime, pool)));
+        match sharing {
+            // The reader shares nothing.
+            Ok(Some(DataSharingMode::Off)) => {}
+            Ok(Some(_)) => batch.into_iter().for_each(|landed| contribute_one(landed.path)),
+            // `sharing_mode` logged why the setting could not be read.
+            Ok(None) => {}
+            Err(error) => log::warn!("sharing: {}", crate::shell::chain(&error)),
+        }
+    }
+}
+
+/// Indexes the one replay `landed.path` into the live index source, which is
+/// made rooted at `landed.root` when there is none yet. Blocking.
+fn index_landed(landed: &LandedReplay) -> Result<(), GameDataError> {
+    let cache = cache().ok_or(GameDataError::Unbound)?;
+
+    with_database(|runtime, pool| {
+        let now = jiff::Timestamp::now();
+        let source = runtime
+            .block_on(index_query::ensure_default_source(pool, &landed.root, now))
+            .map_err(GameDataError::Index)?;
+
+        #[cfg(feature = "test-support")]
+        if let Some(index) = test_support::landed_index() {
+            index(&landed.path, source);
+            return Ok(());
+        }
+
+        replay_index::index_one(runtime, pool, &landed.path, &cache, source, now, IndexWriteMode::Incremental)
+            .map_err(|source| GameDataError::IndexReplay { path: landed.path.clone(), source })
+    })
+}
+
 /// Reads the settings and binds to them, once per process.
 fn ensure_started() {
     if state().started {
@@ -732,8 +824,9 @@ fn queue_index(pass: QueuedPass) {
 fn run_index(pass: QueuedPass, cancel: Arc<AtomicBool>) {
     let QueuedPass { root, mode, origin } = pass;
     let cache = state().binding.as_ref().map(|binding| binding.cache.clone());
-    // Only the game's own directory receives battles as they are played; the
-    // others hold replays the reader opened, which are not contributed unasked.
+    // A pass over an opened directory contributes nothing: a battle landing
+    // there is contributed on its own by `take_landed`, and the rest of the
+    // directory holds replays the reader opened, which are not sent unasked.
     let live = wows_dir().is_some_and(|dir| {
         root == dir.join("replays") || root == wows_toolkit_replay_data::load::resolve_replays_dir(&dir)
     });
@@ -794,7 +887,7 @@ fn run_index(pass: QueuedPass, cancel: Arc<AtomicBool>) {
     let next = update(|state| {
         state.index.cancel = None;
         state.index.progress = None;
-        state.index.finished = IndexPassCount(state.index.finished.0.wrapping_add(1));
+        state.index.finished = state.index.finished.next();
         if origin == IndexOrigin::Requested {
             report(state, level, outcome.text.clone());
         }
@@ -1812,10 +1905,21 @@ fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), GameDataError> 
 /// Hooks for tests that have no game install.
 #[cfg(feature = "test-support")]
 pub mod test_support {
+    use std::path::Path;
+    use std::sync::Mutex;
+    use std::sync::PoisonError;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
 
+    use wows_toolkit_config::index::rows::SourceId;
+
+    /// Stores a landed replay's index rows in place of the parse, which needs
+    /// game data a test does not have.
+    pub type LandedIndex = fn(&Path, SourceId);
+
     pub(super) static REPORT_READY: AtomicBool = AtomicBool::new(false);
+
+    static LANDED_INDEX: Mutex<Option<LandedIndex>> = Mutex::new(None);
 
     /// Reports the game data as loaded to the interface, which then offers
     /// what waits for a loaded build. Nothing is loaded: reads still go
@@ -1823,6 +1927,17 @@ pub mod test_support {
     pub fn report_ready() {
         REPORT_READY.store(true, Ordering::Relaxed);
         super::update(|_| ());
+    }
+
+    /// Makes a battle landing in an opened directory store its rows through
+    /// `index`, given the live index source, in place of the parse. `None`
+    /// puts the parse back.
+    pub fn index_landed_with(index: Option<LandedIndex>) {
+        *LANDED_INDEX.lock().unwrap_or_else(PoisonError::into_inner) = index;
+    }
+
+    pub(super) fn landed_index() -> Option<LandedIndex> {
+        *LANDED_INDEX.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

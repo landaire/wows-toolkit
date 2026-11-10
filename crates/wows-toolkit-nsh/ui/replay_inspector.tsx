@@ -472,7 +472,7 @@ function offerMissingBuilds(builds: ListedBuild[]) {
 /** A replay the game finished writing: exported, indexed and contributed, then opened when autoload is on. */
 async function replayLanded(ws: Workspace, path: string) {
   try {
-    const report = await ReplayInspectorService.processLanded(path);
+    const report = await ReplayInspectorService.processLanded(path, ws.directory);
     if (report.exportError != null) toast.stuck(AUTO_EXPORT_FAILED, report.exportError);
     else if (report.exported != null) toast.resolved(AUTO_EXPORT_FAILED);
   } catch (error) {

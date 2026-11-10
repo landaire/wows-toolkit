@@ -35,6 +35,7 @@ use crate::replay_inspector::document::ReplayDocId;
 use crate::replay_inspector::document::ReplayDocument;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::landed;
+use crate::replay_inspector::landed::LandedIn;
 use crate::replay_inspector::landed::LandedReport;
 use crate::replay_inspector::settings;
 use crate::replay_inspector::summary;
@@ -270,9 +271,15 @@ impl ReplayInspectorService {
         Ok(Some(alt.display().to_string()))
     }
 
-    /// Exports, indexes and contributes a replay the watcher saw land.
-    pub async fn process_landed(path: String) -> Result<LandedReport, InspectorError> {
-        landed::process(PathBuf::from(path)).await
+    /// Exports, indexes and contributes a replay the watcher saw land in the
+    /// opened `directory`, or in the game's own when `None`.
+    pub async fn process_landed(path: String, directory: Option<String>) -> Result<LandedReport, InspectorError> {
+        let landed_in = match directory {
+            Some(root) => LandedIn::OpenedDirectory(PathBuf::from(root)),
+            None => LandedIn::GameDirectory,
+        };
+
+        landed::process(PathBuf::from(path), landed_in).await
     }
 
     /// Fetches the mapping of each listed build that has none and was not

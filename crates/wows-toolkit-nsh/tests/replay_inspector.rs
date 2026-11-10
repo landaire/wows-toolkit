@@ -12,6 +12,7 @@ use std::sync::MutexGuard;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use nsh_core::Points;
 use nsh_core::Size;
@@ -22,6 +23,7 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_nsh::game_data::GameDataState;
 use wows_toolkit_viewmodel::settings::keys;
 
@@ -249,37 +251,60 @@ fn app_bound_to(install: &Path, autoload: bool) -> TestApp {
 fn index_row_for(replay: &Path) {
     runtime().block_on(async {
         let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
-        let now = jiff::Timestamp::now();
-        let arena_id = ArenaId::new(982_003);
         let root = replay.parent().expect("the replay is in a directory");
-        let source = query::ensure_default_source(&pool, root, now).await.expect("the live source exists");
-        let objective = ObjectiveMatch {
-            arena_id,
-            timestamp: now,
-            map: "Atoll".into(),
-            game_mode: "Domination".into(),
-            game_mode_id: None,
-            game_type: "pvp".into(),
-            match_group: "pvp".into(),
-            version_build: Some(1234),
-        };
-        query::upsert_match(&pool, &objective).await.expect("the match is written");
-        let record = ReplayRecord {
-            arena_id,
-            source_id: source,
-            replay_path: replay.to_path_buf(),
-            file_mtime: Some(now.as_second()),
-            outcome: MatchOutcome::Win,
-            self_account_id: Some(AccountId(99_011)),
-            self_ship_id: Some(GameParamId::from(999u64)),
-            self_survived: Some(true),
-            self_damage: Some(123_456),
-            self_kills: Some(2),
-            self_pr: None,
-            results_available: true,
-            indexed_at: now,
-        };
-        query::upsert_record(&pool, &record).await.expect("the replay record is written");
+        let source =
+            query::ensure_default_source(&pool, root, jiff::Timestamp::now()).await.expect("the live source exists");
+        write_index_row(&pool, replay, source).await;
+    });
+}
+
+/// Writes an index row for `replay` in `source`.
+async fn write_index_row(pool: &sqlx::SqlitePool, replay: &Path, source: SourceId) {
+    let now = jiff::Timestamp::now();
+    let arena_id = ArenaId::new(982_003);
+    let objective = ObjectiveMatch {
+        arena_id,
+        timestamp: now,
+        map: "Atoll".into(),
+        game_mode: "Domination".into(),
+        game_mode_id: None,
+        game_type: "pvp".into(),
+        match_group: "pvp".into(),
+        version_build: Some(1234),
+    };
+    query::upsert_match(pool, &objective).await.expect("the match is written");
+    let record = ReplayRecord {
+        arena_id,
+        source_id: source,
+        replay_path: replay.to_path_buf(),
+        file_mtime: Some(now.as_second()),
+        outcome: MatchOutcome::Win,
+        self_account_id: Some(AccountId(99_011)),
+        self_ship_id: Some(GameParamId::from(999u64)),
+        self_survived: Some(true),
+        self_damage: Some(123_456),
+        self_kills: Some(2),
+        self_pr: None,
+        results_available: true,
+        indexed_at: now,
+    };
+    query::upsert_record(pool, &record).await.expect("the replay record is written");
+}
+
+/// Set when a landed replay's held index row may be written.
+static LANDED_RELEASED: AtomicBool = AtomicBool::new(false);
+
+/// Writes a landed replay's index row once [`LANDED_RELEASED`] is set, so a
+/// test sees the listing before the row and after it.
+fn index_landed_once_released(replay: &Path, source: SourceId) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !LANDED_RELEASED.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    runtime().block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+        write_index_row(&pool, replay, source).await;
     });
 }
 
@@ -742,4 +767,47 @@ fn without_a_wows_directory_the_inspector_says_so() {
 
     app.wait_for("Game data failed to load: World of Warships directory is not set").unwrap();
     app.wait_for(&format!("text:{}", exactly("World of Warships directory is not set"))).unwrap();
+}
+
+/// A battle that lands in an opened directory is indexed there, and its row
+/// stops reading as not indexed.
+#[test]
+fn a_replay_landing_in_an_opened_directory_is_indexed() {
+    const REPLAY: &str = "20250117_004534_PWSD108-Oland_15_NE_north.wowsreplay";
+
+    let directory = TestDirectory::new("landed");
+
+    let mut app = app();
+    LANDED_RELEASED.store(false, Ordering::SeqCst);
+    let _hook = LandedIndexHook::install(index_landed_once_released);
+    on_linux_desktop(&mut app);
+    let _opened = open_directory(&mut app, &directory.0);
+    app.wait_for("No replays found").unwrap();
+
+    // The game renames a finished battle into place.
+    let staged = directory.0.join("landing.part");
+    std::fs::copy(fixture(REPLAY), &staged).expect("the fixture is copied");
+    std::fs::rename(&staged, directory.0.join(REPLAY)).expect("the replay is renamed into place");
+    app.wait_for(&format!("label:{REPLAY}")).unwrap();
+    app.wait_for("text:/not indexed/").unwrap();
+
+    LANDED_RELEASED.store(true, Ordering::SeqCst);
+    app.wait_for_gone("text:/not indexed/", Duration::from_secs(30)).unwrap();
+}
+
+/// A landed replay's index rows stored through a test function, the parse
+/// put back when dropped.
+struct LandedIndexHook;
+
+impl LandedIndexHook {
+    fn install(index: wows_toolkit_nsh::game_data::test_support::LandedIndex) -> Self {
+        wows_toolkit_nsh::game_data::test_support::index_landed_with(Some(index));
+        Self
+    }
+}
+
+impl Drop for LandedIndexHook {
+    fn drop(&mut self) {
+        wows_toolkit_nsh::game_data::test_support::index_landed_with(None);
+    }
 }

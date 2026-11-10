@@ -1,7 +1,8 @@
 //! What happens to a battle the watcher saw land, whether or not it is
 //! opened: it is written to the auto-export directory, as the egui app's
-//! background parser writes each replay it reads, and the index pass is
-//! asked to pick it up. The index pass contributes what it indexes.
+//! background parser writes each replay it reads, and indexed. A battle in
+//! the game's directory is left to an index pass, which contributes what it
+//! indexes; one in an opened directory is indexed and contributed on its own.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use nsh_core::prelude::blocking;
 use wows_toolkit_replay_data::export::AutoExport;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 
+use crate::game_data::LandedReplay;
 use crate::replay_inspector::auto_export;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::settings;
@@ -25,15 +27,30 @@ pub struct LandedReport {
     pub export_error: Option<String>,
 }
 
-/// Exports the battle at `path` and queues an index pass that reads what is
-/// not indexed yet.
-pub async fn process(path: PathBuf) -> Result<LandedReport, InspectorError> {
-    blocking(move || {
-        let report = export(&path)?;
-        // `false` when no WoWs directory is set, and then there is no index to fill.
-        crate::game_data::start_indexing(IndexMode::FillGaps);
+/// The listing that saw a battle land.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LandedIn {
+    /// The game's own replay directory.
+    GameDirectory,
+    /// A directory the reader opened.
+    OpenedDirectory(PathBuf),
+}
 
-        Ok(report)
+/// Exports the battle at `path` and indexes it: on its own when it landed in
+/// an opened directory, else through a pass over the game's directory. The
+/// index does not wait on the export, which may fail.
+pub async fn process(path: PathBuf, landed_in: LandedIn) -> Result<LandedReport, InspectorError> {
+    blocking(move || {
+        let report = export(&path);
+        match landed_in {
+            LandedIn::OpenedDirectory(root) => crate::game_data::take_landed(LandedReplay { root, path }),
+            // `false` when no WoWs directory is set, and then there is no index to fill.
+            LandedIn::GameDirectory => {
+                crate::game_data::start_indexing(IndexMode::FillGaps);
+            }
+        }
+
+        report
     })
     .await
     .map_err(|source| InspectorError::Task { source })?
