@@ -642,7 +642,7 @@ async function pinDirectory(path: string, pinned: boolean) {
   }
 }
 
-function IconButton(props: { label: string; glyph?: string; icon?: IconName; tooltip?: string; onPress?: () => void }) {
+function IconButton(props: { label: string; icon: IconName; tooltip?: string; onPress?: () => void }) {
   return (
     <View
       role="button"
@@ -653,9 +653,7 @@ function IconButton(props: { label: string; glyph?: string; icon?: IconName; too
       activeStyle={{ opacity: 0.68 }}
       style={{ minWidth: 26, height: 24, paddingHorizontal: 5, borderRadius: controlRadius(), alignItems: "center", justifyContent: "center" }}
     >
-      <If when={props.icon} else={<Text style={{ fontSize: 12.5, color: colors.foreground }}>{props.glyph ?? ""}</Text>}>
-        {(icon) => <Icon name={icon()} size={15} color={colors.foreground}/>}
-      </If>
+      <Icon name={props.icon} size={15} color={colors.foreground}/>
     </View>
   );
 }
@@ -689,7 +687,7 @@ function OptionCheckbox(props: { label: string; accessibilityLabel?: string; too
       tooltip={props.tooltip ? <Hint text={props.tooltip}/> : undefined}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<If when={props.checked}><Icon name="check" size={12} color={colors.primaryForeground}/></If>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
@@ -709,7 +707,7 @@ function ActionItem(props: { label: string; checked?: boolean; disabled?: boolea
       activeStyle={{ opacity: 0.72 }}
       style={{ height: 30, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 8, opacity: props.disabled ? 0.45 : 1 }}
     >
-      <Text style={{ width: 12, fontSize: 12, color: colors.popoverForeground }}>{props.checked ? "x" : ""}</Text>
+      <View style={{ width: 12 }}><If when={props.checked}><Icon name="check" size={12} color={colors.popoverForeground}/></If></View>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
     </MenuItem>
   );
@@ -722,7 +720,7 @@ function ListingOptions() {
       align="end"
       offset={4}
       margin={8}
-      trigger={<IconButton label={t("ui.replay.listing_options")} glyph="..."/>}
+      trigger={<IconButton label={t("ui.replay.listing_options")} icon="settings"/>}
     >
       <Surface style={{ minWidth: 240, padding: 10, gap: 8, backgroundColor: colors.popover }}>
         <OptionCheckbox
@@ -800,7 +798,7 @@ function OpenMenu() {
 function ListingHeader() {
   return (
     <View style={{ minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-      <IconButton label={t("ui.replay.collapse_listing")} glyph="<<" onPress={() => setListingCollapsed(true)}/>
+      <IconButton label={t("ui.replay.collapse_listing")} icon="panel-left-close" onPress={() => setListingCollapsed(true)}/>
       <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{t("ui.replay.listing_caption")}</Text>
       <ListingOptions/>
       <OpenMenu/>
@@ -811,7 +809,7 @@ function ListingHeader() {
 function ListingRail() {
   return (
     <View style={{ width: 32, alignItems: "center", paddingTop: 4, borderRightWidth: 1, borderRightColor: colors.border }}>
-      <IconButton label={t("ui.replay.expand_listing")} glyph=">>" onPress={() => setListingCollapsed(false)}/>
+      <IconButton label={t("ui.replay.expand_listing")} icon="panel-left-open" onPress={() => setListingCollapsed(false)}/>
     </View>
   );
 }
@@ -852,7 +850,7 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
       >
-        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
+        <Icon name="x" size={12} color={colors.mutedForeground}/>
       </View>
     </View>
   );
@@ -996,7 +994,8 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
       <View selectable style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <If when={props.summary.incompleteResults}>
           <View tooltip={<Hint text={t("ui.replay.incomplete_results_tooltip")}/>} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: semantic.warn }}>{`(i) ${t("ui.replay.incomplete_results")}`}</Text>
+            <Icon name="info" size={14} color={semantic.warn}/>
+            <Text style={{ fontSize: 13, fontWeight: "700", color: semantic.warn }}>{t("ui.replay.incomplete_results")}</Text>
           </View>
         </If>
         <If when={outcome()}>
@@ -1155,7 +1154,7 @@ function SidePanelView(props: { tab: ReplayTab; summary: ReplaySummary; side: Si
     <View style={{ width: 360, minHeight: 0, gap: 6, borderLeftWidth: 1, borderLeftColor: colors.border }}>
       <View style={{ minHeight: 30, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{sideTitle(props.side)}</Text>
-        <IconButton label={t("ui.replay.close_side_panel")} glyph=">>" onPress={() => props.tab.side.set(null)}/>
+        <IconButton label={t("ui.replay.close_side_panel")} icon="panel-right-close" onPress={() => props.tab.side.set(null)}/>
       </View>
       <If when={props.side.kind === "chat"} else={<RawJsonView title={sideTitle(props.side)} json={json()}/>}>
         <ChatPanel summary={props.summary}/>

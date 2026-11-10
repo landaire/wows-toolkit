@@ -341,11 +341,11 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
     state().personal_rating.clone()
 }
 
-/// Installs `table` as the personal-rating table, or clears it, for tests
-/// that have no network.
+/// Installs `table` as the personal-rating table. Test-support builds skip
+/// the startup download, so this is the only table they have.
 #[cfg(feature = "test-support")]
-pub fn set_personal_rating(table: Option<PersonalRatingData>) {
-    update(|state| state.personal_rating = table.map(Arc::new));
+pub fn set_personal_rating(table: PersonalRatingData) {
+    update(|state| state.personal_rating = Some(Arc::new(table)));
 }
 
 /// Changes whenever the game data's state does.
@@ -528,6 +528,11 @@ fn startup_work() {
                 Some(rust_i18n::t!("ui.game_data.pinned_read_failed", reason = reason).into_owned());
         }
     });
+
+    // Tests install their own table through `set_personal_rating`.
+    if cfg!(feature = "test-support") {
+        return;
+    }
 
     let rating = match job_runtime() {
         Ok(runtime) => runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(
