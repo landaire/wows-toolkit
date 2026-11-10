@@ -1,9 +1,13 @@
 import { keymap, mount, Scroll, signal, Storage, Text, View, windowSize } from "nsh";
 import { Window } from "nsh/desktop";
 import { Checkbox, Command, Dialog, Input, Menu, Radio, RadioGroup, Toolbar } from "nsh/base";
-import { ReplayInspector as NativeReplayInspector, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
+import { ReplayInspector as NativeReplayInspector, Shell, Toolkit, type PlayerTrackerState, type SearchState, type SettingsState, type StatisticsState } from "wows-toolkit/native";
 import { Button, EmptyState, MenuRow, Surface } from "./components";
 import { colors, controlRadius } from "./theme";
+import { applyLocale } from "./i18n";
+import { loadAppSettings } from "./settings_store";
+import { ErrorDialog, WarningDialog } from "./shell/notices";
+import * as toast from "./shell/toast";
 
 const startup = Toolkit.startup();
 const activeTab = signal(startup.tabs[0].id);
@@ -11,7 +15,6 @@ const aboutOpen = signal(false);
 const tacticsOpen = signal(false);
 const paletteOpen = signal(false);
 const paletteQuery = signal("");
-const notice = signal<string | null>(null);
 const settings = signal<SettingsState | null>(null);
 const settingsBaseline = signal<SettingsState | null>(null);
 const settingsLoading = signal(false);
@@ -46,6 +49,12 @@ const STORAGE_TAB = "application.active-tab";
 Window.setTitle(startup.title);
 void Storage.getItem(STORAGE_TAB).then((saved) => {
   if (saved && startup.tabs.some((tab) => tab.id === saved)) selectTab(saved);
+});
+applyLocale(startup.locale);
+void loadAppSettings().then((loaded) => {
+  if (!loaded) return;
+  if (loaded.locale) applyLocale(loaded.locale);
+  void Shell.applyTheme(loaded.theme);
 });
 
 function selectTab(id: string) {
@@ -289,10 +298,7 @@ function searchColumnHeader(label: string, column: string, width: number) {
 
 
 function showNotice(message: string) {
-  notice.set(message);
-  setTimeout(() => {
-    if (notice() === message) notice.set(null);
-  }, 4000);
+  toast.info(message);
 }
 
 function openPalette() {
@@ -1057,16 +1063,6 @@ function CommandPalette() {
   );
 }
 
-function Notice() {
-  return (
-    <If when={notice()}>
-      <Surface style={{ position: "absolute", right: 16, bottom: 36, minWidth: 280, maxWidth: 420, padding: 14, backgroundColor: colors.popover }}>
-        <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{notice()}</Text>
-      </Surface>
-    </If>
-  );
-}
-
 function App() {
   return (
     <View onFileDrop={({ uris }) => openDroppedReplay(uris)} style={{ flex: 1, backgroundColor: colors.background }}>
@@ -1076,7 +1072,9 @@ function App() {
         <Text style={{ flex: 1, fontSize: 11.5, color: colors.mutedForeground }}>Ready</Text>
         <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>WoWs Toolkit {startup.version}</Text>
       </View>
-      <Notice/>
+      <toast.ToastLayer/>
+      <WarningDialog/>
+      <ErrorDialog/>
       <AboutDialog/>
       <TacticsDialog/>
       <CommandPalette/>

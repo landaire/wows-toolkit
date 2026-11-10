@@ -15,6 +15,8 @@ use jiff::Timestamp;
 use crate::settings::DataSharingMode;
 
 pub mod build_tracker;
+pub mod contribute;
+pub mod shareable;
 
 /// How long a raw upload waits for the battle's results before going anyway.
 ///

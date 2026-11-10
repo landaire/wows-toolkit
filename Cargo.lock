@@ -4028,29 +4028,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
-dependencies = [
- "anstream",
- "anstyle",
- "env_filter",
- "jiff",
- "log",
-]
-
-[[package]]
 name = "epaint"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -19008,7 +18985,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "twitch_api",
  "unidecode",
  "walkdir",
  "web-time",
@@ -19070,7 +19046,6 @@ name = "wows-toolkit-nsh"
 version = "1.0.3"
 dependencies = [
  "base64 0.22.1",
- "env_logger",
  "jiff",
  "log",
  "nsh-base",
@@ -19080,7 +19055,9 @@ dependencies = [
  "nsh-platform-linux",
  "nsh-testing",
  "png 0.18.1",
+ "reqwest 0.12.28",
  "rust-i18n 3.1.5",
+ "rustls",
  "serde",
  "serde_json",
  "sqlx",
@@ -19089,6 +19066,9 @@ dependencies = [
  "thiserror 2.0.20",
  "tiny-skia 0.12.0",
  "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "url",
  "wows-core",
  "wows-toolkit-config",
@@ -19110,16 +19090,19 @@ dependencies = [
  "nalgebra",
  "pickled",
  "regex",
+ "reqwest 0.12.28",
  "roxmltree 0.21.1",
  "rust-i18n 3.1.5",
  "semver",
  "serde",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.20",
  "thousands",
  "tokio",
  "tracing",
+ "twitch_api",
  "windows-registry 0.6.1",
  "wows-replay-insights",
  "wows-toolkit-config",

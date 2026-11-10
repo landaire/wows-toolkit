@@ -11,7 +11,13 @@ buck = []
 
 [dependencies]
 base64 = "0.22"
-env_logger = "0.11"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+# Both rustls providers are in the dependency graph, so one is installed at
+# startup; without it the first TLS client panics.
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time", "tracing-log"] }
 log = "0.4"
 jiff = { workspace = true }
 nsh-base = "0.4.0"
@@ -25,7 +31,7 @@ serde = { workspace = true }
 serde_json = "1.0"
 tiny-skia = "0.12"
 thiserror = { workspace = true }
-tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"] }
 tempfile = "3.27.0"
 wows_replays = { path = "../wows-replays", default-features = false, features = ["parsing", "arc"] }
 wows-core = { path = "../wows-core" }

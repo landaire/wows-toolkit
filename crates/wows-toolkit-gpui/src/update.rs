@@ -12,6 +12,7 @@ use gpui_kit::Task;
 use rootcause::prelude::*;
 use wows_toolkit_viewmodel::update::RELEASES_URL;
 use wows_toolkit_viewmodel::update::Release;
+use wows_toolkit_viewmodel::update::check_release;
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
@@ -41,29 +42,9 @@ pub fn check(proxy: String, cx: &App) -> Task<Result<Option<Release>, rootcause:
         runtime.block_on(async move {
             let client = crate::http::client(&proxy, reqwest::redirect::Policy::default())
                 .context("Could not create the update HTTP client")?;
-            check_release(&client, RELEASES_URL, env!("CARGO_PKG_VERSION")).await
+            Ok(check_release(&client, RELEASES_URL, env!("CARGO_PKG_VERSION")).await?)
         })
     })
-}
-
-async fn check_release(
-    client: &reqwest::Client,
-    url: &str,
-    running: &str,
-) -> Result<Option<Release>, rootcause::Report> {
-    let releases: Vec<Release> = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .context("Could not request the latest release")?
-        .error_for_status()
-        .context("The release server rejected the update check")?
-        .json()
-        .await
-        .context("Could not read the release information")?;
-    Ok(wows_toolkit_viewmodel::update::select_release(releases, running)
-        .context("The running app version is invalid")?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,40 +237,6 @@ mod tests {
 
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("test runtime")
-    }
-
-    const RELEASE: &str = r###"[{
-        "tag_name": "v1.0.2",
-        "draft": false,
-        "prerelease": false,
-        "html_url": "https://github.com/landaire/wows-toolkit/releases/tag/v1.0.2",
-        "body": "## Changes\nUpdate notes",
-        "assets": [
-            {"name": "wows_toolkit_tools_v1.0.2_win64.zip", "browser_download_url": "https://example.invalid/tools.zip"},
-            {"name": "wows_toolkit_v1.0.2_windows.zip", "browser_download_url": "https://example.invalid/app.zip"}
-        ]
-    }]"###;
-
-    #[test]
-    fn checking_an_older_build_finds_the_published_archive() {
-        let (url, server) = response("200 OK", RELEASE.as_bytes().to_vec());
-        let client = reqwest::Client::builder().no_proxy().build().expect("test HTTP client");
-        let release =
-            runtime().block_on(check_release(&client, &url, "1.0.0")).expect("release check").expect("newer release");
-        server.join().expect("HTTP server");
-        assert_eq!(release.tag_name, "v1.0.2");
-        assert_eq!(
-            release.asset_for_windows().expect("application asset").browser_download_url,
-            "https://example.invalid/app.zip"
-        );
-    }
-
-    #[test]
-    fn an_http_failure_is_not_reported_as_a_release() {
-        let (url, server) = response("403 Forbidden", RELEASE.as_bytes().to_vec());
-        let client = reqwest::Client::builder().no_proxy().build().expect("test HTTP client");
-        assert!(runtime().block_on(check_release(&client, &url, "1.0.0")).is_err());
-        server.join().expect("HTTP server");
     }
 
     #[test]

@@ -1055,7 +1055,7 @@ pub struct ParsedReplay {
     pub export: ExportedMatch,
     /// What the data-sharing setting needs to decide what this battle
     /// contributes, taken while the report was still open.
-    pub shareable: crate::upload::Shareable,
+    pub shareable: wows_toolkit_viewmodel::upload::shareable::Shareable,
     pub game_data: Arc<LoadedGameData>,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
     /// for the debug-mode raw-metadata viewer (mirrors the egui app's
@@ -1240,7 +1240,7 @@ pub(crate) fn parse_replay_with_alts(
     // What sharing needs, taken here because this is the one place the whole
     // report exists: the payloads are per player, and the report is dropped
     // below.
-    let shareable = crate::upload::Shareable {
+    let shareable = wows_toolkit_viewmodel::upload::shareable::Shareable {
         game_type: meta.gameType.clone().unwrap_or_default(),
         version,
         self_confirmed_non_test: crate::upload::self_is_not_a_test_ship(&report),

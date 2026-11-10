@@ -26,5 +26,9 @@ thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "sync"] }
 tracing.workspace = true
 
+[features]
+# Event constructors for front ends' tests.
+test-support = []
+
 [dev-dependencies]
 serde_json.workspace = true

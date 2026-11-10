@@ -984,7 +984,7 @@ impl ReplayInspectorView {
     /// that ignores the ledger reads and sends every one of them.
     pub(crate) fn contribute_all(
         &mut self,
-        ledger: crate::upload::LedgerUse,
+        ledger: wows_toolkit_viewmodel::upload::contribute::LedgerUse,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1027,7 +1027,7 @@ impl ReplayInspectorView {
 
                 // The ledger before the read: a replay already contributed is
                 // seconds of parsing for a request that would be refused.
-                if ledger == crate::upload::LedgerUse::Consult {
+                if ledger == wows_toolkit_viewmodel::upload::contribute::LedgerUse::Consult {
                     let Ok(already) =
                         cx.update(|_window, cx| crate::upload::already_contributed(path.clone(), pool.clone(), cx))
                     else {
@@ -1054,7 +1054,7 @@ impl ReplayInspectorView {
                 else {
                     return;
                 };
-                let candidate = crate::upload::Candidate {
+                let candidate = wows_toolkit_viewmodel::upload::contribute::Candidate {
                     path: path.clone(),
                     shareable: parsed.shareable,
                     first_seen: first_seen.await,
@@ -1064,7 +1064,7 @@ impl ReplayInspectorView {
                 }) else {
                     return;
                 };
-                if matches!(contributed.await, crate::upload::Outcome::Sent) {
+                if matches!(contributed.await, wows_toolkit_viewmodel::upload::contribute::Outcome::Sent) {
                     sent += 1;
                 }
             }
@@ -1106,7 +1106,7 @@ impl ReplayInspectorView {
                     return;
                 }
             };
-            let candidate = crate::upload::Candidate {
+            let candidate = wows_toolkit_viewmodel::upload::contribute::Candidate {
                 path: named.clone(),
                 shareable: parsed.shareable,
                 // First seen now, which is what a replay the watcher just
@@ -1114,13 +1114,20 @@ impl ReplayInspectorView {
                 first_seen: jiff::Timestamp::now(),
             };
             let sent = cx.update(|cx| {
-                crate::upload::contribute(candidate, mode, crate::upload::LedgerUse::Consult, pool, proxy, cx)
+                crate::upload::contribute(
+                    candidate,
+                    mode,
+                    wows_toolkit_viewmodel::upload::contribute::LedgerUse::Consult,
+                    pool,
+                    proxy,
+                    cx,
+                )
             });
             match sent.await {
-                crate::upload::Outcome::Sent => {
+                wows_toolkit_viewmodel::upload::contribute::Outcome::Sent => {
                     tracing::info!(path = %named.display(), "sharing: the battle was contributed")
                 }
-                crate::upload::Outcome::Failed(reason) => {
+                wows_toolkit_viewmodel::upload::contribute::Outcome::Failed(reason) => {
                     tracing::warn!(path = %named.display(), %reason, "sharing: the battle was not contributed")
                 }
                 other => tracing::debug!(path = %named.display(), ?other, "sharing: nothing sent"),

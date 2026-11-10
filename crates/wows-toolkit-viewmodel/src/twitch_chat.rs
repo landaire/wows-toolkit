@@ -6,7 +6,7 @@
 //! the other app happened to collect.
 //!
 //! Who a login plausibly names, and how long an observation counts for, are
-//! `wows_toolkit_viewmodel::twitch`; this module is only the fetching.
+//! `crate::twitch`; this module is only the fetching.
 
 use std::time::Duration;
 
@@ -17,8 +17,9 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use twitch_api::types::UserId;
 use wows_toolkit_config::index::query;
-use wows_toolkit_viewmodel::twitch::POLL_INTERVAL;
-use wows_toolkit_viewmodel::twitch::Token;
+
+use crate::twitch::POLL_INTERVAL;
+use crate::twitch::Token;
 
 /// Why a poll produced nothing.
 #[derive(Debug, thiserror::Error)]

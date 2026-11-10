@@ -12,7 +12,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 #[derive(Debug, thiserror::Error)]
 pub enum RefreshError {
     #[error(transparent)]
-    Client(#[from] crate::http::HttpError),
+    Client(#[from] wows_toolkit_viewmodel::http::HttpError),
     #[error("the expected values could not be fetched")]
     Request(#[source] reqwest::Error),
     #[error("the expected values were rejected")]

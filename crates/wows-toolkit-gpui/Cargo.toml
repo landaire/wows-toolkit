@@ -81,13 +81,6 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # Only to install the process-wide crypto provider at startup; see `main`.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
-# The chat poll behind the roster's possible-stream-sniper chip. Same version
-# and features as the egui app, so the two resolve one Twitch client.
-twitch_api = { version = "0.7.2", features = [
-    "helix",
-    "client",
-    "reqwest",
-] }
 # CBOR is what the match-stats service speaks, and one of the replay
 # export formats.
 ciborium = "0.2"
