@@ -4,6 +4,7 @@ mod native;
 mod player_tracker;
 mod replay;
 mod stats;
+mod text;
 
 pub use native::{AppTab, ShellText, StartupState, Toolkit};
 pub use player_tracker::PlayerTracker;
