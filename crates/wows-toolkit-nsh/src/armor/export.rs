@@ -26,6 +26,8 @@ use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::size_estimate::ExportSizeModel;
 use wowsunpack::export::size_estimate::SchemeLadderStatus;
 
+use super::error::ArmorError;
+use super::error::ExportReadError;
 use super::state::Bundle;
 use super::state::ShipSource;
 use super::state::State;
@@ -170,13 +172,24 @@ struct ShipMeta {
 enum MetaState {
     Loading,
     Loaded(ShipMeta),
-    Failed(String),
+    Failed(ExportReadError),
 }
 
 /// `Loaded(None)` is a ship that could not be priced.
 enum SizeState {
     Loading,
     Loaded(Option<ExportSizeModel>),
+}
+
+/// Counts the dialog's reads of its ship, so a read that lands after a later
+/// one started is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReadGeneration(u64);
+
+impl ReadGeneration {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 pub(super) struct ExportDialog {
@@ -186,7 +199,7 @@ pub(super) struct ExportDialog {
     size: SizeState,
     /// Camo ladders being read, so none is asked for twice.
     pricing: BTreeSet<CamoSchemeId>,
-    generation: u64,
+    generation: ReadGeneration,
     draft: ExportDraft,
     /// What the size line says, settled after every change.
     size_view: SizeView,
@@ -194,23 +207,24 @@ pub(super) struct ExportDialog {
 
 impl ExportDialog {
     pub fn view(&self) -> ExportDialogView {
-        let (lod_count, schemes, error) = match &self.meta {
-            MetaState::Loaded(meta) => (meta.hull_lod_count, meta.camo_schemes.as_slice(), None),
-            MetaState::Loading => (0, [].as_slice(), None),
-            MetaState::Failed(why) => {
-                (0, [].as_slice(), Some(t!("ui.armor.load_failed", error = why.clone()).into_owned()))
-            }
+        let (lod_count, schemes) = match &self.meta {
+            MetaState::Loaded(meta) => (meta.hull_lod_count, meta.camo_schemes.as_slice()),
+            MetaState::Loading | MetaState::Failed(_) => (0, [].as_slice()),
+        };
+        let error = match &self.meta {
+            MetaState::Failed(error) => Some(t!("ui.armor.load_failed", error = error.to_string()).into_owned()),
+            MetaState::Loading | MetaState::Loaded(_) => None,
         };
         let (own, groups) = camo_groups(schemes, |id| self.draft.camos.contains(&id));
         let hulls = self
             .hull_upgrades
             .iter()
             .enumerate()
-            .map(|(index, HullUpgrade { key, label })| ChoiceView {
-                key: key.clone(),
-                label: label.clone(),
+            .map(|(index, hull)| ChoiceView {
+                key: hull.key.clone(),
+                label: hull.label.clone(),
                 // No hull chosen is the first, which is what the exporter takes.
-                selected: self.draft.hull.as_ref().map_or(index == 0, |chosen| chosen == key),
+                selected: self.draft.hull.as_ref().map_or(index == 0, |chosen| *chosen == hull.key),
             })
             .collect();
 
@@ -251,23 +265,24 @@ impl ExportDialog {
     }
 }
 
-/// What the dialog confirmed: where it came from and what to write.
-pub(super) struct ConfirmedExport {
+/// A model to write: the ship and how.
+pub(super) struct ExportJob {
     pub bundle: Arc<Bundle>,
     pub source: ShipSource,
     pub options: ShipExportOptions,
+}
+
+/// What the dialog confirmed: the model to write and what to remember.
+pub(super) struct ConfirmedExport {
+    pub job: ExportJob,
     pub defaults: ExportDefaults,
 }
 
 impl State {
     /// Opens the dialog on `source`, seeded from the active pane's hull and
     /// the remembered choices.
-    pub fn open_export_dialog(
-        &mut self,
-        source: ShipSource,
-        defaults: ExportDefaults,
-    ) -> Result<(), super::error::ArmorError> {
-        let bundle = self.bundle().cloned().ok_or(super::error::ArmorError::CatalogNotReady)?;
+    pub fn open_export_dialog(&mut self, source: ShipSource, defaults: ExportDefaults) -> Result<(), ArmorError> {
+        let bundle = self.bundle().cloned().ok_or(ArmorError::CatalogNotReady)?;
         let seed_hull = self.active_pane().scene.hull_selection().hull;
         let hull_upgrades = hull_upgrades_for(&bundle.assets, &source.param_index);
         self.export = Some(ExportDialog {
@@ -276,7 +291,7 @@ impl State {
             meta: MetaState::Loading,
             size: SizeState::Loading,
             pricing: BTreeSet::new(),
-            generation: 0,
+            generation: ReadGeneration(0),
             draft: ExportDraft {
                 contents: defaults.contents,
                 hull: seed_hull,
@@ -297,7 +312,7 @@ impl State {
         dialog.meta = MetaState::Loading;
         dialog.size = SizeState::Loading;
         dialog.pricing.clear();
-        dialog.generation += 1;
+        dialog.generation = dialog.generation.next();
         dialog.size_view = SizeView::default();
         let reading = dialog.generation;
         let param_index = dialog.source.param_index.clone();
@@ -319,10 +334,10 @@ impl State {
                     }
                     context
                 }
-                Err(why) => {
+                Err(error) => {
                     update(|state| {
                         let Some(dialog) = state.current_export(reading) else { return };
-                        dialog.meta = MetaState::Failed(why);
+                        dialog.meta = MetaState::Failed(error);
                         dialog.size = SizeState::Loaded(None);
                         state.settle_export_size();
                     });
@@ -342,7 +357,7 @@ impl State {
     }
 
     /// The dialog, while it is still the read `generation` belongs to.
-    fn current_export(&mut self, generation: u64) -> Option<&mut ExportDialog> {
+    fn current_export(&mut self, generation: ReadGeneration) -> Option<&mut ExportDialog> {
         self.export.as_mut().filter(|dialog| dialog.generation == generation)
     }
 
@@ -468,17 +483,17 @@ impl State {
     }
 
     /// Closes the dialog with what it describes, once the ship has been read.
-    pub fn confirm_export_dialog(&mut self) -> Result<ConfirmedExport, super::error::ArmorError> {
-        let bundle = self.bundle().cloned().ok_or(super::error::ArmorError::CatalogNotReady)?;
-        let dialog = self.export.as_ref().ok_or(super::error::ArmorError::NoExportDialog)?;
+    pub fn confirm_export_dialog(&mut self) -> Result<ConfirmedExport, ArmorError> {
+        let bundle = self.bundle().cloned().ok_or(ArmorError::CatalogNotReady)?;
+        let dialog = self.export.as_ref().ok_or(ArmorError::NoExportDialog)?;
         if !dialog.is_ready() {
-            return Err(super::error::ArmorError::ExportNotReady);
+            return Err(ArmorError::ExportNotReady);
         }
         let (options, defaults) = dialog.confirmed();
         let source = dialog.source.clone();
         self.export = None;
 
-        Ok(ConfirmedExport { bundle, source, options, defaults })
+        Ok(ConfirmedExport { job: ExportJob { bundle, source, options }, defaults })
     }
 }
 
@@ -493,18 +508,22 @@ fn failed_schemes(model: &ExportSizeModel, options: &ShipExportOptions) -> Vec<C
 
 /// The ship read without textures or armor: those cost far more than the
 /// levels of detail and the camo list this is for.
-fn read_ship_meta(assets: &ShipAssets, param_index: &str, hull: Option<String>) -> Result<ShipMeta, String> {
+fn read_ship_meta(assets: &ShipAssets, param_index: &str, hull: Option<String>) -> Result<ShipMeta, ExportReadError> {
     use wowsunpack::game_params::types::GameParamProvider;
 
     let param = assets.metadata().game_param_by_index(param_index);
     let vehicle = param
         .as_ref()
         .and_then(|param| param.vehicle().cloned())
-        .ok_or_else(|| t!("ui.armor.export.vehicle_not_found").into_owned())?;
+        .ok_or_else(|| ExportReadError::VehicleNotFound { param_index: param_index.to_owned() })?;
     let probe =
         ShipExportOptions { hull, textures: false, contents: ExportContents::Mesh, ..ShipExportOptions::default() };
-    let context = assets.load_ship_from_vehicle(&vehicle, &probe).map_err(|report| format!("{report:?}"))?;
-    let source = context.camo_texture_source().map_err(|report| format!("{report:?}"))?;
+    let context = assets
+        .load_ship_from_vehicle(&vehicle, &probe)
+        .map_err(|report| ExportReadError::LoadShip { detail: format!("{report:?}") })?;
+    let source = context
+        .camo_texture_source()
+        .map_err(|report| ExportReadError::CamoSource { detail: format!("{report:?}") })?;
 
     Ok(ShipMeta {
         hull_lod_count: context.hull_lod_count(),
@@ -513,7 +532,8 @@ fn read_ship_meta(assets: &ShipAssets, param_index: &str, hull: Option<String>) 
     })
 }
 
-/// The hull upgrades the ship offers, in the pane's own vocabulary.
+/// The hull upgrades the ship offers, in the pane's own vocabulary. A ship
+/// with no vehicle offers none; its read fails and says why.
 fn hull_upgrades_for(assets: &ShipAssets, param_index: &str) -> Vec<HullUpgrade> {
     use wowsunpack::game_params::types::GameParamProvider;
 

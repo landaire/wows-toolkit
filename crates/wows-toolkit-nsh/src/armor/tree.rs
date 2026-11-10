@@ -203,6 +203,7 @@ pub(super) fn hull_rows(
                     .iter()
                     .map(|name| HullMeshRow {
                         name: name.clone(),
+                        // A mesh with no entry is hidden, as the group state reads it.
                         visible: hull_visibility.get(name).copied().unwrap_or(false),
                     })
                     .collect(),

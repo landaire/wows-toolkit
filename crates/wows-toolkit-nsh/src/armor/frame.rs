@@ -23,22 +23,29 @@ use crate::frames::AlphaMode;
 use crate::frames::Frame;
 use crate::frames::FrameError;
 use crate::frames::PixelSize;
+use crate::frames::ScaleFactor;
 
 /// One render of a pane: tightly packed straight-alpha RGBA8 rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Readback {
-    pub width: u32,
-    pub height: u32,
+    pub size: PixelSize,
     pub pixels: Vec<u8>,
+}
+
+/// The gizmo's box in device pixels, clipped to the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GizmoBox {
+    left: u32,
+    top: u32,
+    size: PixelSize,
 }
 
 /// The readback as a frame, with `gizmo` (logical pixels) drawn over it at
 /// `scale` device pixels per logical pixel.
-pub(super) fn compose(readback: Readback, gizmo: Option<&GizmoView>, scale: f32) -> Result<Frame, FrameError> {
-    let Readback { width, height, mut pixels } = readback;
-    let size = PixelSize { width, height };
+pub(super) fn compose(readback: Readback, gizmo: Option<&GizmoView>, scale: ScaleFactor) -> Result<Frame, FrameError> {
+    let Readback { size, mut pixels } = readback;
     if let Some(gizmo) = gizmo
-        && pixels.len() == width as usize * height as usize * 4
+        && pixels.len() == size.width as usize * size.height as usize * 4
     {
         draw_gizmo(&mut pixels, size, gizmo, scale);
     }
@@ -46,8 +53,8 @@ pub(super) fn compose(readback: Readback, gizmo: Option<&GizmoView>, scale: f32)
     Frame::new(size, AlphaMode::Straight, pixels)
 }
 
-/// The gizmo's box in device pixels, clipped to the frame: `(x, y, w, h)`.
-fn gizmo_box(size: PixelSize, center: Vec2, scale: f32) -> Option<(u32, u32, u32, u32)> {
+fn gizmo_box(size: PixelSize, center: Vec2, scale: ScaleFactor) -> Option<GizmoBox> {
+    let scale = scale.get();
     let half = gizmo::BOX_SIZE / 2.0;
     let left = ((center.x - half) * scale).floor().max(0.0);
     let top = ((center.y - half) * scale).floor().max(0.0);
@@ -57,19 +64,24 @@ fn gizmo_box(size: PixelSize, center: Vec2, scale: f32) -> Option<(u32, u32, u32
         return None;
     }
 
-    Some((left as u32, top as u32, (right - left) as u32, (bottom - top) as u32))
+    Some(GizmoBox {
+        left: left as u32,
+        top: top as u32,
+        size: PixelSize { width: (right - left) as u32, height: (bottom - top) as u32 },
+    })
 }
 
-fn draw_gizmo(pixels: &mut [u8], size: PixelSize, gizmo: &GizmoView, scale: f32) {
-    let Some((left, top, width, height)) = gizmo_box(size, gizmo.center, scale) else { return };
-    let Some(mut pixmap) = Pixmap::new(width, height) else { return };
-    let transform = Transform::from_row(scale, 0.0, 0.0, scale, -(left as f32), -(top as f32));
+fn draw_gizmo(pixels: &mut [u8], size: PixelSize, gizmo: &GizmoView, scale: ScaleFactor) {
+    let Some(area) = gizmo_box(size, gizmo.center, scale) else { return };
+    let Some(mut pixmap) = Pixmap::new(area.size.width, area.size.height) else { return };
+    let transform =
+        Transform::from_row(scale.get(), 0.0, 0.0, scale.get(), -(area.left as f32), -(area.top as f32));
 
     for ball in &gizmo.balls {
         draw_ball(&mut pixmap, gizmo.center, ball, transform);
     }
 
-    blend_over(pixels, size, &pixmap, left, top);
+    blend_over(pixels, size, &pixmap, area.left, area.top);
 }
 
 /// One axis: its arm and filled, labelled ball when positive, an outlined
@@ -106,18 +118,22 @@ fn draw_glyph(pixmap: &mut Pixmap, axis: Axis, at: Vec2, transform: Transform) {
     const HALF_HEIGHT: f32 = 3.5;
 
     let (w, h) = (HALF_WIDTH, HALF_HEIGHT);
-    let strokes: &[&[(f32, f32)]] = match axis {
-        Axis::X => &[&[(-w, -h), (w, h)], &[(w, -h), (-w, h)]],
-        Axis::Y => &[&[(-w, -h), (0.0, 0.0), (w, -h)], &[(0.0, 0.0), (0.0, h)]],
-        Axis::Z => &[&[(-w, -h), (w, -h), (-w, h), (w, h)]],
+    // Offsets from the ball's centre, one polyline per stroke.
+    let strokes: &[&[Vec2]] = match axis {
+        Axis::X => &[&[Vec2::new(-w, -h), Vec2::new(w, h)], &[Vec2::new(w, -h), Vec2::new(-w, h)]],
+        Axis::Y => &[
+            &[Vec2::new(-w, -h), Vec2::new(0.0, 0.0), Vec2::new(w, -h)],
+            &[Vec2::new(0.0, 0.0), Vec2::new(0.0, h)],
+        ],
+        Axis::Z => &[&[Vec2::new(-w, -h), Vec2::new(w, -h), Vec2::new(-w, h), Vec2::new(w, h)]],
     };
 
     let mut path = PathBuilder::new();
     for line in strokes {
         let Some((first, rest)) = line.split_first() else { continue };
-        path.move_to(at.x + first.0, at.y + first.1);
+        path.move_to(at.x + first.x, at.y + first.y);
         for point in rest {
-            path.line_to(at.x + point.0, at.y + point.1);
+            path.line_to(at.x + point.x, at.y + point.y);
         }
     }
     if let Some(path) = path.finish() {
@@ -178,7 +194,17 @@ mod tests {
     const BACKGROUND: [u8; 4] = [10, 20, 30, 255];
 
     fn solid(width: u32, height: u32) -> Readback {
-        Readback { width, height, pixels: BACKGROUND.repeat(width as usize * height as usize) }
+        Readback {
+            size: PixelSize { width, height },
+            pixels: BACKGROUND.repeat(width as usize * height as usize),
+        }
+    }
+
+    /// A pixel's column and row.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Pixel {
+        x: u32,
+        y: u32,
     }
 
     /// A gizmo in the top-right corner of a `width` logical pixel wide view.
@@ -203,8 +229,8 @@ mod tests {
         }
     }
 
-    /// Every pixel that differs from the background, as `(x, y)`.
-    fn changed(frame: &Frame) -> Vec<(u32, u32)> {
+    /// Every pixel that differs from the background.
+    fn changed(frame: &Frame) -> Vec<Pixel> {
         frame
             .pixels
             .as_chunks::<4>()
@@ -212,13 +238,13 @@ mod tests {
             .iter()
             .enumerate()
             .filter(|(_, pixel)| **pixel != BACKGROUND)
-            .map(|(index, _)| (index as u32 % frame.size.width, index as u32 / frame.size.width))
+            .map(|(index, _)| Pixel { x: index as u32 % frame.size.width, y: index as u32 / frame.size.width })
             .collect()
     }
 
     #[test]
     fn a_readback_becomes_a_straight_alpha_frame_of_its_size() {
-        let frame = compose(solid(4, 3), None, 1.0).expect("a full readback is a frame");
+        let frame = compose(solid(4, 3), None, ScaleFactor::new(1.0)).expect("a full readback is a frame");
 
         assert_eq!(frame.alpha, AlphaMode::Straight);
         assert_eq!(frame.size, PixelSize { width: 4, height: 3 });
@@ -228,9 +254,9 @@ mod tests {
 
     #[test]
     fn a_short_readback_is_refused() {
-        let readback = Readback { width: 4, height: 3, pixels: vec![0; 4 * 3 * 4 - 1] };
+        let readback = Readback { size: PixelSize { width: 4, height: 3 }, pixels: vec![0; 4 * 3 * 4 - 1] };
 
-        assert!(compose(readback, Some(&gizmo_view(4.0)), 1.0).is_err());
+        assert!(compose(readback, Some(&gizmo_view(4.0)), ScaleFactor::new(1.0)).is_err());
     }
 
     #[test]
@@ -240,7 +266,7 @@ mod tests {
             let readback = solid((width * scale) as u32, (height * scale) as u32);
             let gizmo = gizmo_view(width);
 
-            let frame = compose(readback, Some(&gizmo), scale).expect("a full readback is a frame");
+            let frame = compose(readback, Some(&gizmo), ScaleFactor::new(scale)).expect("a full readback is a frame");
             let touched = changed(&frame);
 
             let half = gizmo::BOX_SIZE / 2.0;
@@ -248,11 +274,11 @@ mod tests {
             let (top, bottom) = ((gizmo.center.y - half) * scale, (gizmo.center.y + half) * scale);
             assert!(!touched.is_empty(), "the gizmo drew nothing at scale {scale}");
             assert!(
-                touched.iter().all(|&(x, y)| {
-                    (x as f32) >= left.floor()
-                        && (x as f32) < right.ceil()
-                        && (y as f32) >= top.floor()
-                        && (y as f32) < bottom.ceil()
+                touched.iter().all(|pixel| {
+                    (pixel.x as f32) >= left.floor()
+                        && (pixel.x as f32) < right.ceil()
+                        && (pixel.y as f32) >= top.floor()
+                        && (pixel.y as f32) < bottom.ceil()
                 }),
                 "the gizmo drew outside its box at scale {scale}"
             );
@@ -263,7 +289,7 @@ mod tests {
     #[test]
     fn a_positive_ball_is_filled_in_its_axis_colour() {
         let gizmo = gizmo_view(200.0);
-        let frame = compose(solid(200, 150), Some(&gizmo), 1.0).expect("a full readback is a frame");
+        let frame = compose(solid(200, 150), Some(&gizmo), ScaleFactor::new(1.0)).expect("a full readback is a frame");
 
         // Beside the glyph, inside the positive Y ball.
         let tip = gizmo.center + Vec2::new(0.0, -gizmo::ARM_LEN);
@@ -312,7 +338,8 @@ mod tests {
         scene.show_armor(Arc::new(armor));
         let RgbaImage { width, height, pixels } =
             scene.render(PixelSize { width: 1600, height: 1000 }).expect("a render");
-        let frame = compose(Readback { width, height, pixels }, scene.gizmo().as_ref(), 2.0).expect("frame");
+        let readback = Readback { size: crate::frames::PixelSize { width, height }, pixels };
+        let frame = compose(readback, scene.gizmo().as_ref(), ScaleFactor::new(2.0)).expect("frame");
         assert_eq!(frame.alpha, AlphaMode::Straight);
 
         let file = std::fs::File::create(&out).expect("png file");

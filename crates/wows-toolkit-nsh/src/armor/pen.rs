@@ -17,8 +17,34 @@ use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 
+use crate::js_newtype::js_newtype;
+
 use super::catalog::fold_query;
 use super::catalog::ship_matches;
+
+/// A shell's position in its ship's shell list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellIndex(u32);
+
+js_newtype!(ShellIndex, u32);
+
+impl ShellIndex {
+    pub fn get(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// A ship's position in the list of ships being compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PenShipIndex(u32);
+
+js_newtype!(PenShipIndex, u32);
+
+impl PenShipIndex {
+    pub fn get(self) -> usize {
+        self.0 as usize
+    }
+}
 
 /// What one shell does to the plate.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -36,7 +62,7 @@ pub enum Verdict {
 #[derive(Debug, Clone, PartialEq, Eq, JsObject)]
 #[non_exhaustive]
 pub struct PenShellRow {
-    pub index: u32,
+    pub index: ShellIndex,
     /// `"AP 460mm"`.
     pub label: String,
     /// The flat penetration (`"25mm"`), or `"-"` for AP and a shell without one.
@@ -87,7 +113,7 @@ pub struct PenView {
     pub plate: Option<PenPlate>,
     pub ships: Vec<PenShipRow>,
     pub firing_ship: Option<String>,
-    pub firing_shell: Option<u32>,
+    pub firing_shell: Option<ShellIndex>,
 }
 
 /// The checker's own state, shared by every pane.
@@ -96,8 +122,8 @@ pub(super) struct PenState {
     /// In the order they were added.
     pub ships: Vec<ComparisonShip>,
     pub firing_ship: Option<String>,
-    /// An index into the firing ship's shells, when one was chosen.
-    pub firing_shell: Option<usize>,
+    /// The firing ship's shell, when one was chosen.
+    pub firing_shell: Option<ShellIndex>,
     pub ifhe: bool,
     pub search: String,
 }
@@ -121,7 +147,8 @@ impl PenState {
         self.search.clear();
     }
 
-    pub fn remove(&mut self, index: usize) {
+    pub fn remove(&mut self, index: PenShipIndex) {
+        let index = index.get();
         if index >= self.ships.len() {
             return;
         }
@@ -146,9 +173,9 @@ impl PenState {
         self.firing_shell = None;
     }
 
-    pub fn set_firing_shell(&mut self, index: usize) {
+    pub fn set_firing_shell(&mut self, index: ShellIndex) {
         let Some(ship) = self.firing() else { return };
-        if index >= ship.shells.len() {
+        if index.get() >= ship.shells.len() {
             return;
         }
         self.firing_shell = Some(index);
@@ -161,7 +188,7 @@ impl PenState {
 
     /// The ship a cast fires: the chosen one, else the first. Records it as
     /// chosen, as the trajectory panel shows it.
-    pub fn cast_ship(&mut self) -> (Option<ComparisonShip>, Option<usize>) {
+    pub fn cast_ship(&mut self) -> (Option<ComparisonShip>, Option<ShellIndex>) {
         let ship = self.firing().or_else(|| self.ships.first()).cloned();
         self.firing_ship = ship.as_ref().map(|ship| ship.param_index.clone());
 
@@ -172,10 +199,7 @@ impl PenState {
     pub fn results<'a>(&self, catalog: impl Iterator<Item = &'a ShipEntry>) -> Vec<PenResultRow> {
         const SEARCH_RESULTS: usize = 10;
 
-        let needle = fold_query(&self.search);
-        if needle.is_empty() {
-            return Vec::new();
-        }
+        let Some(needle) = fold_query(&self.search) else { return Vec::new() };
 
         catalog
             .filter(|ship| ship_matches(ship, &needle))
@@ -200,9 +224,10 @@ impl PenState {
                     .iter()
                     .enumerate()
                     .map(|(index, shell)| {
+                        let index = ShellIndex(index as u32);
                         let verdict = verdict(shell, thickness, ifhe);
                         PenShellRow {
-                            index: index as u32,
+                            index,
                             label: shell_label(shell),
                             pen: pen_label(shell, ifhe),
                             verdict,
@@ -334,8 +359,8 @@ mod tests {
         let mut pen = PenState::default();
         pen.add(ship("PJSB018", "Yamato"));
         pen.add(ship("PASB018", "Montana"));
-        pen.set_firing_shell(1);
-        pen.remove(0);
+        pen.set_firing_shell(ShellIndex(1));
+        pen.remove(PenShipIndex(0));
 
         assert_eq!(pen.firing_ship, None);
         assert_eq!(pen.firing_shell, None);

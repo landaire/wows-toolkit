@@ -12,18 +12,20 @@ use std::time::Instant;
 use wows_toolkit_armor::scene::Button;
 use wows_toolkit_armor::viewport::types::Vec2;
 
+use crate::frames::PinchScale;
 use crate::frames::PixelPoint;
-use crate::frames::PixelSize;
 use crate::frames::PointerButton;
+use crate::frames::ScaleFactor;
+use crate::frames::ScrollSteps;
 use crate::frames::SurfaceInput;
+use crate::frames::ViewSize;
 
 /// One surface event, in the scene's terms.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum SceneInput {
     /// The view's size in device pixels and its device pixels per point.
     Resize {
-        size: PixelSize,
-        scale: f32,
+        view: ViewSize,
     },
     Down {
         at: Vec2,
@@ -61,7 +63,7 @@ pub(super) enum SceneInput {
 /// The pinch gesture in progress: the scale last reported and when.
 #[derive(Debug, Clone, Copy)]
 struct PinchGesture {
-    previous: f32,
+    previous: PinchScale,
     at: Instant,
 }
 
@@ -70,7 +72,7 @@ struct PinchGesture {
 #[derive(Debug)]
 pub(super) struct InputMapper {
     /// Device pixels per logical pixel, from the last resize.
-    scale: f32,
+    scale: ScaleFactor,
     pinch: Option<PinchGesture>,
     /// Keys held, so an auto-repeat is told from a fresh press.
     keys_down: HashSet<String>,
@@ -78,17 +80,18 @@ pub(super) struct InputMapper {
 
 impl InputMapper {
     pub fn new() -> Self {
-        Self { scale: 1.0, pinch: None, keys_down: HashSet::new() }
+        // A view not yet sized is drawn at one device pixel per point.
+        Self { scale: ScaleFactor::new(1.0), pinch: None, keys_down: HashSet::new() }
     }
 
     pub fn map(&mut self, input: SurfaceInput, now: Instant) -> Option<SceneInput> {
         match input {
             SurfaceInput::Resized { size, scale } => {
                 // A scale the view could not measure leaves the last one.
-                if scale.is_finite() && scale > 0.0 {
+                if scale.get().is_finite() && scale.get() > 0.0 {
                     self.scale = scale;
                 }
-                Some(SceneInput::Resize { size, scale: self.scale })
+                Some(SceneInput::Resize { view: ViewSize { size, scale: self.scale } })
             }
             SurfaceInput::PointerDown { at, button, clicks, .. } => {
                 self.pinch = None;
@@ -131,24 +134,25 @@ impl InputMapper {
     }
 
     fn logical(&self, at: PixelPoint) -> Vec2 {
-        Vec2::new(at.x / self.scale, at.y / self.scale)
+        let scale = self.scale.get();
+        Vec2::new(at.x / scale, at.y / scale)
     }
 
-    fn pinch(&mut self, scale: f32, now: Instant) -> Option<SceneInput> {
+    fn pinch(&mut self, scale: PinchScale, now: Instant) -> Option<SceneInput> {
         const IDLE: Duration = Duration::from_millis(250);
 
-        if !scale.is_finite() || scale <= 0.0 {
+        if !scale.get().is_finite() || scale.get() <= 0.0 {
             return None;
         }
 
         // A gesture idle this long has ended; this report starts the next one.
         let previous = match self.pinch {
             Some(gesture) if now.saturating_duration_since(gesture.at) <= IDLE => gesture.previous,
-            _ => 1.0,
+            _ => PinchScale::new(1.0),
         };
         self.pinch = Some(PinchGesture { previous: scale, at: now });
 
-        Some(SceneInput::Pinch { factor: scale / previous })
+        Some(SceneInput::Pinch { factor: scale.get() / previous.get() })
     }
 }
 
@@ -163,9 +167,10 @@ fn scene_button(button: PointerButton) -> Option<Button> {
 }
 
 /// Wheel steps as scene pixels: a step down zooms out.
-fn wheel_pixels(steps: f32) -> Option<f32> {
+fn wheel_pixels(steps: ScrollSteps) -> Option<f32> {
     const PIXELS_PER_STEP: f32 = 40.0;
 
+    let steps = steps.get();
     if steps == 0.0 || !steps.is_finite() {
         return None;
     }
@@ -183,6 +188,7 @@ fn key_name(gdk: &str) -> String {
 mod tests {
     use super::*;
     use crate::frames::Modifiers;
+    use crate::frames::PixelSize;
 
     fn point(x: f32, y: f32) -> PixelPoint {
         PixelPoint { x, y }
@@ -190,8 +196,24 @@ mod tests {
 
     fn mapper_at_scale(scale: f32) -> InputMapper {
         let mut mapper = InputMapper::new();
-        mapper.map(SurfaceInput::Resized { size: PixelSize { width: 400, height: 300 }, scale }, Instant::now());
+        mapper.map(
+            SurfaceInput::Resized { size: PixelSize { width: 400, height: 300 }, scale: ScaleFactor::new(scale) },
+            Instant::now(),
+        );
         mapper
+    }
+
+    fn wheel(dx: f32, dy: f32) -> SurfaceInput {
+        SurfaceInput::Wheel {
+            at: None,
+            dx: ScrollSteps::new(dx),
+            dy: ScrollSteps::new(dy),
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    fn pinch(scale: f32) -> SurfaceInput {
+        SurfaceInput::Pinch { scale: PinchScale::new(scale) }
     }
 
     fn key(name: &str, pressed: bool, modifiers: Modifiers) -> SurfaceInput {
@@ -203,9 +225,9 @@ mod tests {
         let mut mapper = InputMapper::new();
         let now = Instant::now();
 
-        let down = mapper.map(SurfaceInput::Wheel { at: None, dx: 0.0, dy: 1.0, modifiers: Modifiers::default() }, now);
-        let up = mapper.map(SurfaceInput::Wheel { at: None, dx: 0.0, dy: -0.5, modifiers: Modifiers::default() }, now);
-        let flat = mapper.map(SurfaceInput::Wheel { at: None, dx: 3.0, dy: 0.0, modifiers: Modifiers::default() }, now);
+        let down = mapper.map(wheel(0.0, 1.0), now);
+        let up = mapper.map(wheel(0.0, -0.5), now);
+        let flat = mapper.map(wheel(3.0, 0.0), now);
 
         assert_eq!(down, Some(SceneInput::Wheel { dy: -40.0 }));
         assert_eq!(up, Some(SceneInput::Wheel { dy: 20.0 }));
@@ -247,11 +269,19 @@ mod tests {
         let mut mapper = mapper_at_scale(1.5);
         let now = Instant::now();
 
-        let resized = mapper.map(SurfaceInput::Resized { size: PixelSize { width: 10, height: 10 }, scale: 0.0 }, now);
+        let resized = mapper.map(
+            SurfaceInput::Resized { size: PixelSize { width: 10, height: 10 }, scale: ScaleFactor::new(0.0) },
+            now,
+        );
         let moved =
             mapper.map(SurfaceInput::PointerMoved { at: point(3.0, 6.0), modifiers: Modifiers::default() }, now);
 
-        assert_eq!(resized, Some(SceneInput::Resize { size: PixelSize { width: 10, height: 10 }, scale: 1.5 }));
+        assert_eq!(
+            resized,
+            Some(SceneInput::Resize {
+                view: ViewSize { size: PixelSize { width: 10, height: 10 }, scale: ScaleFactor::new(1.5) }
+            })
+        );
         assert_eq!(moved, Some(SceneInput::Moved { at: Vec2::new(2.0, 4.0) }));
     }
 
@@ -323,8 +353,8 @@ mod tests {
         let mut mapper = InputMapper::new();
         let start = Instant::now();
 
-        let first = mapper.map(SurfaceInput::Pinch { scale: 1.2 }, start);
-        let second = mapper.map(SurfaceInput::Pinch { scale: 1.5 }, start + Duration::from_millis(16));
+        let first = mapper.map(pinch(1.2), start);
+        let second = mapper.map(pinch(1.5), start + Duration::from_millis(16));
 
         assert_eq!(first, Some(SceneInput::Pinch { factor: 1.2 }));
         assert_eq!(second, Some(SceneInput::Pinch { factor: 1.5 / 1.2 }));
@@ -335,8 +365,8 @@ mod tests {
         let mut mapper = InputMapper::new();
         let start = Instant::now();
 
-        mapper.map(SurfaceInput::Pinch { scale: 2.0 }, start);
-        let later = mapper.map(SurfaceInput::Pinch { scale: 1.1 }, start + Duration::from_millis(300));
+        mapper.map(pinch(2.0), start);
+        let later = mapper.map(pinch(1.1), start + Duration::from_millis(300));
 
         assert_eq!(later, Some(SceneInput::Pinch { factor: 1.1 }));
     }
@@ -346,10 +376,10 @@ mod tests {
         let mut mapper = InputMapper::new();
         let start = Instant::now();
 
-        mapper.map(SurfaceInput::Pinch { scale: 2.0 }, start);
+        mapper.map(pinch(2.0), start);
         mapper.map(SurfaceInput::PointerMoved { at: point(1.0, 1.0), modifiers: Modifiers::default() }, start);
-        let next = mapper.map(SurfaceInput::Pinch { scale: 0.8 }, start + Duration::from_millis(10));
-        let bad = mapper.map(SurfaceInput::Pinch { scale: f32::NAN }, start + Duration::from_millis(20));
+        let next = mapper.map(pinch(0.8), start + Duration::from_millis(10));
+        let bad = mapper.map(pinch(f32::NAN), start + Duration::from_millis(20));
 
         assert_eq!(next, Some(SceneInput::Pinch { factor: 0.8 }));
         assert_eq!(bad, None);

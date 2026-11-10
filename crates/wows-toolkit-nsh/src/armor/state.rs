@@ -18,6 +18,7 @@ use std::time::Duration;
 use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::assets::load_ship_assets;
+use wows_toolkit_armor::error::GpuInitError;
 use wows_toolkit_armor::error::ShipLoadError;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
@@ -30,6 +31,8 @@ use wows_toolkit_armor::scene::Changes;
 use wows_toolkit_armor::scene::GizmoView;
 use wows_toolkit_armor::scene::Gpu;
 use wows_toolkit_armor::scene::PaneCommand;
+use wows_toolkit_armor::scene::SyncedSettings;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
 use wows_toolkit_armor::viewport::types::ViewRect;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
@@ -39,34 +42,39 @@ use wowsunpack::export::ship::ShipAssets;
 
 use crate::frames;
 use crate::frames::PixelSize;
+use crate::frames::ScaleFactor;
 use crate::frames::SurfaceId;
+use crate::frames::ViewSize;
 use crate::game_data;
 use crate::game_data::GameDataError;
+use crate::js_newtype::js_newtype;
 
 use super::defaults;
+use super::error::ArmorError;
+use super::error::BundleError;
 use super::export::ExportDialog;
 use super::frame::Readback;
 use super::input::SceneInput;
 use super::pen::PenState;
+use super::pen::ShellIndex;
 use super::render;
 use super::render::Signal;
 use super::view::HoverView;
 use super::view::hover_view;
 
 /// Where the legend opens before it has been moved.
-const LEGEND_DEFAULT_POSITION: (f32, f32) = (10.0, 100.0);
+const LEGEND_DEFAULT_POSITION: LegendPosition = LegendPosition { x: 10.0, y: 100.0 };
 
 /// One pane, by the number its surface is named with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct PaneId(u32);
+pub struct PaneId(u32);
+
+js_newtype!(PaneId, u32);
 
 impl PaneId {
-    pub fn new(raw: u32) -> Self {
-        Self(raw)
-    }
-
-    pub fn raw(self) -> u32 {
-        self.0
+    /// The id after this one.
+    fn next(self) -> Self {
+        Self(self.0 + 1)
     }
 
     pub fn surface(self) -> SurfaceId {
@@ -84,7 +92,7 @@ impl fmt::Display for PaneId {
 pub(super) enum GpuState {
     Initializing,
     Ready(Gpu),
-    Failed(String),
+    Failed(GpuInitError),
 }
 
 /// The ship data every pane loads from: the export assets and the catalog.
@@ -99,14 +107,14 @@ pub(super) enum BundleState {
     NotConfigured,
     Loading,
     Ready(Arc<Bundle>),
-    Failed(String),
+    Failed(BundleError),
 }
 
 /// Where a pane's ship load stands.
 pub(super) enum PaneLoad {
     Idle,
     Loading { display_name: String },
-    Failed { display_name: String, reason: String },
+    Failed { display_name: String, error: ShipLoadError },
 }
 
 /// The ship a pane shows, which is what a hull change reloads.
@@ -116,20 +124,59 @@ pub(super) struct ShipSource {
     pub display_name: String,
 }
 
+/// Counts the loads into one pane, so a load that lands after a later one
+/// started is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoadGeneration(u64);
+
+impl LoadGeneration {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// Counts the ships a pane has started showing, so a tree's expansion can
+/// start over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipGeneration(u32);
+
+js_newtype!(ShipGeneration, u32);
+
+impl ShipGeneration {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+/// Counts the replays' requests to raise the viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RevealRequest(u32);
+
+js_newtype!(RevealRequest, u32);
+
+impl RevealRequest {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 pub(super) struct Pane {
     pub id: PaneId,
     pub scene: ArmorScene,
     signals: mpsc::Sender<Signal>,
     pub load: PaneLoad,
-    /// Bumped by every load into this pane, so a load that lands after a
-    /// later one started is dropped.
-    load_generation: u64,
+    load_generation: LoadGeneration,
     pub source: Option<ShipSource>,
-    /// Bumped whenever the pane starts showing another ship, so a tree's
-    /// expansion can start over.
-    pub ship_generation: u32,
+    pub ship_generation: ShipGeneration,
     /// The inline export confirmation is up.
     pub export_confirm: bool,
+}
+
+/// Where the legend sits, in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct LegendPosition {
+    pub x: f32,
+    pub y: f32,
 }
 
 /// The floating thickness legend.
@@ -137,23 +184,22 @@ pub(super) struct Pane {
 pub(super) struct Legend {
     pub visible: bool,
     pub collapsed: bool,
-    pub x: f32,
-    pub y: f32,
+    pub position: LegendPosition,
 }
 
 impl Legend {
     fn from_defaults(row: Option<&ArmorViewerDefaultsRow>) -> Self {
         let Some(row) = row else { return Self::new() };
-        let (x, y) = match (row.legend_pos_x, row.legend_pos_y) {
-            (Some(x), Some(y)) => (x as f32, y as f32),
+        let position = match (row.legend_pos_x, row.legend_pos_y) {
+            (Some(x), Some(y)) => LegendPosition { x: x as f32, y: y as f32 },
+            // A legend never moved has no saved position.
             _ => LEGEND_DEFAULT_POSITION,
         };
-        Self { visible: row.show_legend, collapsed: row.legend_collapsed, x, y }
+        Self { visible: row.show_legend, collapsed: row.legend_collapsed, position }
     }
 
     fn new() -> Self {
-        let (x, y) = LEGEND_DEFAULT_POSITION;
-        Self { visible: true, collapsed: false, x, y }
+        Self { visible: true, collapsed: false, position: LEGEND_DEFAULT_POSITION }
     }
 }
 
@@ -182,6 +228,14 @@ struct PendingOpen {
     source: ShipSource,
 }
 
+/// What a comparison pane copies from the active one.
+struct PaneCopy {
+    armor: Arc<LoadedShipArmor>,
+    camera: ArcballCamera,
+    synced: SyncedSettings,
+    source: Option<ShipSource>,
+}
+
 type SeekHandler = Arc<dyn Fn(GameClock) + Send + Sync>;
 
 pub(super) struct State {
@@ -194,7 +248,7 @@ pub(super) struct State {
     defaults_read: bool,
     pub panes: Vec<Pane>,
     pub active: PaneId,
-    next_pane: u32,
+    next_pane: PaneId,
     pub mirror_cameras: bool,
     pub sync_options: bool,
     pub stack_panes: bool,
@@ -211,7 +265,7 @@ pub(super) struct State {
     /// Hits a replay asked for, waiting for their ship to load.
     pending_hits: Vec<PreExtractedHit>,
     pending_open: Option<PendingOpen>,
-    pub reveal_request: u32,
+    pub reveal_request: RevealRequest,
     pub export: Option<ExportDialog>,
     seek: Option<SeekHandler>,
     pub hover: HoverView,
@@ -223,6 +277,15 @@ struct Service {
     hover: tokio::sync::watch::Sender<u64>,
 }
 
+/// What an input or a tick changed beyond the scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Refresh {
+    /// Something a panel shows.
+    view: bool,
+    /// The hover tooltip.
+    hover: bool,
+}
+
 static SERVICE: LazyLock<Service> = LazyLock::new(|| {
     let mut state = State {
         started: false,
@@ -232,7 +295,7 @@ static SERVICE: LazyLock<Service> = LazyLock::new(|| {
         defaults_read: false,
         panes: Vec::new(),
         active: PaneId(1),
-        next_pane: 1,
+        next_pane: PaneId(1),
         mirror_cameras: false,
         sync_options: false,
         stack_panes: false,
@@ -246,7 +309,7 @@ static SERVICE: LazyLock<Service> = LazyLock::new(|| {
         playback_at: None,
         pending_hits: Vec::new(),
         pending_open: None,
-        reveal_request: 0,
+        reveal_request: RevealRequest(0),
         export: None,
         seek: None,
         hover: HoverView::default(),
@@ -299,10 +362,17 @@ pub(super) fn spawn_named(name: &str, work: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// A pane's render, ready to present.
+pub(super) struct Render {
+    pub readback: Readback,
+    pub gizmo: Option<GizmoView>,
+    /// Device pixels per logical pixel of the view it was made for.
+    pub scale: ScaleFactor,
+}
+
 /// What a pane's render thread has to present.
 pub(super) struct Driven {
-    pub readback: Option<Readback>,
-    pub gizmo: Option<GizmoView>,
+    pub render: Option<Render>,
     pub wants_tick: bool,
 }
 
@@ -311,28 +381,28 @@ pub(super) struct Driven {
 pub(super) fn drive(
     id: PaneId,
     inputs: Vec<SceneInput>,
-    view: Option<(PixelSize, f32)>,
+    view: Option<ViewSize>,
     step: Option<Duration>,
     resized: bool,
 ) -> Option<Driven> {
-    let (driven, view_changed, hover_changed) = {
+    let (driven, refresh) = {
         let mut state = lock();
         let index = state.index_of(id)?;
-        let mut view_changed = false;
-        let mut hover_changed = false;
+        let mut refresh = Refresh { view: false, hover: false };
 
-        if let Some((size, scale)) = view {
+        if let Some(view) = view {
+            let scale = view.scale.get();
             let scene = &mut state.panes[index].scene;
-            scene.set_rect(ViewRect::new(0.0, 0.0, size.width as f32 / scale, size.height as f32 / scale));
+            scene.set_rect(ViewRect::new(0.0, 0.0, view.size.width as f32 / scale, view.size.height as f32 / scale));
             if resized {
                 scene.mark_dirty();
             }
         }
 
         for input in inputs {
-            let (view, hover) = state.apply_input(index, input);
-            view_changed |= view;
-            hover_changed |= hover;
+            let applied = state.apply_input(index, input);
+            refresh.view |= applied.view;
+            refresh.hover |= applied.hover;
         }
 
         if let Some(step) = step
@@ -340,28 +410,32 @@ pub(super) fn drive(
         {
             state.panes[index].scene.tick(step);
             let changes = state.absorb(index);
-            view_changed |= changes.settings || changes.trajectory_mode;
+            refresh.view |= changes.settings || changes.trajectory_mode;
         }
 
         let scene = &mut state.panes[index].scene;
-        let readback = match view {
-            Some((size, _)) if !size.is_empty() => scene
-                .render(wows_toolkit_armor::viewport::types::PixelSize { width: size.width, height: size.height })
-                .map(|image| Readback { width: image.width, height: image.height, pixels: image.pixels }),
+        let render = match view {
+            Some(view) if !view.size.is_empty() => {
+                let size = wows_toolkit_armor::viewport::types::PixelSize { width: view.size.width, height: view.size.height };
+                scene.render(size).map(|image| Render {
+                    readback: Readback { size: PixelSize { width: image.width, height: image.height }, pixels: image.pixels },
+                    gizmo: scene.gizmo(),
+                    scale: view.scale,
+                })
+            }
             _ => None,
         };
-        let gizmo = if readback.is_some() { scene.gizmo() } else { None };
-        let driven = Driven { readback, gizmo, wants_tick: scene.wants_tick() };
-        if view_changed {
+        let driven = Driven { render, wants_tick: scene.wants_tick() };
+        if refresh.view {
             state.wake_panes();
         }
 
-        (driven, view_changed, hover_changed)
+        (driven, refresh)
     };
-    if view_changed {
+    if refresh.view {
         bump(&SERVICE.view);
     }
-    if hover_changed {
+    if refresh.hover {
         bump(&SERVICE.hover);
     }
 
@@ -373,7 +447,7 @@ pub(super) fn drive(
 pub fn show_realtime(param_index: String, display_name: String, hits: Vec<PreExtractedHit>, incoming: IncomingContext) {
     update(|state| {
         state.ensure_started();
-        state.reveal_request = state.reveal_request.wrapping_add(1);
+        state.reveal_request = state.reveal_request.next();
         state.pending_hits = hits;
         state.playback_at = incoming.at;
         state.incoming =
@@ -450,10 +524,7 @@ impl State {
         }
     }
 
-    fn adopt_gpu<E>(&mut self, created: Result<Gpu, E>)
-    where
-        E: fmt::Display,
-    {
+    fn adopt_gpu(&mut self, created: Result<Gpu, GpuInitError>) {
         match created {
             Ok(gpu) => {
                 for pane in &mut self.panes {
@@ -462,13 +533,13 @@ impl State {
                 self.gpu = GpuState::Ready(gpu);
             }
             Err(error) => {
-                tracing::error!("armor viewer: failed to create the shared wgpu device: {error:#}");
-                self.gpu = GpuState::Failed(format!("{error:#}"));
+                tracing::error!("armor viewer: failed to create the shared wgpu device: {error}");
+                self.gpu = GpuState::Failed(error);
             }
         }
     }
 
-    fn adopt_defaults(&mut self, read: Result<Option<ArmorViewerDefaultsRow>, super::error::ArmorError>) {
+    fn adopt_defaults(&mut self, read: Result<Option<ArmorViewerDefaultsRow>, ArmorError>) {
         // A row that could not be read is not overwritten: it may hold what
         // the reader set.
         let row = match read {
@@ -486,7 +557,7 @@ impl State {
         self.defaults = row;
     }
 
-    fn adopt_bundle(&mut self, loaded: Result<Bundle, BundleState>) {
+    fn adopt_bundle(&mut self, loaded: Result<Bundle, BundleError>) {
         match loaded {
             Ok(bundle) => {
                 self.bundle = BundleState::Ready(Arc::new(bundle));
@@ -494,7 +565,8 @@ impl State {
                     self.start_ship_load(pane, source);
                 }
             }
-            Err(state) => self.bundle = state,
+            Err(BundleError::GameData(GameDataError::NotConfigured)) => self.bundle = BundleState::NotConfigured,
+            Err(error) => self.bundle = BundleState::Failed(error),
         }
     }
 
@@ -535,8 +607,8 @@ impl State {
 
     /// A new empty pane, with its render thread running.
     fn add_pane(&mut self) -> PaneId {
-        let id = PaneId(self.next_pane);
-        self.next_pane += 1;
+        let id = self.next_pane;
+        self.next_pane = id.next();
         let surface = frames::surface(&id.surface());
         let signals = render::spawn(id, surface);
         let mut scene = ArmorScene::new();
@@ -549,9 +621,9 @@ impl State {
             scene,
             signals,
             load: PaneLoad::Idle,
-            load_generation: 0,
+            load_generation: LoadGeneration(0),
             source: None,
-            ship_generation: 0,
+            ship_generation: ShipGeneration(0),
             export_confirm: false,
         });
 
@@ -633,14 +705,13 @@ impl State {
             show_splash_boxes: self.defaults.as_ref().is_some_and(|row| row.show_splash_boxes),
             show_legend: self.legend.visible,
             legend_collapsed: self.legend.collapsed,
-            legend_pos_x: Some(self.legend.x as f64),
-            legend_pos_y: Some(self.legend.y as f64),
+            legend_pos_x: Some(self.legend.position.x as f64),
+            legend_pos_y: Some(self.legend.position.y as f64),
         }
     }
 
-    /// One input on pane `index`. Returns whether the view and the hover
-    /// changed.
-    fn apply_input(&mut self, index: usize, input: SceneInput) -> (bool, bool) {
+    /// One input on pane `index`, and what it changed.
+    fn apply_input(&mut self, index: usize, input: SceneInput) -> Refresh {
         let mut view = false;
         let id = self.panes[index].id;
         let motion = matches!(input, SceneInput::Moved { .. } | SceneInput::Left);
@@ -698,7 +769,7 @@ impl State {
         view |= self.refresh_pen_plate();
         let hover = self.refresh_hover(index);
 
-        (view, hover)
+        Refresh { view, hover }
     }
 
     /// Reads the active pane's last plate into the checker. Returns whether
@@ -719,7 +790,7 @@ impl State {
         let metadata = self.bundle().map(|bundle| bundle.assets.metadata());
         let hover = hover_view(id, &self.panes[index].scene, metadata);
         let empty = hover.plate.is_none() && hover.ring.is_none();
-        if empty && self.hover.pane_id != Some(id.raw()) {
+        if empty && self.hover.pane_id != Some(id) {
             return false;
         }
         let hover = if empty { HoverView::default() } else { hover };
@@ -753,7 +824,7 @@ impl State {
     /// Hands the active pane the ship and shell a trajectory cast fires.
     pub fn push_cast_ship(&mut self) {
         let (ship, shell) = self.pen.cast_ship();
-        self.act(|scene| scene.set_cast_ship(ship, shell));
+        self.act(|scene| scene.set_cast_ship(ship, shell.map(ShellIndex::get)));
     }
 
     /// Opens a catalog ship in the active pane, unless it already shows it.
@@ -778,7 +849,7 @@ impl State {
         };
         let Some(index) = self.index_of(id) else { return };
         let pane = &mut self.panes[index];
-        pane.load_generation += 1;
+        pane.load_generation = pane.load_generation.next();
         let generation = pane.load_generation;
         pane.load = PaneLoad::Loading { display_name: source.display_name.clone() };
 
@@ -791,7 +862,7 @@ impl State {
     fn finish_ship_load(
         &mut self,
         id: PaneId,
-        generation: u64,
+        generation: LoadGeneration,
         source: ShipSource,
         loaded: Result<LoadedShipArmor, ShipLoadError>,
     ) {
@@ -803,8 +874,7 @@ impl State {
             Ok(armor) => Arc::new(armor),
             Err(error) => {
                 tracing::error!("armor viewer: failed to load {}: {error}", source.display_name);
-                self.panes[index].load =
-                    PaneLoad::Failed { display_name: source.display_name, reason: error.to_string() };
+                self.panes[index].load = PaneLoad::Failed { display_name: source.display_name, error };
                 return;
             }
         };
@@ -816,7 +886,7 @@ impl State {
         let pane = &mut self.panes[index];
         pane.load = PaneLoad::Idle;
         pane.source = Some(source);
-        pane.ship_generation = pane.ship_generation.wrapping_add(1);
+        pane.ship_generation = pane.ship_generation.next();
         pane.scene.show_armor(armor);
         // After the armor: showing a ship starts it over and would drop them.
         if !hits.is_empty() {
@@ -890,20 +960,21 @@ impl State {
     /// ship loads into it instead.
     pub fn compare(&mut self, ship: Option<ShipSource>) {
         let active = self.active_pane();
-        let copy = active
-            .scene
-            .current_armor()
-            .cloned()
-            .map(|armor| (armor, active.scene.camera(), active.scene.synced_settings(), active.source.clone()));
+        let copy = active.scene.current_armor().cloned().map(|armor| PaneCopy {
+            armor,
+            camera: active.scene.camera(),
+            synced: active.scene.synced_settings(),
+            source: active.source.clone(),
+        });
 
         let id = self.add_pane();
         let index = self.panes.len() - 1;
-        if let Some((armor, camera, synced, source)) = copy {
+        if let Some(copy) = copy {
             let pane = &mut self.panes[index];
-            pane.source = source;
-            pane.scene.show_armor(armor);
-            pane.scene.set_camera(camera);
-            pane.scene.apply_synced(&synced);
+            pane.source = copy.source;
+            pane.scene.show_armor(copy.armor);
+            pane.scene.set_camera(copy.camera);
+            pane.scene.apply_synced(&copy.synced);
         }
         self.active = id;
         self.push_cast_ship();
@@ -921,11 +992,11 @@ impl State {
             let pane = &mut self.panes[index];
             pane.scene.clear();
             pane.scene.apply_defaults(self.defaults.as_ref());
-            pane.load_generation += 1;
+            pane.load_generation = pane.load_generation.next();
             pane.load = PaneLoad::Idle;
             pane.source = None;
             pane.export_confirm = false;
-            pane.ship_generation = pane.ship_generation.wrapping_add(1);
+            pane.ship_generation = pane.ship_generation.next();
             self.ship_loaded = false;
             self.refresh_pen_plate();
             return;
@@ -978,6 +1049,7 @@ impl State {
     pub fn part_thicknesses(&self, zone: &str, part: &str) -> Vec<i32> {
         let scene = &self.active_pane().scene;
         let show_zero_mm = scene.display_settings().show_zero_mm;
+        // A zone or part the armor does not have covers no plates.
         scene
             .current_armor()
             .and_then(|armor| armor.zone_part_plates.iter().find(|candidate| candidate.name == zone))
@@ -1013,18 +1085,11 @@ impl State {
     }
 }
 
-/// Reads the installed build's ship data. The error is the state to show.
-fn load_bundle() -> Result<Bundle, BundleState> {
-    let loaded = match game_data::wait_current_build() {
-        Ok(loaded) => loaded,
-        Err(GameDataError::NotConfigured) => return Err(BundleState::NotConfigured),
-        Err(error) => return Err(BundleState::Failed(error.to_string())),
-    };
-    let assets =
-        load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider()).map_err(|error| {
-            tracing::error!("armor viewer: failed to load ship assets: {error}");
-            BundleState::Failed(error.to_string())
-        })?;
+/// Reads the installed build's ship data.
+fn load_bundle() -> Result<Bundle, BundleError> {
+    let loaded = game_data::wait_current_build()?;
+    let assets = load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider())
+        .inspect_err(|error| tracing::error!("armor viewer: failed to load ship assets: {error}"))?;
     let catalog = ShipCatalog::build(loaded.provider());
 
     Ok(Bundle { assets, catalog })
