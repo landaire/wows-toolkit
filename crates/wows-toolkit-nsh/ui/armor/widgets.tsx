@@ -15,11 +15,15 @@ export function tip(text: string | undefined): JSX.Element | undefined {
   );
 }
 
-/** A compact button: a label (or an icon named by it), optionally held down (`on`), with a hint. */
+/**
+ * A compact button: a label (or an icon named by it, `icon`), optionally led
+ * by an icon (`leading`), optionally held down (`on`), with a hint.
+ */
 export function ToolButton(props: {
   id: string;
   label: string;
   icon?: IconName;
+  leading?: IconName;
   tooltip?: string;
   on?: boolean;
   disabled?: boolean;
@@ -27,6 +31,7 @@ export function ToolButton(props: {
   style?: ViewStyle;
   onPress: () => void;
 }) {
+  const tint = () => props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground;
   return (
     <View
       testID={props.id}
@@ -41,6 +46,8 @@ export function ToolButton(props: {
       style={[{
         minHeight: 26,
         paddingHorizontal: 8,
+        flexDirection: "row",
+        gap: 5,
         justifyContent: "center",
         alignItems: "center",
         borderRadius: controlRadius(),
@@ -52,9 +59,16 @@ export function ToolButton(props: {
     >
       <If
         when={props.icon}
-        else={<Text style={{ fontSize: 12, color: props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground }}>{props.label}</Text>}
+        else={
+          <>
+            <If when={props.leading}>
+              {(leading) => <Icon name={leading()} size={13} color={tint()}/>}
+            </If>
+            <Text style={{ fontSize: 12, color: tint() }}>{props.label}</Text>
+          </>
+        }
       >
-        {(icon) => <Icon name={icon()} size={14} color={props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground}/>}
+        {(icon) => <Icon name={icon()} size={14} color={tint()}/>}
       </If>
     </View>
   );

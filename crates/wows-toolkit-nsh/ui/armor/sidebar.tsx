@@ -216,7 +216,7 @@ function CommonSettings() {
           hoverStyle={{ backgroundColor: colors.accent }}
           style={{ width: 26, height: 24, alignItems: "center", justifyContent: "center", borderRadius: controlRadius() }}
         >
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>=</Text>
+          <Icon name="settings-2" size={14} color={colors.foreground}/>
         </View>
       }
     >
@@ -266,6 +266,7 @@ export function ShipsSidebar() {
         <ToolButton
           id="armor-sidebar-compare"
           label={t("ui.armor.compare")}
+          leading="layout-dashboard"
           tooltip={t("ui.armor.compare_tooltip")}
           onPress={() => call(Armor.compare(null, null))}
         />

@@ -56,6 +56,7 @@ function Tools() {
         <ToolButton
           id="armor-show-hidden-button"
           label={t("ui.armor.show_hidden")}
+          leading="eye-off"
           tooltip={t("ui.armor.show_hidden_tooltip")}
           on={active()?.showHidden}
           disabled={!loaded()}
@@ -80,6 +81,7 @@ function Tools() {
         <ToolButton
           id="armor-splash-boxes-button"
           label={t("ui.armor.splash_boxes")}
+          leading="box"
           tooltip={splashData() ? t("ui.armor.splash_tooltip") : t("ui.armor.splash_no_data")}
           on={active()?.splash.boxesShown}
           disabled={!splashData()}
@@ -105,6 +107,7 @@ function Tools() {
         <ToolButton
           id="armor-export-trigger"
           label={t("ui.replay.section_export")}
+          leading="hard-drive"
           tooltip={t("ui.armor.export_tooltip")}
           disabled={!loaded()}
           onPress={() => call(Armor.openExportConfirm())}
