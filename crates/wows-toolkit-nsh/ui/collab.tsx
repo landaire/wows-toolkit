@@ -3,6 +3,7 @@ import { Checkbox, Input, Popover, Progress } from "nsh/base";
 import { Collab, type CollabState, type RosterEntry, type SharedWindowEntry } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
 import { t } from "./i18n";
+import { CheckMark } from "./icons";
 import { appSettings, editSetting } from "./settings_store";
 import { beforeRevealingAddress } from "./shell/notices";
 import * as toast from "./shell/toast";
@@ -61,7 +62,7 @@ function Toggle(props: { label: string; checked: boolean; onChange: (checked: bo
       checked={props.checked}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<CheckMark checked={props.checked}/>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 12.5, color: colors.popoverForeground }}>{props.label}</Text>
@@ -253,7 +254,9 @@ function Permissions(props: { current: CollabState }) {
         onChange={(checked) => Collab.setPermissions(props.current.annotationsLocked, checked)}
       />
       <View style={{ flexDirection: "row" }}>
-        <Button label={t("ui.collab.reset_overrides")} onPress={() => Collab.resetOverrides()}/>
+        <View tooltip={t("ui.collab.reset_overrides_tooltip")}>
+          <Button label={t("ui.collab.reset_overrides")} onPress={() => Collab.resetOverrides()}/>
+        </View>
       </View>
     </View>
   );

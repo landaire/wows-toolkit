@@ -98,6 +98,13 @@ impl PlayerTracker {
         run(move || open(&locale)).await
     }
 
+    /// The labels and controls again, in `locale`, after a language change.
+    pub fn relabel(locale: String) -> TrackerOpened {
+        wows_toolkit_viewmodel::set_locale(&locale);
+        let tracker = tracker();
+        TrackerOpened { labels: tracker.labels(), controls: tracker.controls() }
+    }
+
     /// Reads the index for the current period, and the tracked players again.
     pub async fn refresh() -> Result<TrackerControls, TrackerReport> {
         run(refresh).await

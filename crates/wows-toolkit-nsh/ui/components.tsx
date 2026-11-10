@@ -1,6 +1,7 @@
 import type { JSX, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
-import { Button as BaseButton, MenuItem } from "nsh/base";
+import { Button as BaseButton, MenuItem, Tooltip } from "nsh/base";
+import { Icon, type IconName } from "./icons";
 import { colors, controlRadius } from "./theme";
 
 export function errorMessage(error: unknown): string {
@@ -20,10 +21,24 @@ export const inputStyle = {
   color: colors.foreground,
 };
 
+/** A hover hint for an element's `tooltip` prop, which takes an element, not text. */
+export function Hint(props: { text: string }) {
+  return (
+    <Tooltip delay={400} placement="top" style={{ maxWidth: 360, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}>
+      <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{props.text}</Text>
+    </Tooltip>
+  );
+}
+
 export function Button(props: {
   label: string;
+  /** Drawn before the label. */
+  icon?: IconName;
   variant?: "primary" | "secondary" | "ghost" | "danger";
   disabled?: boolean;
+  tooltip?: string;
+  accessibilityLabel?: string;
+  testID?: string;
   onPress: () => void;
 }) {
   const variant = () => props.variant ?? "secondary";
@@ -39,6 +54,9 @@ export function Button(props: {
   return (
     <BaseButton
       onPress={props.onPress}
+      accessibilityLabel={props.accessibilityLabel}
+      testID={props.testID}
+      tooltip={props.tooltip ? <Hint text={props.tooltip}/> : undefined}
       disabled={props.disabled}
       hoverStyle={{ opacity: 0.86 }}
       activeStyle={{ opacity: 0.68 }}
@@ -46,6 +64,9 @@ export function Button(props: {
       style={{
         minHeight: 30,
         paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
         justifyContent: "center",
         borderRadius: controlRadius(),
         borderWidth: 1,
@@ -54,8 +75,20 @@ export function Button(props: {
         opacity: props.disabled ? 0.45 : 1,
       }}
     >
+      <If when={props.icon}>
+        {(icon) => <Icon name={icon()} size={14} color={foreground()}/>}
+      </If>
       <Text style={{ fontSize: 13, fontWeight: "500", color: foreground() }}>{props.label}</Text>
     </BaseButton>
+  );
+}
+
+/** A turning loader for work without a measure. */
+export function Spinner(props: { label: string; size?: number; color?: string }) {
+  return (
+    <View class="animate-spin" accessibilityLabel={props.label} style={{ width: props.size ?? 16, height: props.size ?? 16 }}>
+      <Icon name="loader" size={props.size ?? 16} color={props.color ?? colors.mutedForeground}/>
+    </View>
   );
 }
 

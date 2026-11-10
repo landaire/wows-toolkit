@@ -74,7 +74,7 @@ function ShipBlock(props: { ship: PenShipView; index: number }) {
           on={props.ship.firing}
           onPress={() => call(Armor.setFiringShip(props.ship.paramIndex))}
         />
-        <IconButton id={`armor-pen-remove-${props.index}`} glyph="x" label={t("ui.armor.pen.remove")} onPress={() => call(Armor.removePenShip(props.index))}/>
+        <IconButton id={`armor-pen-remove-${props.index}`} icon="x" label={t("ui.armor.pen.remove")} onPress={() => call(Armor.removePenShip(props.index))}/>
       </View>
       <If when={props.ship.noShells}>
         <Hint text={props.ship.noShells ?? ""}/>
@@ -107,11 +107,9 @@ function ArcRow(props: { arc: ArcView; index: number }) {
     <View style={{ gap: 4, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Swatch color={arc().color} width={12} height={12}/>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.cardForeground }}>{arc().heading}</Text>
-          <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{arc().summary}</Text>
-        </View>
-        <IconButton id={`armor-arc-delete-${props.index}`} glyph="x" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
+        <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "600", color: colors.cardForeground }}>{arc().heading}</Text>
+        <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{arc().summary}</Text>
+        <IconButton id={`armor-arc-delete-${props.index}`} icon="x" label={t("ui.armor.arc_delete")} onPress={() => call(Armor.removeArc(props.index))}/>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
         <ToolButton
@@ -122,27 +120,27 @@ function ArcRow(props: { arc: ArcView; index: number }) {
           onPress={() => call(Armor.isolateArc(props.index, "plates", !arc().isolatingPlates))}
         />
         <ToolButton
+          id={`armor-arc-range-down-${props.index}`}
+          label="-"
+          icon="minus"
+          tooltip={t("ui.armor.arc_range_tooltip")}
+          disabled={!arc().canStepDown}
+          onPress={() => call(Armor.setArcRange(props.index, Math.max(0, arc().range - 0.5)))}
+        />
+        <ToolButton
+          id={`armor-arc-range-up-${props.index}`}
+          label="+"
+          icon="plus"
+          tooltip={t("ui.armor.arc_range_tooltip")}
+          disabled={!arc().canStepUp}
+          onPress={() => call(Armor.setArcRange(props.index, Math.min(30, arc().range + 0.5)))}
+        />
+        <ToolButton
           id={`armor-arc-isolate-zones-${props.index}`}
           label={t("ui.armor.arc_isolate_zones")}
           tooltip={t("ui.armor.arc_isolate_zones_tooltip")}
           on={arc().isolatingZones}
           onPress={() => call(Armor.isolateArc(props.index, "zones", !arc().isolatingZones))}
-        />
-        <View style={{ flex: 1 }}/>
-        <ToolButton
-          id={`armor-arc-range-down-${props.index}`}
-          label="-"
-          tooltip={t("ui.armor.arc_range_tooltip")}
-          disabled={!arc().canStepDown}
-          onPress={() => call(Armor.setArcRange(props.index, Math.max(0, arc().range - 0.5)))}
-        />
-        <Text style={{ fontSize: 12, color: colors.cardForeground }}>{`${arc().range.toFixed(1)} km`}</Text>
-        <ToolButton
-          id={`armor-arc-range-up-${props.index}`}
-          label="+"
-          tooltip={t("ui.armor.arc_range_tooltip")}
-          disabled={!arc().canStepUp}
-          onPress={() => call(Armor.setArcRange(props.index, Math.min(30, arc().range + 0.5)))}
         />
       </View>
       <Text style={{ fontSize: 12, color: outcomeColor(arc()) }}>{arc().outcome}</Text>
@@ -314,35 +312,37 @@ export function PenCheckPanel() {
           checked={pen()?.ifhe ?? false}
           onChange={(on) => call(Armor.setIfhe(on))}
         />
-        <IconButton id="armor-pen-close" glyph="x" label={t("ui.armor.close_pen_check")} onPress={() => call(Armor.setPenCheckOpen(false))}/>
+        <IconButton id="armor-pen-close" icon="x" label={t("ui.armor.close_pen_check")} onPress={() => call(Armor.setPenCheckOpen(false))}/>
       </View>
-      <Scroll style={{ flex: 1 }}>
-        <View style={{ gap: 10, paddingHorizontal: 8, paddingBottom: 12 }}>
-          <Text style={{ fontSize: 12.5, color: pen()?.plate ? colors.foreground : colors.mutedForeground }}>
-            {pen()?.plate ? `${pen()!.plate!.mm} mm ${pen()!.plate!.zone}` : t("ui.armor.pen.hover_a_plate")}
-          </Text>
-          <If when={searchHere()}>
-            <PenSearch id="armor-pen-search"/>
-          </If>
-          <If when={(pen()?.ships.length ?? 0) === 0}>
-            <Hint text={t("ui.armor.pen.add_a_ship")}/>
-          </If>
-          <Each of={pen()?.ships ?? []} key={(ship) => ship.paramIndex}>
-            {(ship, index) => <ShipBlock ship={ship()} index={index()}/>}
-          </Each>
-          <If when={(pen()?.ships.length ?? 0) > 0}>
-            <View style={{ alignItems: "flex-start" }}>
-              <ToolButton id="armor-pen-clear" label={t("ui.armor.pen.clear_all")} onPress={() => call(Armor.clearPenShips())}/>
-            </View>
-          </If>
-          <If when={(view()?.active.arcs.length ?? 0) > 0}>
-            <Arcs arcs={view()!.active.arcs}/>
-          </If>
-          <If when={view()?.incoming}>
-            {(incoming) => <Incoming incoming={incoming()}/>}
-          </If>
-        </View>
-      </Scroll>
+      <View style={{ flex: 1, minHeight: 0, gap: 10, paddingHorizontal: 8, paddingBottom: 12 }}>
+        <Text style={{ fontSize: 12.5, color: pen()?.plate ? colors.foreground : colors.mutedForeground }}>
+          {pen()?.plate ? `${pen()!.plate!.mm} mm ${pen()!.plate!.zone}` : t("ui.armor.pen.hover_a_plate")}
+        </Text>
+        <If when={searchHere()}>
+          <PenSearch id="armor-pen-search"/>
+        </If>
+        <Scroll testID="armor-pen-ships" style={{ flex: 1, minHeight: 0 }}>
+          <View style={{ gap: 10 }}>
+            <If when={(pen()?.ships.length ?? 0) === 0}>
+              <Hint text={t("ui.armor.pen.add_a_ship")}/>
+            </If>
+            <Each of={pen()?.ships ?? []} key={(ship) => ship.paramIndex}>
+              {(ship, index) => <ShipBlock ship={ship()} index={index()}/>}
+            </Each>
+          </View>
+        </Scroll>
+        <If when={(view()?.active.arcs.length ?? 0) > 0}>
+          <Arcs arcs={view()!.active.arcs}/>
+        </If>
+        <If when={view()?.incoming}>
+          {(incoming) => <Incoming incoming={incoming()}/>}
+        </If>
+        <If when={(pen()?.ships.length ?? 0) > 0}>
+          <View style={{ alignItems: "flex-start" }}>
+            <ToolButton id="armor-pen-clear" label={t("ui.armor.pen.clear_all")} onPress={() => call(Armor.clearPenShips())}/>
+          </View>
+        </If>
+      </View>
     </View>
   );
 }

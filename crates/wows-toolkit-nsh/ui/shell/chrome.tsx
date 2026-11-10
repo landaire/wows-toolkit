@@ -1,10 +1,10 @@
-import type { JSX } from "nsh";
 import { host, keymap, signal, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { Menu, Toolbar } from "nsh/base";
 import { Settings, Shell } from "wows-toolkit/native";
 import { MenuRow, Surface } from "../components";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { appSettings, editSetting } from "../settings_store";
 import { colors, controlRadius } from "../theme";
 import { openAbout } from "./about";
@@ -20,8 +20,12 @@ export const MAX_ZOOM = 2.0;
 export const ZOOM_STEP = 0.05;
 export const DEFAULT_ZOOM = 1.15;
 
-/** Whether the saved game directory is one an install could not be in, which the Settings tab carries a mark for. */
+/** A game directory given in Settings or the Launcher that is not an install; it stays in the field until another is given. */
+export const rejectedWowsDir = signal<string | null>(null);
+
+/** Whether the game directory given or saved is one an install could not be in, which the Settings tab carries a mark for. */
 export function wowsDirInvalid(): boolean {
+  if (rejectedWowsDir() !== null) return true;
   const dir = appSettings()?.wowsDir ?? "";
   return dir !== "" && !Settings.isGameDirectory(dir);
 }
@@ -47,19 +51,20 @@ keymap.bind({
 /** The application menu at the end of the tab strip: what the other front ends' menu bar carries. */
 export function ApplicationMenu(props: { onCommandPalette: () => void; onTacticsBoard: () => void }) {
   return (
-    <Toolbar accessibilityLabel="Application menu">
+    <Toolbar>
       <Menu
         align="end"
         offset={5}
         margin={8}
         trigger={
           <View
-            accessibilityLabel="Open application menu"
+            accessibilityLabel={t("ui.menu.file")}
+            tooltip={t("ui.menu.file")}
             hoverStyle={{ backgroundColor: colors.accent }}
             activeStyle={{ opacity: 0.68 }}
             style={{ width: 32, height: 28, borderRadius: controlRadius(), alignItems: "center", justifyContent: "center" }}
           >
-            <Text style={{ fontSize: 16, color: colors.foreground }}>...</Text>
+            <Icon name="ellipsis" color={colors.foreground}/>
           </View>
         }
       >
@@ -80,57 +85,6 @@ export function ApplicationMenu(props: { onCommandPalette: () => void; onTactics
   );
 }
 
-/** The tab strip: every top-level tab, the selected one underlined, and the menu at its end. */
-export function TabStrip(props: {
-  tabs: readonly { id: string; label: string }[];
-  active: string;
-  /** Tabs that need looking at, marked as the other front ends mark them. */
-  attention: (id: string) => boolean;
-  onSelect: (id: string) => void;
-  menu: JSX.Element;
-}) {
-  return (
-    <View style={{ borderBottomWidth: 1, borderBottomColor: colors.borderBright, backgroundColor: colors.surface }}>
-      <View role="tablist" style={{ minHeight: 36, flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 6 }}>
-        <Each of={props.tabs}>
-          {(tab) => {
-            const selected = () => props.active === tab().id;
-            const flagged = () => props.attention(tab().id);
-            return (
-              <View
-                role="tab"
-                accessibilityLabel={tab().label}
-                accessibilityState={{ selected: selected() }}
-                onPress={() => props.onSelect(tab().id)}
-                hoverStyle={selected() ? undefined : { backgroundColor: colors.accent }}
-                activeStyle={{ opacity: 0.7 }}
-                style={{
-                  height: 32,
-                  paddingHorizontal: 10,
-                  justifyContent: "center",
-                  borderBottomWidth: 2,
-                  borderBottomColor: selected() ? colors.primary : "transparent",
-                  backgroundColor: selected() ? colors.background : "transparent",
-                }}
-              >
-                <Text style={{
-                  fontSize: 12.5,
-                  fontWeight: selected() ? "600" : "400",
-                  color: flagged() ? colors.destructive : selected() ? colors.textBright : colors.mutedForeground,
-                }}>
-                  {flagged() ? `! ${tab().label}` : tab().label}
-                </Text>
-              </View>
-            );
-          }}
-        </Each>
-        <View style={{ flex: 1 }}/>
-        {props.menu}
-      </View>
-    </View>
-  );
-}
-
 /** Whether files are being dragged over the window. */
 export const hoveringFiles = signal(false);
 
@@ -143,10 +97,10 @@ export function DropScrim() {
   return (
     <If when={hoveringFiles()}>
       <View
-        accessibilityLabel={t("ui.app.drop_to_load", { file: "replay" })}
+        accessibilityLabel={t("ui.app.drop_replay")}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.75)" }}
       >
-        <Text style={{ fontSize: 18, color: "#ffffff" }}>{t("ui.app.drop_to_load", { file: "replay" })}</Text>
+        <Text style={{ fontSize: 18, color: "#ffffff" }}>{t("ui.app.drop_replay")}</Text>
       </View>
     </If>
   );

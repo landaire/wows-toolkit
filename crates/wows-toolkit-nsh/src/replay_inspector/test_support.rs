@@ -1,13 +1,20 @@
 //! Documents for tests that have no game install: the fabricated sample
 //! report read in place of any replay file.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
+use wows_replay_insights::personal_rating::ExpectedValuesData;
+use wows_replay_insights::personal_rating::ShipExpectedValues;
+use wows_replay_insights::personal_rating::ShipExpectedValuesEntry;
+use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 
 use crate::replay_inspector::document;
 use crate::replay_inspector::document::ReplayDocument;
+use crate::replay_inspector::document::TitleIcons;
 use crate::replay_inspector::error::InspectorError;
 
 /// The sample report as if it had been read from `path`.
@@ -26,6 +33,7 @@ pub fn sample_document(path: &Path, alts: &[PathBuf]) -> ReplayDocument {
         vfs: None,
         session_stat: None,
         constants_mismatch: None,
+        title_icons: TitleIcons::default(),
     }
 }
 
@@ -34,6 +42,48 @@ pub fn sample_document(path: &Path, alts: &[PathBuf]) -> ReplayDocument {
 /// replay does.
 pub fn read_replays_as_sample() {
     document::set_source(sample_source);
+}
+
+/// The ship the unrated sample's recording player sails.
+const UNRATED_SAMPLE_SHIP: u64 = 4_181_604_048;
+
+/// Makes every replay read as the sample report with no row rated, its
+/// recording player in a ship [`sample_personal_rating`] rates.
+pub fn read_replays_as_unrated_sample() {
+    document::set_source(unrated_sample_source);
+}
+
+/// A personal-rating table that rates the unrated sample's recording player.
+pub fn sample_personal_rating() -> PersonalRatingData {
+    let mut data = HashMap::new();
+    data.insert(
+        UNRATED_SAMPLE_SHIP.to_string(),
+        ShipExpectedValuesEntry::Values(ShipExpectedValues { average_damage_dealt: 50_000.0, average_frags: 1.0, win_rate: 50.0 }),
+    );
+    let mut table = PersonalRatingData::new();
+    table.load(ExpectedValuesData { time: 0, data });
+
+    table
+}
+
+/// The sample report with no row rated, its recording player in a ship
+/// [`sample_personal_rating`] rates.
+pub fn unrated_sample_document(path: &Path, alts: &[PathBuf]) -> ReplayDocument {
+    let mut document = sample_document(path, alts);
+    for row in &mut document.model.rows {
+        row.personal_rating = None;
+        if row.is_self {
+            row.ship_id = Some(GameParamId::from(UNRATED_SAMPLE_SHIP));
+        }
+    }
+
+    document
+}
+
+fn unrated_sample_source(path: &Path, alts: &[PathBuf]) -> Result<ReplayDocument, InspectorError> {
+    sample_source(path, alts)?;
+
+    Ok(unrated_sample_document(path, alts))
 }
 
 fn sample_source(path: &Path, alts: &[PathBuf]) -> Result<ReplayDocument, InspectorError> {

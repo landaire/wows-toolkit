@@ -13,6 +13,9 @@ use nsh_core::prelude::module;
 use crate::shell::error::SettingsError;
 use crate::shell::error::ShellError;
 use crate::shell::error::UpdateError;
+use crate::shell::look;
+use crate::shell::look::LookRevision;
+use crate::shell::look::SharedLook;
 use crate::shell::settings::parse_theme;
 use crate::shell::settings::theme_name;
 use crate::shell::theme;
@@ -64,6 +67,7 @@ impl Shell {
         }
         rust_i18n::set_locale(&code);
         wows_toolkit_viewmodel::set_locale(&code);
+        look::publish_locale(&code);
 
         Ok(())
     }
@@ -89,13 +93,25 @@ impl Shell {
             .collect()
     }
 
-    /// Draws the app in the palette named `name`, and in its appearance.
+    /// Draws the app in the palette named `name`, and in its appearance, and
+    /// has the app's other windows follow.
     pub async fn apply_theme(name: String) -> Result<(), SettingsError> {
-        let choice = parse_theme(&name)?;
-        nsh_core::prelude::set_tokens(theme::tokens(choice));
-        nsh_core::prelude::set_color_scheme(theme::appearance(choice));
+        draw_in(&name)?;
+        look::publish_theme(&name);
 
         Ok(())
+    }
+
+    /// Draws this window in the palette another window applied, without
+    /// announcing it again.
+    pub async fn follow_theme(name: String) -> Result<(), SettingsError> {
+        draw_in(&name)
+    }
+
+    /// The theme and language last applied in any window, once they differ
+    /// from `after`: what the app's other windows follow.
+    pub async fn next_look(after: LookRevision) -> SharedLook {
+        look::next(after).await
     }
 
     /// Opens `url` in the desktop's browser. Resolves to whether it opened.
@@ -230,6 +246,15 @@ fn open_in_file_manager(dir: &Path) -> Result<(), ShellError> {
     }
 
     Err(ShellError::OpenerFailed { path: PathBuf::from(dir), status })
+}
+
+/// Draws the calling window in the palette named `name`, and in its appearance.
+fn draw_in(name: &str) -> Result<(), SettingsError> {
+    let choice = parse_theme(name)?;
+    nsh_core::prelude::set_tokens(theme::tokens(choice));
+    nsh_core::prelude::set_color_scheme(theme::appearance(choice));
+
+    Ok(())
 }
 
 #[cfg(test)]

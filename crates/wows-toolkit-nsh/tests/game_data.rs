@@ -1,5 +1,5 @@
-//! Headless behavior tests for the game-data status indicator and the
-//! Settings sections in `ui/game_data.tsx`.
+//! Headless behavior tests for the game-data Settings sections, the job
+//! reports and status strip, and the download offer in `ui/game_data.tsx`.
 
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -124,60 +124,22 @@ fn install_without_builds(name: &str) -> TestDirectory {
     install
 }
 
-/// Waits for exactly `text`, which may hold characters a `text:` selector
-/// reads as a pattern.
-fn wait_for_text(app: &mut TestApp, text: &str) {
-    app.wait_until(text, Duration::from_secs(5), |screen| screen.shows(text)).unwrap();
-}
-
 #[test]
 fn without_a_game_directory_the_sections_say_what_is_missing() {
     let mut app = app_with(None);
 
-    app.wait_for("text:Game data: no World of Warships directory").unwrap();
     app.press("Settings").unwrap();
     app.wait_for("Game Data Cache").unwrap();
     app.wait_for("Replay Index").unwrap();
-    app.wait_for("Replay Directories").unwrap();
     app.wait_for("Set the World of Warships directory to index its replays.").unwrap();
+    assert!(!app.shows("Replay Directories"), "open directories are managed from their tabs, not Settings");
 }
 
 #[test]
-fn a_replay_directory_is_added_pinned_saved_and_closed() {
+fn the_cache_directory_is_picked_typed_and_cleared() {
     let mut app = app_with(None);
-    let directory = TestDirectory::new("listing");
-    let root = wows_toolkit_replay_data::directories::canonical_root(directory.0.clone());
-    let label = wows_toolkit_replay_data::directories::shortened_path(&root);
-
-    app.press("Settings").unwrap();
-    app.on_pick_paths(vec![directory.0.clone()]).unwrap();
-    app.press("Add Directory...").unwrap();
-    wait_for_text(&mut app, &root.display().to_string());
-
-    app.press(&format!("text:Pin {label}")).unwrap();
-    wait_for_text(&mut app, &format!("{label} [Pinned]"));
-    let saved: Vec<PathBuf> = read_setting(wows_toolkit_replay_data::directories::PINNED_DIRECTORIES_KEY)
-        .expect("the pinned directories are saved");
-    assert_eq!(saved, vec![root.clone()]);
-
-    // A pinned directory stays open.
-    let _ = app.press(&format!("text:Close {label}"));
-    assert!(app.shows(&format!("{label} [Pinned]")));
-
-    app.press(&format!("text:Unpin {label}")).unwrap();
-    app.wait_for(&format!("text:Pin {label}")).unwrap();
-    let saved: Vec<PathBuf> = read_setting(wows_toolkit_replay_data::directories::PINNED_DIRECTORIES_KEY)
-        .expect("the pinned directories are saved");
-    assert!(saved.is_empty(), "an unpinned directory is no longer saved");
-
-    app.press(&format!("text:Close {label}")).unwrap();
-    app.wait_for("No replay directories are open.").unwrap();
-}
-
-#[test]
-fn the_cache_settings_are_saved_and_the_cache_is_measured() {
-    let mut app = app_with(None);
-    let cache_dir = TestDirectory::new("cache");
+    let picked = TestDirectory::new("cache-picked");
+    let typed = TestDirectory::new("cache-typed");
 
     app.press("Settings").unwrap();
     app.wait_for("Game Data Cache").unwrap();
@@ -187,14 +149,30 @@ fn the_cache_settings_are_saved_and_the_cache_is_measured() {
     })
     .unwrap();
 
-    app.on_pick_paths(vec![cache_dir.0.clone()]).unwrap();
+    app.on_pick_paths(vec![picked.0.clone()]).unwrap();
     app.press("text:Browse").unwrap();
-    wait_for_text(&mut app, &format!("Cache directory: {}", cache_dir.0.display()));
-    app.wait_for("text:Game data cache: 0 B across 0 version(s)").unwrap();
-    assert_eq!(read_setting::<String>(keys::GAME_DATA_CACHE_DIR), Some(cache_dir.0.display().to_string()));
+    app.wait_until("the picked directory is saved", Duration::from_secs(5), |_| {
+        read_setting::<String>(keys::GAME_DATA_CACHE_DIR) == Some(picked.0.display().to_string())
+    })
+    .unwrap();
+
+    app.clear("label:Game data cache directory").unwrap();
+    app.type_text("label:Game data cache directory", &typed.0.display().to_string()).unwrap();
+    app.submit("label:Game data cache directory").unwrap();
+    app.wait_until("the typed directory is saved", Duration::from_secs(5), |_| {
+        read_setting::<String>(keys::GAME_DATA_CACHE_DIR) == Some(typed.0.display().to_string())
+    })
+    .unwrap();
+
+    // An empty field is the default location.
+    app.clear("label:Game data cache directory").unwrap();
+    app.submit("label:Game data cache directory").unwrap();
+    app.wait_until("the default location is saved", Duration::from_secs(5), |_| {
+        read_setting::<String>(keys::GAME_DATA_CACHE_DIR) == Some(String::new())
+    })
+    .unwrap();
 
     save_setting(keys::AUTO_DUMP_GAME_DATA, &false);
-    save_setting(keys::GAME_DATA_CACHE_DIR, &String::new());
     wows_toolkit_nsh::game_data::reload_settings().expect("the settings are read");
 }
 
@@ -225,38 +203,30 @@ fn without_a_game_directory_the_configured_cache_reads_dumped_builds() {
 }
 
 #[test]
-fn an_install_without_builds_fails_the_load_and_indexes_nothing() {
-    let install = install_without_builds("index");
+fn an_index_pass_from_the_palette_reports_on_the_tab_shown() {
+    // No replays, so no build is missing and no download offer stands in front.
+    let install = TestDirectory::new("index");
+    std::fs::create_dir_all(install.0.join("bin")).expect("the bin directory is created");
+    std::fs::create_dir_all(install.0.join("replays")).expect("the replays directory is created");
     let mut app = app_with(Some(&install.0));
 
     app.wait_for("text:/^Game data failed to load: no installed builds found under /").unwrap();
-    app.press("Settings").unwrap();
-    app.press("Build Index").unwrap();
-    app.wait_for_within("text:Indexed 0 replays, 1 could not be read", Duration::from_secs(30)).unwrap();
+    app.press_key("mod+k").unwrap();
+    app.press("Index All Replays").unwrap();
+    app.wait_for_within("text:Indexed 0 replays, 0 could not be read", Duration::from_secs(30)).unwrap();
+    assert!(!app.shows("Replay Index"), "the report is not only on the Settings tab");
 }
 
 #[test]
-fn a_replay_on_a_build_nothing_has_is_offered_for_download() {
+fn a_replay_on_a_build_nothing_has_is_offered_for_download_on_any_tab() {
     let install = install_without_builds("offer");
     let mut app = app_with(Some(&install.0));
 
-    app.press("Settings").unwrap();
-    // The inspector's listing may already be asking what is published for
-    // the replays it found; the button takes a press once that is done.
-    app.wait_for_gone("Working out what needs fetching...", Duration::from_secs(90)).unwrap();
-    app.wait_for_gone("Asking what game data is published", Duration::from_secs(90)).unwrap();
-    app.press("Check Game Data for Replays").unwrap();
-    app.wait_for("Download Game Data").unwrap();
+    // The inspector's listing finds the replay and asks; the offer opens over
+    // the inspector without the Settings tab ever being shown.
+    app.wait_for_within("Download Game Data", Duration::from_secs(90)).unwrap();
     app.wait_for("text:/needed by 1 replay\\(s\\)/").unwrap();
 
     app.press("Cancel").unwrap();
     app.wait_for_gone("Download Game Data", Duration::from_secs(5)).unwrap();
-
-    // A build is put to the reader once a session; the plan the first check
-    // asked for is waited out so the button takes the second press.
-    app.wait_for_gone("Working out what needs fetching...", Duration::from_secs(90)).unwrap();
-    app.wait_for_gone("Asking what game data is published", Duration::from_secs(90)).unwrap();
-    app.press("Check Game Data for Replays").unwrap();
-    std::thread::sleep(Duration::from_millis(500));
-    assert!(!app.shows("Download Game Data"));
 }

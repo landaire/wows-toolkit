@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,6 +53,8 @@ use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::upload::contribute::LedgerUse;
 use wows_toolkit_viewmodel::upload::contribute::Outcome;
 use wowsunpack::data::Version;
+
+use crate::js_newtype::js_newtype;
 
 /// Identifies this front end to the services it reaches.
 pub const USER_AGENT: &str = concat!("wows-toolkit-nsh/", env!("CARGO_PKG_VERSION"));
@@ -107,6 +110,9 @@ pub enum GameDataError {
     ReadPinned(#[source] SettingError),
     #[error("the pinned replay directories could not be saved")]
     SavePinned(#[source] sqlx::Error),
+    /// A pin saved before the stored set is read would drop the stored pins.
+    #[error("the pinned replay directories have not been read yet")]
+    PinsNotRestored,
     #[error("the replay index could not be read or written")]
     Index(#[source] IndexError),
     #[error("there is no storage directory for the game data cache")]
@@ -158,6 +164,32 @@ struct BindingGeneration(u64);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GameDataRevision(u64);
 
+/// Numbers the job reports in the order they were made, so the interface
+/// says each one once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct JobReportId(u32);
+
+js_newtype!(JobReportId, u32);
+
+/// How a finished job's report reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum JobReportLevel {
+    Ok,
+    Warn,
+    Failed,
+}
+
+/// What a finished background job has to say. Kept in the state rather than
+/// said where the job ends: a job started from the palette finishes while
+/// the reader is on another tab.
+#[derive(Debug, Clone, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct JobReport {
+    pub id: JobReportId,
+    pub level: JobReportLevel,
+    pub text: String,
+}
+
 /// The settings the service is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BoundSettings {
@@ -203,13 +235,29 @@ struct IndexState {
     progress: Option<IndexProgress>,
     outcome: Option<IndexOutcome>,
     /// Directories waiting for a pass while one runs.
-    queued: Vec<(PathBuf, IndexMode)>,
+    queued: Vec<QueuedPass>,
 }
 
 #[derive(Clone)]
 struct IndexOutcome {
     text: String,
     failed: bool,
+}
+
+/// Who asked for an index pass. A pass the reader asked for, or the one a
+/// stale index asks for at startup, reports its outcome; the passes a landed
+/// battle or an opened directory queue run quietly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IndexOrigin {
+    Requested,
+    Background,
+}
+
+/// One index pass waiting to run.
+struct QueuedPass {
+    root: PathBuf,
+    mode: IndexMode,
+    origin: IndexOrigin,
 }
 
 /// One build a listing of replays needs and nothing on this machine has.
@@ -249,9 +297,15 @@ struct State {
     personal_rating: Option<Arc<PersonalRatingData>>,
     index: IndexState,
     cache: CacheState,
-    cache_message: Option<String>,
+    /// The latest job reports, oldest first. Bounded: the interface reads
+    /// them as they arrive, and older ones were said already.
+    reports: VecDeque<JobReport>,
+    next_report: JobReportId,
     directories: DirectoryRegistry,
     directories_error: Option<String>,
+    /// Whether the startup read of the pinned directories succeeded; pins
+    /// wait for it.
+    pinned_restored: bool,
     offered_builds: BTreeSet<u32>,
     offer: OfferState,
 }
@@ -271,9 +325,11 @@ static SERVICE: LazyLock<Service> = LazyLock::new(|| Service {
         personal_rating: None,
         index: IndexState::default(),
         cache: CacheState::default(),
-        cache_message: None,
+        reports: VecDeque::new(),
+        next_report: JobReportId::default(),
         directories: DirectoryRegistry::new(),
         directories_error: None,
+        pinned_restored: false,
         offered_builds: BTreeSet::new(),
         offer: OfferState::default(),
     }),
@@ -295,6 +351,32 @@ fn update<R>(change: impl FnOnce(&mut State) -> R) -> R {
     SERVICE.changed.send_replace(revision);
 
     result
+}
+
+/// Adds a job report, dropping the oldest past the few the interface could
+/// still be reading.
+fn report(state: &mut State, level: JobReportLevel, text: String) {
+    const KEPT: usize = 16;
+
+    let id = state.next_report;
+    state.next_report = JobReportId(id.0.wrapping_add(1));
+    if state.reports.len() == KEPT {
+        state.reports.pop_front();
+    }
+    state.reports.push_back(JobReport { id, level, text });
+}
+
+/// Drops everything known about the cache. The stale and damaged lists name
+/// builds under one directory; carried across a change they would offer to
+/// repair builds that are not there.
+fn forget_cache_findings(state: &mut State) {
+    state.cache.forget_stats();
+    state.cache.updates.clear();
+    state.cache.repair.clear();
+    state.cache.failure = None;
+    // A fire-chance section that found no geometry found none in the old
+    // directory; kept, it stays failed after the data it needs is fetched.
+    wows_replay_insights::fire_chance::sections::clear_fire_section_failures();
 }
 
 /// The game data cache bound to the settings: the install's when a WoWs
@@ -341,6 +423,13 @@ pub fn personal_rating() -> Option<Arc<PersonalRatingData>> {
     state().personal_rating.clone()
 }
 
+/// Installs `table` as the personal-rating table. Test-support builds skip
+/// the startup download, so this is the only table they have.
+#[cfg(feature = "test-support")]
+pub fn set_personal_rating(table: PersonalRatingData) {
+    update(|state| state.personal_rating = Some(Arc::new(table)));
+}
+
 /// Changes whenever the game data's state does.
 pub fn changes() -> tokio::sync::watch::Receiver<GameDataRevision> {
     SERVICE.changed.subscribe()
@@ -370,11 +459,15 @@ pub fn reload_settings() -> Result<(), GameDataError> {
     rebind()
 }
 
-/// Starts an index pass over the game's replay directory. `false` when the
-/// settings name no WoWs directory.
+/// Starts a quiet index pass over the game's replay directory. `false` when
+/// the settings name no WoWs directory.
 pub fn start_indexing(mode: IndexMode) -> bool {
+    index_install(mode, IndexOrigin::Background)
+}
+
+fn index_install(mode: IndexMode, origin: IndexOrigin) -> bool {
     let Some(wows_dir) = wows_dir() else { return false };
-    queue_index(wows_dir.join("replays"), mode);
+    queue_index(QueuedPass { root: wows_dir.join("replays"), mode, origin });
 
     true
 }
@@ -487,7 +580,7 @@ fn preload(wows_dir: PathBuf, cache: GameDataCache, generation: BindingGeneratio
             .map_err(GameDataError::Index)
     });
     match stale {
-        Ok(true) => queue_index(root, IndexMode::FillGaps),
+        Ok(true) => queue_index(QueuedPass { root, mode: IndexMode::FillGaps, origin: IndexOrigin::Requested }),
         Ok(false) => {}
         Err(error) => log::warn!("replay index revision could not be checked: {}", crate::shell::chain(&error)),
     }
@@ -514,6 +607,7 @@ fn startup_work() {
             for root in pinned.unwrap_or_default() {
                 state.directories.open(root, true);
             }
+            state.pinned_restored = true;
         }
         Err(error) => {
             let reason = crate::shell::sentence(&error);
@@ -521,6 +615,11 @@ fn startup_work() {
                 Some(rust_i18n::t!("ui.game_data.pinned_read_failed", reason = reason).into_owned());
         }
     });
+
+    // Tests install their own table through `set_personal_rating`.
+    if cfg!(feature = "test-support") {
+        return;
+    }
 
     let rating = match job_runtime() {
         Ok(runtime) => runtime.block_on(wows_toolkit_replay_data::personal_rating::load_refreshed(
@@ -532,7 +631,10 @@ fn startup_work() {
             None
         }
     };
-    update(|state| state.personal_rating = rating.map(Arc::new));
+    // A failed refresh keeps a table already installed.
+    if let Some(rating) = rating {
+        update(|state| state.personal_rating = Some(Arc::new(rating)));
+    }
 }
 
 /// Watches the game's replay directory for binding `generation`, replacing
@@ -542,7 +644,9 @@ fn watch_replays(wows_dir: Option<&Path>, generation: BindingGeneration) {
     let watcher = wows_dir.and_then(|dir| {
         let replays = wows_toolkit_replay_data::load::resolve_replays_dir(dir);
         let root = replays.clone();
-        let watched = watch_landings(&replays, move || queue_index(root.clone(), IndexMode::FillGaps));
+        let watched = watch_landings(&replays, move || {
+            queue_index(QueuedPass { root: root.clone(), mode: IndexMode::FillGaps, origin: IndexOrigin::Background })
+        });
         watched.map_err(|error| log::warn!("replay watch: {} is not watched: {error}", replays.display())).ok()
     });
 
@@ -578,12 +682,21 @@ fn lands_replay(event: &notify::Event) -> bool {
     placed && event.paths.iter().any(|path| replay_index::is_finished_replay(path) && path.exists())
 }
 
-/// Queues a pass over `root`, starting it now when nothing else runs.
-fn queue_index(root: PathBuf, mode: IndexMode) {
+/// Queues a pass, starting it now when nothing else runs. A pass already
+/// queued for the same directory takes on the wider re-read and the request
+/// to report.
+fn queue_index(pass: QueuedPass) {
     let start = update(|state| {
         if state.index.cancel.is_some() {
-            if !state.index.queued.iter().any(|(queued, _)| *queued == root) {
-                state.index.queued.push((root.clone(), mode));
+            let Some(queued) = state.index.queued.iter_mut().find(|queued| queued.root == pass.root) else {
+                state.index.queued.push(pass);
+                return None;
+            };
+            if pass.mode == IndexMode::RefreshAll {
+                queued.mode = IndexMode::RefreshAll;
+            }
+            if pass.origin == IndexOrigin::Requested {
+                queued.origin = IndexOrigin::Requested;
             }
             return None;
         }
@@ -591,14 +704,15 @@ fn queue_index(root: PathBuf, mode: IndexMode) {
         state.index.cancel = Some(Arc::clone(&cancel));
         state.index.progress = Some(IndexProgress::default());
         state.index.outcome = None;
-        Some(cancel)
+        Some((pass, cancel))
     });
-    let Some(cancel) = start else { return };
+    let Some((pass, cancel)) = start else { return };
 
-    spawn("replay-index", move || run_index(root, mode, cancel));
+    spawn("replay-index", move || run_index(pass, cancel));
 }
 
-fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
+fn run_index(pass: QueuedPass, cancel: Arc<AtomicBool>) {
+    let QueuedPass { root, mode, origin } = pass;
     let cache = state().binding.as_ref().map(|binding| binding.cache.clone());
     // Only the game's own directory receives battles as they are played; the
     // others hold replays the reader opened, which are not contributed unasked.
@@ -622,30 +736,40 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
         None => Err(GameDataError::SettingsUnreadable),
     };
 
+    let outcome = match &built {
+        Ok(IndexPass { progress, .. }) if progress.skipped > 0 => IndexOutcome {
+            text: rust_i18n::t!(
+                "ui.settings.index.built_with_skipped",
+                indexed = progress.indexed,
+                skipped = progress.skipped,
+                failed = progress.failed
+            )
+            .into_owned(),
+            failed: progress.failed > 0,
+        },
+        Ok(IndexPass { progress, .. }) => IndexOutcome {
+            text: rust_i18n::t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
+                .into_owned(),
+            failed: progress.failed > 0,
+        },
+        Err(error) => IndexOutcome {
+            text: rust_i18n::t!("ui.game_data.index_failed", reason = crate::shell::sentence(error)).into_owned(),
+            failed: true,
+        },
+    };
+    let level = match (&built, outcome.failed) {
+        (Err(_), _) => JobReportLevel::Failed,
+        (Ok(_), true) => JobReportLevel::Warn,
+        (Ok(_), false) => JobReportLevel::Ok,
+    };
+
     let next = update(|state| {
         state.index.cancel = None;
         state.index.progress = None;
-        state.index.outcome = Some(match &built {
-            Ok(IndexPass { progress, .. }) if progress.skipped > 0 => IndexOutcome {
-                text: rust_i18n::t!(
-                    "ui.settings.index.built_with_skipped",
-                    indexed = progress.indexed,
-                    skipped = progress.skipped,
-                    failed = progress.failed
-                )
-                .into_owned(),
-                failed: progress.failed > 0,
-            },
-            Ok(IndexPass { progress, .. }) => IndexOutcome {
-                text: rust_i18n::t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
-                    .into_owned(),
-                failed: progress.failed > 0,
-            },
-            Err(error) => IndexOutcome {
-                text: rust_i18n::t!("ui.game_data.index_failed", reason = crate::shell::sentence(error)).into_owned(),
-                failed: true,
-            },
-        });
+        if origin == IndexOrigin::Requested {
+            report(state, level, outcome.text.clone());
+        }
+        state.index.outcome = Some(outcome);
         if cancel.load(Ordering::Relaxed) {
             state.index.queued.clear();
             return None;
@@ -655,8 +779,8 @@ fn run_index(root: PathBuf, mode: IndexMode, cancel: Arc<AtomicBool>) {
     if let Ok(IndexPass { landed, sharing: Some(sharing), .. }) = built {
         contribute_landed(landed, sharing, |path| spawn("replay-contribute", move || contribute_one(path)));
     }
-    if let Some((root, mode)) = next {
-        queue_index(root, mode);
+    if let Some(pass) = next {
+        queue_index(pass);
     }
 }
 
@@ -854,7 +978,6 @@ where
             return false;
         }
         state.cache.start(job);
-        state.cache_message = None;
         true
     });
     if !started {
@@ -893,21 +1016,23 @@ fn cache_job_finished(outcome: CacheOutcome) {
         match outcome {
             CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
-                state.cache_message = Some(if clean {
-                    rust_i18n::t!("ui.messages.game_data_up_to_date").into_owned()
+                if clean {
+                    report(state, JobReportLevel::Ok, rust_i18n::t!("ui.messages.game_data_up_to_date").into_owned());
                 } else {
-                    rust_i18n::t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned()
-                });
+                    let said = rust_i18n::t!("ui.messages.game_data_updates_available", count = updates.len());
+                    report(state, JobReportLevel::Warn, said.into_owned());
+                }
                 state.cache.updates = updates;
                 clean.then_some(tip)
             }
             CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
-                state.cache_message = Some(if clean {
-                    rust_i18n::t!("ui.messages.game_data_cache_valid").into_owned()
+                if clean {
+                    report(state, JobReportLevel::Ok, rust_i18n::t!("ui.messages.game_data_cache_valid").into_owned());
                 } else {
-                    rust_i18n::t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned()
-                });
+                    let said = rust_i18n::t!("ui.messages.game_data_cache_invalid", count = repair.len());
+                    report(state, JobReportLevel::Warn, said.into_owned());
+                }
                 state.cache.repair = repair;
                 clean.then_some(tip)
             }
@@ -918,10 +1043,15 @@ fn cache_job_finished(outcome: CacheOutcome) {
                     state.cache.forget_stats();
                 }
                 if failed.is_empty() {
-                    state.cache_message =
-                        Some(rust_i18n::t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned());
+                    let said = rust_i18n::t!("ui.messages.game_data_builds_downloaded", count = fetched);
+                    report(state, JobReportLevel::Ok, said.into_owned());
                 } else {
                     let failed: Vec<String> = failed.iter().map(u32::to_string).collect();
+                    report(
+                        state,
+                        JobReportLevel::Failed,
+                        rust_i18n::t!("ui.messages.game_data_download_failed").into_owned(),
+                    );
                     state.cache.failure = Some(
                         rust_i18n::t!("ui.game_data.builds_download_failed", builds = failed.join(", ")).into_owned(),
                     );
@@ -943,6 +1073,9 @@ fn cache_job_finished(outcome: CacheOutcome) {
                     state.offer.planning = false;
                     state.offer.failure =
                         Some(rust_i18n::t!("ui.game_data.plan_failed", reason = reason.as_str()).into_owned());
+                    report(state, JobReportLevel::Warn, rust_i18n::t!("ui.dialogs.download_plan_failed").into_owned());
+                } else {
+                    report(state, JobReportLevel::Failed, reason.clone());
                 }
                 state.cache.failure = Some(reason);
                 None
@@ -1108,7 +1241,9 @@ pub struct CacheSnapshot {
     pub updates: Vec<CacheBuild>,
     pub repair: Vec<CacheBuild>,
     pub failure: Option<String>,
-    pub message: Option<String>,
+    /// Where an empty directory setting puts the cache. `None` when there is
+    /// no storage directory at all.
+    pub default_directory: Option<String>,
 }
 
 /// One open replay directory.
@@ -1159,7 +1294,13 @@ pub struct GameDataSnapshot {
     pub cache: CacheSnapshot,
     pub directories: Vec<DirectoryEntry>,
     pub directories_error: Option<String>,
+    /// Whether the pinned directories were read at startup; pinning waits for it.
+    pub pinned_restored: bool,
     pub offer: MissingBuildOffer,
+    /// The latest finished jobs' reports, oldest first.
+    pub reports: Vec<JobReport>,
+    /// Whether the personal-rating table has loaded.
+    pub personal_rating_loaded: bool,
 }
 
 /// The load's part of the snapshot.
@@ -1191,6 +1332,12 @@ fn snapshot() -> GameDataSnapshot {
         GameDataState::Failed { error } => {
             StatusView { phase: GameDataPhase::Failed, version: None, build: None, reason: Some(error.to_string()) }
         }
+    };
+    #[cfg(feature = "test-support")]
+    let status = if test_support::REPORT_READY.load(Ordering::Relaxed) {
+        StatusView { phase: GameDataPhase::Ready, version: None, build: None, reason: None }
+    } else {
+        status
     };
     let settings = state.binding.as_ref().map(|binding| &binding.settings);
     // No pass running reads as zero progress, which the view hides.
@@ -1231,7 +1378,7 @@ fn snapshot() -> GameDataSnapshot {
             updates: cache_builds(&state.cache.updates),
             repair: cache_builds(&state.cache.repair),
             failure: state.cache.failure.clone(),
-            message: state.cache_message.clone(),
+            default_directory: wows_toolkit_config::game_data_dump_base().map(|dir| dir.display().to_string()),
         },
         directories: state
             .directories
@@ -1244,6 +1391,7 @@ fn snapshot() -> GameDataSnapshot {
             })
             .collect(),
         directories_error: state.directories_error.clone(),
+        pinned_restored: state.pinned_restored,
         offer: MissingBuildOffer {
             open: state.offer.open,
             planning: state.offer.planning,
@@ -1269,6 +1417,8 @@ fn snapshot() -> GameDataSnapshot {
             objects: state.offer.objects.map(|count| count as u64),
             failure: state.offer.failure.clone(),
         },
+        reports: state.reports.iter().cloned().collect(),
+        personal_rating_loaded: state.personal_rating.is_some(),
     }
 }
 
@@ -1338,7 +1488,7 @@ impl GameData {
     /// Indexes the game's replay directory. `false` when no WoWs directory is
     /// set.
     pub async fn index_replays(mode: ReplayIndexMode) -> Result<bool, GameDataRequestError> {
-        run_blocking(move || Ok(start_indexing(mode.into()))).await
+        run_blocking(move || Ok(index_install(mode.into(), IndexOrigin::Requested))).await
     }
 
     /// Stops the running index pass after the replay it is reading.
@@ -1392,11 +1542,7 @@ impl GameData {
             let CacheTarget { base, .. } = cache_target()?;
             let deleted = wows_data_mgr::dump::delete_old_versions(&base);
             if deleted > 0 {
-                update(|state| {
-                    state.cache.forget_stats();
-                    state.cache_message =
-                        Some(rust_i18n::t!("ui.game_data.old_builds_removed", count = deleted).into_owned());
-                });
+                update(forget_cache_findings);
             }
             Ok(deleted as u32)
         })
@@ -1432,13 +1578,12 @@ impl GameData {
         let picked = pick_paths(dialog).await.map_err(|reason| GameDataError::Dialog { reason })?;
         let Some(directory) = picked.and_then(|mut paths| paths.pop()) else { return Ok(None) };
 
-        run_blocking(move || {
-            save_setting(keys::GAME_DATA_CACHE_DIR, &directory.display().to_string())?;
-            rebind()?;
-            measure_cache_if_wanted();
-            Ok(Some(snapshot()))
-        })
-        .await
+        run_blocking(move || adopt_cache_directory(directory.display().to_string()).map(Some)).await
+    }
+
+    /// Saves a typed cache directory. Empty selects the default location.
+    pub async fn set_cache_directory(directory: String) -> Result<GameDataSnapshot, GameDataRequestError> {
+        run_blocking(move || adopt_cache_directory(directory.trim().to_owned())).await
     }
 
     /// Lists the builds the replays on this machine need and nothing here
@@ -1533,8 +1678,11 @@ impl GameData {
     pub async fn pin_directory(path: String, pinned: bool) -> Result<(), GameDataRequestError> {
         run_blocking(move || {
             let path = PathBuf::from(path);
-            if !update(|state| state.directories.set_pinned(&path, pinned)) {
-                return Err(GameDataError::DirectoryNotOpen { path });
+            let changed = update(|state| state.pinned_restored.then(|| state.directories.set_pinned(&path, pinned)));
+            match changed {
+                None => return Err(GameDataError::PinsNotRestored),
+                Some(false) => return Err(GameDataError::DirectoryNotOpen { path }),
+                Some(true) => {}
             }
             save_pinned()
         })
@@ -1545,6 +1693,30 @@ impl GameData {
     pub async fn reveal_directory(path: String) -> Result<(), GameDataRequestError> {
         Ok(open_path(PathBuf::from(path)).await.map_err(|reason| GameDataError::OpenPath { reason })?)
     }
+}
+
+/// Saves `directory` as the cache directory and rebinds to it. Refused while
+/// a cache job runs: its outcome names builds under the old directory.
+/// Blocking.
+fn adopt_cache_directory(directory: String) -> Result<GameDataSnapshot, GameDataError> {
+    let unchanged = {
+        let state = state();
+        let unchanged = state.binding.as_ref().is_some_and(|binding| binding.settings.cache_dir == directory);
+        if !unchanged && state.cache.busy() {
+            return Err(GameDataError::CacheBusy);
+        }
+        unchanged
+    };
+    if unchanged {
+        return Ok(snapshot());
+    }
+
+    save_setting(keys::GAME_DATA_CACHE_DIR, &directory)?;
+    rebind()?;
+    update(forget_cache_findings);
+    measure_cache_if_wanted();
+
+    Ok(snapshot())
 }
 
 fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), GameDataError> {
@@ -1563,7 +1735,7 @@ fn open_registered_directory(root: PathBuf, pinned: bool) -> Result<(), GameData
         save_pinned()?;
     }
     if cache().is_some() {
-        queue_index(root, IndexMode::FillGaps);
+        queue_index(QueuedPass { root, mode: IndexMode::FillGaps, origin: IndexOrigin::Background });
     }
 
     Ok(())
@@ -1576,6 +1748,23 @@ fn download_builds(builds: Vec<BuildUpdateStatus>) -> Result<(), GameDataError> 
     run_cache_job(CacheJob::Downloading, move |client, base, _tip, report| async move {
         cache::download(&client, &base, &builds, report).await
     })
+}
+
+/// Hooks for tests that have no game install.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+
+    pub(super) static REPORT_READY: AtomicBool = AtomicBool::new(false);
+
+    /// Reports the game data as loaded to the interface, which then offers
+    /// what waits for a loaded build. Nothing is loaded: reads still go
+    /// through the bound cache, which has no install behind it.
+    pub fn report_ready() {
+        REPORT_READY.store(true, Ordering::Relaxed);
+        super::update(|_| ());
+    }
 }
 
 #[cfg(test)]

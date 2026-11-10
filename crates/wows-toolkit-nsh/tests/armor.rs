@@ -199,3 +199,23 @@ fn the_palette_opens_on_the_ship_list_in_the_armor_viewer() {
     app.press("id:palette-back").unwrap();
     app.wait_for("Open ship in Armor Viewer...").unwrap();
 }
+
+#[test]
+fn the_pane_sharing_menu_holds_only_its_three_checkboxes() {
+    let mut app = armor_viewer();
+    app.press("id:armor-sidebar-common").unwrap();
+    app.wait_for("id:armor-pane-mirror-cameras").unwrap();
+    assert!(app.screen().matches("id:armor-pane-stack").unwrap());
+    assert!(app.screen().matches("id:armor-pane-sync-options").unwrap());
+    assert!(!app.shows("Common settings"), "the menu carries no heading of its own");
+}
+
+#[test]
+fn the_penetration_panel_scrolls_only_its_ship_list() {
+    let mut app = armor_viewer();
+    app.press("id:armor-analysis-toggle").unwrap();
+    app.wait_for("id:armor-pen-ships").unwrap();
+    app.wait_for("id:armor-pen-ships >> text:Search and add ships above to compare penetration").unwrap();
+    assert!(!app.screen().matches("id:armor-pen-ships >> id:armor-pen-search").unwrap(), "the search sits above the list");
+    assert!(!app.screen().matches("id:armor-pen-clear").unwrap(), "Clear all needs a ship to clear");
+}

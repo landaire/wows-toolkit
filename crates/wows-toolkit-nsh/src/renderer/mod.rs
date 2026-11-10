@@ -22,8 +22,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 
 use nsh_core::file_dialog::FileFilter;
 use nsh_core::file_dialog::OpenDialog;
@@ -60,7 +58,6 @@ pub use crate::renderer::view::RendererText;
 pub use crate::renderer::view::RendererTool;
 pub use crate::renderer::view::RendererView;
 pub use crate::renderer::view::SettingsView;
-pub use crate::renderer::view::ShipMenuView;
 pub use crate::renderer::view::TimelineView;
 use crate::renderer::viewer::ExportDone;
 use crate::renderer::viewer::Viewer;
@@ -77,17 +74,6 @@ static WATCHED: LazyLock<Mutex<HashMap<RendererId, Arc<Watched>>>> = LazyLock::n
 /// What viewports open showing, read from the shared `render_options` row on
 /// first use and replaced by Save Defaults.
 static DEFAULTS: Mutex<Option<SavedRenderOptions>> = Mutex::new(None);
-
-/// Whether the reader asked not to be told before a software encode.
-static SOFTWARE_ENCODE_QUIET: LazyLock<AtomicBool> = LazyLock::new(|| {
-    // An unset or unreadable setting is a reader who never asked.
-    let quiet = wows_toolkit_config::load_startup_setting::<bool>(keys::SUPPRESS_GPU_ENCODER_WARNING)
-        .inspect_err(|err| log::warn!("renderer: the software encode notice setting could not be read: {err}"))
-        .ok()
-        .flatten()
-        .unwrap_or(false);
-    AtomicBool::new(quiet)
-});
 
 fn surface_name(id: RendererId) -> String {
     format!("replay-renderer-{id}")
@@ -110,11 +96,7 @@ fn session(id: RendererId) -> Result<Arc<Session>, RendererError> {
 
 fn current(id: RendererId, session: &Session) -> RendererView {
     let revision = *session.subscribe().borrow();
-    let mut shown = view::of(id, &surface_name(id), &session.lock(), revision);
-    if SOFTWARE_ENCODE_QUIET.load(Ordering::Relaxed) {
-        shown.software_encode = false;
-    }
-    shown
+    view::of(id, &surface_name(id), &session.lock(), revision)
 }
 
 /// Changes viewport `id` and answers what it now shows.
@@ -339,19 +321,21 @@ impl ReplayRenderer {
         change(id, |viewer| viewer.go_to_event_at(ElapsedClock(at as f32)))
     }
 
-    /// The menu of the ship under `(x, y)` points from the frame's top left,
-    /// or `null` when no ship is close enough to have been meant.
-    pub fn ship_menu(id: RendererId, x: f64, y: f64) -> Result<Option<ShipMenuView>, RendererError> {
-        let session = session(id)?;
-        let viewer = session.lock();
+    /// Opens the menu of the ship under `(x, y)` points from the frame's top
+    /// left; a click that misses every ship closes the menu instead.
+    pub fn open_ship_menu(id: RendererId, x: f64, y: f64) -> Result<RendererView, RendererError> {
         let at = LogicalPoint { x: x as f32, y: y as f32 };
-        Ok(viewer.ship_under(at).map(|pick| view::ship_menu(&viewer, &pick)))
+        change(id, |viewer| viewer.open_ship_menu(at))
+    }
+
+    pub fn close_ship_menu(id: RendererId) -> Result<RendererView, RendererError> {
+        change(id, Viewer::close_ship_menu)
     }
 
     /// Opens the armor viewer on the ship `entity_id` (decimal) was in, with
     /// what it had taken by where playback is, and follows playback from then
     /// on. The viewer's health strip seeks this viewport.
-    pub fn show_armor(id: RendererId, entity_id: String) -> Result<(), RendererError> {
+    pub fn show_armor(id: RendererId, entity_id: String) -> Result<RendererView, RendererError> {
         let raw: u32 = entity_id.parse().map_err(|_| RendererError::UnknownEntity { entity_id: entity_id.clone() })?;
         let entity = EntityId::from(raw);
         let session = session(id)?;
@@ -365,7 +349,7 @@ impl ReplayRenderer {
                 session.update(|viewer| viewer.go_to_clock(clock));
             }
         });
-        Ok(())
+        Ok(current(id, &session))
     }
 
     pub fn set_trail(id: RendererId, player: String, on: bool) -> Result<RendererView, RendererError> {
@@ -450,19 +434,6 @@ impl ReplayRenderer {
             .ok_or(RendererError::UnknownShipParam { param_index })?;
         session.update(|viewer| viewer.name_picked_ship(matched, param_id));
         Ok(current(id, &session))
-    }
-
-    /// Stops asking before a software encode, here and in the other apps.
-    pub async fn quiet_software_encode() {
-        SOFTWARE_ENCODE_QUIET.store(true, Ordering::Relaxed);
-        match wows_toolkit_config::open_db().await {
-            Ok(pool) => {
-                if let Err(err) = wows_toolkit_config::queries::set_setting(&pool, keys::SUPPRESS_GPU_ENCODER_WARNING, &true).await {
-                    log::warn!("renderer: the software encode notice setting was not saved: {err}");
-                }
-            }
-            Err(err) => log::warn!("renderer: the software encode notice setting was not saved: {err}"),
-        }
     }
 
     /// Asks where to write, then encodes what viewport `id` shows there.

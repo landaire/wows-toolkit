@@ -5,7 +5,6 @@
 
 mod colors;
 mod detail;
-mod glyphs;
 mod icons;
 mod parts;
 mod row;
@@ -37,13 +36,13 @@ use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_replay_data::sort::SortOrder;
 use wows_toolkit_replay_data::sort::sort_rows;
 
+use crate::icons::Icon;
+use crate::icons::icon;
 use crate::replay_inspector::columns::column_from_key;
 use crate::replay_inspector::document;
 use crate::replay_inspector::document::ReplayDocId;
 use crate::replay_inspector::document::ReplayDocument;
 use crate::replay_inspector::settings;
-use crate::replay_inspector::table::glyphs::Glyph;
-use crate::replay_inspector::table::glyphs::glyph;
 use crate::replay_inspector::table::icons::TableIcons;
 use crate::replay_inspector::table::parts::class;
 
@@ -563,10 +562,10 @@ impl Table {
                         return Vec::new();
                     }
                     let caret = match sort {
-                        SortOrder::Asc(_) => Glyph::SortAscending,
-                        SortOrder::Desc(_) => Glyph::SortDescending,
+                        SortOrder::Asc(_) => Icon::ListSortAscending,
+                        SortOrder::Desc(_) => Icon::ListSortDescending,
                     };
-                    vec![glyph(caret, 14.0).app_class(class("flex-none text-foreground")).into_element()]
+                    vec![icon(caret, px(14.0)).app_class(class("flex-none text-foreground")).into_element()]
                 })),
             None => title.role(AccessibilityRole::ColumnHeader),
         };

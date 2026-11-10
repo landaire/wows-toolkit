@@ -1,6 +1,7 @@
 import type { JSX, ViewStyle } from "nsh";
 import { signal, Text, View } from "nsh";
 import { Checkbox, ColorArea, ColorField, ColorPicker, ColorSlider, Popover, Slider } from "nsh/base";
+import { Icon, type IconName } from "../icons";
 import { colors, controlRadius, semantic } from "../theme";
 import type { TriState } from "./state";
 
@@ -14,10 +15,11 @@ export function tip(text: string | undefined): JSX.Element | undefined {
   );
 }
 
-/** A compact button: a label, optionally held down (`on`), with a hint. */
+/** A compact button: a label (or an icon named by it), optionally held down (`on`), with a hint. */
 export function ToolButton(props: {
   id: string;
   label: string;
+  icon?: IconName;
   tooltip?: string;
   on?: boolean;
   disabled?: boolean;
@@ -48,13 +50,18 @@ export function ToolButton(props: {
         opacity: props.disabled ? 0.45 : 1,
       }, props.style ?? null]}
     >
-      <Text style={{ fontSize: 12, color: props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground }}>{props.label}</Text>
+      <If
+        when={props.icon}
+        else={<Text style={{ fontSize: 12, color: props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground }}>{props.label}</Text>}
+      >
+        {(icon) => <Icon name={icon()} size={14} color={props.danger ? colors.destructive : props.on ? colors.primaryForeground : colors.secondaryForeground}/>}
+      </If>
     </View>
   );
 }
 
-/** A square glyph button without a frame (collapse, close). */
-export function IconButton(props: { id: string; glyph: string; label: string; disabled?: boolean; onPress: () => void }) {
+/** A square icon button without a frame (collapse, close). */
+export function IconButton(props: { id: string; icon: IconName; label: string; disabled?: boolean; onPress: () => void }) {
   return (
     <View
       testID={props.id}
@@ -67,7 +74,7 @@ export function IconButton(props: { id: string; glyph: string; label: string; di
       activeStyle={{ opacity: 0.7 }}
       style={{ minWidth: 22, height: 22, paddingHorizontal: 4, alignItems: "center", justifyContent: "center", borderRadius: controlRadius(), opacity: props.disabled ? 0.45 : 1 }}
     >
-      <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>{props.glyph}</Text>
+      <Icon name={props.icon} size={14} color={colors.foreground}/>
     </View>
   );
 }
@@ -98,9 +105,14 @@ export function CheckRow(props: {
       class="group flex-row items-center gap-2 disabled:opacity-50"
       indicatorClass={indicatorClass}
       indicator={
-        <Text style={{ fontSize: 10, fontWeight: "700", color: state() === "partial" ? semantic.warn : colors.primaryForeground }}>
-          {state() === "on" ? "x" : state() === "partial" ? "-" : ""}
-        </Text>
+        <If when={state() !== "off"}>
+          <Icon
+            name={state() === "partial" ? "minus" : "check"}
+            size={11}
+            strokeWidth={3}
+            color={state() === "partial" ? semantic.warn : colors.primaryForeground}
+          />
+        </If>
       }
       onChange={({ checked }) => props.onChange(checked)}
     >

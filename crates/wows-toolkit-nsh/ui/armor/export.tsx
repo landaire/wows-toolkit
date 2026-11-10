@@ -7,16 +7,19 @@ import { t } from "../i18n";
 import { colors } from "../theme";
 import { runExport } from "./dock";
 import { armor, type CamoView, call, type ExportDialogView } from "./state";
-import { CheckRow, ChoiceRow, Heading, Hint, ToolButton } from "./widgets";
+import { CheckRow, ChoiceRow, Hint, ToolButton } from "./widgets";
 
+/** A 96 px label column with its control beside it. */
 function Row(props: { label: string; hint?: string; children: JSX.Element }) {
   return (
-    <View style={{ gap: 4 }}>
-      <Heading text={props.label}/>
-      {props.children}
-      <If when={props.hint}>
-        <Hint text={props.hint ?? ""}/>
-      </If>
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+      <Text style={{ width: 96, flexShrink: 0, paddingTop: 4, fontSize: 12, color: colors.popoverForeground }}>{props.label}</Text>
+      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+        {props.children}
+        <If when={props.hint}>
+          <Hint text={props.hint ?? ""}/>
+        </If>
+      </View>
     </View>
   );
 }
@@ -84,7 +87,7 @@ export function ExportDialog() {
                       />
                     </Row>
                   </If>
-                  <If when={current().lodCount > 0}>
+                  <If when={current().lodCount > 1}>
                     <Row label={t("ui.armor.export.lod")} hint={t("ui.armor.export.lod_tooltip")}>
                       <ChoiceRow
                         disabled={!mesh()}
@@ -105,14 +108,15 @@ export function ExportDialog() {
                       onSelect={(resolution) => call(Armor.setExportResolution(resolution))}
                     />
                   </Row>
+                  <If when={current().camos.own.length > 0 || current().camos.groups.length > 0}>
                   <Row label={t("ui.armor.export.camos")}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <ToolButton id="armor-export-camos-none" label={t("ui.armor.export.camo_select_none")} disabled={!mesh()} onPress={() => call(Armor.exportCamosNone())}/>
                       <ToolButton id="armor-export-camos-reset" label={t("ui.armor.export.camo_reset")} disabled={!mesh()} onPress={() => call(Armor.exportCamosReset())}/>
-                      <Text style={{ fontSize: 12, fontWeight: current().camos.noneTicked ? "700" : "400", color: colors.mutedForeground }}>{t("ui.armor.camo_none")}</Text>
                     </View>
                     <Scroll style={{ maxHeight: 240 }}>
                       <View style={{ gap: 3, opacity: mesh() ? 1 : 0.5 }}>
+                        <Text testID="armor-export-camo-stock" style={{ fontSize: 12, color: current().camos.noneTicked ? colors.popoverForeground : colors.mutedForeground }}>{t("ui.armor.camo_none")}</Text>
                         <Camos schemes={current().camos.own}/>
                         <Each of={current().camos.groups} key={(group) => group.heading}>
                           {(group) => (
@@ -125,6 +129,7 @@ export function ExportDialog() {
                       </View>
                     </Scroll>
                   </Row>
+                  </If>
                   <If when={current().error}>
                     <Hint tone="error" text={current().error ?? ""}/>
                   </If>

@@ -34,8 +34,6 @@ pub enum StatsError {
     Color { color: String },
     #[error("the stats task did not finish: {source}")]
     Task { source: tokio::task::JoinError },
-    #[error("the stats task did not finish: {reason}")]
-    Dialog { reason: String },
 }
 
 /// Why the session's rows could not be read or written.

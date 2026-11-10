@@ -1,4 +1,4 @@
-import { Clipboard, colorScheme, effect, keymap, List, Scroll, signal, Text, View } from "nsh";
+import { Clipboard, colorScheme, effect, keymap, List, Scroll, signal, Text, untracked, View } from "nsh";
 import { Calendar, type CalendarEntry, Input } from "nsh/base";
 import { Menu, type MenuItem } from "nsh/desktop";
 import {
@@ -12,10 +12,13 @@ import {
   type ResultColumn,
   type SearchPage,
   type SearchRow,
+  type SearchText,
   type SortState,
   type ValueLookup,
 } from "wows-toolkit/native";
-import { Button, Surface } from "./components";
+import { Button, Hint, Surface } from "./components";
+import { currentLocale, t } from "./i18n";
+import { Icon } from "./icons";
 import { MinimapPreview } from "./renderer";
 import { colors, controlRadius } from "./theme";
 
@@ -61,10 +64,38 @@ export type SearchRowActions = {
   renderReplayToClipboard?: (path: string) => void;
 };
 
-const text = ReplaySearch.text();
-const columns: ResultColumn[] = ReplaySearch.columns();
+// The catalog text and column titles, read again after a language change; a
+// read inside a render follows the locale.
+let textCache: { locale: string; text: SearchText; columns: ResultColumn[] } | null = null;
+function catalog() {
+  const locale = currentLocale();
+  if (textCache?.locale !== locale) textCache = { locale, text: ReplaySearch.text(), columns: ReplaySearch.columns() };
+  return textCache;
+}
+const text = new Proxy({} as SearchText, { get: (_target, key) => catalog().text[key as keyof SearchText] });
+function columns(): ResultColumn[] {
+  return catalog().columns;
+}
 const bar = new QueryBar();
 const view = signal<QueryBarView>(bar.view());
+// The pills and the rows on screen word themselves in the current language too.
+let shownLocale = untracked(currentLocale);
+effect(() => {
+  const locale = currentLocale();
+  if (locale === shownLocale) return;
+  shownLocale = locale;
+  untracked(() => {
+    view.set(bar.view());
+    if (!page() || runState().kind !== "done") return;
+    // The same lookup again, so the rows' words follow; nothing is saved.
+    generation += 1;
+    const asked = generation;
+    void ReplaySearch.search(lastRunQuery, sort()).then(
+      (found) => { if (asked === generation) page.set(found); },
+      (error) => { if (asked === generation) runState.set({ kind: "failed", reason: errorMessage(error) }); },
+    );
+  });
+});
 const completionsOpen = signal(false);
 const completionCursor = signal<number | null>(null);
 const valueOptions = signal<CompletionView[]>([]);
@@ -76,7 +107,7 @@ const valueInvalid = signal(false);
 const runState = signal<RunState>({ kind: "idle" });
 const page = signal<SearchPage | null>(null);
 const sort = signal<SortState>(ReplaySearch.defaultSort());
-const widths = signal<(number | null)[]>(columns.map(() => null));
+const widths = signal<(number | null)[]>(columns().map(() => null));
 const settingsLoadError = signal<string | null>(null);
 const settingsSaveError = signal<{ message: string; retry: () => void } | null>(null);
 // `x`/`y`: where the pointer entered the row, in the results view.
@@ -350,7 +381,7 @@ function loadColumnWidths() {
   void ReplaySearch.loadColumnWidths().then(
     (saved) => {
       settingsSaveError.set(null);
-      widths.set(columns.map((_, index) => {
+      widths.set(columns().map((_, index) => {
         const width = saved[index];
         // A width narrower than the grip leaves a column that cannot be
         // grabbed to widen again.
@@ -377,7 +408,7 @@ function sortBy(key: NonNullable<ResultColumn["sort"]>) {
 }
 
 function widthOf(index: number): number {
-  return widths()[index] ?? columns[index].defaultWidth;
+  return widths()[index] ?? columns()[index].defaultWidth;
 }
 
 function setWidth(index: number, width: number | null) {
@@ -669,8 +700,14 @@ function BarTokens() {
 
 function CalendarDay(props: { item: CalendarEntry }) {
   const kind = props.item.kind;
-  const label = kind === "previous" ? "<" : kind === "next" ? ">" : String(props.item.value);
-  return <Text style={{ minWidth: 26, textAlign: "center", fontSize: 12, color: colors.popoverForeground }}>{label}</Text>;
+  if (kind === "previous" || kind === "next") {
+    return (
+      <View style={{ minWidth: 26, alignItems: "center" }}>
+        <Icon name={kind === "previous" ? "chevron-left" : "chevron-right"} size={12} color={colors.popoverForeground}/>
+      </View>
+    );
+  }
+  return <Text style={{ minWidth: 26, textAlign: "center", fontSize: 12, color: colors.popoverForeground }}>{String(props.item.value)}</Text>;
 }
 
 function Dropdown() {
@@ -749,9 +786,7 @@ function QueryBarRow() {
     <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, gap: 4, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 5 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <BarTokens/>
-        <Button label="Run Search" onPress={commitAndRun}/>
-        <Button label={text.undo} variant="ghost" disabled={!view().canUndo} onPress={() => structural(bar.undo())}/>
-        <Button label={text.redo} variant="ghost" disabled={!view().canRedo} onPress={() => structural(bar.redo())}/>
+        <Button label={t("ui.tabs.search")} testID="search-run" onPress={commitAndRun}/>
       </View>
       <If when={valueInvalid()}>
         <Text style={{ fontSize: 11.5, color: colors.primary }}>Invalid filter value. Correct the value or press Escape to cancel.</Text>
@@ -765,7 +800,7 @@ function QueryBarRow() {
 }
 
 function HeaderCell(props: { index: number }) {
-  const column = columns[props.index];
+  const column = columns()[props.index];
   const active = () => column.sort !== null && column.sort !== undefined && sort().column === column.sort;
   let startWidth = 0;
   let startX = 0;
@@ -780,11 +815,12 @@ function HeaderCell(props: { index: number }) {
           accessibilityState={{ selected: active() }}
           onPress={() => sortBy(column.sort!)}
           hoverStyle={{ backgroundColor: colors.accent }}
-          style={{ flex: 1, height: HEADER_HEIGHT, justifyContent: "center", paddingHorizontal: 4 }}
+          style={{ flex: 1, height: HEADER_HEIGHT, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 4 }}
         >
-          <Text style={{ fontSize: 12, fontWeight: "700", color: active() ? colors.foreground : colors.mutedForeground }}>
-            {active() ? `${column.title} ${sort().direction === "descending" ? "v" : "^"}` : column.title}
-          </Text>
+          <Text style={{ fontSize: 12, fontWeight: "700", color: active() ? colors.foreground : colors.mutedForeground }}>{column.title}</Text>
+          <If when={active()}>
+            <Icon name={sort().direction === "descending" ? "chevron-down" : "chevron-up"} size={12} color={colors.foreground}/>
+          </If>
         </View>
       </If>
       <If when={!column.sort}>
@@ -816,14 +852,20 @@ function HeaderCell(props: { index: number }) {
 
 function ResultRow(props: { row: SearchRow; index: number }) {
   const actions = () => rowActions();
+  // The row's own buttons show while the pointer is over it, as GPUI's do.
+  const pointerOver = signal(false);
   return (
     <View
       role="row"
       testID={`search-row-${props.index}`}
       accessibilityLabel={`Open replay ${props.row.replayPath}`}
-      onPress={() => openRow(props.row)}
+      onPress={(event) => {
+        if ((event?.clickCount ?? 1) >= 2) openRow(props.row);
+      }}
       onContextMenu={(event) => void Menu.popup(rowMenu(props.row), event?.pagePosition)}
+      onMouseLeave={() => pointerOver.set(false)}
       onMouseEnter={(event) => {
+        pointerOver.set(true);
         clearTimeout(dwellTimer);
         const row = props.row;
         const index = props.index;
@@ -842,7 +884,7 @@ function ResultRow(props: { row: SearchRow; index: number }) {
         backgroundColor: props.index % 2 === 1 ? colors.muted : "transparent",
       }}
     >
-      <Each of={columns}>
+      <Each of={columns()}>
         {(column, at) => (
           <Text role="cell" style={{ width: widthOf(at()) + GRIP, numberOfLines: 1, fontSize: 12.5, color: cellColor(props.row, column().key) }}>
             {cellText(props.row, column().key)}
@@ -850,26 +892,30 @@ function ResultRow(props: { row: SearchRow; index: number }) {
         )}
       </Each>
       <View style={{ width: ACTIONS_WIDTH, flexDirection: "row", alignItems: "center", gap: 2 }}>
-        <If when={actions().renderReplayToClipboard}>
+        <If when={pointerOver()}>
+          <If when={actions().renderReplayToClipboard}>
+            <View
+              testID={`search-row-render-clipboard-${props.index}`}
+              accessibilityLabel={text.renderToClipboard}
+              tooltip={<Hint text={text.renderToClipboard}/>}
+              onPress={() => props.row.exists && actions().renderReplayToClipboard?.(props.row.replayPath)}
+              hoverStyle={{ backgroundColor: colors.secondary }}
+              style={{ padding: 4, borderRadius: 6, opacity: props.row.exists ? 1 : 0.4 }}
+            >
+              <Icon name="clipboard" size={14} color={colors.mutedForeground}/>
+            </View>
+          </If>
           <View
-            testID={`search-row-render-clipboard-${props.index}`}
-            accessibilityLabel={text.renderToClipboard}
-            onPress={() => props.row.exists && actions().renderReplayToClipboard?.(props.row.replayPath)}
+            testID={`search-row-actions-${props.index}`}
+            accessibilityLabel={text.rowActionsHint}
+            tooltip={<Hint text={text.rowActionsHint}/>}
+            onPress={(event) => void Menu.popup(rowMenu(props.row), event?.pagePosition)}
             hoverStyle={{ backgroundColor: colors.secondary }}
-            style={{ paddingHorizontal: 5, borderRadius: 6, opacity: props.row.exists ? 1 : 0.4 }}
+            style={{ padding: 4, borderRadius: 6 }}
           >
-            <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Clip</Text>
+            <Icon name="ellipsis" size={14} color={colors.mutedForeground}/>
           </View>
         </If>
-        <View
-          testID={`search-row-actions-${props.index}`}
-          accessibilityLabel={text.rowActionsHint}
-          onPress={(event) => void Menu.popup(rowMenu(props.row), event?.pagePosition)}
-          hoverStyle={{ backgroundColor: colors.secondary }}
-          style={{ paddingHorizontal: 6, borderRadius: 6 }}
-        >
-          <Text style={{ fontSize: 13, color: colors.mutedForeground }}>...</Text>
-        </View>
       </View>
     </View>
   );
@@ -927,7 +973,7 @@ function statusText(): string | null {
 }
 
 function Results() {
-  const tableWidth = () => columns.reduce((total, _, index) => total + widthOf(index) + GRIP, 0) + ACTIONS_WIDTH + 16;
+  const tableWidth = () => columns().reduce((total, _, index) => total + widthOf(index) + GRIP, 0) + ACTIONS_WIDTH + 16;
   return (
     <View
       testID="search-results"
@@ -941,7 +987,7 @@ function Results() {
       <Scroll horizontal onScroll={({ offset }) => tableOffset.set(offset.x)} style={{ flex: 1 }} contentStyle={{ minWidth: tableWidth() }}>
         <View role="table" accessibilityLabel="Replay search results" style={{ flex: 1, width: tableWidth() }}>
           <View role="row" style={{ flexDirection: "row", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Each of={columns}>{(_, index) => <HeaderCell index={index()}/>}</Each>
+            <Each of={columns()}>{(_, index) => <HeaderCell index={index()}/>}</Each>
           </View>
           <If when={statusText() === null}>
             <List

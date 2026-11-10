@@ -4,6 +4,7 @@ import { Checkbox, Input, Progress } from "nsh/base";
 import { LauncherSession, type AccountState, type DownloadRow, type GameRow, type InstallRow, type LauncherState, type StatusLine } from "wows-toolkit/native";
 import { Button, Surface } from "./components";
 import { t } from "./i18n";
+import { CheckMark } from "./icons";
 import { applyWowsDir } from "./settings";
 import { appSettings } from "./settings_store";
 import * as toast from "./shell/toast";
@@ -91,7 +92,7 @@ function Toggle(props: { label: string; checked: boolean; onChange: (checked: bo
       checked={props.checked}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<CheckMark checked={props.checked}/>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 12.5, color: colors.cardForeground }}>{props.label}</Text>

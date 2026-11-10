@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::time::Duration;
 
 use nsh_core::{Points, Size};
 
@@ -79,20 +80,49 @@ fn a_replay_that_cannot_be_read_says_so_and_refuses_the_transport() {
 }
 
 #[test]
-fn the_transport_and_popovers_are_offered_for_a_replay() {
+fn the_transport_offers_its_controls_by_their_translated_names() {
     let replay = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FIXTURE);
 
     let mut app = app();
     render(&mut app, replay);
 
     app.wait_for("Replay renderer").unwrap();
-    for control in ["Seek", "Zoom", "Clock", "Jump to start", "Play", "Events"] {
-        app.wait_for(control).unwrap();
+    let controls = [
+        "Playback position",
+        "Jump to start",
+        "Previous event (Shift+Left)",
+        "Back 10s (Left)",
+        "Play",
+        "Forward 10s (Right)",
+        "Next event (Shift+Right)",
+        "Jump to end",
+        "Battle clock",
+        "Zoom",
+        "Playback speed",
+        "Render to Video",
+        "Drawing Tools",
+        "Display Settings",
+        "Event Timeline",
+        "Render to Clipboard",
+    ];
+    for control in controls {
+        app.wait_for(&format!("id:renderer-transport >> label:{control}")).unwrap();
     }
-    app.press("Events").unwrap();
-    app.wait_for("Event Timeline").unwrap();
-    app.press("Open in its own window").unwrap();
-    app.wait_for("Back to the tab").unwrap();
-    app.press("Back to the tab").unwrap();
-    app.wait_for("Open in its own window").unwrap();
+}
+
+#[test]
+fn the_timeline_fills_in_without_being_reopened() {
+    // How long the event scan of the fixture may take.
+    const SCAN: Duration = Duration::from_secs(60);
+
+    let replay = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/replays").join(FIXTURE);
+
+    let mut app = app();
+    render(&mut app, replay);
+
+    app.press("label:Event Timeline").unwrap();
+    app.wait_for("text:Event Timeline").unwrap();
+    app.wait_for_gone("text:Parsing events...", SCAN).unwrap();
+    app.wait_for("text:/^(No significant events detected\\.|No events match the current filter\\.|\\d+:\\d\\d)$/").unwrap();
+    app.wait_for("text:Event Timeline").unwrap();
 }

@@ -14,6 +14,11 @@ export function applyLocale(code: string) {
   locale.set(code);
 }
 
+/** Re-renders what read a catalog string in `code`, which another window already applied to the process. */
+export function followLocale(code: string) {
+  locale.set(code);
+}
+
 /**
  * The catalog text for `key` in the current language, `%{name}` placeholders
  * filled from `args`. Reading it inside a render re-renders on a language change.

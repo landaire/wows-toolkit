@@ -1,17 +1,17 @@
 import type { JSX } from "nsh";
 import { colorScheme, Scroll, signal, Text, View } from "nsh";
-import { Menu, Slider } from "nsh/base";
+import { Select, Slider } from "nsh/base";
 import { Settings, Shell, Twitch } from "wows-toolkit/native";
-import { Button, EmptyState, MenuRow, Surface } from "./components";
+import { Button, EmptyState, Surface } from "./components";
 import { currentLocale, t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting, settingsLoadError, settingsLoading } from "./settings_store";
-import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, setZoom, wowsDirInvalid, ZOOM_STEP } from "./shell/chrome";
+import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, rejectedWowsDir, setZoom, wowsDirInvalid, ZOOM_STEP } from "./shell/chrome";
 import { Choice, CommitInput, Toggle } from "./shell/controls";
 import { chooseLanguage } from "./shell/first_run";
 import * as toast from "./shell/toast";
 import { restartTwitch, twitchStatus } from "./shell/twitch";
 import { colors, controlRadius, semantic } from "./theme";
-import { GameDataCacheSection, ReplayDirectoriesSection, ReplayIndexSection } from "./game_data";
+import { GameDataCacheSection, ReplayIndexSection } from "./game_data";
 
 /** Where a Twitch credential with the permissions the poll needs is issued: Chatterino's login page, as the other front ends use. */
 const TWITCH_TOKEN_URL = "https://chatterino.com/client_login";
@@ -66,31 +66,33 @@ function Field(props: { label?: string; description?: string; invalid?: boolean;
 
 function LanguageField() {
   const languages = Shell.languages();
-  const current = () => languages.find((language) => language.code === (appSettings()?.locale ?? currentLocale()))?.nativeName ?? "English";
+  const code = () => appSettings()?.locale ?? currentLocale();
+  const current = () => languages.find((language) => language.code === code())?.nativeName ?? "English";
   return (
     <Field label={t("ui.settings.app.language")}>
-      <Menu
+      <Select
+        accessibilityLabel={t("ui.settings.app.language")}
+        searchable
+        items={languages.map((language) => ({ value: language.code, title: language.nativeName }))}
+        value={code()}
+        onChange={({ value }) => { if (value) void chooseLanguage(value); }}
         align="start"
         offset={4}
         margin={8}
+        popupStyle={{ width: 200, padding: 4, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}
+        listStyle={{ maxHeight: 320 }}
+        searchStyle={{ minHeight: 28, marginBottom: 4, paddingHorizontal: 8, borderWidth: 1, borderColor: colors.input, borderRadius: controlRadius(), backgroundColor: colors.background, color: colors.foreground, fontSize: 12.5 }}
+        itemStyle={{ minHeight: 26, paddingHorizontal: 8, borderRadius: 4, fontSize: 12.5, color: colors.popoverForeground }}
+        itemClass="hover:bg-accent focus:bg-accent"
         trigger={
           <View
-            accessibilityLabel={t("ui.settings.app.language")}
             hoverStyle={{ backgroundColor: colors.accent }}
             style={{ width: 200, minHeight: 28, paddingHorizontal: 8, justifyContent: "center", borderWidth: 1, borderColor: colors.input, borderRadius: controlRadius(), backgroundColor: colors.background }}
           >
             <Text style={{ fontSize: 12.5, color: colors.foreground }}>{current()}</Text>
           </View>
         }
-      >
-        <Surface style={{ width: 200, maxHeight: 360, padding: 4, backgroundColor: colors.popover }}>
-          <Scroll style={{ maxHeight: 350 }}>
-            <Each of={languages}>
-              {(language) => <MenuRow label={language().nativeName} onSelect={() => void chooseLanguage(language().code)}/>}
-            </Each>
-          </Scroll>
-        </Surface>
-      </Menu>
+      />
     </Field>
   );
 }
@@ -156,7 +158,7 @@ function ZoomField() {
           trackClass="h-[4px] rounded-full bg-secondary"
           indicatorClass="h-[4px] rounded-full bg-primary"
           thumbClass="w-[14px] h-[14px] rounded-full bg-primary"
-          onChangeEnd={({ value }) => setZoom(value as number)}
+          onChange={({ value }) => setZoom(value as number)}
         />
         <Text style={{ width: 40, fontSize: 12.5, color: colors.foreground }}>{zoom().toFixed(2)}</Text>
         <Button label={t("ui.buttons.reset")} onPress={() => setZoom(DEFAULT_ZOOM)}/>
@@ -203,53 +205,53 @@ function ApplicationSection() {
       </Field>
       <Field>
         <View style={{ flexDirection: "row" }}>
-          <Button
-            label={t("ui.settings.app.open_data_dir")}
-            onPress={() => void Shell.openDataDirectory().catch((error) => toast.failed(errorText(error)))}
-          />
+          <View tooltip={t("ui.settings.app.open_data_dir_tooltip")}>
+            <Button
+              label={t("ui.settings.app.open_data_dir")}
+              onPress={() => void Shell.openDataDirectory().catch((error) => toast.failed(errorText(error)))}
+            />
+          </View>
         </View>
       </Field>
     </Section>
   );
 }
 
-/** Adopts a game directory: one that is not an install is said to be wrong and not saved, as every front end refuses it. */
+/**
+ * Adopts a game directory: one that is not an install is said to be wrong,
+ * kept in the field and marked on the Settings tab, and not saved, as every
+ * front end refuses it.
+ */
 export function applyWowsDir(path: string) {
   if (path !== "" && !Settings.isGameDirectory(path)) {
+    rejectedWowsDir.set(path);
     toast.stuck(STUCK_WOWS_DIR, t("ui.messages.wows_dir_invalid"));
     return;
   }
+  rejectedWowsDir.set(null);
   toast.resolved(STUCK_WOWS_DIR);
   void editSetting("wowsDir", path);
 }
 
-const rejectedWowsDir = signal<string | null>(null);
-
 function GameSection() {
-  const invalid = () => rejectedWowsDir() !== null || wowsDirInvalid();
-  const adopt = (path: string) => {
-    const refused = path !== "" && !Settings.isGameDirectory(path);
-    rejectedWowsDir.set(refused ? path : null);
-    applyWowsDir(path);
-  };
   return (
     <Section title={t("ui.settings.wows.heading")} description={t("ui.settings.wows.description")}>
-      <Field label={t("ui.settings.wows.directory_hint")} description={invalid() ? t("ui.messages.wows_dir_invalid") : ""} invalid={invalid()}>
+      <Field label={t("ui.settings.wows.directory_hint")} description={wowsDirInvalid() ? t("ui.messages.wows_dir_invalid") : ""} invalid={wowsDirInvalid()}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1 }}>
             <CommitInput
               label={t("ui.settings.wows.directory_hint")}
               value={rejectedWowsDir() ?? appSettings()!.wowsDir}
               placeholder={t("ui.settings.wows.directory_hint")}
-              invalid={invalid()}
-              onCommit={adopt}
+              invalid={wowsDirInvalid()}
+              onCommit={applyWowsDir}
             />
           </View>
           <Button
             label={t("ui.settings.wows.browse")}
             onPress={() => {
               void Shell.pickDirectory("World of Warships directory")
-                .then((picked) => { if (picked) adopt(picked); })
+                .then((picked) => { if (picked) applyWowsDir(picked); })
                 .catch((error) => toast.failed(errorText(error)));
             }}
           />
@@ -457,7 +459,6 @@ export function SettingsView() {
             <GameSection/>
             <GameDataCacheSection/>
             <ReplayIndexSection/>
-            <ReplayDirectoriesSection/>
             <SessionSection/>
             <ReplaySection/>
             <TwitchSection/>

@@ -67,11 +67,17 @@ pub fn db_path() -> PathBuf {
 /// `ViewportBuilder` before the app is created (position can only be set
 /// at builder time, not via viewport commands).
 pub fn load_main_window_settings() -> Option<WindowSettings> {
+    load_window_settings(WindowKind::Main)
+}
+
+/// Load what is remembered about windows of `kind`, synchronously, for a front
+/// end that places a window as it opens it.
+pub fn load_window_settings(kind: WindowKind) -> Option<WindowSettings> {
     use std::collections::HashMap;
 
     let sizes: HashMap<WindowKind, WindowSettings> = load_startup_setting("window_sizes").ok().flatten()?;
 
-    sizes.get(&WindowKind::Main).copied()
+    sizes.get(&kind).copied()
 }
 
 /// Why a startup-time settings read did not produce a value.

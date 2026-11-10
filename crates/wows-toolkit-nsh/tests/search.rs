@@ -216,7 +216,11 @@ fn a_typed_query_finds_and_opens_an_indexed_replay() {
     app.wait_for("123,456").unwrap();
     app.wait_for("1 match(es)").unwrap();
 
-    app.press(&format!("label:Open replay {}", replay().display())).unwrap();
+    // A single press only selects; a double click opens, as in GPUI.
+    let row = format!("label:Open replay {}", replay().display());
+    app.press(&row).unwrap();
+    assert!(!app.shows("Shimakaze - Fault Line"), "one press does not open the replay");
+    app.press(&row).unwrap();
     app.wait_for("Shimakaze - Fault Line").unwrap();
 }
 
@@ -227,7 +231,7 @@ fn a_query_that_does_not_parse_is_reported_above_the_results() {
     app.press("Search").unwrap();
     app.wait_for("Harugumo").unwrap();
     app.type_text(QUERY, "outcome=win and").unwrap();
-    app.press("Run Search").unwrap();
+    app.press("id:search-run").unwrap();
     app.wait_for("text:/^That query did not parse/").unwrap();
     assert!(app.shows("Harugumo"), "the results the last good query found stay");
 }
@@ -311,7 +315,7 @@ fn a_pill_menu_negates_and_undo_restores() {
     app.wait_until("the negated pill", GONE, |screen| screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() != before)
         .unwrap();
 
-    app.press("Undo the last change to the query").unwrap();
+    app.press_key("mod+z").unwrap();
     app.wait_until("the original pill", GONE, |screen| screen.texts().into_iter().map(str::to_owned).collect::<Vec<_>>() == before)
         .unwrap();
 }
@@ -452,4 +456,28 @@ fn a_palette_layer_searches_players_and_leads_back() {
     app.wait_for_gone("id:palette-back", GONE).unwrap();
     app.wait_for("id:search-pill-0").unwrap();
     app.wait_for("Harugumo").unwrap();
+}
+
+#[test]
+fn a_language_change_rewords_the_rows_on_screen() {
+    let mut app = app();
+
+    app.press("Search").unwrap();
+    app.wait_for("Harugumo").unwrap();
+    app.wait_for("Win").unwrap();
+
+    app.press("Settings").unwrap();
+    app.press("label:Language").unwrap();
+    app.press("Deutsch").unwrap();
+    app.press("text:/^(Search|Suche)$/").unwrap();
+    app.wait_for("Sieg").unwrap();
+    assert!(app.shows("Harugumo"), "the same rows stay");
+
+    // The next test starts in English.
+    tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a database runtime starts").block_on(
+        async {
+            let pool = wows_toolkit_config::open_db().await.expect("the test database opens");
+            wows_toolkit_config::queries::set_setting_raw(&pool, "locale", r#""en""#).await.expect("the locale is reset");
+        },
+    );
 }

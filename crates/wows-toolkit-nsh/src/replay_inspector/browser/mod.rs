@@ -26,7 +26,6 @@ use nsh_base::menu_separator;
 use nsh_base::progress;
 use nsh_core::Color;
 use nsh_core::Hsla;
-use nsh_core::element::ImageSrc;
 use nsh_core::keymap::When;
 use nsh_core::prelude::*;
 use notify::RecommendedWatcher;
@@ -46,6 +45,8 @@ use wows_toolkit_viewmodel::theme::DARK_SEMANTIC;
 use wows_toolkit_viewmodel::theme::LIGHT_SEMANTIC;
 
 use crate::game_data::GameDataState;
+use crate::icons::Icon;
+use crate::icons::icon;
 use crate::replay_inspector::constants::BuildNumber;
 use crate::replay_inspector::error::InspectorError;
 use crate::replay_inspector::settings;
@@ -857,7 +858,16 @@ fn scanning(browser: Browser) -> AnyElement {
 
     view()
         .app_class(class("p-2 gap-1"))
-        .child(text(caption).app_class(class("text-sm text-muted-foreground")))
+        .child(
+            view()
+                .app_class(class("flex-row items-center gap-2"))
+                .child(
+                    view()
+                        .app_class(class("animate-spin"))
+                        .child(icon(Icon::Loader, Points(14.0)).app_class(class("text-muted-foreground"))),
+                )
+                .child(text(caption).app_class(class("text-sm text-muted-foreground"))),
+        )
         .child(when(
             move || browser.progress.with(|progress| progress.total > 0),
             move || {
@@ -969,7 +979,7 @@ fn row_content(row: &ShownRow) -> Vec<AnyElement> {
 
     match &row.node {
         Node::Group(group) => {
-            let caret = if row.expanded { glyph::CARET_DOWN } else { glyph::CARET_RIGHT };
+            let caret = if row.expanded { Icon::ChevronDown } else { Icon::ChevronRight };
             vec![
                 indent,
                 glyph_view(caret, "text-muted-foreground"),
@@ -993,9 +1003,7 @@ fn leaf_lines(leaf: &Leaf) -> AnyElement {
         view().app_class(class("flex-row items-center gap-1 min-w-0 w-full")).child(text(leaf.label.clone()).app_class(class(tint)));
     if leaf.in_division {
         identity = identity.child(
-            svg(ImageSrc::svg_markup(glyph::USERS_THREE))
-                .w(px(12.0))
-                .h(px(12.0))
+            icon(Icon::Users, px(12.0))
                 .text_color(AdaptiveColor { light: hsla(LIGHT_SEMANTIC.division), dark: hsla(DARK_SEMANTIC.division) }),
         );
     }
@@ -1005,8 +1013,8 @@ fn leaf_lines(leaf: &Leaf) -> AnyElement {
             LinePart::Text(said) => text(said.clone())
                 .app_class(class("text-xs text-muted-foreground whitespace-nowrap"))
                 .into_element(),
-            LinePart::Glyph(glyph) => match glyph::markup(glyph) {
-                Some(markup) => glyph_view(markup, "text-muted-foreground"),
+            LinePart::Glyph(glyph) => match glyph::icon_of(glyph) {
+                Some(drawn) => glyph_view(drawn, "text-muted-foreground"),
                 None => text(*glyph).app_class(class("text-xs text-muted-foreground")).into_element(),
             },
         }),
@@ -1019,8 +1027,8 @@ fn leaf_lines(leaf: &Leaf) -> AnyElement {
         .into_element()
 }
 
-fn glyph_view(markup: &'static str, color: &'static str) -> AnyElement {
-    svg(ImageSrc::svg_markup(markup)).w(px(12.0)).h(px(12.0)).app_class(class(color)).into_element()
+fn glyph_view(drawn: Icon, color: &'static str) -> AnyElement {
+    icon(drawn, px(12.0)).app_class(class(color)).into_element()
 }
 
 fn menu_item_view(label: String, on_select: impl Fn() + 'static) -> AnyElement {

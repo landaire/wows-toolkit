@@ -1,8 +1,10 @@
-import { effect, keymap, signal, Text, View, windowSize } from "nsh";
+import { effect, keymap, signal, Text, untracked, View, windowSize } from "nsh";
 import { Command, Dialog } from "nsh/base";
 import { Palette, type AppTab, type PaletteLayer, type ShipSearch } from "wows-toolkit/native";
 import { Surface } from "./components";
+import { t } from "./i18n";
 import { searchFor } from "./search";
+import { Icon } from "./icons";
 import { colors, controlRadius } from "./theme";
 
 // How long typing rests before an index-backed layer asks the index.
@@ -49,7 +51,6 @@ let tabs: AppTab[] = [];
 let handlers: PaletteHandlers = {};
 let armorShips: (() => ShipListState) | null = null;
 let activeTab: () => string = () => "";
-let shellLabels = { tacticsBoard: "", checkUpdates: "", about: "" };
 const paletteOpen = signal(false);
 const layer = signal<Layer | null>(null);
 const query = signal("");
@@ -65,18 +66,25 @@ export function bindPalette(options: {
   handlers: PaletteHandlers;
   activeTab: () => string;
   armorShips?: () => ShipListState;
-  /** The words of the shell's own entries, which the GPUI palette has no strings for. */
-  shellLabels: { tacticsBoard: string; checkUpdates: string; about: string };
 }) {
   tabs = options.tabs;
   handlers = options.handlers;
   activeTab = options.activeTab;
   armorShips = options.armorShips ?? null;
-  shellLabels = options.shellLabels;
+  // The ship layer fills once the catalogue lands, without waiting for a keystroke.
+  const ships = armorShips;
+  if (ships) {
+    effect(() => {
+      if (layer()?.layer !== "armorShips") return;
+      ships();
+      untracked(() => searchLayer(query()));
+    });
+  }
 }
 
+/** The palette's words in the current language; reading it in a render re-renders on a language change. */
 function text() {
-  return Palette.text(tabs.map((tab) => tab.label));
+  return Palette.text(tabs.map((tab) => t(tab.labelKey)));
 }
 
 function rootEntries(): Entry[] {
@@ -108,9 +116,10 @@ function rootEntries(): Entry[] {
   offer(words.themeSystem, { kind: "setTheme", theme: "system" });
   offer(words.themeDark, { kind: "setTheme", theme: "dark" });
   offer(words.themeLight, { kind: "setTheme", theme: "light" });
-  offer(shellLabels.tacticsBoard, { kind: "tacticsBoard" });
-  offer(shellLabels.checkUpdates, { kind: "checkUpdates" });
-  offer(shellLabels.about, { kind: "about" });
+  // The shell's own entries, which the GPUI palette has no strings for.
+  offer(t("ui.windows.tactics_board"), { kind: "tacticsBoard" });
+  offer(t("ui.menu.check_updates"), { kind: "checkUpdates" });
+  offer(`${t("ui.menu.about")} WoWs Toolkit`, { kind: "about" });
   return entries;
 }
 
@@ -222,11 +231,12 @@ function LayerHeader(props: { title: string }) {
         accessibilityLabel={`Back to ${words.title}`}
         onPress={openPalette}
         hoverStyle={{ backgroundColor: colors.accent }}
-        style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: controlRadius() }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: controlRadius() }}
       >
-        <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{`< ${words.title}`}</Text>
+        <Icon name="chevron-left" size={12} color={colors.popoverForeground}/>
+        <Text style={{ fontSize: 12, color: colors.popoverForeground }}>{words.title}</Text>
       </View>
-      <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{">"}</Text>
+      <Icon name="chevron-right" size={12} color={colors.mutedForeground}/>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.title}</Text>
       <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{words.backHint}</Text>
     </View>

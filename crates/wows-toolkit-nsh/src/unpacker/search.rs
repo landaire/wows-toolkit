@@ -17,6 +17,8 @@ use wows_toolkit_viewmodel::unpacker::search::compile_query;
 use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
 
+use crate::icons::Icon;
+
 use super::Tab;
 use super::error::UnpackerError;
 use super::listing::BrowserSource;
@@ -24,7 +26,9 @@ use super::ui::ButtonStyle;
 use super::ui::button;
 use super::ui::caption;
 use super::ui::class;
+use super::ui::icon_button;
 use super::ui::status;
+use super::ui::tip;
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -226,9 +230,10 @@ fn hit_row(run: SearchRun, tab: Tab, at: Position) -> AnyElement {
     };
 
     let actions = menu()
-        .trigger(
-            button("...", ButtonStyle::Ghost).label(move || format!("Actions for {}", label())),
-        )
+        .trigger({
+            let actions_label = move || format!("Actions for {}", label());
+            icon_button(Icon::Ellipsis, String::new()).label(actions_label).tooltip(tip(actions_label))
+        })
         .popup_class("min-w-48 p-1 rounded-(--radius) border border-border bg-popover")
         .child(item("ui.unpacker.view_contents", |tab, _, path| tab.open_viewer(path)))
         .child(item("ui.unpacker.queue", |tab, _, path| tab.queue_path(path)))

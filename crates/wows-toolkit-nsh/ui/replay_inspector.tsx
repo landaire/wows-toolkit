@@ -1,9 +1,8 @@
 import type { JSX, Signal } from "nsh";
-import { effect, Overlay, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, Image, Overlay, Scroll, signal, Text, untracked, View } from "nsh";
 import {
   Button as BaseButton,
   Checkbox,
-  ContextMenu,
   DockArea,
   Editor,
   Menu,
@@ -23,11 +22,13 @@ import {
   type GameDataSnapshot,
   type ReplaySummary,
 } from "wows-toolkit/native";
-import { Button, MenuRow, Surface } from "./components";
+import { Button, errorMessage, MenuRow, Spinner, Surface } from "./components";
 import { t } from "./i18n";
 import { appSettings, editReplayPreferences, editSetting } from "./settings_store";
 import { debugMode } from "./shell/status";
 import * as toast from "./shell/toast";
+import { popOutRenderer } from "./shell/windows";
+import { CheckMark, Icon, type IconName } from "./icons";
 import { colors, controlRadius, semantic } from "./theme";
 
 type Grouping = "date" | "ship" | "none";
@@ -87,9 +88,12 @@ type Workspace = {
 
 export type RenderRequest = { path: string; alts: string[] };
 
-/** What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays. */
+/**
+ * What the app draws in a docked viewport: a replay on its minimap, or a session window another end plays.
+ * `popOut` moves a renderer into a window of its own.
+ */
 export type ViewportSlots = {
-  renderer: (path: string, alts: string[]) => JSX.Element;
+  renderer: (path: string, alts: string[], popOut: () => void) => JSX.Element;
   watched: (replayId: string) => JSX.Element;
 };
 
@@ -335,14 +339,34 @@ function replayStem(path: string): string {
 
 /** Docks a session window another end is playing in the game's own workspace. */
 export function watchSharedWindow(replayId: string, title: string) {
-  activeWorkspace.set(MAIN);
   openViewport(main, { kind: "watched", replayId, title });
 }
 
 /** Docks a renderer for `path` in the game's own workspace, for search results and the palette. */
 export function renderInInspector(path: string) {
-  activeWorkspace.set(MAIN);
   openViewport(main, { kind: "renderer", path, alts: [], title: replayStem(path) });
+}
+
+/** The opened replay directories, each an app tab after the Replay Inspector's. */
+export function replayDirectories(): GameDataSnapshot["directories"] {
+  return gameData()?.directories ?? [];
+}
+
+/** Whether the pinned directories were read at startup; a pin before then would drop them. */
+export function pinsRestored(): boolean {
+  return gameData()?.pinnedRestored ?? false;
+}
+
+/** Shows the listing of `directory`, or the game's own when `null`, as the app's tab selection says. */
+export function showReplayWorkspace(directory: string | null) {
+  activeWorkspace.set(directory ?? MAIN);
+}
+
+let showWorkspaceTab: (directory: string | null) => void = showReplayWorkspace;
+
+/** Has the app select the tab of a workspace the inspector brings forward: a directory just opened, or the game's own when the shown directory closes. */
+export function bindWorkspaceTabs(show: (directory: string | null) => void) {
+  showWorkspaceTab = show;
 }
 
 /**
@@ -479,7 +503,7 @@ export async function openReplayDirectoryDialog() {
     pendingDirectory = { path, known: new Set((gameData()?.directories ?? []).map((entry) => entry.path)) };
     await GameData.openDirectory(path, false);
     if ((gameData()?.directories ?? []).some((entry) => entry.path === path)) {
-      activeWorkspace.set(path);
+      showWorkspaceTab(path);
       pendingDirectory = null;
     }
   } catch (error) {
@@ -516,17 +540,18 @@ function adoptGameData(next: GameDataSnapshot) {
   }
   const changed = kept.length !== existing.size || kept.some((ws, index) => directoryWorkspaces()[index] !== ws);
   if (changed) directoryWorkspaces.set(kept);
-  if (activeWorkspace() !== MAIN && !kept.some((ws) => ws.key === activeWorkspace())) activeWorkspace.set(MAIN);
+  if (activeWorkspace() !== MAIN && !kept.some((ws) => ws.key === activeWorkspace())) showWorkspaceTab(null);
   if (pendingDirectory !== null) {
     const pending = pendingDirectory;
     const shown = next.directories.find((entry) => entry.path === pending.path) ?? next.directories.find((entry) => !pending.known.has(entry.path));
     if (shown) {
-      activeWorkspace.set(shown.path);
+      showWorkspaceTab(shown.path);
       pendingDirectory = null;
     }
   }
 
   if (before === null) return;
+  followGameDataEdges(before, next);
   if (next.phase === "ready" && before.phase !== "ready") void checkLatestConstants();
   // Rows are named from the game data, so a new install or build lists again.
   if (next.wowsDir !== before.wowsDir || next.phase !== before.phase || next.version !== before.version) {
@@ -576,7 +601,55 @@ async function checkGameData() {
   }
 }
 
-function closeDirectory(path: string) {
+/** Set when game data became ready, until the main listing next reports what it holds. */
+let awaitingListedReplays = false;
+
+/** What GPUI reports when the game data finishes loading, and the open replays rated once the PR table arrives. */
+function followGameDataEdges(before: GameDataSnapshot, next: GameDataSnapshot) {
+  if (next.phase === "ready" && before.phase !== "ready") {
+    toast.ok(t("ui.messages.game_data_loaded"));
+    awaitingListedReplays = true;
+  }
+  if (next.personalRatingLoaded && !before.personalRatingLoaded) rerateAll();
+}
+
+/** Warns once after game data became ready when the install's listing holds no replay. */
+function noteListedReplays(ws: Workspace, builds: ListedBuild[]) {
+  if (ws.key !== MAIN || !awaitingListedReplays) return;
+  awaitingListedReplays = false;
+  if (builds.every((build) => build.replays === 0)) toast.warn(t("ui.messages.no_replays_detected"));
+}
+
+/** Rates the rows of open replays read before the personal-rating table loaded. */
+function rerateAll() {
+  for (const ws of allWorkspaces()) {
+    for (const tab of Object.values(ws.tabs())) void rerateTab(tab);
+  }
+}
+
+async function rerateTab(tab: ReplayTab) {
+  const state = tab.state();
+  if (state.kind !== "loaded") return;
+  const read = state.summary.document;
+  let rated: ReplaySummary | null | undefined;
+  try {
+    rated = await ReplayInspectorService.rerate(read);
+  } catch (error) {
+    toast.failed(errorText(error));
+    return;
+  }
+  if (rated == null) return;
+  const shown = tab.state();
+  // A tab closed or read again meanwhile does not take the rated copy.
+  if (tab.closed || shown.kind !== "loaded" || shown.summary.document !== read) {
+    ReplayInspectorService.close(rated.document);
+    return;
+  }
+  tab.state.set({ kind: "loaded", summary: rated });
+}
+
+/** Closes an opened directory's tab. A pinned one stays open. */
+export function closeReplayDirectory(path: string) {
   try {
     GameData.closeDirectory(path);
   } catch (error) {
@@ -584,7 +657,7 @@ function closeDirectory(path: string) {
   }
 }
 
-async function pinDirectory(path: string, pinned: boolean) {
+export async function pinReplayDirectory(path: string, pinned: boolean) {
   try {
     await GameData.pinDirectory(path, pinned);
   } catch (error) {
@@ -592,7 +665,7 @@ async function pinDirectory(path: string, pinned: boolean) {
   }
 }
 
-function IconButton(props: { label: string; glyph: string; tooltip?: string; onPress?: () => void }) {
+function IconButton(props: { label: string; icon: IconName; tooltip?: string; onPress?: () => void }) {
   return (
     <View
       role="button"
@@ -603,7 +676,7 @@ function IconButton(props: { label: string; glyph: string; tooltip?: string; onP
       activeStyle={{ opacity: 0.68 }}
       style={{ minWidth: 26, height: 24, paddingHorizontal: 5, borderRadius: controlRadius(), alignItems: "center", justifyContent: "center" }}
     >
-      <Text style={{ fontSize: 12.5, color: colors.foreground }}>{props.glyph}</Text>
+      <Icon name={props.icon} size={15} color={colors.foreground}/>
     </View>
   );
 }
@@ -632,7 +705,7 @@ function OptionCheckbox(props: { label: string; accessibilityLabel?: string; too
       tooltip={props.tooltip ? <Hint text={props.tooltip}/> : undefined}
       class="group flex-row items-center gap-2"
       indicatorClass="w-[16px] h-[16px] rounded-[4px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<CheckMark checked={props.checked}/>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <Text style={{ fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
@@ -652,7 +725,7 @@ function ActionItem(props: { label: string; checked?: boolean; disabled?: boolea
       activeStyle={{ opacity: 0.72 }}
       style={{ height: 30, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 8, opacity: props.disabled ? 0.45 : 1 }}
     >
-      <Text style={{ width: 12, fontSize: 12, color: colors.popoverForeground }}>{props.checked ? "x" : ""}</Text>
+      <View style={{ width: 12 }}><If when={props.checked}><Icon name="check" size={12} color={colors.popoverForeground}/></If></View>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
     </MenuItem>
   );
@@ -665,7 +738,7 @@ function ListingOptions() {
       align="end"
       offset={4}
       margin={8}
-      trigger={<IconButton label={t("ui.replay.listing_options")} glyph="..."/>}
+      trigger={<IconButton label={t("ui.replay.listing_options")} icon="settings"/>}
     >
       <Surface style={{ minWidth: 240, padding: 10, gap: 8, backgroundColor: colors.popover }}>
         <OptionCheckbox
@@ -730,7 +803,7 @@ function OpenMenu() {
       align="end"
       offset={4}
       margin={8}
-      trigger={<IconButton label={t("ui.replay.open")} glyph="Open"/>}
+      trigger={<IconButton label={t("ui.replay.open")} icon="folder-open"/>}
     >
       <Surface style={{ minWidth: 220, padding: 5, backgroundColor: colors.popover }}>
         <MenuRow label={t("ui.replay.open_file")} onSelect={() => void openReplayFileDialog()}/>
@@ -743,7 +816,7 @@ function OpenMenu() {
 function ListingHeader() {
   return (
     <View style={{ minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-      <IconButton label={t("ui.replay.collapse_listing")} glyph="<<" onPress={() => setListingCollapsed(true)}/>
+      <IconButton label={t("ui.replay.collapse_listing")} icon="panel-left-close" onPress={() => setListingCollapsed(true)}/>
       <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{t("ui.replay.listing_caption")}</Text>
       <ListingOptions/>
       <OpenMenu/>
@@ -754,7 +827,7 @@ function ListingHeader() {
 function ListingRail() {
   return (
     <View style={{ width: 32, alignItems: "center", paddingTop: 4, borderRightWidth: 1, borderRightColor: colors.border }}>
-      <IconButton label={t("ui.replay.expand_listing")} glyph=">>" onPress={() => setListingCollapsed(false)}/>
+      <IconButton label={t("ui.replay.expand_listing")} icon="panel-left-open" onPress={() => setListingCollapsed(false)}/>
     </View>
   );
 }
@@ -762,6 +835,10 @@ function ListingRail() {
 function DockTabLabel(props: { ws: Workspace; id: string }) {
   const tab = () => props.ws.tabs()[props.id];
   const viewport = () => props.ws.viewports()[props.id];
+  const loaded = () => {
+    const state = tab()?.state();
+    return state?.kind === "loaded" ? state.summary : null;
+  };
   const title = () => {
     const shown = tab();
     if (shown) return tabTitle(shown);
@@ -777,6 +854,12 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
       tooltip={<Hint text={hint()}/>}
       style={{ maxWidth: 300, flexDirection: "row", alignItems: "center", gap: 6 }}
     >
+      <If when={loaded()?.nationFlag}>
+        {(flag) => <Image source={flag()} style={{ width: 23, height: 16 }}/>}
+      </If>
+      <If when={loaded()?.classIcon}>
+        {(icon) => <Image source={icon()} style={{ width: 16, height: 16, tintColor: colors.foreground, transform: [{ rotate: "90deg" }] }}/>}
+      </If>
       <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12.5 }}>{title()}</Text>
       <View
         role="button"
@@ -785,17 +868,17 @@ function DockTabLabel(props: { ws: Workspace; id: string }) {
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
       >
-        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
+        <Icon name="x" size={12} color={colors.mutedForeground}/>
       </View>
     </View>
   );
 }
 
-function outcomeLabel(outcome: ReplaySummary["outcome"]): { text: string; color: string } | null {
+function outcomeLabel(outcome: ReplaySummary["outcome"]): { text: string; color: string; icon: IconName } | null {
   switch (outcome) {
-    case "win": return { text: "Victory", color: semantic.win };
-    case "loss": return { text: "Defeat", color: semantic.loss };
-    case "draw": return { text: "Draw", color: semantic.draw };
+    case "win": return { text: "Victory", color: semantic.win, icon: "trophy" };
+    case "loss": return { text: "Defeat", color: semantic.loss, icon: "face-slightly-frowning" };
+    case "draw": return { text: "Draw", color: semantic.draw, icon: "equal" };
     default: return null;
   }
 }
@@ -929,11 +1012,17 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
       <View selectable style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <If when={props.summary.incompleteResults}>
           <View tooltip={<Hint text={t("ui.replay.incomplete_results_tooltip")}/>} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: semantic.warn }}>{`(i) ${t("ui.replay.incomplete_results")}`}</Text>
+            <Icon name="info" size={14} color={semantic.warn}/>
+            <Text style={{ fontSize: 13, fontWeight: "700", color: semantic.warn }}>{t("ui.replay.incomplete_results")}</Text>
           </View>
         </If>
         <If when={outcome()}>
-          {(shown) => <Text style={{ fontSize: 14, fontWeight: "700", color: shown().color }}>{shown().text}</Text>}
+          {(shown) => (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Icon name={shown().icon} size={16} color={shown().color}/>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: shown().color }}>{shown().text}</Text>
+            </View>
+          )}
         </If>
         <If when={props.summary.personalRating}>
           {(rating) => (
@@ -944,7 +1033,10 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
         </If>
       </View>
       <If when={props.tab.reparsing()}>
-        <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t("ui.replay.loading")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Spinner label={t("ui.replay.loading")}/>
+          <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{t("ui.replay.loading")}</Text>
+        </View>
       </If>
       <If when={props.tab.exportStatus()}>
         <Text selectable style={{ fontSize: 12, color: colors.mutedForeground }}>{props.tab.exportStatus()!}</Text>
@@ -960,6 +1052,9 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
         style={{
           height: 26,
           paddingHorizontal: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
           justifyContent: "center",
           borderRadius: controlRadius(),
           borderWidth: 1,
@@ -968,6 +1063,7 @@ function HeaderRow(props: { tab: ReplayTab; summary: ReplaySummary; onRender?: (
           opacity: noChat() ? 0.45 : 1,
         }}
       >
+        <Icon name="panel-right-open" size={14} color={colors.foreground}/>
         <Text style={{ fontSize: 12.5, color: colors.foreground }}>{t("ui.replay.chat")}</Text>
       </BaseButton>
     </View>
@@ -1015,7 +1111,7 @@ function ChatPanel(props: { summary: ReplaySummary }) {
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 6 }}>
       <View style={{ flexDirection: "row", gap: 6, paddingHorizontal: 8 }}>
-        <Button label={t("ui.replay.chat_copy_all")} variant="ghost" onPress={() => copyChat(props.summary)}/>
+        <Button label={t("ui.replay.chat_copy_all")} icon="copy" variant="ghost" onPress={() => copyChat(props.summary)}/>
         <Button label={t("ui.replay.chat_save_to_file")} variant="ghost" onPress={() => void saveChat(props.summary)}/>
       </View>
       <Scroll style={{ flex: 1, minHeight: 0 }}>
@@ -1037,7 +1133,7 @@ function ChatPanel(props: { summary: ReplaySummary }) {
                     hoverStyle={{ backgroundColor: colors.accent }}
                     style={{ paddingHorizontal: 5, borderRadius: controlRadius() }}
                   >
-                    <Text style={{ fontSize: 11, color: colors.mutedForeground }}>Copy</Text>
+                    <Icon name="copy" size={13} color={colors.mutedForeground}/>
                   </View>
                 </View>
                 <Text style={{ fontSize: 12.5, color: line().messageColor }}>{line().message}</Text>
@@ -1080,7 +1176,7 @@ function SidePanelView(props: { tab: ReplayTab; summary: ReplaySummary; side: Si
     <View style={{ width: 360, minHeight: 0, gap: 6, borderLeftWidth: 1, borderLeftColor: colors.border }}>
       <View style={{ minHeight: 30, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: "700", color: colors.foreground }}>{sideTitle(props.side)}</Text>
-        <IconButton label={t("ui.replay.close_side_panel")} glyph=">>" onPress={() => props.tab.side.set(null)}/>
+        <IconButton label={t("ui.replay.close_side_panel")} icon="panel-right-close" onPress={() => props.tab.side.set(null)}/>
       </View>
       <If when={props.side.kind === "chat"} else={<RawJsonView title={sideTitle(props.side)} json={json()}/>}>
         <ChatPanel summary={props.summary}/>
@@ -1140,7 +1236,8 @@ function ReplayPanel(props: { ws: Workspace; id: string; onRender?: (request: Re
               )}
             </If>
             <If when={state().kind === "loading"}>
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Spinner label={t("ui.replay.loading")}/>
                 <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{t("ui.replay.loading")}</Text>
               </View>
             </If>
@@ -1148,6 +1245,14 @@ function ReplayPanel(props: { ws: Workspace; id: string; onRender?: (request: Re
         );
       }}
     </If>
+  );
+}
+
+/** Moves a docked renderer into a window of its own; it stays docked when the window could not be opened. */
+function popOutViewport(ws: Workspace, id: string, path: string, alts: string[]) {
+  popOutRenderer(path, alts).then(
+    () => closeTab(ws, id),
+    (error) => console.warn(`replay renderer: the window could not be opened: ${errorMessage(error)}`),
   );
 }
 
@@ -1167,7 +1272,9 @@ function ReplayDock(props: { ws: Workspace; onRender?: (request: RenderRequest) 
         if (viewport && props.viewports) {
           return (
             <View style={{ flex: 1, minHeight: 0 }}>
-              {viewport.kind === "renderer" ? props.viewports.renderer(viewport.path, viewport.alts) : props.viewports.watched(viewport.replayId)}
+              {viewport.kind === "renderer"
+                ? props.viewports.renderer(viewport.path, viewport.alts, () => popOutViewport(ws, panel.id, viewport.path, viewport.alts))
+                : props.viewports.watched(viewport.replayId)}
             </View>
           );
         }
@@ -1287,6 +1394,7 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
               onReplayAppeared={({ path }) => void replayLanded(ws, path)}
               onReplayChanged={({ path }) => replayChanged(ws, path)}
               onBuildsListed={({ builds }) => {
+                noteListedReplays(ws, builds);
                 void fetchMissingConstants(builds);
                 offerMissingBuilds(builds);
               }}
@@ -1304,76 +1412,6 @@ function WorkspaceView(props: { ws: Workspace; view: ReplayInspectorProps }) {
         </ResizablePanel>
       </ResizablePanelGroup>
       <PreviewCard ws={ws} previewSlot={props.view.previewSlot}/>
-    </View>
-  );
-}
-
-function WorkspaceTab(props: { label: string; selected: boolean; onSelect: () => void; children?: JSX.Element }) {
-  return (
-    <View
-      role="tab"
-      accessibilityState={{ selected: props.selected }}
-      onPress={props.onSelect}
-      hoverStyle={props.selected ? undefined : { backgroundColor: colors.accent }}
-      style={{
-        height: 30,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        paddingHorizontal: 10,
-        borderBottomWidth: 2,
-        borderBottomColor: props.selected ? colors.primary : "transparent",
-      }}
-    >
-      <Text style={{ fontSize: 12.5, fontWeight: props.selected ? "600" : "400", color: props.selected ? colors.foreground : colors.mutedForeground }}>{props.label}</Text>
-      {props.children}
-    </View>
-  );
-}
-
-/** The game's replays and every opened directory, one tab each; a directory is pinned or closed from its tab. */
-function WorkspaceStrip() {
-  const entries = () => gameData()?.directories ?? [];
-  return (
-    <View role="tablist" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 2, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface }}>
-      <WorkspaceTab label={t("ui.tabs.replay_parser")} selected={activeWorkspace() === MAIN} onSelect={() => activeWorkspace.set(MAIN)}/>
-      <Each of={entries()} key={(entry) => entry.path}>
-        {(entry) => (
-          <ContextMenu
-            trigger={
-              <View tooltip={<Hint text={entry().path}/>}>
-                <WorkspaceTab label={entry().label} selected={activeWorkspace() === entry().path} onSelect={() => activeWorkspace.set(entry().path)}>
-                  <If
-                    when={entry().pinned}
-                    else={
-                      <View
-                        role="button"
-                        accessibilityLabel={`Close directory ${entry().label}`}
-                        tooltip={<Hint text="Close directory"/>}
-                        onPress={() => closeDirectory(entry().path)}
-                        hoverStyle={{ backgroundColor: colors.accent }}
-                        style={{ paddingHorizontal: 4, borderRadius: controlRadius() }}
-                      >
-                        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>x</Text>
-                      </View>
-                    }
-                  >
-                    <Text style={{ fontSize: 11, color: colors.mutedForeground }}>[Pinned]</Text>
-                  </If>
-                </WorkspaceTab>
-              </View>
-            }
-          >
-            <Surface style={{ minWidth: 200, padding: 5, backgroundColor: colors.popover }}>
-              <ActionItem
-                label={entry().pinned ? "Unpin directory" : "Pin directory"}
-                onSelect={() => void pinDirectory(entry().path, !entry().pinned)}
-              />
-              <ActionItem label="Close directory" disabled={entry().pinned} onSelect={() => closeDirectory(entry().path)}/>
-            </Surface>
-          </ContextMenu>
-        )}
-      </Each>
     </View>
   );
 }
@@ -1411,17 +1449,11 @@ export function ReplayInspectorView(props: ReplayInspectorProps) {
     const path = props.openPath;
     props.openRequestId;
     if (path == null) return;
-    untracked(() => {
-      activeWorkspace.set(MAIN);
-      openReplay(main, path, false);
-    });
+    untracked(() => openReplay(main, path, false));
   });
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
-      <If when={directoryWorkspaces().length > 0}>
-        <WorkspaceStrip/>
-      </If>
       <Each of={allWorkspaces()} key={(ws) => ws.key}>
         {(ws) => (
           <View style={{ flex: 1, minHeight: 0, display: activeWorkspace() === ws().key ? "flex" : "none" }}>

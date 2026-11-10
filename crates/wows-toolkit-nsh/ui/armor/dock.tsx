@@ -6,9 +6,12 @@ import { Button, MenuRow, Surface } from "../components";
 import { Frame } from "../frame";
 import * as toast from "../shell/toast";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, controlRadius } from "../theme";
 import { armor, call, errorText, type ExportResult, hover, type HoverView, type PaneView } from "./state";
 import { IconButton, Swatch } from "./widgets";
+
+const paneBackground = "#1b1d22";
 
 /** Reports an export the way the other front ends do; a cancelled save says nothing. */
 export async function runExport(command: () => Promise<ExportResult | null>) {
@@ -35,7 +38,11 @@ function CheckItem(props: { label: string; checked: boolean; disabled?: boolean;
       hoverStyle={{ backgroundColor: colors.accent }}
       style={{ height: 28, paddingHorizontal: 10, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 8, opacity: props.disabled ? 0.45 : 1 }}
     >
-      <Text style={{ width: 12, fontSize: 12, color: colors.popoverForeground }}>{props.checked ? "x" : ""}</Text>
+      <View style={{ width: 12 }}>
+        <If when={props.checked}>
+          <Icon name="check" size={12} color={colors.popoverForeground}/>
+        </If>
+      </View>
       <Text style={{ flex: 1, fontSize: 13, color: colors.popoverForeground }}>{props.label}</Text>
     </MenuItem>
   );
@@ -95,16 +102,34 @@ function ViewportMenu(props: { pane: PaneView }) {
   );
 }
 
-/** The plate or camera ring under the pointer, beside it. */
-function HoverTip(props: { pane: PaneView }) {
+type Size = { width: number; height: number };
+
+/** The plate or camera ring under the pointer, beside it and kept 8 px inside the pane. */
+function HoverTip(props: { pane: PaneView; area: Size }) {
+  const tip = signal<Size>({ width: 0, height: 0 });
   const here = () => {
     const current = hover();
     return current && current.paneId === props.pane.id && (current.plate || current.ring?.length) ? current : null;
   };
+  const place = (at: number, size: number, room: number) => Math.max(8, Math.min(at + 16, room - size - 8));
   return (
     <If when={here()}>
       {(current) => (
-        <View style={{ position: "absolute", left: current().x + 16, top: current().y + 16, maxWidth: 280, padding: 8, gap: 3, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}>
+        <View
+          onLayout={({ bounds }) => tip.set({ width: bounds.size.width, height: bounds.size.height })}
+          style={{
+            position: "absolute",
+            left: place(current().x, tip().width, props.area.width),
+            top: place(current().y, tip().height, props.area.height),
+            maxWidth: 280,
+            padding: 8,
+            gap: 3,
+            borderRadius: controlRadius(),
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.popover,
+          }}
+        >
           <If when={current().ring?.length} else={
             <If when={current().plate}>
               {(plate) => (
@@ -157,9 +182,10 @@ function ExportConfirm(props: { pane: PaneView }) {
   );
 }
 
-function Overlay(props: { text: string; tone?: "error" }) {
+/** A pane message; `opaque` hides whatever the pane last drew behind it. */
+function Overlay(props: { text: string; tone?: "error"; opaque?: boolean }) {
   return (
-    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}>
+    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: props.opaque ? paneBackground : undefined }}>
       <Text style={{ fontSize: 13, color: props.tone === "error" ? colors.destructive : colors.mutedForeground }}>{props.text}</Text>
     </View>
   );
@@ -168,12 +194,14 @@ function Overlay(props: { text: string; tone?: "error" }) {
 function Pane(props: { pane: PaneView; several: boolean }) {
   const view = () => armor();
   const pane = () => props.pane;
-  const state = (): { text: string; tone?: "error" } | null => {
+  const area = signal<Size>({ width: 0, height: 0 });
+  // A load in flight covers the previous ship, so it is not mistaken for the new one.
+  const state = (): { text: string; tone?: "error"; opaque?: boolean } | null => {
     const current = view();
     if (!current) return null;
     if (current.gpu === "initializing") return { text: t("ui.armor.initializing") };
     if (current.gpu === "failed") return { text: t("ui.armor.init_failed", { reason: current.gpuError ?? "" }), tone: "error" };
-    if (pane().loading) return { text: t("ui.armor.loading_named_ship", { ship: pane().loading! }) };
+    if (pane().loading) return { text: t("ui.armor.loading_named_ship", { ship: pane().loading! }), opaque: true };
     if (pane().loadError) return { text: pane().loadError!, tone: "error" };
     if (!pane().ship) return { text: t("ui.armor.select_ship") };
     return null;
@@ -181,13 +209,14 @@ function Pane(props: { pane: PaneView; several: boolean }) {
   return (
     <View
       testID={`armor-viewport-pane-${pane().number}`}
+      onLayout={({ bounds }) => area.set({ width: bounds.size.width, height: bounds.size.height })}
       style={{
         flex: 1,
         minWidth: 0,
         minHeight: 0,
         borderWidth: props.several ? 2 : 0,
         borderColor: pane().active ? colors.primary : "transparent",
-        backgroundColor: "#1b1d22",
+        backgroundColor: paneBackground,
       }}
     >
       <Frame
@@ -207,15 +236,15 @@ function Pane(props: { pane: PaneView; several: boolean }) {
         </Each>
       </View>
       <If when={state()}>
-        {(current) => <Overlay text={current().text} tone={current().tone}/>}
+        {(current) => <Overlay text={current().text} tone={current().tone} opaque={current().opaque}/>}
       </If>
-      <HoverTip pane={pane()}/>
+      <HoverTip pane={pane()} area={area()}/>
       <ViewportMenu pane={pane()}/>
       <If when={pane().exportConfirm}>
         <ExportConfirm pane={pane()}/>
       </If>
       <View style={{ position: "absolute", top: 4, right: 4 }}>
-        <IconButton id={`armor-viewport-pane-close-${pane().number}`} glyph="x" label={t("ui.armor.close_pane")} onPress={() => call(Armor.closePane(pane().id))}/>
+        <IconButton id={`armor-viewport-pane-close-${pane().number}`} icon="x" label={t("ui.armor.close_pane")} onPress={() => call(Armor.closePane(pane().id))}/>
       </View>
     </View>
   );
@@ -280,7 +309,7 @@ export function Legend() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <IconButton
             id="armor-legend-collapse"
-            glyph={legend()?.collapsed ? ">" : "v"}
+            icon={legend()?.collapsed ? "chevron-right" : "chevron-down"}
             label={t("ui.armor.legend_collapse")}
             onPress={() => call(Armor.setLegendCollapsed(!legend()!.collapsed))}
           />
@@ -296,7 +325,7 @@ export function Legend() {
           >
             <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.popoverForeground }}>{t("ui.armor.armor_thickness_title")}</Text>
           </View>
-          <IconButton id="armor-legend-close" glyph="x" label={t("ui.armor.legend_hide")} onPress={() => call(Armor.setLegendVisible(false))}/>
+          <IconButton id="armor-legend-close" icon="x" label={t("ui.armor.legend_hide")} onPress={() => call(Armor.setLegendVisible(false))}/>
         </View>
         <If when={!legend()?.collapsed}>
           <Each of={legend()?.entries ?? []} key="index">

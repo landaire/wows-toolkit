@@ -241,6 +241,8 @@ fn launcher_install_is_used_for_the_toolkit_and_game_data_reloads() {
     app.press("Use for toolkit").unwrap();
 
     wait_for_saved_wows_dir(&shown);
-    // The install holds no build, so the reloaded game data says it failed.
+    // The install holds no build, so the reloaded game data says it failed,
+    // where the inspector reports the load.
+    app.press("Replay Inspector").unwrap();
     app.wait_for_within("text:/^Game data failed to load: /", Duration::from_secs(30)).unwrap();
 }

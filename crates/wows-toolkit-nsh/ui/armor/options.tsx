@@ -3,6 +3,7 @@ import { Scroll, signal, Text, View } from "nsh";
 import { Select } from "nsh/base";
 import { Armor } from "wows-toolkit/native";
 import { t } from "../i18n";
+import { Icon } from "../icons";
 import { colors, controlRadius } from "../theme";
 import { PenSearch } from "./analysis";
 import { armor, type CamoGroup, type CamoView, call, type DisplayView, type HullView, type PartView, type ZoneView } from "./state";
@@ -36,7 +37,7 @@ function Chevron(props: { rowKey: string; label: string }) {
       hoverStyle={{ backgroundColor: colors.accent }}
       style={{ width: 16, height: 18, alignItems: "center", justifyContent: "center", borderRadius: 3 }}
     >
-      <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{openRows().includes(props.rowKey) ? "v" : ">"}</Text>
+      <Icon name={openRows().includes(props.rowKey) ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
     </View>
   );
 }
@@ -151,21 +152,21 @@ function TrajectoryPanel() {
         />
         <Select
           accessibilityLabel={t("ui.armor.trajectory_shell_tooltip")}
-          items={shells().map((shell) => ({ value: String(shell.index), title: shell.index === pen().firingShell ? `${shell.label} (selected)` : shell.label }))}
+          items={shells().map((shell) => ({ value: String(shell.index), title: shell.index === pen().firingShell ? `${shell.pickerLabel} (selected)` : shell.pickerLabel }))}
           value={pen().firingShell != null ? String(pen().firingShell) : null}
           disabled={shells().length === 0}
           onChange={({ value }) => { if (value) call(Armor.setFiringShell(Number(value))); }}
           popupStyle={{ padding: 4, borderRadius: controlRadius(), borderWidth: 1, borderColor: colors.border, backgroundColor: colors.popover }}
           itemStyle={{ minHeight: 26, paddingHorizontal: 8, borderRadius: 4, fontSize: 12.5, color: colors.popoverForeground }}
           itemClass="hover:bg-accent focus:bg-accent"
-          trigger={selectTrigger("armor-trajectory-shell", firingShell() ? `${t("ui.armor.trajectory_shell")} ${firingShell()!.label}` : t("ui.armor.trajectory_select_shell"))}
+          trigger={selectTrigger("armor-trajectory-shell", firingShell() ? `${t("ui.armor.trajectory_shell")} ${firingShell()!.pickerLabel}` : t("ui.armor.trajectory_select_shell"))}
         />
         <View style={{ gap: 2 }}>
           <Each of={pen().ships} key={(ship) => ship.paramIndex}>
             {(ship, index) => (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ flex: 1, fontSize: 12, color: colors.cardForeground }}>{ship().label}</Text>
-                <IconButton id={`armor-trajectory-remove-${index()}`} glyph="x" label="Remove ship" onPress={() => call(Armor.removePenShip(index()))}/>
+                <IconButton id={`armor-trajectory-remove-${index()}`} icon="x" label="Remove ship" onPress={() => call(Armor.removePenShip(index()))}/>
               </View>
             )}
           </Each>
@@ -242,24 +243,20 @@ function ZoneRow(props: { zone: ZoneView }) {
     <View>
       <View {...hoverable(() => Armor.hoverTreeZone(props.zone.name))} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
         <Chevron rowKey={key()} label={props.zone.label}/>
-        <CheckRow
-          label={props.zone.label}
-          labelHidden
-          state={props.zone.state}
-          onChange={(checked) => call(Armor.setZone(props.zone.name, checked, false))}
-        />
         <View
-          role="button"
+          testID={`armor-vis-zone-${props.zone.name}`}
+          role="checkbox"
           accessibilityLabel={props.zone.label}
-          onPress={(event) => {
-            if (event.modifiers.control || event.modifiers.platform) call(Armor.setZone(props.zone.name, true, true));
-            else call(Armor.setZone(props.zone.name, props.zone.state !== "on", false));
-          }}
-          style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}
+          accessibilityState={{ checked: props.zone.state === "partial" ? "mixed" : props.zone.state === "on" }}
+          onPress={(event) => call(Armor.setZone(props.zone.name, props.zone.state !== "on", event.modifiers.control || event.modifiers.platform))}
+          style={{ width: 14, height: 14, borderRadius: 3, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: props.zone.state === "on" ? colors.primary : props.zone.state === "partial" ? colors.secondary : undefined }}
         >
-          <Text style={{ fontSize: 12.5, color: colors.cardForeground }}>{props.zone.label}</Text>
-          <Text style={{ fontSize: 11, color: colors.textFaint }}>{t("ui.armor.ctrl_click_solo")}</Text>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: props.zone.state === "partial" ? semantic.warn : colors.primaryForeground }}>
+            {props.zone.state === "on" ? "x" : props.zone.state === "partial" ? "-" : ""}
+          </Text>
         </View>
+        <Text style={{ marginLeft: 4, fontSize: 12.5, color: colors.cardForeground }}>{props.zone.label}</Text>
+        <Text style={{ marginLeft: 4, fontSize: 11, color: colors.textFaint }}>{t("ui.armor.ctrl_click_solo")}</Text>
       </View>
       <If when={openRows().includes(key())}>
         <Each of={props.zone.parts} key={(part) => part.name}>
@@ -419,8 +416,8 @@ function RingsSection(props: { display: DisplayView }) {
   return (
     <View style={{ gap: 6 }}>
       <Heading text={t("ui.armor.camera_rings")}/>
+      <CheckRow id="armor-camera-rings" label={t("ui.armor.show_camera_rings")} checked={rings().shown} disabled={!rings().available} onChange={(on) => call(Armor.setRingsShown(on))}/>
       <If when={rings().available} else={<Hint text={t("ui.armor.no_ship_loaded")}/>}>
-        <CheckRow id="armor-camera-rings" label={t("ui.armor.show_camera_rings")} checked={rings().shown} onChange={(on) => call(Armor.setRingsShown(on))}/>
         <ChoiceRow
           disabled={!rings().shown}
           choices={rings().modes.map((mode) => ({ value: mode.name, label: mode.name, selected: mode.selected, id: `armor-camera-mode-${mode.name}` }))}
@@ -430,12 +427,12 @@ function RingsSection(props: { display: DisplayView }) {
         <SliderRow id="armor-camera-height" label={t("ui.armor.camera_height")} value={rings().height} min={-1} max={1} disabled={!rings().shown} onChange={(v) => call(Armor.setRingsHeight(v))}/>
         <CheckRow id="armor-camera-zoom-path" label={t("ui.armor.show_camera_zoom_path")} checked={rings().zoomPath} disabled={!rings().shown} onChange={(on) => call(Armor.setZoomPath(on))}/>
         <If when={rings().zoomPath}>
-          <View style={{ paddingLeft: 18, gap: 4 }}>
+          <View style={{ paddingLeft: 18, flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 4 }}>
             <CheckRow id="armor-camera-zoom-path-fov" label={t("ui.armor.zoom_path_regular_fov")} checked={rings().zoomPathAtFov} disabled={!rings().shown} onChange={(on) => call(Armor.setZoomPathAtFov(on))}/>
             <CheckRow id="armor-camera-zoom-path-max-fov" label={t("ui.armor.zoom_path_max_fov")} checked={rings().zoomPathAtMaxFov} disabled={!rings().shown} onChange={(on) => call(Armor.setZoomPathAtMaxFov(on))}/>
           </View>
         </If>
-        <CheckRow id="armor-camera-perspective" label={t("ui.armor.camera_perspective")} checked={perspective().enabled} disabled={!rings().shown} onChange={(on) => call(Armor.setPerspective(on))}/>
+        <CheckRow id="armor-camera-perspective" label={t("ui.armor.camera_perspective")} checked={perspective().enabled} onChange={(on) => call(Armor.setPerspective(on))}/>
         <If when={perspective().enabled}>
           <View style={{ paddingLeft: 18, gap: 4 }}>
             <SliderRow id="armor-perspective-fov" label={t("ui.armor.perspective_fov")} value={perspective().fov} min={30} max={120} step={1} digits={0} onChange={(v) => call(Armor.setPerspectiveFov(v))}/>
@@ -466,32 +463,38 @@ const lightingSliders: { field: "flat" | "intensity" | "azimuth" | "elevation" |
 
 function LightingSection(props: { display: DisplayView }) {
   const lighting = () => props.display.lighting;
+  const sliders = (from: number, to?: number) => (
+    <Each of={lightingSliders.slice(from, to)}>
+      {(slider) => (
+        <SliderRow
+          id={`armor-lighting-${slider().field}`}
+          label={t(slider().key)}
+          value={lighting()[slider().field]}
+          min={slider().min}
+          max={slider().max}
+          step={slider().step}
+          digits={slider().digits}
+          disabled={!lighting().enabled}
+          onChange={(value) => call(Armor.setLighting(slider().field, value))}
+        />
+      )}
+    </Each>
+  );
+  // Each color row follows the slider it tints: ambient after Flat, key after Intensity.
   return (
     <View style={{ gap: 6 }}>
       <Heading text={t("ui.armor.lighting")}/>
       <CheckRow id="armor-lighting-enabled" label={t("ui.armor.lighting_enabled")} checked={lighting().enabled} onChange={(on) => call(Armor.setLightingEnabled(on))}/>
       <View style={{ flexDirection: "row", gap: 4 }}>
-        <ToolButton id="armor-lighting-ingame" label={t("ui.armor.lighting_preset_ingame")} onPress={() => call(Armor.setLightingPreset("inGame"))}/>
-        <ToolButton id="armor-lighting-flat" label={t("ui.armor.lighting_preset_flat")} onPress={() => call(Armor.setLightingPreset("flat"))}/>
-        <ToolButton id="armor-lighting-studio" label={t("ui.armor.lighting_preset_studio")} onPress={() => call(Armor.setLightingPreset("studio"))}/>
+        <ToolButton id="armor-lighting-ingame" label={t("ui.armor.lighting_preset_ingame")} disabled={!lighting().enabled} onPress={() => call(Armor.setLightingPreset("inGame"))}/>
+        <ToolButton id="armor-lighting-flat" label={t("ui.armor.lighting_preset_flat")} disabled={!lighting().enabled} onPress={() => call(Armor.setLightingPreset("flat"))}/>
+        <ToolButton id="armor-lighting-studio" label={t("ui.armor.lighting_preset_studio")} disabled={!lighting().enabled} onPress={() => call(Armor.setLightingPreset("studio"))}/>
       </View>
-      <Each of={lightingSliders}>
-        {(slider) => (
-          <SliderRow
-            id={`armor-lighting-${slider().field}`}
-            label={t(slider().key)}
-            value={lighting()[slider().field]}
-            min={slider().min}
-            max={slider().max}
-            step={slider().step}
-            digits={slider().digits}
-            disabled={!lighting().enabled}
-            onChange={(value) => call(Armor.setLighting(slider().field, value))}
-          />
-        )}
-      </Each>
+      {sliders(0, 1)}
       <ColorRow id="armor-lighting-ambient-color" label={t("ui.armor.lighting_ambient_color")} color={lighting().ambientColor} disabled={!lighting().enabled} onChange={(color) => call(Armor.setLightingColor("ambient", color))}/>
+      {sliders(1, 2)}
       <ColorRow id="armor-lighting-key-color" label={t("ui.armor.lighting_key_color")} color={lighting().keyColor} disabled={!lighting().enabled} onChange={(color) => call(Armor.setLightingColor("key", color))}/>
+      {sliders(2)}
     </View>
   );
 }
@@ -538,7 +541,7 @@ function RailSection(props: { section: Section; title: string; body: () => JSX.E
         hoverStyle={{ backgroundColor: colors.accent }}
         style={{ minHeight: 30, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8 }}
       >
-        <Text style={{ width: 12, fontSize: 10, color: colors.mutedForeground }}>{open() ? "v" : ">"}</Text>
+        <Icon name={open() ? "chevron-down" : "chevron-right"} size={12} color={colors.mutedForeground}/>
         <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>{props.title}</Text>
       </View>
       <If when={open()}>
@@ -569,7 +572,7 @@ export function OptionsRail() {
       <View style={{ paddingHorizontal: 8, paddingTop: 6, paddingBottom: 6, gap: 2 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.foreground }}>{t("ui.armor.options")}</Text>
-          <IconButton id="armor-options-collapse" glyph=">" label={t("ui.armor.collapse_options")} onPress={() => call(Armor.setOptionsOpen(false))}/>
+          <IconButton id="armor-options-collapse" icon="panel-right-close" label={t("ui.armor.collapse_options")} onPress={() => call(Armor.setOptionsOpen(false))}/>
         </View>
         <If when={target() !== ""}>
           <Text style={{ fontSize: 12, color: (view()?.panes.length ?? 0) > 1 ? colors.primary : colors.mutedForeground }}>{target()}</Text>
@@ -596,7 +599,7 @@ export function OptionsRail() {
 export function OptionsEdge() {
   return (
     <View style={{ width: 26, alignItems: "center", paddingTop: 6, borderLeftWidth: 1, borderLeftColor: colors.border, backgroundColor: colors.surface }}>
-      <IconButton id="armor-options-expand" glyph="<" label={t("ui.armor.expand_options")} onPress={() => call(Armor.setOptionsOpen(true))}/>
+      <IconButton id="armor-options-expand" icon="panel-right-open" label={t("ui.armor.expand_options")} onPress={() => call(Armor.setOptionsOpen(true))}/>
     </View>
   );
 }

@@ -1,6 +1,7 @@
 import type { JSX, ViewStyle } from "nsh";
 import { signal, Text, View } from "nsh";
 import { Checkbox, Input } from "nsh/base";
+import { CheckMark } from "../icons";
 import { colors, controlRadius } from "../theme";
 
 /** A checkbox with its label beside it, and an optional line under the label. */
@@ -18,7 +19,7 @@ export function Toggle(props: {
       disabled={props.disabled}
       class="group flex-row items-start gap-2 disabled:opacity-50"
       indicatorClass="mt-0.5 w-[16px] h-[16px] rounded-[3px] border border-border items-center justify-center checked:bg-primary"
-      indicator={<Text class="text-[10px] text-primary-foreground">{props.checked ? "x" : ""}</Text>}
+      indicator={<CheckMark checked={props.checked}/>}
       onChange={({ checked }) => props.onChange(checked)}
     >
       <View style={{ flexShrink: 1, gap: 2 }}>

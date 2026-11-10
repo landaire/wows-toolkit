@@ -9,6 +9,7 @@ pub mod collab;
 pub mod desktop;
 pub mod frames;
 pub mod game_data;
+pub mod icons;
 mod js_newtype;
 mod launcher;
 mod native;
@@ -27,7 +28,6 @@ mod unpacker;
 pub use collab::Collab;
 pub use launcher::LauncherSession;
 pub use native::AppTab;
-pub use native::ShellText;
 pub use native::StartupState;
 pub use native::Toolkit;
 pub use player_tracker::PlayerTracker;
@@ -76,4 +76,5 @@ fn native_module(registry: &mut Registry) {
     registry.register::<replay_inspector::table::PlayerTable>();
     registry.register::<replay_inspector::browser::ReplayBrowser>();
     registry.register::<Unpacker>();
+    registry.register::<icons::IconView>();
 }

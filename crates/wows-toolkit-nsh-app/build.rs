@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     watch(&ui)?;
 
     let bundled = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
-        entry: ui.join("App.tsx"),
+        entry: ui.join("main.tsx"),
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into(), wows_toolkit_nsh::registry().into()],
