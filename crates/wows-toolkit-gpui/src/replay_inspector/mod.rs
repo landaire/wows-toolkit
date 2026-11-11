@@ -20,6 +20,7 @@ pub mod columns;
 pub mod controls;
 pub mod damage_mix;
 mod debug_view;
+mod empty_map;
 pub mod expanded;
 pub mod icons;
 pub mod links;
