@@ -221,7 +221,7 @@ fn measure_column_widths(
                         + status_count as f32 * (icon_default + gap_1)
                         + connection_label_width(row, window);
                     if shows_detail(&row.db_id) {
-                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        let detail_w = framed_detail_width(col, row, &model.rows, debug, window);
                         if detail_w > 0. {
                             details.insert((row.db_id, col), px(detail_w + cell_padding));
                         }
@@ -245,7 +245,7 @@ fn measure_column_widths(
                         text_w
                     };
                     if shows_detail(&row.db_id) {
-                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        let detail_w = framed_detail_width(col, row, &model.rows, debug, window);
                         if detail_w > 0. {
                             details.insert((row.db_id, col), px(detail_w + cell_padding));
                         }
@@ -269,7 +269,7 @@ fn measure_column_widths(
                         figures_width(cell.text.into(), window)
                     };
                     if shows_detail(&row.db_id) {
-                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        let detail_w = framed_detail_width(col, row, &model.rows, debug, window);
                         if detail_w > 0. {
                             details.insert((row.db_id, col), px(detail_w + cell_padding));
                         }
@@ -2592,6 +2592,29 @@ enum DetailStyle {
 
 const DETAIL_STYLE: DetailStyle = DetailStyle::Well;
 
+/// The room between neighbouring wells and their borders' width, either side.
+const DETAIL_GAP: f32 = 2.;
+const DETAIL_BORDER: f32 = 1.;
+
+/// What a well adds to its content's width: a gap and a border on each side.
+const DETAIL_FRAME: f32 = match DETAIL_STYLE {
+    DetailStyle::Flat => 0.,
+    DetailStyle::Well => 2. * (DETAIL_GAP + DETAIL_BORDER),
+};
+
+/// A column's detail width as drawn, frame included; 0 for a column with no
+/// detail for `row`.
+fn framed_detail_width(
+    col: ReplayColumn,
+    row: &PlayerRow,
+    rows: &[PlayerRow],
+    debug: bool,
+    window: &mut Window,
+) -> f32 {
+    let detail_w = expanded::expanded_detail_width(col, row, rows, debug, window);
+    if detail_w > 0. { detail_w + DETAIL_FRAME } else { 0. }
+}
+
 /// One column's detail on the surface `DETAIL_STYLE` names, with the fade
 /// at its right edge when the column is `cut_off`.
 fn detail_surface(content: AnyElement, cut_off: bool, ix: usize, layout: &RowLayout) -> Div {
@@ -2623,8 +2646,12 @@ fn detail_surface(content: AnyElement, cut_off: bool, ix: usize, layout: &RowLay
     let surface = div().relative().px_1().child(content).when(cut_off, |surface| surface.child(fade));
     let surface = match DETAIL_STYLE {
         DetailStyle::Flat => surface,
+        // Bordered, so a column's detail reads apart from its neighbour's
+        // when both sit on the same shade.
         DetailStyle::Well => surface
             .py_1()
+            .border(px(DETAIL_BORDER))
+            .border_color(crate::theme::border_bright())
             .bg(ground)
             .group_hover(group, move |style| style.bg(hovered_ground))
             .child(line(shadow).top_0())
@@ -2634,7 +2661,7 @@ fn detail_surface(content: AnyElement, cut_off: bool, ix: usize, layout: &RowLay
 
     // The gap above the detail is part of what is revealed, so the row grows
     // from its first line in step with the progress.
-    v_flex().pt_1().child(surface)
+    v_flex().pt_1().px(px(if DETAIL_STYLE == DetailStyle::Well { DETAIL_GAP } else { 0. })).child(surface)
 }
 
 /// How much of a row's detail is drawn.
