@@ -161,7 +161,7 @@ fn font_width(text: SharedString, font: Font, window: &mut Window) -> f32 {
 ///
 /// A row in `expanded` or `closing` also folds
 /// `expanded::expanded_detail_width` into that row's per-column width
-/// alongside its collapsed content -- `table.rs`'s `render_column_cell`
+/// alongside its collapsed content -- `table.rs`'s `render_column_detail`
 /// clamps a row's detail (the Skills column's captain-skill grid and
 /// consumables table, in particular) to the column's measured width, so
 /// without this the detail would clip at the collapsed-only width instead of
@@ -1494,16 +1494,13 @@ fn cell_element(
     width: f32,
     entity: &Entity<PlayerTable>,
 ) -> AnyElement {
+    let id = ix * CELL_ID_STRIDE + col as usize;
     let base = div()
-        .id(("replay-cell", ix * CELL_ID_STRIDE + col as usize))
+        .id(("replay-cell", id))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, player, col))
-        .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary(cx) {
-                cx.stop_propagation();
-            }
-        })
         .w(px(width))
+        .flex()
         .flex_none()
         .px_1()
         .whitespace_nowrap()
@@ -1512,30 +1509,41 @@ fn cell_element(
         .when_some(cell.color, |el, role| el.text_color(resolve_color(role)))
         // Figures line up down a column; a ship name keeps the font's own.
         .when(col != ReplayColumn::ShipName, crate::ui::tabular);
-    let text = crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text);
-    let base = match cell.color {
+    // As wide as the text, so the rest of the cell is the row's.
+    let text = div()
+        .id(("replay-cell-text-box", id))
+        .test_support()
+        .flex_shrink_1()
+        .min_w_0()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .on_click(keep_click)
+        .child(crate::ui::selectable_text(("replay-cell-text", id), cell.text));
+    let text = match cell.color {
         // A rating is the band's chip, as on every other surface that shows
         // one: the band's hue behind the band's own text colour. In a narrow
         // column the chip narrows with it and its text ends in an ellipsis.
-        Some(ColorRole::PrTier(category)) => base.flex().child(
-            div()
-                .flex_shrink_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .px_1()
-                .rounded(px(3.))
-                .bg(resolve_color(ColorRole::PrTierTint(category))
-                    .opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
-                .child(text),
-        ),
-        _ => base.child(text),
+        Some(ColorRole::PrTier(category)) => text
+            .px_1()
+            .rounded(px(3.))
+            .bg(resolve_color(ColorRole::PrTierTint(category)).opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.)),
+        _ => text,
     };
+    let base = base.child(text);
 
     match cell.hover {
         Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
         None => base.into_any_element(),
+    }
+}
+
+/// Keeps a click on a control or a run of text from reaching the row, where
+/// a double-click toggles the row's detail. A ctrl+click still reaches it to
+/// select the row.
+fn keep_click(event: &ClickEvent, _window: &mut Window, cx: &mut App) {
+    if !event.modifiers().secondary(cx) {
+        cx.stop_propagation();
     }
 }
 
@@ -1580,11 +1588,6 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Name as usize))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, ReplayColumn::Name))
-        .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary(cx) {
-                cx.stop_propagation();
-            }
-        })
         .w(px(width))
         .flex_none()
         .gap_1()
@@ -1605,40 +1608,54 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
                 cell.child(
                     icon_el
                         .id(("replay-name-icon", ix))
+                        .on_click(keep_click)
                         .tooltip(move |window, cx| Tooltip::new(species_text.clone()).build(window, cx)),
                 )
             }
         }
         None => cell.child(
             div()
+                .id(("replay-species-box", ix))
                 .flex_none()
                 .text_xs()
+                .on_click(keep_click)
                 .child(crate::ui::selectable_text(("replay-species", ix), row.ship_species_text.clone())),
         ),
     };
 
     if let Some(div_label) = row.division_label.as_ref() {
-        cell =
-            cell.child(div().flex_none().child(crate::ui::selectable_text(("replay-division", ix), div_label.clone())));
+        cell = cell.child(
+            div()
+                .id(("replay-division-box", ix))
+                .flex_none()
+                .on_click(keep_click)
+                .child(crate::ui::selectable_text(("replay-division", ix), div_label.clone())),
+        );
     }
     if let Some(clan) = row.clan_tag.as_ref() {
         cell = cell.child(
             div()
+                .id(("replay-clan-box", ix))
                 .flex_none()
                 .text_color(clan_tag_color(row))
+                .on_click(keep_click)
                 .child(crate::ui::selectable_text(("replay-clan", ix), clan.clone())),
         );
     }
-    cell = cell.child(
-        div()
-            .flex_1()
-            .min_w(px(0.))
-            .overflow_hidden()
-            .text_ellipsis()
-            .whitespace_nowrap()
-            .text_color(name_color)
-            .child(crate::ui::selectable_text(("replay-name", ix), row.display_name.clone())),
-    );
+    // The name takes only its own width; the space after it is the row's.
+    cell = cell
+        .child(
+            div()
+                .id(("replay-name-box", ix))
+                .min_w(px(0.))
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .text_color(name_color)
+                .on_click(keep_click)
+                .child(crate::ui::selectable_text(("replay-name", ix), row.display_name.clone())),
+        )
+        .child(div().flex_1());
 
     if row.is_hidden_profile {
         cell = cell.child(
@@ -1646,6 +1663,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
                 .flex_none()
                 .id(("replay-hidden-profile", ix))
                 .test_support()
+                .on_click(keep_click)
                 .tooltip(|window, cx| {
                     Tooltip::new(t!("ui.replay.player.hidden_profile").into_owned()).build(window, cx)
                 }),
@@ -1663,6 +1681,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
                 .flex_none()
                 .id(("replay-disconnect", ix))
                 .test_support()
+                .on_click(keep_click)
                 .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx)),
         );
     }
@@ -1732,7 +1751,8 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
         let login = first.login.clone();
         return Some(
             glyph
-                .on_click(move |_event, window, cx| {
+                .on_click(move |event, window, cx| {
+                    keep_click(event, window, cx);
                     cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
                     crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
                 })
@@ -1741,25 +1761,22 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
     }
 
     let logins: Vec<String> = candidates.iter().map(|candidate| candidate.login.clone()).collect();
-    Some(
-        Button::new(("replay-twitch-menu", ix))
-            .ghost()
-            .xsmall()
-            .child(glyph)
-            .dropdown_menu(move |mut menu, _window, _cx| {
-                for login in &logins {
-                    let login = login.clone();
-                    menu = menu.item(PopupMenuItem::new(login.clone()).icon(IconName::Copy).on_click(
-                        move |_event, window, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
-                            crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
-                        },
-                    ));
-                }
-                menu
-            })
-            .into_any_element(),
-    )
+    let menu = Button::new(("replay-twitch-menu", ix)).ghost().xsmall().child(glyph).dropdown_menu(
+        move |mut menu, _window, _cx| {
+            for login in &logins {
+                let login = login.clone();
+                menu = menu.item(PopupMenuItem::new(login.clone()).icon(IconName::Copy).on_click(
+                    move |_event, window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                        crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
+                    },
+                ));
+            }
+            menu
+        },
+    );
+
+    Some(div().id(("replay-twitch-menu-box", ix)).flex_none().on_click(keep_click).child(menu).into_any_element())
 }
 
 /// The Skills column's cell: `cell_value`'s text/color/hover, prefixed with
@@ -1811,22 +1828,24 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Ent
         .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
         .test_support()
         .on_mouse_down(MouseButton::Right, note_cell(entity, row.db_id, ReplayColumn::Skills))
-        .on_click(|event, _window, cx| {
-            if !event.modifiers().secondary(cx) {
-                cx.stop_propagation();
-            }
-        })
         .w(px(width))
         .flex_none()
         .px_1()
-        .child(h_flex().gap_1().items_center().overflow_hidden().when(has_markers, |el| el.child(markers)).child(
-            div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(color).child(
-                crate::ui::selectable_text(
-                    ("replay-cell-text", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize),
-                    cell.text.clone(),
-                ),
+        .child(
+            h_flex().gap_1().items_center().overflow_hidden().when(has_markers, |el| el.child(markers)).child(
+                div()
+                    .id(("replay-cell-text-box", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .text_color(color)
+                    .on_click(keep_click)
+                    .child(crate::ui::selectable_text(
+                        ("replay-cell-text", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize),
+                        cell.text.clone(),
+                    )),
             ),
-        ));
+        );
 
     match cell.hover {
         Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
@@ -2204,7 +2223,7 @@ fn row_actions(ix: usize, row: Rc<ActionsMenuData>, layout: &RowLayout, group: S
         .justify_center()
         .invisible()
         .group_hover(group, |this| this.visible())
-        .child(menu_button)
+        .child(div().id(("replay-row-actions-box", ix)).on_click(keep_click).child(menu_button))
         .into_any_element()
 }
 
@@ -2361,6 +2380,7 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     let share_text = share.map(|share| SharedString::from(share.text()));
     v_flex()
         .id(("replay-damage-mix", ix * CELL_ID_STRIDE + col as usize))
+        .test_support()
         .w(px(width))
         .flex_none()
         .child(cell)
@@ -2380,28 +2400,26 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         .into_any_element()
 }
 
-/// One column's full cell: the collapsed content and, while the row's detail
-/// is shown (open, opening or closing) and this column has detail, that
-/// detail stacked underneath -- so each column's expansion grows downward
-/// under its own header (`expanded::render_column_detail`). The cell is a
-/// fixed-width `v_flex` clamped to the column's content-fit width so the
-/// collapsed table stays aligned and the detail (text wraps to the column
-/// width; a dense build/consumable sub-table clips at the column edge) never
-/// bleeds into the neighbouring column, matching egui_table's per-cell clip
-/// with `AutoSizeMode::Never`. Row height comes from the tallest such cell
-/// (flex). A row whose detail is hidden returns the bare cell.
-fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
-    let collapsed = render_cell(ix, col, row, layout);
-    let (extent, opacity) = match layout.detail {
-        RowDetail::Hidden => return collapsed,
-        RowDetail::Moving(progress) => (crate::motion::Extent::Moving(progress), progress),
-        RowDetail::Open => (crate::motion::Extent::Open, 1.0),
-    };
+/// One column's part of a shown row detail, under its own header
+/// (`expanded::render_column_detail`). Fixed to the column's width so the
+/// detail (text wraps to the width; a dense build/consumable sub-table clips
+/// at its edge) never bleeds into the next column, matching egui_table's
+/// per-cell clip with `AutoSizeMode::Never`. A column without detail keeps
+/// its place with an empty cell.
+fn render_column_detail(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, opacity: f32) -> AnyElement {
+    let cell = div()
+        .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
+        .test_support()
+        .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
+        .w(layout.column_widths[col as usize])
+        .flex_none()
+        .overflow_hidden();
     let Some(detail) =
         expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held)
     else {
-        return collapsed;
+        return cell.into_any_element();
     };
+
     // A column drawn narrower than the detail needs clips it; the fade says
     // there is more to the right than shows.
     let cut_off =
@@ -2409,24 +2427,8 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     // Only the content fades in: a translucent ground would show the cut-off
     // fade, painted over it, as a darker edge.
     let content = div().opacity(opacity).child(detail).into_any_element();
-    let detail = detail_surface(content, cut_off, ix, layout);
-    // Kept in a reveal while open too, so a close starts from the height the
-    // detail had rather than from nothing.
-    let detail = crate::motion::Reveal::new(
-        ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
-        extent,
-        detail.into_any_element(),
-    )
-    .into_any_element();
-    v_flex()
-        .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
-        .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
-        .w(layout.column_widths[col as usize])
-        .flex_none()
-        .overflow_hidden()
-        .child(collapsed)
-        .child(detail)
-        .into_any_element()
+
+    cell.child(detail_surface(content, cut_off, ix, layout)).into_any_element()
 }
 
 /// How an expanded row's detail is set apart from the row it belongs to.
@@ -2583,43 +2585,87 @@ fn placed_cell(cell: AnyElement, col: ReplayColumn, layout: &RowLayout) -> AnyEl
 /// per-column cells outside the horizontal scroll; `layout.scroll_columns`
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
 /// same handle the header's scrolling portion tracks, so both stay aligned.
-/// Mirrors the egui app's `num_sticky_cols(3)`. Each cell is a
-/// `render_column_cell`, so while `layout.detail` is shown every column's
-/// detail grows downward under its own column (achievements under Name, the
-/// build under Skills, the damage breakdowns under
-/// ActualDamage/ReceivedDamage); the row's `items_start` top-aligns the
-/// columns and its height is the
-/// tallest column. A double-click anywhere on the row toggles expansion,
-/// mirroring the egui app's whole-row double-click handler in
-/// `cell_content_ui`.
+/// Mirrors the egui app's `num_sticky_cols(3)`.
+///
+/// The first line is laid out the same whether or not the row's detail is
+/// shown, so nothing on it moves when the row opens. The detail is a second
+/// line of the same columns, each column's detail under its own header
+/// (achievements under Name, the build under Skills, the damage breakdowns
+/// under ActualDamage/ReceivedDamage). A double-click on the first line
+/// toggles the detail, mirroring the egui app's whole-row double-click
+/// handler in `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
-    // A collapsed row is one line of cells and reads across, so its cells are
-    // centred on that line; a row showing detail grows it downward under each
-    // column, which only lines up if the columns start at the same top edge.
-    // That holds while the detail moves too: centred, the cells without
-    // detail would drift down as the row grows and snap back up once open.
-    let align_top = layout.detail.is_shown();
-    let mut sticky = h_flex()
-        .min_w(layout.pinned_reserve)
-        .max_w(relative(STICKY_MAX_FRACTION))
-        .overflow_hidden()
-        .map(|el| if align_top { el.items_start() } else { el.items_center() });
-    for &col in layout.sticky_columns {
-        sticky = sticky.child(placed_cell(render_column_cell(ix, col, row, layout), col, layout));
-    }
+    let sticky_section =
+        || h_flex().min_w(layout.pinned_reserve).max_w(relative(STICKY_MAX_FRACTION)).overflow_hidden();
+    let scrolling_section = || h_flex().w(px(layout.scroll_width)).flex_none();
+    let scroller = |id: (&'static str, usize), line: Div| {
+        div()
+            .id(id)
+            .flex_1()
+            .min_w(px(0.))
+            .overflow_x_scroll()
+            // A vertical wheel belongs to the list around the row, not to
+            // the columns scrolling sideways inside it.
+            .restrict_scroll_to_axis()
+            .track_scroll(layout.h_scroll)
+            .child(line)
+    };
 
-    let mut scrolling = h_flex()
-        .w(px(layout.scroll_width))
-        .flex_none()
-        .map(|el| if align_top { el.items_start() } else { el.items_center() });
-    for &col in layout.scroll_columns {
-        scrolling = scrolling.child(placed_cell(render_column_cell(ix, col, row, layout), col, layout));
+    // A line of cells reads across, so its cells are centred on it.
+    let mut sticky = sticky_section().items_center();
+    for &col in layout.sticky_columns {
+        sticky = sticky.child(placed_cell(render_cell(ix, col, row, layout), col, layout));
     }
+    let mut scrolling = scrolling_section().items_center();
+    for &col in layout.scroll_columns {
+        scrolling = scrolling.child(placed_cell(render_cell(ix, col, row, layout), col, layout));
+    }
+    let entity = layout.entity.clone();
+    let first_line = h_flex()
+        .id(("replay-row-line", ix))
+        .test_support()
+        .w_full()
+        .items_center()
+        .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
+            if event.click_count() >= 2 && !event.modifiers().secondary(cx) {
+                entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
+            }
+        })
+        .child(sticky)
+        .child(scroller(("replay-row-h-scroll", ix), scrolling));
+
+    let shown = match layout.detail {
+        RowDetail::Hidden => None,
+        RowDetail::Moving(progress) => Some((crate::motion::Extent::Moving(progress), progress)),
+        RowDetail::Open => Some((crate::motion::Extent::Open, 1.0)),
+    };
+    let detail_line = shown.map(|(extent, opacity)| {
+        // Each column's detail starts at the same top edge.
+        let mut sticky = sticky_section().items_start();
+        for &col in layout.sticky_columns {
+            sticky = sticky.child(placed_cell(render_column_detail(ix, col, row, layout, opacity), col, layout));
+        }
+        let mut scrolling = scrolling_section().items_start();
+        for &col in layout.scroll_columns {
+            scrolling = scrolling.child(placed_cell(render_column_detail(ix, col, row, layout, opacity), col, layout));
+        }
+        let line = h_flex()
+            .w_full()
+            .items_start()
+            .child(sticky)
+            .child(scroller(("replay-row-detail-h-scroll", ix), scrolling));
+        // Kept in a reveal while open too, so a close starts from the height
+        // the detail had rather than from nothing.
+        crate::motion::Reveal::new(
+            ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
+            extent,
+            line.into_any_element(),
+        )
+    });
 
     // Selection is what a ctrl+click leaves behind, over the stripe; the
     // egui table paints the same two (`ui/replay_parser/mod.rs:3011`).
     let background = if layout.selected { Some(cx.theme().selection) } else { crate::ui::stripe(ix, cx) };
-    let entity = layout.entity.clone();
     let select_entity = layout.entity.clone();
     // A right-click anywhere on the row opens the same menu the dots do: it is
     // where a reader reaches for a row's actions, and the dots are what says so.
@@ -2627,38 +2673,22 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     let menu_row = Rc::new(ActionsMenuData::from_row(row, layout.icons));
     let debug = layout.debug;
     let group = SharedString::from(format!("replay-row-{ix}"));
-    h_flex()
+    v_flex()
         .id(ix)
         .test_support()
         .group(group.clone())
         .relative()
         .w_full()
         .py_0p5()
-        .map(|el| if align_top { el.items_start() } else { el.items_center() })
         .when_some(background, |el, color| el.bg(color))
         .hover(move |style| style.bg(hover_bg))
         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
             if event.modifiers().secondary(cx) {
                 select_entity.update(cx, |this, cx| this.toggle_selected(ix, cx));
-                return;
-            }
-            if event.click_count() >= 2 {
-                entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
             }
         })
-        .child(sticky)
-        .child(
-            div()
-                .id(("replay-row-h-scroll", ix))
-                .flex_1()
-                .min_w(px(0.))
-                .overflow_x_scroll()
-                // A vertical wheel belongs to the list around the row, not to
-                // the columns scrolling sideways inside it.
-                .restrict_scroll_to_axis()
-                .track_scroll(layout.h_scroll)
-                .child(scrolling),
-        )
+        .child(first_line)
+        .children(detail_line)
         .child(team_bands::stripe(layout.mark, cx))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
@@ -2936,6 +2966,8 @@ mod tests {
     use wowsunpack::vfs::VfsPath;
 
     use super::super::columns::ReplayColumn;
+    use super::super::damage_mix::DamageKind;
+    use super::super::damage_mix::DamageLine;
     use super::super::model::MatchContext;
     use super::super::model::ReplayReportModel;
     use super::super::sort::SortColumn;
@@ -3202,6 +3234,124 @@ mod tests {
             );
         })
         .expect("the window is open");
+    }
+
+    /// A model whose first row has detail under several columns and a
+    /// damage split under its Actual Damage figure.
+    fn detailed_model() -> ReplayReportModel {
+        let mut model = two_row_model();
+        for row in &mut model.rows {
+            row.fires = Some(3);
+            row.floods = Some(1);
+            row.citadels = Some(2);
+            row.crits = Some(4);
+        }
+        model.rows[0].actual_damage = Some(50_000);
+        model.rows[0].actual_damage_text = Some("50,000".to_string());
+        model.rows[0].actual_damage_by_type =
+            Some(vec![DamageLine { kind: DamageKind::Ap, label: "AP", amount: 50_000 }]);
+
+        model
+    }
+
+    fn open_detailed_table(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<PlayerTable> {
+        cx.update(gpui_kit::init);
+        // The layout of an open row is what is asserted, not its opening.
+        cx.update(|cx| cx.set_reduce_motion(true));
+        cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(detailed_model(), vfs, false, cx)
+        })
+    }
+
+    fn double_click(window: &mut gpui_kit::Window, at: gpui_kit::Point<gpui_kit::Pixels>, cx: &mut gpui_kit::App) {
+        use gpui_kit::InputEvent as _;
+
+        for click_count in [1, 2] {
+            let down = gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: at,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count,
+                first_mouse: false,
+            };
+            let up = gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: at,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count,
+            };
+            window.dispatch_event(down.to_platform_input(), cx);
+            window.dispatch_event(up.to_platform_input(), cx);
+            window.render_frame(cx);
+        }
+    }
+
+    /// Opening a row moves nothing on its first line up or down: every cell
+    /// keeps its height and its place on the line.
+    #[gpui_kit::test]
+    fn a_rows_first_line_stays_still_when_it_opens(cx: &mut TestAppContext) {
+        let window = open_detailed_table(cx);
+        let lines = |window: &mut gpui_kit::Window| {
+            let ids = [
+                ("replay-cell", ReplayColumn::Name as usize),
+                ("replay-cell", ReplayColumn::ShipName as usize),
+                ("replay-cell", ReplayColumn::Kills as usize),
+                ("replay-damage-mix", ReplayColumn::ActualDamage as usize),
+                ("replay-row-actions", 0usize),
+            ];
+            ids.map(|id| {
+                let bounds = window.find(id).bounds();
+                (bounds.top(), bounds.size.height)
+            })
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let closed = lines(window);
+            window.click(("replay-row-caret", 0usize), cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find(("replay-expanded-cell", ReplayColumn::Name as usize)).is_some(),
+                "the row is open"
+            );
+            assert_eq!(lines(window), closed);
+        })
+        .expect("the window is open");
+    }
+
+    /// A double-click on the empty part of the first line opens and closes
+    /// the row; one on the text, or anywhere in the detail, does not.
+    #[gpui_kit::test]
+    fn a_double_click_on_a_rows_empty_space_toggles_it(cx: &mut TestAppContext) {
+        let window = open_detailed_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+        let open = |cx: &mut TestAppContext| cx.update(|cx| table.read(cx).expanded.contains(&AccountId(1)));
+        let at = |id: (&'static str, usize), cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let bounds = window.find(id).bounds();
+                gpui_kit::point(bounds.right() - px(3.), bounds.center().y)
+            })
+            .expect("the window is open")
+        };
+        let double_click_at = |point, cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| double_click(window, point, cx))
+                .expect("the window is open");
+        };
+        let kills = ReplayColumn::Kills as usize;
+
+        double_click_at(at(("replay-cell-text-box", kills), cx), cx);
+        assert!(!open(cx), "a double-click on the figure is the text's");
+
+        double_click_at(at(("replay-cell", kills), cx), cx);
+        assert!(open(cx), "a double-click beside the figure opens the row");
+
+        double_click_at(at(("replay-expanded-cell", ReplayColumn::Name as usize), cx), cx);
+        assert!(open(cx), "a double-click in the detail leaves it open");
+
+        double_click_at(at(("replay-cell", kills), cx), cx);
+        assert!(!open(cx), "and another beside the figure closes it");
     }
 
     /// A row's detail opens and closes over several frames: partway through
