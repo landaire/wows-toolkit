@@ -60,6 +60,7 @@ use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
 use super::columns::relation_color_rgb;
 use super::damage_mix;
+use super::damage_mix::DamageLine;
 use super::damage_mix::DamageMix;
 use super::expanded;
 use super::icons::IconCache;
@@ -72,10 +73,13 @@ use super::sort::SortOrder;
 use super::sort::sort_rows;
 use super::team_bands;
 use super::team_bands::RowMark;
+use super::team_bands::TeamDamage;
+use super::team_bands::TeamSide;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
+use wows_replays::types::TeamId;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -2222,13 +2226,35 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     }
 }
 
-/// The generic `cell_element`, over a faint bar of its figure against the
-/// column's largest in the match where the column has one.
+/// The generic `cell_element`, over a faint bar of the row's share of its
+/// team's total where the column has one. The hover states the share.
 fn number_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
-    let cell = cell_value(row, col, layout.debug);
+    let share = layout.team_totals.share(row, col, layout.debug);
+    let mut cell = cell_value(row, col, layout.debug);
+    if let Some(share) = share {
+        let line = share.text();
+        cell.hover = Some(match cell.hover.take() {
+            Some(hover) => format!("{hover}\n{line}"),
+            None => line,
+        });
+    }
+
+    share_bar_cell(ix, col, row, cell, share, layout, width)
+}
+
+/// `cell_element` for `cell`, over a faint bar as wide as `share`.
+fn share_bar_cell(
+    ix: usize,
+    col: ReplayColumn,
+    row: &PlayerRow,
+    cell: CellValue,
+    share: Option<TeamShare>,
+    layout: &RowLayout,
+    width: f32,
+) -> AnyElement {
     let color = cell.color.map_or(layout.foreground, resolve_color);
     let element = cell_element(ix, row.db_id, col, cell, width, &layout.entity);
-    let Some(share) = layout.peaks.share(row, col, layout.debug) else {
+    let Some(share) = share else {
         return element;
     };
 
@@ -2236,7 +2262,15 @@ fn number_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         .relative()
         .w(px(width))
         .flex_none()
-        .child(div().absolute().left_0().top_0().bottom_0().w(relative(share)).bg(color.opacity(MAGNITUDE_BAR_OPACITY)))
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w(relative(share.fraction))
+                .bg(color.opacity(MAGNITUDE_BAR_OPACITY)),
+        )
         .child(element)
         .into_any_element()
 }
@@ -2244,7 +2278,9 @@ fn number_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 /// Strength of a magnitude bar against the text colour it is drawn in.
 const MAGNITUDE_BAR_OPACITY: f32 = 0.13;
 
-/// The figure a column draws a magnitude bar for, when the cell shows it.
+/// The figure a column draws a share bar for, when the cell shows it. A
+/// hidden figure gets no bar and is left out of its team's total, as it is
+/// from the team heading.
 fn bar_figure(row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<u64> {
     let hidden = row.should_hide_stats() && !debug;
     match col {
@@ -2256,32 +2292,52 @@ fn bar_figure(row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<u64> {
     }
 }
 
-/// The largest shown figure in each barred column, indexed by
-/// `ReplayColumn as usize`.
+/// A row's figure as part of its own team's total in that column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TeamShare {
+    side: TeamSide,
+    /// From 0 to 1.
+    fraction: f32,
+}
+
+impl TeamShare {
+    fn text(self) -> String {
+        let pct = format!("{:.0}%", self.fraction * 100.);
+        t!("ui.replay.team_share", pct = pct, team = self.side.label()).into_owned()
+    }
+}
+
+/// Each barred column's figure summed over each team, indexed by
+/// `ReplayColumn as usize`. The team heading shows the Actual Damage entry,
+/// so a bar and its heading count the same rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ColumnPeaks(Vec<Option<u64>>);
+struct TeamTotals {
+    self_team: TeamId,
+    columns: Vec<TeamDamage>,
+}
 
-impl ColumnPeaks {
-    fn of(rows: &[PlayerRow], debug: bool) -> Self {
-        let mut peaks = vec![None; ReplayColumn::ALL.len()];
-        for row in rows {
-            for col in ReplayColumn::ALL {
-                let Some(figure) = bar_figure(row, col, debug) else { continue };
-                let peak: &mut Option<u64> = &mut peaks[col as usize];
-                *peak = Some(peak.map_or(figure, |held| held.max(figure)));
-            }
-        }
+impl TeamTotals {
+    fn of(rows: &[PlayerRow], self_team: TeamId, debug: bool) -> Self {
+        let columns = ReplayColumn::ALL
+            .into_iter()
+            .map(|col| TeamDamage::summing(rows, self_team, |row| bar_figure(row, col, debug)))
+            .collect();
 
-        Self(peaks)
+        Self { self_team, columns }
     }
 
-    /// `row`'s figure in `col` against the column's largest, from 0 to 1.
-    /// `None` where there is no bar to draw.
-    fn share(&self, row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<f32> {
-        let figure = bar_figure(row, col, debug)?;
-        let peak = self.0[col as usize]?;
+    fn column(&self, col: ReplayColumn) -> TeamDamage {
+        self.columns[col as usize]
+    }
 
-        (figure > 0 && peak > 0).then(|| (figure as f64 / peak as f64) as f32)
+    /// `row`'s figure in `col` against its team's total. `None` where there
+    /// is no bar to draw.
+    fn share(&self, row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<TeamShare> {
+        let figure = bar_figure(row, col, debug)?;
+        let side = TeamSide::of(row, self.self_team);
+        let total = self.column(col).side(side)?;
+
+        (figure > 0 && total > 0).then(|| TeamShare { side, fraction: (figure as f64 / total as f64) as f32 })
     }
 }
 
@@ -2289,16 +2345,20 @@ impl ColumnPeaks {
 /// listed with its colour key on hover. The bare cell when there is no split
 /// to show.
 fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
-    let cell = number_cell(ix, col, row, layout, width);
     let Some(lines) = damage_mix::shown_lines(row, col, layout.debug) else {
-        return cell;
+        return number_cell(ix, col, row, layout, width);
     };
     let Some(mix) = DamageMix::of(lines) else {
-        return cell;
+        return number_cell(ix, col, row, layout, width);
     };
 
+    // The share is stated under the split, on the one tooltip the cell has.
+    let share = layout.team_totals.share(row, col, layout.debug);
+    let cell = share_bar_cell(ix, col, row, cell_value(row, col, layout.debug), share, layout, width);
     let bar = div().px_1().child(mix.bar());
-    let shown = Rc::new((mix, lines.to_vec()));
+    let mix = Rc::new(mix);
+    let lines: Rc<[DamageLine]> = lines.into();
+    let share_text = share.map(|share| SharedString::from(share.text()));
     v_flex()
         .id(("replay-damage-mix", ix * CELL_ID_STRIDE + col as usize))
         .w(px(width))
@@ -2306,8 +2366,16 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         .child(cell)
         .child(bar)
         .tooltip(move |window, cx| {
-            let shown = Rc::clone(&shown);
-            Tooltip::element(move |_window, _cx| shown.0.listing(&shown.1)).build(window, cx)
+            let mix = Rc::clone(&mix);
+            let lines = Rc::clone(&lines);
+            let share_text = share_text.clone();
+            Tooltip::element(move |_window, _cx| {
+                v_flex()
+                    .gap_1()
+                    .child(mix.listing(&lines))
+                    .children(share_text.clone().map(|text| div().text_xs().child(text)))
+            })
+            .build(window, cx)
         })
         .into_any_element()
 }
@@ -2470,8 +2538,8 @@ struct RowLayout<'a> {
     fade_to_hovered: Hsla,
     /// The text colour of a cell the model gives no colour.
     foreground: Hsla,
-    /// Each barred column's largest figure, for the bars behind the numbers.
-    peaks: &'a ColumnPeaks,
+    /// Each barred column's team totals, for the bars behind the numbers.
+    team_totals: &'a TeamTotals,
     icons: &'a IconCache,
     debug: bool,
     h_scroll: &'a ScrollHandle,
@@ -2707,8 +2775,8 @@ impl Render for PlayerTable {
         // Headings only while each team's rows stay together under the sort.
         let self_team = self.model.self_team;
         let team_runs = team_bands::team_runs(&self.model.rows, self_team).unwrap_or_default();
-        let team_damage = team_bands::TeamDamage::of(&self.model.rows, self_team, self.debug);
-        let peaks = ColumnPeaks::of(&self.model.rows, self.debug);
+        let team_totals = TeamTotals::of(&self.model.rows, self_team, self.debug);
+        let team_damage = team_totals.column(ReplayColumn::ActualDamage);
         let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
             let (db_id, is_expanded, is_closing) = {
                 let table = entity.read(cx);
@@ -2756,7 +2824,7 @@ impl Render for PlayerTable {
                 fade_to,
                 fade_to_hovered: hover_bg,
                 foreground: cx.theme().foreground,
-                peaks: &peaks,
+                team_totals: &team_totals,
                 icons: &table.icons,
                 debug: table.debug,
                 h_scroll: &h_scroll,
@@ -2873,6 +2941,10 @@ mod tests {
     use super::super::sort::SortColumn;
     use super::super::test_support::base_row;
     use super::PlayerTable;
+    use super::TeamDamage;
+    use super::TeamShare;
+    use super::TeamSide;
+    use super::TeamTotals;
     use wows_replays::types::AccountId;
     use wows_replays::types::Relation;
 
@@ -3813,26 +3885,37 @@ mod tests {
         assert_eq!(set, Some(drawn_before - px(20.)), "and kept the width it had shown, not what followed");
     }
 
-    /// A bar is the row's figure against the column's largest; hidden figures
-    /// neither get a bar nor set the scale, and spotting, which is shown on
-    /// every row, always does.
+    /// A bar is the row's figure against its own team's total in that
+    /// column, the total the team heading shows. Hidden figures neither get a
+    /// bar nor count toward the total; spotting, shown on every row, does.
     #[test]
-    fn bars_scale_to_the_largest_shown_figure_in_each_column() {
-        let row = |id, actual, spotting| super::PlayerRow {
+    fn bars_are_each_rows_share_of_its_team_total() {
+        let row = |id, team: i64, actual, spotting| super::PlayerRow {
+            team_id: TeamId::from(team),
             actual_damage: Some(actual),
             spotting_damage: Some(spotting),
             ..base_row(id, Relation::new(2), false)
         };
-        let hidden = super::PlayerRow { manual_stat_hide_toggle: true, ..row(3, 90_000, 8_000) };
-        let rows = [row(1, 40_000, 2_000), row(2, 20_000, 0), hidden];
+        let hidden = super::PlayerRow { manual_stat_hide_toggle: true, ..row(4, 1, 90_000, 2_000) };
+        let rows = [row(1, 0, 30_000, 2_000), row(2, 0, 10_000, 0), row(3, 1, 20_000, 6_000), hidden];
+        let share = |side, fraction| Some(TeamShare { side, fraction });
 
-        let peaks = super::ColumnPeaks::of(&rows, false);
+        let totals = TeamTotals::of(&rows, TeamId::from(0i64), false);
 
-        assert_eq!(peaks.share(&rows[0], ReplayColumn::ActualDamage, false), Some(1.));
-        assert_eq!(peaks.share(&rows[1], ReplayColumn::ActualDamage, false), Some(0.5));
-        assert_eq!(peaks.share(&rows[2], ReplayColumn::ActualDamage, false), None);
-        assert_eq!(peaks.share(&rows[2], ReplayColumn::SpottingDamage, false), Some(1.));
-        assert_eq!(peaks.share(&rows[1], ReplayColumn::SpottingDamage, false), None, "no bar for nothing");
-        assert_eq!(peaks.share(&rows[0], ReplayColumn::ReceivedDamage, false), None, "not a barred column");
+        assert_eq!(
+            totals.column(ReplayColumn::ActualDamage),
+            TeamDamage { allies: Some(40_000), enemies: Some(20_000) }
+        );
+        assert_eq!(totals.share(&rows[0], ReplayColumn::ActualDamage, false), share(TeamSide::Allies, 0.75));
+        assert_eq!(totals.share(&rows[1], ReplayColumn::ActualDamage, false), share(TeamSide::Allies, 0.25));
+        assert_eq!(totals.share(&rows[2], ReplayColumn::ActualDamage, false), share(TeamSide::Enemies, 1.));
+        assert_eq!(totals.share(&rows[3], ReplayColumn::ActualDamage, false), None);
+        assert_eq!(totals.share(&rows[2], ReplayColumn::SpottingDamage, false), share(TeamSide::Enemies, 0.75));
+        assert_eq!(totals.share(&rows[3], ReplayColumn::SpottingDamage, false), share(TeamSide::Enemies, 0.25));
+        assert_eq!(totals.share(&rows[1], ReplayColumn::SpottingDamage, false), None, "no bar for nothing");
+        assert_eq!(totals.share(&rows[0], ReplayColumn::ReceivedDamage, false), None, "not a barred column");
+
+        let debug = TeamTotals::of(&rows, TeamId::from(0i64), true);
+        assert_eq!(debug.column(ReplayColumn::ActualDamage).enemies, Some(110_000));
     }
 }

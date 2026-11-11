@@ -57,11 +57,11 @@ pub enum TeamSide {
 }
 
 impl TeamSide {
-    fn of(row: &PlayerRow, self_team: TeamId) -> Self {
+    pub fn of(row: &PlayerRow, self_team: TeamId) -> Self {
         if row.team_id == self_team { Self::Allies } else { Self::Enemies }
     }
 
-    fn label(self) -> String {
+    pub fn label(self) -> String {
         match self {
             Self::Allies => t!("ui.player_tracker.allies").into_owned(),
             Self::Enemies => t!("ui.player_tracker.enemies").into_owned(),
@@ -101,8 +101,8 @@ pub fn team_runs(rows: &[PlayerRow], self_team: TeamId) -> Option<Vec<TeamRun>> 
     Some(runs)
 }
 
-/// Each team's summed actual damage. `None` for a team none of whose rows
-/// carries a figure the reader may see.
+/// Each team's sum of one figure over its rows. `None` for a team none of
+/// whose rows has the figure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TeamDamage {
     pub allies: Option<u64>,
@@ -110,15 +110,13 @@ pub struct TeamDamage {
 }
 
 impl TeamDamage {
-    /// Hidden rows are left out so the total does not reveal what their
-    /// cells withhold.
-    pub fn of(rows: &[PlayerRow], self_team: TeamId, debug: bool) -> Self {
+    pub fn summing<F>(rows: &[PlayerRow], self_team: TeamId, figure: F) -> Self
+    where
+        F: Fn(&PlayerRow) -> Option<u64>,
+    {
         let mut damage = Self::default();
         for row in rows {
-            if row.should_hide_stats() && !debug {
-                continue;
-            }
-            let Some(amount) = row.actual_damage else { continue };
+            let Some(amount) = figure(row) else { continue };
 
             let total = match TeamSide::of(row, self_team) {
                 TeamSide::Allies => &mut damage.allies,
@@ -130,7 +128,7 @@ impl TeamDamage {
         damage
     }
 
-    fn side(self, side: TeamSide) -> Option<u64> {
+    pub fn side(self, side: TeamSide) -> Option<u64> {
         match side {
             TeamSide::Allies => self.allies,
             TeamSide::Enemies => self.enemies,
@@ -232,22 +230,20 @@ mod tests {
     }
 
     #[test]
-    fn team_damage_sums_each_side_and_leaves_out_hidden_rows() {
-        let hidden = PlayerRow { manual_stat_hide_toggle: true, ..row(4, 1, Some(500)) };
-        let rows = [row(1, 0, Some(3_000)), row(2, 0, Some(1_000)), row(3, 1, Some(4_000)), hidden];
+    fn team_damage_sums_each_side() {
+        let rows = [row(1, 0, Some(3_000)), row(2, 0, Some(1_000)), row(3, 1, Some(4_000))];
 
-        let damage = TeamDamage::of(&rows, TeamId::from(0i64), false);
+        let damage = TeamDamage::summing(&rows, TeamId::from(0i64), |row| row.actual_damage);
 
         assert_eq!(damage, TeamDamage { allies: Some(4_000), enemies: Some(4_000) });
         assert_eq!(damage.allies_share(), Some(0.5));
-        assert_eq!(TeamDamage::of(&rows, TeamId::from(0i64), true).enemies, Some(4_500));
     }
 
     #[test]
     fn a_team_without_figures_has_no_total_and_no_split() {
         let rows = [row(1, 0, Some(3_000)), row(2, 1, None)];
 
-        let damage = TeamDamage::of(&rows, TeamId::from(0i64), false);
+        let damage = TeamDamage::summing(&rows, TeamId::from(0i64), |row| row.actual_damage);
 
         assert_eq!(damage.enemies, None);
         assert_eq!(damage.allies_share(), None);
