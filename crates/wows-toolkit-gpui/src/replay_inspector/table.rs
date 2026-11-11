@@ -77,6 +77,7 @@ use super::team_bands::RowMark;
 use super::team_bands::TeamDamage;
 use super::team_bands::TeamSide;
 use wows_replay_insights::battle_report::ConnectionNote;
+use wows_replay_insights::battle_report::TimeOffline;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
@@ -217,7 +218,8 @@ fn measure_column_widths(
                         + gap_1
                         + text_w
                         + ROW_ACTIONS_WIDTH
-                        + status_count as f32 * (icon_default + gap_1);
+                        + status_count as f32 * (icon_default + gap_1)
+                        + connection_label_width(row, window);
                     if shows_detail(&row.db_id) {
                         let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
                         if detail_w > 0. {
@@ -291,6 +293,18 @@ fn measure_column_widths(
     }
 
     MeasuredWidths { columns: widths, details, detail_fit }
+}
+
+/// What a disconnect chip's time adds to the Name column beyond its glyph:
+/// the label, its gap and the chip's padding. Measured at the body size, a
+/// little over the chip's smaller text.
+fn connection_label_width(row: &PlayerRow, window: &mut Window) -> f32 {
+    let Some(time) = row.connection.as_ref().and_then(time_offline) else {
+        return 0.;
+    };
+    let rem = window.rem_size().as_f32();
+
+    text_width(offline_label(time).into(), window, false) + rem * 0.125 + rem * 0.25
 }
 
 /// What `measure_column_widths` found.
@@ -1724,15 +1738,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     }
 
     if let Some(note) = row.connection.as_ref() {
-        let hover: SharedString = connection_hover_text(note).into();
-        cell = cell.child(
-            crate::icons::icon(crate::icons::Glyph::Plug)
-                .flex_none()
-                .id(("replay-disconnect", ix))
-                .test_support()
-                .on_click(keep_click)
-                .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx)),
-        );
+        cell = cell.child(connection_chip(ix, note, layout));
     }
 
     // The dots sit at the end of the player's name, between it and the ship:
@@ -1751,8 +1757,72 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
 fn connection_hover_text(note: &ConnectionNote) -> String {
     match note {
         ConnectionNote::NeverConnected => t!("ui.replay.player.never_connected").into_owned(),
-        ConnectionNote::Interrupted { events } => format!("Player {}", events.join(", ")),
+        ConnectionNote::Interrupted { events, .. } => format!("Player {}", events.join(", ")),
     }
+}
+
+/// How long the player was offline while alive, when the replay says.
+fn time_offline(note: &ConnectionNote) -> Option<TimeOffline> {
+    match note {
+        ConnectionNote::NeverConnected => None,
+        ConnectionNote::Interrupted { time_offline, .. } => *time_offline,
+    }
+}
+
+/// `time` as minutes and seconds, "1m 12s", or seconds alone under a minute.
+fn offline_label(time: TimeOffline) -> String {
+    let secs = time.duration().as_secs();
+    match (secs / 60, secs % 60) {
+        (0, secs) => format!("{secs}s"),
+        (mins, secs) => format!("{mins}m {secs}s"),
+    }
+}
+
+/// How deep a disconnect chip is coloured, from 0 to 1: nothing for a drop
+/// under half a minute, rising evenly to full at a minute and a half.
+fn offline_depth(time: TimeOffline) -> f32 {
+    const NEUTRAL_UNDER_SECS: f32 = 30.;
+    const FULL_AT_SECS: f32 = 90.;
+
+    let secs = time.duration().as_secs_f32();
+    ((secs - NEUTRAL_UNDER_SECS) / (FULL_AT_SECS - NEUTRAL_UNDER_SECS)).clamp(0., 1.)
+}
+
+/// The connection marker: the plug and, when known, how long the player was
+/// offline, on a ground that reddens with that time. A click copies what
+/// its tooltip says.
+fn connection_chip(ix: usize, note: &ConnectionNote, layout: &RowLayout) -> AnyElement {
+    let hover: SharedString = connection_hover_text(note).into();
+    let copied = hover.clone();
+    let time = time_offline(note);
+
+    let chip = h_flex()
+        .id(("replay-disconnect", ix))
+        .test_support()
+        .flex_none()
+        .gap_0p5()
+        .px_0p5()
+        .rounded(px(3.))
+        .cursor_pointer()
+        .child(crate::icons::icon(crate::icons::Glyph::Plug))
+        .on_click(move |event, window, cx| {
+            keep_click(event, window, cx);
+            cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()));
+            crate::toast::ok(t!("ui.replay.context.copied").into_owned(), window, cx);
+        })
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx));
+    let chip = match time {
+        Some(time) => {
+            // Opaque over the row, so the text colour can be chosen against it.
+            let error: Hsla = rgb(crate::theme::semantic().error).into();
+            let ground =
+                layout.fade_to.blend(layout.foreground.opacity(0.08)).blend(error.opacity(offline_depth(time)));
+            chip.bg(ground).text_color(crate::theme::text_on(ground)).child(div().text_xs().child(offline_label(time)))
+        }
+        None => chip,
+    };
+
+    chip.into_any_element()
 }
 
 /// The Twitch chip: a logo beside the name when a chat login around this
@@ -3072,11 +3142,13 @@ mod tests {
     use super::super::model::ReplayReportModel;
     use super::super::sort::SortColumn;
     use super::super::test_support::base_row;
+    use super::ConnectionNote;
     use super::PlayerTable;
     use super::TeamDamage;
     use super::TeamShare;
     use super::TeamSide;
     use super::TeamTotals;
+    use super::TimeOffline;
     use wows_replays::types::AccountId;
     use wows_replays::types::Relation;
 
@@ -4229,6 +4301,39 @@ mod tests {
         });
         assert!(!resizing, "the width drag ended with the button up");
         assert_eq!(set, Some(drawn_before - px(20.)), "and kept the width it had shown, not what followed");
+    }
+
+    /// A disconnect chip stays neutral under half a minute offline, deepens
+    /// evenly to a minute and a half, and stays at full past it.
+    #[test]
+    fn a_disconnect_chip_deepens_from_thirty_to_ninety_seconds() {
+        let depth = |secs| super::offline_depth(TimeOffline::new(std::time::Duration::from_secs(secs)));
+
+        assert_eq!([depth(0), depth(29), depth(30)], [0.; 3]);
+        assert!(0. < depth(45) && depth(45) < depth(60) && depth(60) < depth(89) && depth(89) < 1.);
+        assert_eq!([depth(90), depth(400)], [1.; 2]);
+    }
+
+    /// A click on the disconnect chip puts its tooltip's text on the
+    /// clipboard.
+    #[gpui_kit::test]
+    fn clicking_a_disconnect_chip_copies_its_tooltip(cx: &mut TestAppContext) {
+        let note = ConnectionNote::Interrupted {
+            events: vec!["disconnected @ 1:40".to_string(), "connected @ 2:52".to_string()],
+            time_offline: Some(TimeOffline::new(std::time::Duration::from_secs(72))),
+        };
+        let mut model = two_row_model();
+        model.rows[0].connection = Some(note.clone());
+        let window = open_still_table(cx, model);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("replay-disconnect", 0usize), cx);
+        })
+        .expect("the window is open");
+
+        let copied = cx.read_from_clipboard().and_then(|item| item.text());
+        assert_eq!(copied, Some(super::connection_hover_text(&note)));
     }
 
     /// The owner, an ally and an enemy each get their own row ground, and a

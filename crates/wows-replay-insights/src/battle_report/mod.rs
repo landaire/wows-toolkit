@@ -11,11 +11,13 @@ pub use results::*;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::Value;
 use wows_battle_world::report::BattleReport;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ConnectionChangeInfo;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
@@ -150,7 +152,57 @@ pub enum ConnectionNote {
     /// Dropped at least once while still alive. Each entry is one event
     /// after the opening connect, as "connected @ M:SS" or
     /// "disconnected @ M:SS".
-    Interrupted { events: Vec<String> },
+    Interrupted {
+        events: Vec<String>,
+        /// `None` when a drop was never recovered and the replay says
+        /// neither when the player died nor when the battle ended.
+        time_offline: Option<TimeOffline>,
+    },
+}
+
+/// How long a player was disconnected while alive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct TimeOffline(Duration);
+
+impl TimeOffline {
+    pub fn new(duration: Duration) -> Self {
+        Self(duration)
+    }
+
+    pub fn duration(self) -> Duration {
+        self.0
+    }
+
+    /// Each drop while alive until the reconnect that follows it, but never
+    /// past `until`, the player's death or the battle's end; a drop never
+    /// recovered runs to `until`. `None` for an unrecovered drop when
+    /// `until` is unknown.
+    pub fn of(changes: &[ConnectionChangeInfo], until: Option<Duration>) -> Option<Self> {
+        let mut total = Duration::ZERO;
+        let mut dropped_at: Option<Duration> = None;
+        for change in changes {
+            match change.event_kind() {
+                ConnectionChangeKind::Disconnected if !change.had_death_event() => {
+                    dropped_at.get_or_insert(change.at_game_duration());
+                }
+                // A drop after death costs the team nothing.
+                ConnectionChangeKind::Disconnected => {}
+                ConnectionChangeKind::Connected => {
+                    if let Some(at) = dropped_at.take() {
+                        let back =
+                            until.map_or(change.at_game_duration(), |until| change.at_game_duration().min(until));
+                        total += back.saturating_sub(at);
+                    }
+                }
+            }
+        }
+
+        if let Some(at) = dropped_at {
+            total += until?.saturating_sub(at);
+        }
+
+        Some(Self(total))
+    }
 }
 
 impl NormalizedPlayer {
@@ -851,12 +903,25 @@ fn build_player(
         time_lived_secs,
         survived,
         is_hidden_profile: state.is_hidden(),
-        connection: connection_note(player),
+        connection: connection_note(player, connection_end(report, state.entity_id())),
     }
 }
 
-/// What to say about a player's connection, if anything.
-fn connection_note(player: &Player) -> Option<ConnectionNote> {
+/// When a drop that was never recovered stops counting against the player:
+/// their death, else the end of the battle. Both on the clock connection
+/// changes are stamped with. `None` for a clock that is not a time.
+fn connection_end(report: &BattleReport, vehicle: EntityId) -> Option<Duration> {
+    let clock = match report.deaths_by_victim().get(&vehicle) {
+        Some(death) => *death,
+        None => report.battle_start_clock()? + report.played_duration()?,
+    };
+
+    Duration::try_from_secs_f32(clock.seconds()).ok()
+}
+
+/// What to say about a player's connection, if anything. `until` is where
+/// an unrecovered drop ends; see `connection_end`.
+fn connection_note(player: &Player, until: Option<Duration>) -> Option<ConnectionNote> {
     let changes = player.connection_change_info();
     if changes.is_empty() {
         return player.vehicle_entity().is_none().then_some(ConnectionNote::NeverConnected);
@@ -882,7 +947,8 @@ fn connection_note(player: &Player) -> Option<ConnectionNote> {
             }
         })
         .collect();
-    Some(ConnectionNote::Interrupted { events })
+    let time_offline = TimeOffline::of(&changes, until);
+    Some(ConnectionNote::Interrupted { events, time_offline })
 }
 
 /// Second pass: attribute each player's received damage from the per-victim
@@ -1170,5 +1236,51 @@ mod tests {
         );
 
         assert!(controller_damage(&stats, DamageStatCategory::Ally).is_none());
+    }
+
+    fn change(at_secs: u64, kind: ConnectionChangeKind, dead: bool) -> ConnectionChangeInfo {
+        ConnectionChangeInfo::new(Duration::from_secs(at_secs), kind, dead)
+    }
+
+    #[test]
+    fn time_offline_adds_each_drop_while_alive() {
+        let changes = [
+            change(10, ConnectionChangeKind::Connected, false),
+            change(100, ConnectionChangeKind::Disconnected, false),
+            change(130, ConnectionChangeKind::Connected, false),
+            change(400, ConnectionChangeKind::Disconnected, false),
+            change(442, ConnectionChangeKind::Connected, false),
+            change(600, ConnectionChangeKind::Disconnected, true),
+        ];
+
+        assert_eq!(TimeOffline::of(&changes, None), Some(TimeOffline::new(Duration::from_secs(72))));
+    }
+
+    #[test]
+    fn an_unrecovered_drop_runs_to_its_end_when_known() {
+        let changes = [
+            change(10, ConnectionChangeKind::Connected, false),
+            change(500, ConnectionChangeKind::Disconnected, false),
+        ];
+
+        assert_eq!(
+            TimeOffline::of(&changes, Some(Duration::from_secs(590))),
+            Some(TimeOffline::new(Duration::from_secs(90)))
+        );
+        assert_eq!(TimeOffline::of(&changes, None), None);
+    }
+
+    #[test]
+    fn a_drop_stops_counting_at_death_even_when_recovered_later() {
+        let changes = [
+            change(10, ConnectionChangeKind::Connected, false),
+            change(100, ConnectionChangeKind::Disconnected, false),
+            change(200, ConnectionChangeKind::Connected, true),
+        ];
+
+        assert_eq!(
+            TimeOffline::of(&changes, Some(Duration::from_secs(120))),
+            Some(TimeOffline::new(Duration::from_secs(20)))
+        );
     }
 }

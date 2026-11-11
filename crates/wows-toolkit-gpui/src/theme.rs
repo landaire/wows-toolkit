@@ -652,6 +652,17 @@ fn pack(color: Hsla) -> u32 {
     (channel(rgba.r) << 16) | (channel(rgba.g) << 8) | channel(rgba.b)
 }
 
+/// Near-black or white, whichever has the higher contrast on `ground`.
+pub fn text_on(ground: Hsla) -> Hsla {
+    const DARK: u32 = 0x1a1a1a;
+    const LIGHT: u32 = 0xffffff;
+
+    let ground = pack(ground);
+    let text = if contrast_ratio(DARK, ground) >= contrast_ratio(LIGHT, ground) { DARK } else { LIGHT };
+
+    gpui_kit::rgb(text).into()
+}
+
 /// WCAG 2.1 contrast ratio between two `0xRRGGBB` colours.
 fn contrast_ratio(a: u32, b: u32) -> f32 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
