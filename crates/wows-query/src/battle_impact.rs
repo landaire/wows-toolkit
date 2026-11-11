@@ -4,6 +4,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::Km;
 
 use crate::comparison::ComparedShip;
 use crate::comparison::CruiserType;
@@ -98,17 +99,6 @@ pub struct ComponentEntry {
     pub top: Vec<String>,
 }
 
-/// The battle_impact score of one ship in ship_comparison.
-#[derive(Debug, Clone, Serialize)]
-pub struct ImpactSummary {
-    pub score: ImpactScore,
-
-    /// Position by score in the group, from 1.
-    pub rank: usize,
-
-    pub components: PerComponent<ImpactScore>,
-}
-
 /// A score from 0 to 100, one decimal: the weighted share of the group a
 /// ship beats.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
@@ -131,7 +121,11 @@ pub struct PerComponent<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub firepower: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub close_quarters: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub accuracy: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handling: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reach: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,22 +133,41 @@ pub struct PerComponent<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mobility: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub commander: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spotting: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub utility: Option<T>,
 }
 
 impl<T> PerComponent<T> {
     fn new() -> Self {
-        Self { firepower: None, accuracy: None, reach: None, survivability: None, mobility: None, spotting: None }
+        Self {
+            firepower: None,
+            close_quarters: None,
+            accuracy: None,
+            handling: None,
+            reach: None,
+            survivability: None,
+            mobility: None,
+            commander: None,
+            spotting: None,
+            utility: None,
+        }
     }
 
     fn slot_mut(&mut self, component: Component) -> &mut Option<T> {
         match component {
             Component::Firepower => &mut self.firepower,
+            Component::CloseQuarters => &mut self.close_quarters,
             Component::Accuracy => &mut self.accuracy,
+            Component::Handling => &mut self.handling,
             Component::Reach => &mut self.reach,
             Component::Survivability => &mut self.survivability,
             Component::Mobility => &mut self.mobility,
+            Component::Commander => &mut self.commander,
             Component::Spotting => &mut self.spotting,
+            Component::Utility => &mut self.utility,
         }
     }
 }
@@ -169,22 +182,36 @@ impl<T> Default for PerComponent<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Component {
     Firepower,
+    CloseQuarters,
     Accuracy,
+    Handling,
     Reach,
     Survivability,
     Mobility,
+    Commander,
     Spotting,
+    Utility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScoreModel {
+    Arithmetic,
+    Battleship,
 }
 
 impl Component {
     fn key(self) -> &'static str {
         match self {
             Self::Firepower => "firepower",
+            Self::CloseQuarters => "close_quarters",
             Self::Accuracy => "accuracy",
+            Self::Handling => "handling",
             Self::Reach => "reach",
             Self::Survivability => "survivability",
             Self::Mobility => "mobility",
+            Self::Commander => "commander",
             Self::Spotting => "spotting",
+            Self::Utility => "utility",
         }
     }
 }
@@ -203,8 +230,11 @@ enum Absent {
     /// Below every ship with it: a consumable or armament the ship lacks.
     Worst,
 
-    /// Not at all: armor values missing for want of citadel plates, an
-    /// armor model or a bow zone, which say nothing against the ship.
+    /// Zero capability: an optional system the component measures directly.
+    Zero,
+
+    /// Rank only among ships with the factor; a ship without it is scored on
+    /// its other factors.
     Unmeasured,
 }
 
@@ -274,12 +304,15 @@ impl GameData {
         // in `lowest`.
         const DEFAULT_LIMIT: usize = 10;
         const LOWEST_SHOWN: usize = 5;
-        const FORMULA: &str = "factor share = share of the other ships of the group (of the same tier for bb_ap_citadel, cruiser_he_damaging and bow_overmatch) whose value the ship's beats, ties counting half. A ship without a factor others have (no radar, no torpedoes, no Repair Party) counts as worse than every ship with it and tied with the others without it. A family (gun_dpm, gun_alpha, flight_time) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. score = weighted mean of the components with the class weights below, 0 to 100. An armor value a ship lacks (no citadel plates or armor model) leaves the ship scored on its other factors.";
+        const ARITHMETIC_FORMULA: &str = "factor share = share of the other ships of the group (of the same tier for armor factors) whose value the ship's beats, ties counting half. A ship without a measured factor others have counts as worse than every ship with it and tied with the others without it. A factor marked unmeasured ranks only among peers that have it and is left out for ships without it. A family (gun_dpm, gun_alpha) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. score = weighted mean of the components with the class weights below, 0 to 100.";
+        const BATTLESHIP_FORMULA: &str = "factor share = share of the other ships of the group (of the same tier for armor and offensive overmatch factors) whose value the ship's beats, ties counting half. A ship without a measured factor others have counts as worse than every ship with it and tied with the others without it; no funny button contributes zero funny-button utility. A factor marked unmeasured ranks only among peers that have it and is left out for ships without it. A family (gun_dpm, gun_alpha) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. Damage delivery = the power mean with exponent -8 of firepower, accuracy, gun handling, survivability and mobility after flooring each at 20%; it is multiplied by 65% for each of those components or reach that beats less than half of the group. Reach is a tactical weakness but not a linear damage bottleneck because dispersion is measured at 12 km. Score = damage delivery x71.5%, survivability x5%, funny-button utility x15%, unique-commander talent potential x5%, close quarters x1% and spotting x2.5%, 0 to 100.";
         const NOTES: &[&str] = &[
             "A judgment from game data, not from win rates or player results: the weights are a stated opinion of what sways a battle. Read the components to see why a ship scores as it does.",
-            "Scores compare ships of one class and tier range only; a cruiser's score says nothing against a battleship's.",
-            "Values are those of ship_comparison: each on its best-fit build, consumables stock, damage as if every shell and torpedo hits. A consumable counts when any slot offers it, though a slot holds one choice.",
-            "Not counted: secondaries, anti-aircraft, special abilities (the F key), firing arcs, turret traverse and torpedo reaction time. Main battery reload counts through gun_dpm.",
+            "Scores compare released ships of one class and tier range only; a named test or experimental ship is included on request. A cruiser's score says nothing against a battleship's.",
+            "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion and flight time measured at 12 km. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice.",
+            "The funny button means the F key: Combat Instructions or an alternative fire mode. Its effect index measures modifier magnitude and duration. Its access index uses the least demanding repeatable charge path. Equal burden means 20 ribbons, 10 adjustment salvos, 4 visibility changes, 3 consumable uses, 120 timer seconds, or potential damage equal to 10 times ship HP.",
+            "Mobile smoke counts its active duration. Unique-commander talent potential measures the modifiers from a talent's first activation; talent activation difficulty, improved skills and non-modifier talent effects are not estimated.",
+            "Not counted: anti-aircraft, exact shell hit probability, consumable uptime, ability charge events during a real match and player positioning.",
         ];
 
         let mut named = Vec::new();
@@ -307,12 +340,14 @@ impl GameData {
                 min_tier: args.min_tier,
                 max_tier: args.max_tier,
                 ships: args.ships.clone(),
-                reference_range_km: None,
+                reference_range_km: Some(Km::new(12.0)),
             },
             Listing::Every,
+            true,
         )?;
         let entries = comparison.ships;
-        let impacts = impacts(specs, &entries);
+        let model = if class == ShipClass::Battleship { ScoreModel::Battleship } else { ScoreModel::Arithmetic };
+        let impacts = impacts(model, specs, &entries);
         let ranks = ranks(&impacts);
 
         // Highest score first; ships without a score are left out.
@@ -346,36 +381,13 @@ impl GameData {
             interpretations: comparison.interpretations,
             group: comparison.group,
             ranked: order.len(),
-            formula: FORMULA,
-            weights: weight_lines(specs),
+            formula: if model == ScoreModel::Battleship { BATTLESHIP_FORMULA } else { ARITHMETIC_FORMULA },
+            weights: weight_lines(model, specs),
             ships,
             lowest,
             notes: NOTES,
         })
     }
-}
-
-/// The battle impact of every entry of a comparison group, `None` each for
-/// classes without a score.
-pub(crate) fn summaries(class: ShipClass, entries: &[ComparedShip]) -> Vec<Option<ImpactSummary>> {
-    let Some(specs) = class_specs(class) else {
-        return vec![None; entries.len()];
-    };
-    let impacts = impacts(specs, entries);
-    let ranks = ranks(&impacts);
-
-    impacts
-        .iter()
-        .zip(ranks)
-        .map(|(impact, rank)| {
-            let mut components = PerComponent::new();
-            for component in &impact.components {
-                *components.slot_mut(component.component) = Some(ImpactScore::from_share(component.score));
-            }
-
-            Some(ImpactSummary { score: ImpactScore::from_share(impact.score?), rank: rank?, components })
-        })
-        .collect()
 }
 
 /// Components and factors with their weights for `class`; `None` for
@@ -397,13 +409,13 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
     };
     const ACCURACY: &[FactorSpec] = &[
         FactorSpec { name: "dispersion", keys: &["dispersion"], weight: Weight(1.0), absent: Absent::Worst },
-        FactorSpec { name: "sigma", keys: &["sigma"], weight: Weight(1.0), absent: Absent::Worst },
         FactorSpec {
-            name: "flight_time",
-            keys: &["flight_time_ap", "flight_time_he", "flight_time_sap"],
+            name: "vertical_dispersion",
+            keys: &["vertical_dispersion"],
             weight: Weight(1.0),
             absent: Absent::Worst,
         },
+        FactorSpec { name: "sigma", keys: &["sigma"], weight: Weight(1.0), absent: Absent::Worst },
     ];
     const REACH: &[FactorSpec] = &[FactorSpec {
         name: "main_battery_range",
@@ -602,23 +614,78 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
     const BATTLESHIP: &[ComponentSpec] = &[
         ComponentSpec {
             component: Component::Firepower,
-            weight: Weight(0.3),
+            weight: Weight(0.13),
             factors: &[
-                GUN_DPM,
-                FactorSpec { name: "gun_alpha", keys: ALPHA, weight: Weight(0.75), absent: Absent::Worst },
                 FactorSpec {
-                    name: "fires_per_minute",
-                    keys: &["fires_per_minute"],
-                    weight: Weight(0.15),
+                    name: "effective_gun_damage",
+                    keys: &["effective_gun_damage"],
+                    weight: Weight(1.0),
+                    absent: Absent::Worst,
+                },
+                FactorSpec { name: "gun_dpm", keys: GUN_DPM.keys, weight: Weight(2.0), absent: Absent::Worst },
+                FactorSpec { name: "gun_alpha", keys: ALPHA, weight: Weight(1.5), absent: Absent::Worst },
+                FactorSpec {
+                    name: "main_battery_reload",
+                    keys: &["main_battery_reload"],
+                    weight: Weight(0.75),
+                    absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "main_battery_range",
+                    keys: &["main_battery_range"],
+                    weight: Weight(0.25),
+                    absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "cruiser_bow_overmatch",
+                    keys: &["cruiser_bow_overmatch"],
+                    weight: Weight(1.0),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "cruiser_full_bow_overmatch",
+                    keys: &["cruiser_full_bow_overmatch"],
+                    weight: Weight(0.75),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "cruiser_external_overmatch",
+                    keys: &["cruiser_external_overmatch"],
+                    weight: Weight(0.5),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "main_sap_coverage",
+                    keys: &["main_sap_coverage"],
+                    weight: Weight(1.5),
+                    absent: Absent::Unmeasured,
+                },
+            ],
+        },
+        ComponentSpec { component: Component::Accuracy, weight: Weight(0.13), factors: ACCURACY },
+        ComponentSpec {
+            component: Component::Handling,
+            weight: Weight(0.13),
+            factors: &[
+                FactorSpec {
+                    name: "turret_traverse",
+                    keys: &["turret_traverse"],
+                    weight: Weight(0.5),
+                    absent: Absent::Worst,
+                },
+                FactorSpec { name: "bow_barrels", keys: &["bow_barrels"], weight: Weight(0.5), absent: Absent::Worst },
+                FactorSpec {
+                    name: "all_bear_from_bow",
+                    keys: &["all_bear_from_bow"],
+                    weight: Weight(1.0),
                     absent: Absent::Worst,
                 },
             ],
         },
-        ComponentSpec { component: Component::Accuracy, weight: Weight(0.1), factors: ACCURACY },
-        ComponentSpec { component: Component::Reach, weight: Weight(0.1), factors: REACH },
+        ComponentSpec { component: Component::Reach, weight: Weight(0.13), factors: REACH },
         ComponentSpec {
             component: Component::Survivability,
-            weight: Weight(0.35),
+            weight: Weight(0.05),
             factors: &[
                 FactorSpec { name: "health", keys: &["health"], weight: Weight(1.0), absent: Absent::Worst },
                 FactorSpec {
@@ -655,42 +722,107 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
         },
         ComponentSpec {
             component: Component::Mobility,
-            weight: Weight(0.1),
+            weight: Weight(0.13),
             factors: &[
                 FactorSpec { name: "speed", keys: &["speed"], weight: Weight(1.0), absent: Absent::Worst },
                 FactorSpec {
                     name: "rudder_shift",
                     keys: &["rudder_shift"],
-                    weight: Weight(0.5),
+                    weight: Weight(1.0),
                     absent: Absent::Worst,
                 },
                 FactorSpec {
                     name: "turning_circle",
                     keys: &["turning_circle"],
-                    weight: Weight(0.5),
+                    weight: Weight(1.0),
                     absent: Absent::Worst,
                 },
             ],
         },
         ComponentSpec {
             component: Component::Spotting,
-            weight: Weight(0.05),
+            weight: Weight(0.025),
             factors: &[
                 FactorSpec { name: "concealment", keys: &["concealment"], weight: Weight(1.0), absent: Absent::Worst },
-                FactorSpec { name: "radar_range", keys: &["radar_range"], weight: Weight(0.5), absent: Absent::Worst },
+                FactorSpec { name: "radar_range", keys: &["radar_range"], weight: Weight(1.0), absent: Absent::Worst },
                 FactorSpec { name: "hydro_range", keys: &["hydro_range"], weight: Weight(0.5), absent: Absent::Worst },
                 FactorSpec {
                     name: "torpedo_detection",
                     keys: &["torpedo_detection"],
-                    weight: Weight(0.5),
+                    weight: Weight(0.25),
                     absent: Absent::Worst,
                 },
                 FactorSpec {
                     name: "smoke_lifetime",
                     keys: &["smoke_lifetime"],
-                    weight: Weight(0.25),
+                    weight: Weight(0.5),
                     absent: Absent::Worst,
                 },
+                FactorSpec {
+                    name: "mobile_smoke_duration",
+                    keys: &["mobile_smoke_duration"],
+                    weight: Weight(1.0),
+                    absent: Absent::Worst,
+                },
+            ],
+        },
+        ComponentSpec {
+            component: Component::Utility,
+            weight: Weight(0.15),
+            factors: &[
+                FactorSpec {
+                    name: "funny_button_effect",
+                    keys: &["funny_button_effect"],
+                    weight: Weight(1.25),
+                    absent: Absent::Zero,
+                },
+                FactorSpec {
+                    name: "funny_button_access",
+                    keys: &["funny_button_access"],
+                    weight: Weight(1.0),
+                    absent: Absent::Zero,
+                },
+            ],
+        },
+        ComponentSpec {
+            component: Component::Commander,
+            weight: Weight(0.05),
+            factors: &[FactorSpec {
+                name: "commander_talent_effect",
+                keys: &["commander_talent_effect"],
+                weight: Weight(1.0),
+                absent: Absent::Zero,
+            }],
+        },
+        ComponentSpec {
+            component: Component::CloseQuarters,
+            weight: Weight(0.01),
+            factors: &[
+                FactorSpec {
+                    name: "fires_per_minute",
+                    keys: &["fires_per_minute"],
+                    weight: Weight(0.5),
+                    absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "secondary_dpm",
+                    keys: &["secondary_dpm"],
+                    weight: Weight(1.0),
+                    absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "secondary_range",
+                    keys: &["secondary_range"],
+                    weight: Weight(0.75),
+                    absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "secondary_sap_coverage",
+                    keys: &["secondary_sap_coverage"],
+                    weight: Weight(0.75),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec { name: "torpedo_dpm", keys: &["torpedo_dpm"], weight: Weight(0.5), absent: Absent::Worst },
             ],
         },
     ];
@@ -705,7 +837,7 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
 
 /// Every entry's score under `specs`. A component without any factor for a
 /// ship is left out and the other weights share its part.
-fn impacts(specs: &'static [ComponentSpec], entries: &[ComparedShip]) -> Vec<ShipImpact> {
+fn impacts(model: ScoreModel, specs: &'static [ComponentSpec], entries: &[ComparedShip]) -> Vec<ShipImpact> {
     (0..entries.len())
         .map(|index| {
             let components: Vec<(Weight, ComponentScore)> = specs
@@ -717,11 +849,54 @@ fn impacts(specs: &'static [ComponentSpec], entries: &[ComparedShip]) -> Vec<Shi
                     Some((spec.weight, ComponentScore { component: spec.component, score, factors }))
                 })
                 .collect();
-            let score = weighted_mean(components.iter().map(|(weight, component)| (*weight, component.score)));
+            let score = impact_score(model, &components);
 
             ShipImpact { score, components: components.into_iter().map(|(_, component)| component).collect() }
         })
         .collect()
+}
+
+fn impact_score(model: ScoreModel, components: &[(Weight, ComponentScore)]) -> Option<Share> {
+    if model == ScoreModel::Arithmetic {
+        return weighted_mean(components.iter().map(|(weight, component)| (*weight, component.score)));
+    }
+
+    let is_delivery = |component: Component| {
+        matches!(
+            component,
+            Component::Firepower | Component::Accuracy | Component::Handling | Component::Reach | Component::Mobility
+        )
+    };
+    let is_delivery_core = |component: Component| {
+        matches!(
+            component,
+            Component::Firepower
+                | Component::Accuracy
+                | Component::Handling
+                | Component::Survivability
+                | Component::Mobility
+        )
+    };
+    let delivery_components: Vec<Share> = components
+        .iter()
+        .filter(|(_, component)| is_delivery_core(component.component))
+        .map(|(_, component)| component.score)
+        .collect();
+    let delivery = weighted_strict_mean(delivery_components.iter().map(|score| (Weight(1.0), *score)))?;
+    let weaknesses = components
+        .iter()
+        .filter(|(_, component)| is_delivery(component.component) || component.component == Component::Survivability)
+        .filter(|(_, component)| component.score.0 < 0.5)
+        .count() as i32;
+    let delivery = Share(delivery.0 * 0.65_f32.powi(weaknesses));
+    weighted_mean(
+        std::iter::once((Weight(0.715), delivery)).chain(
+            components
+                .iter()
+                .filter(|(_, component)| !is_delivery(component.component))
+                .map(|(weight, component)| (*weight, component.score)),
+        ),
+    )
 }
 
 /// The share of its peers entry `index` beats on `spec`, ties counting
@@ -750,12 +925,19 @@ fn factor_share(spec: &'static FactorSpec, index: usize, entries: &[ComparedShip
         .map(|standing| (standing.rank.beaten_ties_half().map_or(0.5, |beaten| beaten.value() / 100.0), standing))
         .max_by(|left, right| left.0.total_cmp(&right.0));
     let (share, standing) = match (best, spec.absent) {
-        (Some((beaten, standing)), _) => ((beaten * (having - 1) as f32 + lacking) / others, Some(standing.clone())),
+        (Some((beaten, standing)), absent) => {
+            (present_factor_share(beaten, having, lacking, others, absent), Some(standing.clone()))
+        }
         (None, Absent::Worst) => ((lacking - 1.0) / 2.0 / others, None),
+        (None, Absent::Zero) => (0.0, None),
         (None, Absent::Unmeasured) => return None,
     };
 
     Some(FactorShare { spec, share: Share(share), standing })
+}
+
+fn present_factor_share(beaten: f32, having: usize, lacking: f32, others: f32, absent: Absent) -> f32 {
+    if absent == Absent::Unmeasured { beaten } else { (beaten * (having - 1) as f32 + lacking) / others }
 }
 
 /// `None` for no values or no weight.
@@ -764,6 +946,19 @@ fn weighted_mean(values: impl Iterator<Item = (Weight, Share)>) -> Option<Share>
         values.fold((0.0, 0.0), |(total, weights), (weight, value)| (total + weight.0 * value.0, weights + weight.0));
 
     (weights > 0.0).then(|| Share(total / weights))
+}
+
+/// `None` for no values or no weight. The negative exponent makes every
+/// damage-delivery input matter; the floor limits one outlier's effect.
+fn weighted_strict_mean(values: impl Iterator<Item = (Weight, Share)>) -> Option<Share> {
+    const EXPONENT: f32 = -8.0;
+    const FLOOR: f32 = 0.2;
+
+    let (power_total, weights) = values.fold((0.0, 0.0), |(total, weights), (weight, value)| {
+        (total + weight.0 * value.0.max(FLOOR).powf(EXPONENT), weights + weight.0)
+    });
+
+    (weights > 0.0).then(|| Share((power_total / weights).powf(EXPONENT.recip())))
 }
 
 /// Rank by score among the ships with one, from 1, equal displayed scores
@@ -824,7 +1019,7 @@ fn entry(entry: &ComparedShip, impact: &ShipImpact, rank: usize) -> Option<Impac
 }
 
 /// "firepower 30%: gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x1, ...".
-fn weight_lines(specs: &[ComponentSpec]) -> Vec<String> {
+fn weight_lines(model: ScoreModel, specs: &[ComponentSpec]) -> Vec<String> {
     let total: f32 = specs.iter().map(|spec| spec.weight.0).sum();
 
     specs
@@ -838,7 +1033,22 @@ fn weight_lines(specs: &[ComponentSpec]) -> Vec<String> {
                     keys => format!("{} (best of {}) x{}", factor.name, keys.join(", "), number(factor.weight.0)),
                 })
                 .collect();
-            format!("{} {}%: {}", spec.component.key(), (spec.weight.0 / total * 100.0).round(), factors.join(", "))
+            let weight = if model == ScoreModel::Battleship {
+                match spec.component {
+                    Component::Firepower | Component::Accuracy | Component::Handling | Component::Mobility => {
+                        "14.3%".to_owned()
+                    }
+                    Component::Survivability => "19.3%".to_owned(),
+                    Component::Reach => "penalty only".to_owned(),
+                    Component::Utility => "15%".to_owned(),
+                    Component::Commander => "5%".to_owned(),
+                    Component::CloseQuarters => "1%".to_owned(),
+                    Component::Spotting => "2.5%".to_owned(),
+                }
+            } else {
+                format!("{}%", (spec.weight.0 / total * 100.0).round())
+            };
+            format!("{} {weight}: {}", spec.component.key(), factors.join(", "))
         })
         .collect()
 }
@@ -858,5 +1068,12 @@ mod tests {
                 assert!(keys.contains(key), "{key} is no ship_comparison factor");
             }
         }
+    }
+
+    #[test]
+    fn unmeasured_factor_does_not_beat_ships_without_it() {
+        assert_eq!(present_factor_share(0.0, 5, 27.0, 31.0, Absent::Unmeasured), 0.0);
+        assert_eq!(present_factor_share(0.5, 5, 27.0, 31.0, Absent::Unmeasured), 0.5);
+        assert_eq!(present_factor_share(0.0, 5, 27.0, 31.0, Absent::Worst), 27.0 / 31.0);
     }
 }

@@ -15,17 +15,17 @@
 //! tier X torpedo bombers (145 kn) and dive bombers (166 kn). The client moves
 //! planes at `speed * BW_KNOTS_TO_MPS` world units per second
 //! (`AirplaneUtils.py:442`, `m63fc2621.py:47`) and places auras with
-//! `fromBallistic`, so in ballistic meters a plane covers
-//! `speed * BW_KNOTS_TO_MPS * BW_TO_BALLISTIC`, 2.69 m/s per knot.
+//! `fromBallistic`, so in ballistic meters a plane covers 2.69 m/s per knot
+//! (`ballistic_speed`).
 
 use serde::Serialize;
 use wows_core::units::DamagePerSecond;
 use wowsunpack::game_params::ttx::anti_air::AntiAirDefense;
 use wowsunpack::game_params::ttx::anti_air::AuraBand;
 use wowsunpack::game_params::ttx::anti_air::bubble_update_interval;
-use wowsunpack::game_params::ttx::constants::BW_KNOTS_TO_MPS;
-use wowsunpack::game_params::ttx::constants::BW_TO_BALLISTIC;
+use wowsunpack::game_params::ttx::constants::ballistic_speed;
 use wowsunpack::game_params::ttx::model::Hp;
+use wowsunpack::game_params::ttx::model::Knots;
 
 /// Speed of the plane the rating assumes, knots.
 pub const PLANE_SPEED: f32 = 150.0;
@@ -64,7 +64,7 @@ pub struct BandShare {
 impl AaRating {
     /// The rating of `defense`.
     pub fn from_defense(defense: &AntiAirDefense) -> Self {
-        let speed = PLANE_SPEED * BW_KNOTS_TO_MPS * BW_TO_BALLISTIC;
+        let speed = ballistic_speed(Knots::new(PLANE_SPEED)).value();
         let crossing = |min_km: f32, max_km: f32| ((max_km - min_km) * 1000.0).max(0.0) / speed;
 
         let bands: Vec<BandShare> = defense

@@ -23,8 +23,10 @@ factors:
   - "flight_time_ap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "effective_gun_damage (index, higher is better): main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time"
   - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
   - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
+  - "vertical_dispersion (m, lower is better): main battery vertical dispersion at the reference range, or at the ship's own range when shorter"
   - "sigma (sigma, higher is better): main battery sigma; higher puts more shells near the aim point"
   - "fires_per_minute (fires/min, higher is better): fire starts per minute of every armament against one target at its best bearing, every projectile hitting"
   - "bow_barrels (%, higher is better): share of main battery barrels that bear on a target within 30 deg of the bow, at the best bearing"
@@ -32,7 +34,12 @@ factors:
   - "all_bear_from_bow (deg, lower is better): smallest angle off the bow at which every main battery barrel bears"
   - "all_bear_from_stern (deg, lower is better): smallest angle off the stern at which every main battery barrel bears; the kiting angle"
   - "secondary_dpm (HP/min, higher is better): secondary battery damage per minute, each group at its own best bearing, added up, every shell hitting"
+  - "main_sap_coverage (%, higher is better): above-water external armor plate thicknesses across released surface ships in its matchmaking that its largest main battery SAP shell penetrates"
+  - "secondary_sap_coverage (%, higher is better): the same armor-plate coverage for its largest secondary battery SAP shell; absent without SAP secondaries"
   - "secondary_range (km, higher is better): secondary battery firing range"
+  - "funny_button_effect (index, higher is better): impact of the funny button (F key) while active: magnitude of its modifiers, scaled by duration; optional alternative fire modes include burst concentration"
+  - "funny_button_access (index, higher is better): ease of getting the funny button (F key): the least demanding repeatable charge path; an alternative fire mode is immediately available"
+  - "commander_talent_effect (index, higher is better): largest total modifier magnitude from the first activation of the random-battle talents of a unique commander who can serve on the ship; activation difficulty is not estimated"
   - "torpedo_dpm (HP/min, higher is better): torpedo damage per minute of the best torpedo against one target at its best bearing, every torpedo hitting"
   - "torpedoes_per_minute (torpedoes/min, higher is better): torpedoes launched per minute against one target at its best bearing, with the loaders' limit"
   - "torpedo_reload (s, lower is better): torpedo tube reload"
@@ -56,6 +63,9 @@ factors:
   - "cruiser_he_damaging (%, lower is better): broadside HE hits of the cruiser HE shooter of its matchmaking at 5 to 10 km that penetrate, from armor_assessment"
   - "bow_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest bow plate above the waterline"
   - "stern_overmatch (%, lower is better): battleships of its matchmaking whose largest AP shell overmatches its thinnest stern plate above the waterline"
+  - "cruiser_bow_overmatch (%, higher is better): cruisers in its matchmaking whose thinnest above-water bow plate its largest main battery AP shell overmatches"
+  - "cruiser_full_bow_overmatch (%, higher is better): cruisers in its matchmaking whose thickest above-water bow plate its largest main battery AP shell overmatches"
+  - "cruiser_external_overmatch (%, higher is better): cruisers in its matchmaking whose thickest above-water external hull plate its largest main battery AP shell overmatches; excludes citadel, turrets, steering gear and torpedo protection"
 torpedo_factors:
   - "speed (kn, higher is better): torpedo speed"
   - "range (km, higher is better): torpedo range"
@@ -185,6 +195,11 @@ leaders:
       - C. Colombo (Italy) 7.43 s
     worst:
       - "R. Lauria (Italy, premium) 8.21 s"
+  effective_gun_damage:
+    best:
+      - "Conte Verde (Italy, premium) 9.58 index"
+    worst:
+      - "Cumberland (United_Kingdom, test) 2.77 index"
   turret_traverse:
     best:
       - "Conte Verde (Italy, premium) 21.74 s"
@@ -195,6 +210,11 @@ leaders:
       - "Conte Verde (Italy, premium) 127 m"
     worst:
       - "Cumberland (United_Kingdom, test) 234 m"
+  vertical_dispersion:
+    best:
+      - "Slava (Russia, premium) 53 m"
+    worst:
+      - "Cumberland (United_Kingdom, test) 119 m"
   sigma:
     best:
       - Bungo (Japan) 2.2 sigma
@@ -230,11 +250,36 @@ leaders:
       - "Sibir (Russia, premium) 692308 HP/min"
     worst:
       - "Pérez Gacitúa (Pan_America, test) 189905 HP/min"
+  main_sap_coverage:
+    best:
+      - "R. Lauria (Italy, premium) 77.62%"
+    worst:
+      - "Conte Verde (Italy, premium) 67.38%"
+  secondary_sap_coverage:
+    best:
+      - "Sicilia (Italy, premium) 61.98%"
+    worst:
+      - "R. Lauria (Italy, premium) 60.09%"
   secondary_range:
     best:
       - "Bourgogne (France, premium) 11.95 km"
     worst:
       - "Incomparable (United_Kingdom, premium) 10.08 km"
+  funny_button_effect:
+    best:
+      - "Wisconsin (USA, premium) 188.01 index"
+    worst:
+      - "Sibir (Russia, premium) 23.4 index"
+  funny_button_access:
+    best:
+      - Libertad (Pan_America) 100 index
+    worst:
+      - "Sibir (Russia, premium) 58.82 index"
+  commander_talent_effect:
+    best:
+      - Libertad (Pan_America) 2046.03 index
+    worst:
+      - "Rodina (Russia, test) 7.23 index"
   torpedo_dpm:
     best:
       - Thor (Europe) 85934 HP/min
@@ -350,6 +395,21 @@ leaders:
       - "Bourgogne (France, premium) 5.74%"
     worst:
       - "Aki (Japan, premium) 100%"
+  cruiser_bow_overmatch:
+    best:
+      - "Aki (Japan, premium) 100%"
+    worst:
+      - "Conte Verde (Italy, premium) 0%"
+  cruiser_full_bow_overmatch:
+    best:
+      - "Aki (Japan, premium) 38.85%"
+    worst:
+      - "Conte Verde (Italy, premium) 0%"
+  cruiser_external_overmatch:
+    best:
+      - "Aki (Japan, premium) 4.46%"
+    worst:
+      - "Tōgasa (Japan, test) 0%"
 torpedo_leaders:
   speed:
     best:
@@ -407,8 +467,10 @@ ships:
       alpha_he: "44400 (rank 35/39, p11)"
       flight_time_ap: "8.77 (rank 41/43, p5)"
       flight_time_he: "8.77 (rank 37/39, p5)"
+      effective_gun_damage: "4.84 (rank 16/43, p64)"
       turret_traverse: "21.74 (rank 1/43, p71)"
       dispersion: "162 (rank 5/43, p76)"
+      vertical_dispersion: "89 (rank 12/43, p71)"
       sigma: "2 (rank 10/43, p69)"
       fires_per_minute: "37.25 (rank 20/43, p55)"
       bow_barrels: "66.67 (rank 5/43, p57)"
@@ -417,6 +479,7 @@ ships:
       all_bear_from_stern: "30 (rank 2/43, p67)"
       secondary_dpm: "500000 (rank 10/43, p79)"
       secondary_range: "10.08 (rank 43/43, p0)"
+      commander_talent_effect: "40.82 (rank 17/43, p52)"
       torpedo_dpm: "49314 (rank 4/6, p40)"
       torpedoes_per_minute: "2.94 (rank 4/6, p40)"
       torpedo_reload: "81.6 (rank 3/6, p60)"
@@ -437,6 +500,9 @@ ships:
       cruiser_he_damaging: "61 (rank 25/43, p43)"
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 38/43, p0"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 34/43, p10"
+      cruiser_bow_overmatch: "100 (rank 1/43, p21)"
+      cruiser_full_bow_overmatch: "38.85 (rank 1/43, p21)"
+      cruiser_external_overmatch: "4.46 (rank 1/43, p93)"
     outliers:
       - "weakness: health 70000 HP, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "strength: repair_party_heal 40%, tied for the highest of the 42 tier 10 battleships (rank 1/42)"
@@ -447,6 +513,7 @@ ships:
       - "strength: concealment 10.6 km, the lowest of the 43 tier 10 battleships (rank 1/43)"
       - "weakness: turning_circle 1160 m, the highest of the 43 tier 10 battleships (rank 43/43)"
       - "strength: 43.4% of those battleship AP hits overpenetrate it, doing little damage (bb_ap_overpenetration), higher than 95% of the 42 other tier 10 battleships (rank 3/43)"
+      - "strength: cruiser_external_overmatch 4.46%, tied for the highest of the 43 tier 10 battleships (rank 1/43)"
       - "strength: Edinburgh's light cruiser AP 152 mm shells at 5-10 km overpenetrate it on 3.3% of broadside hits, higher than 91% of the 81 other tier 9-11 battleships (rank 6/82); an overpenetration is little damage taken."
       - "strength: Minnesota's battleship AP 406 mm shells at 12-14 km overpenetrate it on 43.4% of broadside hits, higher than 94% of the 81 other tier 9-11 battleships (rank 6/82) and 39.9% of angled 30 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82) and 37.3% of angled 45 deg hits, higher than 95% of the 81 other tier 9-11 battleships (rank 5/82); an overpenetration is little damage taken."
       - "weakness: Minnesota's battleship AP 406 mm shells at 12-14 km detonate in its citadel on 7.7% of angled 45 deg hits, higher than 93% of the 81 other tier 9-11 battleships (rank 76/82); a citadel hit is heavy damage taken."
@@ -505,16 +572,6 @@ ships:
       - "Kites poorly: within 30 deg of the stern 2 of 6 main battery barrels bear and all bear from 30 deg off the stern."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 4 of 6 main battery barrels bear and all bear from 30 deg off the bow."
       - "Battleship AP mostly passes through it: battleship AP 406 mm (Minnesota) at 12-14 km, 43.4% of broadside hits overpenetrate, more than 94% of tier 9-11 battleships. Overpenetration-prone plating is a strength against battleships."
-    battle_impact:
-      score: 33.4
-      rank: 42
-      components:
-        firepower: 23.1
-        accuracy: 54.1
-        reach: 4.8
-        survivability: 29.8
-        mobility: 60.1
-        spotting: 82.4
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (2 charges, 80 s reload)"
@@ -536,8 +593,10 @@ ships:
       alpha_sap: "192000 (rank 1/4, p67)"
       flight_time_ap: "7.7 (rank 7/43, p81)"
       flight_time_sap: "7.43 (rank 1/4, p67)"
+      effective_gun_damage: "3.93 (rank 34/43, p21)"
       turret_traverse: "27.75 (rank 20/43, p50)"
       dispersion: "186 (rank 18/43, p60) (with unique upgrade Improved Rangefinders)"
+      vertical_dispersion: "105 (rank 39/43, p7) (with unique upgrade Improved Rangefinders)"
       sigma: "1.5 (rank 42/43, p2)"
       fires_per_minute: "31.46 (rank 30/43, p31)"
       bow_barrels: "100 (rank 1/43, p93)"
@@ -545,7 +604,9 @@ ships:
       all_bear_from_bow: "23 (rank 2/43, p93)"
       all_bear_from_stern: "36 (rank 30/43, p26)"
       secondary_dpm: "521875 (rank 7/43, p86)"
+      main_sap_coverage: "73.56 (rank 2/4, p33)"
       secondary_range: "10.51 (rank 17/43, p2)"
+      commander_talent_effect: "35.95 (rank 22/43, p40)"
       aa_rating: "8408 (rank 39/43, p10)"
       aa_long_dps: "246 (rank 11/43, p76)"
       aa_flak: "18515 (rank 23/43, p48)"
@@ -560,10 +621,14 @@ ships:
       cruiser_he_damaging: "52.5 (rank 15/43, p64)"
       bow_overmatch: "5.74 (rank 1/43, p19)"
       stern_overmatch: "5.74 (rank 1/43, p26)"
+      cruiser_bow_overmatch: "82.17 (rank 35/43, p12)"
+      cruiser_full_bow_overmatch: "32.48 (rank 35/43, p12)"
+      cruiser_external_overmatch: "1.27 (rank 35/43, p12)"
     outliers:
       - "weakness: main_battery_reload 32.56 s, higher than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "weakness: main_battery_range 19.94 km, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
       - "strength: alpha_ap 206400 HP, tied for the highest of the 43 tier 10 battleships (rank 1/43)"
+      - "weakness: vertical_dispersion 105 m (with unique upgrade Improved Rangefinders), higher than 90% of the 42 other tier 10 battleships (rank 39/43)"
       - "weakness: sigma 1.5 sigma, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
       - "strength: bow_barrels 100%, tied for the highest of the 43 tier 10 battleships (rank 1/43)"
       - "strength: all_bear_from_bow 23 deg, lower than 93% of the 42 other tier 10 battleships (rank 2/43)"
@@ -612,17 +677,7 @@ ships:
     signals:
       - "Kites well: within 30 deg of the stern 8 of 16 main battery barrels bear and all bear from 36 deg off the stern."
       - "Bow-in suits it: within 30 deg of the bow 16 of 16 main battery barrels bear and all bear from 23 deg off the bow; only 5.74% of tier 8-11 battleships overmatch its 32 mm bow plating."
-    battle_impact:
-      score: 60.6
-      rank: 8
-      components:
-        firepower: 93.1
-        accuracy: 48.4
-        reach: 2.4
-        survivability: 59.4
-        mobility: 47.9
-        spotting: 40.2
-    unique_upgrade: "Improved Rangefinders (unique upgrade), taken for: dispersion"
+    unique_upgrade: "Improved Rangefinders (unique upgrade), taken for: dispersion, vertical_dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (4 charges, 80 s reload)"
@@ -643,8 +698,10 @@ ships:
       alpha_he: "76500 (rank 6/39, p87)"
       flight_time_ap: "7.95 (rank 16/43, p64)"
       flight_time_he: "8.19 (rank 19/39, p53)"
+      effective_gun_damage: "8.91 (rank 2/43, p98)"
       turret_traverse: "26.09 (rank 15/43, p57)"
       dispersion: "146 (rank 2/43, p98)"
+      vertical_dispersion: "76 (rank 3/43, p95)"
       sigma: "1.9 (rank 17/43, p45)"
       fires_per_minute: "40.06 (rank 9/43, p81)"
       bow_barrels: "40 (rank 42/43, p0)"
@@ -653,6 +710,9 @@ ships:
       all_bear_from_stern: "40 (rank 35/43, p10)"
       secondary_dpm: "477778 (rank 12/43, p74)"
       secondary_range: "10.51 (rank 17/43, p2)"
+      funny_button_effect: "24.69 (rank 7/8, p14)"
+      funny_button_access: "100 (rank 1/8, p14)"
+      commander_talent_effect: "18.45 (rank 33/43, p14)"
       torpedo_dpm: "55922 (rank 3/6, p60)"
       torpedoes_per_minute: "2.35 (rank 5/6, p20)"
       torpedo_reload: "102 (rank 5/6, p20)"
@@ -671,17 +731,25 @@ ships:
       cruiser_he_damaging: "75.3 (rank 38/43, p12)"
       bow_overmatch: "weakness: 87.7% of the battleships it meets overmatch its bow (a majority); for comparison, rank 38/43, p0"
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 34/43, p10"
+      cruiser_bow_overmatch: "24.2 (rank 39/43, p5)"
+      cruiser_full_bow_overmatch: "10.19 (rank 39/43, p2)"
+      cruiser_external_overmatch: "0 (rank 39/43, p0)"
     outliers:
       - "weakness: health 68300 HP, lower than 98% of the 42 other tier 10 battleships (rank 42/43)"
       - "weakness: repair_party_total_heal 38248 HP, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "strength: main_battery_reload 20.24 s, lower than 90% of the 42 other tier 10 battleships (rank 5/43)"
       - "strength: dpm_ap 413482 HP/min, higher than 93% of the 42 other tier 10 battleships (rank 4/43)"
       - "strength: dpm_he 226779 HP/min, higher than 97% of the 38 other tier 10 battleships (rank 2/39)"
+      - "strength: effective_gun_damage 8.91 index, higher than 98% of the 42 other tier 10 battleships (rank 2/43)"
       - "strength: dispersion 146 m, lower than 98% of the 42 other tier 10 battleships (rank 2/43)"
+      - "strength: vertical_dispersion 76 m, lower than 95% of the 42 other tier 10 battleships (rank 3/43)"
       - "weakness: bow_barrels 40%, tied for the lowest of the 43 tier 10 battleships (rank 42/43)"
       - "strength: stern_barrels 60%, higher than 90% of the 42 other tier 10 battleships (rank 4/43)"
       - "strength: aa_long_dps 268 HP/s, higher than 90% of the 42 other tier 10 battleships (rank 5/43)"
       - "strength: concealment 12.26 km, lower than 90% of the 42 other tier 10 battleships (rank 5/43)"
+      - "weakness: cruiser_bow_overmatch 24.2%, lower than 90% of the 42 other tier 10 battleships (rank 39/43)"
+      - "weakness: cruiser_full_bow_overmatch 10.19%, lower than 90% of the 42 other tier 10 battleships (rank 39/43)"
+      - "weakness: cruiser_external_overmatch 0%, tied for the lowest of the 43 tier 10 battleships (rank 39/43)"
       - "strength: torpedo Type 93 mod. 3 flood_coefficient 4.06x, the highest of the 6 torpedo options of tier 10 battleships (rank 1/6)"
       - "weakness: torpedo Type 93 mod. 3 reaction_time 9 s, the highest of the 6 torpedo options of tier 10 battleships (rank 6/6)"
       - "strength: Edinburgh's light cruiser AP 152 mm shells at 5-10 km overpenetrate it on 3.4% of broadside hits, higher than 94% of the 82 other tier 9-11 battleships (rank 5/83); an overpenetration is little damage taken."
@@ -739,16 +807,6 @@ ships:
     signals:
       - "Kites with its guns (within 30 deg of the stern 9 of 15 main battery barrels bear and all bear from 40 deg off the stern), but most tier 8-11 battleships (87.7%) overmatch its 25 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 15 main battery barrels bear and all bear from 40 deg off the bow."
-    battle_impact:
-      score: 55.2
-      rank: 21
-      components:
-        firepower: 91.9
-        accuracy: 71.8
-        reach: 52.4
-        survivability: 19.6
-        mobility: 53
-        spotting: 61.6
     consumables:
       - "Damage Control Party (unlimited charges, 80 s reload)"
       - "Repair Party (4 charges, 80 s reload)"
@@ -759,21 +817,27 @@ head_to_head:
   - ships:
       - Incomparable
       - C. Colombo
-    compared: 32
+    compared: 38
     first_better:
       - repair_party_heal
       - repair_party_total_heal
       - main_battery_reload
       - main_battery_range
+      - effective_gun_damage
       - turret_traverse
       - dispersion
+      - vertical_dispersion
       - sigma
       - fires_per_minute
       - all_bear_from_stern
+      - commander_talent_effect
       - aa_rating
       - concealment
       - speed
       - bb_ap_overpenetration
+      - cruiser_bow_overmatch
+      - cruiser_full_bow_overmatch
+      - cruiser_external_overmatch
     second_better:
       - health
       - dpm_ap
@@ -796,18 +860,18 @@ head_to_head:
       - damage_control_reload
       - air_concealment
     first_largest_leads:
+      - cruiser_external_overmatch 4.46 vs 1.27% (72% apart)
       - repair_party_heal 40 vs 14% (65% apart)
       - bb_ap_overpenetration 43.4 vs 27.2% (37% apart)
-      - sigma 2 vs 1.5 sigma (25% apart)
     second_largest_leads:
       - bb_ap_citadel 0 vs 7.2% (100% apart)
       - bow_overmatch 5.74 vs 87.7% (93% apart)
       - stern_overmatch 5.74 vs 87.7% (93% apart)
-    verdict: "Mixed: Incomparable is better on 13 of 32 compared factors, C. Colombo on 17, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Incomparable is better on 19 of 38 compared factors, C. Colombo on 17, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Incomparable
       - Tōgasa
-    compared: 40
+    compared: 46
     first_better:
       - health
       - repair_party_heal
@@ -818,6 +882,7 @@ head_to_head:
       - all_bear_from_bow
       - all_bear_from_stern
       - secondary_dpm
+      - commander_talent_effect
       - torpedoes_per_minute
       - torpedo_reload
       - torpedo_launch_from_bow
@@ -826,6 +891,9 @@ head_to_head:
       - speed
       - bb_ap_overpenetration
       - cruiser_he_damaging
+      - cruiser_bow_overmatch
+      - cruiser_full_bow_overmatch
+      - cruiser_external_overmatch
     second_better:
       - main_battery_reload
       - main_battery_range
@@ -835,7 +903,9 @@ head_to_head:
       - alpha_he
       - flight_time_ap
       - flight_time_he
+      - effective_gun_damage
       - dispersion
+      - vertical_dispersion
       - fires_per_minute
       - stern_barrels
       - secondary_range
@@ -852,18 +922,18 @@ head_to_head:
       - bow_overmatch
       - stern_overmatch
     first_largest_leads:
-      - repair_party_heal 40 vs 14% (65% apart)
-      - bow_barrels 66.67 vs 40% (40% apart)
-      - repair_party_total_heal 56000 vs 38248 HP (32% apart)
+      - cruiser_external_overmatch 4.46 vs 0% (100% apart)
+      - cruiser_bow_overmatch 100 vs 24.2% (76% apart)
+      - cruiser_full_bow_overmatch 38.85 vs 10.19% (74% apart)
     second_largest_leads:
       - bb_ap_citadel 0.8 vs 7.2% (89% apart)
       - dpm_he 226779 vs 108117 HP/min (52% apart)
-      - stern_barrels 60 vs 33.33% (44% apart)
-    verdict: "Mixed: Incomparable is better on 17 of 40 compared factors, Tōgasa on 18, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+      - effective_gun_damage 8.91 vs 4.84 index (46% apart)
+    verdict: "Mixed: Incomparable is better on 21 of 46 compared factors, Tōgasa on 20, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - C. Colombo
       - Tōgasa
-    compared: 32
+    compared: 38
     first_better:
       - health
       - repair_party_total_heal
@@ -873,18 +943,24 @@ head_to_head:
       - all_bear_from_bow
       - all_bear_from_stern
       - secondary_dpm
+      - commander_talent_effect
       - speed
       - rudder_shift
       - bb_ap_citadel
       - cruiser_he_damaging
       - bow_overmatch
       - stern_overmatch
+      - cruiser_bow_overmatch
+      - cruiser_full_bow_overmatch
+      - cruiser_external_overmatch
     second_better:
       - main_battery_reload
       - main_battery_range
       - dpm_ap
+      - effective_gun_damage
       - turret_traverse
       - dispersion
+      - vertical_dispersion
       - sigma
       - fires_per_minute
       - stern_barrels
@@ -901,13 +977,13 @@ head_to_head:
       - air_concealment
     first_largest_leads:
       - bb_ap_citadel 0 vs 0.8% (100% apart)
+      - cruiser_external_overmatch 1.27 vs 0% (100% apart)
       - bow_overmatch 5.74 vs 87.7% (93% apart)
-      - stern_overmatch 5.74 vs 87.7% (93% apart)
     second_largest_leads:
+      - effective_gun_damage 8.91 vs 3.93 index (56% apart)
       - main_battery_reload 20.24 vs 32.56 s (38% apart)
-      - bb_ap_overpenetration 35.3 vs 27.2% (23% apart)
-      - dispersion 146 vs 186 m (22% apart)
-    verdict: "Mixed: C. Colombo is better on 14 of 32 compared factors, Tōgasa on 14, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+      - vertical_dispersion 76 vs 105 m (28% apart)
+    verdict: "Mixed: C. Colombo is better on 18 of 38 compared factors, Tōgasa on 16, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

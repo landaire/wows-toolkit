@@ -518,6 +518,76 @@ pub struct StatNamesOutput {
     pub note: &'static str,
 }
 
+/// A stat stat_search can search, as the quantity catalog lists it.
+pub(crate) struct StatDefinition {
+    pub(crate) name: String,
+    pub(crate) unit: &'static str,
+    pub(crate) label: String,
+
+    /// What one row stands for when the stat has several, e.g. "per ammo type".
+    pub(crate) item: Option<&'static str>,
+
+    /// Which way the stat improves; `None` when no build changes it for the better.
+    pub(crate) better: Option<Direction>,
+}
+
+/// A stat valued on one build per ship, as stat_search ranks it.
+pub(crate) struct StatQuantity {
+    rank: Rank,
+}
+
+impl StatQuantity {
+    /// The stat named `stat`, on `build`, or without one on the build that
+    /// improves it (the base value for a stat with no better direction).
+    /// `qualifier` picks one row as in stat_search.
+    pub(crate) fn new(stat: &str, qualifier: Option<String>, build: Option<RankBuild>) -> Result<Self, QueryError> {
+        let stat = resolve_stat(stat)?;
+        let (build, basis) = match (build, stat.better()) {
+            (Some(build), _) => (build, BuildBasis::Given),
+            (None, Some(Direction::Lower)) => (RankBuild::Lowest, BuildBasis::Usual),
+            (None, Some(Direction::Higher)) => (RankBuild::Highest, BuildBasis::Usual),
+            (None, None) => (RankBuild::Base, BuildBasis::Given),
+        };
+        // A base value of a stat with several rows takes the lowest row.
+        let order = match build {
+            RankBuild::Highest => RankOrder::Desc,
+            RankBuild::Base | RankBuild::Lowest => RankOrder::Asc,
+        };
+
+        Ok(Self { rank: Rank { stat, qualifier, order, build, basis, limit: RankLimit(1), condition: None } })
+    }
+
+    /// What the value is on, e.g. the best-fit build.
+    pub(crate) fn build_label(&self) -> &'static str {
+        match (self.rank.build, self.rank.basis) {
+            (RankBuild::Base, _) => "base value: stock modules, no captain skills or upgrades",
+            (RankBuild::Lowest, BuildBasis::Usual) | (RankBuild::Highest, BuildBasis::Usual) => {
+                "best-fit build: the modules, captain skills and upgrades players take for this stat"
+            }
+            (RankBuild::Lowest, _) => "the build that lowers it most",
+            (RankBuild::Highest, _) => "the build that raises it most",
+        }
+    }
+}
+
+/// One ship's value of a [`StatQuantity`].
+pub(crate) struct StatReading {
+    /// On the quantity's build, rounded as stat_search shows it.
+    pub(crate) value: f32,
+
+    /// Stock modules, no captain skills or upgrades.
+    pub(crate) base: f32,
+
+    /// Modules, captain skills and upgrades of the build `value` is on.
+    pub(crate) build: Vec<String>,
+
+    /// The row `value` comes from when the stat has several.
+    pub(crate) row: Option<String>,
+
+    /// The row `base` comes from when the stat has several.
+    pub(crate) base_row: Option<String>,
+}
+
 /// A stat a condition can test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SearchStat {
@@ -1609,6 +1679,29 @@ impl GameData {
             condition: label,
         }))
     }
+
+    /// `ship`'s value of `stat`, from the same builds stat_search ranks by.
+    /// `None` when the ship lacks the stat.
+    pub(crate) fn stat_reading(&self, ship: &Ship, stat: &StatQuantity) -> Result<Option<StatReading>, QueryError> {
+        let row_names = RowNames::default();
+        let Some(RankedBuilds { builds, .. }) = self.rank_builds(ship, &stat.rank, &row_names)? else {
+            return Ok(None);
+        };
+
+        let ranked = stat.rank.ranked(&builds);
+        let build = match stat.rank.build {
+            RankBuild::Base => Vec::new(),
+            RankBuild::Lowest | RankBuild::Highest => builds.best.assumed,
+        };
+
+        Ok(Some(StatReading {
+            value: shown(ranked.value),
+            base: shown(builds.base.value),
+            build,
+            row: ranked.row.and_then(|row| row_names.label(self, ship, stat.rank.stat, row)),
+            base_row: builds.base.row.and_then(|row| row_names.label(self, ship, stat.rank.stat, row)),
+        }))
+    }
 }
 
 impl<'a> ShipSearch<'a> {
@@ -2376,6 +2469,20 @@ impl RowNames {
 
         row_label(game, ship, stat, key.caliber, Some(&key.qualifier))
     }
+}
+
+/// Every stat stat_search can search.
+pub(crate) fn stat_definitions(game: &GameData) -> Vec<StatDefinition> {
+    SearchStat::all()
+        .into_iter()
+        .map(|stat| StatDefinition {
+            name: stat.name(),
+            unit: stat.unit().name(),
+            label: stat.label(game),
+            item: stat.item(),
+            better: stat.better(),
+        })
+        .collect()
 }
 
 fn resolve_rank(rank: &StatRank) -> Result<Rank, QueryError> {

@@ -11,4 +11,4 @@ ship:
   group: upgradeable
   category: tech_tree
   status: released
-none: "No special ability: the ship has neither Combat Instructions nor an alternative main battery fire mode, so its ability key (F by default) does nothing."
+none: "No special ability: the ship has neither Combat Instructions nor an alternative main battery fire mode, so its funny button (F by default) does nothing."

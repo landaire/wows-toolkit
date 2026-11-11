@@ -5,12 +5,16 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_core::units::Degrees;
+use wows_core::units::Km;
 use wows_core::units::MetersPerSecond;
 use wows_core::units::Millimeters;
 use wows_core::units::Percent;
 use wows_core::units::Seconds;
+use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::OVERMATCH_RATIO;
+use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::is_overmatch;
+use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
@@ -240,6 +244,20 @@ impl GameData {
             .collect();
 
         Ok(ShipShells { interpretations, ship: ship.summary(), shells })
+    }
+
+    /// Where the shell of GameParams name `param` lands when fired at
+    /// `range`, times on the in-game clock. `None` beyond its ballistic reach
+    /// or when the projectile lacks a ballistic input.
+    pub(crate) fn shell_impact(&self, param: &str, range: Km) -> Result<Option<ImpactResult>, QueryError> {
+        let projectile = self.projectile(param)?;
+        let Some(params) =
+            projectile.to_shell_info(param.to_owned()).and_then(|info| ShellParams::from_shell_info(&info))
+        else {
+            return Ok(None);
+        };
+
+        Ok(solve_for_range(&params, range.to_meters()))
     }
 
     pub(crate) fn shells(&self, ship: &Ship) -> Vec<Shell> {

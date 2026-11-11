@@ -2416,11 +2416,12 @@ impl BuoyancyState {
 }
 
 impl BuoyancyState {
-    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.depth_state(id).map(|name| Self::from_name(name, version))
+    pub fn from_id(id: i32, constants: &BattleConstants, _version: Version) -> Option<Recognized<Self>> {
+        constants.depth_state(id).map(Self::from_name)
     }
 
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+    /// The state named as battle.xml and GameParams name it, e.g. "PERISCOPE".
+    pub fn from_name(name: &str) -> Recognized<Self> {
         match name {
             "INVALID_STATE" => Recognized::Known(BuoyancyState::Invalid),
             "SURFACE" => Recognized::Known(BuoyancyState::Surface),

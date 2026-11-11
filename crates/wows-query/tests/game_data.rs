@@ -1361,6 +1361,25 @@ fn battle_impact_tier_10_rankings() {
             .expect("tier 10 ships score");
         assert_eq!(output.ships.len(), output.ranked);
         assert!(output.lowest.is_empty());
+        if class == ShipClass::Battleship {
+            let position = |prefix: &str| {
+                output
+                    .ships
+                    .iter()
+                    .position(|ship| ship.ship.starts_with(prefix))
+                    .unwrap_or_else(|| panic!("{prefix} is ranked"))
+            };
+            let libertad = position("T10 Libertad ");
+            let colombo = position("T10 C. Colombo ");
+            let schlieffen = position("T10 Schlieffen ");
+            let kurfurst = position("T10 G. Kur");
+            let bottom_five = output.ranked - 5;
+
+            assert!(libertad < colombo);
+            assert!(colombo < 10);
+            assert!(schlieffen >= bottom_five, "Schlieffen position {} of {}", schlieffen + 1, output.ranked);
+            assert!(kurfurst >= bottom_five, "G. Kurfurst position {} of {}", kurfurst + 1, output.ranked);
+        }
         let lines: Vec<String> = output
             .ships
             .iter()
@@ -1930,20 +1949,25 @@ fn skill_trigger_sentences_match_their_effects() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
-fn grosser_kurfurst_resolves_from_abbreviations() {
-    let resolved: Vec<_> = ["GK", "grober", "Grober Kurfurst", "Groer Kurfurst"]
-        .into_iter()
-        .map(|name| {
-            let skill = game()
-                .captain_skill(&CaptainSkillArgs {
-                    skill: "IFA".to_owned(),
-                    ship: Some(name.to_owned()),
-                    ..Default::default()
-                })
-                .expect("names resolve");
-            json!({ "ship": skill.ship.map(|ship| ship.name), "interpretations": skill.interpretations })
-        })
-        .collect();
+fn community_ship_names_resolve() {
+    let resolved: Vec<_> = [
+        ("GK", "G. Kurf\u{fc}rst"),
+        ("grober", "G. Kurf\u{fc}rst"),
+        ("Grober Kurfurst", "G. Kurf\u{fc}rst"),
+        ("Groer Kurfurst", "G. Kurf\u{fc}rst"),
+        ("mega grober", "Hannover"),
+        ("brik", "Vermont"),
+        ("brick", "Vermont"),
+    ]
+    .into_iter()
+    .map(|(name, expected)| {
+        let ship = game().ship_summary(name).expect("name resolves");
+        assert_eq!(ship.ship.name, expected);
+
+        (name, ship.interpretations)
+    })
+    .collect();
+
     insta::assert_yaml_snapshot!(resolved);
 }
 

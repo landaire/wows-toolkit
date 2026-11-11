@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/src/data.rs
-assertion_line: 478
 expression: resolutions
 ---
 - name: Großer Kurfürst
@@ -8,6 +7,18 @@ expression: resolutions
   method: exact-alias
 - name: GK
   resolved: G. Kurfürst
+  method: exact-alias
+- name: Grober
+  resolved: G. Kurfürst
+  method: exact-alias
+- name: Mega Grober
+  resolved: Hannover
+  method: exact-alias
+- name: Brik
+  resolved: Vermont
+  method: exact-alias
+- name: Brick
+  resolved: Vermont
   method: exact-alias
 - name: Friedrich der Große
   resolved: F. der Grosse

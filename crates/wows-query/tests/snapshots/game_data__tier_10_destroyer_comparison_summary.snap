@@ -23,8 +23,10 @@ factors:
   - "flight_time_ap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "effective_gun_damage (index, higher is better): main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time"
   - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
   - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
+  - "vertical_dispersion (m, lower is better): main battery vertical dispersion at the reference range, or at the ship's own range when shorter"
   - "sigma (sigma, higher is better): main battery sigma; higher puts more shells near the aim point"
   - "fires_per_minute (fires/min, higher is better): fire starts per minute of every armament against one target at its best bearing, every projectile hitting"
   - "bow_barrels (%, higher is better): share of main battery barrels that bear on a target within 30 deg of the bow, at the best bearing"
@@ -33,6 +35,9 @@ factors:
   - "all_bear_from_stern (deg, lower is better): smallest angle off the stern at which every main battery barrel bears; the kiting angle"
   - "secondary_dpm (HP/min, higher is better): secondary battery damage per minute, each group at its own best bearing, added up, every shell hitting"
   - "secondary_range (km, higher is better): secondary battery firing range"
+  - "funny_button_effect (index, higher is better): impact of the funny button (F key) while active: magnitude of its modifiers, scaled by duration; optional alternative fire modes include burst concentration"
+  - "funny_button_access (index, higher is better): ease of getting the funny button (F key): the least demanding repeatable charge path; an alternative fire mode is immediately available"
+  - "commander_talent_effect (index, higher is better): largest total modifier magnitude from the first activation of the random-battle talents of a unique commander who can serve on the ship; activation difficulty is not estimated"
   - "torpedo_dpm (HP/min, higher is better): torpedo damage per minute of the best torpedo against one target at its best bearing, every torpedo hitting"
   - "torpedoes_per_minute (torpedoes/min, higher is better): torpedoes launched per minute against one target at its best bearing, with the loaders' limit"
   - "torpedo_reload (s, lower is better): torpedo tube reload"
@@ -106,209 +111,177 @@ leaders:
     best:
       - "A. da Barbiano (Italy, premium) 35600 HP"
       - Elbing (Germany) 34400 HP
-      - "Lübeck (Germany, test) 34400 HP"
     worst:
       - "Peredovoy (Russia, test) 20400 HP"
       - "Somers (USA, premium) 20800 HP"
-      - Shimakaze (Japan) 21400 HP
   repair_party_heal:
     best:
       - "Laffey (USA, premium) 30%"
       - "Lüshun (Pan_Asia, premium) 30%"
-      - "Peredovoy (Russia, test) 30%"
     worst:
       - "Kléber TE (France, test) 10%"
       - "Druid (United_Kingdom, premium) 10%"
-      - Daring (United_Kingdom) 10%
   repair_party_total_heal:
     best:
       - "Lüshun (Pan_Asia, premium) 21600 HP"
       - "Peredovoy (Russia, test) 18360 HP"
-      - "Hull (USA, premium) 17040 HP"
     worst:
       - Daring (United_Kingdom) 4860 HP
       - "Kléber TE (France, test) 5080 HP"
-      - "Druid (United_Kingdom, premium) 5760 HP"
   damage_control_reload:
     best:
       - 20 de Julio (Pan_America) 40 s
       - A. Regolo (Italy) 40 s
-      - "A. da Barbiano (Italy, premium) 40 s"
     worst:
       - "Södermanland (Europe, test) 40 s"
       - "Peredovoy (Russia, test) 40 s"
-      - "Lübeck (Germany, test) 40 s"
   main_battery_reload:
     best:
       - "F. Sherman (USA, premium) 1.25 s"
       - "Lüshun (Pan_Asia, premium) 1.42 s"
-      - "Småland (Europe, premium) 1.42 s"
     worst:
       - "Lübeck (Germany, test) 6.46 s"
       - "G. Hoffmann (Germany, premium) 6.19 s"
-      - Elbing (Germany) 5.94 s
   main_battery_range:
     best:
       - Kléber (France) 18.88 km
       - Elbing (Germany) 18.56 km
-      - "Tromp (Netherlands, premium) 18.46 km"
     worst:
       - "Kléber TE (France, test) 10.2 km"
       - "Södermanland (Europe, test) 12.54 km"
-      - A. Regolo (Italy) 13.36 km
   dpm_ap:
     best:
       - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 465107 HP/min"
       - "Marceau (France, premium) 432057 HP/min"
-      - "Lüshun (Pan_Asia, premium) 399381 HP/min"
     worst:
       - Shimakaze (Japan) 177425 HP/min
       - "La Pampa (Pan_America, premium) 196390 HP/min"
-      - "Somers (USA, premium) 216029 HP/min"
   dpm_he:
     best:
       - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 305406 HP/min"
       - "Marceau (France, premium) 303486 HP/min"
-      - "Småland (Europe, premium) 295525 HP/min"
     worst:
       - "Lübeck (Germany, test) 100310 HP/min"
       - Elbing (Germany) 109172 HP/min
-      - "G. Hoffmann (Germany, premium) 128023 HP/min"
   dpm_sap:
     best:
       - "A. da Barbiano (Italy, premium) 765550 HP/min"
       - "F. Sherman (USA, premium) 387560 HP/min"
-      - Burrows (USA) 369105 HP/min
     worst:
       - A. Regolo (Italy) 318399 HP/min
       - Burrows (USA) 369105 HP/min
-      - "F. Sherman (USA, premium) 387560 HP/min"
   alpha_ap:
     best:
       - Elbing (Germany) 26445 HP
       - "G. Hoffmann (Germany, premium) 26445 HP"
-      - "Lübeck (Germany, test) 26445 HP"
     worst:
       - "Södermanland (Europe, test) 9030 HP"
       - "Småland (Europe, premium) 9030 HP"
-      - "La Pampa (Pan_America, premium) 9030 HP"
   alpha_he:
     best:
       - Kléber (France) 16000 HP
       - "Kléber TE (France, test) 16000 HP"
-      - A. Regolo (Italy) 15600 HP
     worst:
       - "F. Sherman (USA, premium) 5400 HP"
       - "Lüshun (Pan_Asia, premium) 5600 HP"
-      - "La Pampa (Pan_America, premium) 6800 HP"
   alpha_sap:
     best:
       - "A. da Barbiano (Italy, premium) 32000 HP"
       - A. Regolo (Italy) 24400 HP
-      - Burrows (USA) 18000 HP
     worst:
       - "F. Sherman (USA, premium) 8100 HP"
       - Burrows (USA) 18000 HP
-      - A. Regolo (Italy) 24400 HP
   flight_time_ap:
     best:
       - Elbing (Germany) 4.92 s
       - "G. Hoffmann (Germany, premium) 4.92 s"
-      - "Lübeck (Germany, test) 4.92 s"
     worst:
       - Yueyang (Pan_Asia) 8.23 s
       - "Somers (USA, premium) 8.23 s"
-      - "Laffey (USA, premium) 8.23 s"
   flight_time_he:
     best:
       - Elbing (Germany) 4.92 s
       - "Lübeck (Germany, test) 4.92 s"
-      - "G. Hoffmann (Germany, premium) 4.94 s"
     worst:
       - Yueyang (Pan_Asia) 8.34 s
       - "Somers (USA, premium) 8.34 s"
-      - "Laffey (USA, premium) 8.34 s"
   flight_time_sap:
     best:
       - "F. Sherman (USA, premium) 5.89 s"
       - Burrows (USA) 6.16 s
-      - A. Regolo (Italy) 6.27 s
     worst:
       - "A. da Barbiano (Italy, premium) 7.27 s"
       - A. Regolo (Italy) 6.27 s
-      - Burrows (USA) 6.16 s
+  effective_gun_damage:
+    best:
+      - Elbing (Germany) 96.34 index
+      - "G. Hoffmann (Germany, premium) 88.73 index"
+    worst:
+      - Shimakaze (Japan) 13.13 index
+      - "Somers (USA, premium) 14.2 index"
   turret_traverse:
     best:
       - "F. Sherman (USA, premium) 3.4 s"
       - "Hull (USA, premium) 4.54 s"
-      - "Marceau (France, premium) 4.54 s"
     worst:
       - Shimakaze (Japan) 17.23 s
       - "Kléber TE (France, test) 13.61 s"
-      - "Álvaro de Bazán (Spain, premium) 13.61 s"
   dispersion:
     best:
       - Elbing (Germany) 47 m
       - "G. Hoffmann (Germany, premium) 47 m"
-      - "Ragnar (Europe, premium) 47 m"
     worst:
       - "Södermanland (Europe, test) 84 m"
       - "Peredovoy (Russia, test) 84 m"
-      - "Álvaro de Bazán (Spain, premium) 84 m"
+  vertical_dispersion:
+    best:
+      - Elbing (Germany) 24 m
+      - "Ragnar (Europe, premium) 24 m"
+    worst:
+      - "Södermanland (Europe, test) 47 m"
+      - "Khabarovsk (Russia, premium, with unique upgrade Master Fire Control Director) 45 m"
   sigma:
     best:
       - 20 de Julio (Pan_America) 2 sigma
       - A. Regolo (Italy) 2 sigma
-      - "A. da Barbiano (Italy, premium) 2 sigma"
     worst:
       - "Södermanland (Europe, test) 2 sigma"
       - "Peredovoy (Russia, test) 2 sigma"
-      - "Lübeck (Germany, test) 2 sigma"
   fires_per_minute:
     best:
       - "Tromp (Netherlands, premium) 25.06 fires/min"
       - "Vampire II (Commonwealth, premium) 15.5 fires/min"
-      - "Harugumo (Japan, with unique upgrade Additional Smoke Generators) 15.27 fires/min"
     worst:
       - "Somers (USA, premium) 5.74 fires/min"
       - "Lübeck (Germany, test) 7.24 fires/min"
-      - Shimakaze (Japan) 7.5 fires/min
   bow_barrels:
     best:
       - Daring (United_Kingdom) 100%
       - Delny (Russia) 100%
-      - "Druid (United_Kingdom, premium) 100%"
     worst:
       - "Lübeck (Germany, test) 33.33%"
       - Shimakaze (Japan) 33.33%
-      - "Hayate (Japan, premium) 33.33%"
   stern_barrels:
     best:
       - Delny (Russia) 100%
       - Halland (Europe) 100%
-      - "Hull (USA, premium) 100%"
     worst:
       - "Druid (United_Kingdom, premium) 0%"
       - "Peredovoy (Russia, test) 33.33%"
-      - "Vampire II (Commonwealth, premium) 33.33%"
   all_bear_from_bow:
     best:
       - "Druid (United_Kingdom, premium) 0 deg"
       - "La Pampa (Pan_America, premium) 0 deg"
-      - Daring (United_Kingdom) 24 deg
     worst:
       - "A. da Barbiano (Italy, premium) 71 deg"
       - "Z-42 (Germany, premium) 45 deg"
-      - Gdańsk (Europe) 44 deg
   all_bear_from_stern:
     best:
       - Kléber (France) 24 deg
       - "Kléber TE (France, test) 24 deg"
-      - "Marceau (France, premium) 27 deg"
     worst:
       - "A. da Barbiano (Italy, premium) 71 deg"
       - Burrows (USA) 50 deg
-      - "Z-42 (Germany, premium) 45 deg"
   secondary_dpm:
     best:
       - "Peredovoy (Russia, test) 45000 HP/min"
@@ -319,241 +292,210 @@ leaders:
       - "Peredovoy (Russia, test) 6.3 km"
     worst:
       - "Peredovoy (Russia, test) 6.3 km"
+  funny_button_effect:
+    best:
+      - "La Pampa (Pan_America, premium) 189.71 index"
+      - "Álvaro de Bazán (Spain, premium) 60.54 index"
+    worst:
+      - 20 de Julio (Pan_America) 23.41 index
+      - "Kléber TE (France, test) 28.3 index"
+  funny_button_access:
+    best:
+      - "La Pampa (Pan_America, premium) 100 index"
+      - "Laffey (USA, premium) 100 index"
+    worst:
+      - 20 de Julio (Pan_America) 80 index
+      - "Kléber TE (France, test) 100 index"
+  commander_talent_effect:
+    best:
+      - 20 de Julio (Pan_America) 2046.03 index
+      - "La Pampa (Pan_America, premium) 2046.03 index"
+    worst:
+      - "Peredovoy (Russia, test) 7.23 index"
+      - "Khabarovsk (Russia, premium) 7.23 index"
   torpedo_dpm:
     best:
       - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 217472 HP/min"
       - "La Pampa (Pan_America, premium) 158371 HP/min"
-      - Gearing (USA) 144933 HP/min
     worst:
       - "Hull (USA, premium) 38464 HP/min"
       - "F. Sherman (USA, premium) 38464 HP/min"
-      - "Marceau (France, premium) 49158 HP/min"
   torpedoes_per_minute:
     best:
       - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) 10.18 torpedoes/min"
       - "G. Hoffmann (Germany, premium) 9.8 torpedoes/min"
-      - "La Pampa (Pan_America, premium) 9.05 torpedoes/min"
     worst:
       - "Hull (USA, premium) 2.15 torpedoes/min"
       - "F. Sherman (USA, premium) 2.15 torpedoes/min"
-      - Harugumo (Japan) 3 torpedoes/min
   torpedo_reload:
     best:
       - "Tromp (Netherlands, premium) 53.55 s"
       - "F. Sherman (USA, premium) 55.84 s"
-      - "Hull (USA, premium) 55.84 s"
     worst:
       - Harugumo (Japan) 120.1 s
       - "Hayate (Japan, premium) 117.04 s"
-      - "Marceau (France, premium) 108.63 s"
   torpedo_launch_from_bow:
     best:
       - "Châteaurenault (France, premium) 6 deg"
       - Kléber (France) 18 deg
-      - "Kléber TE (France, test) 18 deg"
     worst:
       - "Södermanland (Europe, test) 64 deg"
       - Halland (Europe) 64 deg
-      - "Småland (Europe, premium) 63 deg"
   broadside_tubes:
     best:
       - "La Pampa (Pan_America, premium) 15 tubes"
       - Shimakaze (Japan) 15 tubes
-      - "Somers (USA, premium) 12 tubes"
     worst:
       - "Hull (USA, premium) 2 tubes"
       - "F. Sherman (USA, premium) 2 tubes"
-      - "Tromp (Netherlands, premium) 3 tubes"
   aa_rating:
     best:
       - 20 de Julio (Pan_America) 13351 hp
       - Halland (Europe) 13066 hp
-      - "Småland (Europe, premium) 13066 hp"
     worst:
       - "Somers (USA, premium) 220 hp"
       - "Peredovoy (Russia, test) 1761 hp"
-      - A. Regolo (Italy) 2121 hp
   aa_long_dps:
     best:
       - 20 de Julio (Pan_America) 288 HP/s
       - "A. da Barbiano (Italy, premium) 262 HP/s"
-      - Halland (Europe) 182 HP/s
     worst:
       - "Ragnar (Europe, premium) 49 HP/s"
       - "Lübeck (Germany, test) 51 HP/s"
-      - Burrows (USA) 53 HP/s
   aa_flak:
     best:
       - 20 de Julio (Pan_America) 27495 hp
       - "Hull (USA, premium) 20737 hp"
-      - Halland (Europe) 19996 hp
     worst:
       - "Lübeck (Germany, test) 6038 hp"
       - "La Pampa (Pan_America, premium) 8147 hp"
-      - Shimakaze (Japan) 8517 hp
   concealment:
     best:
       - Shimakaze (Japan) 5.59 km
       - "Gearing (USA, with unique upgrade Improved Hull Concealment) 5.61 km"
-      - "La Pampa (Pan_America, premium) 5.78 km"
     worst:
       - "A. da Barbiano (Italy, premium) 7.96 km"
       - "Khabarovsk (Russia, premium) 7.86 km"
-      - "Ragnar (Europe, premium) 7.51 km"
   air_concealment:
     best:
       - 20 de Julio (Pan_America) 2.36 km
       - "Somers (USA, premium) 2.53 km"
-      - "Gearing (USA, with unique upgrade Improved Hull Concealment) 2.61 km"
     worst:
       - "Kléber TE (France, test) 4.36 km"
       - "Lübeck (Germany, test) 4.06 km"
-      - Elbing (Germany) 4.06 km
   radar_range:
     best:
       - Gdańsk (Europe) 9 km
       - "Ragnar (Europe, premium) 7.5 km"
-      - "Småland (Europe, premium) 7.5 km"
     worst:
       - Yueyang (Pan_Asia) 7.5 km
       - "Småland (Europe, premium) 7.5 km"
-      - "Ragnar (Europe, premium) 7.5 km"
   radar_duration:
     best:
       - "Ragnar (Europe, premium) 30 s"
       - Yueyang (Pan_Asia) 25 s
-      - "Småland (Europe, premium) 20 s"
     worst:
       - Gdańsk (Europe) 10 s
       - "Småland (Europe, premium) 20 s"
-      - Yueyang (Pan_Asia) 25 s
   hydro_range:
     best:
       - "Kléber TE (France, test) 7 km"
       - "G. Hoffmann (Germany, premium) 6 km"
-      - "Z-42 (Germany, premium) 6 km"
     worst:
       - "Druid (United_Kingdom, premium) 3 km"
       - Daring (United_Kingdom) 3 km
-      - "Vampire II (Commonwealth, premium) 5 km"
   torpedo_detection:
     best:
       - "G. Hoffmann (Germany, premium) 4 km"
       - "Z-42 (Germany, premium) 4 km"
-      - Z-52 (Germany) 4 km
     worst:
       - "Druid (United_Kingdom, premium) 3 km"
       - Daring (United_Kingdom) 3 km
-      - "Vampire II (Commonwealth, premium) 3.5 km"
   smoke_lifetime:
     best:
       - "F. Sherman (USA, premium) 130 s"
       - Gearing (USA) 130 s
-      - "Somers (USA, premium) 130 s"
     worst:
       - "Kléber TE (France, test) 5 s"
       - "Laffey (USA, premium) 5 s"
-      - Burrows (USA) 5 s
   speed:
     best:
       - Kléber (France) 44 kn
       - "Marceau (France, premium) 44 kn"
-      - "Kléber TE (France, test) 44 kn"
     worst:
       - 20 de Julio (Pan_America) 32 kn
       - "Fuyutsuki (Japan, premium) 33 kn"
-      - "Tromp (Netherlands, premium) 33.5 kn"
   rudder_shift:
     best:
       - Shimakaze (Japan) 1.43 s
       - "Laffey (USA, premium) 1.5 s"
-      - Yueyang (Pan_Asia) 1.5 s
     worst:
       - "Khabarovsk (Russia, premium) 5.33 s"
       - "Lübeck (Germany, test) 3.04 s"
-      - Elbing (Germany) 3.04 s
   turning_circle:
     best:
       - 20 de Julio (Pan_America) 560 m
       - "La Pampa (Pan_America, premium) 560 m"
-      - Cassard (France) 610 m
     worst:
       - "Lübeck (Germany, test) 890 m"
       - Elbing (Germany) 890 m
-      - Harugumo (Japan) 830 m
 torpedo_leaders:
   speed:
     best:
       - Gdańsk (Europe) Torped M1947 mod 0 94.81 kn
       - Halland (Europe) Torped M1947 mod 1 94.81 kn
-      - "Södermanland (Europe, test) Torped M1947 mod 1 94.81 kn"
     worst:
       - "Lübeck (Germany, test) G7 T1 Ausf.C 55.12 kn"
       - Elbing (Germany) G7 T1 Ausf.C 55.12 kn
-      - "Khabarovsk (Russia, premium) ET-46 58.43 kn"
   range:
     best:
       - Shimakaze (Japan) Type 93 20.01 km
       - "Châteaurenault (France, premium) 550 mm 20 km"
-      - "F. Sherman (USA, premium) Mk17 16.5 km"
     worst:
       - "Peredovoy (Russia, test) ET-46M 6 km"
       - "Khabarovsk (Russia, premium) ET-46 6 km"
-      - "Laffey (USA, premium) Mk17 8 km"
   damage:
     best:
       - "Fuyutsuki (Japan, premium) Type93 mod. 3 23767 HP"
       - Harugumo (Japan) Type 93 mod. 3 23767 HP
-      - "Hayate (Japan, premium) Type 93 mod. 3 23767 HP"
     worst:
       - "Södermanland (Europe, test) Torped M1947 mod 1 10700 HP"
       - "Småland (Europe, premium) Torped M1943 mod 1 10700 HP"
-      - Halland (Europe) Torped M1947 mod 1 10700 HP
   damage_at_max_range:
     best:
       - "Fuyutsuki (Japan, premium) Type93 mod. 3 23767 HP"
       - Harugumo (Japan) Type 93 mod. 3 23767 HP
-      - "Hayate (Japan, premium) Type 93 mod. 3 23767 HP"
     worst:
       - "Châteaurenault (France, premium) 550 mm 9767 HP"
       - "Södermanland (Europe, test) Torped M1947 mod 1 10700 HP"
-      - "Småland (Europe, premium) Torped M1943 mod 1 10700 HP"
   flood_coefficient:
     best:
       - "Fuyutsuki (Japan, premium) Type93 mod. 3 4.06x"
       - Harugumo (Japan) Type 93 mod. 3 4.06x
-      - "Hayate (Japan, premium) Type 93 mod. 3 4.06x"
     worst:
       - "Södermanland (Europe, test) Torped M1947 mod 1 1.73x"
       - "Småland (Europe, premium) Torped M1943 mod 1 1.73x"
-      - Halland (Europe) Torped M1947 mod 1 1.73x
   detectability:
     best:
       - "Khabarovsk (Russia, premium) ET-46 0.6 km"
       - "Lüshun (Pan_Asia, premium) 53-51 0.8 km"
-      - Yueyang (Pan_Asia) Mark 17 0.8 km
     worst:
       - Shimakaze (Japan) Type 93 2.5 km
       - "Södermanland (Europe, test) Torped M1947 mod 1 1.8 km"
-      - "Kléber TE (France, test) 550 mm 24V Mle 2 1.8 km"
   reaction_time:
     best:
       - "Khabarovsk (Russia, premium) ET-46 3.82 s"
       - Yueyang (Pan_Asia) Mark 17 3.92 s
-      - "Lüshun (Pan_Asia, premium) 53-51 4.16 s"
     worst:
       - Shimakaze (Japan) Type 93 13.62 s
       - Shimakaze (Japan) Type 93 mod. 3 8.57 s
-      - "Hayate (Japan, premium) Type 93 mod. 3 8.57 s"
   damage_per_minute:
     best:
       - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type F3 217472 HP/min"
       - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type 93 mod. 3 207117 HP/min"
-      - "Shimakaze (Japan, with unique upgrade Torpedo Quick Reload System) Type 93 186370 HP/min"
     worst:
       - "Hull (USA, premium) Mk17 38464 HP/min"
       - "F. Sherman (USA, premium) Mk17 38464 HP/min"
-      - "Marceau (France, premium) 550 mm 23DT 49158 HP/min"
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

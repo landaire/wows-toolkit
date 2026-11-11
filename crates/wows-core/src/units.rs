@@ -174,6 +174,16 @@ pub struct Millimeters(f32);
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct MetersPerSecond(f32);
 
+/// Speed in game knots, the unit the port gives ship, torpedo and plane
+/// speeds in. A game knot is not a nautical knot (0.5144 m/s): on the map a
+/// ship or torpedo covers about 2.69 m/s per game knot
+/// (`wowsunpack::game_params::ttx::constants::ballistic_speed`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Knots(f32);
+
 /// An angle in degrees. GameParams states every angle in degrees.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -316,6 +326,12 @@ impl From<f32> for MetersPerSecond {
 impl From<i32> for MetersPerSecond {
     fn from(v: i32) -> Self {
         Self(v as f32)
+    }
+}
+
+impl From<f32> for Knots {
+    fn from(v: f32) -> Self {
+        Self(v)
     }
 }
 
@@ -473,6 +489,17 @@ impl MetersPerSecond {
     /// Distance covered at this speed over `duration`.
     pub fn travel_over(self, duration: Seconds) -> Meters {
         Meters(self.0 * duration.0)
+    }
+}
+
+impl Knots {
+    /// Const constructor for use in static/const contexts.
+    pub const fn new(v: f32) -> Self {
+        Self(v)
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
     }
 }
 
@@ -675,6 +702,13 @@ impl fmt::Display for Millimeters {
 impl fmt::Display for MetersPerSecond {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.0} m/s", self.0)
+    }
+}
+
+/// Conventional English-port rounding: one decimal place plus the `kn` symbol.
+impl fmt::Display for Knots {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.1} kn", self.0)
     }
 }
 

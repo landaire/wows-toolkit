@@ -39,6 +39,7 @@ pub mod loadout;
 pub mod modules;
 pub mod names;
 pub mod penetration;
+pub mod quantities;
 pub mod rates;
 pub mod raw_params;
 pub mod replay;
@@ -62,6 +63,7 @@ mod fuzzy;
 mod jq;
 mod sandbox;
 mod text;
+mod torpedoes;
 
 pub use data::GameData;
 pub use error::LoadError;

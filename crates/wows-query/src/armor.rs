@@ -118,7 +118,7 @@ pub(crate) struct Plate {
 }
 
 impl Plate {
-    fn is_above_water(&self) -> bool {
+    pub(crate) fn is_above_water(&self) -> bool {
         is_above_water(self.material)
     }
 }

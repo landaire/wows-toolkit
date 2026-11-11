@@ -5,8 +5,10 @@
 //! `BigWorld` engine module); the ones used here are recovered by solving a client
 //! formula against a known in-game port value, documented per constant.
 
+use crate::game_params::ttx::model::Knots;
 use crate::game_params::types::BigWorldDistance;
 use crate::game_params::types::Km;
+use crate::game_params::types::MetersPerSecond;
 
 /// `KM_TO_M = 1000.0` (me658a8e4.py:41).
 pub const KM_TO_M: f32 = 1000.0;
@@ -83,6 +85,12 @@ pub const PORT_SHIP_TIME_SCALE: f32 = 2.61;
 /// module's `KNOTS_TO_MPS` is `1.852 / 3.6` (m63fc2621.py:41,47) and its
 /// `SHIP_TIME_SCALE` is [`PORT_SHIP_TIME_SCALE`].
 pub const BW_KNOTS_TO_MPS: f32 = 1.852 / 3.6 * SHIP_TO_BW * PORT_SHIP_TIME_SCALE;
+
+/// Ballistic meters per second per game knot of ship, torpedo and plane speed,
+/// about 2.6854: BigWorld units per second per knot times ballistic meters per
+/// BigWorld unit. A nautical knot is 0.5144 m/s; travel times on the map use
+/// this.
+pub const BW_KNOTS_TO_BALLISTIC_MPS: f32 = BW_KNOTS_TO_MPS * BW_TO_BALLISTIC;
 
 /// The shell dispersion ellipse: both semi-axes in BigWorld units. Convert each to
 /// display meters with `.to_meters()` (the TTX card), or use the BigWorld values
@@ -173,6 +181,12 @@ pub fn dispersion_ellipse(
     DispersionEllipse { horizontal, vertical: horizontal * coeff }
 }
 
+/// How fast a ship, torpedo or plane moving at `speed` game knots covers
+/// ground on the map, in ballistic meters per second.
+pub fn ballistic_speed(speed: Knots) -> MetersPerSecond {
+    MetersPerSecond::new(speed.value() * BW_KNOTS_TO_BALLISTIC_MPS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +220,15 @@ mod tests {
         // PJPT001_Sea_Torpedo_Type93 maxDist=667 -> Shimakaze in-game range 20.0 km.
         let range_km = 667.0 * BW_TO_BALLISTIC / KM_TO_M;
         assert!((range_km - 20.0).abs() < 0.1, "got {range_km}");
+    }
+
+    #[test]
+    fn game_knot_is_not_a_nautical_knot() {
+        // A 62 kn Type 93 torpedo runs 10 km in about 60 s, not the 313 s a
+        // nautical knot (0.5144 m/s) gives.
+        let speed = ballistic_speed(Knots::new(62.0));
+        assert!((BW_KNOTS_TO_BALLISTIC_MPS - 2.6854).abs() < 1e-4, "got {BW_KNOTS_TO_BALLISTIC_MPS}");
+        assert!((10_000.0 / speed.value() - 60.06).abs() < 0.01, "got {}", 10_000.0 / speed.value());
     }
 
     #[test]
