@@ -439,6 +439,14 @@ impl ReplayInspectorView {
     pub(crate) fn select_folder(&mut self, id: FolderId, cx: &mut Context<Self>) {
         let Some(at) = self.folders.iter().position(|folder| folder.id() == id) else { return };
 
+        // The listing being left drops its New tags, so they are gone when the
+        // reader comes back to it.
+        if self.selected_folder != id
+            && let Some(left) = self.folder(self.selected_folder)
+        {
+            left.browser().update(cx, |browser, cx| browser.clear_new_arrivals(cx));
+        }
+
         self.selected_folder = id;
         self.folders[at].unseen.clear();
         self.folder_scroll.scroll_to_item(at);

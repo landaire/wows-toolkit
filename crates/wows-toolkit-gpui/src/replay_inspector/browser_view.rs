@@ -391,6 +391,9 @@ pub struct ReplayBrowser {
     /// Bumped per summaries load, so a slower earlier load cannot write over
     /// a later one.
     summaries_generation: u64,
+    /// Replays the watcher listed since the reader last left this listing,
+    /// with when each arrived. Each carries a New tag until it is opened.
+    new_arrivals: Rc<HashMap<PathBuf, std::time::Instant>>,
 }
 
 /// Whether a listing follows its directory as it changes.
@@ -534,6 +537,7 @@ impl ReplayBrowser {
             scan_generation: 0,
             watch_generation: 0,
             summaries_generation: 0,
+            new_arrivals: Rc::new(HashMap::new()),
         }
     }
 
@@ -1030,6 +1034,7 @@ impl ReplayBrowser {
                             cx.emit(ReplayBrowserEvent::ReplayChanged(touched));
                         }
                         None => {
+                            this.note_arrival(raw.path.clone(), cx);
                             this.files.push(raw);
                             this.status = ScanStatus::Loaded;
                             this.rebuild_tree(cx);
@@ -1060,6 +1065,7 @@ impl ReplayBrowser {
         let Some(at) = held else { return };
         self.files.remove(at);
         self.marked.remove(path);
+        self.mark_opened(path);
         if self.selected_path.as_deref() == Some(path) {
             self.selected_path = None;
         }
@@ -1068,6 +1074,34 @@ impl ReplayBrowser {
         }
         self.rebuild_tree(cx);
         cx.notify();
+    }
+
+    /// Tags a replay the watcher has just listed as new.
+    fn note_arrival(&mut self, path: PathBuf, cx: &App) {
+        let now = cx.background_executor().now();
+        Rc::make_mut(&mut self.new_arrivals).insert(path, now);
+    }
+
+    /// Takes the New tag off a replay the reader has opened.
+    fn mark_opened(&mut self, path: &Path) {
+        if self.new_arrivals.contains_key(path) {
+            Rc::make_mut(&mut self.new_arrivals).remove(path);
+        }
+    }
+
+    /// Takes the New tag off every row, for a listing the reader has left.
+    pub(crate) fn clear_new_arrivals(&mut self, cx: &mut Context<Self>) {
+        if self.new_arrivals.is_empty() {
+            return;
+        }
+        self.new_arrivals = Rc::new(HashMap::new());
+        cx.notify();
+    }
+
+    /// Whether `path`'s row carries a New tag.
+    #[cfg(test)]
+    fn is_new(&self, path: &Path) -> bool {
+        self.new_arrivals.contains_key(path)
     }
 
     /// Switches the grouping strategy and rebuilds the tree. Called only from
@@ -1179,6 +1213,7 @@ impl ReplayBrowser {
         if click_count >= 2 {
             tracing::info!(path = %path.display(), "replay browser: open requested");
             self.open_requested = Some(path.clone());
+            self.mark_opened(&path);
             cx.emit(ReplayBrowserEvent::OpenReplay(path));
         }
         cx.notify();
@@ -1379,6 +1414,43 @@ fn personal_rating_chip(ix: usize, rating: &PersonalRatingResult) -> impl IntoEl
         .child(shown)
 }
 
+/// The tag on a row the watcher has listed and the reader not yet opened.
+fn new_tag(ix: usize) -> impl IntoElement {
+    let accent = crate::theme::accent();
+
+    div()
+        .id(("replay-row-new", ix))
+        .test_support()
+        .flex_none()
+        .px_1()
+        .rounded(px(2.))
+        .border_1()
+        .border_color(accent)
+        .text_xs()
+        .text_color(accent)
+        .child(t!("ui.replay.new_tag").into_owned())
+}
+
+/// The background of a row that has just arrived: the accent, fading out
+/// once. `None` once the fade is over, and at once under reduced motion.
+fn arrival_glow(arrived: std::time::Instant, window: &mut Window, cx: &App) -> Option<Hsla> {
+    const GLOW: std::time::Duration = std::time::Duration::from_millis(1200);
+    const STRENGTH: f32 = 0.3;
+
+    if cx.reduce_motion() {
+        return None;
+    }
+
+    let elapsed = cx.background_executor().now().saturating_duration_since(arrived);
+    if elapsed >= GLOW {
+        return None;
+    }
+    window.request_animation_frame();
+
+    let remaining = 1.0 - elapsed.as_secs_f32() / GLOW.as_secs_f32();
+    Some(crate::theme::accent().opacity(STRENGTH * remaining * remaining))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_browser_item(
     browser: Entity<ReplayBrowser>,
@@ -1387,6 +1459,7 @@ fn render_browser_item(
     selected: bool,
     leaf_info: &HashMap<SharedString, LeafInfo>,
     marked: &HashSet<PathBuf>,
+    new_arrivals: &HashMap<PathBuf, std::time::Instant>,
     row_height: Pixels,
     window: &mut Window,
     cx: &mut App,
@@ -1394,6 +1467,7 @@ fn render_browser_item(
     let item = entry.item();
     let is_folder = entry.is_folder();
     let leaf = (!is_folder).then(|| leaf_info.get(&item.id)).flatten();
+    let arrived = leaf.and_then(|leaf| new_arrivals.get(&leaf.path)).copied();
 
     // Line one names the battle and is tinted by its outcome; line two, in
     // de-emphasised text, reports it. The same two lines the egui row draws
@@ -1411,6 +1485,7 @@ fn render_browser_item(
         .when_some(leaf.filter(|leaf| leaf.in_division), |row, _| {
             row.child(crate::icons::icon(DIVISION_GLYPH).text_color(gpui_kit::rgb(crate::theme::semantic().division)))
         })
+        .when(arrived.is_some(), |row| row.child(new_tag(ix)))
         .when_some(leaf.and_then(|leaf| leaf.personal_rating.as_ref()), |row, rating| {
             row.child(div().flex_1()).child(personal_rating_chip(ix, rating))
         });
@@ -1454,11 +1529,17 @@ fn render_browser_item(
     // replays under them alternate, which is what makes a long date group
     // scannable (`ui::stripe`).
     let striped = (!is_folder).then(|| crate::ui::stripe(ix, cx)).flatten();
+    let glow = arrived.and_then(|arrived| arrival_glow(arrived, window, cx));
+    // Laid over the stripe, so the row settles back onto it as the glow fades.
+    let background = match (glow, striped) {
+        (Some(glow), Some(striped)) => Some(striped.blend(glow)),
+        (glow, striped) => glow.or(striped),
+    };
     let selected = selected || leaf.is_some_and(|leaf| marked.contains(&leaf.path));
     // Named, so a row is told apart from the tree's own wrapper at the same index.
     let mut list_item = ListItem::new(("replay-browser-row", ix))
         .selected(selected)
-        .when_some(striped, |item, color| item.bg(color))
+        .when_some(background, |item, color| item.bg(color))
         .child(row);
 
     if let Some(leaf) = leaf {
@@ -1533,6 +1614,7 @@ impl Render for ReplayBrowser {
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
                 let marked = self.marked.clone();
+                let new_arrivals = Rc::clone(&self.new_arrivals);
                 let listing = tree(&self.tree_state, move |ix, entry, selected, window, cx| {
                     render_browser_item(
                         entity.clone(),
@@ -1541,6 +1623,7 @@ impl Render for ReplayBrowser {
                         selected,
                         &leaf_info,
                         &marked,
+                        &new_arrivals,
                         row_height,
                         window,
                         cx,
@@ -1653,13 +1736,18 @@ impl Render for ReplayBrowser {
                     })
                     .item(PopupMenuItem::new(t!("ui.collab.open").into_owned()).on_click(move |_event, _window, cx| {
                         let path = open_path.clone();
-                        open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
+                        open_entity.update(cx, |browser, cx| {
+                            browser.mark_opened(&path);
+                            cx.emit(ReplayBrowserEvent::OpenReplay(path));
+                        });
                     }))
                     .item(PopupMenuItem::new(t!("ui.replay.context.open_in_new_tab").into_owned()).on_click(
                         move |_event, _window, cx| {
                             let path = new_tab_path.clone();
-                            new_tab_entity
-                                .update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplayInNewTab(path)));
+                            new_tab_entity.update(cx, |browser, cx| {
+                                browser.mark_opened(&path);
+                                cx.emit(ReplayBrowserEvent::OpenReplayInNewTab(path));
+                            });
                         },
                     ))
                     .item(PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).on_click(
@@ -1799,8 +1887,9 @@ impl Render for ReplayBrowser {
                         let Some(id) = this.tree_state.read(cx).selected_item().map(|item| item.id.clone()) else {
                             return;
                         };
-                        let Some(leaf) = this.leaf_info.get(&id) else { return };
-                        cx.emit(ReplayBrowserEvent::OpenReplay(leaf.path.clone()));
+                        let Some(path) = this.leaf_info.get(&id).map(|leaf| leaf.path.clone()) else { return };
+                        this.mark_opened(&path);
+                        cx.emit(ReplayBrowserEvent::OpenReplay(path));
                     }))
                     .child(listing.flex_1())
                     .into_any_element()
@@ -2225,6 +2314,39 @@ async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawRe
 
 #[cfg(test)]
 mod tests {
+
+    /// A replay the watcher lists is tagged new until it is opened from the
+    /// listing, or until the reader leaves the listing.
+    #[gpui_kit::test]
+    fn a_new_arrival_is_tagged_until_opened_or_left(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::Modifiers;
+        use std::path::PathBuf;
+
+        cx.update(gpui_kit::init);
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+        let opened = PathBuf::from("opened.wowsreplay");
+        let left = PathBuf::from("left.wowsreplay");
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| {
+                browser.seed_listing_for_test(opened.clone(), cx);
+                browser.seed_listing_for_test(left.clone(), cx);
+                browser.note_arrival(opened.clone(), cx);
+                browser.note_arrival(left.clone(), cx);
+                assert!(browser.is_new(&opened) && browser.is_new(&left), "both arrivals are tagged");
+
+                browser.handle_leaf_click(opened.clone(), 1, Modifiers::default(), cx);
+                assert!(browser.is_new(&opened), "selecting a row does not open it");
+                browser.handle_leaf_click(opened.clone(), 2, Modifiers::default(), cx);
+                assert!(!browser.is_new(&opened), "opening it takes the tag off");
+                assert!(browser.is_new(&left), "and only its own");
+
+                browser.clear_new_arrivals(cx);
+                assert!(!browser.is_new(&left), "leaving the listing takes the rest off");
+            });
+        });
+    }
 
     /// A row the index rated carries a chip with that rating; a row it did not
     /// rate has none. Only a known outcome gets a coloured edge.
