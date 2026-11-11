@@ -235,7 +235,8 @@ const DIVISION_GLYPH: crate::icons::Glyph = crate::icons::Glyph::Users;
 enum ScanStatus {
     Loading,
     Loaded,
-    Empty,
+    /// The directory scanned, which holds no replays.
+    Empty(PathBuf),
     Failed(ScanError),
 }
 
@@ -737,7 +738,7 @@ impl ReplayBrowser {
                     return;
                 }
                 this.scan_progress = None;
-                this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
+                this.status = if files.is_empty() { ScanStatus::Empty(directory.clone()) } else { ScanStatus::Loaded };
                 this.files = files;
                 crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
@@ -908,7 +909,8 @@ impl ReplayBrowser {
                     return;
                 }
                 this.scan_progress = None;
-                this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
+                this.status =
+                    if files.is_empty() { ScanStatus::Empty(replays_dir.clone()) } else { ScanStatus::Loaded };
                 this.files = files;
                 crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
@@ -1651,11 +1653,22 @@ impl Render for ReplayBrowser {
             ScanStatus::Failed(reason) => {
                 div().p_2().text_sm().text_color(crate::theme::text_dim()).child(reason.to_string()).into_any_element()
             }
-            ScanStatus::Empty => div()
+            ScanStatus::Empty(directory) => v_flex()
+                .id("replay-listing-empty")
+                .test_support()
                 .p_2()
-                .text_sm()
-                .text_color(crate::theme::text_dim())
-                .child(t!("ui.replay.no_replays").to_string())
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .child(t!("ui.replay.no_replays_in", folder = super::view::shown_path(directory)).into_owned()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.replay.drop_folder_hint").into_owned()),
+                )
                 .into_any_element(),
             // Every row's ship and map name comes from the game data, so a
             // list built before it loads is a list of raw ids. The egui app

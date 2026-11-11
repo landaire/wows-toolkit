@@ -2208,6 +2208,81 @@ fn directory_stats_item(
         })
 }
 
+/// An island on the empty pane's map outline, in fractions of the map's edge.
+struct Island {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+/// The replay pane with nothing open: the faint outline of a map inside a
+/// dashed drop target, and what can be dropped on it.
+fn empty_pane(cx: &App) -> impl IntoElement {
+    const MAP_EDGE: Pixels = px(120.);
+    // The minimap's own squares per side.
+    const GRID_LINES: u16 = 10;
+    const ISLANDS: [Island; 3] = [
+        Island { left: 0.18, top: 0.22, width: 0.22, height: 0.16 },
+        Island { left: 0.55, top: 0.45, width: 0.28, height: 0.2 },
+        Island { left: 0.28, top: 0.68, width: 0.14, height: 0.12 },
+    ];
+
+    let outline = crate::theme::text_dim().opacity(0.35);
+    let grid = crate::theme::text_dim().opacity(0.12);
+
+    let grid_lines = (1..GRID_LINES).flat_map(|line| {
+        let at = relative(f32::from(line) / f32::from(GRID_LINES));
+        [
+            div().absolute().top_0().bottom_0().left(at).w(px(1.)).bg(grid),
+            div().absolute().left_0().right_0().top(at).h(px(1.)).bg(grid),
+        ]
+    });
+    let islands = ISLANDS.iter().map(|island| {
+        div()
+            .absolute()
+            .left(relative(island.left))
+            .top(relative(island.top))
+            .w(relative(island.width))
+            .h(relative(island.height))
+            .rounded_full()
+            .border_1()
+            .border_color(outline)
+    });
+    // Shrinks with a narrow pane rather than spilling over the listing.
+    let map = div()
+        .relative()
+        .w_full()
+        .max_w(MAP_EDGE)
+        .aspect_square()
+        .border_1()
+        .border_color(outline)
+        .children(grid_lines)
+        .children(islands);
+
+    v_flex()
+        .id("replay-pane-empty")
+        .test_support()
+        .max_w_full()
+        .items_center()
+        .gap_3()
+        .p_6()
+        .border_2()
+        .border_dashed()
+        .border_color(outline)
+        .rounded(cx.theme().radius_lg)
+        .child(map)
+        .child(div().text_sm().child(t!("ui.replay.select_replay").into_owned()))
+        .child(
+            div()
+                .max_w(px(260.))
+                .text_center()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.drop_hint").into_owned()),
+        )
+}
+
 impl Render for ReplayInspectorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.grouping(cx) != self.replay_settings.grouping {
@@ -2219,12 +2294,16 @@ impl Render for ReplayInspectorView {
             .child(self.dock_area.clone())
             .when(!self.has_dock_content, |this| {
                 this.child(
-                    div().absolute().inset_0().flex().items_center().justify_center().bg(cx.theme().background).child(
-                        div()
-                            .text_sm()
-                            .text_color(crate::theme::text_dim())
-                            .child(t!("ui.replay.select_replay").to_string()),
-                    ),
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p_2()
+                        .overflow_hidden()
+                        .bg(cx.theme().background)
+                        .child(empty_pane(cx)),
                 )
             })
             .into_any_element();
