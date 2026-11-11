@@ -411,11 +411,9 @@ fn player_tone(kind: PlayerColorKind, tones: &crate::theme::Semantic) -> u32 {
     }
 }
 
-/// The team/division-relative color for stat cells (not the name cell, which
-/// additionally turns pink for abusers via `name_color_kind`). `pub(crate)`
-/// so the render layer (`table.rs`) can reuse it for the multi-segment Name
-/// cell, which colors its ship-icon/name segments individually instead of
-/// through a single `cell_value` string.
+/// The team/division-relative color of a row: the ship-class icon tint, the
+/// row's background tint and the actions menu heading. `pub(crate)` for the
+/// render layer (`table.rs`).
 pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_self_division_mate {
         return PlayerColorKind::DivisionMate;
@@ -429,8 +427,8 @@ pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
     }
 }
 
-/// The name cell's color: pink for abusers, otherwise the same team/division
-/// color as the stat cells. `pub(crate)`; see `player_color_kind`.
+/// The actions menu heading's name color: pink for abusers, otherwise the
+/// row's team/division color. `pub(crate)`; see `player_color_kind`.
 pub(crate) fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_abuser { PlayerColorKind::Abuser } else { player_color_kind(row) }
 }
@@ -467,7 +465,13 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 parts.push(clan.clone());
             }
             parts.push(row.display_name.clone());
-            CellValue::colored(parts.join(" "), ColorRole::Player(name_color_kind(row)))
+            // The row's tint says the team; the name is marked only for abuse.
+            let text = parts.join(" ");
+            if row.is_abuser {
+                CellValue::colored(text, ColorRole::Player(PlayerColorKind::Abuser))
+            } else {
+                CellValue::plain(text)
+            }
         }
         ReplayColumn::ShipName => CellValue::plain(row.ship_name.clone()),
         ReplayColumn::Skills => {
@@ -493,7 +497,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             None => CellValue::plain(DASH),
         },
         ReplayColumn::BaseXp => match row.base_xp_text.as_ref() {
-            Some(text) => CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row))),
+            Some(text) => CellValue::plain(text.clone()),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::RawXp => match row.raw_xp_text.as_ref() {
@@ -512,12 +516,12 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
         // own tooltip (`damage_mix`).
         ReplayColumn::ActualDamage => match row.actual_damage_text.as_ref() {
             Some(_) if nda_active => CellValue::plain(NDA),
-            Some(text) => CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row))),
+            Some(text) => CellValue::plain(text.clone()),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::ReceivedDamage => match row.received_damage_text.as_ref() {
             Some(_) if nda_active => CellValue::plain(NDA),
-            Some(text) => CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row))),
+            Some(text) => CellValue::plain(text.clone()),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::SpottingDamage => match row.spotting_damage_text.as_ref() {
@@ -544,7 +548,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
         ReplayColumn::Hits => match row.hits_text.as_ref() {
             Some(_) if nda_active => CellValue::plain(NDA),
             Some(text) => {
-                let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
+                let mut cell = CellValue::plain(text.clone());
                 if let Some(hover) = row.hits_breakdown.as_ref() {
                     cell = cell.with_hover(breakdown::padded_text(hover));
                 }
@@ -640,7 +644,7 @@ mod tests {
         let cell = cell_value(&row, ReplayColumn::Name, false);
 
         assert_eq!(cell.text, "(A) [ABC] Steve");
-        assert_eq!(cell.color, Some(ColorRole::Player(PlayerColorKind::Ally)));
+        assert_eq!(cell.color, None, "the row's tint says the team");
     }
 
     #[test]

@@ -1622,7 +1622,8 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, turn: f32) -> AnyElement
 /// egui app's `cell_content_ui` `ReplayColumn::Name` arm, which makes one
 /// separate `ui.add`/`ui.label` call per segment.
 fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
-    let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
+    // The row's tint says the team; the name is marked only for abuse.
+    let name_color = row.is_abuser.then(|| resolve_color(ColorRole::Player(PlayerColorKind::Abuser)));
     let icon_tint = class_icon_tint(player_color_kind(row));
 
     let container = h_flex()
@@ -1692,7 +1693,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
                 .overflow_hidden()
                 .text_ellipsis()
                 .whitespace_nowrap()
-                .text_color(name_color)
+                .when_some(name_color, |el, color| el.text_color(color))
                 .on_click(keep_click)
                 .child(crate::ui::selectable_text(("replay-name", ix), row.display_name.clone())),
         )
@@ -2626,6 +2627,18 @@ fn placed_cell(cell: AnyElement, col: ReplayColumn, layout: &RowLayout) -> AnyEl
         .into_any_element()
 }
 
+/// A faint wash of a row's side over its ground: allies green, enemies red,
+/// division mates gold. The replay owner's row keeps the plain ground. Faint
+/// enough that the figures, rating chips and damage bars read over it as
+/// they do over the plain stripe.
+fn row_tint(row: &PlayerRow) -> Option<Hsla> {
+    let strength = if crate::theme::is_dark_mode() { 0.10 } else { 0.12 };
+    match player_color_kind(row) {
+        PlayerColorKind::SelfPlayer => None,
+        kind => Some(Hsla::from(rgb(player_color_kind_rgb(kind))).opacity(strength)),
+    }
+}
+
 /// One row: `layout.sticky_columns` (Actions/Name/ShipName) render as fixed
 /// per-column cells outside the horizontal scroll; `layout.scroll_columns`
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
@@ -2639,7 +2652,7 @@ fn placed_cell(cell: AnyElement, col: ReplayColumn, layout: &RowLayout) -> AnyEl
 /// under ActualDamage/ReceivedDamage). A double-click on the first line
 /// toggles the detail, mirroring the egui app's whole-row double-click
 /// handler in `cell_content_ui`.
-fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
+fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, cx: &App) -> AnyElement {
     let sticky_section =
         || h_flex().min_w(layout.pinned_reserve).max_w(relative(STICKY_MAX_FRACTION)).overflow_hidden();
     let scrolling_section = || h_flex().w(px(layout.scroll_width)).flex_none();
@@ -2709,8 +2722,10 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     });
 
     // Selection is what a ctrl+click leaves behind, over the stripe; the
-    // egui table paints the same two (`ui/replay_parser/mod.rs:3011`).
-    let background = if layout.selected { Some(cx.theme().selection) } else { crate::ui::stripe(ix, cx) };
+    // egui table paints the same two (`ui/replay_parser/mod.rs:3011`). Both,
+    // and the hover, carry the row's team tint.
+    let background = layout.fade_to;
+    let hover_bg = layout.fade_to_hovered;
     let select_entity = layout.entity.clone();
     // A right-click anywhere on the row opens the same menu the dots do: it is
     // where a reader reaches for a row's actions, and the dots are what says so.
@@ -2725,7 +2740,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .relative()
         .w_full()
         .py_0p5()
-        .when_some(background, |el, color| el.bg(color))
+        .bg(background)
         .hover(move |style| style.bg(hover_bg))
         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
             if event.modifiers().secondary(cx) {
@@ -2885,12 +2900,17 @@ impl Render for PlayerTable {
             let table = entity.read(cx);
             let row = &table.model.rows[ix];
             let selected = table.selected == Some(db_id);
-            // What the row is painted with, so a cut-off detail fades into it.
-            let fade_to = if selected {
+            // What the row is painted with, so a cut-off detail and the
+            // detail's well match it: the stripe or the selection, washed
+            // with the row's side.
+            let ground = if selected {
                 cx.theme().selection
             } else {
                 crate::ui::stripe(ix, cx).unwrap_or(cx.theme().background)
             };
+            let tint = row_tint(row);
+            let fade_to = tint.map_or(ground, |tint| ground.blend(tint));
+            let fade_to_hovered = tint.map_or(hover_bg, |tint| hover_bg.blend(tint));
             let layout = RowLayout {
                 sticky_cap,
                 sticky_columns: &sticky_columns,
@@ -2899,7 +2919,7 @@ impl Render for PlayerTable {
                 column_widths: &table.drawn_widths,
                 detail_widths: &table.detail_widths,
                 fade_to,
-                fade_to_hovered: hover_bg,
+                fade_to_hovered,
                 foreground: cx.theme().foreground,
                 team_totals: &team_totals,
                 icons: &table.icons,
@@ -2916,7 +2936,7 @@ impl Render for PlayerTable {
                 pinned_reserve: reserve,
                 all_rows: &table.model.rows,
             };
-            let row = render_row(ix, row, &layout, hover_bg, cx);
+            let row = render_row(ix, row, &layout, cx);
             match team_runs.iter().find(|run| run.start == ix) {
                 Some(run) => {
                     v_flex().w_full().child(team_bands::heading(*run, team_damage, cx)).child(row).into_any_element()
@@ -4147,6 +4167,30 @@ mod tests {
         });
         assert!(!resizing, "the width drag ended with the button up");
         assert_eq!(set, Some(drawn_before - px(20.)), "and kept the width it had shown, not what followed");
+    }
+
+    /// The owner, an ally and an enemy each get their own row ground, and a
+    /// figure reads in the same colour on every side.
+    #[test]
+    fn rows_carry_the_side_and_figures_do_not() {
+        let row = |id, relation, is_self| super::PlayerRow {
+            base_xp_text: Some("1,200".to_string()),
+            actual_damage_text: Some("50,000".to_string()),
+            received_damage_text: Some("20,000".to_string()),
+            hits_text: Some("40".to_string()),
+            ..base_row(id, Relation::new(relation), is_self)
+        };
+        let (owner, ally, enemy) = (row(1, 0, true), row(2, 1, false), row(3, 2, false));
+
+        let tints = [&owner, &ally, &enemy].map(super::row_tint);
+
+        assert_eq!(tints[0], None, "the owner's row keeps the plain ground");
+        assert!(tints[1].is_some() && tints[2].is_some() && tints[1] != tints[2], "{tints:?}");
+        for col in [ReplayColumn::BaseXp, ReplayColumn::ActualDamage, ReplayColumn::ReceivedDamage, ReplayColumn::Hits]
+        {
+            let colors = [&owner, &ally, &enemy].map(|row| super::cell_value(row, col, false).color);
+            assert_eq!(colors, [None; 3], "{col:?}");
+        }
     }
 
     /// A bar is the row's figure against its own team's total in that
