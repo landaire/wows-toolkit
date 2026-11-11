@@ -18,9 +18,9 @@ git_fetch(
 )
 
 git_fetch(
-    name = "gpui-component-7d752d82da021603.git",
+    name = "gpui-component-7a7fee4f89b1d01e.git",
     repo = "https://github.com/landaire-contrib/gpui-component",
-    rev = "840e2c4fc82c2d78a67a600c9591553f279c2e99",
+    rev = "ec9c08224ac0cc6741e4744f00a092e38301678f",
     sub_targets = ["crates/assets"],
     visibility = [],
 )
@@ -1369,7 +1369,7 @@ cargo.rust_library(
     },
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-sys-0.60"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -1407,7 +1407,7 @@ cargo.rust_library(
     deps = [
         ":anstyle-1",
         ":once_cell_polyfill-1",
-        ":windows-sys-0.60",
+        ":windows-sys-0.61",
     ],
 )
 
@@ -5998,7 +5998,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = [":unicode-width-0.2"],
+    deps = [":unicode-width-0.1"],
 )
 
 http_archive(
@@ -6129,7 +6129,7 @@ cargo.rust_library(
     },
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-sys-0.52"],
+            deps = [":windows-sys-0.59"],
         ),
     },
     visibility = [],
@@ -9338,7 +9338,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.60"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -12252,7 +12252,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.52"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -15219,7 +15219,7 @@ cargo.rust_library(
     ],
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-0.58"],
+            deps = [":windows-0.62"],
         ),
     },
     visibility = [],
@@ -15336,13 +15336,13 @@ buildscript_run(
 
 cargo.rust_library(
     name = "gpui-base-0.9",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "gpui_base",
-    crate_root = "gpui-component-7d752d82da021603/crates/base/src/lib.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/base/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_base",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/base",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/base",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Behavior, interaction, and infrastructure foundations for GPUI applications.",
         "CARGO_PKG_NAME": "gpui-base",
@@ -15418,13 +15418,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-component-0.9",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "gpui_component",
-    crate_root = "gpui-component-7d752d82da021603/crates/component/src/lib.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/component/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_component",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/component",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/component",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "GPUI Component: the styled component library of GPUI Kit, with 60+ desktop UI components for GPUI.",
         "CARGO_PKG_NAME": "gpui-component",
@@ -15503,13 +15503,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-component-macros-0.9",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "gpui_component_macros",
-    crate_root = "gpui-component-7d752d82da021603/crates/component-macros/src/lib.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/component-macros/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_component_macros",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/component-macros",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/component-macros",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Procedural macros for GPUI Component, the styled layer of GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-component-macros",
@@ -16224,13 +16224,13 @@ alias(
 
 cargo.rust_library(
     name = "gpui-kit-0.9",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "gpui_kit",
-    crate_root = "gpui-component-7d752d82da021603/crates/kit/src/lib.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/kit/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_kit",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/kit",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/kit",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "GPUI Kit: one dependency for building desktop applications with GPUI, GPUI Base, GPUI Component and default assets.",
         "CARGO_PKG_NAME": "gpui-kit",
@@ -16272,13 +16272,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-kit-assets-0.9",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "gpui_kit_assets",
-    crate_root = "gpui-component-7d752d82da021603/crates/assets/src/lib.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/assets/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_kit_assets",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/assets",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/assets",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Default bundled assets for GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-kit-assets",
@@ -16324,13 +16324,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-kit-assets-0.9-build-script-build",
-    srcs = [":gpui-component-7d752d82da021603.git"],
+    srcs = [":gpui-component-7a7fee4f89b1d01e.git"],
     crate = "build_script_build",
-    crate_root = "gpui-component-7d752d82da021603/crates/assets/build.rs",
+    crate_root = "gpui-component-7a7fee4f89b1d01e/crates/assets/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-component-7d752d82da021603/crates/assets",
+        "CARGO_MANIFEST_DIR": "gpui-component-7a7fee4f89b1d01e/crates/assets",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Default bundled assets for GPUI Kit.",
         "CARGO_PKG_NAME": "gpui-kit-assets",
@@ -16359,7 +16359,7 @@ buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["gpui-fast"],
-    manifest_dir = ":gpui-component-7d752d82da021603.git[crates/assets]",
+    manifest_dir = ":gpui-component-7a7fee4f89b1d01e.git[crates/assets]",
     version = "0.9.0",
 )
 
@@ -27034,7 +27034,7 @@ cargo.rust_library(
     platform = {
         "windows-msvc": dict(
             named_deps = {
-                "windows": ":windows-sys-0.60",
+                "windows": ":windows-sys-0.61",
             },
         ),
     },
@@ -38345,7 +38345,7 @@ cargo.rust_library(
             named_deps = {
                 "libc_errno": ":errno-0.3",
             },
-            deps = [":windows-sys-0.52"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     rustc_flags = ["@$(location :rustix-1-build-script-run[rustc_flags])"],
@@ -38679,7 +38679,7 @@ cargo.rust_library(
             ],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.52"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -41805,7 +41805,7 @@ cargo.rust_library(
             deps = [":libc-0.2"],
         ),
         "windows-msvc": dict(
-            deps = [":windows-sys-0.60"],
+            deps = [":windows-sys-0.61"],
         ),
     },
     visibility = [],
@@ -43799,7 +43799,7 @@ cargo.rust_library(
         "windows-msvc": dict(
             deps = [
                 ":getrandom-0.4",
-                ":windows-sys-0.52",
+                ":windows-sys-0.61",
             ],
         ),
     },
@@ -50734,7 +50734,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = [":windows-sys-0.52"],
+    deps = [":windows-sys-0.61"],
 )
 
 http_archive(
@@ -50772,9 +50772,6 @@ cargo.rust_library(
         "Win32",
         "Win32_Foundation",
         "Win32_Graphics",
-        "Win32_Graphics_Direct3D12",
-        "Win32_Graphics_Dxgi",
-        "Win32_Graphics_Dxgi_Common",
         "Win32_Graphics_Gdi",
         "Win32_Graphics_GdiPlus",
         "Win32_System",
@@ -51529,18 +51526,10 @@ cargo.rust_library(
         "Win32_Graphics_Dwm",
         "Win32_Graphics_Gdi",
         "Win32_Media",
-        "Win32_Networking",
-        "Win32_Networking_WinSock",
         "Win32_Security",
-        "Win32_Security_Cryptography",
-        "Win32_Storage",
-        "Win32_Storage_FileSystem",
         "Win32_System",
         "Win32_System_Com",
         "Win32_System_Com_StructuredStorage",
-        "Win32_System_Console",
-        "Win32_System_Diagnostics",
-        "Win32_System_Diagnostics_Debug",
         "Win32_System_LibraryLoader",
         "Win32_System_Ole",
         "Win32_System_SystemInformation",
@@ -51645,18 +51634,13 @@ cargo.rust_library(
     features = [
         "Win32",
         "Win32_Foundation",
-        "Win32_Globalization",
         "Win32_Graphics",
         "Win32_Graphics_Gdi",
-        "Win32_Networking",
-        "Win32_Networking_WinSock",
         "Win32_Security",
         "Win32_Security_Credentials",
         "Win32_Storage",
         "Win32_Storage_FileSystem",
         "Win32_System",
-        "Win32_System_Com",
-        "Win32_System_Console",
         "Win32_System_DataExchange",
         "Win32_System_IO",
         "Win32_System_Memory",
@@ -51714,6 +51698,7 @@ cargo.rust_library(
         "Wdk_System_IO",
         "Win32",
         "Win32_Foundation",
+        "Win32_Globalization",
         "Win32_Graphics",
         "Win32_Graphics_Dwm",
         "Win32_NetworkManagement",
