@@ -193,7 +193,7 @@ impl ChatPanel {
             None,
         );
         cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let shown = path.display().to_string();
             let written = cx.background_spawn(async move { std::fs::write(&path, transcript) }).await;
             let _ = this.update_in(cx, |_this, window, cx| match written {

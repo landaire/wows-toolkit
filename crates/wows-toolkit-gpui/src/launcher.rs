@@ -246,7 +246,7 @@ impl LauncherView {
     fn add_install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
         cx.spawn_in(window, async move |this, cx| {
-            let Some(dir) = asked.await else { return };
+            let Some(dir) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| {
                 this.op(cx, |launcher, settings, env| {
                     settings.manual_installs.push(dir);
@@ -261,7 +261,7 @@ impl LauncherView {
     fn browse_proton_binary(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_file(Some(&t!("ui.launcher.proton.binary")), None);
         cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_binary = Some(path)));
         })
         .detach();
@@ -270,7 +270,7 @@ impl LauncherView {
     fn browse_proton_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder(&t!("ui.launcher.proton.prefix"));
         cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_prefix = Some(path)));
         })
         .detach();
@@ -279,7 +279,7 @@ impl LauncherView {
     fn download(&mut self, install: PathBuf, start: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
         cx.spawn_in(window, async move |this, cx| {
-            let Some(dest) = asked.await else { return };
+            let Some(dest) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 let mut result = Ok(());
                 this.op(cx, |launcher, _, env| {
@@ -296,7 +296,7 @@ impl LauncherView {
         let asked =
             crate::dialog::pick_folder_in(&t!("ui.launcher.install_title"), &wgc_download::default_install_dir());
         cx.spawn_in(window, async move |this, cx| {
-            let Some(dest) = asked.await else { return };
+            let Some(dest) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 let mut result = Ok(());
                 this.op(cx, |launcher, _, env| {

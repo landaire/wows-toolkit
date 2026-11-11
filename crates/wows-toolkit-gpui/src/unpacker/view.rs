@@ -289,7 +289,7 @@ impl UnpackerView {
     fn browse_for_output_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder("Extract to");
         cx.spawn(async move |this, cx| {
-            let Some(picked) = asked.await else { return };
+            let Some(picked) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let picked = picked.to_string_lossy().into_owned();
             let _ = this.update_in(cx, |this, window, cx| {
                 this.output_dir_input.update(cx, |state, cx| state.set_value(picked.clone(), window, cx));
@@ -605,7 +605,7 @@ impl UnpackerView {
             crate::dialog::save_file(Some("Save game parameters"), &format!("{stem}.{}", format.extension()), None);
 
         cx.spawn(async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| {
                 this.dump_status = Some("Writing...".to_string());
                 cx.notify();
@@ -640,7 +640,7 @@ impl UnpackerView {
         let stem = name.rsplit_once('.').map(|(stem, _)| stem.to_string()).unwrap_or(name);
         let asked = crate::dialog::save_file(Some(&t!("ui.unpacker.extract_as_json")), &format!("{stem}.json"), None);
         cx.spawn(async move |this, cx| {
-            let Some(target) = asked.await else { return };
+            let Some(target) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let written = cx
                 .background_spawn(async move {
                     let json = viewer::decode_to_json(&path).map_err(|err| err.to_string())?;

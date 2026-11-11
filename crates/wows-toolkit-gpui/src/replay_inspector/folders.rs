@@ -669,7 +669,7 @@ impl ReplayInspectorView {
     pub(crate) fn browse_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder(&t!("ui.replay.open_directory"));
         cx.spawn_in(window, async move |this, cx| {
-            let Some(directory) = asked.await else { return };
+            let Some(directory) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| this.open_folder(directory, window, cx));
         })
         .detach();

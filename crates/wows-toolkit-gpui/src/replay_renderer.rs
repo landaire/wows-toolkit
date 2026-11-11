@@ -1925,15 +1925,15 @@ impl ReplayRendererPanel {
 
         self._export = Some(cx.spawn(async move |this, cx| {
             let chosen = match asked {
-                Some(dialog) => dialog.await,
+                Some(dialog) => crate::dialog::chosen(dialog, &this, cx).await,
                 // A temporary file that outlives this process, since the
                 // clipboard will point at it.
                 None => temporary_output(&suggested),
             };
             let Some(output) = chosen else {
-                // Cancelled at the dialog, or no temporary file could be
-                // made: the renderer goes back to the viewport and nothing
-                // else changes.
+                // Dismissed at the dialog, the dialog failed and said so, or
+                // no temporary file could be made: the renderer goes back to
+                // the viewport and nothing else changes.
                 let _ = this.update(cx, |this, cx| {
                     this.renderer = Some(renderer);
                     this.export = None;

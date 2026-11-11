@@ -3598,7 +3598,7 @@ impl ViewportView {
         );
 
         cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {

@@ -877,7 +877,7 @@ impl ReplayInspectorView {
         );
 
         cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let imported = crate::constants::import(&path, build);
             let _ = this.update_in(cx, |this, window, cx| match imported {
                 Ok(()) => {
@@ -973,9 +973,10 @@ impl ReplayInspectorView {
 
         cx.spawn_in(window, async move |this, cx| {
             let out_dir = match target {
-                // Cancelled at the dialog.
+                // Dismissed at the dialog, or the dialog failed and said so.
                 BatchTarget::Directory => {
-                    match crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video")).await {
+                    let asked = crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
+                    match crate::dialog::chosen(asked, &this, cx).await {
                         Some(picked) => picked,
                         None => return,
                     }
@@ -1829,7 +1830,7 @@ impl ReplayInspectorView {
     pub(crate) fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_file(None, Some(crate::dialog::REPLAYS));
         cx.spawn(async move |this, cx| {
-            let Some(file) = asked.await else { return };
+            let Some(file) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 // What the Settings drawer reports as the current replay: the one
                 // the reader named, which is what the egui app writes here too.

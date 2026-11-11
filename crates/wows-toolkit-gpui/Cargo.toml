@@ -109,7 +109,6 @@ tracing-appender = "0.2"
 thiserror = "2.0"
 escaper = "0.1.1"
 gettext = "0.4"
-rfd = "0.17"
 # ASCII-folded search names for the armor viewer's ship catalog, matching the
 # egui app's `ShipCatalog::build` and wowsunpack's own pinned version.
 unidecode = "0.3"
@@ -157,6 +156,15 @@ windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_
 # taskbar and in Explorer.
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1.31"
+
+# File dialogs. Linux asks the desktop portal directly, which reports why a
+# dialog could not open; rfd only answers with a path or nothing.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
+url = "2"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "0.17"
 
 # `wows_buck_build` is set by the Buck build, which compiles the Windows
 # resources with its own pinned rc.exe instead of the build script's.

@@ -389,6 +389,38 @@ fn the_listing_open_menu_asks_for_a_file_or_a_directory(cx: &mut TestAppContext)
     }
 }
 
+/// A directory dialog that could not be opened says so, with the reason; one
+/// the reader dismissed says nothing.
+#[gpui_kit::test]
+fn a_directory_dialog_that_cannot_open_says_why(cx: &mut TestAppContext) {
+    const DIRECTORY_ROW: u64 = 1;
+
+    let window = open_app(cx);
+    cx.update_window(window.into(), |_, window, cx| show_tab(window, AppTab::ReplayInspector, cx))
+        .expect("the test window stays open");
+    let failed =
+        rust_i18n::t!("ui.dialogs.file_dialog_failed", reason = crate::dialog::DialogError::Refused).into_owned();
+    assert!(failed.contains(&crate::dialog::DialogError::Refused.to_string()), "the message names the reason");
+
+    for refused in [false, true] {
+        if refused {
+            crate::dialog::refuse_next();
+        }
+        let before = crate::toast::said_for_test().len();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click(LISTING_OPEN, cx);
+            window.render_frame(cx);
+            window.within("popup-menu").click(gpui_kit::ElementId::Integer(DIRECTORY_ROW), cx);
+        })
+        .expect("the test window stays open");
+        cx.run_until_parked();
+
+        let said = crate::toast::said_for_test().split_off(before);
+        let expected = if refused { vec![failed.clone()] } else { Vec::new() };
+        assert_eq!(said, expected, "refused {refused}");
+    }
+}
+
 /// A settings snapshot with distinguishable values, so an assertion on a
 /// checkbox proves it read the snapshot rather than a coincidental default.
 /// The WoWs directory is deliberately empty: `apply_settings` then takes its

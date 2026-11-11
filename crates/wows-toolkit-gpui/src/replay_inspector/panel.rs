@@ -409,7 +409,7 @@ impl ReplayPanel {
         let primary = self.path.clone();
 
         cx.spawn_in(window, async move |this, cx| {
-            let Some(alt) = asked.await else { return };
+            let Some(alt) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let Ok(check) =
                 cx.update(|_window, cx| super::load::check_alt(primary, alt.clone(), game_data.clone(), cx))
             else {
@@ -499,7 +499,7 @@ impl ReplayPanel {
         );
 
         cx.spawn(async move |this, cx| {
-            let Some(path) = asked.await else { return };
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
             let _ = this.update(cx, |this, cx| {
                 this.export_status = match written {
