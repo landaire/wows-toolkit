@@ -525,6 +525,13 @@ kept so the next audit does not re-report them.
   frame. Two tables open at once keep their own widths until one is reopened;
   the row is the port's own, since the egui table keeps its widths in egui's
   memory.
+- [changed] A column can be moved by dragging its header, and pinned or
+  unpinned from its header's right-click menu or by dragging it into or out
+  of the pinned zone. The egui table has a fixed order with three frozen
+  columns. The order and the pinned set are written back like the widths.
+- [changed] A column the reader set narrower than an open row's detail
+  widens to fit the widest detail shown in it and returns to their width
+  once the last such row has closed. The egui table clips the detail.
 - [done] The replays directory is watched; a finished match joins the
   listing and, with the checkbox on, opens.
 
@@ -537,26 +544,33 @@ kept so the next audit does not re-report them.
   a header menu that is always present instead of a row that appeared with
   the second pane.
 - [done] The pane names the ship it is showing.
-- [done] The penetration checker is a popover on the pane's own strip, over
-  the plate the pointer was last on. The rest of the Analysis window (the
-  comparison list, the server-vs-simulation report) is still absent.
-- [done] Shell trajectory mode is absent. It is on the pane's toolbar,
-  carrying how many shells have been cast, and Ctrl+T toggles it. A click
-  casts a shell at the armor: the ray is sent along the camera's bearing,
-  flattened and then pitched by the solver's own fall angle, from outside the
-  hull so it crosses every plate rather than only those past the point
-  clicked. Shift-click adds a shell to those already cast; clicking past the
-  ship drops them. The arc, the impact markers coloured by strike angle, the
-  path between plates and the detonation burst are one overlay mesh, scaled
-  to the camera. The flight solver and the penetration chain are
-  `wowsunpack::ballistics`, which the egui viewer casts through too, so both
-  draw the same shell; the attacker is the penetration checker's own, so
-  choosing a ship there is what the cast fires. The range slider and the
-  continue-past-ricochet toggle are in the display popover, and both re-cast
-  what is already on screen. A hit on a triangle carrying no thickness is
-  dropped rather than guessed at. Not ported: the Trajectory tab's per-arc
-  list, its per-arc range sliders and its isolate-plates/isolate-zones
-  buttons, and the per-ship arcs a comparison list of more than one draws.
+- [done] The penetration checker is a section of the options rail, beside
+  the hull, read against the plate the pointer was last on. The rest of the
+  Analysis window (the server-vs-simulation report) is still absent.
+- [done] Shell trajectories. There is no mode to switch on: a Shift-click
+  on the hull casts a shell there and adds it to the arcs already cast.
+  Shift is the one modifier no other viewport gesture holds (the middle
+  button pans). Ctrl+T, which toggled the egui mode, does nothing. The ray
+  is sent along the camera's bearing, flattened and then pitched by the
+  solver's own fall angle, from outside the hull so it crosses every plate
+  rather than only those past the point clicked. A cast past the ship does
+  nothing; Clear All drops the arcs. The arc, the impact markers
+  coloured by strike angle, the path between plates and the detonation
+  burst are drawn over the scene in screen space, each line over a dark
+  outline, each arc in a colour of its own. The flight solver and the
+  penetration chain are `wowsunpack::ballistics`, which the egui viewer
+  casts through too, so both draw the same shell. The rail's Trajectory
+  section lists each arc as a marker in its colour: a click opens the arc's
+  editor (range, shell, isolate plates or zones), a right-click removes it.
+  A range or shell changed there fires the arc again at the plates it first
+  crossed. A hit on a triangle carrying no thickness is dropped rather than
+  guessed at. Not ported: the per-ship arcs a comparison list of more than
+  one draws.
+- [done] Splash box names were not drawn over their outlines. They are,
+  in the names the box list uses.
+- [done] A held modifier is named on the status bar: Ctrl (Cmd) makes a
+  zone's box show that zone alone, Shift makes a click on the hull cast a
+  shell. The zone's box says the same on hover, as the egui label does.
 - [done] Splash/blast mode and the splash-box popover are absent. Splash mode
   is on the pane's toolbar, carrying how many zones the last burst reached; a
   click places a burst, sized from the largest high-explosive or
@@ -630,8 +644,7 @@ kept so the next audit does not re-report them.
   empty pane, as the egui app does when its final dock tab is closed.
   Dragging a pane to re-dock it elsewhere is still egui-only.
 - [done] Ctrl+S opens and closes the display-settings popover, which
-  anchors to its toolbar button rather than to the pointer. Ctrl+T waits
-  on shell trajectory mode, which it toggles and which is not ported.
+  anchors to its toolbar button rather than to the pointer.
 
 ## Stats
 

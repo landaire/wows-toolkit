@@ -5,6 +5,8 @@
 //! render layer (Milestone 2); no `gpui_kit`/`egui` color type appears here.
 
 use rust_i18n::t;
+use serde::Deserialize;
+use serde::Serialize;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::Relation;
 use wows_toolkit_config::ReplaySettings;
@@ -72,6 +74,34 @@ impl ReplayColumn {
             _ => None,
         }
     }
+
+    /// The name this column is stored under in the settings database. Fixed
+    /// strings rather than positions or variant names, so a stored
+    /// arrangement still reads after a column is added, dropped or renamed.
+    const fn storage_key(self) -> &'static str {
+        match self {
+            ReplayColumn::Name => "name",
+            ReplayColumn::ShipName => "ship_name",
+            ReplayColumn::Skills => "skills",
+            ReplayColumn::PersonalRating => "personal_rating",
+            ReplayColumn::BaseXp => "base_xp",
+            ReplayColumn::RawXp => "raw_xp",
+            ReplayColumn::Kills => "kills",
+            ReplayColumn::ObservedDamage => "observed_damage",
+            ReplayColumn::ActualDamage => "actual_damage",
+            ReplayColumn::ReceivedDamage => "received_damage",
+            ReplayColumn::SpottingDamage => "spotting_damage",
+            ReplayColumn::PotentialDamage => "potential_damage",
+            ReplayColumn::Hits => "hits",
+            ReplayColumn::Heals => "heals",
+            ReplayColumn::DistanceTraveled => "distance_traveled",
+            ReplayColumn::TimeLived => "time_lived",
+        }
+    }
+
+    fn from_storage_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|col| col.storage_key() == key)
+    }
 }
 
 /// The column set for a fresh replay load, given the persisted display
@@ -80,6 +110,180 @@ impl ReplayColumn {
 /// Mirrors `UiReport::update_visible_columns`.
 pub fn default_columns(settings: &ReplaySettings) -> Vec<ReplayColumn> {
     ReplayColumn::ALL.into_iter().filter(|col| col.settings_gate().is_none_or(|gate| gate(settings))).collect()
+}
+
+/// Which part of the table a column sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    /// Held at the table's left edge while the rest scroll.
+    Pinned,
+    Scrolling,
+}
+
+/// Where a moved column lands: its section, and how many of that section's
+/// shown columns, other than itself, stand before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placement {
+    pub section: Section,
+    pub index: usize,
+}
+
+/// The columns a table shows, in the order it draws them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShownColumns {
+    pub pinned: Vec<ReplayColumn>,
+    pub scrolling: Vec<ReplayColumn>,
+}
+
+impl ShownColumns {
+    /// Every shown column, left to right.
+    pub fn iter(&self) -> impl Iterator<Item = ReplayColumn> + '_ {
+        self.pinned.iter().chain(&self.scrolling).copied()
+    }
+}
+
+/// Where the reader has put the columns: the pinned ones, which stay at the
+/// table's left edge, then the rest, each in the order drawn. Every column
+/// appears once whether it is shown or not, so a column the filters bring
+/// back returns to where it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnArrangement {
+    pinned: Vec<ReplayColumn>,
+    scrolling: Vec<ReplayColumn>,
+}
+
+impl ColumnArrangement {
+    /// The player and the ship, which say whose row it is, as the egui
+    /// table's frozen columns do.
+    const DEFAULT_PINNED: [ReplayColumn; 2] = [ReplayColumn::Name, ReplayColumn::ShipName];
+
+    pub fn new() -> Self {
+        let pinned = Self::DEFAULT_PINNED.to_vec();
+        let scrolling = ReplayColumn::ALL.into_iter().filter(|col| !pinned.contains(col)).collect();
+
+        Self { pinned, scrolling }
+    }
+
+    pub fn is_pinned(&self, col: ReplayColumn) -> bool {
+        self.pinned.contains(&col)
+    }
+
+    /// The columns of `shown`, in the order they are drawn.
+    pub fn shown(&self, shown: &[ReplayColumn]) -> ShownColumns {
+        let pick = |list: &[ReplayColumn]| list.iter().copied().filter(|col| shown.contains(col)).collect();
+
+        ShownColumns { pinned: pick(&self.pinned), scrolling: pick(&self.scrolling) }
+    }
+
+    /// Pins `col` after the columns already pinned.
+    pub fn pin(&mut self, col: ReplayColumn) {
+        self.remove(col);
+        self.pinned.push(col);
+    }
+
+    /// Unpins `col` to the first scrolling place, which is beside the pinned
+    /// edge it stood against.
+    pub fn unpin(&mut self, col: ReplayColumn) {
+        self.remove(col);
+        self.scrolling.insert(0, col);
+    }
+
+    /// Moves `col` to `placement`, counted among the columns in `shown`.
+    pub fn place(&mut self, col: ReplayColumn, placement: Placement, shown: &[ReplayColumn]) {
+        self.remove(col);
+        let list = self.list_mut(placement.section);
+        let shown_at: Vec<usize> =
+            list.iter().enumerate().filter(|(_, other)| shown.contains(other)).map(|(position, _)| position).collect();
+
+        // Past the last shown column it goes directly after that one, ahead
+        // of any hidden ones behind it; with none shown, first.
+        let at = match shown_at.get(placement.index) {
+            Some(position) => *position,
+            None => shown_at.last().map_or(0, |last| last + 1),
+        };
+        list.insert(at, col);
+    }
+
+    pub fn to_stored(&self) -> StoredArrangement {
+        let keys = |list: &[ReplayColumn]| list.iter().map(|col| col.storage_key().to_owned()).collect();
+
+        StoredArrangement { pinned: keys(&self.pinned), scrolling: keys(&self.scrolling) }
+    }
+
+    /// Reads a stored arrangement back, whatever version of the column set
+    /// wrote it.
+    pub fn from_stored(stored: &StoredArrangement) -> Self {
+        let mut arrangement = Self { pinned: Vec::new(), scrolling: Vec::new() };
+
+        // A name no column answers to is a column since removed, and a
+        // repeated one would place a column twice: both are passed over.
+        for (keys, section) in [(&stored.pinned, Section::Pinned), (&stored.scrolling, Section::Scrolling)] {
+            for col in keys.iter().filter_map(|key| ReplayColumn::from_storage_key(key)) {
+                if !arrangement.contains(col) {
+                    arrangement.list_mut(section).push(col);
+                }
+            }
+        }
+
+        // A column the stored list does not name was added after it was
+        // saved. It takes its default section, after the nearest column that
+        // precedes it there by default, so the reader's own order is kept.
+        let default = Self::new();
+        for section in [Section::Pinned, Section::Scrolling] {
+            let default_list = default.list(section);
+            for (default_at, col) in default_list.iter().copied().enumerate() {
+                if arrangement.contains(col) {
+                    continue;
+                }
+                let list = arrangement.list_mut(section);
+                let at = default_list[..default_at]
+                    .iter()
+                    .rev()
+                    .find_map(|before| list.iter().position(|other| other == before))
+                    .map_or(0, |position| position + 1);
+                list.insert(at, col);
+            }
+        }
+
+        arrangement
+    }
+
+    fn contains(&self, col: ReplayColumn) -> bool {
+        self.pinned.contains(&col) || self.scrolling.contains(&col)
+    }
+
+    fn remove(&mut self, col: ReplayColumn) {
+        self.pinned.retain(|other| *other != col);
+        self.scrolling.retain(|other| *other != col);
+    }
+
+    fn list(&self, section: Section) -> &[ReplayColumn] {
+        match section {
+            Section::Pinned => &self.pinned,
+            Section::Scrolling => &self.scrolling,
+        }
+    }
+
+    fn list_mut(&mut self, section: Section) -> &mut Vec<ReplayColumn> {
+        match section {
+            Section::Pinned => &mut self.pinned,
+            Section::Scrolling => &mut self.scrolling,
+        }
+    }
+}
+
+impl Default for ColumnArrangement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A `ColumnArrangement` as the settings database keeps it: columns by name,
+/// so the list survives the column set changing between versions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredArrangement {
+    pub pinned: Vec<String>,
+    pub scrolling: Vec<String>,
 }
 
 /// A color role a cell can carry, resolved to a real color by the render
@@ -539,5 +743,63 @@ mod tests {
         let cell = cell_value(&row, ReplayColumn::PersonalRating, false);
         assert_eq!(cell.text, "-");
         assert_eq!(cell.color, None);
+    }
+
+    /// A stored arrangement from another version: a column it names that no
+    /// longer exists and a repeated name are passed over, and the columns it
+    /// does not name take their default places among the reader's own order.
+    #[test]
+    fn a_stored_arrangement_reads_back_across_column_set_changes() {
+        let stored = StoredArrangement {
+            pinned: vec!["skills".into(), "retired_column".into(), "name".into()],
+            scrolling: vec!["kills".into(), "base_xp".into(), "kills".into(), "time_lived".into()],
+        };
+
+        let arrangement = ColumnArrangement::from_stored(&stored);
+
+        assert_eq!(
+            arrangement.shown(&ReplayColumn::ALL),
+            ShownColumns {
+                pinned: vec![ReplayColumn::Skills, ReplayColumn::Name, ReplayColumn::ShipName],
+                scrolling: vec![
+                    ReplayColumn::PersonalRating,
+                    ReplayColumn::Kills,
+                    ReplayColumn::ObservedDamage,
+                    ReplayColumn::ActualDamage,
+                    ReplayColumn::ReceivedDamage,
+                    ReplayColumn::SpottingDamage,
+                    ReplayColumn::PotentialDamage,
+                    ReplayColumn::Hits,
+                    ReplayColumn::Heals,
+                    ReplayColumn::DistanceTraveled,
+                    ReplayColumn::BaseXp,
+                    ReplayColumn::RawXp,
+                    ReplayColumn::TimeLived,
+                ],
+            }
+        );
+        assert_eq!(
+            ColumnArrangement::from_stored(&arrangement.to_stored()),
+            arrangement,
+            "a saved arrangement reads back"
+        );
+    }
+
+    /// A placement counts only the shown columns, so a column hidden by the
+    /// filters does not shift where a dragged one lands.
+    #[test]
+    fn a_placement_counts_shown_columns_only() {
+        let mut arrangement = ColumnArrangement::new();
+        let shown = [ReplayColumn::Name, ReplayColumn::ShipName, ReplayColumn::Skills, ReplayColumn::Kills];
+
+        arrangement.place(ReplayColumn::Kills, Placement { section: Section::Scrolling, index: 0 }, &shown);
+        assert_eq!(arrangement.shown(&shown).scrolling, vec![ReplayColumn::Kills, ReplayColumn::Skills]);
+
+        arrangement.place(ReplayColumn::Kills, Placement { section: Section::Pinned, index: 1 }, &shown);
+        assert_eq!(
+            arrangement.shown(&shown).pinned,
+            vec![ReplayColumn::Name, ReplayColumn::Kills, ReplayColumn::ShipName]
+        );
+        assert!(arrangement.is_pinned(ReplayColumn::Kills));
     }
 }

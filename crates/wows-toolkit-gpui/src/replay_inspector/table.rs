@@ -1,10 +1,12 @@
 //! Custom virtualized player table (collapsed rows). Renders the M1
 //! presentation model with a fixed sortable header and a `gpui_kit::list`-backed
-//! body. The Name/ShipName columns stay pinned to the left edge
-//! (`STICKY_COLUMN_COUNT`); the remaining columns scroll horizontally inside
-//! a nested container per row and per header, all sharing one scroll handle
-//! so they stay aligned. This layer adds the per-column cell parity pass on
-//! top of Task 4's scaffold: colors, NDA text, the multi-segment Name cell
+//! body. The reader's pinned columns (Name/ShipName unless rearranged; see
+//! `ColumnArrangement`) stay at the left edge; the remaining columns scroll
+//! horizontally inside a nested container per row and per header, all sharing
+//! one scroll handle so they stay aligned. A header dragged sideways moves
+//! its column, and a right-click on it pins or unpins it. This layer adds the
+//! per-column cell parity pass on top of Task 4's scaffold: colors, NDA text,
+//! the multi-segment Name cell
 //! (ship-class icon, division, clan tag, player name), Skills tier icons, and
 //! hover tooltips for the stat cells that carry a breakdown. A row also
 //! carries an expand/collapse state (`expanded`, keyed by `db_id` so it
@@ -44,8 +46,13 @@ use super::columns::BattleOutcome;
 use super::columns::CaptainPointsTier;
 use super::columns::CellValue;
 use super::columns::ColorRole;
+use super::columns::ColumnArrangement;
+use super::columns::Placement;
 use super::columns::PlayerColorKind;
 use super::columns::ReplayColumn;
+use super::columns::Section;
+use super::columns::ShownColumns;
+use super::columns::StoredArrangement;
 use super::columns::cell_value;
 use super::columns::class_icon_tint;
 use super::columns::name_color_kind;
@@ -79,13 +86,6 @@ const LIST_OVERDRAW: Pixels = px(200.);
 /// Must exceed `ReplayColumn::ALL.len()`.
 const CELL_ID_STRIDE: usize = 32;
 const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE must exceed the column count");
-
-/// Columns pinned to the left edge of the table while the rest scroll
-/// horizontally: Name and ShipName, in that order. The egui app pins three
-/// (`num_sticky_cols(3)`, `mod.rs:2808`), the third being its Actions column,
-/// which a row carries itself here. `default_columns` always includes these two
-/// first and unconditionally, so this always freezes exactly them.
-const STICKY_COLUMN_COUNT: usize = 2;
 
 /// Column width bounds, matching the egui app's
 /// `Column::new(100.0).range(10.0..=500.0)` (`mod.rs:2795`).
@@ -155,10 +155,10 @@ fn measure_column_widths(
     model: &ReplayReportModel,
     debug: bool,
     expanded: &HashSet<AccountId>,
-    closing: &HashSet<AccountId>,
+    closing: &HashMap<AccountId, CloseTicket>,
     window: &mut Window,
 ) -> MeasuredWidths {
-    let shows_detail = |id: &AccountId| expanded.contains(id) || closing.contains(id);
+    let shows_detail = |id: &AccountId| expanded.contains(id) || closing.contains_key(id);
     let rem = window.rem_size().as_f32();
     let gap_1 = rem * 0.25;
     let gap_0p5 = rem * 0.125;
@@ -241,7 +241,20 @@ fn measure_column_widths(
         };
         widths[col as usize] = px((content_w + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
     }
-    MeasuredWidths { columns: widths, details }
+
+    // The same padding and room as a fitted column, so a widened column
+    // shows its detail without the cut-off fade.
+    let mut detail_fit: Vec<Option<Pixels>> = vec![None; ReplayColumn::ALL.len()];
+    for ((_, col), needs) in &details {
+        if *needs <= px(0.) {
+            continue;
+        }
+        let fit = px((needs.as_f32() + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
+        let slot = &mut detail_fit[*col as usize];
+        *slot = Some(slot.map_or(fit, |held| held.max(fit)));
+    }
+
+    MeasuredWidths { columns: widths, details, detail_fit }
 }
 
 /// What `measure_column_widths` found.
@@ -251,6 +264,9 @@ struct MeasuredWidths {
     /// The width each shown row's detail needs in each column, so a cell
     /// drawn narrower can mark where its detail is cut off.
     details: HashMap<(AccountId, ReplayColumn), Pixels>,
+    /// The width each column needs to show every shown detail in full, by
+    /// `ReplayColumn as usize`. `None` where no shown row has detail there.
+    detail_fit: Vec<Option<Pixels>>,
 }
 
 /// Header label for a column, matching the egui app's `ui.replay.column.*`
@@ -389,16 +405,12 @@ pub struct PlayerTable {
     expanded: HashSet<AccountId>,
     /// Rows that have left `expanded` but whose detail is still closing.
     /// They keep their share of the column widths until it has closed.
-    closing: HashSet<AccountId>,
+    closing: HashMap<AccountId, CloseTicket>,
+    /// The ticket the next close is given.
+    next_close: CloseTicket,
     /// The row a ctrl+click picked out, if any. One at a time, as in the egui
     /// table.
     selected: Option<AccountId>,
-    /// Whether alt is down, which turns the damage breakdown's percentages
-    /// around: how much of the other player's total this was, rather than how
-    /// much of this row's. The egui table reads the modifier per frame
-    /// (`mod.rs`'s `alt_held`); here a change notifies and the next render
-    /// picks it up.
-    alt_held: bool,
     /// Content-fit width per column, indexed by `ReplayColumn as usize`.
     /// Recomputed by `measure_column_widths` whenever `widths_dirty` is set;
     /// `render` is the only reader/writer of that flag, since computing a
@@ -408,18 +420,26 @@ pub struct PlayerTable {
     /// The width each shown row's detail needs per column, from the same
     /// measurement.
     detail_widths: HashMap<(AccountId, ReplayColumn), Pixels>,
+    /// The width each column needs for the widest detail shown in it, a
+    /// closing one included, from the same measurement. Remeasured as each
+    /// row opens or finishes closing.
+    detail_fit: Vec<Option<Pixels>>,
     /// Set on construction and whenever the columns/data/debug flag change
     /// (`set_columns`, `set_debug`); cleared by `render` after it recomputes
     /// `column_widths`. Keeps the (17-column x up-to-24-row) measurement pass
     /// off the per-frame path.
     widths_dirty: bool,
-    /// The width every column is drawn at: what was dragged, or what the
-    /// content measured. Rebuilt each render, so rows and header agree.
+    /// The width every column is drawn at: what was dragged or what the
+    /// content measured, widened for any detail shown in it. Rebuilt each
+    /// render, so rows and header agree.
     drawn_widths: Vec<Pixels>,
     /// Widths the reader dragged a column to, by `ReplayColumn as usize`.
     /// `None` leaves that column fitted to its content, which is what every
     /// column does until one is dragged.
     width_overrides: Vec<Option<Pixels>>,
+    /// Columns whose width a drag set while a detail widened them, drawn at
+    /// that width rather than the detail's until no detail shows in them.
+    fit_waived: HashSet<ReplayColumn>,
     /// Whether the saved widths have been read back yet. One shot, on the
     /// first frame.
     widths_loaded: bool,
@@ -433,10 +453,81 @@ pub struct PlayerTable {
     /// so a press that lands on a row but not on one of its cells offers
     /// nothing rather than whatever was pressed before.
     right_clicked_cell: Option<(AccountId, ReplayColumn)>,
-    /// The table's own width, measured as it is laid out, so the frozen
-    /// section's cap can be worked out in pixels. `None` before the first
-    /// frame.
-    viewport_width: Option<Pixels>,
+    /// The table's own bounds, measured as it is laid out, so the frozen
+    /// section's cap can be worked out in pixels and a pointer placed among
+    /// the columns. `None` before the first frame.
+    viewport: Option<Bounds<Pixels>>,
+
+    /// Where the reader has put the columns, and which are pinned.
+    arrangement: ColumnArrangement,
+    /// Whether this table has changed `arrangement` itself, which a stored
+    /// arrangement read afterwards does not undo.
+    arrangement_changed: bool,
+    /// A column being moved by its header, if any.
+    reorder: Option<ColumnReorder>,
+    /// Columns sliding to new places, if any.
+    slide: Option<ColumnSlide>,
+    /// How far each column is drawn from its place while the columns slide,
+    /// by `ReplayColumn as usize`.
+    column_shift: Vec<Pixels>,
+    /// Where each column was last drawn from the table's left edge, scrolled
+    /// and slid, by `ReplayColumn as usize`. `None` for a column not drawn.
+    drawn_starts: Vec<Option<Pixels>>,
+    /// Where the pinned section ends, as last drawn.
+    pinned_edge: Pixels,
+    /// Ends a drag when the window loses focus, since the release then goes
+    /// elsewhere. Made on the first frame, which is the first to have the
+    /// window.
+    activation: Option<Subscription>,
+}
+
+/// Which close of a row's detail a delayed finish belongs to, so the finish
+/// of a close since undone does not end a later one early.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CloseTicket(u64);
+
+impl CloseTicket {
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// Columns sliding from where they were drawn to new places.
+struct ColumnSlide {
+    started: std::time::Instant,
+    /// Where each column was drawn when the slide began, as `drawn_starts`.
+    from: Vec<Option<Pixels>>,
+}
+
+/// The arrangement last read from or written to the settings database, so
+/// a table opened later draws it from its first frame.
+struct KnownArrangement(ColumnArrangement);
+
+impl Global for KnownArrangement {}
+
+/// A column being moved by its header.
+#[derive(Clone)]
+enum ColumnReorder {
+    /// Pressed, but not yet moved far enough to be told from a click.
+    Pressed { column: ReplayColumn, pointer_start: Pixels, grab: Pixels },
+    /// Following the pointer. `preview` is what a release here leaves.
+    Moving { column: ReplayColumn, grab: Pixels, pointer: Pixels, preview: ColumnArrangement },
+}
+
+impl ColumnReorder {
+    fn column(&self) -> ReplayColumn {
+        match self {
+            Self::Pressed { column, .. } | Self::Moving { column, .. } => *column,
+        }
+    }
+
+    /// The pointer's distance into the header from its left edge, so the
+    /// floating header keeps the point it was taken by under the pointer.
+    fn grab(&self) -> Pixels {
+        match self {
+            Self::Pressed { grab, .. } | Self::Moving { grab, .. } => *grab,
+        }
+    }
 }
 
 /// A column-width drag in progress.
@@ -477,6 +568,13 @@ const STICKY_MAX_FRACTION: f32 = 0.6;
 /// Room kept for the horizontal scrollbar, so it is still reachable however
 /// wide the frozen columns are drawn.
 const H_SCROLLBAR_MIN_WIDTH: Pixels = px(80.);
+
+/// The settings row the column order and the pinned set are kept in, by
+/// column name. The port's own row, as with the widths.
+const COLUMN_ARRANGEMENT_KEY: &str = "replay_column_arrangement";
+
+/// How faint the dragged column's own cells are drawn in its landing slot.
+const DRAGGED_OPACITY: f32 = 0.35;
 
 impl PlayerTable {
     /// Builds the table for `model` and kicks off resolving every icon its
@@ -523,18 +621,32 @@ impl PlayerTable {
             icons: IconCache::new(),
             debug,
             expanded: HashSet::new(),
-            closing: HashSet::new(),
+            closing: HashMap::new(),
+            next_close: CloseTicket(0),
             selected: None,
-            alt_held: false,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
             detail_widths: HashMap::new(),
+            detail_fit: vec![None; ReplayColumn::ALL.len()],
             drawn_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
             widths_loaded: false,
             width_overrides: vec![None; ReplayColumn::ALL.len()],
+            fit_waived: HashSet::new(),
             resizing: None,
             right_clicked_cell: None,
-            viewport_width: None,
+            viewport: None,
             widths_dirty: true,
+            // Before the settings database has been read, nothing is known
+            // to replace the default.
+            arrangement: cx
+                .try_global::<KnownArrangement>()
+                .map_or_else(ColumnArrangement::new, |known| known.0.clone()),
+            arrangement_changed: false,
+            reorder: None,
+            slide: None,
+            column_shift: vec![px(0.); ReplayColumn::ALL.len()],
+            drawn_starts: vec![None; ReplayColumn::ALL.len()],
+            pinned_edge: px(0.),
+            activation: None,
         }
     }
 
@@ -660,8 +772,8 @@ impl PlayerTable {
     /// column-filter checkboxes (`view.rs::ReplayInspectorView::set_column_filter`,
     /// via `panel.rs::ReplayPanel::set_columns`). Row order/content is
     /// untouched -- only which columns render -- so this just swaps the field
-    /// and notifies; `render`'s `sticky_columns`/`scroll_columns` split is
-    /// recomputed from `model.columns` fresh on every render. Marks
+    /// and notifies; `render`'s pinned/scrolling split is recomputed from
+    /// `model.columns` and the arrangement fresh on every render. Marks
     /// `widths_dirty` so a newly-shown column gets a real fit width instead
     /// of its placeholder `COLUMN_MIN_WIDTH` entry.
     pub fn set_columns(&mut self, columns: Vec<ReplayColumn>, cx: &mut Context<Self>) {
@@ -690,10 +802,10 @@ impl PlayerTable {
     fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
         let db_id = self.model.rows[ix].db_id;
         if self.expanded.remove(&db_id) {
-            self.closing.insert(db_id);
+            self.begin_closing(db_id, cx);
         } else {
             self.expanded.insert(db_id);
-            if !self.closing.remove(&db_id) {
+            if self.closing.remove(&db_id).is_none() {
                 self.widths_dirty = true;
             }
         }
@@ -701,24 +813,55 @@ impl PlayerTable {
         cx.notify();
     }
 
+    /// Moves a row to `closing` until its detail has closed. The finish also
+    /// comes from a timer of the reveal's length, since a row scrolled or
+    /// sorted out of view is not drawn to see its detail close.
+    fn begin_closing(&mut self, db_id: AccountId, cx: &mut Context<Self>) {
+        let ticket = self.next_close;
+        self.next_close = ticket.next();
+        self.closing.insert(db_id, ticket);
+
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(crate::motion::reveal_duration()).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.closing.get(&db_id) == Some(&ticket) {
+                    this.finish_closing(db_id, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Lets a row whose detail has closed give up its share of the column
     /// widths.
     fn finish_closing(&mut self, db_id: AccountId, cx: &mut Context<Self>) {
-        if self.closing.remove(&db_id) {
+        if self.closing.remove(&db_id).is_some() {
             self.widths_dirty = true;
             cx.notify();
         }
     }
 
-    /// The width `col` is drawn at: what the reader dragged it to, or what
-    /// its content measured.
+    /// The width the reader set for `col`, or what its content measured.
     fn width_of(&self, col: ReplayColumn) -> Pixels {
         self.width_overrides[col as usize].unwrap_or(self.column_widths[col as usize])
     }
 
+    /// The width `col` is drawn at before the frozen cap: `width_of`, widened
+    /// to the widest detail shown in it unless a drag set its width since.
+    /// The reader's width is left as set, so the column returns to it once
+    /// the last such detail has closed.
+    fn fitted_width(&self, col: ReplayColumn) -> Pixels {
+        let set = self.width_of(col);
+        if self.fit_waived.contains(&col) {
+            return set;
+        }
+
+        self.detail_fit[col as usize].map_or(set, |fit| set.max(fit))
+    }
+
     /// Starts a width drag on `col` from the pointer's current position, at
-    /// the width the column is drawn at, which the frozen cap may have
-    /// narrowed below its stored width.
+    /// the width the column is drawn at: the grip is under the pointer there,
+    /// whether the frozen cap narrowed the column or a detail widened it.
     fn start_column_drag(&mut self, col: ReplayColumn, at: Pixels, cx: &mut Context<Self>) {
         self.resizing =
             Some(ColumnDrag { column: col, pointer_start: at, width_start: self.drawn_widths[col as usize] });
@@ -739,13 +882,201 @@ impl PlayerTable {
         {
             width = width.min(frozen_room(&frozen, &self.drawn_widths, cap, drag.column).max(COLUMN_DRAG_MIN));
         }
+        // The reader is setting this width with the detail in view, so it is
+        // drawn as dragged rather than held at what the detail needs.
+        if self.detail_fit[drag.column as usize].is_some() {
+            self.fit_waived.insert(drag.column);
+        }
         self.width_overrides[drag.column as usize] = Some(width);
         cx.notify();
     }
 
-    /// The columns that stay put while the rest scroll.
+    /// Drops whatever drag is under way when its release cannot arrive: the
+    /// button is found up or the window has lost focus. A width drag keeps
+    /// the width it has shown; a column move is undone.
+    fn abandon_drags(&mut self, cx: &mut Context<Self>) {
+        self.end_column_drag(cx);
+        if let Some(ColumnReorder::Moving { .. }) = self.reorder.take() {
+            self.begin_slide(cx);
+            cx.notify();
+        }
+    }
+
+    /// The columns that stay put while the rest scroll, as drawn.
     fn frozen_columns(&self) -> Vec<ReplayColumn> {
-        self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect()
+        self.drawn_columns().pinned
+    }
+
+    /// The shown columns in the reader's arrangement.
+    fn shown_columns(&self) -> ShownColumns {
+        self.arrangement.shown(&self.model.columns)
+    }
+
+    /// The shown columns as drawn: while a column is being moved, in the
+    /// order a release would leave.
+    fn drawn_columns(&self) -> ShownColumns {
+        match &self.reorder {
+            Some(ColumnReorder::Moving { preview, .. }) => preview.shown(&self.model.columns),
+            Some(ColumnReorder::Pressed { .. }) | None => self.shown_columns(),
+        }
+    }
+
+    /// The column being moved, once it has left its place.
+    fn moving_column(&self) -> Option<ReplayColumn> {
+        match &self.reorder {
+            Some(ColumnReorder::Moving { column, .. }) => Some(*column),
+            Some(ColumnReorder::Pressed { .. }) | None => None,
+        }
+    }
+
+    /// Notes a press on `col`'s header, which becomes a move once the
+    /// pointer travels. A press that stays put is a click.
+    fn press_header(&mut self, col: ReplayColumn, at: Pixels) {
+        let (Some(viewport), Some(start)) = (self.viewport, self.drawn_starts[col as usize]) else { return };
+
+        let left = viewport.origin.x + start;
+        self.reorder = Some(ColumnReorder::Pressed { column: col, pointer_start: at, grab: at - left });
+    }
+
+    /// Follows a column move. A no-op when no header is pressed.
+    fn follow_reorder(&mut self, at: Pixels, cx: &mut Context<Self>) {
+        // How far a pressed header must travel before it moves its column
+        // rather than sorting by it.
+        const THRESHOLD: Pixels = px(4.);
+
+        let Some(reorder) = self.reorder.as_ref() else { return };
+        if let ColumnReorder::Pressed { pointer_start, .. } = reorder
+            && (at - *pointer_start).abs() < THRESHOLD
+        {
+            return;
+        }
+        let Some(viewport) = self.viewport else { return };
+
+        let column = reorder.column();
+        let grab = reorder.grab();
+        let mut preview = self.arrangement.clone();
+        preview.place(column, self.placement_at(column, at - viewport.origin.x), &self.model.columns);
+        if self.drawn_columns() != preview.shown(&self.model.columns) {
+            self.begin_slide(cx);
+        }
+        self.reorder = Some(ColumnReorder::Moving { column, grab, pointer: at, preview });
+        cx.notify();
+    }
+
+    /// Where `column`, dragged to `x` from the table's left edge, lands among
+    /// the other shown columns: before the first whose middle lies right of
+    /// the pointer, in the section the pointer is over.
+    fn placement_at(&self, column: ReplayColumn, x: Pixels) -> Placement {
+        // Measured against the zone as drawn, so a column taken into it
+        // stays pinned until it is taken back out past the zone's edge.
+        let section = if x < self.pinned_edge && self.can_pin(column) { Section::Pinned } else { Section::Scrolling };
+
+        let mut others = self.shown_columns();
+        others.pinned.retain(|col| *col != column);
+        others.scrolling.retain(|col| *col != column);
+        let reserve = pinned_reserve(true, &others.pinned);
+        let offsets = column_offsets(&others, &self.drawn_widths, self.sticky_cap(), reserve);
+        let (list, scroll) = match section {
+            Section::Pinned => (&others.pinned, px(0.)),
+            Section::Scrolling => (&others.scrolling, self.h_scroll.offset().x),
+        };
+        let index = list
+            .iter()
+            .take_while(|col| {
+                offsets.starts[**col as usize]
+                    .is_some_and(|start| start + scroll + self.drawn_widths[**col as usize] / 2. < x)
+            })
+            .count();
+
+        Placement { section, index }
+    }
+
+    /// Whether `col` may be pinned, or stay pinned when moved. A shown
+    /// column must be left to scroll, and the pinned ones must fit their cap
+    /// at their narrowest: otherwise the rest of the table cannot be reached,
+    /// nor the clipped pinned headers to unpin them.
+    fn can_pin(&self, col: ReplayColumn) -> bool {
+        let shown = self.shown_columns();
+        let pinned = shown.pinned.iter().filter(|other| **other != col).count() + 1;
+        let scrolling_left = shown.scrolling.iter().any(|other| *other != col);
+        let fits = self.sticky_cap().is_none_or(|cap| COLUMN_DRAG_MIN * pinned as f32 <= cap);
+
+        scrolling_left && fits
+    }
+
+    /// Ends a column move, keeping where it got to.
+    fn end_reorder(&mut self, cx: &mut Context<Self>) {
+        let Some(ColumnReorder::Moving { preview, .. }) = self.reorder.take() else { return };
+
+        if preview != self.arrangement {
+            self.arrangement = preview;
+            self.save_arrangement(cx);
+        }
+        cx.notify();
+    }
+
+    /// Pins `col` after the pinned columns, or unpins it beside them.
+    fn set_pinned(&mut self, col: ReplayColumn, pinned: bool, cx: &mut Context<Self>) {
+        if self.arrangement.is_pinned(col) == pinned || (pinned && !self.can_pin(col)) {
+            return;
+        }
+        if pinned {
+            self.arrangement.pin(col);
+        } else {
+            self.arrangement.unpin(col);
+        }
+        self.begin_slide(cx);
+        self.save_arrangement(cx);
+        cx.notify();
+    }
+
+    /// Starts the columns sliding from where they are drawn now.
+    fn begin_slide(&mut self, cx: &mut Context<Self>) {
+        self.slide = Some(ColumnSlide { started: cx.background_executor().now(), from: self.drawn_starts.clone() });
+    }
+
+    /// What `save_arrangement` writes and the first frame reads back.
+    fn stored_arrangement(&self) -> StoredArrangement {
+        self.arrangement.to_stored()
+    }
+
+    /// Writes the column order and the pinned set back, as the widths are,
+    /// and keeps them for the tables opened after.
+    fn save_arrangement(&mut self, cx: &mut Context<Self>) {
+        self.arrangement_changed = true;
+        cx.set_global(KnownArrangement(self.arrangement.clone()));
+        crate::settings_store::save(COLUMN_ARRANGEMENT_KEY, &self.stored_arrangement(), cx);
+    }
+
+    /// Takes up the arrangement read from the settings database, which
+    /// lands after the first frame. A change this table made meanwhile is
+    /// newer and stays, and an arrangement another table already knows is
+    /// newer than this read.
+    ///
+    /// A stored name no column answers to is dropped and a column it does
+    /// not name takes its default place (`ColumnArrangement::from_stored`):
+    /// the stored list may be from a version with another column set, and the
+    /// reader's order for the columns both share is still theirs.
+    fn adopt_stored_arrangement(&mut self, stored: Option<&StoredArrangement>, cx: &mut Context<Self>) {
+        if self.arrangement_changed {
+            return;
+        }
+
+        let arrangement = match cx.try_global::<KnownArrangement>() {
+            Some(known) => known.0.clone(),
+            None => {
+                // Nothing stored is the default arrangement, never changed.
+                let read = stored.map_or_else(ColumnArrangement::new, ColumnArrangement::from_stored);
+                cx.set_global(KnownArrangement(read.clone()));
+                read
+            }
+        };
+        if arrangement != self.arrangement {
+            // A move in progress was previewed against what this replaces.
+            self.reorder = None;
+            self.arrangement = arrangement;
+            cx.notify();
+        }
     }
 
     /// Ends a width drag, keeping where it got to.
@@ -767,22 +1098,27 @@ impl PlayerTable {
         crate::settings_store::save(COLUMN_WIDTHS_KEY, &widths, cx);
     }
 
-    /// Reads the dragged widths back on the first frame, once the config
-    /// database is open. `new` runs before it is.
-    fn load_column_widths(&mut self, cx: &mut Context<Self>) {
+    /// Reads the dragged widths and the column arrangement back on the first
+    /// frame, once the config database is open. `new` runs before it is.
+    fn load_column_settings(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         cx.spawn(async move |this, cx| {
             let stored = crate::runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await
+                let widths =
+                    wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await;
+                let arrangement =
+                    wows_toolkit_config::queries::get_setting::<StoredArrangement>(&pool, COLUMN_ARRANGEMENT_KEY).await;
+                (widths, arrangement)
             })
             .await;
-            let Ok(Some(widths)) = stored else { return };
+            let Ok((widths, arrangement)) = stored else { return };
             let _ = this.update(cx, |this, cx| {
-                for (slot, width) in this.width_overrides.iter_mut().zip(widths) {
+                for (slot, width) in this.width_overrides.iter_mut().zip(widths.into_iter().flatten()) {
                     // A width narrower than the grip would leave a column
                     // that cannot be grabbed to widen again.
                     *slot = width.map(|width| px(width).max(COLUMN_DRAG_MIN));
                 }
+                this.adopt_stored_arrangement(arrangement.as_ref(), cx);
                 cx.notify();
             });
         })
@@ -801,10 +1137,10 @@ impl PlayerTable {
         self.right_clicked_cell.take()
     }
 
-    /// The widest the two frozen columns may be drawn, in pixels. `None` until
+    /// The widest the pinned columns may be drawn, in pixels. `None` until
     /// the table has been laid out once.
     fn sticky_cap(&self) -> Option<Pixels> {
-        self.viewport_width.map(|width| width * STICKY_MAX_FRACTION)
+        self.viewport.map(|viewport| viewport.size.width * STICKY_MAX_FRACTION)
     }
 
     /// One cell's text as the table draws it.
@@ -818,10 +1154,9 @@ impl PlayerTable {
     fn row_text(&self, player: AccountId) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
         Some(
-            self.model
-                .columns
+            self.shown_columns()
                 .iter()
-                .map(|col| cell_value(row, *col, self.debug).text.to_string())
+                .map(|col| cell_value(row, col, self.debug).text.to_string())
                 .collect::<Vec<_>>()
                 .join("\t"),
         )
@@ -830,7 +1165,7 @@ impl PlayerTable {
     /// The whole table: the column headings, then every row in the order the
     /// table is sorted into.
     fn table_text(&self) -> String {
-        let mut lines = vec![self.model.columns.iter().map(|col| column_label(*col)).collect::<Vec<_>>().join("\t")];
+        let mut lines = vec![self.shown_columns().iter().map(column_label).collect::<Vec<_>>().join("\t")];
         lines.extend(self.model.rows.iter().filter_map(|row| self.row_text(row.db_id)));
         lines.join("\n")
     }
@@ -845,13 +1180,14 @@ impl PlayerTable {
     }
 
     fn markdown_table<'a>(&self, rows: impl Iterator<Item = &'a PlayerRow>) -> String {
+        let columns = self.shown_columns();
         let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
         let mut lines = vec![
-            line(self.model.columns.iter().map(|col| markdown_cell(&column_label(*col))).collect()),
-            line(self.model.columns.iter().map(|_| "---".to_owned()).collect()),
+            line(columns.iter().map(|col| markdown_cell(&column_label(col))).collect()),
+            line(columns.iter().map(|_| "---".to_owned()).collect()),
         ];
         lines.extend(rows.map(|row| {
-            line(self.model.columns.iter().map(|col| markdown_cell(&cell_value(row, *col, self.debug).text)).collect())
+            line(columns.iter().map(|col| markdown_cell(&cell_value(row, col, self.debug).text)).collect())
         }));
         lines.join("\n")
     }
@@ -866,15 +1202,6 @@ impl PlayerTable {
     }
 
     fn header_cell(&self, col: ReplayColumn, cx: &mut Context<Self>) -> AnyElement {
-        let base = div()
-            .w(self.drawn_widths[col as usize])
-            .flex_none()
-            .px_1()
-            .py_1()
-            .font_weight(FontWeight::BOLD)
-            .whitespace_nowrap()
-            .overflow_hidden();
-
         // The grip sits on the header's trailing edge, over the rule
         // between this column and the next, which is where a reader reaches
         // for it.
@@ -891,8 +1218,8 @@ impl PlayerTable {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     // The grip sits inside the header, and the header sorts
-                    // when it is clicked. Without this, letting go of a drag
-                    // over the header also re-sorts the table.
+                    // when it is clicked and moves its column when it is
+                    // dragged. Without this, a width drag would do both.
                     cx.stop_propagation();
                     // Double-clicking a grip puts that column back on its
                     // content, which is the usual way out of a drag that
@@ -905,31 +1232,171 @@ impl PlayerTable {
                 }),
             );
 
-        let base = base.relative().child(grip);
+        let sorted = column_sort(col).filter(|sort_column| self.sort.column() == *sort_column).map(|_| self.sort);
+        let base = div()
+            .id(("replay-header", col as usize))
+            .test_support()
+            .w(self.drawn_widths[col as usize])
+            .flex_none()
+            .relative()
+            .left(self.column_shift[col as usize])
+            .px_1()
+            .py_1()
+            .flex()
+            .items_center()
+            .gap_1()
+            .font_weight(FontWeight::BOLD)
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .when(self.moving_column() == Some(col), |el| el.opacity(DRAGGED_OPACITY))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _window, _cx| this.press_header(col, event.position.x)),
+            )
+            .child(grip)
+            .child(column_label(col))
+            .when_some(sorted, |el, sort| el.child(Icon::new(sort_caret_icon(sort))));
 
-        match column_sort(col) {
-            None => base.child(column_label(col)).into_any_element(),
+        let base = match column_sort(col) {
+            None => base,
             Some(sort_column) => {
-                let sorted = self.sort.column() == sort_column;
-                let sort = self.sort;
-                base.id(("replay-header", col as usize))
-                    .test_support()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.sort_by(sort_column, cx);
-                    }))
-                    .child(column_label(col))
-                    .when(sorted, |el| el.child(Icon::new(sort_caret_icon(sort))))
-                    .into_any_element()
+                base.cursor_pointer().on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                    // A press that moved its column is not a request to sort.
+                    if this.moving_column().is_some() {
+                        return;
+                    }
+                    this.sort_by(sort_column, cx);
+                }))
             }
-        }
+        };
+
+        let table = cx.entity();
+        base.context_menu(move |menu, _window, cx| {
+            let (pinned, refused) = {
+                let this = table.read(cx);
+                let pinned = this.arrangement.is_pinned(col);
+                (pinned, !pinned && !this.can_pin(col))
+            };
+            let label = if pinned { t!("ui.replay.context.unpin_column") } else { t!("ui.replay.context.pin_column") };
+            let table = table.clone();
+            menu.item(
+                PopupMenuItem::new(label.into_owned()).disabled(refused).on_click(move |_event, _window, cx| {
+                    table.update(cx, |this, cx| this.set_pinned(col, !pinned, cx))
+                }),
+            )
+        })
+        .into_any_element()
+    }
+
+    /// What shows while a column is being moved: the pinned zone tinted to
+    /// its edge, the slot the column will land in, and its header following
+    /// the pointer. Draws over the table and takes no pointer events.
+    fn reorder_overlay(&self, cx: &App) -> Option<AnyElement> {
+        let Some(ColumnReorder::Moving { column, grab, pointer, preview }) = &self.reorder else { return None };
+        let viewport = self.viewport?;
+
+        let accent = cx.theme().primary;
+        let width = self.drawn_widths[*column as usize];
+
+        // A zone that will not take the column is drawn without the accent.
+        let (zone_tint, zone_edge) =
+            if self.can_pin(*column) { (accent, accent) } else { (cx.theme().muted_foreground, cx.theme().border) };
+        let zone = div()
+            .id("replay-pinned-zone")
+            .test_support()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left_0()
+            .w(self.pinned_edge)
+            .bg(zone_tint.opacity(0.08))
+            .border_r_2()
+            .border_color(zone_edge);
+
+        // A scrolling slot is cut at the pinned edge, which its cells pass
+        // under as the columns scroll.
+        let start = self.drawn_starts[*column as usize]?;
+        let left = if preview.is_pinned(*column) { start } else { start.max(self.pinned_edge) };
+        let right = start + width;
+        let slot = (right > left).then(|| {
+            div()
+                .id("replay-column-slot")
+                .test_support()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(left)
+                .w(right - left)
+                .bg(accent.opacity(0.12))
+                .border_2()
+                .border_color(accent.opacity(0.6))
+        });
+
+        let ghost_left = (*pointer - viewport.origin.x - *grab).min(viewport.size.width - width).max(px(0.));
+        let ghost = div()
+            .id("replay-column-ghost")
+            .test_support()
+            .absolute()
+            .top_0()
+            .left(ghost_left)
+            .w(width)
+            .px_1()
+            .py_1()
+            .font_weight(FontWeight::BOLD)
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .bg(cx.theme().popover)
+            .text_color(cx.theme().popover_foreground)
+            .border_1()
+            .border_color(accent)
+            .shadow_md()
+            .child(column_label(*column));
+
+        Some(div().absolute().inset_0().child(zone).children(slot).child(ghost).into_any_element())
     }
 }
 
 impl EventEmitter<PlayerTableEvent> for PlayerTable {}
+
+/// Where the pinned section ends and each shown column starts, from the
+/// table's left edge with the scrolling columns unscrolled.
+struct ColumnOffsets {
+    pinned_edge: Pixels,
+    /// By `ReplayColumn as usize`; `None` for a column not shown.
+    starts: Vec<Option<Pixels>>,
+}
+
+/// Lays `shown` out at `widths`: the pinned columns from the left edge, the
+/// scrolling ones from where the pinned section is cut at `cap`, and no
+/// nearer the left edge than `reserve`.
+fn column_offsets(shown: &ShownColumns, widths: &[Pixels], cap: Option<Pixels>, reserve: Pixels) -> ColumnOffsets {
+    let mut starts = vec![None; ReplayColumn::ALL.len()];
+
+    let mut x = px(0.);
+    for col in &shown.pinned {
+        starts[*col as usize] = Some(x);
+        x += widths[*col as usize];
+    }
+
+    let pinned_edge = cap.map_or(x, |cap| x.min(cap)).max(reserve);
+    let mut x = pinned_edge;
+    for col in &shown.scrolling {
+        starts[*col as usize] = Some(x);
+        x += widths[*col as usize];
+    }
+
+    ColumnOffsets { pinned_edge, starts }
+}
+
+/// Room held at the left edge for pinning while a column is `carried` and
+/// none of `pinned` is shown. Without it the zone that pins would lie over
+/// the first scrolling column, and a column could not be dropped before a
+/// narrow one there without pinning it.
+fn pinned_reserve(carried: bool, pinned: &[ReplayColumn]) -> Pixels {
+    const RESERVE: Pixels = px(24.);
+
+    if carried && pinned.is_empty() { RESERVE } else { px(0.) }
+}
 
 /// The order the frozen columns give way in when they overrun their cap:
 /// Name first, then the rest from the right.
@@ -1849,7 +2316,32 @@ struct RowLayout<'a> {
     turn: f32,
     selected: bool,
     alt_held: bool,
+    /// How far each column is drawn from its place while the columns slide.
+    column_shift: &'a [Pixels],
+    /// The column being moved by its header, whose cells mark its slot.
+    moving: Option<ReplayColumn>,
+    /// Room held for the pinned zone while a column is carried and nothing
+    /// is pinned.
+    pinned_reserve: Pixels,
     all_rows: &'a [PlayerRow],
+}
+
+/// A cell at its column's place: offset while the columns slide to new
+/// places, and faint while its column is the one being moved.
+fn placed_cell(cell: AnyElement, col: ReplayColumn, layout: &RowLayout) -> AnyElement {
+    let shift = layout.column_shift[col as usize];
+    let moving = layout.moving == Some(col);
+    if shift == px(0.) && !moving {
+        return cell;
+    }
+
+    div()
+        .flex_none()
+        .relative()
+        .left(shift)
+        .when(moving, |el| el.opacity(DRAGGED_OPACITY))
+        .child(cell)
+        .into_any_element()
 }
 
 /// One row: `layout.sticky_columns` (Actions/Name/ShipName) render as fixed
@@ -1873,12 +2365,12 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     // detail would drift down as the row grows and snap back up once open.
     let align_top = layout.detail.is_shown();
     let mut sticky = h_flex()
-        .min_w(px(0.))
+        .min_w(layout.pinned_reserve)
         .max_w(relative(STICKY_MAX_FRACTION))
         .overflow_hidden()
         .map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.sticky_columns {
-        sticky = sticky.child(render_column_cell(ix, col, row, layout));
+        sticky = sticky.child(placed_cell(render_column_cell(ix, col, row, layout), col, layout));
     }
 
     let mut scrolling = h_flex()
@@ -1886,7 +2378,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .flex_none()
         .map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.scroll_columns {
-        scrolling = scrolling.child(render_column_cell(ix, col, row, layout));
+        scrolling = scrolling.child(placed_cell(render_column_cell(ix, col, row, layout), col, layout));
     }
 
     // Selection is what a ctrl+click leaves behind, over the stripe; the
@@ -1942,40 +2434,78 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
 
 impl Render for PlayerTable {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // A window that is not active never sees the alt release, so the
-        // modifier is read back here rather than left latched at whatever it
-        // was when focus left.
-        if !window.is_window_active() && self.alt_held {
-            self.alt_held = false;
-        }
         if self.widths_dirty {
             let measured = measure_column_widths(&self.model, self.debug, &self.expanded, &self.closing, window);
             self.column_widths = measured.columns;
             self.detail_widths = measured.details;
+            self.detail_fit = measured.detail_fit;
             self.widths_dirty = false;
+            // A drag's width holds only while the detail it was set over shows.
+            let detail_fit = &self.detail_fit;
+            self.fit_waived.retain(|col| detail_fit[*col as usize].is_some());
+        }
+        if self.activation.is_none() {
+            self.activation = Some(cx.observe_window_activation(window, |this, window, cx| {
+                if !window.is_window_active() {
+                    this.abandon_drags(cx);
+                }
+            }));
         }
 
         let border = cx.theme().border;
         let hover_bg = cx.theme().muted;
 
-        let sticky_columns = self.frozen_columns();
-        let scroll_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().skip(STICKY_COLUMN_COUNT).collect();
+        let shown = self.drawn_columns();
+        // Alt turns the damage breakdowns' percentages around: how much of
+        // the other player's total a line was, rather than of this row's.
+        let alt_held = crate::status_bar::is_held(crate::status_bar::ModifierKey::Alt, window, cx);
+        let shares_shown = alt_held
+            && expanded::shows_damage_shares(
+                self.model
+                    .rows
+                    .iter()
+                    .filter(|row| self.expanded.contains(&row.db_id) || self.closing.contains_key(&row.db_id)),
+                shown.iter(),
+                self.debug,
+            );
+        crate::status_bar::set_mode(cx.weak_entity().into(), shares_shown.then_some(expanded::SHARE_MODE), cx);
         if !std::mem::replace(&mut self.widths_loaded, true) {
-            self.load_column_widths(cx);
+            self.load_column_settings(cx);
         }
 
         // Resolved once per frame so the header, the rows and the scrolling
         // section's total all read the same number.
-        self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
+        self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.fitted_width(*col)).collect();
         let sticky_cap = self.sticky_cap().map(f32::from);
         if let Some(cap) = sticky_cap {
-            fit_frozen_widths(&mut self.drawn_widths, &sticky_columns, px(cap));
+            fit_frozen_widths(&mut self.drawn_widths, &shown.pinned, px(cap));
         }
-        let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
-        // Where the scrolling portion starts, which is where its own bar
-        // belongs: the sticky columns to its left do not move.
-        let sticky_width: f32 = sticky_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
+        let scroll_width: f32 = shown.scrolling.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
+        let reserve = pinned_reserve(self.moving_column().is_some(), &shown.pinned);
+        let offsets = column_offsets(&shown, &self.drawn_widths, self.sticky_cap(), reserve);
+        self.pinned_edge = offsets.pinned_edge;
 
+        // Each column slides from where it was drawn to its new place, both
+        // as seen: scrolled, for the scrolling ones.
+        let progress =
+            self.slide.as_ref().and_then(|slide| crate::motion::rearrange_progress(slide.started, window, cx));
+        if progress.is_none() {
+            self.slide = None;
+        }
+        let scroll = self.h_scroll.offset().x;
+        for col in ReplayColumn::ALL {
+            let target = offsets.starts[col as usize]
+                .map(|start| if shown.pinned.contains(&col) { start } else { start + scroll });
+            let from = self.slide.as_ref().and_then(|slide| slide.from[col as usize]);
+            let shift = match (target, from, progress) {
+                (Some(target), Some(from), Some(progress)) => (from - target) * (1. - progress),
+                _ => px(0.),
+            };
+            self.column_shift[col as usize] = shift;
+            self.drawn_starts[col as usize] = target.map(|target| target + shift);
+        }
+
+        let ShownColumns { pinned: sticky_columns, scrolling: scroll_columns } = shown;
         let header = h_flex()
             .w_full()
             .flex_none()
@@ -1983,7 +2513,7 @@ impl Render for PlayerTable {
             .border_color(border)
             .child(
                 h_flex()
-                    .min_w(px(0.))
+                    .min_w(reserve)
                     .max_w(relative(STICKY_MAX_FRACTION))
                     .overflow_hidden()
                     .children(sticky_columns.iter().map(|col| self.header_cell(*col, cx))),
@@ -2010,7 +2540,7 @@ impl Render for PlayerTable {
             let (db_id, is_expanded, is_closing) = {
                 let table = entity.read(cx);
                 let db_id = table.model.rows[ix].db_id;
-                (db_id, table.expanded.contains(&db_id), table.closing.contains(&db_id))
+                (db_id, table.expanded.contains(&db_id), table.closing.contains_key(&db_id))
             };
             // Keyed by `db_id`: the row's own ids are list positions.
             let turn = crate::motion::disclosure_turn(
@@ -2059,37 +2589,49 @@ impl Render for PlayerTable {
                 detail,
                 turn,
                 selected,
-                alt_held: table.alt_held,
+                alt_held,
+                column_shift: &table.column_shift,
+                moving: table.moving_column(),
+                pinned_reserve: reserve,
                 all_rows: &table.model.rows,
             };
             render_row(ix, row, &layout, hover_bg, cx)
         };
 
+        let reorder_overlay = self.reorder_overlay(cx);
+
         div()
             .id("replay-table-root")
             .size_full()
             .relative()
-            // A width drag keeps following the pointer past the header's own
-            // bounds, which is where it goes the moment a column grows.
+            // A width drag or a column move keeps following the pointer past
+            // the header's own bounds, which is where it goes the moment a
+            // column grows or is carried off.
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                // The release went somewhere this table did not see.
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.abandon_drags(cx);
+                    return;
+                }
                 this.drag_column(event.position.x, cx);
+                this.follow_reorder(event.position.x, cx);
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.end_column_drag(cx);
+                    this.end_reorder(cx);
+                }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.end_column_drag(cx);
+                    this.end_reorder(cx);
+                }),
             )
-            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _window, cx| {
-                if this.alt_held == event.modifiers.alt {
-                    return;
-                }
-                this.alt_held = event.modifiers.alt;
-                cx.notify();
-            }))
             .child(v_flex().size_full().child(header).child(list(self.list_state.clone(), render_item).flex_1()))
+            .children(reorder_overlay)
             .child(Scrollbar::vertical(&self.list_state))
             // Along the bottom of the scrolling columns. Without it there is
             // nothing to say the table runs past its right edge, and a
@@ -2105,19 +2647,19 @@ impl Render for PlayerTable {
                     .h(px(12.))
                     // The same cap the frozen section is drawn at, so the bar
                     // starts where those columns end rather than over them.
-                    .child(div().w(px(sticky_cap.map_or(sticky_width, |cap| sticky_width.min(cap)))))
+                    .child(div().w(offsets.pinned_edge))
                     .child(div().flex_1().min_w(H_SCROLLBAR_MIN_WIDTH).child(Scrollbar::horizontal(&self.h_scroll))),
             )
-            // The table's own width, for the cap above. Painted over everything
-            // and hit-testing nothing.
+            // The table's own bounds, for the cap above and for placing a
+            // moved column. Painted over everything and hit-testing nothing.
             .child(
                 canvas(
                     {
                         let measure = cx.weak_entity();
                         move |bounds: Bounds<Pixels>, _window, cx| {
                             let _ = measure.update(cx, |this: &mut Self, cx| {
-                                if this.viewport_width != Some(bounds.size.width) {
-                                    this.viewport_width = Some(bounds.size.width);
+                                if this.viewport != Some(bounds) {
+                                    this.viewport = Some(bounds);
                                     cx.notify();
                                 }
                             });
@@ -2149,6 +2691,7 @@ mod tests {
     use super::super::sort::SortColumn;
     use super::super::test_support::base_row;
     use super::PlayerTable;
+    use wows_replays::types::AccountId;
     use wows_replays::types::Relation;
 
     fn two_row_model() -> ReplayReportModel {
@@ -2251,8 +2794,8 @@ mod tests {
         let panel = px(240.);
         let window = open_table_at(cx, panel);
         let table = window.entity(cx).expect("the window has a root view");
-        let columns = two_row_model().columns;
-        let scrolling = columns[super::STICKY_COLUMN_COUNT];
+        let shown = super::ColumnArrangement::new().shown(&two_row_model().columns);
+        let scrolling = shown.scrolling[0];
 
         cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
 
@@ -2260,7 +2803,7 @@ mod tests {
         // frozen columns happened to fit, and the clamp would go untested.
         let wanted: gpui_kit::Pixels = cx.update(|cx| {
             let table = table.read(cx);
-            columns.iter().take(super::STICKY_COLUMN_COUNT).map(|col| table.width_of(*col)).sum()
+            shown.pinned.iter().map(|col| table.width_of(*col)).sum()
         });
         assert!(
             wanted > panel * super::STICKY_MAX_FRACTION,
@@ -2572,5 +3115,519 @@ mod tests {
             cap - widths[ReplayColumn::ShipName as usize],
             "a drag of Name stops at what ShipName leaves"
         );
+    }
+
+    /// A table that draws every move at once, for asserting where things land.
+    fn open_still_table(cx: &mut TestAppContext, model: ReplayReportModel) -> gpui_kit::WindowHandle<PlayerTable> {
+        cx.update(gpui_kit::init);
+        cx.update(|cx| cx.set_reduce_motion(true));
+        cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(model, vfs, false, cx)
+        })
+    }
+
+    fn header_left(window: &gpui_kit::Window, col: ReplayColumn) -> gpui_kit::Pixels {
+        window.find(("replay-header", col as usize)).bounds().origin.x
+    }
+
+    /// Dragging a header across the others moves its column there, without
+    /// sorting by it, and the order it leaves is what is saved.
+    #[gpui_kit::test]
+    fn dragging_a_header_moves_its_column_and_the_order_is_kept(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+        let sort_before = cx.update(|cx| table.read(cx).sort);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(("replay-header", ReplayColumn::Kills as usize)).bounds().center();
+            let skills = window.find(("replay-header", ReplayColumn::Skills as usize)).bounds();
+            // Inside Skills's left half, so Kills lands before it.
+            let to = gpui_kit::point(skills.left() + px(2.), skills.center().y);
+            window.drag(from, to, cx);
+            window.render_frame(cx);
+            assert!(
+                header_left(window, ReplayColumn::Kills) < header_left(window, ReplayColumn::Skills),
+                "Kills is drawn before Skills"
+            );
+        })
+        .expect("the window is open");
+
+        let (scrolling, stored, arrangement) = cx.update(|cx| {
+            let table = table.read(cx);
+            (table.shown_columns().scrolling, table.stored_arrangement(), table.arrangement.clone())
+        });
+        assert_eq!(scrolling[..2], [ReplayColumn::Kills, ReplayColumn::Skills], "Kills landed where it was dropped");
+        assert_eq!(cx.update(|cx| table.read(cx).sort), sort_before, "moving a column is not a sort");
+        assert_eq!(
+            super::ColumnArrangement::from_stored(&stored),
+            arrangement,
+            "what is saved reads back as the order"
+        );
+    }
+
+    /// A table opened after a change draws it from its first frame, and the
+    /// settings read that lands after that frame does not undo a change made
+    /// before it landed.
+    #[gpui_kit::test]
+    fn a_change_outlives_a_late_settings_read(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+
+        cx.update(|cx| table.update(cx, |table, cx| table.set_pinned(ReplayColumn::Kills, true, cx)));
+        let stale = super::ColumnArrangement::new().to_stored();
+        cx.update(|cx| table.update(cx, |table, cx| table.adopt_stored_arrangement(Some(&stale), cx)));
+        assert!(
+            cx.update(|cx| table.read(cx).arrangement.is_pinned(ReplayColumn::Kills)),
+            "the read landing after the pin leaves it"
+        );
+
+        let reopened = open_still_table(cx, two_row_model());
+        let next = reopened.entity(cx).expect("the window has a root view");
+        cx.update_window(reopened.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let ship_end = window.find(("replay-header", ReplayColumn::ShipName as usize)).bounds().right();
+            assert_eq!(header_left(window, ReplayColumn::Kills), ship_end, "its first frame draws Kills pinned");
+        })
+        .expect("the window is open");
+        cx.update(|cx| next.update(cx, |table, cx| table.adopt_stored_arrangement(Some(&stale), cx)));
+        assert!(
+            cx.update(|cx| next.read(cx).arrangement.is_pinned(ReplayColumn::Kills)),
+            "and its own late read does not put back the older arrangement"
+        );
+    }
+
+    /// While a header is carried, it follows the pointer over a tinted zone
+    /// that ends where the pinned columns do, and its slot is marked.
+    #[gpui_kit::test]
+    fn a_carried_header_follows_the_pointer_over_the_pinned_zone(cx: &mut TestAppContext) {
+        use gpui_kit::InputEvent as _;
+
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(("replay-header", ReplayColumn::Kills as usize)).bounds().center();
+            let pinned_end = window.find(("replay-header", ReplayColumn::ShipName as usize)).bounds().right();
+            let press = gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: from,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            };
+            let move_to = |window: &mut gpui_kit::Window,
+                           to: gpui_kit::Point<gpui_kit::Pixels>,
+                           pressed_button: Option<gpui_kit::MouseButton>,
+                           cx: &mut gpui_kit::App| {
+                let event = gpui_kit::MouseMoveEvent {
+                    position: to,
+                    pressed_button,
+                    modifiers: gpui_kit::Modifiers::default(),
+                };
+                window.dispatch_event(event.to_platform_input(), cx);
+                window.render_frame(cx);
+            };
+            let carry = |window: &mut gpui_kit::Window, to, cx: &mut gpui_kit::App| {
+                move_to(window, to, Some(gpui_kit::MouseButton::Left), cx);
+            };
+            move_to(window, from, None, cx);
+            window.dispatch_event(press.to_platform_input(), cx);
+            window.render_frame(cx);
+
+            let to = gpui_kit::point(from.x - px(30.), from.y);
+            carry(window, to, cx);
+            let ghost = window.find("replay-column-ghost").bounds();
+            assert!((ghost.center().x - to.x).abs() < px(1.), "the header is carried with the pointer");
+            assert!(window.try_find("replay-column-slot").is_some(), "the slot it will land in is marked");
+            let zone = window.find("replay-pinned-zone").bounds();
+            assert_eq!(zone.right(), pinned_end, "the zone ends where the pinned columns do");
+
+            let into_zone = gpui_kit::point(
+                window.find(("replay-header", ReplayColumn::Name as usize)).bounds().left() + px(4.),
+                from.y,
+            );
+            carry(window, into_zone, cx);
+            assert!(
+                window.find("replay-pinned-zone").bounds().right() > pinned_end,
+                "carried into the zone, the column joins the pinned ones"
+            );
+
+            let release = gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: into_zone,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count: 1,
+            };
+            window.dispatch_event(release.to_platform_input(), cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-column-ghost").is_none(), "nothing is carried once let go");
+            assert!(window.try_find("replay-pinned-zone").is_none(), "and the zone is put away");
+        })
+        .expect("the window is open");
+
+        assert_eq!(
+            cx.update(|cx| table.read(cx).frozen_columns()),
+            vec![ReplayColumn::Kills, ReplayColumn::Name, ReplayColumn::ShipName],
+            "dropped at the start of the zone, Kills is pinned first"
+        );
+    }
+
+    /// A pinned column dragged out past the zone's edge is unpinned where it
+    /// was dropped.
+    #[gpui_kit::test]
+    fn dragging_a_pinned_column_out_unpins_it(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(("replay-header", ReplayColumn::ShipName as usize)).bounds().center();
+            let to = window.find(("replay-header", ReplayColumn::PersonalRating as usize)).bounds().center();
+            window.drag(from, to, cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let shown = cx.update(|cx| table.read(cx).shown_columns());
+        assert_eq!(shown.pinned, vec![ReplayColumn::Name], "ShipName left the pinned columns");
+        assert!(shown.scrolling.contains(&ReplayColumn::ShipName), "and scrolls with the rest");
+    }
+
+    /// A header's right-click menu pins its column after the pinned ones, and
+    /// on a pinned column unpins it beside them.
+    #[gpui_kit::test]
+    fn the_header_menu_pins_and_unpins_a_column(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+        let kills = ("replay-header", ReplayColumn::Kills as usize);
+
+        for (label, pinned) in [("ui.replay.context.pin_column", true), ("ui.replay.context.unpin_column", false)] {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.right_click(kills, cx);
+            })
+            .expect("the window is open");
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let label = rust_i18n::t!(label).into_owned();
+                let offered = crate::interaction_tests::menu_items(window);
+                let labels: Vec<Option<String>> =
+                    offered.iter().map(|(_, item)| item.label().map(str::to_owned)).collect();
+                let (row, _) = offered
+                    .into_iter()
+                    .find(|(_, item)| item.label() == Some(label.as_str()))
+                    .unwrap_or_else(|| panic!("the header menu offers {label}, offered {labels:?}"));
+                window.within("popup-menu").click(gpui_kit::ElementId::Integer(row), cx);
+            })
+            .expect("the window is open");
+            cx.run_until_parked();
+
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let ship_end = window.find(("replay-header", ReplayColumn::ShipName as usize)).bounds().right();
+                assert_eq!(header_left(window, ReplayColumn::Kills), ship_end, "Kills sits beside the pinned edge");
+            })
+            .expect("the window is open");
+            let frozen = cx.update(|cx| table.read(cx).frozen_columns());
+            assert_eq!(frozen.contains(&ReplayColumn::Kills), pinned, "after {label}, Kills pinned is {pinned}");
+        }
+    }
+
+    /// Two players on the reader's side, whose builds show, with captain
+    /// details of different widths in Skills: player 2's is the wider.
+    fn two_builds_model() -> ReplayReportModel {
+        let mut model = two_row_model();
+        for row in &mut model.rows {
+            row.relation = Relation::new(1);
+            let skills = if row.db_id == AccountId(1) {
+                "Superintendent, Adrenaline"
+            } else {
+                "Concealment Expert, Adrenaline Rush, Priority"
+            };
+            row.skill_hover_text = Some(skills.to_owned());
+        }
+        model
+    }
+
+    /// Opens or closes `player`'s row by its caret.
+    fn toggle_player(cx: &mut TestAppContext, window: gpui_kit::WindowHandle<PlayerTable>, player: i64) {
+        let table = window.entity(cx).expect("the window has a root view");
+        let ix = cx
+            .update(|cx| table.read(cx).model.rows.iter().position(|row| row.db_id == AccountId(player)))
+            .expect("the player has a row");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click(("replay-row-caret", ix), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+    }
+
+    /// Draws a frame `after` from now.
+    fn draw_after(cx: &mut TestAppContext, window: gpui_kit::WindowHandle<PlayerTable>, after: std::time::Duration) {
+        cx.executor().advance_clock(after);
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+    }
+
+    /// Lets every opening and closing finish.
+    fn settle(cx: &mut TestAppContext, window: gpui_kit::WindowHandle<PlayerTable>) {
+        draw_after(cx, window, std::time::Duration::from_secs(1));
+    }
+
+    /// The Skills column as drawn, and what each shown player's detail needs.
+    fn skills_widths(cx: &mut TestAppContext, table: &gpui_kit::Entity<PlayerTable>) -> SkillsWidths {
+        cx.update(|cx| {
+            let table = table.read(cx);
+            let needs = |player| table.detail_widths.get(&(AccountId(player), ReplayColumn::Skills)).copied();
+            SkillsWidths {
+                drawn: table.drawn_widths[ReplayColumn::Skills as usize],
+                narrow: needs(1),
+                wide: needs(2),
+                set: table.width_overrides[ReplayColumn::Skills as usize],
+            }
+        })
+    }
+
+    struct SkillsWidths {
+        drawn: gpui_kit::Pixels,
+        narrow: Option<gpui_kit::Pixels>,
+        wide: Option<gpui_kit::Pixels>,
+        set: Option<gpui_kit::Pixels>,
+    }
+
+    /// A column the reader set narrow fits the widest detail shown in it:
+    /// closing the widest of two open rows narrows it to the other's, and
+    /// closing that one returns it to the width they set, which none of this
+    /// changes.
+    #[gpui_kit::test]
+    fn a_narrowed_column_fits_the_widest_open_detail_until_all_close(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_builds_model());
+        let table = window.entity(cx).expect("the window has a root view");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let grip = window.find(("replay-header-grip", ReplayColumn::Skills as usize)).bounds().center();
+            window.drag(grip, gpui_kit::point(grip.x - px(60.), grip.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        let set = skills_widths(cx, &table).set.expect("the drag set a width");
+
+        toggle_player(cx, window, 1);
+        toggle_player(cx, window, 2);
+        let both = skills_widths(cx, &table);
+        let narrow = both.narrow.expect("player 1's build shows");
+        let wide = both.wide.expect("player 2's build shows");
+        assert!(set < narrow && narrow < wide, "the fixture needs {set:?} < {narrow:?} < {wide:?} to test this");
+        assert!(both.drawn >= wide, "both open, the column fits the wider: drawn {:?}", both.drawn);
+
+        toggle_player(cx, window, 2);
+        settle(cx, window);
+        let one = skills_widths(cx, &table);
+        assert!(
+            narrow <= one.drawn && one.drawn < wide,
+            "with the wider closed, the column fits the one still open: drawn {:?}",
+            one.drawn
+        );
+
+        toggle_player(cx, window, 1);
+        settle(cx, window);
+        let none = skills_widths(cx, &table);
+        assert_eq!(none.drawn, set, "with both closed, the column returns to the reader's width");
+        assert_eq!(none.set, Some(set), "which was never changed");
+    }
+
+    /// A row opened while another is still opening or closing: the column
+    /// fits whichever detail shown is widest, a closing one included, and
+    /// returns to its content's width once the last has closed.
+    #[gpui_kit::test]
+    fn a_column_fits_details_that_open_and_close_over_each_other(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(two_builds_model(), vfs, false, cx)
+        });
+        let table = window.entity(cx).expect("the window has a root view");
+        let midway = std::time::Duration::from_millis(80);
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        let default = skills_widths(cx, &table).drawn;
+
+        toggle_player(cx, window, 2);
+        draw_after(cx, window, midway);
+        toggle_player(cx, window, 1);
+        let opening = skills_widths(cx, &table);
+        let wide = opening.wide.expect("player 2's build shows");
+        assert!(opening.drawn >= wide, "opened while the wider opens, the column fits the wider");
+        settle(cx, window);
+        let narrow = skills_widths(cx, &table).narrow.expect("player 1's build shows");
+        assert!(default < narrow && narrow < wide, "the fixture needs {default:?} < {narrow:?} < {wide:?}");
+
+        toggle_player(cx, window, 2);
+        draw_after(cx, window, midway);
+        assert!(skills_widths(cx, &table).drawn >= wide, "a closing detail keeps its width until it has closed");
+        settle(cx, window);
+        let one = skills_widths(cx, &table).drawn;
+        assert!(narrow <= one && one < wide, "then the column fits the one still open: drawn {one:?}");
+
+        toggle_player(cx, window, 1);
+        draw_after(cx, window, midway);
+        toggle_player(cx, window, 2);
+        assert!(skills_widths(cx, &table).drawn >= wide, "opened while the other closes, the column fits it");
+        settle(cx, window);
+        assert!(skills_widths(cx, &table).drawn >= wide, "and still does once the other has closed");
+
+        toggle_player(cx, window, 2);
+        settle(cx, window);
+        assert_eq!(skills_widths(cx, &table).drawn, default, "with none open, the column fits its content again");
+    }
+
+    /// A grip dragged while a detail widens its column moves from the width
+    /// drawn, shows the width dragged to rather than the detail's, and that
+    /// width is the reader's once the detail has closed.
+    #[gpui_kit::test]
+    fn a_drag_over_a_widened_column_sets_what_it_shows(cx: &mut TestAppContext) {
+        let window = open_still_table(cx, two_builds_model());
+        let table = window.entity(cx).expect("the window has a root view");
+        let grip = ("replay-header-grip", ReplayColumn::Skills as usize);
+        let drag_by = |cx: &mut TestAppContext, by: gpui_kit::Pixels| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                let from = window.find(grip).bounds().center();
+                window.drag(from, gpui_kit::point(from.x + by, from.y), cx);
+                window.render_frame(cx);
+            })
+            .expect("the window is open");
+        };
+
+        drag_by(cx, px(-60.));
+        toggle_player(cx, window, 2);
+        let widened = skills_widths(cx, &table).drawn;
+
+        drag_by(cx, px(-30.));
+        let dragged = skills_widths(cx, &table);
+        assert_eq!(dragged.set, Some(widened - px(30.)), "the drag moved from the width drawn");
+        assert_eq!(dragged.drawn, widened - px(30.), "and the column shows it with the detail still open");
+
+        toggle_player(cx, window, 2);
+        settle(cx, window);
+        let closed = skills_widths(cx, &table);
+        assert_eq!(closed.drawn, widened - px(30.), "closed, the column keeps the dragged width");
+        assert_eq!(closed.set, Some(widened - px(30.)), "as the reader's own");
+    }
+
+    /// The last shown scrolling column cannot be pinned: neither the menu's
+    /// pin nor dropping it in the zone pins it.
+    #[gpui_kit::test]
+    fn the_last_scrolling_column_cannot_be_pinned(cx: &mut TestAppContext) {
+        let mut model = two_row_model();
+        model.columns = vec![ReplayColumn::Name, ReplayColumn::ShipName, ReplayColumn::Kills];
+        let window = open_still_table(cx, model);
+        let table = window.entity(cx).expect("the window has a root view");
+        let kills = ("replay-header", ReplayColumn::Kills as usize);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.right_click(kills, cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let label = rust_i18n::t!("ui.replay.context.pin_column").into_owned();
+            // The kit's menu items do not report their disabled state to
+            // the snapshot, so what is checked is that choosing it pins
+            // nothing.
+            let (row, _) = crate::interaction_tests::menu_items(window)
+                .into_iter()
+                .find(|(_, item)| item.label() == Some(label.as_str()))
+                .expect("the header menu names the pin");
+            window.within("popup-menu").click(gpui_kit::ElementId::Integer(row), cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| table.read(cx).arrangement.is_pinned(ReplayColumn::Kills)), "the menu did not pin it");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(kills).bounds().center();
+            let name = window.find(("replay-header", ReplayColumn::Name as usize)).bounds();
+            window.drag(from, gpui_kit::point(name.left() + px(4.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert_eq!(
+            cx.update(|cx| table.read(cx).shown_columns().scrolling),
+            vec![ReplayColumn::Kills],
+            "nor did dropping it in the zone"
+        );
+    }
+
+    /// A pointer that comes back with the button up ends a drag whose release
+    /// went elsewhere: a column move is undone, and a width drag stops
+    /// following the pointer.
+    #[gpui_kit::test]
+    fn a_drag_whose_release_was_missed_lets_go(cx: &mut TestAppContext) {
+        use gpui_kit::InputEvent as _;
+
+        let window = open_still_table(cx, two_row_model());
+        let table = window.entity(cx).expect("the window has a root view");
+        let before = cx.update(|cx| table.read(cx).shown_columns());
+        let move_to = |window: &mut gpui_kit::Window,
+                       to: gpui_kit::Point<gpui_kit::Pixels>,
+                       pressed_button: Option<gpui_kit::MouseButton>,
+                       cx: &mut gpui_kit::App| {
+            let event =
+                gpui_kit::MouseMoveEvent { position: to, pressed_button, modifiers: gpui_kit::Modifiers::default() };
+            window.dispatch_event(event.to_platform_input(), cx);
+            window.render_frame(cx);
+        };
+        let press = |window: &mut gpui_kit::Window, at: gpui_kit::Point<gpui_kit::Pixels>, cx: &mut gpui_kit::App| {
+            move_to(window, at, None, cx);
+            let event = gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: at,
+                modifiers: gpui_kit::Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            };
+            window.dispatch_event(event.to_platform_input(), cx);
+            window.render_frame(cx);
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(("replay-header", ReplayColumn::Kills as usize)).bounds().center();
+            let to = window.find(("replay-header", ReplayColumn::Skills as usize)).bounds().left() + px(2.);
+            press(window, from, cx);
+            move_to(window, gpui_kit::point(to, from.y), Some(gpui_kit::MouseButton::Left), cx);
+            assert!(window.try_find("replay-column-ghost").is_some(), "the column is being carried");
+            move_to(window, gpui_kit::point(to, from.y), None, cx);
+            assert!(window.try_find("replay-column-ghost").is_none(), "with the button up, it is let go");
+        })
+        .expect("the window is open");
+        assert_eq!(cx.update(|cx| table.read(cx).shown_columns()), before, "and the move is undone");
+
+        let ship = ReplayColumn::ShipName as usize;
+        let drawn_before = cx.update(|cx| table.read(cx).drawn_widths[ship]);
+        cx.update_window(window.into(), |_, window, cx| {
+            let grip = window.find(("replay-header-grip", ship)).bounds().center();
+            press(window, grip, cx);
+            move_to(window, gpui_kit::point(grip.x - px(20.), grip.y), Some(gpui_kit::MouseButton::Left), cx);
+            move_to(window, gpui_kit::point(grip.x - px(20.), grip.y), None, cx);
+            move_to(window, gpui_kit::point(grip.x - px(60.), grip.y), Some(gpui_kit::MouseButton::Left), cx);
+        })
+        .expect("the window is open");
+        let (resizing, set) = cx.update(|cx| {
+            let table = table.read(cx);
+            (table.resizing.is_some(), table.width_overrides[ship])
+        });
+        assert!(!resizing, "the width drag ended with the button up");
+        assert_eq!(set, Some(drawn_before - px(20.)), "and kept the width it had shown, not what followed");
     }
 }

@@ -6,6 +6,7 @@
 
 use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
+use std::time::Instant;
 
 use gpui_kit::Animation;
 use gpui_kit::AnimationExt as _;
@@ -50,6 +51,9 @@ const SLIDE: Duration = Duration::from_millis(170);
 
 /// How long a surface takes to fade in.
 const FADE: Duration = Duration::from_millis(220);
+
+/// How long an item moved within a row of items takes to reach its new place.
+const REARRANGE: Duration = Duration::from_millis(200);
 
 /// The standard ease-in-out: a gentle start and end around a steady middle,
 /// so most of the travel is visible.
@@ -109,6 +113,32 @@ pub fn slide_frame(width: Pixels, progress: f32, edge: Edge, content: AnyElement
 /// Whether a slide or reveal has come to rest.
 pub fn settled(motion: MotionValue<f32>) -> bool {
     matches!(motion.status, MotionStatus::Idle | MotionStatus::Finished)
+}
+
+/// How far items moving to new places within a row of items have gone,
+/// from 0 where they were to 1 at their new places, for a move begun at
+/// `started`. `None` once the move is over, or at once under reduced motion.
+///
+/// The caller keeps where each item started, so a move can begin from
+/// wherever an earlier one had got to.
+pub fn rearrange_progress(started: Instant, window: &mut Window, cx: &App) -> Option<f32> {
+    if cx.reduce_motion() {
+        return None;
+    }
+
+    let elapsed = cx.background_executor().now().saturating_duration_since(started);
+    if elapsed >= REARRANGE {
+        return None;
+    }
+    window.request_animation_frame();
+
+    Some(standard().sample(elapsed.as_secs_f32() / REARRANGE.as_secs_f32()))
+}
+
+/// How long a block of content takes to open or close, for work that has
+/// to wait until it has.
+pub fn reveal_duration() -> Duration {
+    REVEAL
 }
 
 /// A caret that points right at `turn` 0 and down at 1.
