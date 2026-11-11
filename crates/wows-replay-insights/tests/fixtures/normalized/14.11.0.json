@@ -494,7 +494,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_tbomb": 27638
+              "damage_tbomb_avia": 27638
             },
             "damage_received_inverse_percentage": 16.122502552136503,
             "damage_received_percentage": 19.871730346126746,
@@ -685,7 +685,7 @@
         "received_damage_by_type": {
           "damage_main_ap": 109662,
           "damage_main_he": 1782,
-          "damage_tbomb": 27638
+          "damage_tbomb_avia": 27638
         },
         "received_damage_details": {
           "ap": 109662,
@@ -1852,7 +1852,7 @@
             },
             "damage_received_by_type_full": {
               "damage_fire": 513,
-              "damage_rocket": 13656
+              "damage_rocket_avia": 13656
             },
             "damage_received_inverse_percentage": 8.265422196295756,
             "damage_received_percentage": 10.268805125343345,
@@ -1979,7 +1979,7 @@
           "damage_fire": 25564,
           "damage_main_ap": 48302,
           "damage_main_he": 50459,
-          "damage_rocket": 13656
+          "damage_rocket_avia": 13656
         },
         "received_damage_details": {
           "ap": 48302,
@@ -4180,7 +4180,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_bomb": 5676
+              "damage_bomb_avia": 5676
             },
             "damage_received_inverse_percentage": 24.175824175824175,
             "damage_received_percentage": 13.183444047010731,
@@ -4260,10 +4260,10 @@
         "raw_xp": 985,
         "received_damage": 43054,
         "received_damage_by_type": {
-          "damage_bomb": 5676,
           "damage_fire": 448,
           "damage_main_ap": 26713,
-          "damage_main_he": 10217
+          "damage_main_he": 10217,
+          "damage_bomb_avia": 5676
         },
         "received_damage_details": {
           "ap": 26713,
@@ -4765,8 +4765,8 @@
             },
             "damage_received_by_type_full": {
               "damage_flood": 5432,
-              "damage_rocket": 7158,
-              "damage_tbomb": 14769
+              "damage_rocket_avia": 7158,
+              "damage_tbomb_avia": 14769
             },
             "damage_received_inverse_percentage": 15.959749161440865,
             "damage_received_percentage": 37.557312687038404,
@@ -4881,8 +4881,8 @@
           "damage_flood": 5432,
           "damage_main_ap": 38933,
           "damage_main_he": 6171,
-          "damage_rocket": 7158,
-          "damage_tbomb": 14769
+          "damage_rocket_avia": 7158,
+          "damage_tbomb_avia": 14769
         },
         "received_damage_details": {
           "ap": 38933,
@@ -5444,8 +5444,8 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_bomb": 13600,
-              "damage_tbomb": 10759
+              "damage_bomb_avia": 13600,
+              "damage_tbomb_avia": 10759
             },
             "damage_received_inverse_percentage": 14.209712702347964,
             "damage_received_percentage": 24.471815067460994,
@@ -5676,11 +5676,11 @@
         "raw_xp": 1511,
         "received_damage": 99539,
         "received_damage_by_type": {
-          "damage_bomb": 13600,
           "damage_fire": 457,
           "damage_main_ap": 64301,
           "damage_main_he": 10422,
-          "damage_tbomb": 10759
+          "damage_bomb_avia": 13600,
+          "damage_tbomb_avia": 10759
         },
         "received_damage_details": {
           "ap": 64301,
@@ -6255,7 +6255,7 @@
             },
             "damage_received_by_type_full": {
               "damage_flood": 397,
-              "damage_tbomb": 5821
+              "damage_tbomb_avia": 5821
             },
             "damage_received_inverse_percentage": 26.48436834483346,
             "damage_received_percentage": 6.704910608380599,
@@ -6299,8 +6299,8 @@
           "damage_fire": 21438,
           "damage_flood": 794,
           "damage_main_he": 28412,
-          "damage_tbomb": 5821,
-          "damage_tpd_normal": 10035
+          "damage_tpd_normal": 10035,
+          "damage_tbomb_avia": 5821
         },
         "received_damage_details": {
           "ap": null,
@@ -6940,7 +6940,7 @@
             },
             "damage_received_by_type_full": {
               "damage_flood": 112,
-              "damage_tbomb": 4611
+              "damage_tbomb_avia": 4611
             },
             "damage_received_inverse_percentage": 20.11670500042593,
             "damage_received_percentage": 10.59562535053281,
@@ -6985,7 +6985,7 @@
           "damage_flood": 112,
           "damage_main_ap": 1170,
           "damage_main_he": 2343,
-          "damage_tbomb": 4611
+          "damage_tbomb_avia": 4611
         },
         "received_damage_details": {
           "ap": 1170,
@@ -7622,9 +7622,8 @@
           "torpedoes": 49599
         },
         "raw_xp": 1147,
-        "received_damage": 31513,
+        "received_damage": 21100,
         "received_damage_by_type": {
-          "damage_adbomb": 10413,
           "damage_atba_he": 505,
           "damage_dbomb_airsupport": 10413,
           "damage_fire": 423,
@@ -8294,9 +8293,8 @@
           "torpedoes": 36932
         },
         "raw_xp": 1264,
-        "received_damage": 22385,
+        "received_damage": 19200,
         "received_damage_by_type": {
-          "damage_adbomb": 3185,
           "damage_atba_he": 2112,
           "damage_dbomb_airsupport": 3185,
           "damage_flood": 887,
@@ -8826,7 +8824,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_tbomb": 8458
+              "damage_tbomb_avia": 8458
             },
             "damage_received_inverse_percentage": 4.933936123669243,
             "damage_received_percentage": 44.98936170212766,
@@ -8984,7 +8982,7 @@
           "damage_atba_he": 891,
           "damage_main_ap": 4338,
           "damage_main_he": 5113,
-          "damage_tbomb": 8458
+          "damage_tbomb_avia": 8458
         },
         "received_damage_details": {
           "ap": 4338,
@@ -9373,12 +9371,12 @@
         "damage": 171425,
         "damage_by_type": {
           "damage_atba_he": 561,
-          "damage_bomb": 34000,
           "damage_dbomb_airsupport": 3185,
           "damage_fire": 513,
           "damage_flood": 6256,
-          "damage_rocket": 21854,
-          "damage_tbomb": 105056
+          "damage_bomb_avia": 34000,
+          "damage_rocket_avia": 21854,
+          "damage_tbomb_avia": 105056
         },
         "damage_details": {
           "ap": null,
@@ -9406,7 +9404,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_tbomb": 27638
+              "damage_tbomb_avia": 27638
             },
             "damage_dealt_inverse_percentage": 19.871730346126746,
             "damage_dealt_percentage": 16.122502552136503,
@@ -9443,7 +9441,7 @@
             },
             "damage_dealt_by_type_full": {
               "damage_fire": 513,
-              "damage_rocket": 13656
+              "damage_rocket_avia": 13656
             },
             "damage_dealt_inverse_percentage": 10.268805125343345,
             "damage_dealt_percentage": 8.265422196295756,
@@ -9480,8 +9478,8 @@
             },
             "damage_dealt_by_type_full": {
               "damage_flood": 5432,
-              "damage_rocket": 7158,
-              "damage_tbomb": 14769
+              "damage_rocket_avia": 7158,
+              "damage_tbomb_avia": 14769
             },
             "damage_dealt_inverse_percentage": 37.557312687038404,
             "damage_dealt_percentage": 15.959749161440865,
@@ -9517,8 +9515,8 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_bomb": 13600,
-              "damage_tbomb": 10759
+              "damage_bomb_avia": 13600,
+              "damage_tbomb_avia": 10759
             },
             "damage_dealt_inverse_percentage": 24.471815067460994,
             "damage_dealt_percentage": 14.209712702347964,
@@ -9592,7 +9590,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_tbomb": 8458
+              "damage_tbomb_avia": 8458
             },
             "damage_dealt_inverse_percentage": 44.98936170212766,
             "damage_dealt_percentage": 4.933936123669243,
@@ -9628,7 +9626,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_rocket": 1040
+              "damage_rocket_avia": 1040
             },
             "damage_dealt_inverse_percentage": 2.601951463597698,
             "damage_dealt_percentage": 0.6066793058188713,
@@ -9664,7 +9662,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_tbomb": 15900
+              "damage_tbomb_avia": 15900
             },
             "damage_dealt_inverse_percentage": 15.63898533476281,
             "damage_dealt_percentage": 9.275193233192358,
@@ -9715,7 +9713,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_bomb": 1419
+              "damage_bomb_avia": 1419
             },
             "damage_received_inverse_percentage": 6.043956043956044,
             "damage_received_percentage": 100.0,
@@ -9736,8 +9734,8 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_bomb": 20400,
-              "damage_tbomb": 27532
+              "damage_bomb_avia": 20400,
+              "damage_tbomb_avia": 27532
             },
             "damage_dealt_inverse_percentage": 26.781543687909977,
             "damage_dealt_percentage": 27.960915852413592,
@@ -9766,10 +9764,10 @@
         "hits": 41,
         "hits_by_type": {
           "hits_atba_he": 2,
-          "hits_bomb": 5,
           "hits_dbomb_airsupport": 1,
-          "hits_rocket": 41,
-          "hits_tbomb": 16
+          "hits_bomb_avia": 5,
+          "hits_rocket_avia": 41,
+          "hits_tbomb_avia": 16
         },
         "hits_details": {
           "ap": null,
@@ -9796,7 +9794,7 @@
         "raw_xp": 1763,
         "received_damage": 1419,
         "received_damage_by_type": {
-          "damage_bomb": 1419
+          "damage_bomb_avia": 1419
         },
         "received_damage_details": {
           "ap": null,
@@ -10375,7 +10373,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_rocket": 1040
+              "damage_rocket_avia": 1040
             },
             "damage_received_inverse_percentage": 0.6066793058188713,
             "damage_received_percentage": 2.601951463597698,
@@ -10536,7 +10534,7 @@
         "received_damage_by_type": {
           "damage_main_ap": 16593,
           "damage_main_he": 22337,
-          "damage_rocket": 1040
+          "damage_rocket_avia": 1040
         },
         "received_damage_details": {
           "ap": 16593,
@@ -11223,7 +11221,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_tbomb": 5442
+              "damage_tbomb_avia": 5442
             },
             "damage_received_inverse_percentage": 23.179146434960387,
             "damage_received_percentage": 3.838665989503978,
@@ -11307,7 +11305,7 @@
           "damage_fire": 52226,
           "damage_main_ap": 14115,
           "damage_main_he": 43394,
-          "damage_tbomb": 5442
+          "damage_tbomb_avia": 5442
         },
         "received_damage_details": {
           "ap": 14115,
@@ -12432,7 +12430,7 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_tbomb": 15900
+              "damage_tbomb_avia": 15900
             },
             "damage_received_inverse_percentage": 9.275193233192358,
             "damage_received_percentage": 15.63898533476281,
@@ -12586,7 +12584,7 @@
           "damage_fire": 22373,
           "damage_main_ap": 56004,
           "damage_main_he": 7392,
-          "damage_tbomb": 15900
+          "damage_tbomb_avia": 15900
         },
         "received_damage_details": {
           "ap": 56004,
@@ -14292,9 +14290,9 @@
         "crits_dealt": 0,
         "damage": 23478,
         "damage_by_type": {
-          "damage_bomb": 7095,
           "damage_flood": 509,
-          "damage_tbomb": 15874
+          "damage_bomb_avia": 7095,
+          "damage_tbomb_avia": 15874
         },
         "damage_details": {
           "ap": null,
@@ -14356,7 +14354,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_bomb": 5676
+              "damage_bomb_avia": 5676
             },
             "damage_dealt_inverse_percentage": 13.183444047010731,
             "damage_dealt_percentage": 24.175824175824175,
@@ -14395,7 +14393,7 @@
             },
             "damage_dealt_by_type_full": {
               "damage_flood": 397,
-              "damage_tbomb": 5821
+              "damage_tbomb_avia": 5821
             },
             "damage_dealt_inverse_percentage": 6.704910608380599,
             "damage_dealt_percentage": 26.48436834483346,
@@ -14432,7 +14430,7 @@
             },
             "damage_dealt_by_type_full": {
               "damage_flood": 112,
-              "damage_tbomb": 4611
+              "damage_tbomb_avia": 4611
             },
             "damage_dealt_inverse_percentage": 10.59562535053281,
             "damage_dealt_percentage": 20.11670500042593,
@@ -14468,7 +14466,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_bomb": 1419
+              "damage_bomb_avia": 1419
             },
             "damage_dealt_inverse_percentage": 100.0,
             "damage_dealt_percentage": 6.043956043956044,
@@ -14504,7 +14502,7 @@
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_tbomb": 5442
+              "damage_tbomb_avia": 5442
             },
             "damage_dealt_inverse_percentage": 3.838665989503978,
             "damage_dealt_percentage": 23.179146434960387,
@@ -14568,8 +14566,8 @@
         "floods_dealt": 2,
         "hits": 0,
         "hits_by_type": {
-          "hits_bomb": 11,
-          "hits_tbomb": 4
+          "hits_bomb_avia": 11,
+          "hits_tbomb_avia": 4
         },
         "hits_details": {
           "ap": null,
@@ -16575,8 +16573,8 @@
               "torps": null
             },
             "damage_received_by_type_full": {
-              "damage_bomb": 20400,
-              "damage_tbomb": 27532
+              "damage_bomb_avia": 20400,
+              "damage_tbomb_avia": 27532
             },
             "damage_received_inverse_percentage": 27.960915852413592,
             "damage_received_percentage": 26.781543687909977,
@@ -16697,11 +16695,11 @@
         "raw_xp": 858,
         "received_damage": 178974,
         "received_damage_by_type": {
-          "damage_bomb": 20400,
           "damage_fire": 14885,
           "damage_main_ap": 75053,
           "damage_main_he": 41104,
-          "damage_tbomb": 27532
+          "damage_bomb_avia": 20400,
+          "damage_tbomb_avia": 27532
         },
         "received_damage_details": {
           "ap": 75053,

@@ -491,9 +491,10 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
     let main_hits = hits_by_type.get(HITS_MAIN_HE).copied().unwrap_or(0)
         + hits_by_type.get(HITS_MAIN_CS).copied().unwrap_or(0)
         + hits_by_type.get(HITS_MAIN_AP).copied().unwrap_or(0);
-    let plane_hits = hits_by_type.get(HITS_ROCKET).copied().unwrap_or(0)
+    let plane_hits = hits_by_type.get(HITS_ROCKET_AVIA).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_ROCKET_ALT).copied().unwrap_or(0)
         + hits_by_type.get(HITS_ROCKET_AIRSUPPORT).copied().unwrap_or(0)
-        + hits_by_type.get(HITS_SKIP).copied().unwrap_or(0)
+        + hits_by_type.get(HITS_SKIP_AVIA).copied().unwrap_or(0)
         + hits_by_type.get(HITS_SKIP_ALT).copied().unwrap_or(0)
         + hits_by_type.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
     let hits = Some(if is_air_carrier { plane_hits } else { main_hits });
@@ -1114,16 +1115,19 @@ mod tests {
     #[test]
     fn extract_server_results_carrier_relevant_hits_count_air_strikes() {
         // Carriers report relevant hits as rocket/skip strikes, not main battery.
+        // `hits_rocket` and `hits_skip` are the server's sums of the parts.
         let pr = json!({
             "damage": 40000u64,
             "hits_main_he": 3u64,
             "hits_rocket": 7u64,
-            "hits_skip": 2u64,
+            "hits_rocket_avia": 7u64,
+            "hits_skip": 3u64,
+            "hits_skip_avia": 2u64,
             "hits_skip_airsupport": 1u64,
         });
 
         let carrier = extract_server_results(&pr, true);
-        assert_eq!(carrier.hits, Some(10), "rocket + skip + skip_airsupport");
+        assert_eq!(carrier.hits, Some(10), "rocket_avia + skip_avia + skip_airsupport");
         // No `interactions` key on this fixture: all four dealt fields stay None.
         assert_eq!(carrier.fires_dealt, None);
         assert_eq!(carrier.floods_dealt, None);

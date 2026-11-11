@@ -26,11 +26,11 @@ pub const DAMAGE_TPD_NORMAL: &str = "damage_tpd_normal";
 pub const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
 pub const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
 pub const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
-pub const DAMAGE_BOMB: &str = "damage_bomb";
+pub const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
 pub const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
+pub const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
 pub const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
-pub const DAMAGE_ADBOMB: &str = "damage_adbomb";
-pub const DAMAGE_TBOMB: &str = "damage_tbomb";
+pub const DAMAGE_TBOMB_AVIA: &str = "damage_tbomb_avia";
 pub const DAMAGE_TBOMB_ALT: &str = "damage_tbomb_alt";
 pub const DAMAGE_TBOMB_AIRSUPPORT: &str = "damage_tbomb_airsupport";
 pub const DAMAGE_FIRE: &str = "damage_fire";
@@ -40,16 +40,29 @@ pub const DAMAGE_DBOMB: &str = "damage_dbomb";
 pub const DAMAGE_DBOMB_DIRECT: &str = "damage_dbomb_direct";
 pub const DAMAGE_DBOMB_SPLASH: &str = "damage_dbomb_splash";
 pub const DAMAGE_SEA_MINE: &str = "damage_sea_mine";
-pub const DAMAGE_ROCKET: &str = "damage_rocket";
+pub const DAMAGE_ROCKET_AVIA: &str = "damage_rocket_avia";
+pub const DAMAGE_ROCKET_ALT: &str = "damage_rocket_alt";
 pub const DAMAGE_ROCKET_AIRSUPPORT: &str = "damage_rocket_airsupport";
-pub const DAMAGE_SKIP: &str = "damage_skip";
+pub const DAMAGE_SKIP_AVIA: &str = "damage_skip_avia";
 pub const DAMAGE_SKIP_ALT: &str = "damage_skip_alt";
 pub const DAMAGE_SKIP_AIRSUPPORT: &str = "damage_skip_airsupport";
+pub const DAMAGE_MISSILE: &str = "damage_missile";
 pub const DAMAGE_WAVE: &str = "damage_wave";
 pub const DAMAGE_CHARGE_LASER: &str = "damage_charge_laser";
 pub const DAMAGE_PULSE_LASER: &str = "damage_pulse_laser";
 pub const DAMAGE_AXIS_LASER: &str = "damage_axis_laser";
 pub const DAMAGE_PHASER_LASER: &str = "damage_phaser_laser";
+pub const DAMAGE_PHASER_LASER_SPLASH: &str = "damage_phaser_laser_splash";
+
+// Server sums of the keys above, left out of the description tables:
+// `damage_bomb`, `damage_tbomb`, `damage_rocket` and `damage_skip` are the sums
+// of their `_avia`, `_alt` and `_airsupport` keys, and `damage_adbomb` equals
+// `damage_dbomb_airsupport`.
+pub const DAMAGE_BOMB: &str = "damage_bomb";
+pub const DAMAGE_TBOMB: &str = "damage_tbomb";
+pub const DAMAGE_ROCKET: &str = "damage_rocket";
+pub const DAMAGE_SKIP: &str = "damage_skip";
+pub const DAMAGE_ADBOMB: &str = "damage_adbomb";
 
 pub const HITS_MAIN_AP: &str = "hits_main_ap";
 pub const HITS_MAIN_CS: &str = "hits_main_cs";
@@ -61,29 +74,43 @@ pub const HITS_ATBA_AP_MANUAL: &str = "hits_atba_ap_manual";
 pub const HITS_ATBA_CS_MANUAL: &str = "hits_atba_cs_manual";
 pub const HITS_ATBA_HE_MANUAL: &str = "hits_atba_he_manual";
 pub const HITS_TPD_NORMAL: &str = "hits_tpd";
-pub const HITS_BOMB: &str = "hits_bomb";
+pub const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
 pub const HITS_BOMB_ALT: &str = "hits_bomb_alt";
 pub const HITS_BOMB_AIRSUPPORT: &str = "hits_bomb_airsupport";
 pub const HITS_DBOMB_AIRSUPPORT: &str = "hits_dbomb_airsupport";
-pub const HITS_TBOMB: &str = "hits_tbomb";
+pub const HITS_TBOMB_AVIA: &str = "hits_tbomb_avia";
 pub const HITS_TBOMB_ALT: &str = "hits_tbomb_alt";
 pub const HITS_TBOMB_AIRSUPPORT: &str = "hits_tbomb_airsupport";
 pub const HITS_RAM: &str = "hits_ram";
 pub const HITS_DBOMB_DIRECT: &str = "hits_dbomb_direct";
 pub const HITS_DBOMB_SPLASH: &str = "hits_dbomb_splash";
 pub const HITS_SEA_MINE: &str = "hits_sea_mine";
-pub const HITS_ROCKET: &str = "hits_rocket";
+pub const HITS_ROCKET_AVIA: &str = "hits_rocket_avia";
+pub const HITS_ROCKET_ALT: &str = "hits_rocket_alt";
 pub const HITS_ROCKET_AIRSUPPORT: &str = "hits_rocket_airsupport";
-pub const HITS_SKIP: &str = "hits_skip";
+pub const HITS_SKIP_AVIA: &str = "hits_skip_avia";
 pub const HITS_SKIP_ALT: &str = "hits_skip_alt";
 pub const HITS_SKIP_AIRSUPPORT: &str = "hits_skip_airsupport";
+pub const HITS_MISSILE: &str = "hits_missile";
 pub const HITS_WAVE: &str = "hits_wave";
 pub const HITS_CHARGE_LASER: &str = "hits_charge_laser";
 pub const HITS_PULSE_LASER: &str = "hits_pulse_laser";
 pub const HITS_AXIS_LASER: &str = "hits_axis_laser";
 pub const HITS_PHASER_LASER: &str = "hits_phaser_laser";
+pub const HITS_PHASER_LASER_SPLASH: &str = "hits_phaser_laser_splash";
 
-pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
+// Server sums of the keys above, left out of `HITS_DESCRIPTIONS`.
+pub const HITS_BOMB: &str = "hits_bomb";
+pub const HITS_TBOMB: &str = "hits_tbomb";
+pub const HITS_ROCKET: &str = "hits_rocket";
+pub const HITS_SKIP: &str = "hits_skip";
+
+/// Lists only the parts of the summed keys (`DAMAGE_BOMB` and the others
+/// beside it) on the dealt, per-victim and received sides alike, so each point
+/// of damage appears once and the lines sum to the `damage` total.
+/// `damage_airdefense`, `damage_planes_by_plane` and `damage_shields` are
+/// damage to aircraft and shields, which `damage` leaves out.
+pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 40] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
@@ -97,10 +124,11 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
     (DAMAGE_TPD_DEEP, "Deep Water Torps"),
     (DAMAGE_TPD_ALTER, "Alt Torps"),
     (DAMAGE_TPD_PHOTON, "Photon Torps"),
-    (DAMAGE_BOMB, "HE Bomb"),
+    (DAMAGE_BOMB_AVIA, "HE Bomb"),
     (DAMAGE_BOMB_ALT, "Alt Bomb"),
+    (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
-    (DAMAGE_TBOMB, "Torpedo Bomber"),
+    (DAMAGE_TBOMB_AVIA, "Torpedo Bomber"),
     (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
     (DAMAGE_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
     (DAMAGE_FIRE, "Fire"),
@@ -110,19 +138,23 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
     (DAMAGE_DBOMB_DIRECT, "Depth Charge (Direct)"),
     (DAMAGE_DBOMB_SPLASH, "Depth Charge (Splash)"),
     (DAMAGE_SEA_MINE, "Sea Mine"),
-    (DAMAGE_ROCKET, "Rocket"),
+    (DAMAGE_ROCKET_AVIA, "Rocket"),
+    (DAMAGE_ROCKET_ALT, "Alt Rocket"),
     (DAMAGE_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
-    (DAMAGE_SKIP, "Skip Bomb"),
+    (DAMAGE_SKIP_AVIA, "Skip Bomb"),
     (DAMAGE_SKIP_ALT, "Alt Skip Bomb"),
     (DAMAGE_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
+    (DAMAGE_MISSILE, "Missile"),
     (DAMAGE_WAVE, "Wave"),
     (DAMAGE_CHARGE_LASER, "Charge Laser"),
     (DAMAGE_PULSE_LASER, "Pulse Laser"),
     (DAMAGE_AXIS_LASER, "Axis Laser"),
     (DAMAGE_PHASER_LASER, "Phaser Laser"),
+    (DAMAGE_PHASER_LASER_SPLASH, "Phaser Laser (Splash)"),
 ];
 
-pub static HITS_DESCRIPTIONS: [(&str, &str); 31] = [
+/// Lists the parts of the summed hit keys, as `DAMAGE_DESCRIPTIONS` does.
+pub static HITS_DESCRIPTIONS: [(&str, &str); 34] = [
     (HITS_MAIN_AP, "AP"),
     (HITS_MAIN_CS, "SAP"),
     (HITS_MAIN_HE, "HE"),
@@ -133,32 +165,36 @@ pub static HITS_DESCRIPTIONS: [(&str, &str); 31] = [
     (HITS_ATBA_HE, "HE Sec"),
     (HITS_ATBA_HE_MANUAL, "HE Sec (Manual)"),
     (HITS_TPD_NORMAL, "Torps"),
-    (HITS_BOMB, "HE Bomb"),
+    (HITS_BOMB_AVIA, "HE Bomb"),
     (HITS_BOMB_ALT, "Alt Bomb"),
     (HITS_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (HITS_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
-    (HITS_TBOMB, "Torpedo Bomber"),
+    (HITS_TBOMB_AVIA, "Torpedo Bomber"),
     (HITS_TBOMB_ALT, "Torpedo Bomber (Alt)"),
     (HITS_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
     (HITS_RAM, "Ram"),
     (HITS_DBOMB_DIRECT, "Depth Charge (Direct)"),
     (HITS_DBOMB_SPLASH, "Depth Charge (Splash)"),
     (HITS_SEA_MINE, "Sea Mine"),
-    (HITS_ROCKET, "Rocket"),
+    (HITS_ROCKET_AVIA, "Rocket"),
+    (HITS_ROCKET_ALT, "Alt Rocket"),
     (HITS_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
-    (HITS_SKIP, "Skip Bomb"),
+    (HITS_SKIP_AVIA, "Skip Bomb"),
     (HITS_SKIP_ALT, "Alt Skip Bomb"),
     (HITS_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
+    (HITS_MISSILE, "Missile"),
     (HITS_WAVE, "Wave"),
     (HITS_CHARGE_LASER, "Charge Laser"),
     (HITS_PULSE_LASER, "Pulse Laser"),
     (HITS_AXIS_LASER, "Axis Laser"),
     (HITS_PHASER_LASER, "Phaser Laser"),
+    (HITS_PHASER_LASER_SPLASH, "Phaser Laser (Splash)"),
 ];
 
 /// Keys for received damage lookups. The server uses different key names on the
 /// received side (e.g. combined `damage_dbomb` instead of split direct/splash).
-pub static RECEIVED_DAMAGE_DESCRIPTIONS: [(&str, &str); 27] = [
+/// Lists the parts of the summed keys, as `DAMAGE_DESCRIPTIONS` does.
+pub static RECEIVED_DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
@@ -171,21 +207,28 @@ pub static RECEIVED_DAMAGE_DESCRIPTIONS: [(&str, &str); 27] = [
     (DAMAGE_TPD_NORMAL, "Torps"),
     (DAMAGE_TPD_DEEP, "Deep Water Torps"),
     (DAMAGE_TPD_ALTER, "Alt Torps"),
-    (DAMAGE_BOMB, "HE Bomb"),
+    (DAMAGE_TPD_PHOTON, "Photon Torps"),
+    (DAMAGE_BOMB_AVIA, "HE Bomb"),
     (DAMAGE_BOMB_ALT, "Alt Bomb"),
+    (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (DAMAGE_DBOMB, "Depth Charge"),
     (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
-    (DAMAGE_ADBOMB, "Airstrike Depth Charge"),
-    (DAMAGE_TBOMB, "Torpedo Bomber"),
+    (DAMAGE_TBOMB_AVIA, "Torpedo Bomber"),
     (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
     (DAMAGE_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
     (DAMAGE_FIRE, "Fire"),
     (DAMAGE_RAM, "Ram"),
     (DAMAGE_FLOOD, "Flood"),
     (DAMAGE_SEA_MINE, "Sea Mine"),
-    (DAMAGE_ROCKET, "Rocket"),
+    (DAMAGE_ROCKET_AVIA, "Rocket"),
+    (DAMAGE_ROCKET_ALT, "Alt Rocket"),
     (DAMAGE_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
-    (DAMAGE_SKIP, "Skip Bomb"),
+    (DAMAGE_SKIP_AVIA, "Skip Bomb"),
+    (DAMAGE_SKIP_ALT, "Alt Skip Bomb"),
+    (DAMAGE_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
+    (DAMAGE_MISSILE, "Missile"),
+    (DAMAGE_PHASER_LASER, "Phaser Laser"),
+    (DAMAGE_PHASER_LASER_SPLASH, "Phaser Laser (Splash)"),
 ];
 
 pub static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] =

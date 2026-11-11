@@ -5,15 +5,15 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use wows_minimap_renderer::renderer::Armament;
-use wows_replay_insights::battle_report::DAMAGE_ADBOMB;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_AP;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_AP_MANUAL;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_CS;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_CS_MANUAL;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_HE;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_HE_MANUAL;
-use wows_replay_insights::battle_report::DAMAGE_BOMB;
+use wows_replay_insights::battle_report::DAMAGE_BOMB_AIRSUPPORT;
 use wows_replay_insights::battle_report::DAMAGE_BOMB_ALT;
+use wows_replay_insights::battle_report::DAMAGE_BOMB_AVIA;
 use wows_replay_insights::battle_report::DAMAGE_DBOMB_AIRSUPPORT;
 use wows_replay_insights::battle_report::DAMAGE_FIRE;
 use wows_replay_insights::battle_report::DAMAGE_FLOOD;
@@ -21,14 +21,15 @@ use wows_replay_insights::battle_report::DAMAGE_MAIN_AP;
 use wows_replay_insights::battle_report::DAMAGE_MAIN_CS;
 use wows_replay_insights::battle_report::DAMAGE_MAIN_HE;
 use wows_replay_insights::battle_report::DAMAGE_RAM;
-use wows_replay_insights::battle_report::DAMAGE_ROCKET;
 use wows_replay_insights::battle_report::DAMAGE_ROCKET_AIRSUPPORT;
-use wows_replay_insights::battle_report::DAMAGE_SKIP;
+use wows_replay_insights::battle_report::DAMAGE_ROCKET_ALT;
+use wows_replay_insights::battle_report::DAMAGE_ROCKET_AVIA;
 use wows_replay_insights::battle_report::DAMAGE_SKIP_AIRSUPPORT;
 use wows_replay_insights::battle_report::DAMAGE_SKIP_ALT;
-use wows_replay_insights::battle_report::DAMAGE_TBOMB;
+use wows_replay_insights::battle_report::DAMAGE_SKIP_AVIA;
 use wows_replay_insights::battle_report::DAMAGE_TBOMB_AIRSUPPORT;
 use wows_replay_insights::battle_report::DAMAGE_TBOMB_ALT;
+use wows_replay_insights::battle_report::DAMAGE_TBOMB_AVIA;
 use wows_replay_insights::battle_report::DAMAGE_TPD_ALTER;
 use wows_replay_insights::battle_report::DAMAGE_TPD_DEEP;
 use wows_replay_insights::battle_report::DAMAGE_TPD_NORMAL;
@@ -91,16 +92,17 @@ impl DamageKind {
             | DAMAGE_ATBA_HE
             | DAMAGE_ATBA_HE_MANUAL => Self::Secondary,
             DAMAGE_TPD_NORMAL | DAMAGE_TPD_DEEP | DAMAGE_TPD_ALTER | DAMAGE_TPD_PHOTON => Self::Torpedo,
-            DAMAGE_BOMB
-            | DAMAGE_DBOMB_AIRSUPPORT
-            | DAMAGE_ADBOMB
+            DAMAGE_BOMB_AVIA
             | DAMAGE_BOMB_ALT
-            | DAMAGE_TBOMB
+            | DAMAGE_BOMB_AIRSUPPORT
+            | DAMAGE_DBOMB_AIRSUPPORT
+            | DAMAGE_TBOMB_AVIA
             | DAMAGE_TBOMB_ALT
             | DAMAGE_TBOMB_AIRSUPPORT
-            | DAMAGE_ROCKET
+            | DAMAGE_ROCKET_AVIA
+            | DAMAGE_ROCKET_ALT
             | DAMAGE_ROCKET_AIRSUPPORT
-            | DAMAGE_SKIP
+            | DAMAGE_SKIP_AVIA
             | DAMAGE_SKIP_ALT
             | DAMAGE_SKIP_AIRSUPPORT => Self::Plane,
             DAMAGE_FIRE => Self::Fire,
@@ -405,7 +407,7 @@ mod tests {
     fn keys_of_one_weapon_count_toward_one_kind() {
         let lines =
             DamageLine::from_results(&wows_replay_insights::battle_report::DAMAGE_DESCRIPTIONS, |key| match key {
-                "damage_atba_he" | "damage_atba_ap_manual" | "damage_skip" | "damage_tpd_deep" => 1,
+                "damage_atba_he" | "damage_atba_ap_manual" | "damage_skip_avia" | "damage_tpd_deep" => 1,
                 _ => 0,
             });
 
