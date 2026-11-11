@@ -7,13 +7,14 @@
 //! outcome row mirrors `build_replay_view`'s Row 1: the Win/Loss/Draw label
 //! with a trophy, frowning face or equals sign beside it (see `crate::icons`).
 //!
-//! Beside it sits the single-battle PR badge, showing what
+//! Beside it sit tiles for the recording player's own damage, base XP, kills
+//! and single-battle PR (`header_figures`), the last scored as
 //! `populate_personal_ratings` scored this replay's own row, in that band's
-//! chip colors (`build_replay_view`'s `pr_chip`). It deviates from that
-//! version in one respect: egui rates a replay whose results are missing as
-//! though it dealt zero damage (`to_battle_stats`'s `unwrap_or_default`),
-//! which reads as a real "Bad" rating for a battle whose damage is simply
-//! unknown. Unknown damage is left unrated here, so no badge appears.
+//! colour (`build_replay_view`'s `pr_chip`). It deviates from that version in
+//! one respect: egui rates a replay whose results are missing as though it
+//! dealt zero damage (`to_battle_stats`'s `unwrap_or_default`), which reads
+//! as a real "Bad" rating for a battle whose damage is simply unknown.
+//! Unknown damage is left unrated here, so no PR tile appears.
 //!
 //! The Export menu writes the same document the egui app does
 //! (`wows_toolkit_viewmodel::replay_export`), in the same three formats.
@@ -40,9 +41,12 @@
 //! (subscribed in `apply_result`) builds a `RawJsonPanel` for that row's JSON
 //! and opens it as `SidePanel::RawPlayerMetadata`.
 
+mod header_figures;
+
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use wows_toolkit_config::ReplaySettings;
 
 use gpui_kit::base::TestSupportExt as _;
@@ -67,14 +71,14 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
-use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
-use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::icons;
+
+use header_figures::OwnFigures;
 
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
@@ -164,6 +168,11 @@ struct LoadedReplay {
     raw_results_panel: Option<Entity<RawJsonPanel>>,
     mapped_results_panel: Option<Entity<RawJsonPanel>>,
     raw_player_metadata_panel: Option<Entity<RawJsonPanel>>,
+    /// The recording player's own figures for the header tiles. `None` when
+    /// the replay has no row for them.
+    own_figures: Option<OwnFigures>,
+    /// When the header figures began counting up.
+    figures_since: Instant,
 }
 
 enum LoadState {
@@ -267,6 +276,9 @@ pub struct ReplayPanel {
     /// together). `None` while still loading, since there is no `table` yet
     /// to subscribe to.
     _table_subscription: Option<Subscription>,
+    /// When this tab first showed a loaded battle. Kept across re-reads, so
+    /// the header figures count up once per tab rather than once per read.
+    first_loaded_at: Option<Instant>,
 }
 
 /// How many other recordings one tab reads alongside its own.
@@ -325,6 +337,7 @@ impl ReplayPanel {
             _table_subscription: None,
             title_icons: None,
             title_icon_task: None,
+            first_loaded_at: None,
         }
     }
 
@@ -674,6 +687,8 @@ impl ReplayPanel {
         let chat_title = title.to_string();
         let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, chat_title, cx)));
         let battle_at = model.timestamp;
+        let own_figures = OwnFigures::from_rows(&model.rows);
+        let figures_since = *self.first_loaded_at.get_or_insert_with(|| cx.background_executor().now());
         let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
         self.load_twitch_candidates(table.clone(), battle_at, cx);
         self._table_subscription = Some(cx.subscribe_in(&table, window, Self::on_table_event));
@@ -691,6 +706,8 @@ impl ReplayPanel {
             raw_results_panel,
             mapped_results_panel,
             raw_player_metadata_panel: None,
+            own_figures,
+            figures_since,
         }))
     }
 
@@ -763,6 +780,7 @@ impl ReplayPanel {
             _table_subscription: None,
             title_icons: None,
             title_icon_task: None,
+            first_loaded_at: None,
         };
         let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
         let payloads =
@@ -988,44 +1006,6 @@ pub(super) fn write_export(match_data: &ExportedMatch, path: &Path, format: Expo
     }
 }
 
-/// The PR badge's element id, so a test can assert on its presence and label.
-const PR_BADGE_ID: &str = "replay-personal-rating-badge";
-
-/// The badge's text, verbatim the egui `pr_chip` call's format string.
-fn personal_rating_label(rating: &PersonalRatingResult) -> String {
-    format!("PR: {:.0} ({})", rating.pr, rating.category.name())
-}
-
-/// The chip tint the egui `pr_chip` paints behind its text.
-const PR_CHIP_TINT: f32 = personal_rating::CHIP_TINT_ALPHA as f32 / 255.;
-
-/// The single-battle PR badge, mirroring the egui app's `pr_chip` call beside
-/// the outcome label: "PR: {score} ({band})" in the band's color over a faint
-/// tint of it. Renders nothing when no expected-values table has been applied
-/// yet, or when this replay's own row carries no rating, matching that call's
-/// `if let Some(pr_result)` gate.
-fn personal_rating_badge(rating: PersonalRatingResult) -> AnyElement {
-    let color = resolve_color(ColorRole::PrTier(rating.category));
-    let text = personal_rating_label(&rating);
-    let mut tint = resolve_color(ColorRole::PrTierTint(rating.category));
-    tint.a = PR_CHIP_TINT;
-
-    h_flex()
-        .id(PR_BADGE_ID)
-        .test_support()
-        .aria_label(text.clone())
-        .flex_none()
-        .items_center()
-        .px_2()
-        .py_1()
-        .rounded_sm()
-        .bg(tint)
-        .font_weight(FontWeight::BOLD)
-        .text_color(color)
-        .child(crate::ui::selectable_text("replay-pr-text", text))
-        .into_any_element()
-}
-
 /// One side-panel toggle button's static shape, bundled into a struct so
 /// `side_panel_button` stays under clippy's argument-count limit (mirrors
 /// `table.rs::RowLayout`'s reason for existing).
@@ -1070,7 +1050,6 @@ struct HeaderState {
     /// asks to have rendered.
     path: PathBuf,
     battle_result: Option<BattleResult>,
-    personal_rating: Option<PersonalRatingResult>,
     has_chat: bool,
     has_results: bool,
     /// Whether the results resolved into their named form, which is a
@@ -1091,13 +1070,11 @@ struct HeaderState {
     alts: usize,
 }
 
-/// The subdued line under the header: who was recording, which match, and
-/// what each side dealt.
+/// The subdued line under the header: who was recording and which match.
 ///
-/// Mirrors the egui app's Row 2, down to the interpunct between the fields
-/// and the win/loss tones on the two damage figures.
-fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyElement {
-    let (friendly, enemy) = team_damage;
+/// Mirrors the egui app's Row 2, down to the separator between the fields.
+/// The team damage it ends with is drawn as `header_figures::damage_split`.
+fn match_context_line(context: &MatchContext) -> AnyElement {
     let dim = crate::theme::text_dim();
     let separator = || div().flex_none().text_xs().text_color(dim).child(SEPARATOR);
     let field = |index: usize, text: String| {
@@ -1125,26 +1102,7 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
         line = line.child(field(index, text.clone()));
         drawn += 1;
     }
-
-    line.child(separator())
-        .child(field(5, t!("ui.replay.team_damage").into_owned()))
-        .child(
-            div()
-                .flex_none()
-                .text_xs()
-                .text_color(rgb(crate::theme::semantic().win))
-                .child(crate::ui::selectable_text("friendly-damage", separate_number(friendly))),
-        )
-        .child(field(6, " : ".to_string()))
-        .child(
-            div()
-                .flex_none()
-                .text_xs()
-                .text_color(rgb(crate::theme::semantic().loss))
-                .child(crate::ui::selectable_text("enemy-damage", separate_number(enemy))),
-        )
-        .child(field(7, format!(" ({})", separate_number(friendly + enemy))))
-        .into_any_element()
+    line.into_any_element()
 }
 
 /// What the egui line puts between its fields.
@@ -1271,7 +1229,6 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
     let HeaderState {
         path,
         battle_result,
-        personal_rating,
         has_chat,
         has_results,
         has_mapped_results,
@@ -1355,8 +1312,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                             }),
                     )
                 })
-                .child(outcome_badge(battle_result))
-                .when_some(personal_rating, |this, rating| this.child(personal_rating_badge(rating))),
+                .child(outcome_badge(battle_result)),
         )
         .child(buttons)
         .into_any_element()
@@ -1502,15 +1458,28 @@ impl Render for ReplayPanel {
                     )
                 });
 
-                let context_line = match_context_line(loaded.table.read(cx).match_context(), team_damage);
+                let context_line = match_context_line(loaded.table.read(cx).match_context());
+                let progress = header_figures::count_up_progress(loaded.figures_since, window, cx);
+                // A test ship's own figures stay off the tiles while the table hides them.
+                let own_figures = loaded.own_figures.filter(|_| !self_stats_hidden);
+                let personal_rating = personal_rating.filter(|_| !self_stats_hidden);
+                let figures = h_flex()
+                    .flex_none()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .pb_1()
+                    .children(header_figures::stat_tiles(own_figures, personal_rating.as_ref(), progress, cx))
+                    .child(header_figures::damage_split(team_damage.0, team_damage.1, cx));
 
-                let content = v_flex()
-                    .size_full()
+                let header_band = v_flex()
+                    .flex_none()
+                    .when_some(header_figures::result_tint(battle_result), |band, tint| band.bg(tint))
                     .child(header_row(
                         HeaderState {
                             path: self.path.clone(),
                             battle_result,
-                            personal_rating,
                             has_chat,
                             has_results,
                             has_mapped_results,
@@ -1526,13 +1495,15 @@ impl Render for ReplayPanel {
                         cx,
                     ))
                     .child(context_line)
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_h(px(0.))
-                            .child(div().flex_1().min_w(px(0.)).h_full().child(table))
-                            .children(side_slot),
-                    );
+                    .child(figures);
+
+                let content = v_flex().size_full().child(header_band).child(
+                    h_flex()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .child(div().flex_1().min_w(px(0.)).h_full().child(table))
+                        .children(side_slot),
+                );
                 // Fades in where the outline was. The id holds while the
                 // panel shows a battle, so a re-read does not fade it again.
                 crate::motion::fade_in("replay-panel-loaded", content)
@@ -1561,9 +1532,9 @@ mod tests {
 
     use super::ExportFormat;
     use super::ExportedMatch;
-    use super::PR_BADGE_ID;
     use super::ReplayPanel;
-    use super::personal_rating_label;
+    use super::header_figures::PR_TILE_ID as PR_BADGE_ID;
+    use super::header_figures::personal_rating_label;
     use super::write_export;
     use crate::replay_inspector::columns::ReplayColumn;
     use crate::replay_inspector::model::PlayerRow;
@@ -2126,5 +2097,51 @@ mod tests {
         assert_eq!(rating.category, PersonalRatingCategory::Average);
         assert_eq!(personal_rating_label(&rating), "PR: 1150 (Average)");
         assert_eq!(personal_rating_label(&PersonalRatingResult::new(2456.4)), "PR: 2456 (Super Unicum)");
+    }
+
+    /// The recording player's figures count up once, from nothing to the
+    /// figure, and stay there; under reduced motion they show the figure at
+    /// once.
+    #[gpui_kit::test]
+    fn the_header_figures_count_up_once(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+        let damage = |window: &mut gpui_kit::Window| window.find("replay-damage-tile").label().map(str::to_string);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(damage(window).as_deref(), Some("0"), "the count starts at nothing");
+            assert_eq!(window.find("replay-kills-tile").label(), Some("0"));
+        })
+        .expect("the window is open");
+
+        cx.executor().advance_clock(std::time::Duration::from_millis(500));
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(damage(window).as_deref(), Some("50,000"), "and ends on the figure");
+            assert_eq!(window.find("replay-kills-tile").label(), Some("1"));
+            assert!(window.try_find("replay-base-xp-tile").is_none(), "a figure the replay lacks has no tile");
+        })
+        .expect("the window is open");
+
+        let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
+        panel.update(cx, |_panel, cx| cx.notify());
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(damage(window).as_deref(), Some("50,000"), "a redraw does not count again");
+        })
+        .expect("the window is open");
+
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let still = cx.open_window(size(px(1400.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+        cx.update_window(still.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(damage(window).as_deref(), Some("50,000"), "reduced motion shows the figure at once");
+        })
+        .expect("the window is open");
     }
 }
