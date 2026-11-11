@@ -1122,7 +1122,7 @@ impl ArmorViewerPane {
         let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
             view.set_hit_health(health, cx);
-            view.show_hits(hits, cx);
+            view.follow_hits(hits, cx);
         });
     }
 

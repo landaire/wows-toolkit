@@ -50,6 +50,7 @@ use wowsunpack::game_params::keys::ComponentType;
 
 use super::analysis::SimAgreement;
 use super::camera_rings;
+use super::depth_cues;
 use super::gaps;
 use super::splash;
 use super::trajectory;
@@ -767,6 +768,8 @@ pub struct ViewportView {
     /// What this ship had taken when a replay viewport asked for it, drawn
     /// over the hull as the overlays are.
     hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// Rings still spreading from hits that landed as a battle played.
+    hit_pulses: Vec<depth_cues::HitPulse>,
     /// What this app's own simulation made of each landed shell, against what
     /// the server said. Keyed by the shot, because that is what the log lists.
     sim_verdicts: HashMap<ShotId, SimAgreement>,
@@ -1003,6 +1006,7 @@ impl ViewportView {
             popover_scroll: ScrollHandle::new(),
             hovered: None,
             hits: Vec::new(),
+            hit_pulses: Vec::new(),
             hit_health: None,
             ring_hovers: Vec::new(),
             hovered_ring: None,
@@ -1423,6 +1427,7 @@ impl ViewportView {
         self.hovered = None;
         self.hover_highlight = None;
         self.hovered_ring = None;
+        self.hit_pulses.clear();
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
         // `part_visibility` absent means visible and `hull_visibility`
@@ -1467,6 +1472,7 @@ impl ViewportView {
         self.arcs.clear();
         self.selected_arc = None;
         self.upload_splash_boxes(device, &armor);
+        depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
         // The camera the lock puts back is the one framed on the ship now
         // showing, not the one framed on the ship before it. A ship that names
         // no orbit has nothing to lock onto, and its control is not drawn, so
@@ -1775,6 +1781,63 @@ impl ViewportView {
         self.hits = hits;
         self.reupload_current_armor(cx);
         cx.notify();
+    }
+
+    /// Draws what the ship had taken as playback moves, sending a ring out
+    /// from each hit that has landed since the last call.
+    pub(crate) fn follow_hits(
+        &mut self,
+        hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        cx: &mut Context<Self>,
+    ) {
+        /// A seek forward lands many hits at once; rings for all of them
+        /// would cover the hull, so only the latest few get one.
+        const MOST_RINGS: usize = 4;
+
+        if let Some(armor) = self.current_armor.as_ref().filter(|_| !cx.reduce_motion()) {
+            let center = armor.center();
+            let center = [center.x, center.y, center.z];
+            let bounds = armor.bounds;
+            let bounds = Some(([bounds.0.x, bounds.0.y, bounds.0.z], [bounds.1.x, bounds.1.y, bounds.1.z]));
+            let landed = depth_cues::landed(&self.hits, &hits, |hit| hit.clock);
+            let started = cx.background_executor().now();
+            let rings = landed
+                .iter()
+                .rev()
+                .filter_map(|hit| {
+                    let at = wows_replay_insights::hull_impact::hull_impact(&hit.hit, center, bounds)?;
+                    Some(depth_cues::HitPulse { at: Vec3::new(at[0], at[1], at[2]), started })
+                })
+                .take(MOST_RINGS);
+            self.hit_pulses.extend(rings);
+        }
+
+        self.show_hits(hits, cx);
+    }
+
+    /// Draws the rings still spreading from landed hits, and asks for the
+    /// next frame while any is.
+    fn paint_hit_pulses(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let now = cx.background_executor().now();
+        if cx.reduce_motion() {
+            self.hit_pulses.clear();
+        }
+        self.hit_pulses.retain(|pulse| now.saturating_duration_since(pulse.started) < depth_cues::PULSE);
+        if self.hit_pulses.is_empty() {
+            return;
+        }
+
+        let rect = view_rect_from_bounds(bounds);
+        let color = rgb_color([super::hits::COLOR[0], super::hits::COLOR[1], super::hits::COLOR[2]]);
+        for pulse in &self.hit_pulses {
+            let anchor = self.viewport.pos_to_world_space(pulse.at);
+            let Some(at) = self.viewport.camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else {
+                continue;
+            };
+            let progress = now.saturating_duration_since(pulse.started).as_secs_f32() / depth_cues::PULSE.as_secs_f32();
+            depth_cues::paint_pulse(point(px(at.x), px(at.y)), progress, color, window);
+        }
+        window.request_animation_frame();
     }
 
     /// What this app's own simulation made of a landed shell.
@@ -3185,6 +3248,8 @@ impl ViewportView {
             self.ring_hovers = hovers;
         }
 
+        depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
+
         if self.display_settings.show_ship_center {
             let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
             self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
@@ -3817,7 +3882,9 @@ impl Render for ViewportView {
                 if scene_shown {
                     let _ = weak.update(cx, |this, cx| {
                         this.paint_scene(bounds, window);
+                        depth_cues::paint_vignette(bounds, window);
                         this.paint_annotations(bounds, window, cx);
+                        this.paint_hit_pulses(bounds, window, cx);
                     });
                 }
                 if gizmo_drawn {

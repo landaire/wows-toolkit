@@ -43,6 +43,7 @@ pub mod assets;
 pub mod camera_rings;
 pub(crate) mod camo;
 pub mod catalog;
+mod depth_cues;
 pub mod dock;
 mod export_dialog;
 mod gaps;

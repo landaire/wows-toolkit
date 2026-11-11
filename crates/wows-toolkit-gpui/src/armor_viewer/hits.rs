@@ -23,7 +23,7 @@ const THICKNESS: f32 = 0.22;
 /// What a marker is coloured. One colour for every hit: what kind of hit it
 /// was is the penetration checker's answer, not a marker's, and colouring
 /// them here would say something this does not know.
-const COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
+pub(crate) const COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
 
 /// What the ship-centre cross is coloured (`armor_viewer/ui/tab.rs`).
 const CENTER_COLOR: [f32; 4] = [1.0, 0.85, 0.1, 1.0];
