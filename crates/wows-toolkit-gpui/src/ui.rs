@@ -97,6 +97,11 @@ pub fn selectable_text(id: impl Into<ElementId>, text: impl Into<SharedString>) 
     SelectableText::new(id, text)
 }
 
+/// Sets `element`'s figures to one width, for numbers read down a column.
+pub fn tabular<E: Styled>(element: E) -> E {
+    element.font_features(crate::fonts::tabular_figures())
+}
+
 /// The height a `Select` occupies in a row, by its size.
 ///
 /// `Select` puts its trigger inside a `size_full` root, so in a row taller

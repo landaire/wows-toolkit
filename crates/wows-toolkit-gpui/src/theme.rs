@@ -367,8 +367,12 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Wind
     CURRENT_FAINT.store(palette.faint, Ordering::Relaxed);
     let semantic = semantic_for(dark);
     Theme::change(palette.mode, Some(window), cx);
+    let ui_family = crate::fonts::ui_family(cx);
 
     let theme = Theme::global_mut(cx);
+    if let Some(family) = ui_family {
+        theme.font_family = family;
+    }
     theme.background = rgb(palette.panel).into();
     theme.foreground = rgb(palette.text).into();
     theme.border = rgb(palette.border).into();
