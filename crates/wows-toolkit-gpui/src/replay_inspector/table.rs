@@ -2253,34 +2253,20 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     else {
         return collapsed;
     };
-    // The gap above the detail is part of what is revealed, so the row grows
-    // from its first line in step with the progress.
     // A column drawn narrower than the detail needs clips it; the fade says
     // there is more to the right than shows.
     let cut_off =
         layout.detail_widths.get(&(row.db_id, col)).is_some_and(|needs| *needs > layout.column_widths[col as usize]);
-    let fade = |to: Hsla| linear_gradient(90., linear_color_stop(to.opacity(0.), 0.), linear_color_stop(to, 1.));
-    let hovered = layout.fade_to_hovered;
-    // Padded like the cells, which also keeps it clear of the team stripe.
-    let detail = v_flex().relative().pt_1().px_1().child(detail).when(cut_off, |detail| {
-        detail.child(
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right_0()
-                .w(px(CUT_OFF_FADE_WIDTH))
-                .bg(fade(layout.fade_to))
-                // The row repaints in its hover colour under the pointer.
-                .group_hover(SharedString::from(format!("replay-row-{ix}")), move |style| style.bg(fade(hovered))),
-        )
-    });
+    // Only the content fades in: a translucent ground would show the cut-off
+    // fade, painted over it, as a darker edge.
+    let content = div().opacity(opacity).child(detail).into_any_element();
+    let detail = detail_surface(content, cut_off, ix, layout);
     // Kept in a reveal while open too, so a close starts from the height the
     // detail had rather than from nothing.
     let detail = crate::motion::Reveal::new(
         ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
         extent,
-        detail.opacity(opacity).into_any_element(),
+        detail.into_any_element(),
     )
     .into_any_element();
     v_flex()
@@ -2292,6 +2278,63 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
         .child(collapsed)
         .child(detail)
         .into_any_element()
+}
+
+/// How an expanded row's detail is set apart from the row it belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DetailStyle {
+    /// Drawn straight on the row.
+    Flat,
+    /// Sunk into the row: a shaded ground, a shadow along its top edge and a
+    /// highlight along its bottom.
+    Well,
+}
+
+const DETAIL_STYLE: DetailStyle = DetailStyle::Well;
+
+/// One column's detail on the surface `DETAIL_STYLE` names, with the fade
+/// at its right edge when the column is `cut_off`.
+fn detail_surface(content: AnyElement, cut_off: bool, ix: usize, layout: &RowLayout) -> Div {
+    // Black and white at low strength rather than palette colours: they shade
+    // whatever the row is painted, stripe, selection or hover alike.
+    let dark = crate::theme::is_dark_mode();
+    let shade = hsla(0., 0., 0., if dark { 0.18 } else { 0.05 });
+    let shadow = hsla(0., 0., 0., if dark { 0.45 } else { 0.14 });
+    let highlight = hsla(0., 0., 1., if dark { 0.07 } else { 0.7 });
+
+    let (ground, hovered_ground) = match DETAIL_STYLE {
+        DetailStyle::Flat => (layout.fade_to, layout.fade_to_hovered),
+        DetailStyle::Well => (layout.fade_to.blend(shade), layout.fade_to_hovered.blend(shade)),
+    };
+    let group = SharedString::from(format!("replay-row-{ix}"));
+    let fade = |to: Hsla| linear_gradient(90., linear_color_stop(to.opacity(0.), 0.), linear_color_stop(to, 1.));
+    let fade = div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .w(px(CUT_OFF_FADE_WIDTH))
+        .bg(fade(ground))
+        // The row repaints in its hover colour under the pointer.
+        .group_hover(group.clone(), move |style| style.bg(fade(hovered_ground)));
+    let line = |color: Hsla| div().absolute().left_0().right_0().h(px(1.)).bg(color);
+
+    // Padded like the cells, which also keeps it clear of the team stripe.
+    let surface = div().relative().px_1().child(content).when(cut_off, |surface| surface.child(fade));
+    let surface = match DETAIL_STYLE {
+        DetailStyle::Flat => surface,
+        DetailStyle::Well => surface
+            .py_1()
+            .bg(ground)
+            .group_hover(group, move |style| style.bg(hovered_ground))
+            .child(line(shadow).top_0())
+            .child(line(shadow.opacity(0.5)).top(px(1.)))
+            .child(line(highlight).bottom_0()),
+    };
+
+    // The gap above the detail is part of what is revealed, so the row grows
+    // from its first line in step with the progress.
+    v_flex().pt_1().child(surface)
 }
 
 /// How much of a row's detail is drawn.
