@@ -279,14 +279,15 @@ impl Render for WatchedPlayback {
                 this.child(div().flex_1().min_h(px(0.)).child(frame_view(&self.drawn, None).size_full()))
             })
             .when(self.drawn.size().is_none(), |this| {
+                // The host may never send a frame, so the wait has no end.
                 this.child(
-                    v_flex()
-                        .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(t!("ui.collab.waiting_for_frames").to_string()),
+                    div().flex_1().min_h(px(0.)).child(
+                        crate::loading::Loading::new(
+                            "watched-playback-waiting",
+                            t!("ui.collab.waiting_for_frames").to_string(),
+                        )
+                        .unbounded(),
+                    ),
                 )
             })
     }

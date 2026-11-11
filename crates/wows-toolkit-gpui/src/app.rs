@@ -3611,14 +3611,8 @@ impl App {
     fn render_settings_tab(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = match &self.settings {
             SettingsState::Loading => {
-                return v_flex()
-                    .p_4()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(crate::theme::text_dim())
-                            .child(t!("ui.settings.loading").to_string()),
-                    )
+                return crate::loading::Loading::new("settings-loading", t!("ui.settings.loading").into_owned())
+                    .top()
                     .into_any_element();
             }
             SettingsState::Failed(reason) => {

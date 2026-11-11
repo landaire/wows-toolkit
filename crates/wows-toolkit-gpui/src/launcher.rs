@@ -723,7 +723,9 @@ impl LauncherView {
 impl Render for LauncherView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(settings) = self.settings.clone() else {
-            return v_flex().p_4().child(dim(t!("ui.launcher.loading"))).into_any_element();
+            return crate::loading::Loading::new("launcher-loading", t!("ui.launcher.loading").into_owned())
+                .top()
+                .into_any_element();
         };
         let account = self.render_account(cx);
         let toolbar = h_flex()

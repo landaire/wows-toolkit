@@ -2775,19 +2775,10 @@ impl Panel for ReplayRendererPanel {
 impl ReplayRendererPanel {
     fn render_body(&self, cx: &mut Context<Self>) -> AnyElement {
         match &self.state {
-            State::Baking => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .child(Spinner::new().large())
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(t!("ui.replay.renderer.baking").into_owned()),
-                )
-                .into_any_element(),
+            State::Baking => {
+                crate::loading::Loading::new("replay-renderer-baking", t!("ui.replay.renderer.baking").into_owned())
+                    .into_any_element()
+            }
             State::Failed(reason) => v_flex()
                 .size_full()
                 .items_center()
@@ -4556,12 +4547,9 @@ fn timeline_rows(
     any_events: bool,
 ) -> AnyElement {
     if !read {
-        return h_flex()
-            .gap_2()
-            .items_center()
+        return div()
             .py_2()
-            .child(Spinner::new())
-            .child(div().text_xs().child(t!("ui.replay.timeline_parsing").into_owned()))
+            .child(crate::loading::LoadingLine::new(t!("ui.replay.timeline_parsing").into_owned()))
             .into_any_element();
     }
     if rows.is_empty() {

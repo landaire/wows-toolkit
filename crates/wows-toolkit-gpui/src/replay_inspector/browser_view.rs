@@ -40,7 +40,6 @@ use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
@@ -1258,8 +1257,6 @@ impl Render for ReplayBrowser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.sync_with_window(window);
         let body = match &self.status {
-            // A spinner beside the line, as the egui listing shows while it
-            // is reading the directory.
             ScanStatus::Loading => {
                 let ScanProgress { done, total } = self.scan_progress.unwrap_or_default();
                 // Zero files counted so far means the directory walk itself
@@ -1269,19 +1266,9 @@ impl Render for ReplayBrowser {
                 } else {
                     t!("ui.replay.scanning_count", done = done, total = total).into_owned()
                 };
-                v_flex()
-                    .p_2()
-                    .gap_1()
-                    .text_sm()
-                    .text_color(crate::theme::text_dim())
-                    .child(h_flex().gap_2().items_center().child(Spinner::new()).child(caption.clone()))
-                    .when(total > 0, |this| {
-                        this.child(
-                            Progress::new("replay-scan-progress")
-                                .accessibility_label(caption)
-                                .value(done as f32 / total as f32 * 100.),
-                        )
-                    })
+                crate::loading::Loading::new("replay-listing-scan", caption)
+                    .top()
+                    .counts(crate::loading::Counts { done, total })
                     .into_any_element()
             }
             ScanStatus::Failed(reason) => {
@@ -1300,18 +1287,8 @@ impl Render for ReplayBrowser {
             ScanStatus::Loaded
                 if self.chosen_directory.is_none() && matches!(self.game_data, GameData::Loading { .. }) =>
             {
-                let said = loading_said(&self.game_data);
-                h_flex()
-                    .id("replay-listing-loading")
-                    .test_support()
-                    .aria_label(said.clone())
-                    .p_2()
-                    .gap_2()
-                    .items_center()
-                    .text_sm()
-                    .text_color(crate::theme::text_dim())
-                    .child(Spinner::new())
-                    .child(said)
+                crate::loading::Loading::new("replay-listing-loading", loading_said(&self.game_data))
+                    .top()
                     .into_any_element()
             }
             ScanStatus::Loaded => {
@@ -1665,11 +1642,12 @@ impl Render for ReplayBrowser {
                 .bg(theme.background)
                 .children(preview_map)
                 .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim())));
-            deferred(anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(crate::motion::fade_in(
-                "replay-preview-popup",
-                card,
-                cx,
-            )))
+            deferred(
+                anchored()
+                    .position(anchor)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(crate::motion::fade_in("replay-preview-popup", card, cx)),
+            )
             .with_priority(1)
         });
 

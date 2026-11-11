@@ -27,6 +27,7 @@ mod icons;
 #[cfg(test)]
 mod interaction_tests;
 mod launcher;
+mod loading;
 mod logging;
 mod minimap_preview;
 mod motion;

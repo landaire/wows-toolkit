@@ -3695,18 +3695,15 @@ impl Render for ViewportView {
             .then(|| status.clone().unwrap_or_else(|| t!("ui.armor.select_ship").into_owned()));
         let scene_shown = loading_ship.is_none() && empty_state.is_none() && status.is_none();
         let image_child = if let Some(name) = loading_ship {
-            h_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .child(Spinner::new())
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(t!("ui.armor.loading_named_ship", ship = name).to_string()),
-                )
+            crate::loading::Loading::new(
+                "armor-viewport-loading",
+                t!("ui.armor.loading_named_ship", ship = name).to_string(),
+            )
+            .into_any_element()
+        } else if matches!(self.gpu, GpuState::Waiting) {
+            // Also covers a lost device not yet replaced, which has no end.
+            crate::loading::Loading::new("armor-viewport-initializing", t!("ui.armor.initializing").into_owned())
+                .unbounded()
                 .into_any_element()
         } else if let Some(message) = empty_state.or(status) {
             h_flex()

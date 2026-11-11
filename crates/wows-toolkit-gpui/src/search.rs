@@ -2050,7 +2050,7 @@ impl Render for SearchView {
                 .items_center()
                 .px_2()
                 .py_1()
-                .child(div().text_xs().text_color(muted).child(t!("ui.search.looking_up_values").into_owned()))
+                .child(crate::loading::LoadingLine::new(t!("ui.search.looking_up_values").into_owned()))
                 .into_any_element()
         });
 
@@ -2376,11 +2376,12 @@ impl Render for SearchView {
                 .bg(theme.background)
                 .children(preview_art)
                 .when_some(preview_facts, |this, facts| this.child(preview_hover_grid(&facts)));
-            deferred(anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(crate::motion::fade_in(
-                "search-preview-fade",
-                card,
-                cx,
-            )))
+            deferred(
+                anchored()
+                    .position(anchor)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(crate::motion::fade_in("search-preview-fade", card, cx)),
+            )
             .with_priority(1)
         });
 
@@ -2416,6 +2417,10 @@ impl Render for SearchView {
             });
 
         let body: AnyElement = match status {
+            // A settings failure keeps the plain status, which carries its retry.
+            Some(status) if matches!(self.state, SearchState::Running) && self.settings_load_error.is_none() => {
+                crate::loading::Loading::new("search-status", status).into_any_element()
+            }
             Some(status) => v_flex()
                 .id("search-status")
                 .test_support()

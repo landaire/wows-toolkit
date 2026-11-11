@@ -1707,6 +1707,9 @@ impl PlayerTrackerView {
         };
 
         let body: AnyElement = match status {
+            Some(status) if matches!(load_state, LoadState::Loading) => {
+                crate::loading::Loading::new("tracker-loading", status).into_any_element()
+            }
             Some(status) => v_flex()
                 .size_full()
                 .items_center()
@@ -1729,10 +1732,24 @@ impl PlayerTrackerView {
     fn render_current_match(&self, cx: &mut Context<Self>) -> AnyElement {
         let border = cx.theme().border;
 
+        let said = |text: String| {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(text))
+                .into_any_element()
+        };
         let status = match (&self.game_data, self.live_checked, &self.live_match) {
-            (None, _, _) => Some(t!("ui.player_tracker.live_no_directory").into_owned()),
-            (_, false, _) => Some(t!("ui.player_tracker.live_checking").into_owned()),
-            (_, true, None) => Some(t!("ui.player_tracker.live_none").into_owned()),
+            (None, _, _) => Some(said(t!("ui.player_tracker.live_no_directory").into_owned())),
+            (_, false, _) => Some(
+                crate::loading::Loading::new(
+                    "tracker-live-checking",
+                    t!("ui.player_tracker.live_checking").into_owned(),
+                )
+                .into_any_element(),
+            ),
+            (_, true, None) => Some(said(t!("ui.player_tracker.live_none").into_owned())),
             (_, true, Some(_)) => None,
         };
 
@@ -1789,13 +1806,7 @@ impl PlayerTrackerView {
             return v_flex()
                 .size_full()
                 .child(mode_bar)
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .child(div().text_sm().text_color(crate::theme::text_dim()).child(status)),
-                )
+                .child(div().flex_1().min_h(px(0.)).child(status))
                 .into_any_element();
         }
 
@@ -1803,14 +1814,19 @@ impl PlayerTrackerView {
             return div().into_any_element();
         };
 
+        // The build and stats waits run alongside a match and may retry for
+        // minutes, so the roster is not redrawn every frame for them.
+        let waiting = |text: String| Some(crate::loading::LoadingLine::new(text).unbounded().into_any_element());
         let note = match &self.stats {
             // A failure is reported even while the ships are unresolved: a
             // build that did not load is why they are unresolved, and saying
             // "loading" for it would never stop being wrong.
-            StatsState::Failed(reason) => Some(t!("ui.player_tracker.stats_unavailable", reason = reason).to_string()),
-            _ if !roster.ships_resolved => Some(t!("ui.player_tracker.live_loading_build").into_owned()),
-            StatsState::Scanning => Some(t!("ui.player_tracker.stats_resolving").into_owned()),
-            StatsState::Held | StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned()),
+            StatsState::Failed(reason) => Some(
+                div().child(t!("ui.player_tracker.stats_unavailable", reason = reason).to_string()).into_any_element(),
+            ),
+            _ if !roster.ships_resolved => waiting(t!("ui.player_tracker.live_loading_build").into_owned()),
+            StatsState::Scanning => waiting(t!("ui.player_tracker.stats_resolving").into_owned()),
+            StatsState::Held | StatsState::Fetching => waiting(t!("ui.player_tracker.stats_fetching").into_owned()),
             StatsState::Idle | StatsState::Ready(_) => None,
         };
         let stats = match &self.stats {

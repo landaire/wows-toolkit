@@ -451,7 +451,13 @@ impl Render for BrowserPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status = match &self.state {
             PaneState::Empty => Some(t!("ui.unpacker.no_game_data").into_owned().to_string()),
-            PaneState::Loading => Some(t!("ui.replay.loading").into_owned().to_string()),
+            PaneState::Loading => {
+                return crate::loading::Loading::new(
+                    SharedString::from(format!("unpacker-{}-loading", self.source.id_fragment())),
+                    t!("ui.replay.loading").into_owned(),
+                )
+                .into_any_element();
+            }
             PaneState::Failed(reason) => Some(t!("ui.unpacker.load_failed", error = reason).to_string()),
             PaneState::Ready(_) => None,
         };

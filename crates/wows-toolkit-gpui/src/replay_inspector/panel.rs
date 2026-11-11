@@ -51,6 +51,7 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
@@ -813,6 +814,7 @@ impl Panel for ReplayPanel {
             LoadState::Loaded(loaded) => loaded.title.to_string(),
             LoadState::Failed(_) => t!("ui.messages.replay_load_failed").into_owned(),
         };
+        let loading = matches!(self.state, LoadState::Loading);
         let images = matches!(self.state, LoadState::Loaded(_)).then_some(self.title_icons.as_ref()).flatten();
         let nation = images.and_then(|icons| icons.nation.clone());
         let class = images.and_then(|icons| icons.class.clone());
@@ -821,6 +823,7 @@ impl Panel for ReplayPanel {
             .items_center()
             .max_w(px(300.))
             .min_w_0()
+            .when(loading, |row| row.child(Spinner::new().xsmall()))
             .when_some(nation, |row, image| row.child(img(image).w(px(23.)).h(px(16.)).flex_none()))
             .when_some(class, |row, image| row.child(img(image).size(px(16.)).flex_none()))
             .child(div().min_w_0().truncate().child(title))
@@ -1295,9 +1298,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         .flex_none()
         .items_center()
         .gap_1()
-        .when(refreshing, |this| {
-            this.child(div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.replay.loading").into_owned()))
-        })
+        .when(refreshing, |this| this.child(crate::loading::LoadingLine::new(t!("ui.replay.loading").into_owned())))
         .when_some(export_status, |this, status| {
             this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
         })
@@ -1397,18 +1398,10 @@ impl ReplayPanel {
 impl Render for ReplayPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.state {
-            LoadState::Loading => div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .text_sm()
-                .text_color(crate::theme::text_dim())
-                .child(Spinner::new())
-                .child(t!("ui.replay.loading").into_owned())
-                .into_any_element(),
+            LoadState::Loading => {
+                crate::loading::TableSkeleton::new("replay-panel-loading", t!("ui.replay.loading").into_owned())
+                    .into_any_element()
+            }
             LoadState::Failed(err) => v_flex()
                 .size_full()
                 .p_2()
@@ -1449,7 +1442,7 @@ impl Render for ReplayPanel {
 
                 let context_line = match_context_line(loaded.table.read(cx).match_context(), team_damage);
 
-                v_flex()
+                let content = v_flex()
                     .size_full()
                     .child(header_row(
                         HeaderState {
@@ -1516,8 +1509,8 @@ impl Render for ReplayPanel {
                                         .child(div().flex_1().min_h(px(0.)).child(side_panel)),
                                 )
                             }),
-                    )
-                    .into_any_element()
+                    );
+                content.into_any_element()
             }
         };
 
@@ -1630,6 +1623,41 @@ mod tests {
         .expect("the window is open");
 
         panel.update(cx, |panel, _cx| assert!(panel.side_panel == super::SidePanel::None));
+    }
+
+    /// While a replay is read, the tab shows the outline of its table under
+    /// the label it waits on, and holds still when asked for reduced motion.
+    #[gpui_kit::test]
+    fn a_replay_being_read_shows_its_table_outline(cx: &mut TestAppContext) {
+        use rust_i18n::t;
+
+        cx.update(gpui_kit::init);
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+        let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
+        panel.update(cx, |panel, cx| {
+            panel.state = super::LoadState::Loading;
+            cx.notify();
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let outline = window.try_find("replay-panel-loading").expect("the outline stands in for the table");
+            assert_eq!(outline.label(), Some(t!("ui.replay.loading").as_ref()));
+            assert!(window.try_find("replay-actions").is_none(), "nothing is offered on a replay not yet read");
+            assert_eq!(window.simulate_next_frame(cx), 0, "the outline holds still");
+        })
+        .expect("the window is open");
+
+        cx.update(|cx| cx.set_reduce_motion(false));
+        panel.update(cx, |_panel, cx| cx.notify());
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.simulate_next_frame(cx) > 0, "the outline pulses");
+        })
+        .expect("the window is open");
     }
 
     /// Rendering is offered on the replay being read, so a reader does not

@@ -3332,6 +3332,17 @@ impl TacticsBoard {
     /// The map itself, or what is standing in its way.
     fn render_map(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.drawn.size().is_none() {
+            let said = if self.map.is_none() {
+                t!("ui.tactics.pick_a_map").to_string()
+            } else if self.no_art {
+                t!("ui.tactics.no_map_art").to_string()
+            } else {
+                return div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(crate::loading::Loading::new("tactics-map-drawing", t!("ui.tactics.drawing").to_string()))
+                    .into_any_element();
+            };
             return div()
                 .flex_1()
                 .min_h(px(0.))
@@ -3340,13 +3351,7 @@ impl TacticsBoard {
                 .justify_center()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
-                .child(if self.map.is_none() {
-                    t!("ui.tactics.pick_a_map").to_string()
-                } else if self.no_art {
-                    t!("ui.tactics.no_map_art").to_string()
-                } else {
-                    t!("ui.tactics.drawing").to_string()
-                })
+                .child(said)
                 .into_any_element();
         }
 

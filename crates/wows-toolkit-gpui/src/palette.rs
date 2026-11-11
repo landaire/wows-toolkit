@@ -465,8 +465,12 @@ impl Render for ModeDialog {
             .empty({
                 let dialog = dialog.clone();
                 move |_state, _window, cx| {
-                    let message = dialog.read(cx).empty_message();
-                    div().p_4().text_sm().text_color(crate::theme::text_dim()).child(message)
+                    let dialog = dialog.read(cx);
+                    let message = dialog.empty_message();
+                    if matches!(dialog.source, ModeSource::Ships(ShipList::Pending)) {
+                        return crate::loading::Loading::new("palette-ships-loading", message).top().into_any_element();
+                    }
+                    div().p_4().text_sm().text_color(crate::theme::text_dim()).child(message).into_any_element()
                 }
             })
             .on_query({

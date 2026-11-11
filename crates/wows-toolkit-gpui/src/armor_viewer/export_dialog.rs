@@ -549,11 +549,9 @@ pub(crate) fn render(state: &Entity<ExportDialogState>, dialog: Dialog, _window:
 fn render_size_line(state: &Entity<ExportDialogState>, size: SizeLine) -> impl IntoElement + use<> {
     match size {
         SizeLine::Silent => div().into_any_element(),
-        SizeLine::Waiting => div()
-            .text_xs()
-            .text_color(crate::theme::text_dim())
-            .child(t!("ui.armor.export.loading_details").into_owned())
-            .into_any_element(),
+        SizeLine::Waiting => {
+            crate::loading::LoadingLine::new(t!("ui.armor.export.loading_details").into_owned()).into_any_element()
+        }
         SizeLine::Known(estimate) => {
             let total = humansize::format_size(estimate.total(), humansize::BINARY);
             let geometry = humansize::format_size(estimate.geometry_bytes, humansize::BINARY);
