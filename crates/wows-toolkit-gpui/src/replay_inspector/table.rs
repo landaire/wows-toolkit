@@ -199,7 +199,9 @@ fn measure_column_widths(
                         + status_count as f32 * (icon_default + gap_1);
                     if shows_detail(&row.db_id) {
                         let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
-                        details.insert((row.db_id, col), px(detail_w));
+                        if detail_w > 0. {
+                            details.insert((row.db_id, col), px(detail_w + cell_padding));
+                        }
                         row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
@@ -221,7 +223,9 @@ fn measure_column_widths(
                     };
                     if shows_detail(&row.db_id) {
                         let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
-                        details.insert((row.db_id, col), px(detail_w));
+                        if detail_w > 0. {
+                            details.insert((row.db_id, col), px(detail_w + cell_padding));
+                        }
                         row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
@@ -235,7 +239,9 @@ fn measure_column_widths(
                     let mut row_w = text_width(cell.text.into(), window, false);
                     if shows_detail(&row.db_id) {
                         let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
-                        details.insert((row.db_id, col), px(detail_w));
+                        if detail_w > 0. {
+                            details.insert((row.db_id, col), px(detail_w + cell_padding));
+                        }
                         row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
@@ -246,14 +252,11 @@ fn measure_column_widths(
         widths[col as usize] = px((content_w + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
     }
 
-    // The same padding and room as a fitted column, so a widened column
-    // shows its detail without the cut-off fade.
+    // The same room as a fitted column, so a widened column shows its detail
+    // without the cut-off fade. The detail widths already hold the padding.
     let mut detail_fit: Vec<Option<Pixels>> = vec![None; ReplayColumn::ALL.len()];
     for ((_, col), needs) in &details {
-        if *needs <= px(0.) {
-            continue;
-        }
-        let fit = px((needs.as_f32() + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
+        let fit = px((needs.as_f32() + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
         let slot = &mut detail_fit[*col as usize];
         *slot = Some(slot.map_or(fit, |held| held.max(fit)));
     }
@@ -2258,7 +2261,8 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
         layout.detail_widths.get(&(row.db_id, col)).is_some_and(|needs| *needs > layout.column_widths[col as usize]);
     let fade = |to: Hsla| linear_gradient(90., linear_color_stop(to.opacity(0.), 0.), linear_color_stop(to, 1.));
     let hovered = layout.fade_to_hovered;
-    let detail = v_flex().relative().pt_1().child(detail).when(cut_off, |detail| {
+    // Padded like the cells, which also keeps it clear of the team stripe.
+    let detail = v_flex().relative().pt_1().px_1().child(detail).when(cut_off, |detail| {
         detail.child(
             div()
                 .absolute()
@@ -2333,7 +2337,8 @@ struct RowLayout<'a> {
     scroll_columns: &'a [ReplayColumn],
     scroll_width: f32,
     column_widths: &'a [Pixels],
-    /// What each shown row's detail needs, against `column_widths`.
+    /// What each shown row's detail needs with its padding, against
+    /// `column_widths`.
     detail_widths: &'a HashMap<(AccountId, ReplayColumn), Pixels>,
     /// The colour a cut-off detail fades into at the column's edge.
     fade_to: Hsla,
