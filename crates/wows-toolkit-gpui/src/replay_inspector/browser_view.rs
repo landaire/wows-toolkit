@@ -1706,12 +1706,10 @@ fn node_to_tree_item(
     }
 }
 
-/// Maps a leaf's outcome to its label color: Win/Loss/Draw get the
+/// A leaf's outcome colour for its row edge: Win/Loss/Draw get the
 /// win/loss/draw palette (`table.rs::resolve_color`, the same one the player
-/// table uses), an outcome the index does not know is left uncolored --
-/// matching the egui row, which draws an `Unknown` outcome in the plain text
-/// colour (`listing_row::row_layout_job`).
-fn leaf_label_color(outcome: MatchOutcome) -> Option<Hsla> {
+/// table uses); an outcome the index does not know gets none.
+fn outcome_color(outcome: MatchOutcome) -> Option<Hsla> {
     let outcome = match outcome {
         MatchOutcome::Win => BattleOutcome::Win,
         MatchOutcome::Loss => BattleOutcome::Loss,
@@ -1726,7 +1724,7 @@ fn leaf_label_color(outcome: MatchOutcome) -> Option<Hsla> {
 fn result_edge(outcome: Option<MatchOutcome>) -> impl IntoElement {
     const WIDTH: Pixels = px(3.);
 
-    div().flex_none().w(WIDTH).h_full().when_some(outcome.and_then(leaf_label_color), |edge, color| edge.bg(color))
+    div().flex_none().w(WIDTH).h_full().when_some(outcome.and_then(outcome_color), |edge, color| edge.bg(color))
 }
 
 /// The recording player's rating in a battle, in its band's colour over a
@@ -1836,10 +1834,8 @@ fn render_browser_item(
     // de-emphasised text, reports it. The same two lines the egui row draws
     // (`listing_row::row_layout_job`), as two elements rather than one
     // layout job.
-    let mut identity_el = div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap();
-    if let Some(leaf) = leaf {
-        identity_el = identity_el.when_some(leaf_label_color(leaf.outcome), |el, color| el.text_color(color));
-    }
+    // Plain text colour: the outcome is carried by the row's left edge alone.
+    let identity_el = div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap();
     let identity_el = h_flex()
         .w_full()
         .gap_1()
@@ -2911,8 +2907,8 @@ mod tests {
                 assert_eq!(format!("{:.0}", rating.pr), "1650");
                 assert!(unrated.personal_rating.is_none(), "an unrated battle has no chip");
 
-                assert!(super::leaf_label_color(rated.outcome).is_some(), "a win has an edge");
-                assert!(super::leaf_label_color(unrated.outcome).is_none(), "an unknown outcome has none");
+                assert!(super::outcome_color(rated.outcome).is_some(), "a win has an edge");
+                assert!(super::outcome_color(unrated.outcome).is_none(), "an unknown outcome has none");
             });
         });
     }
