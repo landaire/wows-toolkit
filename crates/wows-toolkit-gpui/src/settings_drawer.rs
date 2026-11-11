@@ -3,8 +3,13 @@
 //! description, and grouped into sections the strip under the search jumps to.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 
+use gpui_kit::component::Size;
+use gpui_kit::component::StyleSized as _;
+use gpui_kit::component::label::Label;
 use gpui_kit::component::switch::Switch;
+use gpui_kit::component::tooltip::Tooltip;
 
 use super::*;
 
@@ -19,6 +24,9 @@ const LANGUAGE_COMBO_WIDTH: Pixels = px(170.);
 
 /// The corner a settings card is drawn with.
 const CARD_RADIUS: Pixels = px(6.);
+
+/// The narrowest a directory field gets before its button drops under it.
+const PATH_FIELD_MIN_WIDTH: Rems = Rems(10.);
 
 /// The formats a battle can be auto-exported in, in the order the egui
 /// combo lists them.
@@ -330,6 +338,11 @@ pub(super) struct SettingsDrawer {
     /// strip marks the section at the top from it, and a scroll waits until
     /// the layout it measures against holds the same children.
     drawn: Vec<Drawn>,
+    /// Where the zoom slider was before a zoom change, until the rows are
+    /// laid out at the new zoom.
+    zoom_slider_anchor: Option<ZoomSliderAnchor>,
+    /// Where the zoom slider is laid out and drawn.
+    zoom_slider: Rc<ZoomSliderSeen>,
     _search_edited: Subscription,
 }
 
@@ -350,6 +363,8 @@ impl SettingsDrawer {
             scroll: ScrollHandle::new(),
             scroll_to: None,
             drawn: Vec::new(),
+            zoom_slider_anchor: None,
+            zoom_slider: Rc::default(),
             _search_edited: search_edited,
         }
     }
@@ -360,6 +375,169 @@ impl SettingsDrawer {
 
     pub(super) fn search(&self) -> &Entity<InputState> {
         &self.search
+    }
+}
+
+/// The zoom slider's top in the window before a zoom change.
+#[derive(Clone, Copy, Debug)]
+struct ZoomSliderAnchor {
+    top: Pixels,
+}
+
+/// The zoom slider's layout node in the frame being drawn, and its bounds
+/// in the frame last drawn.
+#[derive(Default)]
+struct ZoomSliderSeen {
+    layout: Cell<Option<LayoutId>>,
+    drawn: Cell<Option<Bounds<Pixels>>>,
+}
+
+/// Records where the element it wraps is laid out and drawn, for
+/// [`AnchoredScroll`] to read before the element is placed.
+struct LayoutProbe {
+    seen: Rc<ZoomSliderSeen>,
+    child: AnyElement,
+}
+
+impl IntoElement for LayoutProbe {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for LayoutProbe {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let layout = self.child.request_layout(window, cx);
+        self.seen.layout.set(Some(layout));
+
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Self::PrepaintState {
+        self.seen.drawn.set(Some(bounds));
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+/// A scroll area that, given an anchor, scrolls so the zoom slider is drawn
+/// at the anchor. It acts between layout and placement, so the first frame
+/// at a new zoom already shows the slider in place.
+struct AnchoredScroll {
+    scroll: ScrollHandle,
+    slider: Rc<ZoomSliderSeen>,
+    anchor: Option<ZoomSliderAnchor>,
+    child: AnyElement,
+}
+
+impl IntoElement for AnchoredScroll {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for AnchoredScroll {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // What was probed in an earlier frame is not in this frame's layout.
+        self.slider.layout.set(None);
+        self.slider.drawn.set(None);
+
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Self::PrepaintState {
+        if let Some(anchor) = self.anchor
+            && let Some(slider) = self.slider.layout.take()
+        {
+            // The slider's unscrolled top. Not above the area's own top, which
+            // a zoom in moves down as the header over it grows.
+            let slider_top = window.layout_bounds(slider).top();
+            let top = anchor.top.max(bounds.top());
+            let offset = self.scroll.offset();
+            // The scroll area clamps this to its range as it is placed.
+            self.scroll.set_offset(point(offset.x, top - slider_top));
+        }
+
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) {
+        self.child.paint(window, cx);
     }
 }
 
@@ -400,10 +578,33 @@ impl App {
 
         self.settings_drawer.open = false;
         self.settings_drawer.scroll_to = None;
+        self.settings_drawer.zoom_slider_anchor = None;
         // Focus leaves the search with the drawer, back to where the window's
         // shortcuts are heard.
         window.focus(&self.focus_handle, cx);
         cx.notify();
+    }
+
+    /// Notes where the zoom slider is drawn, for the rows laid out at a new
+    /// zoom to be scrolled so it stays there. A slider scrolled out of view
+    /// is left out of view.
+    pub(super) fn anchor_zoom_slider(&mut self) {
+        if !self.settings_drawer.open {
+            return;
+        }
+
+        let Some(slider) = self.settings_drawer.zoom_slider.drawn.get() else { return };
+        if !slider.intersects(&self.settings_drawer.scroll.bounds()) {
+            return;
+        }
+
+        self.settings_drawer.zoom_slider_anchor = Some(ZoomSliderAnchor { top: slider.top() });
+    }
+
+    /// Wraps the zoom slider so the drawer can keep it in place.
+    pub(super) fn probe_zoom_slider(&self, slider: impl IntoElement) -> AnyElement {
+        LayoutProbe { seen: Rc::clone(&self.settings_drawer.zoom_slider), child: slider.into_any_element() }
+            .into_any_element()
     }
 
     fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -568,7 +769,7 @@ impl App {
             children.push(settings_heading(section, drawn.is_empty()));
             drawn.push(Drawn::Heading(section));
             for (position, setting) in in_section.into_iter().enumerate() {
-                children.push(self.render_setting_row(setting, position == 0, position == last, cx));
+                children.push(self.render_setting_row(setting, position == 0, position == last, window, cx));
                 drawn.push(Drawn::Row(setting));
             }
         }
@@ -626,6 +827,8 @@ impl App {
                 )
             }));
 
+        // Taken even when no rows are drawn, so that no later frame applies it.
+        let anchor = self.settings_drawer.zoom_slider_anchor.take();
         let list = if children.is_empty() {
             let said = t!("ui.settings.panel.no_matches").into_owned();
             div()
@@ -639,7 +842,7 @@ impl App {
                 .child(said)
                 .into_any_element()
         } else {
-            v_flex()
+            let list = v_flex()
                 .id("settings-drawer-scroll")
                 .test_support()
                 .flex_1()
@@ -650,7 +853,14 @@ impl App {
                 .pt_3()
                 .pb_4()
                 .children(children)
-                .into_any_element()
+                .into_any_element();
+            AnchoredScroll {
+                scroll: self.settings_drawer.scroll.clone(),
+                slider: Rc::clone(&self.settings_drawer.zoom_slider),
+                anchor,
+                child: list,
+            }
+            .into_any_element()
         };
 
         v_flex().flex_1().min_h(px(0.)).children(count).child(categories).child(list).into_any_element()
@@ -709,20 +919,45 @@ impl App {
         });
     }
 
-    fn render_setting_row(&self, setting: Setting, first: bool, last: bool, cx: &mut Context<Self>) -> AnyElement {
-        let (control, note) = self.setting_control(setting, cx);
+    fn render_setting_row(
+        &self,
+        setting: Setting,
+        first: bool,
+        last: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (control, note) = self.setting_control(setting, window, cx);
 
         let text = v_flex()
-            .min_w(px(0.))
+            // A title narrower than this is a column of a few words, so the
+            // control beside it drops under it instead.
+            .min_w(rems(8.))
             .flex_1()
             .gap_0p5()
-            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(setting.title().into_owned()))
-            .child(div().text_xs().text_color(crate::theme::text_dim()).child(setting.description().into_owned()));
+            .child(
+                div()
+                    .id("settings-row-title")
+                    .test_support()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(setting.title().into_owned()),
+            )
+            .child(
+                div()
+                    .id("settings-row-description")
+                    .test_support()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(setting.description().into_owned()),
+            );
         let body = if setting.stacked() {
             v_flex().gap_2().child(text).children(control).into_any_element()
         } else {
             h_flex()
-                .gap_3()
+                .flex_wrap()
+                .gap_x_3()
+                .gap_y_2()
                 .items_center()
                 .child(text)
                 .children(control.map(|control| div().flex_none().child(control)))
@@ -730,6 +965,8 @@ impl App {
         };
         let note = note.map(|note| {
             div()
+                .id("settings-row-note")
+                .test_support()
                 .text_xs()
                 .text_color(if note.error {
                     rgb(crate::theme::semantic().error).into()
@@ -758,7 +995,12 @@ impl App {
     }
 
     /// The control a setting is changed with, and what is reported under it.
-    fn setting_control(&self, setting: Setting, cx: &mut Context<Self>) -> (Option<AnyElement>, Option<Note>) {
+    fn setting_control(
+        &self,
+        setting: Setting,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (Option<AnyElement>, Option<Note>) {
         let Some(settings) = self.settings() else { return (None, None) };
         let dim = |text: String| Some(Note { text, error: false });
 
@@ -812,7 +1054,7 @@ impl App {
                 let note = self
                     .wows_dir_invalid
                     .then(|| Note { text: t!("ui.messages.wows_dir_invalid").into_owned(), error: true });
-                (Some(self.wows_dir_control(cx)), note)
+                (Some(self.wows_dir_control(window, cx)), note)
             }
             Setting::AutoDump => {
                 let control = setting_switch("cache-auto-dump", setting, settings.auto_dump_game_data).on_click(
@@ -826,7 +1068,7 @@ impl App {
                 );
                 (Some(control.into_any_element()), None)
             }
-            Setting::CacheDirectory => (Some(self.cache_dir_control(cx)), None),
+            Setting::CacheDirectory => (Some(self.cache_dir_control(window, cx)), None),
             Setting::CachedBuilds => {
                 let base = self.cache_base();
                 let stats = self.cache.stats;
@@ -1085,14 +1327,16 @@ impl App {
             .into_any_element()
     }
 
-    fn wows_dir_control(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn wows_dir_control(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
+            .flex_wrap()
             .gap_2()
             .child(
                 div()
                     .flex_1()
+                    .min_w(PATH_FIELD_MIN_WIDTH)
                     .when(self.wows_dir_invalid, |this| this.text_color(rgb(crate::theme::semantic().error)))
-                    .child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()),
+                    .child(path_field(Setting::WowsDirectory, "wows-dir", &self.wows_dir_input, window, cx)),
             )
             .child(
                 Button::new("wows-dir-browse")
@@ -1104,10 +1348,17 @@ impl App {
             .into_any_element()
     }
 
-    fn cache_dir_control(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn cache_dir_control(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
+            .flex_wrap()
             .gap_2()
-            .child(div().flex_1().child(Input::new(&self.cache_dir_input).id("cache-dir").small().w_full()))
+            .child(div().flex_1().min_w(PATH_FIELD_MIN_WIDTH).child(path_field(
+                Setting::CacheDirectory,
+                "cache-dir",
+                &self.cache_dir_input,
+                window,
+                cx,
+            )))
             .child(
                 Button::new("cache-dir-browse")
                     .icon(IconName::FolderOpen)
@@ -1134,7 +1385,9 @@ impl App {
             .flex_wrap()
             .items_center()
             .child(
-                div().text_sm().child(
+                // Without a zero minimum the text keeps its unwrapped width and
+                // runs past the card.
+                div().id("cache-stats").test_support().min_w_0().text_sm().child(
                     t!(
                         "ui.settings.wows.cache.stats",
                         size = humansize::format_size(stats.total_bytes, humansize::BINARY),
@@ -1215,9 +1468,17 @@ impl App {
             let count = self.cache.updates.len();
             let dir = base.clone();
             h_flex()
+                .flex_wrap()
                 .gap_2()
                 .items_center()
-                .child(div().text_sm().child(t!("ui.settings.wows.cache.updates_available", count = count).to_string()))
+                .child(
+                    div()
+                        .id("cache-updates")
+                        .test_support()
+                        .min_w_0()
+                        .text_sm()
+                        .child(t!("ui.settings.wows.cache.updates_available", count = count).to_string()),
+                )
                 .child(
                     Button::new("cache-update-all")
                         .label(t!("ui.settings.wows.cache.update_all").to_string())
@@ -1234,10 +1495,14 @@ impl App {
             let count = self.cache.repair.len();
             let dir = base.clone();
             h_flex()
+                .flex_wrap()
                 .gap_2()
                 .items_center()
                 .child(
                     div()
+                        .id("cache-repair-needed")
+                        .test_support()
+                        .min_w_0()
                         .text_sm()
                         .text_color(rgb(crate::theme::semantic().error))
                         .child(t!("ui.settings.wows.cache.repair_needed", count = count).to_string()),
@@ -1254,11 +1519,14 @@ impl App {
                 )
         });
 
-        let failure = self
-            .cache
-            .failure
-            .clone()
-            .map(|reason| div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason));
+        let failure = self.cache.failure.clone().map(|reason| {
+            div()
+                .id("cache-failure")
+                .test_support()
+                .text_xs()
+                .text_color(rgb(crate::theme::semantic().error))
+                .child(reason)
+        });
 
         v_flex()
             .gap_2()
@@ -1350,6 +1618,7 @@ impl App {
         let missing = !directory.is_empty() && !std::path::Path::new(&directory).is_dir();
 
         let format = h_flex()
+            .flex_wrap()
             .gap_3()
             .items_center()
             .child(setting_switch("auto-export-data", Setting::AutoExport, enabled).on_click(cx.listener(
@@ -1387,24 +1656,38 @@ impl App {
                 div()
                     .id("settings-auto-export-path")
                     .test_support()
-                    .min_w(px(0.))
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_middle()
                     .text_sm()
                     .when(missing, |path| path.text_color(rgb(crate::theme::semantic().error)))
-                    .child(if directory.is_empty() { t!("ui.settings.not_set").into_owned() } else { directory }),
+                    .map(|path| {
+                        if directory.is_empty() {
+                            path.child(t!("ui.settings.not_set").into_owned())
+                        } else {
+                            path.tooltip(path_tooltip(directory.clone().into())).child(directory)
+                        }
+                    }),
             );
 
         v_flex().gap_2().child(format).child(place).into_any_element()
     }
 
     fn twitch_token_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        // The label wraps rather than pushing the button past the card; the
+        // button grows in height to hold it.
+        let label = div().min_w_0().whitespace_normal().child(t!(self.twitch_paste_label_key()).to_string());
         h_flex()
             .child(
                 Button::new("twitch-paste-token")
                     .child(
                         h_flex()
+                            .min_w_0()
                             .gap_1()
                             .child(crate::icons::icon(crate::icons::Glyph::ClipboardList))
-                            .child(t!(self.twitch_paste_label_key()).to_string())
+                            .child(label)
                             .child(
                                 div()
                                     .text_color(rgb(self.twitch_status_tone()))
@@ -1412,6 +1695,10 @@ impl App {
                             ),
                     )
                     .compact()
+                    .max_w_full()
+                    .h_auto()
+                    .min_h_6()
+                    .py_0p5()
                     .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
                     .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
             )
@@ -1423,6 +1710,58 @@ impl App {
 /// setting's title, which is the label beside it.
 fn setting_switch(id: &'static str, setting: Setting, on: bool) -> Switch {
     Switch::new(id).checked(on).small().accessibility_label(setting.title().into_owned())
+}
+
+/// A field for a directory. While it is not focused, the path is drawn over
+/// it shortened in the middle, since a path is told apart by its ends, with
+/// the whole path in a tooltip. An empty field shows its placeholder that way.
+///
+/// The field itself stays under the drawing, transparent rather than hidden,
+/// so that a click still places the caret and Tab still reaches it.
+fn path_field(
+    setting: Setting,
+    input_id: &'static str,
+    state: &Entity<InputState>,
+    window: &Window,
+    cx: &gpui_kit::App,
+) -> AnyElement {
+    let field = state.read(cx);
+    let editing = field.focus_handle(cx).is_focused(window);
+    let shown = (!editing).then(|| {
+        let value = field.value();
+        let (path, placeholder) =
+            if value.is_empty() { (field.presentation().placeholder().clone(), true) } else { (value, false) };
+        h_flex()
+            .id(("settings-path", setting as usize))
+            .test_support()
+            .absolute()
+            .inset_0()
+            .input_px(Size::Small)
+            .input_text_size(Size::Small)
+            .bg(cx.theme().input_background())
+            .border_1()
+            .border_color(cx.theme().input)
+            .rounded(cx.theme().radius)
+            .cursor_text()
+            .when(placeholder, |this| this.text_color(cx.theme().muted_foreground))
+            .tooltip(path_tooltip(path.clone()))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis_middle().child(path))
+    });
+
+    div()
+        .relative()
+        .w_full()
+        .child(div().when(!editing, |input| input.opacity(0.)).child(Input::new(state).id(input_id).small().w_full()))
+        .children(shown)
+        .into_any_element()
+}
+
+/// A tooltip with the whole of a path that is drawn shortened.
+fn path_tooltip(path: SharedString) -> impl Fn(&mut Window, &mut gpui_kit::App) -> AnyView + 'static {
+    move |window, cx| {
+        let path = path.clone();
+        Tooltip::element(move |_window, _cx| Label::new(path.clone())).build(window, cx)
+    }
 }
 
 /// A section's name over its card, which the strip's button for it jumps to.
@@ -1443,15 +1782,18 @@ fn settings_heading(section: SettingsSection, first: bool) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use gpui_kit::AppContext as _;
+    use gpui_kit::Bounds;
     use gpui_kit::ElementId;
     use gpui_kit::Entity;
     use gpui_kit::Pixels;
     use gpui_kit::TestAppContext;
     use gpui_kit::Window;
     use gpui_kit::WindowHandle;
+    use gpui_kit::component::ActiveTheme as _;
     use gpui_kit::component::Root;
     use gpui_kit::point;
     use gpui_kit::px;
+    use gpui_kit::rems;
     use gpui_kit::test::TestWindowExt as _;
     use rust_i18n::t;
 
@@ -1711,6 +2053,180 @@ mod tests {
             window.within("app-tabs").click(1usize, cx);
             window.render_frame(cx);
             assert!(window.try_find(DRAWER).is_none());
+        })
+        .expect("the test window stays open");
+    }
+
+    /// A directory deep enough that its path is wider than the drawer.
+    fn long_directory(base: &std::path::Path) -> std::path::PathBuf {
+        base.join("a-directory-with-a-long-name-for-the-game-data-cache").join("and-a-second-directory-under-it")
+    }
+
+    /// Applies settings that point the cache, the export and the current
+    /// replay at `directory`, and opens the drawer at the cache once it is
+    /// measured.
+    fn show_cache(directory: &std::path::Path, window: WindowHandle<Root>, app: &Entity<App>, cx: &mut TestAppContext) {
+        let mut settings = crate::interaction_tests::test_settings();
+        settings.game_data_cache_dir = directory.to_string_lossy().into_owned();
+        settings.replay.auto_export_path = directory.to_string_lossy().into_owned();
+        settings.current_replay_path = directory.to_path_buf();
+        cx.update_window(window.into(), |_, window, cx| {
+            app.update(cx, |app, cx| app.apply_settings(settings, window, cx));
+            crate::interaction_tests::show_settings(window, SettingsSection::GameDataCache, cx);
+        })
+        .expect("the test window stays open");
+        // The cache is measured off the UI thread; its card follows.
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    fn zoom_to(zoom: f32, window: WindowHandle<Root>, app: &Entity<App>, cx: &mut TestAppContext) {
+        cx.update_window(window.into(), |_, window, cx| {
+            app.update(cx, |app, cx| app.set_zoom(crate::zoom::ZoomFactor::new(zoom), window, cx));
+            // The kit sets the rem size from the theme as the frame starts,
+            // so the second frame is the first laid out at the new size.
+            window.render_frame(cx);
+            window.render_frame(cx);
+        })
+        .expect("the test window stays open");
+    }
+
+    /// Whether `inner` lies within `outer`, give or take rounding.
+    fn contains(outer: Bounds<Pixels>, inner: Bounds<Pixels>) -> bool {
+        let slack = px(0.5);
+
+        inner.left() >= outer.left() - slack
+            && inner.right() <= outer.right() + slack
+            && inner.top() >= outer.top() - slack
+            && inner.bottom() <= outer.bottom() + slack
+    }
+
+    /// At every zoom the slider offers, going up and coming back down, each
+    /// card's text and controls stay inside it and the cards inside the
+    /// drawer. A control beside its title at 1x drops under it at 2x.
+    #[gpui_kit::test]
+    fn every_row_keeps_its_contents_inside_its_card_at_every_zoom(cx: &mut TestAppContext) {
+        use wows_data_mgr::download_repo::BuildUpdateStatus;
+
+        // Rows that must be drawn, so one left out fails rather than passing
+        // unchecked.
+        const EXPECTED_ROWS: [Setting; 8] = [
+            Setting::Language,
+            Setting::Zoom,
+            Setting::WowsDirectory,
+            Setting::CacheDirectory,
+            Setting::CachedBuilds,
+            Setting::CurrentReplayPath,
+            Setting::AutoExport,
+            Setting::TwitchToken,
+        ];
+
+        let base = tempfile::tempdir().expect("a temporary directory can be made");
+        let directory = long_directory(base.path());
+        crate::interaction_tests::cached_build(&directory, "1.0.0", 100);
+        let (window, app) = open(cx);
+        show_cache(&directory, window, &app, cx);
+        // What a check and a failed job leave under the cache's controls.
+        app.update(cx, |app, cx| {
+            app.cache.updates = vec![BuildUpdateStatus { build: 100, version: "1.0.0".to_string() }];
+            app.cache.repair = vec![BuildUpdateStatus { build: 100, version: "1.0.0".to_string() }];
+            app.cache.failure = Some(format!("The repository could not be read: {}", directory.display()));
+            cx.notify();
+        });
+        zoom_to(1.0, window, &app, cx);
+        let actual_size = cx.update(|cx| cx.theme().font_size);
+
+        for zoom in [0.5, 1.0, 1.5, 2.0, 1.5, 1.0, 0.5] {
+            zoom_to(zoom, window, &app, cx);
+            assert_eq!(cx.update(|cx| cx.theme().font_size), actual_size * zoom, "the drawer is drawn at {zoom}x");
+
+            cx.update_window(window.into(), |_, window, _cx| {
+                for id in ["cache-stats", "cache-updates", "cache-repair-needed", "cache-failure"] {
+                    assert!(window.try_find(id).is_some(), "{id} is drawn at {zoom}x");
+                }
+                let scroll = window.find(SCROLL).bounds();
+                for setting in Setting::ALL {
+                    let Some(card) = window.try_find(row(setting)) else {
+                        assert!(!EXPECTED_ROWS.contains(&setting), "{setting:?} is drawn at {zoom}x");
+                        continue;
+                    };
+                    let card = card.bounds();
+                    assert!(
+                        card.left() >= scroll.left() && card.right() <= scroll.right(),
+                        "{setting:?} at {zoom}x: the card {card:?} runs out of the drawer {scroll:?}"
+                    );
+                    for element in window.within(row(setting)).elements() {
+                        assert!(
+                            contains(card, element.bounds()),
+                            "{setting:?} at {zoom}x: {:?} at {:?} runs out of its card {card:?}",
+                            element.path().last(),
+                            element.bounds()
+                        );
+                    }
+                }
+
+                let language = window.within(row(Setting::Language)).find("settings-language").bounds();
+                let said = window.within(row(Setting::Language)).find("settings-row-description").bounds();
+                if zoom == 1.0 {
+                    assert!(language.left() >= said.right(), "at 1x the combo sits beside its title");
+                }
+                if zoom == 2.0 {
+                    assert!(language.top() >= said.bottom(), "at 2x the combo drops under its title");
+                }
+            })
+            .expect("the test window stays open");
+        }
+    }
+
+    /// A cache directory wider than its field is drawn shortened inside the
+    /// field, and a pointer resting on it shows the whole path. Focus, by a
+    /// click or by Tab, puts the field itself in front.
+    #[gpui_kit::test]
+    fn a_long_cache_directory_is_shortened_with_the_whole_path_in_a_tooltip(cx: &mut TestAppContext) {
+        let base = tempfile::tempdir().expect("a temporary directory can be made");
+        let directory = long_directory(base.path());
+        let whole = directory.to_string_lossy().into_owned();
+        let (window, app) = open(cx);
+        show_cache(&directory, window, &app, cx);
+        let shown = ("settings-path", Setting::CacheDirectory as usize);
+        let whole_shown = |window: &Window| {
+            gpui_kit::base::test_support::texts(window).iter().any(|text| text.text() == whole && text.visible())
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let field = window.find(shown).bounds();
+            // The field's text size, which is `text_sm`.
+            let text_size = rems(0.875).to_pixels(window.rem_size());
+            let run = window.text_style().to_run(whole.len());
+            let unshortened = window.text_system().layout_line(&whole, text_size, &[run], None).width;
+            assert!(unshortened > field.size.width, "the path ({unshortened:?}) is wider than its field {field:?}");
+            assert!(contains(window.find(row(Setting::CacheDirectory)).bounds(), field), "the field fits its card");
+            assert!(!whole_shown(window), "the whole path is not shown before the pointer rests on it");
+            window.hover(shown, cx);
+        })
+        .expect("the test window stays open");
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(whole_shown(window), "the tooltip shows the whole path");
+
+            window.click(shown, cx);
+            window.render_frame(cx);
+            assert!(window.try_find(shown).is_none(), "a click puts the field itself in front");
+            assert_eq!(window.find("cache-dir").focused(), Some(true), "ready for typing");
+            assert_eq!(window.find("cache-dir").value(), Some(whole.as_str()), "holding the whole path");
+
+            window.press("tab", cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("cache-dir").focused(), Some(false));
+            assert!(window.try_find(shown).is_some(), "leaving the field shortens the path again");
+
+            window.press("shift-tab", cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("cache-dir").focused(), Some(true), "Tab reaches the field");
+            assert!(window.try_find(shown).is_none());
         })
         .expect("the test window stays open");
     }

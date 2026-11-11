@@ -1246,7 +1246,7 @@ fn the_recent_games_limit_can_be_switched_on_and_off(cx: &mut TestAppContext) {
 }
 
 /// Writes a cached build under `base`, named the way the dumper names one.
-fn cached_build(base: &std::path::Path, version: &str, build: u32) {
+pub(crate) fn cached_build(base: &std::path::Path, version: &str, build: u32) {
     let dir = base.join(format!("{version}_{build}"));
     std::fs::create_dir_all(&dir).expect("the build directory can be made");
     std::fs::write(dir.join("metadata.toml"), "").expect("the metadata can be written");

@@ -2454,19 +2454,34 @@ impl App {
         let shown = self.zoom_slider.read(cx).value().end();
 
         h_flex()
+            .flex_wrap()
             .gap_2()
             .items_center()
-            .child(crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(&self.zoom_slider)))
-            .child(div().text_sm().w(px(40.)).child(format!("{shown:.2}")))
+            // The kit draws the thumb 8px left of its value whatever the
+            // thumb's size, so the track is inset by that much on each side.
+            .child(
+                self.probe_zoom_slider(
+                    crate::ui::boxed(px(176.), crate::ui::SELECT_SMALL_HEIGHT)
+                        .px(px(8.))
+                        .child(Slider::new(&self.zoom_slider)),
+                ),
+            )
+            // Wide enough for "2.00" at any zoom, so the reset button holds still.
+            .child(
+                crate::ui::tabular(div().id("zoom-value").test_support().flex_none().min_w(rems(2.5)).text_sm())
+                    .child(format!("{shown:.2}")),
+            )
             .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(
                 cx.listener(|this, _event: &ClickEvent, window, cx| this.set_zoom(ZoomFactor::DEFAULT, window, cx)),
             ))
     }
 
-    /// Applies `zoom`, saves it, and moves the slider to it.
+    /// Applies `zoom`, saves it, and moves the slider to it. An open drawer
+    /// keeps the zoom row where it is drawn.
     fn set_zoom(&mut self, zoom: ZoomFactor, window: &mut Window, cx: &mut Context<Self>) {
         self.zoom_slider.update(cx, |slider, cx| slider.set_value(zoom.get(), window, cx));
         if zoom != self.zoom {
+            self.anchor_zoom_slider();
             self.zoom = zoom;
             theme::apply_egui_theme(self.theme_preview.unwrap_or(self.theme), zoom, window, cx);
             settings_store::save(keys::ZOOM_FACTOR, &zoom, cx);

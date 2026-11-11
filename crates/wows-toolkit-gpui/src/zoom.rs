@@ -114,11 +114,13 @@ mod tests {
     use gpui_kit::Pixels;
     use gpui_kit::PlatformInput;
     use gpui_kit::Point;
+    use gpui_kit::ScrollDelta;
     use gpui_kit::TestAppContext;
     use gpui_kit::WindowHandle;
     use gpui_kit::component::ActiveTheme as _;
     use gpui_kit::component::Root;
     use gpui_kit::point;
+    use gpui_kit::px;
     use gpui_kit::test::TestWindowExt as _;
     use wows_toolkit_viewmodel::settings::keys;
 
@@ -128,6 +130,9 @@ mod tests {
     use crate::interaction_tests::open_app_in_root;
     use crate::interaction_tests::show_settings;
     use crate::interaction_tests::test_settings;
+
+    const ZOOM_ROW: (&str, usize) = ("settings-row", Setting::Zoom as usize);
+    const SCROLL: &str = "settings-drawer-scroll";
 
     #[test]
     fn steps_land_on_tenths_and_stop_at_the_ends() {
@@ -270,17 +275,28 @@ mod tests {
         assert_eq!(saved_zoom(), None);
     }
 
-    /// Opens the drawer at the zoom row, presses the slider's thumb at 1x
-    /// and drags it to 1.55, checking that no step rescales the window or
-    /// saves anything. Returns where the pointer was let go.
+    /// Opens the drawer at the zoom row and drags its slider to 1.55.
     fn drag_to_1_55(app: &Harness, cx: &mut TestAppContext) -> Point<Pixels> {
+        show_zoom_row(app, cx);
+
+        drag_shown_slider_to_1_55(app, cx)
+    }
+
+    fn show_zoom_row(app: &Harness, cx: &mut TestAppContext) {
         // The reset's note sits over the gear that opens the drawer.
         cx.executor().advance_clock(std::time::Duration::from_secs(30));
         cx.run_until_parked();
+        cx.update_window(app.window.into(), |_, window, cx| show_settings(window, SettingsSection::Appearance, cx))
+            .expect("the test window stays open");
+    }
+
+    /// Presses the drawn zoom slider's thumb at 1x and drags it to 1.55,
+    /// checking that no step rescales the window or saves anything. Returns
+    /// where the pointer was let go.
+    fn drag_shown_slider_to_1_55(app: &Harness, cx: &mut TestAppContext) -> Point<Pixels> {
         let track = cx
-            .update_window(app.window.into(), |_, window, cx| {
-                show_settings(window, SettingsSection::Appearance, cx);
-                window.within(("settings-row", Setting::Zoom as usize)).find("slider-bar-container").bounds()
+            .update_window(app.window.into(), |_, window, _| {
+                window.within(ZOOM_ROW).find("slider-bar-container").bounds()
             })
             .expect("the test window stays open");
         let saves = crate::settings_store::saved_for_test().len();
@@ -342,7 +358,7 @@ mod tests {
         cx.simulate_keystrokes(app.window.into(), "escape");
         cx.update_window(app.window.into(), |_, window, cx| {
             window.render_frame(cx);
-            assert!(window.try_find(("settings-row", Setting::Zoom as usize)).is_none(), "the drawer is shut");
+            assert!(window.try_find(ZOOM_ROW).is_none(), "the drawer is shut");
         })
         .expect("the test window stays open");
 
@@ -355,5 +371,95 @@ mod tests {
         .expect("the test window stays open");
         cx.simulate_keystrokes(app.window.into(), "secondary--");
         assert_zoom_applied_and_saved(&app, 1.5, cx);
+    }
+
+    fn draw(app: &Harness, cx: &mut TestAppContext) {
+        cx.update_window(app.window.into(), |_, window, cx| window.render_frame(cx))
+            .expect("the test window stays open");
+    }
+
+    /// The zoom slider's top in the window, in the frame last drawn.
+    fn zoom_slider_top(app: &Harness, cx: &mut TestAppContext) -> Pixels {
+        cx.update_window(app.window.into(), |_, window, _| {
+            window.within(ZOOM_ROW).find("slider-bar-container").bounds().top()
+        })
+        .expect("the test window stays open")
+    }
+
+    fn assert_slider_kept(app: &Harness, before: Pixels, change: &str, cx: &mut TestAppContext) {
+        let after = zoom_slider_top(app, cx);
+        assert!((after - before).abs() < px(1.), "{change} moves the zoom slider from {before:?} to {after:?}");
+    }
+
+    /// Each way of changing the zoom keeps the zoom slider where it was
+    /// drawn, as far as the list can scroll.
+    #[gpui_kit::test]
+    fn a_zoom_change_keeps_the_zoom_slider_in_place(cx: &mut TestAppContext) {
+        let app = Harness::open(cx);
+        show_zoom_row(&app, cx);
+        cx.update_window(app.window.into(), |_, window, cx| {
+            let list = window.find(SCROLL).bounds();
+            let slider = window.within(ZOOM_ROW).find("slider-bar-container").bounds();
+            window.scroll(SCROLL, ScrollDelta::Pixels(point(px(0.), list.center().y - slider.top())), cx);
+        })
+        .expect("the test window stays open");
+        let start = zoom_slider_top(&app, cx);
+        let list = cx
+            .update_window(app.window.into(), |_, window, _| window.find(SCROLL).bounds())
+            .expect("the test window stays open");
+        assert!((start - list.center().y).abs() < px(1.), "the slider starts mid-list");
+
+        app.press(&["secondary-="; 5].join(" "), 1.5, cx);
+        draw(&app, cx);
+        assert_slider_kept(&app, start, "zooming in to 1.5", cx);
+        app.press(&["secondary-="; 5].join(" "), 2.0, cx);
+        draw(&app, cx);
+        assert_slider_kept(&app, start, "zooming in to 2.0", cx);
+
+        // At 0.5 the rows over it are too short to keep it there, so the list
+        // stops at the top of its range, which scrolling up then shows.
+        app.press(&["secondary--"; 15].join(" "), 0.5, cx);
+        draw(&app, cx);
+        let shrunk = zoom_slider_top(&app, cx);
+        assert!(shrunk < start - px(1.), "the slider rises to {shrunk:?} from {start:?}");
+        cx.update_window(app.window.into(), |_, window, cx| {
+            window.scroll(SCROLL, ScrollDelta::Pixels(point(px(0.), px(1000.))), cx);
+        })
+        .expect("the test window stays open");
+        assert_slider_kept(&app, shrunk, "scrolling up at the top of the range", cx);
+
+        app.press("secondary-0", 1.0, cx);
+        draw(&app, cx);
+        let reset = zoom_slider_top(&app, cx);
+
+        let end = drag_shown_slider_to_1_55(&app, cx);
+        assert_slider_kept(&app, reset, "the drag before its release", cx);
+        // Draws the one frame after the release: the first at the new zoom.
+        release(&app, end, cx);
+        assert_zoom_applied_and_saved(&app, 1.55, cx);
+        assert_slider_kept(&app, reset, "a slider drag", cx);
+    }
+
+    /// A zoom shortcut pressed while the drawer shows another section leaves
+    /// the drawer where it is rather than bringing the zoom slider back.
+    #[gpui_kit::test]
+    fn a_zoom_change_does_not_bring_back_a_zoom_slider_out_of_view(cx: &mut TestAppContext) {
+        let app = Harness::open(cx);
+        show_zoom_row(&app, cx);
+        let in_view = |window: &mut gpui_kit::Window| {
+            let list = window.find(SCROLL).bounds();
+            window.within(ZOOM_ROW).find("slider-bar-container").bounds().intersects(&list)
+        };
+        cx.update_window(app.window.into(), |_, window, cx| {
+            window.scroll(SCROLL, ScrollDelta::Pixels(point(px(0.), px(-5000.))), cx);
+            assert!(!in_view(window), "the slider is scrolled out of view");
+        })
+        .expect("the test window stays open");
+
+        app.press("secondary-=", 1.1, cx);
+        draw(&app, cx);
+
+        cx.update_window(app.window.into(), |_, window, _| assert!(!in_view(window), "the slider stays out of view"))
+            .expect("the test window stays open");
     }
 }
