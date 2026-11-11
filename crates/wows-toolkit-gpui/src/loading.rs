@@ -1,7 +1,7 @@
 //! What a view draws in place of content it is still waiting for.
 //!
-//! The spinner and the skeleton pulse hold still when the system asks for
-//! reduced motion.
+//! The spinner, the bar sweep and the skeleton pulse hold still when the
+//! system asks for reduced motion.
 
 use std::time::Duration;
 
@@ -18,21 +18,22 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-/// How long a wait may last, which sets how often its spinner redraws.
+/// How long a wait may last, which sets how often its spinner or bar redraws.
 #[derive(Clone, Copy)]
 enum Pace {
-    /// Work that finishes on its own: the spinner turns every frame.
+    /// Work that finishes on its own: the spinner and bar move every frame.
     Bounded,
-    /// A wait with no known end, such as for another program: every spinner
-    /// frame re-renders the owning view, so it turns at a capped rate.
+    /// A wait with no known end, such as for another program: every frame
+    /// re-renders the owning view, so the motion runs at a capped rate.
     Unbounded,
 }
 
 impl Pace {
+    /// Low enough that an open-ended wait costs little, high enough that the
+    /// motion still reads as moving.
+    const UNBOUNDED_FPS: f32 = 10.;
+
     fn spinner(self, size: Size) -> AnyElement {
-        // Low enough that an open-ended wait costs little, high enough that
-        // the arc still reads as turning.
-        const UNBOUNDED_FPS: f32 = 10.;
         const UNBOUNDED_TURN: Duration = Duration::from_millis(1200);
 
         match self {
@@ -43,12 +44,74 @@ impl Pace {
             Pace::Unbounded => div()
                 .child(Icon::new(IconName::LoaderCircle).with_size(size).with_animation(
                     "loading-spinner",
-                    Animation::new(UNBOUNDED_TURN).repeat().with_max_fps(UNBOUNDED_FPS),
+                    Animation::new(UNBOUNDED_TURN).repeat().with_max_fps(Self::UNBOUNDED_FPS),
                     |icon, turn| icon.transform(Transformation::rotate(percentage(turn))),
                 ))
                 .into_any_element(),
         }
     }
+
+    /// A bar with a segment sweeping across its track, for work whose share
+    /// done is not known. The kit's indeterminate bar cannot cap its rate.
+    fn sweep(self, cx: &App) -> AnyElement {
+        const SWEEP: Duration = Duration::from_millis(1400);
+        const SEGMENT: f32 = 0.35;
+
+        let color = cx.theme().tokens.progress_bar;
+        let radius = cx.theme().radius.min(BAR_HEIGHT / 2.);
+        let segment = div().absolute().top_0().h_full().w(relative(SEGMENT)).rounded(radius).bg(color);
+        let segment = if cx.reduce_motion() {
+            segment.left(relative((1. - SEGMENT) / 2.)).into_any_element()
+        } else {
+            let animation = Animation::new(SWEEP).repeat().with_easing(ease_in_out);
+            let animation = match self {
+                Pace::Bounded => animation,
+                Pace::Unbounded => animation.with_max_fps(Self::UNBOUNDED_FPS),
+            };
+            // Enters past the left edge and leaves past the right one.
+            segment
+                .with_animation("loading-sweep", animation, |segment, delta| {
+                    segment.left(relative(-SEGMENT + delta * (1. + SEGMENT)))
+                })
+                .into_any_element()
+        };
+
+        gpui_kit::base::Progress::new("loading-progress")
+            .indeterminate(true)
+            .relative()
+            .w_full()
+            .h(BAR_HEIGHT)
+            .rounded(radius)
+            .overflow_hidden()
+            .bg(color.opacity(0.2))
+            .child(segment)
+            .into_any_element()
+    }
+}
+
+/// Height of the bar in a centred wait, the kit's default bar height.
+const BAR_HEIGHT: Pixels = px(8.);
+
+/// The box centred in a content area that holds the label of a wait above
+/// its bar.
+fn card(label: SharedString, bar: AnyElement, cx: &App) -> Div {
+    const CARD_WIDTH: Pixels = px(280.);
+
+    let theme = cx.theme();
+    v_flex()
+        .w(CARD_WIDTH)
+        .max_w_full()
+        .gap_3()
+        .px_6()
+        .py_5()
+        .bg(theme.popover)
+        .text_color(theme.popover_foreground)
+        .border_1()
+        .border_color(theme.border)
+        .rounded(theme.radius)
+        .shadow_md()
+        .child(div().text_sm().text_center().child(label))
+        .child(bar)
 }
 
 /// How much of a counted piece of work is finished.
@@ -75,8 +138,8 @@ enum Placement {
     Top,
 }
 
-/// A spinner and a label standing in for content that is not ready, with a
-/// bar beneath when the work counts its steps.
+/// A label standing in for content that is not ready, with a bar showing how
+/// much of the work is finished, or sweeping while that is not known.
 #[derive(IntoElement)]
 pub struct Loading {
     id: ElementId,
@@ -113,31 +176,25 @@ impl Loading {
 }
 
 impl RenderOnce for Loading {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        const CENTERED_BAR_WIDTH: Pixels = px(240.);
-
-        // The bar takes no label of its own: the root already names the wait.
-        let bar = self.counts.and_then(Counts::percent).map(|percent| Progress::new("loading-progress").value(percent));
-        let root = v_flex()
-            .id(self.id)
-            .test_support()
-            .aria_label(self.label.clone())
-            .gap_2()
-            .text_sm()
-            .text_color(crate::theme::text_dim());
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let percent = self.counts.and_then(Counts::percent);
+        let root = v_flex().id(self.id).test_support().aria_label(self.label.clone());
 
         match self.placement {
-            Placement::Centered => root
-                .size_full()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .child(self.pace.spinner(Size::Large))
-                .child(div().text_center().child(self.label))
-                .when_some(bar, |this, bar| this.child(div().w(CENTERED_BAR_WIDTH).max_w_full().child(bar))),
+            Placement::Centered => {
+                // The bar takes no label of its own: the root already names the wait.
+                let bar = match percent {
+                    Some(percent) => Progress::new("loading-progress").value(percent).into_any_element(),
+                    None => self.pace.sweep(cx),
+                };
+                root.size_full().items_center().justify_center().p_4().child(card(self.label, bar, cx))
+            }
             Placement::Top => root
                 .w_full()
                 .p_2()
+                .gap_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
                 .child(
                     h_flex()
                         .gap_2()
@@ -145,7 +202,7 @@ impl RenderOnce for Loading {
                         .child(self.pace.spinner(Size::Medium))
                         .child(div().min_w_0().child(self.label)),
                 )
-                .when_some(bar, |this, bar| this.child(bar)),
+                .when_some(percent, |this, percent| this.child(Progress::new("loading-progress").value(percent))),
         }
     }
 }
@@ -184,7 +241,8 @@ impl RenderOnce for LoadingLine {
 }
 
 /// The outline of a header line over a table of players, pulsing where the
-/// table will be drawn once it is read, with the label of what it waits for.
+/// table will be drawn once it is read, under a centred card with the label
+/// of what it waits for.
 #[derive(IntoElement)]
 pub struct TableSkeleton {
     id: ElementId,
@@ -223,7 +281,7 @@ impl RenderOnce for TableSkeleton {
             .py_1()
             .child(block(px(56.), px(18.)))
             .child(block(px(40.), px(18.)))
-            .child(div().text_sm().text_color(crate::theme::text_dim()).child(self.label.clone()))
+            .child(block(px(160.), TEXT_HEIGHT))
             .child(div().flex_1())
             .child(block(px(72.), px(22.)))
             .child(block(px(22.), px(22.)));
@@ -269,7 +327,21 @@ impl RenderOnce for TableSkeleton {
             |outline, delta| outline.opacity(1. - delta * PULSE_DEPTH),
         );
 
-        v_flex().id(self.id).test_support().aria_label(self.label).size_full().overflow_hidden().child(outline)
+        let overlay = div().absolute().inset_0().flex().items_center().justify_center().p_4().child(card(
+            self.label.clone(),
+            Pace::Bounded.sweep(cx),
+            cx,
+        ));
+
+        div()
+            .id(self.id)
+            .test_support()
+            .aria_label(self.label)
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .child(outline)
+            .child(overlay)
     }
 }
 
@@ -309,13 +381,26 @@ mod tests {
     fn only_a_wait_with_an_end_redraws_every_frame(cx: &mut TestAppContext) {
         let bounded = open(cx, || Loading::new("wait", "Reading"));
         cx.update_window(bounded, |_, window, cx| {
-            assert!(window.simulate_next_frame(cx) > 0, "a bounded wait turns every frame");
+            assert!(window.simulate_next_frame(cx) > 0, "a bounded wait sweeps every frame");
         })
         .expect("the window is open");
 
         let unbounded = open(cx, || Loading::new("wait", "Waiting").unbounded());
         cx.update_window(unbounded, |_, window, cx| {
-            assert_eq!(window.simulate_next_frame(cx), 0, "an open-ended wait turns on a timer instead");
+            assert_eq!(window.simulate_next_frame(cx), 0, "an open-ended wait sweeps on a timer instead");
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn a_wait_holds_still_under_reduced_motion(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let window: AnyWindowHandle =
+            cx.open_window(size(px(400.), px(300.)), |_, _| Host(|| Loading::new("wait", "Reading"))).into();
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.simulate_next_frame(cx), 0);
         })
         .expect("the window is open");
     }
