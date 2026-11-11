@@ -215,8 +215,12 @@ pub fn running(cx: &App) -> Vec<Job> {
     running.0.iter().filter(|entry| entry.owner.is_upgradable()).map(|entry| entry.job.clone()).collect()
 }
 
-/// The bar: `toggles` on the left, then `extras`, then `jobs` on the right.
+/// The bar: the toggles for left and bottom panels on the left, then
+/// `extras`; `jobs`, then the toggles for right panels, at the right end, so
+/// each toggle sits on the side of the panel it opens.
 pub fn render(toggles: Vec<PanelToggle>, extras: Vec<AnyElement>, jobs: Vec<Job>, cx: &App) -> AnyElement {
+    let (right, near): (Vec<PanelToggle>, Vec<PanelToggle>) =
+        toggles.into_iter().partition(|toggle| toggle.side == PanelSide::Right);
     h_flex()
         .id("app-status-strip")
         .test_support()
@@ -230,10 +234,11 @@ pub fn render(toggles: Vec<PanelToggle>, extras: Vec<AnyElement>, jobs: Vec<Job>
         .bg(crate::theme::surface())
         .text_xs()
         .text_color(crate::theme::text_dim())
-        .children(toggles.into_iter().map(PanelToggle::render))
+        .children(near.into_iter().map(PanelToggle::render))
         .children(extras)
         .child(div().flex_1())
         .children(work(jobs))
+        .children(right.into_iter().map(PanelToggle::render))
         .into_any_element()
 }
 
