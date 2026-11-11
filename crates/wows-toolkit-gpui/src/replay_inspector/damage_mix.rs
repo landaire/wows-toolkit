@@ -1,14 +1,10 @@
 //! Damage by type: the kind each results key counts toward, the colour each
-//! kind is drawn in, and the segments of a player's damage-mix bar. Shell,
-//! torpedo and aircraft colours are the replay renderer's, so a type reads
-//! the same in the table as on the minimap.
+//! kind is drawn in, and the segments of a player's damage-mix bar.
 
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
-use wows_minimap_renderer::renderer::COLOR_PLANES;
-use wows_minimap_renderer::renderer::COLOR_TORP;
-use wows_minimap_renderer::renderer::ammo_type_color;
+use wows_minimap_renderer::renderer::Armament;
 use wows_replay_insights::battle_report::DAMAGE_ADBOMB;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_AP;
 use wows_replay_insights::battle_report::DAMAGE_ATBA_AP_MANUAL;
@@ -49,9 +45,6 @@ const BAR_HEIGHT: Pixels = px(4.);
 /// Side of the colour key square beside a listed type.
 pub const SWATCH_SIZE: f32 = 8.0;
 
-/// A kind below this percent of the total is drawn as part of `Other`.
-const MERGE_BELOW_PERCENT: u64 = 3;
-
 /// What a damage type counts toward in the bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DamageKind {
@@ -83,7 +76,7 @@ impl DamageKind {
 
     /// Drawn after the others in this order, whatever their size, so the
     /// same types sit in the same place from row to row.
-    const FIXED_TAIL: [Self; 3] = [Self::Torpedo, Self::Fire, Self::Flood];
+    const FIXED_TAIL: [Self; 4] = [Self::Torpedo, Self::Fire, Self::Flood, Self::Other];
 
     /// The kind a results key (`DAMAGE_*`) counts toward.
     pub fn of_key(key: &str) -> Self {
@@ -117,22 +110,29 @@ impl DamageKind {
         }
     }
 
-    /// The renderer's colours are tuned for a dark map; on a light theme
-    /// each is darkened so a thin bar still stands off the panel.
-    pub fn color(self) -> Hsla {
-        let packed = match self {
-            Self::Ap => ammo_type_color(&AmmoType::AP),
-            Self::Sap => ammo_type_color(&AmmoType::SAP),
-            Self::He => ammo_type_color(&AmmoType::HE),
-            Self::Torpedo => COLOR_TORP,
-            Self::Plane => COLOR_PLANES,
-            Self::Secondary => [235, 140, 215],
+    /// The kind's colour before the theme's adjustment. Weapon kinds take
+    /// the replay renderer's armament colour. The others have none there and
+    /// are chosen to stay apart from that set: fire yellow, flooding deep
+    /// blue, ramming brown, anything else grey.
+    fn rgb(self) -> [u8; 3] {
+        match self {
+            Self::Ap => Armament::MainBattery(AmmoType::AP).color(),
+            Self::Sap => Armament::MainBattery(AmmoType::SAP).color(),
+            Self::He => Armament::MainBattery(AmmoType::HE).color(),
+            Self::Secondary => Armament::Secondaries.color(),
+            Self::Torpedo => Armament::Torpedoes.color(),
+            Self::Plane => Armament::Planes.color(),
             Self::Fire => [255, 225, 70],
             Self::Flood => [80, 110, 235],
             Self::Ram => [180, 130, 90],
             Self::Other => [160, 160, 160],
-        };
-        let [r, g, b] = packed;
+        }
+    }
+
+    /// The kind's colour, the same wherever the kind is drawn. A light theme
+    /// darkens every colour by one factor so a thin bar stands off the panel.
+    pub fn color(self) -> Hsla {
+        let [r, g, b] = self.rgb();
         let color: Hsla = rgb(u32::from_be_bytes([0, r, g, b])).into();
         if crate::theme::is_dark_mode() { color } else { Hsla { l: color.l * 0.72, ..color } }
     }
@@ -189,9 +189,7 @@ impl DamageMix {
         for line in lines {
             by_kind[line.kind as usize] = by_kind[line.kind as usize].saturating_add(line.amount);
         }
-        let small = |amount: u64| u128::from(amount) * 100 < u128::from(total) * u128::from(MERGE_BELOW_PERCENT);
 
-        let mut other = 0;
         let mut ranked = Vec::new();
         let mut fixed = Vec::new();
         for kind in DamageKind::ALL {
@@ -199,12 +197,12 @@ impl DamageMix {
             if amount == 0 {
                 continue;
             }
-            if kind == DamageKind::Other || small(amount) {
-                other = amount.saturating_add(other);
-            } else if DamageKind::FIXED_TAIL.contains(&kind) {
-                fixed.push(Segment { kind, amount });
+
+            let segment = Segment { kind, amount };
+            if DamageKind::FIXED_TAIL.contains(&kind) {
+                fixed.push(segment);
             } else {
-                ranked.push(Segment { kind, amount });
+                ranked.push(segment);
             }
         }
 
@@ -212,21 +210,12 @@ impl DamageMix {
         ranked.sort_by_key(|segment| std::cmp::Reverse(segment.amount));
         let mut segments = ranked;
         segments.extend(fixed);
-        if other > 0 {
-            segments.push(Segment { kind: DamageKind::Other, amount: other });
-        }
 
         Some(Self { segments, total })
     }
 
     pub fn segments(&self) -> &[Segment] {
         &self.segments
-    }
-
-    /// The kind whose segment holds `kind`: itself, or `Other` when it was
-    /// too small to draw on its own.
-    pub fn shown_kind(&self, kind: DamageKind) -> DamageKind {
-        if self.segments.iter().any(|segment| segment.kind == kind) { kind } else { DamageKind::Other }
     }
 
     /// `amount` as a percent of this mix's total.
@@ -258,7 +247,7 @@ impl DamageMix {
         let mut amounts = column().items_end();
         let mut percents = column().items_end();
         for line in lines {
-            keys = keys.child(h_flex().gap_1().child(swatch(self.shown_kind(line.kind))).child(line.label));
+            keys = keys.child(h_flex().gap_1().child(swatch(line.kind)).child(line.label));
             amounts = amounts.child(separate_number(line.amount));
             percents = percents.child(format!("{:.0}%", self.percent(line.amount)));
         }
@@ -289,6 +278,10 @@ pub fn swatch(kind: DamageKind) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
+    use wows_minimap_renderer::renderer::Armament;
+    use wows_replay_insights::battle_report::DAMAGE_DESCRIPTIONS;
+    use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
+
     use super::DamageKind;
     use super::DamageLine;
     use super::DamageMix;
@@ -327,20 +320,70 @@ mod tests {
     }
 
     #[test]
-    fn small_kinds_merge_into_other_at_the_end() {
+    fn a_small_kind_keeps_its_own_segment() {
         let lines = [
             line(DamageKind::Ap, 9_000),
             line(DamageKind::Ram, 200),
-            line(DamageKind::Fire, 250),
             line(DamageKind::Other, 100),
+            line(DamageKind::Fire, 250),
             line(DamageKind::Sap, 450),
         ];
 
         let mix = DamageMix::of(&lines).expect("damage was dealt");
 
-        assert_eq!(kinds(&mix), vec![(DamageKind::Ap, 9_000), (DamageKind::Sap, 450), (DamageKind::Other, 550)]);
-        assert_eq!(mix.shown_kind(DamageKind::Fire), DamageKind::Other);
-        assert_eq!(mix.shown_kind(DamageKind::Sap), DamageKind::Sap);
+        assert_eq!(
+            kinds(&mix),
+            vec![
+                (DamageKind::Ap, 9_000),
+                (DamageKind::Sap, 450),
+                (DamageKind::Ram, 200),
+                (DamageKind::Fire, 250),
+                (DamageKind::Other, 100),
+            ]
+        );
+    }
+
+    /// A minor share in one row and a major one in another, dealt and
+    /// received alike, draw in the renderer's torpedo colour.
+    #[test]
+    fn a_kind_has_one_colour_in_every_row_and_direction() {
+        let torpedo_color = |descriptions: &'static [(&'static str, &'static str)], torpedoes: u64| {
+            let lines = DamageLine::from_results(descriptions, |key| match key {
+                "damage_tpd_normal" => torpedoes,
+                "damage_main_he" => 10_000,
+                _ => 0,
+            });
+            let mix = DamageMix::of(&lines).expect("damage was dealt");
+            mix.segments().iter().find(|segment| segment.amount == torpedoes).map(|segment| segment.kind.rgb())
+        };
+
+        let colors = [
+            torpedo_color(&DAMAGE_DESCRIPTIONS, 100),
+            torpedo_color(&DAMAGE_DESCRIPTIONS, 30_000),
+            torpedo_color(&RECEIVED_DAMAGE_DESCRIPTIONS, 100),
+            torpedo_color(&RECEIVED_DAMAGE_DESCRIPTIONS, 30_000),
+        ];
+
+        assert_eq!(colors, [Some(Armament::Torpedoes.color()); 4]);
+    }
+
+    #[test]
+    fn kinds_without_an_armament_colour_stand_apart_from_the_renderer_set() {
+        let armaments = [
+            DamageKind::Ap,
+            DamageKind::Sap,
+            DamageKind::He,
+            DamageKind::Secondary,
+            DamageKind::Torpedo,
+            DamageKind::Plane,
+        ]
+        .map(DamageKind::rgb);
+        let others = [DamageKind::Fire, DamageKind::Flood, DamageKind::Ram, DamageKind::Other].map(DamageKind::rgb);
+
+        for (index, color) in others.iter().enumerate() {
+            assert!(!armaments.contains(color), "{color:?}");
+            assert!(!others[index + 1..].contains(color), "{color:?}");
+        }
     }
 
     #[test]

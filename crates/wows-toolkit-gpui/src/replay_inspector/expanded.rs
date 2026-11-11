@@ -51,7 +51,6 @@ use super::columns::NDA;
 use super::columns::ReplayColumn;
 use super::damage_mix;
 use super::damage_mix::DamageLine;
-use super::damage_mix::DamageMix;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
@@ -514,8 +513,6 @@ const BREAKDOWN_GAP: f32 = 8.0;
 /// The per-type damage listing: `breakdown_grid` with each type's colour key,
 /// the colour its stretch of the cell's bar is drawn in.
 fn damage_lines_grid(lines: &[DamageLine]) -> AnyElement {
-    let mix = DamageMix::of(lines);
-    let key = |line: &DamageLine| mix.as_ref().map_or(line.kind, |mix| mix.shown_kind(line.kind));
     h_flex()
         .id("damage-lines")
         .gap(px(BREAKDOWN_GAP))
@@ -525,7 +522,7 @@ fn damage_lines_grid(lines: &[DamageLine]) -> AnyElement {
             h_flex()
                 .id(("label", index))
                 .gap(px(SWATCH_GAP))
-                .child(damage_mix::swatch(key(line)))
+                .child(damage_mix::swatch(line.kind))
                 .child(detail_text(line.label))
         })))
         .child(

@@ -265,10 +265,34 @@ fn consumable_radius_color(consumable: &Recognized<Consumable>, is_friendly: boo
     }
 }
 
-/// Color for a shell ammo type. Single source of truth shared by the ship-name
-/// armament color, the shell-tracer tip and the replay table's damage colors
-/// so they cannot drift apart.
-pub fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
+/// A ship's selected weapon, as far as its armament colour goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Armament {
+    /// Main battery, coloured by the loaded shell.
+    MainBattery(AmmoType),
+    Secondaries,
+    Torpedoes,
+    Planes,
+    Pinger,
+}
+
+impl Armament {
+    /// Single source of truth for the ship-name armament colour and the
+    /// replay table's damage-type colours, so they cannot drift apart.
+    pub fn color(&self) -> [u8; 3] {
+        match self {
+            Self::MainBattery(ammo) => ammo_type_color(ammo),
+            Self::Secondaries => ammo_type_color(&AmmoType::HE),
+            Self::Torpedoes => [100, 255, 160],
+            Self::Planes => [200, 160, 255],
+            Self::Pinger => [100, 220, 255],
+        }
+    }
+}
+
+/// Color for a shell ammo type, shared by the armament color and the
+/// shell-tracer tip.
+fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
     match ammo {
         AmmoType::AP => [140, 200, 255],
         AmmoType::HE => [255, 180, 80],
@@ -276,15 +300,6 @@ pub fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
         AmmoType::Unknown(_) => [140, 200, 255],
     }
 }
-
-/// Armament color for torpedoes.
-pub const COLOR_TORP: [u8; 3] = [100, 255, 160];
-
-/// Armament color for aircraft.
-pub const COLOR_PLANES: [u8; 3] = [200, 160, 255];
-
-/// Armament color for the sonar pinger.
-pub const COLOR_SONAR: [u8; 3] = [100, 220, 255];
 
 /// Map a `DamageStatWeapon` to a short display group label for stats breakdown.
 pub fn weapon_group_label(weapon: &Recognized<DamageStatWeapon>) -> &'static str {
@@ -842,18 +857,20 @@ impl<'a> MinimapRenderer<'a> {
         let props = controller.vehicle_props(*entity_id)?;
         let weapon = props.selected_weapon()?.known()?;
         let selected_ammo = controller.selected_ammo();
-        match weapon {
+        let armament = match weapon {
             WeaponType::Artillery => {
                 let ammo_param_id = selected_ammo.get(entity_id)?;
                 let param = GameParamProvider::game_param_by_id(self.game_params, *ammo_param_id)?;
                 let projectile = param.projectile()?;
-                Some(ammo_type_color(&AmmoType::from_game_str(projectile.ammo_type()?)))
+                Armament::MainBattery(AmmoType::from_game_str(projectile.ammo_type()?))
             }
-            WeaponType::Torpedoes => Some(COLOR_TORP),
-            WeaponType::Planes => Some(COLOR_PLANES),
-            WeaponType::Pinger => Some(COLOR_SONAR),
-            WeaponType::Secondaries => Some(ammo_type_color(&AmmoType::HE)),
-        }
+            WeaponType::Torpedoes => Armament::Torpedoes,
+            WeaponType::Planes => Armament::Planes,
+            WeaponType::Pinger => Armament::Pinger,
+            WeaponType::Secondaries => Armament::Secondaries,
+        };
+
+        Some(armament.color())
     }
 
     /// Get the depth suffix for a submarine (e.g. " (Scope)", " (30m)").
