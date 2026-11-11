@@ -2076,7 +2076,7 @@ impl Render for SearchView {
                             .border_1()
                             .border_color(border)
                             .rounded(theme.radius)
-                            .shadow_md()
+                            .shadow(crate::theme::overlay_shadow())
                             .child(Calendar::new(&self.calendar)),
                     ),
             )
@@ -2125,7 +2125,7 @@ impl Render for SearchView {
                                 .border_1()
                                 .border_color(border)
                                 .rounded(theme.radius)
-                                .shadow_md()
+                                .shadow(crate::theme::overlay_shadow())
                                 .children(looking_up)
                                 .children(rows),
                         ),
@@ -2363,17 +2363,8 @@ impl Render for SearchView {
         // read beside the row it belongs to, and a strip at the foot of the tab
         // resized the results under the pointer that asked for it.
         let preview = (preview_art.is_some() || preview_facts.is_some()).then(|| {
-            let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
-            let card = v_flex()
-                .id("search-preview")
-                .test_support()
-                .gap_1()
-                .p_1()
-                .rounded(theme.radius)
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
+            let card = crate::ui::overlay_surface(v_flex().id("search-preview").test_support().gap_1().p_1(), cx)
                 .children(preview_art)
                 .when_some(preview_facts, |this, facts| this.child(preview_hover_grid(&facts)));
             deferred(

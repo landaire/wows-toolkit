@@ -6,6 +6,7 @@ use gpui_kit::WindowAppearance;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::component::theme::ThemeTokens;
+use gpui_kit::hsla;
 use gpui_kit::px;
 use gpui_kit::rgb;
 use std::cell::RefCell;
@@ -228,6 +229,7 @@ static CURRENT_BORDER_BRIGHT: AtomicU32 = AtomicU32::new(DARK.border_bright);
 static CURRENT_TEXT_DIM: AtomicU32 = AtomicU32::new(DARK.text_dim);
 static CURRENT_PANEL: AtomicU32 = AtomicU32::new(DARK.panel);
 static CURRENT_FAINT: AtomicU32 = AtomicU32::new(DARK.faint);
+static CURRENT_CARD: AtomicU32 = AtomicU32::new(DARK.card);
 
 /// The WCAG contrast a colour the app does not choose is lifted to.
 const CONTRAST_FLOOR: f32 = 4.5;
@@ -365,6 +367,7 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Wind
     CURRENT_TEXT_DIM.store(palette.text_dim, Ordering::Relaxed);
     CURRENT_PANEL.store(palette.panel, Ordering::Relaxed);
     CURRENT_FAINT.store(palette.faint, Ordering::Relaxed);
+    CURRENT_CARD.store(palette.card, Ordering::Relaxed);
     let semantic = semantic_for(dark);
     Theme::change(palette.mode, Some(window), cx);
     let ui_family = crate::fonts::ui_family(cx);
@@ -474,6 +477,8 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Wind
     let zoom = zoom.get();
     theme.font_size = px(12.5 * zoom);
     theme.radius = px(2.0 * zoom);
+    // Dialogs, notifications and the app's cards and overlays.
+    theme.radius_lg = px(4.0 * zoom);
 
     // rem-based helpers scale via rem size; px-valued fields were scaled above.
     window.set_rem_size(px(16.0 * zoom));
@@ -519,6 +524,27 @@ pub fn accent_foreground() -> Hsla {
 /// A stationary halo for active controls on dark surfaces.
 pub fn phosphor_glow() -> BoxShadow {
     BoxShadow::new(px(0.), px(0.), accent().opacity(if is_dark_mode() { 0.18 } else { 0. })).blur_radius(px(8.))
+}
+
+/// A card: one surface step above the panel it sits on.
+pub fn card() -> Hsla {
+    rgb(CURRENT_CARD.load(Ordering::Relaxed)).into()
+}
+
+/// A 1px lit edge along a card's top, in dark palettes only: on a light
+/// panel the card is already the lightest surface. Offset 2px because the
+/// card's 1px border paints over the first.
+pub fn card_highlight() -> Option<BoxShadow> {
+    is_dark_mode().then(|| BoxShadow::new(px(0.), px(2.), hsla(0., 0., 1., 0.05)).inset())
+}
+
+/// The shadow under a popover, tooltip or drawer: small and soft, darker on a
+/// dark palette where a light one would not register. GPUI takes the blur as
+/// a gaussian sigma, so 2px reaches about 6px.
+pub fn overlay_shadow() -> Vec<BoxShadow> {
+    let ink = if is_dark_mode() { 0.32 } else { 0.12 };
+
+    vec![BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., ink)).blur_radius(px(2.))]
 }
 
 /// A control held down: a step darker than under the pointer, so a press

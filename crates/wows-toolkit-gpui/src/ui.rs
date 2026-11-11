@@ -128,6 +128,28 @@ pub fn rule_h(cx: &App) -> impl IntoElement {
     div().flex_none().h(px(1.)).w_full().my_1().bg(cx.theme().border)
 }
 
+/// The card level: one surface step above the panel, edged by a 1px rule.
+pub fn card_surface<E: Styled>(element: E, cx: &App) -> E {
+    let element =
+        element.bg(crate::theme::card()).border_1().border_color(cx.theme().border).rounded(cx.theme().radius_lg);
+    match crate::theme::card_highlight() {
+        Some(highlight) => element.shadow(vec![highlight]),
+        None => element,
+    }
+}
+
+/// The overlay level, for a popover or tooltip the app builds itself: the
+/// popover surface, a 1px rule and a small shadow.
+pub fn overlay_surface<E: Styled>(element: E, cx: &App) -> E {
+    element
+        .bg(cx.theme().popover)
+        .text_color(cx.theme().popover_foreground)
+        .border_1()
+        .border_color(cx.theme().border)
+        .rounded(cx.theme().radius_lg)
+        .shadow(crate::theme::overlay_shadow())
+}
+
 /// The edge of the window a collapsible side panel is docked against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelSide {

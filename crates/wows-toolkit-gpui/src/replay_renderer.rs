@@ -819,16 +819,8 @@ impl ReplayRendererPanel {
     /// ones beside the one being read.
     fn consumable_reading(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let (hover, at) = self.hovered_consumable.as_ref()?;
-        let theme = cx.theme();
         let lines = &hover.lines;
-        let body = v_flex()
-            .gap_0p5()
-            .w(px(280.))
-            .bg(theme.background)
-            .border_1()
-            .border_color(theme.border)
-            .rounded(theme.radius)
-            .p_2()
+        let body = crate::ui::overlay_surface(v_flex().gap_0p5().w(px(280.)).p_2(), cx)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(lines.name.clone()))
             .child(div().text_xs().child(hover.player.clone()))
             .child(div().text_xs().child(lines.charges.clone()))
@@ -3219,6 +3211,7 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
                     .border_1()
                     .border_color(crate::theme::border_bright())
                     .bg(crate::theme::surface())
+                    .shadow(crate::theme::overlay_shadow())
                     .child(content),
             ),
         )
