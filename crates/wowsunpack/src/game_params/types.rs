@@ -8,10 +8,12 @@ use crate::Rc;
 use crate::data::ResourceLoader;
 use crate::data::TranslationKey;
 use crate::data::Version;
+use crate::game_types::BuoyancyState;
 use crate::game_types::GameParamId;
 use crate::game_types::GunId;
 use crate::game_types::Vec2;
 use crate::game_types::Vec3;
+use crate::recognized::Recognized;
 
 /// Friendly game version (major, minor, patch) at which the captain-skill rework
 /// landed. Before this, a captain's learned skills are a single `learnedSkills`
@@ -3484,6 +3486,39 @@ pub struct ShellInfo {
     pub cap: bool,
 }
 
+/// One point of a projectile's splash damage curve (`pointsOfDamage`): the
+/// share of the projectile's damage dealt at a distance from the burst, given
+/// as a fraction of its splash radius (`depthSplashRadius`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct SplashDamagePoint {
+    /// Distance from the burst over the splash radius, 0 to 1.
+    pub relative_distance: f32,
+    /// Share of the projectile's damage, 1 for all of it.
+    pub coefficient: f32,
+}
+
+/// Share of a projectile's damage a submarine takes in one depth state
+/// (`buoyancyToDamageCoeff`).
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct BuoyancyDamage {
+    pub state: Recognized<BuoyancyState>,
+    pub coefficient: f32,
+}
+
+/// Damage multiplier of a projectile against one ship class
+/// (`damageVulnerabilityForShipClasses`).
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ClassVulnerability {
+    pub class: Recognized<Species>,
+    pub coefficient: f32,
+}
+
 #[derive(Clone, Builder, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -3519,9 +3554,30 @@ pub struct Projectile {
     /// Fuse threshold thickness in mm.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_detonator_threshold: Option<f32>,
-    /// Blast radius of a depth charge (`depthSplashRadius`) in BigWorld units.
+    /// Splash radius (`depthSplashRadius`) in the game world's meters, the
+    /// scale ship models are drawn at: depth charge blasts, and how far from
+    /// a submarine a shell bursting in the water still damages it.
     #[cfg_attr(feature = "serde", serde(default))]
-    depth_splash_radius: Option<f32>,
+    depth_splash_radius: Option<Meters>,
+    /// Splash damage curve over the splash radius (`pointsOfDamage`), nearest
+    /// point first.
+    #[cfg_attr(feature = "serde", serde(default))]
+    points_of_damage: Option<Vec<SplashDamagePoint>>,
+    /// Share of damage per submarine depth state (`buoyancyToDamageCoeff`).
+    /// Empty on torpedoes that list no state.
+    #[cfg_attr(feature = "serde", serde(default))]
+    buoyancy_to_damage_coeff: Option<Vec<BuoyancyDamage>>,
+    /// Submarine depth states the projectile cannot hit
+    /// (`ignoreBuoyancyStates`, read by `VehicleUtils.canHit`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    ignore_buoyancy_states: Option<Vec<Recognized<BuoyancyState>>>,
+    /// Deepest waterline the projectile reaches, negative below the surface
+    /// (`maxDepth`, read by `VehicleUtils.canHit`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    max_depth: Option<Meters>,
+    /// Damage multiplier per target class (`damageVulnerabilityForShipClasses`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    damage_vulnerability_for_ship_classes: Option<Vec<ClassVulnerability>>,
     /// Ricochet start angle in degrees.
     #[cfg_attr(feature = "serde", serde(default))]
     bullet_ricochet_at: Option<f32>,
@@ -3631,8 +3687,28 @@ impl Projectile {
         self.bullet_detonator_threshold
     }
 
-    pub fn depth_splash_radius(&self) -> Option<f32> {
+    pub fn depth_splash_radius(&self) -> Option<Meters> {
         self.depth_splash_radius
+    }
+
+    pub fn points_of_damage(&self) -> Option<&[SplashDamagePoint]> {
+        self.points_of_damage.as_deref()
+    }
+
+    pub fn buoyancy_to_damage_coeff(&self) -> Option<&[BuoyancyDamage]> {
+        self.buoyancy_to_damage_coeff.as_deref()
+    }
+
+    pub fn ignore_buoyancy_states(&self) -> Option<&[Recognized<BuoyancyState>]> {
+        self.ignore_buoyancy_states.as_deref()
+    }
+
+    pub fn max_depth(&self) -> Option<Meters> {
+        self.max_depth
+    }
+
+    pub fn damage_vulnerability_for_ship_classes(&self) -> Option<&[ClassVulnerability]> {
+        self.damage_vulnerability_for_ship_classes.as_deref()
     }
 
     pub fn bullet_ricochet_at(&self) -> Option<f32> {
@@ -3728,7 +3804,7 @@ impl Projectile {
             he_pen_mm: self.alpha_piercing_he,
             sap_pen_mm: self.alpha_piercing_cs,
             alpha_damage: self.alpha_damage?,
-            muzzle_velocity: self.bullet_speed?,
+            muzzle_velocity: self.bullet_speed? * self.time_factor.unwrap_or(1.0),
             mass_kg: self.bullet_mass?,
             krupp: self.bullet_krupp?,
             ricochet_angle: self.bullet_ricochet_at,
@@ -4342,6 +4418,24 @@ mod tests {
         assert_eq!(p.bullet_mass(), Some(59.0));
         assert_eq!(p.bullet_krupp(), Some(2692.0));
         assert_eq!(p.bullet_speed(), Some(762.0));
+    }
+
+    #[test]
+    fn canonical_shell_info_applies_time_factor() {
+        let projectile = Projectile::builder()
+            .ammo_type("AP".to_owned())
+            .bullet_diametr(0.305)
+            .alpha_damage(8000.0)
+            .bullet_speed(762.0)
+            .time_factor(0.5)
+            .bullet_mass(470.0)
+            .bullet_krupp(2400.0)
+            .bullet_air_drag(0.3)
+            .build();
+
+        let shell = projectile.to_shell_info("test shell".to_owned()).expect("complete shell");
+
+        assert_eq!(shell.muzzle_velocity, 381.0);
     }
 
     fn shell_param(id: u32, name: &str) -> Param {

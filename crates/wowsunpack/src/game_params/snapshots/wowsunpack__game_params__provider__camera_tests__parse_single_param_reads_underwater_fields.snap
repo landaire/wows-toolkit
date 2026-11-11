@@ -1,0 +1,115 @@
+---
+source: crates/wowsunpack/src/game_params/provider.rs
+expression: "Underwater\n{\n    points_of_damage: projectile.points_of_damage(), depth_splash_radius:\n    projectile.depth_splash_radius(), buoyancy_to_damage_coeff:\n    projectile.buoyancy_to_damage_coeff(), ignore_buoyancy_states:\n    projectile.ignore_buoyancy_states(), max_depth: projectile.max_depth(),\n    damage_vulnerability_for_ship_classes:\n    projectile.damage_vulnerability_for_ship_classes(),\n}"
+---
+Underwater {
+    points_of_damage: Some(
+        [
+            SplashDamagePoint {
+                relative_distance: 0.0,
+                coefficient: 0.1,
+            },
+            SplashDamagePoint {
+                relative_distance: 1.0,
+                coefficient: 0.1,
+            },
+        ],
+    ),
+    depth_splash_radius: Some(
+        Meters(
+            1.69,
+        ),
+    ),
+    buoyancy_to_damage_coeff: Some(
+        [
+            BuoyancyDamage {
+                state: Known(
+                    DeepWater,
+                ),
+                coefficient: 1.0,
+            },
+            BuoyancyDamage {
+                state: Known(
+                    DeepWaterInvul,
+                ),
+                coefficient: 0.0,
+            },
+            BuoyancyDamage {
+                state: Known(
+                    Periscope,
+                ),
+                coefficient: 1.0,
+            },
+            BuoyancyDamage {
+                state: Known(
+                    SemiDeepWater,
+                ),
+                coefficient: 1.0,
+            },
+            BuoyancyDamage {
+                state: Known(
+                    Surface,
+                ),
+                coefficient: 1.0,
+            },
+        ],
+    ),
+    ignore_buoyancy_states: Some(
+        [
+            Known(
+                SemiDeepWater,
+            ),
+            Known(
+                DeepWater,
+            ),
+            Known(
+                DeepWaterInvul,
+            ),
+        ],
+    ),
+    max_depth: Some(
+        Meters(
+            -15.0,
+        ),
+    ),
+    damage_vulnerability_for_ship_classes: Some(
+        [
+            ClassVulnerability {
+                class: Known(
+                    AirCarrier,
+                ),
+                coefficient: 1.0,
+            },
+            ClassVulnerability {
+                class: Known(
+                    Auxiliary,
+                ),
+                coefficient: 1.0,
+            },
+            ClassVulnerability {
+                class: Known(
+                    Battleship,
+                ),
+                coefficient: 1.0,
+            },
+            ClassVulnerability {
+                class: Known(
+                    Cruiser,
+                ),
+                coefficient: 1.0,
+            },
+            ClassVulnerability {
+                class: Known(
+                    Destroyer,
+                ),
+                coefficient: 1.0,
+            },
+            ClassVulnerability {
+                class: Known(
+                    Submarine,
+                ),
+                coefficient: 1.0,
+            },
+        ],
+    ),
+}

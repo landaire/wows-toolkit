@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+ships:
+  - ship: "T10 Châteaurenault (destroyer, France, premium)"
+    quantities:
+      - quantity: torpedo.damage_at_distance
+        unit: HP
+        values:
+          - option: 550 mm (stock)
+            build: base
+            value: 9767
+            note: "full damage 19533 HP; 100% of full damage up to 8 km, 50% from 8.1 km"
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

@@ -420,6 +420,15 @@ pub(crate) fn extended_horizontal_dispersion(planner: &Planner<'_>, outcome: &Ou
     Some(Meters::new(profile.ellipse_at(range).horizontal.to_meters().value().round()))
 }
 
+/// Vertical main battery dispersion of `outcome` at `range` even past the
+/// build's own firing range.
+pub(crate) fn extended_vertical_dispersion(planner: &Planner<'_>, outcome: &Outcome, range: Km) -> Option<Meters> {
+    let profile = artillery_dispersion(&planner.ship().param, planner.selection(outcome.selection), &outcome.bundle)?;
+    let profile = ArtilleryDispersion { max_range: Km::new(profile.max_range.value().max(range.value())), ..profile };
+
+    Some(Meters::new(profile.ellipse_at(range).vertical.to_meters().value().round()))
+}
+
 /// "Label (qualifier)", with a projectile qualifier by its English name.
 pub(crate) fn stat_label(label: &str, qualifier: Option<&str>, game: &GameData) -> String {
     match qualifier {

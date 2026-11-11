@@ -1,7 +1,7 @@
-//! What a ship's ability key does: Combat Instructions (GameParams
+//! What a ship's funny button does: Combat Instructions (GameParams
 //! `RageMode`) and the main battery's alternative fire mode, Burst Fire or
-//! Modified Shells (`SwitchableModeArtilleryModule`). Players call either
-//! "the F key", its default binding (update notes 0.10.10).
+//! Modified Shells (`SwitchableModeArtilleryModule`). "Funny button" means
+//! the F key, the default binding (update notes 0.10.10).
 
 use std::collections::BTreeMap;
 
@@ -56,7 +56,7 @@ const USES_PER_BATTLE: &str = "No limit per battle and no cooldown or charges: e
 
 const FIRE_MODE_USE: &str = "Toggled with the fire mode key (F by default) at any time except while a burst is firing; no limit per battle and no cooldown. The mode stays on until switched back.";
 
-const NO_ABILITY: &str = "No special ability: the ship has neither Combat Instructions nor an alternative main battery fire mode, so its ability key (F by default) does nothing.";
+const NO_ABILITY: &str = "No special ability: the ship has neither Combat Instructions nor an alternative main battery fire mode, so its funny button (F by default) does nothing.";
 
 /// Arguments for `special_ability_search`. Every filter is optional.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -278,7 +278,7 @@ impl Burst {
 }
 
 impl GameData {
-    /// What one ship's ability key does.
+    /// What one ship's funny button does.
     pub fn ship_special_ability(&self, args: &ShipArgs) -> Result<ShipSpecialAbilityOutput, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
@@ -292,7 +292,7 @@ impl GameData {
         })
     }
 
-    /// Ships with an ability key, by kind and effect.
+    /// Ships with a funny button, by kind and effect.
     pub fn special_ability_search(
         &self,
         args: &SpecialAbilitySearchArgs,

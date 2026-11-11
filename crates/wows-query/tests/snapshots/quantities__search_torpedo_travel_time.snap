@@ -1,0 +1,90 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+query: torpedo travel time
+quantities:
+  - name: torpedo.travel_time
+    unit: s
+    applies_to: torpedo_option
+    description: "Torpedo travel time to a distance: how long a torpedo takes to reach a target, run time to impact, at the torpedo's speed in game knots (2.6854 m/s per game knot on the map, not 0.5144 m/s per nautical knot), on the base build and on the best-fit build for speed. No value past the torpedo's range."
+    parameters:
+      - name: distance_km
+        type: number (km)
+        required: true
+        description: Distance the torpedo runs from launch to the target.
+      - name: option
+        type: "one of: stock, best"
+        required: false
+        default: stock
+        description: "For a group: count each ship's torpedo on stock modules, or its best torpedo option for this quantity."
+    sources:
+      - "GameParams Projectile.speed (game knots), Projectile.maxDist"
+      - client script TorpedoesCommon/m41dd1280.py recalcTorpedoParams (speed * BW_KNOTS_TO_MPS) and m63fc2621.py BW_KNOTS_TO_MPS
+      - "computation: game knots x 2.6854 ballistic m/s per knot (BW_KNOTS_TO_MPS x 30 m per BigWorld unit)"
+  - name: torpedoes.launchers.rotation_time
+    unit: s
+    applies_to: ship
+    description: 180° Turn Time; one row per launcher. A stat_search stat.
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: torpedoes.reload_time
+    unit: s
+    applies_to: ship
+    description: Torpedo Tube Reload Time. A stat_search stat.
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: armor.torpedo_protection.max
+    unit: mm
+    applies_to: ship
+    description: "Thickest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment); no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: armor.torpedo_protection.min
+    unit: mm
+    applies_to: ship
+    description: "Thinnest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment); no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+omitted: 61
+note: "Call quantity_values with a name and its params: it computes the values from game data. Speeds are game knots: ships and torpedoes move 2.6854 m/s per game knot on the map, not 0.5144 m/s per nautical knot; values already apply this."

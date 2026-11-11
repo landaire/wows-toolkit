@@ -267,6 +267,22 @@ impl DepthChargeAirStrike {
     }
 }
 
+/// The anti-submarine weapon that drops a depth charge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DepthChargeWeapon {
+    ShipMounted,
+    AirStrike,
+}
+
+impl DepthChargeWeapon {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::ShipMounted => "ship-mounted depth charge",
+            Self::AirStrike => "depth charge air strike",
+        }
+    }
+}
+
 /// The anti-submarine weapons of one hull.
 pub(crate) struct AswWeapons {
     pub(crate) launchers: Option<DepthChargeLaunchers>,
@@ -347,7 +363,10 @@ impl GameData {
             Some(Hp::from(damage.round()))
         };
         let splash_of = |name: &str| {
-            projectile(name)?.projectile()?.depth_splash_radius().map(|radius| Meters::new(round_to(radius, 100.0)))
+            projectile(name)?
+                .projectile()?
+                .depth_splash_radius()
+                .map(|radius| Meters::new(round_to(radius.value(), 100.0)))
         };
 
         let launchers =
@@ -381,6 +400,44 @@ impl GameData {
         });
 
         AswWeapons { launchers, air_strike }
+    }
+
+    /// GameParams names of the depth charges of every hull of `ship`:
+    /// ship-mounted first, then those of its depth charge air strike, each once.
+    pub(crate) fn depth_charge_params(&self, ship: &Ship) -> Vec<(DepthChargeWeapon, String)> {
+        let Some(components) = ship.param.vehicle().and_then(|vehicle| vehicle.ttx_components()) else {
+            return Vec::new();
+        };
+
+        let mut hulls: Vec<&String> = components.depth_charges.keys().chain(components.air_supports.keys()).collect();
+        hulls.sort();
+        let mut params: Vec<(DepthChargeWeapon, String)> = Vec::new();
+        let mut add = |weapon: DepthChargeWeapon, param: &str| {
+            if !params.iter().any(|(_, known)| known == param) {
+                params.push((weapon, param.to_owned()));
+            }
+        };
+        for hull in &hulls {
+            if let Some(param) = components.depth_charges.get(*hull).and_then(|charges| charges.projectile()) {
+                add(DepthChargeWeapon::ShipMounted, param);
+            }
+        }
+        for hull in &hulls {
+            let Some(strike) = components.air_supports.get(*hull) else {
+                continue;
+            };
+            for plane in &strike.planes {
+                let ordnance = self
+                    .squadron(plane, SquadronRole::AirStrike)
+                    .and_then(|squadron| squadron.ordnance)
+                    .filter(|ordnance| ordnance.kind == OrdnanceKind::DepthCharge);
+                if let Some(ordnance) = ordnance {
+                    add(DepthChargeWeapon::AirStrike, &ordnance.param);
+                }
+            }
+        }
+
+        params
     }
 
     /// Ship-mounted depth charges and the depth charge air strike of the

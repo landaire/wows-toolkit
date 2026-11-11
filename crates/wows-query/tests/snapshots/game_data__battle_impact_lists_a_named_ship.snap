@@ -1,164 +1,248 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1396
 expression: output
 ---
 group: tier 10 battleships
-ranked: 43
-formula: "factor share = share of the other ships of the group (of the same tier for bb_ap_citadel, cruiser_he_damaging and bow_overmatch) whose value the ship's beats, ties counting half. A ship without a factor others have (no radar, no torpedoes, no Repair Party) counts as worse than every ship with it and tied with the others without it. A family (gun_dpm, gun_alpha, flight_time) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. score = weighted mean of the components with the class weights below, 0 to 100. An armor value a ship lacks (no citadel plates or armor model) leaves the ship scored on its other factors."
+ranked: 32
+formula: "factor share = share of the other ships of the group (of the same tier for armor and offensive overmatch factors) whose value the ship's beats, ties counting half. A ship without a measured factor others have counts as worse than every ship with it and tied with the others without it; no funny button contributes zero funny-button utility. A factor marked unmeasured ranks only among peers that have it and is left out for ships without it. A family (gun_dpm, gun_alpha) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. Damage delivery = the power mean with exponent -8 of firepower, accuracy, gun handling, survivability and mobility after flooring each at 20%; it is multiplied by 65% for each of those components or reach that beats less than half of the group. Reach is a tactical weakness but not a linear damage bottleneck because dispersion is measured at 12 km. Score = damage delivery x71.5%, survivability x5%, funny-button utility x15%, unique-commander talent potential x5%, close quarters x1% and spotting x2.5%, 0 to 100."
 weights:
-  - "firepower 30%: gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x1, gun_alpha (best of alpha_ap, alpha_he, alpha_sap) x0.75, fires_per_minute x0.15"
-  - "accuracy 10%: dispersion x1, sigma x1, flight_time (best of flight_time_ap, flight_time_he, flight_time_sap) x1"
-  - "reach 10%: main_battery_range x1"
-  - "survivability 35%: health x1, repair_party_total_heal x1, damage_control_reload x0.25, bb_ap_citadel x0.75, bow_overmatch x0.5, cruiser_he_damaging x0.25"
-  - "mobility 10%: speed x1, rudder_shift x0.5, turning_circle x0.5"
-  - "spotting 5%: concealment x1, radar_range x0.5, hydro_range x0.5, torpedo_detection x0.5, smoke_lifetime x0.25"
+  - "firepower 14.2%: effective_gun_damage x1, gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x2, gun_alpha (best of alpha_ap, alpha_he, alpha_sap) x1.5, main_battery_reload x0.75, main_battery_range x0.25, cruiser_bow_overmatch x1, cruiser_full_bow_overmatch x0.75, cruiser_external_overmatch x0.5, main_sap_coverage x1.5"
+  - "accuracy 14.2%: dispersion x1, vertical_dispersion x1, sigma x1"
+  - "handling 14.2%: turret_traverse x0.5, bow_barrels x0.5, all_bear_from_bow x1"
+  - "reach penalty only: main_battery_range x1"
+  - "survivability 19.2%: health x1, repair_party_total_heal x1, damage_control_reload x0.25, bb_ap_citadel x0.75, bow_overmatch x0.5, cruiser_he_damaging x0.25"
+  - "mobility 14.2%: speed x1, rudder_shift x1, turning_circle x1"
+  - "spotting 2.5%: concealment x1, radar_range x1, hydro_range x0.5, torpedo_detection x0.25, smoke_lifetime x0.5, mobile_smoke_duration x1"
+  - "utility 15%: funny_button_effect x1.25, funny_button_access x1"
+  - "commander 5%: commander_talent_effect x1"
+  - "close_quarters 1%: fires_per_minute x0.5, secondary_dpm x1, secondary_range x0.75, secondary_sap_coverage x0.75, torpedo_dpm x0.5"
 ships:
   - rank: 1
-    ship: "T10 Montana (battleship, USA)"
-    score: 69.6
+    ship: "T10 Wisconsin (battleship, USA, premium)"
+    score: 47.8
     components:
       firepower:
-        score: 84.7
+        score: 45.3
         top:
-          - dpm_ap 395796 HP/min (beats 87%)
-          - alpha_ap 174150 HP (beats 83%)
+          - effective_gun_damage 11.53 index (beats 84%)
+          - cruiser_bow_overmatch 100% (beats 61%)
+      close_quarters:
+        score: 23
+        top:
+          - secondary_range 10.51 km (beats 31%)
+          - secondary_dpm 250000 HP/min (beats 16%)
       accuracy:
-        score: 40.5
+        score: 86
         top:
-          - sigma 1.9 (beats 54%)
-          - dispersion 187 m (beats 51%)
+          - dispersion 132 m (beats 95%)
+          - vertical_dispersion 62 m (beats 94%)
+      handling:
+        score: 50.8
+        top:
+          - all_bear_from_bow 31 deg (beats 55%)
+          - bow_barrels 66.67% (beats 73%)
       reach:
-        score: 72.6
+        score: 64.5
         top:
-          - main_battery_range 27.43 km (beats 73%)
+          - main_battery_range 27.09 km (beats 65%)
       survivability:
-        score: 72.4
+        score: 62.9
         top:
-          - repair_party_total_heal 71185 HP (beats 92%)
-          - health 96300 HP (beats 73%)
+          - repair_party_total_heal 59949 HP (beats 90%)
+          - bb_ap_citadel 0.3% (beats 77%)
       mobility:
-        score: 56.3
+        score: 59.7
         top:
-          - speed 30 kn (beats 50%)
-          - rudder_shift 12.43 s (beats 81%)
+          - speed 32.5 kn (beats 77%)
+          - turning_circle 920 m (beats 66%)
+      commander:
+        score: 82.3
+        top:
+          - commander_talent_effect 57.15 index (beats 82%)
       spotting:
-        score: 38.2
-        top:
-          - concealment 14 km (beats 26%)
-    weak_points:
-      - flight_time_ap 8.59 s (beats 17%)
-  - rank: 2
-    ship: "T10 Montana 2 (battleship, USA, test)"
-    score: 67.6
-    components:
-      firepower:
-        score: 84.7
-        top:
-          - dpm_ap 395796 HP/min (beats 87%)
-          - alpha_ap 174150 HP (beats 83%)
-      accuracy:
-        score: 40.5
-        top:
-          - sigma 1.9 (beats 54%)
-          - dispersion 187 m (beats 51%)
-      reach:
-        score: 72.6
-        top:
-          - main_battery_range 27.43 km (beats 73%)
-      survivability:
-        score: 72.4
-        top:
-          - repair_party_total_heal 71185 HP (beats 92%)
-          - health 96300 HP (beats 73%)
-      mobility:
-        score: 36
-        top:
-          - speed 30 kn (beats 50%)
-          - turning_circle 950 m (beats 44%)
-      spotting:
-        score: 38.2
-        top:
-          - concealment 14 km (beats 26%)
-    weak_points:
-      - flight_time_ap 8.59 s (beats 17%)
-      - rudder_shift 17.76 s (beats 0%)
-  - rank: 3
-    ship: "T10 Vermont (battleship, USA)"
-    score: 66.5
-    components:
-      firepower:
-        score: 78.4
-        top:
-          - dpm_ap 384801 HP/min (beats 80%)
-          - alpha_he 77400 HP (beats 91%)
-      accuracy:
-        score: 50.7
-        top:
-          - sigma 1.95 (beats 65%)
-          - dispersion 187 m (beats 51%)
-      reach:
-        score: 79.8
-        top:
-          - main_battery_range 28.42 km (beats 80%)
-      survivability:
-        score: 69.4
-        top:
-          - health 102800 HP (beats 87%)
-          - repair_party_total_heal 57568 HP (beats 75%)
-      mobility:
-        score: 28.6
-        top:
-          - turning_circle 850 m (beats 94%)
-          - rudder_shift 15.31 s (beats 13%)
-      spotting:
-        score: 56.4
-        top:
-          - concealment 12.59 km (beats 76%)
-    weak_points:
-      - speed 23 kn (beats 4%)
-      - rudder_shift 15.31 s (beats 13%)
-      - fires_per_minute 25.41 fires/min (beats 7%)
-  - rank: 6
-    ship: "T10 Conqueror (battleship, United_Kingdom)"
-    score: 65.9
-    components:
-      firepower:
-        score: 90
-        top:
-          - dpm_he 196364 HP/min (beats 95%)
-          - alpha_he 86400 HP (beats 97%)
-      accuracy:
-        score: 29.4
-        top:
-          - sigma 1.8 (beats 33%)
-          - flight_time_he 8.48 s (beats 28%)
-      reach:
-        score: 76.2
-        top:
-          - main_battery_range 28.13 km (beats 76%)
-      survivability:
-        score: 58
-        top:
-          - repair_party_total_heal 99480 HP (beats 100%)
-          - health 82900 HP (beats 42%)
-      mobility:
         score: 50
         top:
-          - rudder_shift 8.33 s (beats 98%)
-          - turning_circle 940 m (beats 52%)
+          - concealment 12.87 km (beats 61%)
+      utility:
+        score: 98.6
+        top:
+          - funny_button_effect 188.01 index (beats 100%)
+          - funny_button_access 100 index (beats 97%)
+    weak_points:
+      - dpm_ap 296847 HP/min (beats 19%)
+      - secondary_dpm 250000 HP/min (beats 16%)
+      - fires_per_minute 25.07 fires/min (beats 6%)
+  - rank: 2
+    ship: "T10 Thunderer (battleship, United_Kingdom, premium)"
+    score: 34.5
+    components:
+      firepower:
+        score: 75.7
+        top:
+          - dpm_he 172028 HP/min (beats 89%)
+          - alpha_he 65600 HP (beats 75%)
+      close_quarters:
+        score: 20.1
+        top:
+          - secondary_range 10.51 km (beats 31%)
+          - fires_per_minute 27.34 fires/min (beats 16%)
+      accuracy:
+        score: 69.9
+        top:
+          - dispersion 138 m (beats 81%)
+          - vertical_dispersion 68 m (beats 76%)
+      handling:
+        score: 57.7
+        top:
+          - all_bear_from_bow 30 deg (beats 74%)
+          - turret_traverse 26.09 s (beats 56%)
+      reach:
+        score: 45.2
+        top:
+          - main_battery_range 24.94 km (beats 45%)
+      survivability:
+        score: 51
+        top:
+          - repair_party_total_heal 55709 HP (beats 68%)
+          - health 82900 HP (beats 44%)
+      mobility:
+        score: 60.8
+        top:
+          - rudder_shift 8.32 s (beats 100%)
+          - turning_circle 940 m (beats 56%)
+      commander:
+        score: 66.1
+        top:
+          - commander_talent_effect 40.82 index (beats 66%)
       spotting:
+        score: 56.9
+        top:
+          - concealment 12.3 km (beats 84%)
+      utility:
+        score: 0
+        top: []
+    weak_points:
+      - funny_button_effect none (beats 0%)
+      - funny_button_access none (beats 0%)
+      - secondary_dpm 189905 HP/min (beats 3%)
+  - rank: 3
+    ship: "T10 Libertad (battleship, Pan_America)"
+    score: 28.7
+    components:
+      firepower:
+        score: 53.7
+        top:
+          - dpm_he 151240 HP/min (beats 68%)
+          - alpha_he 73200 HP (beats 89%)
+      close_quarters:
+        score: 58.8
+        top:
+          - secondary_range 11.95 km (beats 89%)
+          - secondary_dpm 411667 HP/min (beats 45%)
+      accuracy:
+        score: 14.5
+        top:
+          - dispersion 167 m (beats 21%)
+          - sigma 1.7 (beats 15%)
+      handling:
+        score: 41.5
+        top:
+          - turret_traverse 21.74 s (beats 82%)
+          - all_bear_from_bow 35 deg (beats 29%)
+      reach:
+        score: 30.6
+        top:
+          - main_battery_range 23.78 km (beats 31%)
+      survivability:
+        score: 58.2
+        top:
+          - repair_party_total_heal 57456 HP (beats 77%)
+          - health 85500 HP (beats 48%)
+      mobility:
+        score: 71.5
+        top:
+          - rudder_shift 10.86 s (beats 90%)
+          - turning_circle 910 m (beats 74%)
+      commander:
+        score: 98.4
+        top:
+          - commander_talent_effect 2046.03 index (beats 98%)
+      spotting:
+        score: 49
+        top:
+          - concealment 12.96 km (beats 58%)
+      utility:
+        score: 95
+        top:
+          - funny_button_effect 66.78 index (beats 94%)
+          - funny_button_access 100 index (beats 97%)
+    weak_points:
+      - effective_gun_damage 5.99 index (beats 0%)
+      - vertical_dispersion 84 m (beats 8%)
+      - sigma 1.7 (beats 15%)
+  - rank: 6
+    ship: "T10 Conqueror (battleship, United_Kingdom)"
+    score: 24.7
+    components:
+      firepower:
+        score: 70.2
+        top:
+          - dpm_he 196364 HP/min (beats 96%)
+          - alpha_he 86400 HP (beats 100%)
+      close_quarters:
+        score: 19.5
+        top:
+          - secondary_range 10.51 km (beats 31%)
+          - fires_per_minute 27.28 fires/min (beats 13%)
+      accuracy:
+        score: 29.6
+        top:
+          - vertical_dispersion 76 m (beats 34%)
+          - sigma 1.8 (beats 34%)
+      handling:
+        score: 54
+        top:
+          - all_bear_from_bow 30 deg (beats 74%)
+          - turret_traverse 28.86 s (beats 42%)
+      reach:
+        score: 71
+        top:
+          - main_battery_range 28.13 km (beats 71%)
+      survivability:
         score: 59.8
         top:
-          - concealment 12.3 km (beats 86%)
+          - repair_party_total_heal 99480 HP (beats 100%)
+          - health 82900 HP (beats 44%)
+      mobility:
+        score: 59.7
+        top:
+          - rudder_shift 8.33 s (beats 97%)
+          - turning_circle 940 m (beats 56%)
+      commander:
+        score: 66.1
+        top:
+          - commander_talent_effect 40.82 index (beats 66%)
+      spotting:
+        score: 56.9
+        top:
+          - concealment 12.3 km (beats 84%)
+      utility:
+        score: 0
+        top: []
+    weak_points:
+      - funny_button_effect none (beats 0%)
+      - funny_button_access none (beats 0%)
+      - secondary_dpm 189905 HP/min (beats 3%)
 lowest:
-  - "43. T10 Conte Verde (battleship, Italy, premium) 32.3"
-  - "42. T10 Incomparable (battleship, United_Kingdom, premium) 33.4"
-  - "41. T10 R. Lauria (battleship, Italy, premium) 34.5"
-  - "40. T10 Schlieffen (battleship, Germany) 34.9"
-  - "39. T10 Slava (battleship, Russia, premium) 37.1"
+  - "32. T10 Irresistible (battleship, Commonwealth, premium) 9.6"
+  - "31. T10 Slava (battleship, Russia, premium) 9.7"
+  - "30. T10 Bourgogne (battleship, France, premium) 10"
+  - "28. T10 Schlieffen (battleship, Germany) 10.6"
+  - "28. T10 G. Kurfürst (battleship, Germany, premium) 10.6"
 notes:
   - "A judgment from game data, not from win rates or player results: the weights are a stated opinion of what sways a battle. Read the components to see why a ship scores as it does."
-  - "Scores compare ships of one class and tier range only; a cruiser's score says nothing against a battleship's."
-  - "Values are those of ship_comparison: each on its best-fit build, consumables stock, damage as if every shell and torpedo hits. A consumable counts when any slot offers it, though a slot holds one choice."
-  - "Not counted: secondaries, anti-aircraft, special abilities (the F key), firing arcs, turret traverse and torpedo reaction time. Main battery reload counts through gun_dpm."
+  - "Scores compare released ships of one class and tier range only; a named test or experimental ship is included on request. A cruiser's score says nothing against a battleship's."
+  - "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion and flight time measured at 12 km. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice."
+  - "The funny button means the F key: Combat Instructions or an alternative fire mode. Its effect index measures modifier magnitude and duration. Its access index uses the least demanding repeatable charge path. Equal burden means 20 ribbons, 10 adjustment salvos, 4 visibility changes, 3 consumable uses, 120 timer seconds, or potential damage equal to 10 times ship HP."
+  - "Mobile smoke counts its active duration. Unique-commander talent potential measures the modifiers from a talent's first activation; talent activation difficulty, improved skills and non-modifier talent effects are not estimated."
+  - "Not counted: anti-aircraft, exact shell hit probability, consumable uptime, ability charge events during a real match and player positioning."

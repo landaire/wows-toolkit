@@ -1,0 +1,180 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+ships:
+  - ship: "T10 Venezia (cruiser, Italy)"
+    quantities:
+      - quantity: underwater.splash_coefficient
+        unit: x
+        values:
+          - option: main battery 203 mm proiettili AP 1924 mod.2
+            value: 0.1
+            note: "pointsOfDamage: 0.1 at 0, 0.1 at 1"
+          - option: main battery 203 mm proiettili CS 1924 mod.2
+            value: 0.165
+            note: "pointsOfDamage: 0.165 at 0, 0.165 at 1"
+          - option: depth charge air strike CS 300 kg
+            value: 1
+            note: "pointsOfDamage: 1 at 0, 1 at 0.4, 0.5 at 0.401, 0.5 at 0.8, 0 at 0.801, 0 at 1"
+      - quantity: underwater.splash_radius
+        unit: m
+        values:
+          - option: main battery 203 mm proiettili AP 1924 mod.2
+            build: base
+            value: 1.69
+          - option: main battery 203 mm proiettili AP 1924 mod.2
+            build: with Demolition Expert
+            value: 1.9435
+          - option: main battery 203 mm proiettili CS 1924 mod.2
+            build: base
+            value: 3.39
+          - option: main battery 203 mm proiettili CS 1924 mod.2
+            build: with Demolition Expert
+            value: 3.8985
+          - option: depth charge air strike CS 300 kg
+            build: base
+            value: 12.5
+      - quantity: underwater.max_depth
+        unit: m
+        values:
+          - option: main battery 203 mm proiettili AP 1924 mod.2
+            value: 15
+          - option: main battery 203 mm proiettili CS 1924 mod.2
+            value: 15
+          - option: depth charge air strike CS 300 kg
+            value: 80
+      - quantity: underwater.depth_state_damage
+        unit: x
+        values:
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, surface"
+            value: 1
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, periscope"
+            value: 1
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, semi_deep_water"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists SEMI_DEEP_WATER"
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, deep_water"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER"
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, deep_water_invul"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER_INVUL"
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, surface"
+            value: 1
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, periscope"
+            value: 1
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, semi_deep_water"
+            value: 1
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, deep_water"
+            value: 1
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, deep_water_invul"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER_INVUL"
+          - option: "depth charge air strike CS 300 kg, surface"
+            value: 1
+          - option: "depth charge air strike CS 300 kg, periscope"
+            value: 1
+          - option: "depth charge air strike CS 300 kg, semi_deep_water"
+            value: 1
+          - option: "depth charge air strike CS 300 kg, deep_water"
+            value: 1
+          - option: "depth charge air strike CS 300 kg, deep_water_invul"
+            value: 1
+      - quantity: underwater.class_damage_multiplier
+        unit: x
+        values:
+          - option: "main battery 203 mm proiettili AP 1924 mod.2, submarine"
+            value: 1
+          - option: "main battery 203 mm proiettili CS 1924 mod.2, submarine"
+            value: 1
+          - option: depth charge air strike CS 300 kg
+            note: game data lists no damageVulnerabilityForShipClasses (no per-class multiplier) for it
+  - ship: "T10 Des Moines (cruiser, USA)"
+    quantities:
+      - quantity: underwater.splash_coefficient
+        unit: x
+        values:
+          - option: main battery 203 mm HE/HC Mk25
+            value: 0.165
+            note: "pointsOfDamage: 0.165 at 0, 0.165 at 1"
+          - option: main battery 203 mm AP Mk21
+            value: 0.1
+            note: "pointsOfDamage: 0.1 at 0, 0.1 at 1"
+          - option: depth charge air strike 650 lb Depth Bomb
+            value: 1
+            note: "pointsOfDamage: 1 at 0, 1 at 0.4, 0.5 at 0.401, 0.5 at 0.8, 0 at 0.801, 0 at 1"
+      - quantity: underwater.splash_radius
+        unit: m
+        values:
+          - option: main battery 203 mm HE/HC Mk25
+            build: base
+            value: 3.39
+          - option: main battery 203 mm HE/HC Mk25
+            build: with Demolition Expert
+            value: 3.8985
+          - option: main battery 203 mm AP Mk21
+            build: base
+            value: 1.69
+          - option: main battery 203 mm AP Mk21
+            build: with Demolition Expert
+            value: 1.9435
+          - option: depth charge air strike 650 lb Depth Bomb
+            build: base
+            value: 12.5
+      - quantity: underwater.max_depth
+        unit: m
+        values:
+          - option: main battery 203 mm HE/HC Mk25
+            value: 15
+          - option: main battery 203 mm AP Mk21
+            value: 15
+          - option: depth charge air strike 650 lb Depth Bomb
+            value: 80
+      - quantity: underwater.depth_state_damage
+        unit: x
+        values:
+          - option: "main battery 203 mm HE/HC Mk25, surface"
+            value: 1
+          - option: "main battery 203 mm HE/HC Mk25, periscope"
+            value: 1
+          - option: "main battery 203 mm HE/HC Mk25, semi_deep_water"
+            value: 1
+          - option: "main battery 203 mm HE/HC Mk25, deep_water"
+            value: 1
+          - option: "main battery 203 mm HE/HC Mk25, deep_water_invul"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER_INVUL"
+          - option: "main battery 203 mm AP Mk21, surface"
+            value: 1
+          - option: "main battery 203 mm AP Mk21, periscope"
+            value: 1
+          - option: "main battery 203 mm AP Mk21, semi_deep_water"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists SEMI_DEEP_WATER"
+          - option: "main battery 203 mm AP Mk21, deep_water"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER"
+          - option: "main battery 203 mm AP Mk21, deep_water_invul"
+            value: 0
+            note: "cannot hit: ignoreBuoyancyStates lists DEEP_WATER_INVUL"
+          - option: "depth charge air strike 650 lb Depth Bomb, surface"
+            value: 1
+          - option: "depth charge air strike 650 lb Depth Bomb, periscope"
+            value: 1
+          - option: "depth charge air strike 650 lb Depth Bomb, semi_deep_water"
+            value: 1
+          - option: "depth charge air strike 650 lb Depth Bomb, deep_water"
+            value: 1
+          - option: "depth charge air strike 650 lb Depth Bomb, deep_water_invul"
+            value: 1
+      - quantity: underwater.class_damage_multiplier
+        unit: x
+        values:
+          - option: "main battery 203 mm HE/HC Mk25, submarine"
+            value: 1
+          - option: "main battery 203 mm AP Mk21, submarine"
+            value: 1
+          - option: depth charge air strike 650 lb Depth Bomb
+            note: game data lists no damageVulnerabilityForShipClasses (no per-class multiplier) for it
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

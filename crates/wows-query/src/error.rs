@@ -282,6 +282,27 @@ pub enum QueryError {
 
     #[error("projectile {projectile} lacks data the ballistic solution needs")]
     ProjectileIncomplete { projectile: String },
+
+    #[error("no quantity matches {query:?}; {}", did_you_mean(suggestions, "find quantity names with quantity_search"))]
+    QuantityNotFound { query: String, suggestions: Vec<String> },
+
+    #[error("invalid params for {quantity}: {source}; quantity_search lists its parameters")]
+    QuantityParameters {
+        quantity: String,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error(
+        "Vigilance is not in the {} skill tree; spotter_class can be {}",
+        class.label().replace('_', " "),
+        classes.iter().map(|class| class.label()).collect::<Vec<_>>().join(", ")
+    )]
+    VigilanceNotForClass {
+        class: ShipClass,
+        /// Classes whose skill tree has Vigilance.
+        classes: Vec<ShipClass>,
+    },
 }
 
 impl QueryError {
@@ -307,7 +328,8 @@ impl QueryError {
             | Self::UpgradeNotFound { suggestions, .. }
             | Self::CommanderNotFound { suggestions, .. }
             | Self::ConsumableNotFound { suggestions, .. }
-            | Self::StatNotFound { suggestions, .. } => suggestions,
+            | Self::StatNotFound { suggestions, .. }
+            | Self::QuantityNotFound { suggestions, .. } => suggestions,
             _ => &[],
         }
     }

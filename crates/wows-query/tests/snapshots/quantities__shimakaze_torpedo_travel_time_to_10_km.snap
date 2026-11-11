@@ -1,0 +1,30 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+ships:
+  - ship: "T10 Shimakaze (destroyer, Japan)"
+    quantities:
+      - quantity: torpedo.travel_time
+        unit: s
+        values:
+          - option: Type 93 (stock)
+            build: base
+            value: 60.06
+            note: 62 kn = 166.49 m/s
+          - option: Type 93 (stock)
+            build: "with Swift Fish, Torpedo Tubes Modification 1"
+            value: 54.48
+            note: 68.35 kn = 183.56 m/s
+          - option: "Type 93 mod. 3 (modules: Type 93 mod. 3)"
+            build: base
+            value: 55.58
+            note: 67 kn = 179.92 m/s
+          - option: "Type 93 mod. 3 (modules: Type 93 mod. 3)"
+            build: "with Swift Fish, Torpedo Tubes Modification 1"
+            value: 50.41
+            note: 73.87 kn = 198.36 m/s
+          - option: "Type F3 (modules: Type F3)"
+            build: base
+            note: "10 km is beyond the torpedo's 8.01 km range on this build"
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

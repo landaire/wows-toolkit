@@ -1,0 +1,13 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+ships:
+  - ship: "T10 Des Moines (cruiser, USA)"
+    quantities:
+      - quantity: shell.flight_time
+        unit: s
+        values:
+          - option: main battery 203 mm HE/HC Mk25
+            value: 7.55
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

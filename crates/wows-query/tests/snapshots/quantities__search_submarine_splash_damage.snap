@@ -1,0 +1,94 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+query: submarine splash damage
+quantities:
+  - name: underwater.splash_coefficient
+    unit: x
+    applies_to: shell_or_depth_charge
+    description: "Splash damage to a submarine: the share of a shell's or depth charge's damage dealt by a burst near it, by distance from the burst as a fraction of the splash radius (pointsOfDamage). Most AP shells deal 0.1, HE and SAP 0.165; depth charges deal full damage near the burst and less farther out."
+    parameters:
+      - name: projectile
+        type: "one of: AP, HE, SAP, depth_charge"
+        required: false
+        description: "Only shells of this ammo type, or only depth charges. Without it, every shell and depth charge; a group needs it."
+      - name: battery
+        type: "one of: main, secondary"
+        required: false
+        description: "Only shells of this battery. Without it, both; a group takes the main battery."
+      - name: relative_distance
+        type: "number (fraction of the splash radius, 0 to 1)"
+        required: false
+        default: "0, at the burst"
+        description: Distance from the burst over the splash radius.
+    sources:
+      - GameParams Projectile.pointsOfDamage
+      - client script m65e88a3f.py classes Ammo and DepthCharge (defaults when a projectile omits the field)
+  - name: underwater.splash_radius
+    unit: m
+    applies_to: shell_or_depth_charge
+    description: "Splash radius of a shell or depth charge under water (depthSplashRadius), in the game world's meters (the scale ship models are drawn at): how far from a submerged submarine a burst still damages it."
+    parameters:
+      - name: projectile
+        type: "one of: AP, HE, SAP, depth_charge"
+        required: false
+        description: "Only shells of this ammo type, or only depth charges. Without it, every shell and depth charge; a group needs it."
+      - name: battery
+        type: "one of: main, secondary"
+        required: false
+        description: "Only shells of this battery. Without it, both; a group takes the main battery."
+    sources:
+      - GameParams Projectile.depthSplashRadius
+      - client script m65e88a3f.py classes Ammo and DepthCharge (defaults when a projectile omits the field)
+      - client script Modifiers/ModifiersApply.py getDepthSplashRadius (times dcSplashRadiusMultiplier or ammoSplashRadiusMultiplier)
+  - name: asw.best_damage_per_attack
+    unit: hp
+    applies_to: ship
+    description: "Damage of one attack with the ship's stronger anti-submarine weapon, ship-mounted depth charges or depth charge air strike, if every depth charge hits; the row names the weapon; base value, without skills or upgrades; one row per weapon, the stronger one; no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: asw.depth_charge.splash_radius
+    unit: m
+    applies_to: ship
+    description: "Blast radius of one ship-mounted depth charge, in the game world's meters (the scale of ship models; full damage in the inner part, a third beyond); base value, without skills or upgrades; no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: torpedoes.torpedoes.damage_per_minute
+    unit: hp/min
+    applies_to: ship
+    description: "Torpedo damage per minute against one target at its best bearing, launchers bearing on it only, every torpedo hitting, on the launcher reload, loader limits applied, no consumable; not submarines; one row per torpedo. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+omitted: 49
+note: "Call quantity_values with a name and its params: it computes the values from game data. Speeds are game knots: ships and torpedoes move 2.6854 m/s per game knot on the map, not 0.5144 m/s per nautical knot; values already apply this."

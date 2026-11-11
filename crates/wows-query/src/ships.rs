@@ -41,6 +41,10 @@ const FIND_SHIPS_LIMIT: usize = 40;
 pub(crate) const SHIP_ALIASES: &[(&str, &str)] = &[
     ("Gro\u{df}er Kurf\u{fc}rst", "G. Kurf\u{fc}rst"),
     ("GK", "G. Kurf\u{fc}rst"),
+    ("Grober", "G. Kurf\u{fc}rst"),
+    ("Mega Grober", "Hannover"),
+    ("Brik", "Vermont"),
+    ("Brick", "Vermont"),
     ("Friedrich der Gro\u{df}e", "F. der Grosse"),
     ("FdG", "F. der Grosse"),
     ("DM", "Des Moines"),

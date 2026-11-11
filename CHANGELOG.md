@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- *(wows-query)* Add searchable computed quantities for ballistics, torpedoes, underwater weapons, and comparison factors
+- *(wows-query)* Expand battle impact with fixed-range accuracy, ammo, overmatch, secondaries, maneuverability, consumables, funny buttons, and commander talents
+
 ### Bug Fixes
 
 - *(toolkit)* Keep replay export ship data attached after roster sorting

@@ -50,6 +50,7 @@ use crate::game_params::ttx::special_abilities::ProgressDecay;
 use crate::game_params::ttx::special_abilities::ProgressEvent;
 use crate::game_params::ttx::special_abilities::ProgressPercent;
 use crate::game_params::ttx::special_abilities::ProgressTrigger;
+use crate::game_types::BuoyancyState;
 use crate::game_types::ChargeCount;
 use crate::game_types::GameParamId;
 use crate::game_types::Vec2;
@@ -3168,6 +3169,48 @@ impl GameMetadataProvider {
                         .filter_map(|item| item.string_ref().map(|s| s.inner().to_string()))
                         .collect::<Vec<_>>()
                 });
+                let points_of_damage = read_pairs("pointsOfDamage").map(|pairs| {
+                    pairs
+                        .into_iter()
+                        .map(|(relative_distance, coefficient)| SplashDamagePoint { relative_distance, coefficient })
+                        .collect::<Vec<_>>()
+                });
+                // Dicts keyed by name; sorted so the cache is the same on every parse.
+                let read_coefficients = |key: &str| -> Option<Vec<(String, f32)>> {
+                    let dict = param_data.get(&pk(key))?.dict_or_object_dict()?;
+                    let mut pairs: Vec<(String, f32)> = dict
+                        .inner()
+                        .iter()
+                        .filter_map(|(name, value)| Some((name.string_ref()?.inner().to_owned(), value_f32(value)?)))
+                        .collect();
+                    pairs.sort_by(|left, right| left.0.cmp(&right.0));
+                    Some(pairs)
+                };
+                let buoyancy_to_damage_coeff = read_coefficients("buoyancyToDamageCoeff").map(|pairs| {
+                    pairs
+                        .into_iter()
+                        .map(|(state, coefficient)| BuoyancyDamage {
+                            state: BuoyancyState::from_name(&state),
+                            coefficient,
+                        })
+                        .collect::<Vec<_>>()
+                });
+                let damage_vulnerability = read_coefficients("damageVulnerabilityForShipClasses").map(|pairs| {
+                    pairs
+                        .into_iter()
+                        .map(|(class, coefficient)| ClassVulnerability {
+                            class: Species::from_name(&class),
+                            coefficient,
+                        })
+                        .collect::<Vec<_>>()
+                });
+                let ignore_buoyancy_states =
+                    param_data.get(&pk("ignoreBuoyancyStates")).map(read_sequence).map(|states| {
+                        states
+                            .iter()
+                            .filter_map(|state| state.string_ref().map(|name| BuoyancyState::from_name(name.inner())))
+                            .collect::<Vec<_>>()
+                    });
                 Some(ParamData::Projectile(
                     Projectile::builder()
                         .maybe_ammo_type(ammo_type)
@@ -3180,7 +3223,12 @@ impl GameMetadataProvider {
                         .maybe_bullet_cap_normalize_max_angle(bullet_cap_normalize_max_angle)
                         .maybe_bullet_detonator(bullet_detonator)
                         .maybe_bullet_detonator_threshold(bullet_detonator_threshold)
-                        .maybe_depth_splash_radius(read_opt_f32("depthSplashRadius"))
+                        .maybe_depth_splash_radius(read_opt_f32("depthSplashRadius").map(Meters::from))
+                        .maybe_points_of_damage(points_of_damage)
+                        .maybe_buoyancy_to_damage_coeff(buoyancy_to_damage_coeff)
+                        .maybe_ignore_buoyancy_states(ignore_buoyancy_states)
+                        .maybe_max_depth(read_opt_f32("maxDepth").map(Meters::from))
+                        .maybe_damage_vulnerability_for_ship_classes(damage_vulnerability)
                         .maybe_bullet_ricochet_at(bullet_ricochet_at)
                         .maybe_bullet_always_ricochet_at(bullet_always_ricochet_at)
                         .maybe_alpha_piercing_he(alpha_piercing_he)
@@ -3435,6 +3483,58 @@ mod camera_tests {
         assert_eq!(projectile.ignore_classes(), Some(&["Cruiser".to_string(), "Destroyer".to_string()][..]));
         assert_eq!(projectile.maneuver_dist().map(|d| d.value()), Some(20.0));
         assert_eq!(projectile.arming_time(), Some(1.0));
+    }
+
+    #[test]
+    fn parse_single_param_reads_underwater_fields() {
+        /// The fields that decide what a projectile does to submarines.
+        #[derive(Debug)]
+        #[allow(dead_code, reason = "read through Debug by the snapshot")]
+        struct Underwater<'a> {
+            points_of_damage: Option<&'a [SplashDamagePoint]>,
+            depth_splash_radius: Option<Meters>,
+            buoyancy_to_damage_coeff: Option<&'a [BuoyancyDamage]>,
+            ignore_buoyancy_states: Option<&'a [crate::recognized::Recognized<BuoyancyState>]>,
+            max_depth: Option<Meters>,
+            damage_vulnerability_for_ship_classes: Option<&'a [ClassVulnerability]>,
+        }
+
+        // Real PAPA012_Shell_203mm_AP_AP_Mk_21 (Des Moines AP) values.
+        let classes = ["AirCarrier", "Auxiliary", "Battleship", "Cruiser", "Destroyer", "Submarine"];
+        let proj = dict(vec![
+            (pk("id"), iv(4243)),
+            (pk("index"), sv("PAPA012")),
+            (pk("name"), sv("PAPA012_Shell_203mm_AP_AP_Mk_21")),
+            (pk("typeinfo"), typeinfo("USA", "Artillery", "Projectile")),
+            (pk("ammoType"), sv("AP")),
+            (pk("pointsOfDamage"), list(vec![list(vec![iv(0), fv(0.1)]), list(vec![iv(1), fv(0.1)])])),
+            (pk("depthSplashRadius"), fv(1.69)),
+            (
+                pk("buoyancyToDamageCoeff"),
+                dict(vec![
+                    (pk("SURFACE"), fv(1.0)),
+                    (pk("PERISCOPE"), fv(1.0)),
+                    (pk("SEMI_DEEP_WATER"), fv(1.0)),
+                    (pk("DEEP_WATER"), fv(1.0)),
+                    (pk("DEEP_WATER_INVUL"), fv(0.0)),
+                ]),
+            ),
+            (pk("ignoreBuoyancyStates"), list(vec![sv("SEMI_DEEP_WATER"), sv("DEEP_WATER"), sv("DEEP_WATER_INVUL")])),
+            (pk("maxDepth"), iv(-15)),
+            (pk("damageVulnerabilityForShipClasses"), dict(classes.iter().map(|class| (pk(class), iv(1))).collect())),
+        ]);
+        let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
+        let param = GameMetadataProvider::parse_single_param(&proj, &params_dict, None).expect("param parsed");
+        let projectile = param.projectile().expect("projectile data");
+
+        insta::assert_debug_snapshot!(Underwater {
+            points_of_damage: projectile.points_of_damage(),
+            depth_splash_radius: projectile.depth_splash_radius(),
+            buoyancy_to_damage_coeff: projectile.buoyancy_to_damage_coeff(),
+            ignore_buoyancy_states: projectile.ignore_buoyancy_states(),
+            max_depth: projectile.max_depth(),
+            damage_vulnerability_for_ship_classes: projectile.damage_vulnerability_for_ship_classes(),
+        });
     }
 
     #[test]

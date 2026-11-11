@@ -1,8 +1,8 @@
 //! TTX data model: stat newtypes plus the `ShipStats` struct tree.
 //!
-//! Distance units (`Meters`, `Millimeters`, ...) are reused from `wows-core`
-//! (re-exported by `game_params::types`). The newtypes defined here cover the
-//! remaining TTX quantities. Leaf structs hold `Option` fields (absent when not
+//! Distance and speed units (`Meters`, `Millimeters`, `Knots`, ...) are reused
+//! from `wows-core`. The newtypes defined here cover the remaining TTX
+//! quantities. Leaf structs hold `Option` fields (absent when not
 //! computable); per-species fields are filled in by later milestones.
 
 use crate::game_params::ttx::consumables::ConsumableCard;
@@ -13,32 +13,9 @@ use crate::game_params::types::Meters;
 use crate::game_params::types::MetersPerSecond;
 use crate::game_params::types::Millimeters;
 
-// `Knots`, `Seconds`, `Hp`, `DegreesPerSecond` are defined below in this module.
+pub use wows_core::units::Knots;
 
-/// Speed in knots.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
-pub struct Knots(f32);
-
-impl Knots {
-    pub fn value(&self) -> f32 {
-        self.0
-    }
-}
-
-impl From<f32> for Knots {
-    fn from(v: f32) -> Self {
-        Self(v)
-    }
-}
-
-/// Conventional English-port rounding: one decimal place plus the `kn` symbol.
-impl std::fmt::Display for Knots {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.1} kn", self.0)
-    }
-}
+// `Seconds`, `Hp`, `DegreesPerSecond` are defined below in this module.
 
 /// Duration in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]

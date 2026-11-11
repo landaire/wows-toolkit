@@ -23,8 +23,10 @@ factors:
   - "flight_time_ap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
+  - "effective_gun_damage (index, higher is better): main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time"
   - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
   - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
+  - "vertical_dispersion (m, lower is better): main battery vertical dispersion at the reference range, or at the ship's own range when shorter"
   - "sigma (sigma, higher is better): main battery sigma; higher puts more shells near the aim point"
   - "fires_per_minute (fires/min, higher is better): fire starts per minute of every armament against one target at its best bearing, every projectile hitting"
   - "bow_barrels (%, higher is better): share of main battery barrels that bear on a target within 30 deg of the bow, at the best bearing"
@@ -32,7 +34,12 @@ factors:
   - "all_bear_from_bow (deg, lower is better): smallest angle off the bow at which every main battery barrel bears"
   - "all_bear_from_stern (deg, lower is better): smallest angle off the stern at which every main battery barrel bears; the kiting angle"
   - "secondary_dpm (HP/min, higher is better): secondary battery damage per minute, each group at its own best bearing, added up, every shell hitting"
+  - "main_sap_coverage (%, higher is better): above-water external armor plate thicknesses across released surface ships in its matchmaking that its largest main battery SAP shell penetrates"
+  - "secondary_sap_coverage (%, higher is better): the same armor-plate coverage for its largest secondary battery SAP shell; absent without SAP secondaries"
   - "secondary_range (km, higher is better): secondary battery firing range"
+  - "funny_button_effect (index, higher is better): impact of the funny button (F key) while active: magnitude of its modifiers, scaled by duration; optional alternative fire modes include burst concentration"
+  - "funny_button_access (index, higher is better): ease of getting the funny button (F key): the least demanding repeatable charge path; an alternative fire mode is immediately available"
+  - "commander_talent_effect (index, higher is better): largest total modifier magnitude from the first activation of the random-battle talents of a unique commander who can serve on the ship; activation difficulty is not estimated"
   - "torpedo_dpm (HP/min, higher is better): torpedo damage per minute of the best torpedo against one target at its best bearing, every torpedo hitting"
   - "torpedoes_per_minute (torpedoes/min, higher is better): torpedoes launched per minute against one target at its best bearing, with the loaders' limit"
   - "torpedo_reload (s, lower is better): torpedo tube reload"
@@ -198,6 +205,11 @@ leaders:
       - "Venezia (Italy, heavy cruiser) 5.97 s"
     worst:
       - "Austin (USA, light cruiser, premium) 7.47 s"
+  effective_gun_damage:
+    best:
+      - "Bremen (Germany, light cruiser, premium) 39.35 index"
+    worst:
+      - "Kitakami (Japan, light cruiser, premium) 7.74 index"
   turret_traverse:
     best:
       - "Austin (USA, light cruiser, premium) 3.4 s"
@@ -208,6 +220,11 @@ leaders:
       - "Zaō (Japan, heavy cruiser, with unique upgrade Improved Bridge) 91 m"
     worst:
       - "Puerto Rico (USA, large cruiser, premium) 167 m"
+  vertical_dispersion:
+    best:
+      - "Petropavlovsk (Russia, heavy cruiser) 47 m"
+    worst:
+      - "Puerto Rico (USA, large cruiser, premium) 85 m"
   sigma:
     best:
       - "Stalingrad (Russia, large cruiser, premium) 2.65 sigma"
@@ -243,11 +260,36 @@ leaders:
       - "Napoli (Italy, heavy cruiser, premium) 579861 HP/min"
     worst:
       - "Petrozavodsk (Russia, heavy cruiser, test) 180000 HP/min"
+  main_sap_coverage:
+    best:
+      - "Venezia (Italy, heavy cruiser) 67.38%"
+    worst:
+      - "Austin (USA, light cruiser, premium) 58.59%"
+  secondary_sap_coverage:
+    best:
+      - "Napoli (Italy, heavy cruiser, premium) 61.98%"
+    worst:
+      - "Napoli (Italy, heavy cruiser, premium) 61.98%"
   secondary_range:
     best:
       - "Amiral Lartigue (France, large cruiser, premium) 11.95 km"
     worst:
       - "Almte. Irízar (Pan_America, light cruiser, premium) 9.07 km"
+  funny_button_effect:
+    best:
+      - "Latouche-Tréville (France, large cruiser, test) 366.32 index"
+    worst:
+      - "Castilla (Spain, heavy cruiser) 25 index"
+  funny_button_access:
+    best:
+      - "Castilla (Spain, heavy cruiser) 100 index"
+    worst:
+      - "Almte. Irízar (Pan_America, light cruiser, premium) 40 index"
+  commander_talent_effect:
+    best:
+      - "Almte. Irízar (Pan_America, light cruiser, premium) 2046.03 index"
+    worst:
+      - "V. Monomakh (Russia, heavy cruiser, test) 7.23 index"
   torpedo_dpm:
     best:
       - "Zaō (Japan, heavy cruiser) 185307 HP/min"
@@ -421,8 +463,10 @@ ships:
       alpha_he: "27720 (rank 35/48, p26; heavy cruisers rank 16/19, p11)"
       flight_time_ap: "7.69 (rank 42/54, p19; heavy cruisers rank 21/23, p0)"
       flight_time_he: "7.55 (rank 37/48, p19; heavy cruisers rank 17/19, p0)"
+      effective_gun_damage: "25.84 (rank 9/56, p84; heavy cruisers rank 4/23, p82)"
       turret_traverse: "22.68 (rank 36/56, p18; heavy cruisers rank 14/23, p23)"
       dispersion: "108 (rank 9/56, p18; heavy cruisers rank 4/23, p9)"
+      vertical_dispersion: "57 (rank 33/56, p31; heavy cruisers rank 20/23, p5)"
       sigma: "2.05 (rank 5/56, p5; heavy cruisers rank 2/23, p0)"
       fires_per_minute: "32.15 (rank 16/55, p70; heavy cruisers rank 3/23, p86)"
       bow_barrels: "66.67 (rank 19/56, p44; heavy cruisers rank 3/23, p45)"
@@ -431,6 +475,7 @@ ships:
       all_bear_from_stern: "31 (rank 18/54, p53; heavy cruisers rank 12/23, p32)"
       secondary_dpm: "200000 (rank 34/41, p13; heavy cruisers rank 18/23, p14)"
       secondary_range: "10.51 (rank 10/41, p8; heavy cruisers rank 3/23, p0)"
+      commander_talent_effect: "57.15 (rank 10/56, p75; heavy cruisers rank 3/23, p86)"
       aa_rating: "11956 (rank 35/56, p38; heavy cruisers rank 11/23, p55)"
       aa_long_dps: "151 (rank 41/55, p19; heavy cruisers rank 18/23, p9)"
       aa_flak: "16905 (rank 39/55, p17; heavy cruisers rank 17/23, p9)"
@@ -491,16 +536,6 @@ ships:
     signals:
       - "Kites poorly: within 30 deg of the stern 3 of 9 main battery barrels bear and all bear from 31 deg off the stern."
       - "Bow-on it is exposed: most tier 8-11 battleships (67.21%) overmatch its 27 mm bow plating; within 30 deg of the bow 6 of 9 main battery barrels bear and all bear from 30 deg off the bow."
-    battle_impact:
-      score: 55.5
-      rank: 12
-      components:
-        firepower: 60.8
-        accuracy: 40.7
-        reach: 31.8
-        survivability: 48.8
-        mobility: 59
-        spotting: 62.1
     unique_upgrade: "Enhanced Propulsion Plant (unique upgrade), taken for: rudder_shift"
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
@@ -525,12 +560,17 @@ ships:
       alpha_he: "47520 (rank 6/48, p87; light cruisers rank 2/17, p94)"
       flight_time_ap: "7.47 (rank 36/54, p34; light cruisers rank 4/19, p83)"
       flight_time_he: "7.47 (rank 32/48, p32; light cruisers rank 4/17, p75)"
+      effective_gun_damage: "20.2 (rank 20/56, p65; light cruisers rank 10/21, p55)"
       turret_traverse: "3.4 (rank 1/56, p95; light cruisers rank 1/21, p85)"
       dispersion: "108 (rank 9/56, p18; light cruisers rank 6/21, p0)"
+      vertical_dispersion: "57 (rank 33/56, p31; light cruisers rank 10/21, p40)"
       sigma: "2.05 (rank 5/56, p5; light cruisers rank 1/21, p10)"
       fires_per_minute: "28.96 (rank 29/55, p48; light cruisers rank 7/20, p68)"
       bow_barrels: "66.67 (rank 19/56, p44; light cruisers rank 9/21, p60)"
       stern_barrels: "66.67 (rank 11/56, p82; light cruisers rank 5/21, p80)"
+      funny_button_effect: "38.13 (rank 4/5, p25; light cruisers rank 3/3, p0)"
+      funny_button_access: "100 (rank 1/5, p50; light cruisers rank 1/3, p100)"
+      commander_talent_effect: "57.15 (rank 10/56, p75; light cruisers rank 7/21, p60)"
       aa_rating: "19145 (rank 1/56, p100; light cruisers rank 1/21, p100)"
       aa_long_dps: "443 (rank 1/55, p100; light cruisers rank 1/20, p100)"
       aa_flak: "32703 (rank 1/55, p100; light cruisers rank 1/20, p100)"
@@ -595,16 +635,6 @@ ships:
     signals:
       - "Kites with its guns (within 30 deg of the stern 16 of 24 main battery barrels bear and they never all bear toward the stern), but most tier 8-11 battleships (67.21%) overmatch its 27 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (67.21%) overmatch its 27 mm bow plating; within 30 deg of the bow 16 of 24 main battery barrels bear and they never all bear toward the bow."
-    battle_impact:
-      score: 59.5
-      rank: 3
-      components:
-        firepower: 77.2
-        accuracy: 45
-        reach: 25.5
-        survivability: 68.4
-        mobility: 25.7
-        spotting: 52.7
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
       - "Repair Party (3 charges, 80 s reload)"
@@ -630,8 +660,10 @@ ships:
       alpha_he: "44880 (rank 9/48, p83; heavy cruisers rank 3/19, p89)"
       flight_time_ap: "6.21 (rank 20/54, p62; heavy cruisers rank 11/23, p50)"
       flight_time_he: "6.21 (rank 17/48, p64; heavy cruisers rank 9/19, p50)"
+      effective_gun_damage: "25.07 (rank 12/56, p80; heavy cruisers rank 7/23, p73)"
       turret_traverse: "22.68 (rank 36/56, p18; heavy cruisers rank 14/23, p23)"
       dispersion: "91 (rank 1/56, p100; heavy cruisers rank 1/23, p100) (with unique upgrade Improved Bridge)"
+      vertical_dispersion: "49 (rank 2/56, p98; heavy cruisers rank 2/23, p95) (with unique upgrade Improved Bridge)"
       sigma: "2.05 (rank 5/56, p5; heavy cruisers rank 2/23, p0)"
       fires_per_minute: "31.14 (rank 22/55, p61; heavy cruisers rank 9/23, p64)"
       bow_barrels: "50 (rank 36/56, p4; heavy cruisers rank 16/23, p5)"
@@ -640,6 +672,7 @@ ships:
       all_bear_from_stern: "34 (rank 30/54, p42; heavy cruisers rank 18/23, p23)"
       secondary_dpm: "283333 (rank 16/41, p55; heavy cruisers rank 6/23, p68)"
       secondary_range: "10.51 (rank 10/41, p8; heavy cruisers rank 3/23, p0)"
+      commander_talent_effect: "18.45 (rank 37/56, p25; heavy cruisers rank 14/23, p32)"
       torpedo_dpm: "185307 (rank 1/36, p100; heavy cruisers rank 1/16, p100)"
       torpedoes_per_minute: "7.54 (rank 2/36, p97; heavy cruisers rank 2/16, p93)"
       torpedo_reload: "79.56 (rank 20/36, p46; heavy cruisers rank 11/16, p33)"
@@ -662,6 +695,7 @@ ships:
       stern_overmatch: "weakness: 87.7% of the battleships it meets overmatch its stern (a majority); for comparison, rank 8/56, p35; heavy cruisers rank 4/23, p23"
     outliers:
       - "strength: dispersion 91 m (with unique upgrade Improved Bridge), the lowest of the 56 tier 10 cruisers (rank 1/56)"
+      - "strength: vertical_dispersion 49 m (with unique upgrade Improved Bridge), lower than 98% of the 55 other tier 10 cruisers (rank 2/56)"
       - "strength: torpedo_dpm 185307 HP/min, the highest of the 36 tier 10 cruisers (rank 1/36)"
       - "strength: torpedoes_per_minute 7.54 torpedoes/min, higher than 97% of the 35 other tier 10 cruisers (rank 2/36)"
       - "weakness: torpedo_launch_from_bow 50 deg, higher than 97% of the 35 other tier 10 cruisers (rank 35/36)"
@@ -745,17 +779,7 @@ ships:
       - "Kites with its guns (within 30 deg of the stern 6 of 12 main battery barrels bear and all bear from 34 deg off the stern), but most tier 8-11 battleships (87.7%) overmatch its 25 mm stern plating."
       - "Bow-on it is exposed: most tier 8-11 battleships (87.7%) overmatch its 25 mm bow plating; within 30 deg of the bow 6 of 12 main battery barrels bear and all bear from 36 deg off the bow."
       - "Its torpedo launchers bear only from 50 deg off the bow, so a launch needs a wide turn toward broadside."
-    battle_impact:
-      score: 54.8
-      rank: 15
-      components:
-        firepower: 66.9
-        accuracy: 71.3
-        reach: 38.2
-        survivability: 38.2
-        mobility: 65.5
-        spotting: 52.9
-    unique_upgrade: "Improved Bridge (unique upgrade), taken for: dispersion"
+    unique_upgrade: "Improved Bridge (unique upgrade), taken for: dispersion, vertical_dispersion"
     consumables:
       - "Damage Control Party (unlimited charges, 60 s reload)"
       - "Auxiliary and Torpedo Weaponry Coordination (3 charges, 120 s reload) or Hydroacoustic Search (3 charges, 120 s reload)"
@@ -766,11 +790,12 @@ head_to_head:
   - ships:
       - Des Moines
       - Hawaii
-    compared: 35
+    compared: 38
     first_better:
       - main_battery_reload
       - main_battery_range
       - dpm_ap
+      - effective_gun_damage
       - fires_per_minute
       - concealment
       - air_concealment
@@ -798,8 +823,10 @@ head_to_head:
       - repair_party_heal
       - damage_control_reload
       - dispersion
+      - vertical_dispersion
       - sigma
       - bow_barrels
+      - commander_talent_effect
       - hydro_range
       - torpedo_detection
       - speed
@@ -808,26 +835,28 @@ head_to_head:
     first_largest_leads:
       - rudder_shift 3.3 vs 6.63 s (50% apart)
       - dpm_ap 585744 vs 453147 HP/min (23% apart)
-      - bb_ap_citadel 5.8 vs 7.1% (18% apart)
+      - effective_gun_damage 25.84 vs 20.2 index (22% apart)
     second_largest_leads:
       - turret_traverse 3.4 vs 22.68 s (85% apart)
       - aa_long_dps 443 vs 151 HP/s (66% apart)
       - stern_barrels 66.67 vs 33.33% (50% apart)
-    verdict: "Mixed: Des Moines is better on 11 of 35 compared factors, Hawaii on 14, 10 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Des Moines is better on 12 of 38 compared factors, Hawaii on 14, 12 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Des Moines
       - Zaō
-    compared: 37
+    compared: 40
     first_better:
       - health
       - repair_party_total_heal
       - main_battery_reload
       - dpm_ap
       - dpm_he
+      - effective_gun_damage
       - fires_per_minute
       - bow_barrels
       - all_bear_from_bow
       - all_bear_from_stern
+      - commander_talent_effect
       - aa_rating
       - rudder_shift
       - turning_circle
@@ -841,6 +870,7 @@ head_to_head:
       - flight_time_ap
       - flight_time_he
       - dispersion
+      - vertical_dispersion
       - stern_barrels
       - secondary_dpm
       - aa_long_dps
@@ -859,18 +889,18 @@ head_to_head:
       - hydro_range
       - torpedo_detection
     first_largest_leads:
+      - commander_talent_effect 57.15 vs 18.45 index (68% apart)
       - main_battery_reload 4.84 vs 12.06 s (60% apart)
       - dpm_ap 585744 vs 338620 HP/min (42% apart)
-      - dpm_he 343636 vs 223358 HP/min (35% apart)
     second_largest_leads:
       - alpha_he 44880 vs 27720 HP (38% apart)
       - bb_ap_citadel 3.6 vs 5.8% (38% apart)
       - stern_barrels 50 vs 33.33% (33% apart)
-    verdict: "Mixed: Des Moines is better on 15 of 37 compared factors, Zaō on 15, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Des Moines is better on 17 of 40 compared factors, Zaō on 16, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Hawaii
       - Zaō
-    compared: 33
+    compared: 36
     first_better:
       - health
       - repair_party_total_heal
@@ -881,6 +911,7 @@ head_to_head:
       - turret_traverse
       - bow_barrels
       - stern_barrels
+      - commander_talent_effect
       - aa_rating
       - aa_long_dps
       - aa_flak
@@ -893,7 +924,9 @@ head_to_head:
       - alpha_ap
       - flight_time_ap
       - flight_time_he
+      - effective_gun_damage
       - dispersion
+      - vertical_dispersion
       - fires_per_minute
       - concealment
       - air_concealment
@@ -909,13 +942,13 @@ head_to_head:
       - turning_circle
     first_largest_leads:
       - turret_traverse 3.4 vs 22.68 s (85% apart)
+      - commander_talent_effect 57.15 vs 18.45 index (68% apart)
       - main_battery_reload 5.72 vs 12.06 s (53% apart)
-      - aa_long_dps 443 vs 217 HP/s (51% apart)
     second_largest_leads:
       - bb_ap_citadel 3.6 vs 7.1% (49% apart)
       - rudder_shift 3.68 vs 6.63 s (44% apart)
       - air_concealment 6.04 vs 7.69 km (21% apart)
-    verdict: "Mixed: Hawaii is better on 16 of 33 compared factors, Zaō on 11, 6 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Hawaii is better on 17 of 36 compared factors, Zaō on 13, 6 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."
