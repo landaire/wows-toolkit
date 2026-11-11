@@ -68,8 +68,8 @@ use crate::status_bar::ModifierKey;
 /// list.
 const DETAIL_ID_STRIDE: usize = 256;
 
-/// Icon size, in pixels, for the two icon kinds the egui app renders larger
-/// than the rest: achievements and non-subribbon ribbons.
+/// Icon size, in pixels, for sub-ribbons, which the egui app renders larger
+/// than the build icons.
 const LARGE_ICON_SIZE: f32 = 32.0;
 const RIBBON_ICON_SIZE: f32 = 64.0;
 const MODULE_ICON_SIZE: f32 = 28.0;
@@ -234,10 +234,9 @@ fn damage_lines_width(lines: &[DamageLine], window: &mut Window) -> f32 {
     damage_mix::SWATCH_SIZE + SWATCH_GAP + labels + BREAKDOWN_GAP + values
 }
 
-/// Mirrors `render_name_section`: the section headings, each achievement
-/// row's icon-box-plus-label width (`icon_label_row_width`), the ribbon grid
-/// (`ribbon_grid_width`), the damage-event grid (or the NDA placeholder when
-/// hidden), and the fire-chance block.
+/// Mirrors `render_name_section`: the section headings, the achievement and
+/// ribbon grids (`tile_grid_width`), the damage-event grid (or the NDA
+/// placeholder when hidden), and the fire-chance block.
 fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();
@@ -251,21 +250,12 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
 
     if has_achievements {
         max_w = max_w.max(text_width(t!("ui.replay.sections.achievements").into_owned().into(), window, true));
-        for achievement in &row.achievements {
-            let label = if achievement.count > 1 {
-                format!("{} ({}x)", achievement.display_name, achievement.count)
-            } else {
-                achievement.display_name.clone()
-            };
-            let label_w = text_width(label.into(), window, false);
-            // Achievements always render at LARGE_ICON_SIZE (`achievement_row`).
-            max_w = max_w.max(icon_label_row_width(LARGE_ICON_SIZE, label_w));
-        }
+        max_w = max_w.max(tile_grid_width(row.achievements.len()));
     }
 
     if has_ribbons {
         max_w = max_w.max(text_width(t!("ui.replay.sections.ribbons").into_owned().into(), window, true));
-        max_w = max_w.max(ribbon_grid_width(row.ribbons.len()));
+        max_w = max_w.max(tile_grid_width(row.ribbons.len()));
     }
 
     if has_damage_events {
@@ -338,17 +328,12 @@ fn fire_chance_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
 /// fire-chance headline holds besides its two figures.
 const HEADLINE_CHROME: f32 = 56.0;
 
-/// Pure width formula for `icon_label_row`: the icon box, the 8px icon-to-
-/// label gap (`icon_label_row`'s `gap(px(8.))`), then the label text.
-fn icon_label_row_width(icon_box: f32, label_width: f32) -> f32 {
-    icon_box + 8.0 + label_width
-}
-
-/// Width `ribbons_view` asks of the column: `RIBBON_GRID_MIN_TILES` tiles per
-/// line, or fewer when there are fewer ribbons. A wider column fits more
-/// tiles per line, since the grid wraps to it.
-fn ribbon_grid_width(ribbon_count: usize) -> f32 {
-    let tiles = ribbon_count.min(RIBBON_GRID_MIN_TILES) as f32;
+/// Width a ribbon or achievement grid asks of the column:
+/// `RIBBON_GRID_MIN_TILES` tiles per line, or fewer when there are fewer
+/// tiles. A wider column fits more tiles per line, since the grid wraps to
+/// it.
+fn tile_grid_width(tile_count: usize) -> f32 {
+    let tiles = tile_count.min(RIBBON_GRID_MIN_TILES) as f32;
     if tiles == 0.0 {
         return 0.0;
     }
@@ -702,41 +687,6 @@ fn fit_dims(w: f32, h: f32, max: f32) -> (f32, f32) {
     (w * scale, h * scale)
 }
 
-/// An `[icon | label]` achievement row: an icon when `icons.get_keyed(key)`
-/// has one (no fallback text in its place, matching the egui app's
-/// `ui.horizontal` which only conditionally adds the image), then `label`
-/// always rendered alongside it. A hover tooltip covers the whole row.
-/// The icon is fitted within a `size` by `size` box preserving its aspect
-/// ratio (`fit_within_box`). `items_center()` vertically centers the icon
-/// and label on a shared center line when the icon is taller than the text.
-/// The 8px icon-to-label gap matches egui's default
-/// `Spacing::item_spacing.x` (`egui::style::Spacing::default()`), the gap a
-/// `ui.horizontal` puts between the image and the label it adds next.
-/// `tag` keys the `ElementId` so different lists in the same row never
-/// collide (see `DETAIL_ID_STRIDE`'s doc).
-#[allow(clippy::too_many_arguments)]
-fn icon_label_row(
-    tag: &'static str,
-    row_ix: usize,
-    idx: usize,
-    key: &str,
-    label: String,
-    tooltip_text: String,
-    size: f32,
-    icons: &IconCache,
-) -> AnyElement {
-    let tooltip: SharedString = tooltip_text.into();
-    let mut row = h_flex().w_full().gap(px(8.)).items_center();
-    if let Some(image) = icons.get_keyed(key) {
-        let (w, h) = fit_within_box(&image, size);
-        row = row.child(img(image).w(px(w)).h(px(h)).flex_none());
-    }
-    row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(detail_text(label)));
-    row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        .into_any_element()
-}
-
 /// The effective-fire-chance block under the recording player's row.
 ///
 /// Only that row carries a result, so every other expands to nothing here.
@@ -923,10 +873,9 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     }
 
     // 3px matches egui's default `Spacing::item_spacing.y`: the section
-    // heading, each achievement row, the ribbon grid, the separators, and the
+    // heading, the achievement and ribbon grids, the separators, and the
     // damage event lines are all top-level children of one `ui.vertical` in
-    // the egui original, so they all share that one gap -- not a larger gap
-    // at this level and a tighter one nested inside `achievements_view`.
+    // the egui original, so they all share that one gap.
     // Set in from the table's edge, which the Name column starts at and the
     // ribbons would otherwise sit against.
     let mut col = v_flex().gap(px(3.)).pl(NAME_SECTION_INDENT);
@@ -1002,19 +951,18 @@ fn reorder_bulge_after_main_caliber(ribbons: &mut Vec<&RibbonResult>) {
     ribbons.insert(insert_idx, bulge);
 }
 
-/// A tight vertical list of achievement rows (icon + label side by side),
-/// matching the egui app's `ui.vertical` of per-achievement `ui.horizontal`
-/// rows -- one achievement per line, not a wrapping icon flow. The 3px gap
-/// matches egui's default `Spacing::item_spacing.y` and keeps the row-to-row
-/// rhythm identical to the outer section's heading-to-first-row gap
-/// (`render_name_section`'s `v_flex().gap(px(3.))`), instead of a different
-/// nested gap that would read uneven against it.
+/// Achievement tiles in a grid that wraps to the column, as the ribbons are.
+/// Top-aligned: only some tiles carry a count, and the icons line up above it.
 fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &IconCache) -> AnyElement {
-    let mut col = v_flex().gap(px(3.));
-    for (idx, achievement) in achievements.iter().enumerate() {
-        col = col.child(achievement_row(row_ix, idx, achievement, icons));
-    }
-    col.into_any_element()
+    h_flex()
+        .w_full()
+        .flex_wrap()
+        .items_start()
+        .gap(px(RIBBON_TILE_GAP))
+        .children(
+            achievements.iter().enumerate().map(|(idx, achievement)| achievement_tile(row_ix, idx, achievement, icons)),
+        )
+        .into_any_element()
 }
 
 /// Ribbon tiles in the already-sorted/reordered display order, wrapping to
@@ -1072,23 +1020,48 @@ fn group_ribbons(ordered: Vec<&RibbonResult>) -> RibbonGroups<'_> {
     RibbonGroups { standalone, families }
 }
 
-fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
-    let key = format!("achievement:{}", achievement.icon_key);
-    let label = if achievement.count > 1 {
-        format!("{} ({}x)", achievement.display_name, achievement.count)
-    } else {
-        achievement.display_name.clone()
+/// One achievement as a ribbon tile: its icon (or, absent one, its name)
+/// over "xN" when it was earned more than once. Hovering shows the icon
+/// larger with the name and the game's description.
+fn achievement_tile(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
+    let image = icons.get_keyed(&format!("achievement:{}", achievement.icon_key));
+    let preview = image.as_ref().map(|image| IconPreview::new(Arc::clone(image), IconBackdrop::Bare, RIBBON_ICON_SIZE));
+    let icon = match image {
+        Some(image) => {
+            let (w, h) = fit_within_box(&image, RIBBON_ICON_SIZE);
+            img(image).w(px(w)).h(px(h)).flex_none().into_any_element()
+        }
+        None => div()
+            .w_full()
+            .text_xs()
+            .text_center()
+            .child(detail_text(achievement.display_name.clone()))
+            .into_any_element(),
     };
-    icon_label_row(
-        "replay-achievement",
-        row_ix,
-        idx,
-        &key,
-        label,
-        achievement.description.clone(),
-        LARGE_ICON_SIZE,
-        icons,
-    )
+    let count = (achievement.count > 1).then(|| {
+        div()
+            .id(("replay-achievement-count", row_ix * DETAIL_ID_STRIDE + idx))
+            .test_support()
+            .text_xs()
+            .child(detail_text(format!("x{}", achievement.count)))
+    });
+    let tooltip = IconTooltip {
+        preview,
+        name: achievement.display_name.clone().into(),
+        description: description_text(Some(&achievement.description)),
+    };
+
+    v_flex()
+        .id(("replay-achievement", row_ix * DETAIL_ID_STRIDE + idx))
+        .test_support()
+        .w(px(RIBBON_TILE_WIDTH))
+        .flex_none()
+        .items_center()
+        .gap_0p5()
+        .child(icon)
+        .children(count)
+        .tooltip(move |window, cx| tooltip.build().build(window, cx))
+        .into_any_element()
 }
 
 /// One ribbon: its icon fitted within its box (or, absent an icon, its name)
@@ -1789,19 +1762,19 @@ mod tests {
     use super::RIBBON_TILE_WIDTH;
     use super::ReplayColumn;
     use super::ShareText;
+    use super::achievements_view;
     use super::consumables_width;
     use super::damage_event_rows;
     use super::fit_dims;
     use super::group_ribbons;
-    use super::icon_label_row_width;
     use super::interaction_amount;
     use super::interaction_percentage;
     use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
-    use super::ribbon_grid_width;
     use super::shows_damage_shares;
     use super::skill_grid_width;
     use super::spotting_target_rows;
+    use super::tile_grid_width;
     use crate::replay_inspector::test_support::base_row;
     use crate::replay_inspector::test_support::fire_chance_result;
     use wows_replays::types::Relation;
@@ -2083,13 +2056,13 @@ mod tests {
     }
 
     /// The grid asks the column for at most `RIBBON_GRID_MIN_TILES` tiles per
-    /// line and wraps the rest, rather than one line of every ribbon.
+    /// line and wraps the rest, rather than one line of every tile.
     #[test]
-    fn ribbon_grid_width_caps_at_the_minimum_tiles_per_line() {
-        assert_eq!(ribbon_grid_width(0), 0.0);
-        assert_eq!(ribbon_grid_width(1), RIBBON_TILE_WIDTH);
-        assert_eq!(ribbon_grid_width(2), 2.0 * RIBBON_TILE_WIDTH + RIBBON_TILE_GAP);
-        assert_eq!(ribbon_grid_width(15), ribbon_grid_width(RIBBON_GRID_MIN_TILES));
+    fn tile_grid_width_caps_at_the_minimum_tiles_per_line() {
+        assert_eq!(tile_grid_width(0), 0.0);
+        assert_eq!(tile_grid_width(1), RIBBON_TILE_WIDTH);
+        assert_eq!(tile_grid_width(2), 2.0 * RIBBON_TILE_WIDTH + RIBBON_TILE_GAP);
+        assert_eq!(tile_grid_width(15), tile_grid_width(RIBBON_GRID_MIN_TILES));
     }
 
     #[test]
@@ -2119,9 +2092,45 @@ mod tests {
         assert!((consumables_width(8.0) - 314.0).abs() < 1e-4);
     }
 
-    #[test]
-    fn icon_label_row_width_adds_the_8px_gap_between_icon_and_label() {
-        assert!((icon_label_row_width(64.0, 40.0) - 112.0).abs() < 1e-4);
-        assert!((icon_label_row_width(0.0, 40.0) - 48.0).abs() < 1e-4);
+    /// Each achievement is one tile, and only one earned more than once
+    /// carries a count.
+    #[gpui_kit::test]
+    fn achievements_are_tiles_counted_only_above_one(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::test::TestWindowExt as _;
+
+        struct Grid(Vec<wows_replay_insights::battle_report::AchievementResult>);
+
+        impl gpui_kit::Render for Grid {
+            fn render(
+                &mut self,
+                _window: &mut gpui_kit::Window,
+                _cx: &mut gpui_kit::Context<Self>,
+            ) -> impl gpui_kit::IntoElement {
+                achievements_view(0, &self.0, &super::IconCache::new())
+            }
+        }
+
+        let achievement = |name: &str, count| wows_replay_insights::battle_report::AchievementResult {
+            name: name.to_string(),
+            display_name: name.to_string(),
+            description: String::new(),
+            icon_key: name.to_string(),
+            count,
+        };
+        let achievements = vec![achievement("Kraken", 1), achievement("Fireproof", 3)];
+        cx.update(gpui_kit::init);
+        let window =
+            cx.open_window(gpui_kit::size(gpui_kit::px(600.), gpui_kit::px(200.)), |_window, _cx| Grid(achievements));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(("replay-achievement", 0usize)).is_some());
+            assert!(window.try_find(("replay-achievement", 1usize)).is_some());
+            assert!(window.try_find(("replay-achievement", 2usize)).is_none(), "one tile per achievement");
+            assert!(window.try_find(("replay-achievement-count", 0usize)).is_none(), "a single award has no count");
+            assert!(window.try_find(("replay-achievement-count", 1usize)).is_some(), "a repeated one does");
+        })
+        .expect("the window is open");
     }
 }
