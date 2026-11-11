@@ -50,6 +50,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::resizable::ResizableState;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::v_flex;
@@ -57,6 +58,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
+use crate::motion;
 use crate::replay_inspector::load::LoadedGameData;
 use crate::viewport::device::SharedSceneDevice;
 
@@ -188,6 +190,9 @@ pub struct ArmorViewerPane {
     show_options: bool,
     /// Whether the ships list is collapsed to its expand rail.
     sidebar_collapsed: bool,
+    /// The split holding the ships list, kept here so the list's dragged
+    /// width survives a collapse and can be read while it slides.
+    sidebar_split: Entity<ResizableState>,
     /// Which of the rail's sections are expanded.
     option_sections: OptionSectionsOpen,
     /// What the rail's filter field holds.
@@ -343,6 +348,7 @@ impl ArmorViewerPane {
             show_analysis,
             show_options: true,
             sidebar_collapsed: false,
+            sidebar_split: cx.new(|_| ResizableState::default()),
             option_sections: OptionSectionsOpen::default(),
             options_filter,
             _subscriptions: vec![
@@ -1318,7 +1324,7 @@ struct UnportedDefaults {
 }
 
 impl Render for ArmorViewerPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The checker reads its verdicts against whatever the pointer is on,
         // so the plate is taken here, every frame, rather than once when a
         // panel opens.
@@ -1340,32 +1346,71 @@ impl Render for ArmorViewerPane {
         // the first a middle one, whose close truncates the wrong entry and
         // rescales every other panel. One optional panel in the group, at the
         // end, is what keeps that state honest.
-        let options = self.show_options.then(|| {
-            div().flex_none().w(options_panel::PANEL_WIDTH).h_full().child(options_panel::render_panel(
-                self,
-                &cx.entity(),
-                cx,
-            ))
+        //
+        // `motion::slide` does not fit: its content closure would hold `cx`
+        // while the call itself also borrows it.
+        let options_shown = motion::slide_progress("armor-viewer-options-slide", self.show_options, window, cx);
+        let options = (self.show_options || options_shown.value > 0.0).then(|| {
+            let panel = div().h_full().child(options_panel::render_panel(self, &cx.entity(), cx));
+            motion::slide_frame(
+                options_panel::PANEL_WIDTH,
+                options_shown.value,
+                motion::Edge::Right,
+                panel.into_any_element(),
+            )
         });
 
         // A collapsed ships list takes its group with it: `ResizableState` is
-        // positional, so the split without it is a separate group.
-        let split = if self.sidebar_collapsed {
-            h_resizable("armor-viewer-split-no-ships")
-        } else {
-            h_resizable("armor-viewer-split").child(
-                resizable_panel()
-                    .size(SIDEBAR_WIDTH)
-                    .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                    .flex_none()
-                    .child(self.sidebar.clone()),
-            )
+        // positional, so the split without it is a separate group. Only the
+        // group with the ships list is bound to `sidebar_split`.
+        let ships_open = !self.sidebar_collapsed;
+        let ships_shown = motion::slide_progress("armor-viewer-ships-slide", ships_open, window, cx);
+        let rest = |group: gpui_kit::component::resizable::ResizablePanelGroup| {
+            group
+                .child(resizable_panel().child(self.dock.clone()))
+                // `child`, not `children`: the group tracks its panels,
+                // and a plain `ParentElement` child is not one of them.
+                .when_some(analysis, |group, panel| group.child(panel))
         };
-        let split = split
-            .child(resizable_panel().child(self.dock.clone()))
-            // `child`, not `children`: the group tracks its panels,
-            // and a plain `ParentElement` child is not one of them.
-            .when_some(analysis, |group, panel| group.child(panel));
+        let split = if motion::settled(ships_shown) && ships_open {
+            rest(
+                h_resizable("armor-viewer-split").with_state(&self.sidebar_split).child(
+                    resizable_panel()
+                        .size(SIDEBAR_WIDTH)
+                        .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                        .flex_none()
+                        .child(self.sidebar.clone()),
+                ),
+            )
+            .into_any_element()
+        } else if motion::settled(ships_shown) {
+            rest(h_resizable("armor-viewer-split-no-ships")).into_any_element()
+        } else {
+            // Before the split has ever been laid out it holds no sizes, and
+            // the ships list then opens at the width the split would give it.
+            let width = self
+                .sidebar_split
+                .read(cx)
+                .sizes()
+                .first()
+                .copied()
+                .unwrap_or(SIDEBAR_WIDTH)
+                // The split stores a width the window has rescaled and draws it
+                // clamped; the slide uses what shows.
+                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+            div()
+                .flex()
+                .flex_row()
+                .size_full()
+                .child(motion::slide_frame(
+                    width,
+                    ships_shown.value,
+                    motion::Edge::Left,
+                    self.sidebar.clone().into_any_element(),
+                ))
+                .child(div().flex_1().min_w(px(0.)).h_full().child(rest(h_resizable("armor-viewer-split-no-ships"))))
+                .into_any_element()
+        };
 
         let content = v_flex().size_full().child(
             h_flex().flex_1().min_h(px(0.)).child(div().flex_1().min_w(px(0.)).h_full().child(split)).children(options),

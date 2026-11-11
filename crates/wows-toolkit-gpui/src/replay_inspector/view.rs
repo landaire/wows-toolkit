@@ -30,6 +30,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::resizable::ResizableState;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::tooltip::Tooltip;
@@ -125,6 +126,9 @@ fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
 
 pub struct ReplayInspectorView {
     browser: Entity<ReplayBrowser>,
+    /// The listing's split, held so its dragged width can be read while the
+    /// listing slides open or shut outside the split.
+    listing_split: Entity<ResizableState>,
     /// The collaborative session, hosted or joined from this tab's header.
     collab: crate::collab::CollabState,
     /// The two fields the session popover writes into, held so a name typed
@@ -386,6 +390,7 @@ impl ReplayInspectorView {
         Self {
             data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode::default(),
             browser,
+            listing_split: cx.new(|_| ResizableState::default()),
             collab: crate::collab::CollabState::default(),
             collab_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string())),
@@ -2164,29 +2169,60 @@ impl Render for ReplayInspectorView {
                 // A plain flex row rather than `h_flex`, which centres its
                 // children: this is the body, and the listing beside the
                 // replays is a full-height column rather than a toolbar item.
-                div().flex().flex_row().flex_1().min_h(px(0.)).child(if self.replay_settings.listing_collapsed {
-                    div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
-                } else {
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .child(
-                            h_resizable("replay-inspector-split")
-                                .child(
-                                    resizable_panel()
-                                        .size(BROWSER_WIDTH)
-                                        .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
-                                        .flex_none()
-                                        .child(
-                                            v_flex()
-                                                .size_full()
-                                                .child(listing_header(entity.clone(), self, cx))
-                                                .child(div().flex_1().min_h(px(0.)).child(self.browser.clone())),
-                                        ),
-                                )
-                                .child(resizable_panel().child(dock_content)),
-                        )
-                        .into_any_element()
+                div().flex().flex_row().flex_1().min_h(px(0.)).child({
+                    let open = !self.replay_settings.listing_collapsed;
+                    let shown = crate::motion::slide_progress("replay-listing-slide", open, window, cx);
+                    let listing = v_flex()
+                        .size_full()
+                        .child(listing_header(entity.clone(), self, cx))
+                        .child(div().flex_1().min_h(px(0.)).child(self.browser.clone()));
+                    if crate::motion::settled(shown) && !open {
+                        div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
+                    } else if crate::motion::settled(shown) {
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(
+                                h_resizable("replay-inspector-split")
+                                    .with_state(&self.listing_split)
+                                    .child(
+                                        resizable_panel()
+                                            .size(BROWSER_WIDTH)
+                                            .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
+                                            .flex_none()
+                                            .child(listing),
+                                    )
+                                    .child(resizable_panel().child(dock_content)),
+                            )
+                            .into_any_element()
+                    } else {
+                        // Before the split has ever been laid out it holds no
+                        // sizes, and the listing then opens at the width the
+                        // split would give it.
+                        let width = self
+                            .listing_split
+                            .read(cx)
+                            .sizes()
+                            .first()
+                            .copied()
+                            .unwrap_or(BROWSER_WIDTH)
+                            // The split stores a width the window has rescaled
+                            // and draws it clamped; the slide uses what shows.
+                            .clamp(BROWSER_MIN_WIDTH, BROWSER_MAX_WIDTH);
+                        h_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .h_full()
+                            .items_start()
+                            .child(crate::motion::slide_frame(
+                                width,
+                                shown.value,
+                                crate::motion::Edge::Left,
+                                listing.into_any_element(),
+                            ))
+                            .child(div().flex_1().min_w(px(0.)).h_full().child(dock_content))
+                            .into_any_element()
+                    }
                 }),
             )
     }
@@ -2298,6 +2334,9 @@ mod tests {
         .expect("the window is open");
 
         view.update(cx, |view, cx| view.set_listing_collapsed(true, cx));
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        // The listing slides shut before it leaves.
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.try_find("replay-listing-options").is_none(), "the listing header is away with it");

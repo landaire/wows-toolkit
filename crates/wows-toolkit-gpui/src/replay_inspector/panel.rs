@@ -209,6 +209,8 @@ pub struct ReplayPanel {
     /// port's own state for the two debug viewers egui opens as standalone
     /// windows instead (see the module doc).
     side_panel: SidePanel,
+    /// The panel the slot last showed, drawn while it slides shut.
+    slid_side_panel: SidePanel,
     /// Debug mode lifts NDA hiding (threaded into `table`'s `debug` flag) and
     /// reveals the raw-metadata/raw-results viewer buttons. Seeded from
     /// `ReplayInspectorView`'s session debug flag at construction, kept live
@@ -304,6 +306,7 @@ impl ReplayPanel {
             focus_handle,
             state: LoadState::Loading,
             side_panel: SidePanel::None,
+            slid_side_panel: SidePanel::None,
             debug,
             columns,
             personal_rating,
@@ -741,6 +744,7 @@ impl ReplayPanel {
             focus_handle: cx.focus_handle(),
             state: LoadState::Loading,
             side_panel: SidePanel::None,
+            slid_side_panel: SidePanel::None,
             debug: false,
             columns: model.columns.clone(),
             personal_rating,
@@ -1396,7 +1400,19 @@ impl ReplayPanel {
 }
 
 impl Render for ReplayPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // What the slot shows while it slides shut, after `side_panel` has
+        // already gone back to none. Read every frame, so the first open
+        // slides as later ones do.
+        if self.side_panel != SidePanel::None {
+            self.slid_side_panel = self.side_panel;
+        }
+        let side_panel_open = self.side_panel != SidePanel::None;
+        let slid = crate::motion::slide_progress("replay-side-panel", side_panel_open, window, cx);
+        if !side_panel_open && crate::motion::settled(slid) {
+            self.slid_side_panel = SidePanel::None;
+        }
+        let slot_kind = self.slid_side_panel;
         let body = match &self.state {
             LoadState::Loading => {
                 crate::loading::TableSkeleton::new("replay-panel-loading", t!("ui.replay.loading").into_owned())
@@ -1431,7 +1447,7 @@ impl Render for ReplayPanel {
                 let team_damage = loaded.table.read(cx).team_damage();
                 let border = cx.theme().border;
 
-                let side_panel_entity: Option<AnyView> = match self.side_panel {
+                let side_panel_entity: Option<AnyView> = match slot_kind {
                     SidePanel::None => None,
                     SidePanel::Chat => loaded.chat_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawMetadata => Some(loaded.raw_metadata_panel.clone().into()),
@@ -1439,6 +1455,52 @@ impl Render for ReplayPanel {
                     SidePanel::MappedResults => loaded.mapped_results_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawPlayerMetadata => loaded.raw_player_metadata_panel.clone().map(|panel| panel.into()),
                 };
+                let side_slot = side_panel_entity.map(|side_panel| {
+                    // The button that opened a panel closes it. A row's raw
+                    // metadata is opened from that row's menu, which opens
+                    // rather than toggles, so that panel keeps a close of its
+                    // own.
+                    let close = (slot_kind == SidePanel::RawPlayerMetadata).then(|| {
+                        crate::ui::panel_collapse_button(
+                            "replay-side-panel-close",
+                            crate::ui::PanelSide::Right,
+                            t!("ui.replay.close_side_panel").into_owned(),
+                            cx.listener(|this, _event, _window, cx| {
+                                this.side_panel = SidePanel::None;
+                                cx.notify();
+                            }),
+                        )
+                    });
+                    let header = h_flex()
+                        .flex_none()
+                        .items_center()
+                        .px_2()
+                        .py_1()
+                        .border_b_1()
+                        .border_color(border)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_sm()
+                                .font_weight(FontWeight::BOLD)
+                                .children(slot_kind.title_key().map(|key| t!(key).into_owned())),
+                        )
+                        .children(close);
+                    crate::motion::slide_frame(
+                        SIDE_PANEL_WIDTH,
+                        slid.value,
+                        crate::motion::Edge::Right,
+                        v_flex()
+                            .size_full()
+                            .border_l_1()
+                            .border_color(border)
+                            .child(header)
+                            .child(div().flex_1().min_h(px(0.)).child(side_panel))
+                            .into_any_element(),
+                    )
+                });
 
                 let context_line = match_context_line(loaded.table.read(cx).match_context(), team_damage);
 
@@ -1469,46 +1531,7 @@ impl Render for ReplayPanel {
                             .flex_1()
                             .min_h(px(0.))
                             .child(div().flex_1().min_w(px(0.)).h_full().child(table))
-                            .when_some(side_panel_entity, |row, side_panel| {
-                                // The close control sits at the slot's outer
-                                // edge, as the listing's does on the left.
-                                let header = h_flex()
-                                    .flex_none()
-                                    .gap_1()
-                                    .items_center()
-                                    .px_2()
-                                    .py_1()
-                                    .border_b_1()
-                                    .border_color(border)
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .truncate()
-                                            .text_sm()
-                                            .font_weight(FontWeight::BOLD)
-                                            .children(self.side_panel.title_key().map(|key| t!(key).into_owned())),
-                                    )
-                                    .child(crate::ui::panel_collapse_button(
-                                        "replay-side-panel-close",
-                                        crate::ui::PanelSide::Right,
-                                        t!("ui.replay.close_side_panel").into_owned(),
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.side_panel = SidePanel::None;
-                                            cx.notify();
-                                        }),
-                                    ));
-                                row.child(
-                                    v_flex()
-                                        .flex_none()
-                                        .w(SIDE_PANEL_WIDTH)
-                                        .h_full()
-                                        .border_l_1()
-                                        .border_color(border)
-                                        .child(header)
-                                        .child(div().flex_1().min_h(px(0.)).child(side_panel)),
-                                )
-                            }),
+                            .children(side_slot),
                     );
                 // Fades in where the outline was. The id holds while the
                 // panel shows a battle, so a re-read does not fade it again.
@@ -1605,29 +1628,7 @@ mod tests {
         .expect("the window is open");
     }
 
-    /// The side panel carries its own close control, so it can be put away
-    /// from where it is rather than from the toggle that opened it.
-    #[gpui_kit::test]
-    fn the_side_panel_closes_from_its_own_header(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
-        });
-        let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
-        panel.update(cx, |panel, cx| panel.toggle_side_panel(super::SidePanel::RawMetadata, cx));
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            window.click("replay-side-panel-close", cx);
-            window.render_frame(cx);
-            assert!(window.try_find("replay-side-panel-close").is_none(), "the side panel went with its header");
-        })
-        .expect("the window is open");
-
-        panel.update(cx, |panel, _cx| assert!(panel.side_panel == super::SidePanel::None));
-    }
-
-    /// While a replay is read, the tab shows the outline of its table under
+    /// While a replay is read, the tab shows the outline of its table behind
     /// the label it waits on, and holds still when asked for reduced motion.
     #[gpui_kit::test]
     fn a_replay_being_read_shows_its_table_outline(cx: &mut TestAppContext) {

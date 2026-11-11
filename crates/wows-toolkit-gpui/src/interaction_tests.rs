@@ -496,6 +496,13 @@ fn the_status_bar_puts_the_options_rail_away_and_brings_it_back(cx: &mut TestApp
 
         window.click("armor-options-toggle", cx);
         window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    // The rail slides shut before it leaves the tree.
+    cx.executor().advance_clock(std::time::Duration::from_millis(400));
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
         assert!(window.try_find("armor-options-panel").is_none(), "the toggle puts the rail away");
         assert!(window.try_find("armor-show-hidden-button").is_none(), "and the tools with it");
 
@@ -520,6 +527,13 @@ fn the_status_bar_holds_the_listing_toggle_and_the_session_on_replay_tabs(cx: &m
         assert!(window.try_find("collab-session-toggle").is_some(), "the session control is on the bar");
 
         window.click("replay-listing-toggle", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    // The listing slides shut before it leaves.
+    cx.executor().advance_clock(std::time::Duration::from_millis(400));
+
+    cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("replay-browser-rows").is_none(), "the toggle puts the listing away");
 
@@ -676,6 +690,13 @@ fn the_status_bar_puts_the_ships_list_away_and_brings_it_back(cx: &mut TestAppCo
         assert!(window.try_find(SHIP_SEARCH).is_some(), "the list is up without being asked for");
 
         window.click("armor-ships-toggle", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    // The list slides shut before it leaves the tree.
+    cx.executor().advance_clock(std::time::Duration::from_millis(400));
+    cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find(SHIP_SEARCH).is_none(), "the toggle puts the list away");
 
