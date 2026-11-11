@@ -173,6 +173,8 @@ impl UnpackerView {
         let (dock_area, skin) = DockSkin::dock_area("unpacker-dock", None, window, cx);
         // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
+        // Opt-in in the kit; a panel that refuses to close still shows none.
+        skin.set_close_button_visible(true, cx);
         let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
         let assets_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, window, cx));
 

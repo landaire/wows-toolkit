@@ -427,6 +427,8 @@ impl ReplayInspectorView {
         let (dock_area, skin) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
         // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
+        // Opt-in in the kit; a panel that refuses to close still shows none.
+        skin.set_close_button_visible(true, cx);
         let dock_subscription = cx.subscribe_in(&dock_area, window, |this, dock, event, _window, cx| {
             if matches!(event, DockEvent::LayoutChanged) {
                 let has_content = !dock.read(cx).is_empty(DockPlacement::Center, cx);

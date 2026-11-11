@@ -557,6 +557,8 @@ impl StatsView {
         let (dock_area, skin) = DockSkin::dock_area(dock_id, None, window, cx);
         // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
+        // Opt-in in the kit; a panel that refuses to close still shows none.
+        skin.set_close_button_visible(true, cx);
         let overview = cx.new(StatsOverviewPanel::new);
         dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(overview.clone()), DockPlacement::Center, None, window, cx);

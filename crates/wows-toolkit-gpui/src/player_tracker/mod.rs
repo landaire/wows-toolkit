@@ -421,6 +421,8 @@ impl PlayerTrackerView {
         let (dock_area, skin) = DockSkin::dock_area("tracker-dock", None, window, cx);
         // The status bar shows and hides the docks.
         skin.set_toggle_button_visible(false, cx);
+        // Opt-in in the kit; a panel that refuses to close still shows none.
+        skin.set_close_button_visible(true, cx);
         let this = cx.weak_entity();
         let panels: Vec<Entity<panels::TrackerPanel>> = SubTab::ALL
             .map(|section| {
