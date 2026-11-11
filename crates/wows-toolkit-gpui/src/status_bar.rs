@@ -347,7 +347,8 @@ pub fn render(
         .id("app-status-strip")
         .test_support()
         .flex_none()
-        .h(px(26.))
+        // A floor rather than a height: at a large zoom the toggles are taller.
+        .min_h(px(26.))
         .gap_1()
         .items_center()
         .px_2()
@@ -597,6 +598,39 @@ mod tests {
             window.render_frame(cx);
             assert!(is_held(ModifierKey::Alt, window, cx), "alt is still down");
             assert!(!shown(window), "the other tab does not show it");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// At the largest zoom the bar grows to hold its toggles and the work
+    /// line, so they do not extend beyond the bar and the window.
+    #[gpui_kit::test]
+    fn the_bar_holds_its_controls_at_the_largest_zoom(cx: &mut TestAppContext) {
+        let (window, app) = crate::interaction_tests::open_app_in_root(cx);
+        cx.update(crate::zoom::bind_keys);
+        cx.update_window(window.into(), |_, window, cx| {
+            app.update(cx, |app, cx| app.apply_settings(crate::interaction_tests::test_settings(), window, cx));
+            working(app.downgrade().into(), JobKind::UpdateCheck, "Checking for updates", None, cx);
+            window.render_frame(cx);
+        })
+        .expect("the test window stays open");
+        // More steps than the range holds, so the zoom ends at its top.
+        cx.simulate_keystrokes(window.into(), &["secondary-="; 20].join(" "));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.render_frame(cx);
+            let strip = window.find("app-status-strip").bounds();
+            let toggle = window.within("app-status-strip").find("replay-listing-toggle").bounds();
+            assert!(toggle.size.height > px(26.), "the zoom draws the toggle taller than the bar at 1x");
+            for id in ["replay-listing-toggle", "app-status-work"] {
+                let control = window.within("app-status-strip").find(id).bounds();
+                assert!(
+                    control.top() >= strip.top() && control.bottom() <= strip.bottom(),
+                    "{id} at {control:?} is inside the bar at {strip:?}"
+                );
+            }
+            assert!(strip.bottom() <= window.viewport_size().height, "the bar {strip:?} ends inside the window");
         })
         .expect("the test window stays open");
     }

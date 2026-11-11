@@ -1076,9 +1076,16 @@ struct HeaderState {
 /// The team damage it ends with is drawn as `header_figures::damage_split`.
 fn match_context_line(context: &MatchContext) -> AnyElement {
     let dim = crate::theme::text_dim();
-    let separator = || div().flex_none().text_xs().text_color(dim).child(SEPARATOR);
+    let separator =
+        |index: usize| div().id(("replay-match-separator", index)).test_support().flex_none().child(SEPARATOR);
     let field = |index: usize, text: String| {
-        div().flex_none().text_xs().text_color(dim).child(crate::ui::selectable_text(("match-field", index), text))
+        div()
+            .id(("replay-match-field", index))
+            .test_support()
+            .flex_none()
+            .text_xs()
+            .text_color(dim)
+            .child(crate::ui::selectable_text(("match-field", index), text))
     };
 
     // The clan tag reads as part of the name, so it sits against it rather
@@ -1088,7 +1095,19 @@ fn match_context_line(context: &MatchContext) -> AnyElement {
         None => context.player_name.clone(),
     };
 
-    let mut line = h_flex().id("replay-match-context").test_support().flex_none().items_center().gap_1().px_2().pb_1();
+    // Wraps rather than running its fields off a panel too narrow for them. A
+    // separator wraps with the field after it, so no line ends or starts on one.
+    let mut line = h_flex()
+        .id("replay-match-context")
+        .test_support()
+        .flex_none()
+        .flex_wrap()
+        .items_center()
+        .gap_1()
+        .px_2()
+        .pb_1()
+        .text_xs()
+        .text_color(dim);
     let mut drawn = 0usize;
     for (index, text) in
         [&who, &context.game_type, &context.version, &context.game_mode, &context.map].into_iter().enumerate()
@@ -1096,10 +1115,13 @@ fn match_context_line(context: &MatchContext) -> AnyElement {
         if text.is_empty() {
             continue;
         }
-        if drawn > 0 {
-            line = line.child(separator());
-        }
-        line = line.child(field(index, text.clone()));
+        let item = h_flex()
+            .flex_none()
+            .gap_1()
+            .items_center()
+            .when(drawn > 0, |item| item.child(separator(index)))
+            .child(field(index, text.clone()));
+        line = line.child(item);
         drawn += 1;
     }
     line.into_any_element()
@@ -1709,6 +1731,49 @@ mod tests {
                 assert!(loaded.table.read(cx).self_stats_hidden(), "the figures are hidden");
             })
             .expect("the window is open");
+    }
+
+    /// At twice the text size, the line under the header takes a second line
+    /// rather than running its last fields off the panel.
+    #[gpui_kit::test]
+    fn the_match_context_wraps_inside_a_panel_too_narrow_for_it(cx: &mut TestAppContext) {
+        let mut model = model_at_expected_values();
+        model.context = MatchContext {
+            clan_tag: Some("[CLAN]".to_string()),
+            player_name: "A_Long_Player_Name".to_string(),
+            game_type: "Random Battle".to_string(),
+            version: "14.10.0.11965230".to_string(),
+            game_mode: "Domination".to_string(),
+            map: "Northern Waters".to_string(),
+        };
+
+        cx.update(gpui_kit::init);
+        let window = cx
+            .open_window(size(px(900.), px(600.)), |window, cx| ReplayPanel::loaded_for_test(model, None, window, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.set_rem_size(window.rem_size() * 2.0);
+            window.render_frame(cx);
+            let line = window.find("replay-match-context").bounds();
+            let first = window.find(("replay-match-field", 0usize)).bounds();
+            let last = window.find(("replay-match-field", 4usize)).bounds();
+            assert!(last.top() > first.top(), "the fields take a second line");
+            for index in 0..5usize {
+                let field = window.find(("replay-match-field", index)).bounds();
+                assert!(
+                    field.left() >= line.left() && field.right() <= line.right() && field.bottom() <= line.bottom(),
+                    "field {index} at {field:?} is inside the line at {line:?}"
+                );
+                if index > 0 {
+                    let separator = window.find(("replay-match-separator", index)).bounds();
+                    assert!(
+                        (separator.center().y - field.center().y).abs() < px(1.) && separator.right() <= field.left(),
+                        "separator {index} at {separator:?} leads its field at {field:?} on the same line"
+                    );
+                }
+            }
+        })
+        .expect("the window is open");
     }
 
     /// Dragging a column header's grip widens that column, and every row

@@ -108,6 +108,12 @@ pub(super) fn render_tools(
     Some(div().id("armor-options-tools").test_support().grid().grid_cols(2).gap_1().children(tools).into_any_element())
 }
 
+/// A tool button's label, shortened rather than cut off where a large zoom
+/// leaves its column too narrow. The button's tooltip says what it does.
+fn tool_label(label: StyledText) -> impl IntoElement {
+    div().id("armor-tool-label").test_support().min_w_0().text_ellipsis().child(label)
+}
+
 /// What a filter match is marked with.
 pub(super) fn mark() -> Hsla {
     gpui_kit::Hsla::from(gpui_kit::rgb(crate::theme::semantic().notice)).opacity(0.3)
@@ -196,7 +202,7 @@ fn render_hidden_plates_button(
             showing,
             Button::new("armor-show-hidden-button")
                 .icon(crate::icons::Glyph::EyeOff)
-                .child(label_text)
+                .child(tool_label(label_text))
                 .compact()
                 .w_full()
                 .selected(showing)
@@ -515,7 +521,7 @@ fn render_gaps_button(
             gaps.shown,
             Button::new("armor-show-gaps-button")
                 .icon(if found { crate::icons::Glyph::TriangleAlert } else { crate::icons::Glyph::EyeOff })
-                .child(label_text)
+                .child(tool_label(label_text))
                 .compact()
                 .w_full()
                 .selected(gaps.shown)
@@ -561,7 +567,7 @@ fn render_splash_button(
             state.shown,
             Button::new("armor-splash-button")
                 .icon(crate::icons::Glyph::Bomb)
-                .child(label_text)
+                .child(tool_label(label_text))
                 .compact()
                 .w_full()
                 .selected(state.shown)
@@ -593,7 +599,7 @@ fn render_splash_boxes_button(
             state.boxes_shown,
             Button::new("armor-splash-boxes-button")
                 .icon(crate::icons::Glyph::Box)
-                .child(label_text)
+                .child(tool_label(label_text))
                 .compact()
                 .w_full()
                 .selected(state.boxes_shown)
@@ -625,7 +631,7 @@ fn render_export_button(
     Some(
         Button::new("armor-export-trigger")
             .icon(IconName::HardDrive)
-            .child(label_text)
+            .child(tool_label(label_text))
             .compact()
             .w_full()
             .tooltip(t!("ui.armor.export_tooltip").to_string())

@@ -89,7 +89,16 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
             .text_xs()
             .text_color(crate::theme::text_dim())
             .child(crate::icons::icon(crate::icons::Glyph::Crosshair))
-            .child(div().flex_1().whitespace_normal().child(t!("ui.armor.cast_hint", key = shift).into_owned()))
+            .child(
+                div()
+                    .id("armor-cast-hint-text")
+                    .test_support()
+                    .flex_1()
+                    // Without it the hint keeps the width of its unwrapped text.
+                    .min_w_0()
+                    .whitespace_normal()
+                    .child(t!("ui.armor.cast_hint", key = shift).into_owned()),
+            )
     });
 
     let visibility = viewport.clone();
@@ -223,4 +232,82 @@ fn section(
             }))
             .into_any_element(),
     )
+}
+
+// The test module imports by name: `use super::*` would pull in the glob
+// `gpui_kit::*` re-export of GPUI's own `test` macro.
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AppContext as _;
+    use gpui_kit::Bounds;
+    use gpui_kit::Pixels;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::Window;
+    use gpui_kit::WindowHandle;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt as _;
+
+    use crate::armor_viewer::pane::ArmorViewerPane;
+
+    /// The rail's tool buttons.
+    const TOOLS: [&str; 5] = [
+        "armor-show-hidden-button",
+        "armor-show-gaps-button",
+        "armor-splash-button",
+        "armor-splash-boxes-button",
+        "armor-export-trigger",
+    ];
+
+    /// The pane with its rail up, drawn at twice the text size it opens at.
+    fn open_at_double_size(cx: &mut TestAppContext) -> WindowHandle<ArmorViewerPane> {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1600.), px(1000.)), ArmorViewerPane::new);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.set_rem_size(window.rem_size() * 2.0);
+            window.render_frame(cx);
+        })
+        .expect("the test window stays open");
+
+        window
+    }
+
+    /// Whether `inner` lies between the left and right edges of `outer`.
+    fn inside_across(outer: Bounds<Pixels>, inner: Bounds<Pixels>) -> bool {
+        inner.left() >= outer.left() && inner.right() <= outer.right()
+    }
+
+    fn rail(window: &Window) -> Bounds<Pixels> {
+        window.find("armor-options-panel").bounds()
+    }
+
+    /// The cast hint wraps inside the rail rather than running on as one line
+    /// past its edge, where the rest of it cannot be read.
+    #[gpui_kit::test]
+    fn the_cast_hint_wraps_inside_the_rail(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            let hint = window.find("armor-cast-hint-text").bounds();
+            assert!(inside_across(rail(window), hint), "the hint at {hint:?} is inside the rail at {:?}", rail(window));
+        })
+        .expect("the test window stays open");
+    }
+
+    /// Each tool's label stays inside its button, shortened where the column
+    /// is too narrow for it, rather than cut off at the button's edge.
+    #[gpui_kit::test]
+    fn each_tool_label_stays_inside_its_button(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            for tool in TOOLS {
+                let button = window.find(tool).bounds();
+                let label = window.within(tool).find("armor-tool-label").bounds();
+                assert!(inside_across(button, label), "{tool}'s label at {label:?} is inside the button at {button:?}");
+                assert!(inside_across(rail(window), button), "{tool} at {button:?} is inside the rail");
+            }
+        })
+        .expect("the test window stays open");
+    }
 }
