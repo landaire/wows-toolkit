@@ -1971,17 +1971,12 @@ impl Render for ReplayBrowser {
         // The popup is what a hovered row says, so it goes up as soon as the
         // row is known -- with the map once there is one.
         let preview_popup = (preview_map.is_some() || hover_facts.is_some()).then(|| {
-            let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
             // Fades in when it goes up, not as the pointer moves between rows:
             // the id stays the same for as long as the popup is drawn.
-            let card = v_flex()
+            let card = crate::ui::overlay_surface(v_flex(), cx)
                 .gap_1()
                 .p_1()
-                .rounded(theme.radius)
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
                 .children(preview_map)
                 .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim())));
             deferred(

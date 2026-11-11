@@ -140,7 +140,7 @@ fn counted(target: i128, progress: f32) -> i128 {
 fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
     let Tile { id, label, value, said, tone } = tile;
 
-    v_flex()
+    crate::ui::card_surface(v_flex(), cx)
         .id(id)
         .test_support()
         .aria_label(said)
@@ -148,10 +148,6 @@ fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
         .min_w(px(64.))
         .px_2()
         .py_0p5()
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(px(3.))
-        .bg(cx.theme().background)
         .child(div().text_xs().text_color(crate::theme::text_dim()).child(label))
         // One width per figure, so a counting number does not shift sideways.
         .child(crate::ui::tabular(
