@@ -195,7 +195,10 @@ fn measure_column_widths(
     let mut widths = vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()];
     let mut details = HashMap::new();
     for &col in &model.columns {
-        let header_w = text_width(column_label(col).into(), window, true);
+        // A sortable header always holds room for its indicator, so sorting
+        // never changes a width.
+        let indicator_w = if column_sort(col).is_some() { gap_1 + icon_default } else { 0. };
+        let header_w = text_width(column_label(col).into(), window, true) + indicator_w;
         let content_w = match col {
             ReplayColumn::Name => {
                 let mut max_w = header_w;
@@ -873,9 +876,23 @@ impl PlayerTable {
         }
     }
 
-    /// The width the reader set for `col`, or what its content measured.
+    /// The width the reader set for `col`, no narrower than its header's
+    /// furniture, or what its content measured.
     fn width_of(&self, col: ReplayColumn) -> Pixels {
-        self.width_overrides[col as usize].unwrap_or(self.column_widths[col as usize])
+        match self.width_overrides[col as usize] {
+            Some(set) => set.max(self.header_min(col)),
+            None => self.column_widths[col as usize],
+        }
+    }
+
+    /// The narrowest `col` is drawn at its reader's width: a sortable header
+    /// keeps its padding and indicator, which grow with the zoom.
+    fn header_min(&self, col: ReplayColumn) -> Pixels {
+        match (column_sort(col), self.measured_rem) {
+            // `px_1` either side of a one-rem indicator.
+            (Some(_), Some(rem)) => COLUMN_DRAG_MIN.max(rem * 1.5),
+            _ => COLUMN_DRAG_MIN,
+        }
     }
 
     /// The width `col` is drawn at before the frozen cap: `width_of`, widened
@@ -1286,8 +1303,27 @@ impl PlayerTable {
                 cx.listener(move |this, event: &MouseDownEvent, _window, _cx| this.press_header(col, event.position.x)),
             )
             .child(grip)
-            .child(column_label(col))
-            .when_some(sorted, |el, sort| el.child(Icon::new(sort_caret_icon(sort))));
+            // The label gives way to an ellipsis first; the indicator keeps
+            // its size and its place at the end.
+            .child(
+                div()
+                    .id(("replay-header-label", col as usize))
+                    .test_support()
+                    .min_w_0()
+                    .flex_shrink_1()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(column_label(col)),
+            )
+            .when_some(sorted, |el, sort| {
+                el.child(
+                    div()
+                        .id(("replay-header-sort", col as usize))
+                        .test_support()
+                        .flex_none()
+                        .child(Icon::new(sort_caret_icon(sort))),
+                )
+            });
 
         let base = match column_sort(col) {
             None => base,
@@ -3216,6 +3252,47 @@ mod tests {
             frozen <= px(900.) * super::STICKY_MAX_FRACTION + px(1.),
             "the drag stopped at the cap, got {frozen:?}"
         );
+    }
+
+    /// A sortable column fitted to its header holds the whole label and the
+    /// sort indicator; narrowed below that, even to the drag minimum at
+    /// twice the zoom, the label gives way and the indicator stays inside.
+    #[gpui_kit::test]
+    fn a_headers_sort_indicator_is_never_cut_off(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+        let base_xp = ReplayColumn::BaseXp as usize;
+        cx.update(|cx| table.update(cx, |table, cx| table.sort_by(SortColumn::BaseXp, cx)));
+        let indicator_inside = |window: &mut gpui_kit::Window| {
+            let header = window.find(("replay-header", base_xp)).bounds();
+            let indicator = window.find(("replay-header-sort", base_xp)).bounds();
+            indicator.left() >= header.left() && indicator.right() <= header.right()
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let label = window.find(("replay-header-label", base_xp)).bounds();
+            let text = super::text_width(super::column_label(ReplayColumn::BaseXp).into(), window, true);
+            assert!(label.size.width.as_f32() >= text - 0.5, "the fitted label is cut to {:?}", label.size.width);
+            assert!(indicator_inside(window), "the fitted header holds the indicator");
+        })
+        .expect("the window is open");
+
+        cx.update(|cx| {
+            table.update(cx, |table, cx| {
+                table.width_overrides[base_xp] = Some(super::COLUMN_DRAG_MIN);
+                cx.notify();
+            })
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(indicator_inside(window), "a narrowed header still holds the indicator");
+            window.set_rem_size(window.rem_size() * 2.0);
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(indicator_inside(window), "and does at twice the zoom");
+        })
+        .expect("the window is open");
     }
 
     /// The row's dots sit on the row's centre line, as the cells beside them
