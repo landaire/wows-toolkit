@@ -338,7 +338,6 @@ pub fn render(
     toggles: Vec<PanelToggle>,
     extras: Vec<AnyElement>,
     jobs: Vec<Job>,
-    settings: AnyElement,
     window: &Window,
     cx: &App,
 ) -> AnyElement {
@@ -363,8 +362,6 @@ pub fn render(
         .child(div().flex_1())
         .children(work(jobs))
         .children(right.into_iter().map(PanelToggle::render))
-        // Last, apart from the tab's own toggles: it is the same on every tab.
-        .child(h_flex().flex_none().pl_1().border_l_1().border_color(cx.theme().border).child(settings))
         .into_any_element()
 }
 

@@ -1138,8 +1138,7 @@ impl App {
         // A session belongs to the replay workspace it was started from.
         let session = inspector.map(|view| crate::collab_popover::render(&view, cx));
 
-        let settings = self.render_settings_button("status-settings-open", cx);
-        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, settings, window, cx)
+        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, window, cx)
     }
 
     /// Notes the files now being dragged over the window.
@@ -3297,7 +3296,7 @@ impl Render for App {
             .flex_none()
             .items_center()
             .child(div().flex_1().min_w(px(0.)).child(tabs))
-            .child(div().flex_none().pl_1().child(self.render_settings_button("settings-open", cx)))
+            .child(div().flex_none().pl_1().child(self.render_settings_button(cx)))
             .child(div().flex_none().px_1().child(app_menu));
 
         // A replay dragged onto the window opens, which is what the egui app does

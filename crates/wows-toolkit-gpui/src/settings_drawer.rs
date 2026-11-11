@@ -423,13 +423,12 @@ impl App {
         })
     }
 
-    /// The gear that opens the drawer, at the end of the tab strip and of the
-    /// status bar. It carries the mark the drawer has for a game directory
-    /// that cannot be read.
-    pub(super) fn render_settings_button(&self, id: &'static str, cx: &Context<Self>) -> AnyElement {
+    /// The gear at the end of the tab strip. It carries the mark the drawer
+    /// has for a game directory that cannot be read.
+    pub(super) fn render_settings_button(&self, cx: &Context<Self>) -> AnyElement {
         let glyph = Icon::from(crate::icons::Glyph::Settings);
         let glyph = if self.wows_dir_invalid { glyph.text_color(cx.theme().danger) } else { glyph };
-        Button::new(id)
+        Button::new("settings-open")
             .ghost()
             .small()
             .icon(glyph)
@@ -1496,37 +1495,6 @@ mod tests {
         let scroll = top(window, SCROLL);
         let shown = top(window, id);
         shown > scroll - px(1.) && shown < scroll + px(1.)
-    }
-
-    #[gpui_kit::test]
-    fn the_status_bar_gear_opens_and_shuts_the_drawer_on_any_tab(cx: &mut TestAppContext) {
-        let (window, app) = open(cx);
-
-        cx.update_window(window.into(), |_, window, cx| {
-            app.update(cx, |app, cx| {
-                app.active_tab = AppTab::Search;
-                cx.notify();
-            });
-            window.render_frame(cx);
-            window.click("status-settings-open", cx);
-            window.render_frame(cx);
-            assert!(window.try_find(DRAWER).is_some(), "the status bar gear opens it from a tab with no toggles");
-        })
-        .expect("the test window stays open");
-        cx.executor().advance_clock(std::time::Duration::from_millis(400));
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            window.click("status-settings-open", cx);
-        })
-        .expect("the test window stays open");
-        cx.executor().advance_clock(std::time::Duration::from_millis(400));
-
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            assert!(window.try_find(DRAWER).is_none(), "a second press shuts it");
-        })
-        .expect("the test window stays open");
     }
 
     #[gpui_kit::test]
