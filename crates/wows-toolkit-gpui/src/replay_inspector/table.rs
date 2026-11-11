@@ -170,7 +170,8 @@ fn font_width(text: SharedString, font: Font, window: &mut Window) -> f32 {
 ///
 /// Run once per data/column/debug/detail-set change (`PlayerTable::new`,
 /// `set_columns`, `set_debug`, `toggle_expanded`, `finish_closing`), gated
-/// behind `PlayerTable::widths_dirty` in `render` -- never per frame.
+/// behind `PlayerTable::widths_dirty` in `render`, and once per rem size
+/// change (`PlayerTable::measured_rem`) -- never per frame.
 fn measure_column_widths(
     model: &ReplayReportModel,
     debug: bool,
@@ -456,6 +457,9 @@ pub struct PlayerTable {
     /// `column_widths`. Keeps the (17-column x up-to-24-row) measurement pass
     /// off the per-frame path.
     widths_dirty: bool,
+    /// The rem size `column_widths` was measured at, so a zoom measures them
+    /// again. `None` until the first measurement.
+    measured_rem: Option<Pixels>,
     /// The width every column is drawn at: what was dragged or what the
     /// content measured, widened for any detail shown in it. Rebuilt each
     /// render, so rows and header agree.
@@ -662,6 +666,7 @@ impl PlayerTable {
             right_clicked_cell: None,
             viewport: None,
             widths_dirty: true,
+            measured_rem: None,
             // Before the settings database has been read, nothing is known
             // to replace the default.
             arrangement: cx
@@ -2704,12 +2709,14 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
 
 impl Render for PlayerTable {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.widths_dirty {
+        let rem = window.rem_size();
+        if self.widths_dirty || self.measured_rem != Some(rem) {
             let measured = measure_column_widths(&self.model, self.debug, &self.expanded, &self.closing, window);
             self.column_widths = measured.columns;
             self.detail_widths = measured.details;
             self.detail_fit = measured.detail_fit;
             self.widths_dirty = false;
+            self.measured_rem = Some(rem);
             // A drag's width holds only while the detail it was set over shows.
             let detail_fit = &self.detail_fit;
             self.fit_waived.retain(|col| detail_fit[*col as usize].is_some());
@@ -3052,6 +3059,32 @@ mod tests {
             window.drag(grip, gpui_kit::point(grip.x - px(140.), grip.y), cx);
             window.render_frame(cx);
             assert_columns_tile(&columns, "narrowed", window);
+        })
+        .expect("the window is open");
+    }
+
+    /// A zoom measures the columns again, so each header is as wide as its
+    /// label at the new text size rather than at the one it was first drawn
+    /// at, where the label would be cut off.
+    #[gpui_kit::test]
+    fn a_zoom_refits_each_header_to_its_label(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let columns = two_row_model().columns;
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.set_rem_size(window.rem_size() * 2.0);
+            window.render_frame(cx);
+
+            let mut checked = 0;
+            for col in &columns {
+                let Some(header) = window.try_find(("replay-header", *col as usize)) else { continue };
+                let header = header.bounds();
+                let label = px(super::text_width(super::column_label(*col).into(), window, true));
+                assert!(header.size.width >= label, "{col:?}'s header {header:?} holds its label, {label:?} wide");
+                checked += 1;
+            }
+            assert!(checked > 0, "the headers are drawn");
         })
         .expect("the window is open");
     }
