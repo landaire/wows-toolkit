@@ -68,6 +68,8 @@ use super::model::SkillWarning;
 use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
+use super::team_bands;
+use super::team_bands::RowMark;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
@@ -2315,6 +2317,8 @@ struct RowLayout<'a> {
     /// How far the row's disclosure has turned.
     turn: f32,
     selected: bool,
+    /// Which side the row's player is on, for the stripe in its gutter.
+    mark: RowMark,
     alt_held: bool,
     /// How far each column is drawn from its place while the columns slide.
     column_shift: &'a [Pixels],
@@ -2424,6 +2428,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
+        .child(team_bands::stripe(layout.mark, cx))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, cx| {
@@ -2536,6 +2541,10 @@ impl Render for PlayerTable {
 
         let entity = cx.entity();
         let h_scroll = self.h_scroll.clone();
+        // Headings only while each team's rows stay together under the sort.
+        let self_team = self.model.self_team;
+        let team_runs = team_bands::team_runs(&self.model.rows, self_team).unwrap_or_default();
+        let team_damage = team_bands::TeamDamage::of(&self.model.rows, self_team, self.debug);
         let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
             let (db_id, is_expanded, is_closing) = {
                 let table = entity.read(cx);
@@ -2589,13 +2598,20 @@ impl Render for PlayerTable {
                 detail,
                 turn,
                 selected,
+                mark: RowMark::of(row, self_team),
                 alt_held,
                 column_shift: &table.column_shift,
                 moving: table.moving_column(),
                 pinned_reserve: reserve,
                 all_rows: &table.model.rows,
             };
-            render_row(ix, row, &layout, hover_bg, cx)
+            let row = render_row(ix, row, &layout, hover_bg, cx);
+            match team_runs.iter().find(|run| run.start == ix) {
+                Some(run) => {
+                    v_flex().w_full().child(team_bands::heading(*run, team_damage, cx)).child(row).into_any_element()
+                }
+                None => row,
+            }
         };
 
         let reorder_overlay = self.reorder_overlay(cx);

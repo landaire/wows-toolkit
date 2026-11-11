@@ -28,6 +28,7 @@ pub mod panel;
 pub mod sample;
 pub mod sort;
 pub mod table;
+mod team_bands;
 pub mod view;
 
 #[cfg(test)]
