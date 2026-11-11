@@ -11,7 +11,6 @@ use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec3;
-use crate::viewport::types::Vertex;
 use wowsunpack::ballistics::ArcProfile;
 use wowsunpack::ballistics::FuseDetonation;
 use wowsunpack::ballistics::ImpactResult;
@@ -35,17 +34,8 @@ const ARC_POINT_COUNT: usize = 60;
 /// A flat-fire shell would otherwise draw as a line lying on the water.
 const MIN_ARC_HEIGHT_RATIO: f32 = 0.02;
 
-/// Half-width of a drawn line, in model units.
-const LINE_WIDTH: f32 = 0.02;
-
 /// How far past the last plate the shell's path is drawn, in model units.
 const TRAILING_LENGTH: f32 = 2.0;
-
-/// Size of an impact marker, in model units.
-const MARKER_SIZE: f32 = 0.06;
-
-/// Size of a detonation burst, in model units.
-const BURST_SIZE: f32 = 0.10;
 
 /// Strike angles that read as shallow and as steep. Between them is the
 /// middling band; the three colour the impact markers.
@@ -55,6 +45,56 @@ const STEEP_ANGLE: f32 = 45.0;
 const IMPACT_COLOR_SHALLOW: [f32; 4] = [0.35, 0.85, 0.35, 1.0];
 const IMPACT_COLOR_MEDIUM: [f32; 4] = [0.95, 0.80, 0.25, 1.0];
 const IMPACT_COLOR_STEEP: [f32; 4] = [0.95, 0.35, 0.30, 1.0];
+
+/// The colours arcs are drawn in. Bright and saturated, so under a dark
+/// outline each stands off both the thickness colours and the grey hull.
+const ARC_PALETTE: [[f32; 4]; 8] = [
+    [0.20, 0.80, 1.00, 1.0],
+    [1.00, 0.55, 0.10, 1.0],
+    [0.60, 1.00, 0.20, 1.0],
+    [1.00, 0.30, 0.80, 1.0],
+    [1.00, 0.92, 0.20, 1.0],
+    [0.62, 0.45, 1.00, 1.0],
+    [0.95, 0.95, 0.95, 1.0],
+    [0.20, 1.00, 0.70, 1.0],
+];
+
+/// Names one cast arc for as long as it is on screen, whatever else is cast
+/// or removed around it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ArcId(u64);
+
+impl ArcId {
+    pub const FIRST: Self = Self(0);
+
+    /// The id handed out after this one.
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// Which palette colour an arc is drawn in. Kept with the arc, so removing
+/// one does not recolour the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArcColor(usize);
+
+impl ArcColor {
+    /// The first colour no arc in `taken` uses, or with every colour in use,
+    /// the first of those fewest arcs use.
+    pub fn unused(taken: impl IntoIterator<Item = ArcColor>) -> Self {
+        let mut uses = [0usize; ARC_PALETTE.len()];
+        for color in taken {
+            uses[color.0] += 1;
+        }
+
+        let slot = (0..ARC_PALETTE.len()).min_by_key(|slot| uses[*slot]).expect("the palette is not empty");
+        Self(slot)
+    }
+
+    pub fn rgba(self) -> [f32; 4] {
+        ARC_PALETTE[self.0]
+    }
+}
 
 /// One plate a cast shell struck, in the order the shell reached them.
 #[derive(Clone, Debug)]
@@ -67,6 +107,8 @@ pub struct TrajectoryHit {
     /// which is the convention the game states its ricochet angles in.
     pub angle_from_normal: Degrees,
     pub distance_from_start: ShipModelDistance,
+    /// The plate's normal, which a new fall angle is struck against.
+    pub normal: Vec3,
 }
 
 /// A cast shell: what it flew in on, what it hit, and what became of it.
@@ -119,6 +161,25 @@ pub fn approach_xz(shell_dir: &Vec3) -> Vec3 {
     if length > 0.001 { flat / length } else { Vec3::x() }
 }
 
+/// The same plates struck by a shell travelling along `shell_dir`.
+///
+/// The plates are the ones the first cast crossed rather than found again:
+/// a ray cast now would miss every plate hidden since, including the ones
+/// the arc's own isolation hid. A different fall changes how squarely each
+/// is struck and how far apart they lie along the shell's path.
+pub fn reaim(hits: Vec<TrajectoryHit>, shell_dir: &Vec3) -> Vec<TrajectoryHit> {
+    let Some(first) = hits.first().map(|hit| hit.position) else { return hits };
+
+    let direction = shell_dir / shell_dir.norm().max(1e-9);
+    hits.into_iter()
+        .map(|hit| TrajectoryHit {
+            angle_from_normal: impact_angle_from_normal(&direction, &hit.normal),
+            distance_from_start: ShipModelDistance::from((hit.position - first).dot(&direction)),
+            ..hit
+        })
+        .collect()
+}
+
 /// Turns a ray cast through the armor into the plates it crossed.
 ///
 /// A hit whose triangle carries no metadata is dropped: without a thickness
@@ -144,6 +205,7 @@ pub fn build_hits(
                 material: info.material,
                 angle_from_normal: impact_angle_from_normal(shell_dir, normal),
                 distance_from_start: ShipModelDistance::from(hit.distance - first_distance),
+                normal: *normal,
             })
         })
         .collect()
@@ -243,124 +305,71 @@ fn impact_color(angle: Degrees) -> [f32; 4] {
     }
 }
 
-/// Builds the drawable geometry for a cast shell.
-///
-/// One mesh carries the whole thing: the incoming arc, a marker at each plate
-/// reached, the path between them, and the detonation burst. `scale` follows
-/// the camera so a marker stays readable as the view pulls back.
-pub fn build_mesh(trajectory: &Trajectory, color: [f32; 4], scale: f32) -> (Vec<Vertex>, Vec<u32>) {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let width = LINE_WIDTH * scale;
+/// How a line of a cast shell is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stroke {
+    /// The flight in and the path between the plates reached.
+    Solid,
+    /// Past the last plate reached, where the shell no longer travels.
+    Faded,
+}
 
-    // The arc fades in along its length, so the eye follows it toward the
-    // ship rather than reading it as a bar across the view.
-    let spans = trajectory.arc.len().saturating_sub(1).max(1) as f32;
-    let fade = |step: usize| {
-        let along = step as f32 / spans;
-        [color[0], color[1], color[2], color[3] * (0.7 + 0.3 * along)]
-    };
-    for (step, pair) in trajectory.arc.windows(2).enumerate() {
-        push_segment(&mut vertices, &mut indices, pair[0], pair[1], width, fade(step), fade(step + 1));
-    }
+/// One line of a cast shell, in world space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArcLine {
+    pub points: Vec<Vec3>,
+    pub stroke: Stroke,
+}
 
-    let last = trajectory.last_plate_drawn();
-    let drawn: usize = match last {
+/// A plate the shell reached, coloured by how square the strike was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Impact {
+    pub position: Vec3,
+    pub color: [f32; 4],
+}
+
+/// What is drawn for a cast shell. Drawn over the scene in screen space, so a
+/// line keeps its width however far the camera pulls back.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ArcDrawing {
+    pub lines: Vec<ArcLine>,
+    pub impacts: Vec<Impact>,
+    pub detonation: Option<Vec3>,
+}
+
+/// The lines and markers a cast shell is drawn with: the flight in, on
+/// through every plate it reached, and a stub past the last one saying which
+/// way it was going.
+pub fn drawing(trajectory: &Trajectory) -> ArcDrawing {
+    let drawn: usize = match trajectory.last_plate_drawn() {
         Some(plate) => plate.value() + 1,
         // Nothing was simulated, so every plate the ray crossed is shown.
         None => trajectory.hits.len(),
     };
+    let reached = &trajectory.hits[..drawn.min(trajectory.hits.len())];
 
-    for hit in trajectory.hits.iter().take(drawn) {
-        push_marker(
-            &mut vertices,
-            &mut indices,
-            hit.position,
-            MARKER_SIZE * scale,
-            impact_color(hit.angle_from_normal),
-        );
+    // The arc ends on the first plate, so the path carries on from there.
+    let path: Vec<Vec3> =
+        trajectory.arc.iter().copied().chain(reached.iter().skip(1).map(|hit| hit.position)).collect();
+    let mut lines = Vec::new();
+    if path.len() >= 2 {
+        lines.push(ArcLine { points: path, stroke: Stroke::Solid });
     }
 
-    for pair in trajectory.hits.iter().take(drawn).collect::<Vec<_>>().windows(2) {
-        let through = [color[0], color[1], color[2], color[3] * 0.9];
-        push_segment(&mut vertices, &mut indices, pair[0].position, pair[1].position, width, through, through);
-    }
-
-    // Past the last plate the shell is gone; the stub says which way.
-    if let Some(exit) = trajectory.hits.get(drawn.saturating_sub(1)) {
+    if let Some(exit) = reached.last() {
         let direction = trajectory.shell_dir / trajectory.shell_dir.norm().max(1e-9);
-        let faded = [color[0], color[1], color[2], color[3] * 0.3];
-        push_segment(
-            &mut vertices,
-            &mut indices,
-            exit.position,
-            exit.position + direction * TRAILING_LENGTH,
-            width,
-            faded,
-            faded,
-        );
+        lines.push(ArcLine {
+            points: vec![exit.position, exit.position + direction * TRAILING_LENGTH],
+            stroke: Stroke::Faded,
+        });
     }
 
-    if let Some(burst) = trajectory.detonation {
-        push_marker(&mut vertices, &mut indices, burst, BURST_SIZE * scale, color);
-    }
+    let impacts = reached
+        .iter()
+        .map(|hit| Impact { position: hit.position, color: impact_color(hit.angle_from_normal) })
+        .collect();
 
-    (vertices, indices)
-}
-
-/// A line drawn as two crossed quads, so it reads from any angle without a
-/// geometry shader.
-fn push_segment(
-    vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u32>,
-    from: Vec3,
-    to: Vec3,
-    width: f32,
-    color_from: [f32; 4],
-    color_to: [f32; 4],
-) {
-    let along = to - from;
-    let length = along.norm();
-    if length < 1e-9 {
-        return;
-    }
-    let direction = along / length;
-    // Any axis not parallel to the line will do to get a perpendicular from.
-    let reference = if direction[1].abs() < 0.9 { Vec3::y() } else { Vec3::x() };
-    let across = direction.cross(&reference).normalize();
-    let up = direction.cross(&across).normalize();
-    let normal: [f32; 3] = across.into();
-
-    for perpendicular in [across, up] {
-        let offset = perpendicular * (width * 0.5);
-        let base = vertices.len() as u32;
-        vertices.push(Vertex { position: (from - offset).into(), normal, color: color_from, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (from + offset).into(), normal, color: color_from, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (to + offset).into(), normal, color: color_to, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (to - offset).into(), normal, color: color_to, uv: [0.0, 0.0] });
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-}
-
-/// An octahedron, which reads as a point from every angle.
-fn push_marker(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, size: f32, color: [f32; 4]) {
-    let base = vertices.len() as u32;
-    let corners = [
-        at + Vec3::new(size, 0.0, 0.0),
-        at + Vec3::new(-size, 0.0, 0.0),
-        at + Vec3::new(0.0, size, 0.0),
-        at + Vec3::new(0.0, -size, 0.0),
-        at + Vec3::new(0.0, 0.0, size),
-        at + Vec3::new(0.0, 0.0, -size),
-    ];
-    for corner in corners {
-        let normal: [f32; 3] = (corner - at).normalize().into();
-        vertices.push(Vertex { position: corner.into(), normal, color, uv: [0.0, 0.0] });
-    }
-    // Each face joins one x, one y and one z corner.
-    for (x, y, z) in [(0u32, 2u32, 4u32), (0, 4, 3), (0, 3, 5), (0, 5, 2), (1, 4, 2), (1, 3, 4), (1, 5, 3), (1, 2, 5)] {
-        indices.extend_from_slice(&[base + x, base + y, base + z]);
-    }
+    ArcDrawing { lines, impacts, detonation: trajectory.detonation }
 }
 
 #[cfg(test)]
@@ -379,7 +388,22 @@ mod tests {
             material: hull_belt(),
             angle_from_normal: Degrees::from(angle),
             distance_from_start: ShipModelDistance::from(distance),
+            normal: Vec3::y(),
         }
+    }
+
+    /// A deck is struck more squarely the steeper the shell falls, and the
+    /// spacing between plates is measured along the new path.
+    #[test]
+    fn a_steeper_fall_strikes_a_deck_more_squarely() {
+        let flat = vec![hit(0.0, 32.0, 90.0), hit(3.0, 19.0, 90.0)];
+        let falling = Vec3::new(1.0, -1.0, 0.0).normalize();
+
+        let steeper = reaim(flat, &falling);
+
+        assert!((steeper[0].angle_from_normal.value() - 45.0).abs() < 1e-3);
+        assert!((steeper[1].distance_from_start.value() - 3.0 / 2f32.sqrt()).abs() < 1e-4);
+        assert_eq!(steeper[1].position, Vec3::new(3.0, 0.0, 0.0), "the plates stay where they were found");
     }
 
     #[test]
@@ -492,21 +516,42 @@ mod tests {
     fn a_cast_that_hit_nothing_draws_nothing() {
         let cast = cast(Vec::new(), Vec3::x(), None, 100.0, false, Km::new(10.0));
 
-        assert!(cast.arc.is_empty());
-        let (vertices, indices) = build_mesh(&cast, [1.0; 4], 1.0);
-        assert!(vertices.is_empty());
-        assert!(indices.is_empty());
+        assert_eq!(drawing(&cast), ArcDrawing::default());
     }
 
+    /// The flight runs on through every plate reached as one line, so the
+    /// shell reads as one path rather than a lead-in and loose segments.
     #[test]
-    fn every_index_the_mesh_emits_names_a_vertex_it_emitted() {
+    fn the_path_runs_from_the_flight_through_each_plate_and_fades_past_the_last() {
         let hits = vec![hit(0.0, 32.0, 10.0), hit(3.0, 19.0, 70.0)];
         let cast = cast(hits, Vec3::x(), None, 100.0, false, Km::new(10.0));
 
-        let (vertices, indices) = build_mesh(&cast, [1.0, 0.5, 0.2, 1.0], 1.0);
+        let drawn = drawing(&cast);
 
-        assert!(!indices.is_empty());
-        assert!(indices.iter().all(|index| (*index as usize) < vertices.len()));
+        let solid = &drawn.lines[0];
+        assert_eq!(solid.stroke, Stroke::Solid);
+        assert_eq!(solid.points, vec![Vec3::new(-TRAILING_LENGTH, 0.0, 0.0), Vec3::zeros(), Vec3::new(3.0, 0.0, 0.0)]);
+        let stub = &drawn.lines[1];
+        assert_eq!(stub.stroke, Stroke::Faded);
+        assert_eq!(stub.points, vec![Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0 + TRAILING_LENGTH, 0.0, 0.0)]);
+        let colors: Vec<[f32; 4]> = drawn.impacts.iter().map(|impact| impact.color).collect();
+        assert_eq!(colors, vec![IMPACT_COLOR_SHALLOW, IMPACT_COLOR_STEEP]);
+    }
+
+    /// Removing an arc frees its colour for the next one, and leaves the
+    /// others drawn as they were.
+    #[test]
+    fn a_new_arc_takes_the_first_colour_no_arc_holds() {
+        assert_eq!(ArcColor::unused([]), ArcColor(0));
+        assert_eq!(ArcColor::unused([ArcColor(0), ArcColor(2)]), ArcColor(1));
+    }
+
+    #[test]
+    fn with_every_colour_held_a_new_arc_takes_the_least_used() {
+        let mut taken: Vec<ArcColor> = (0..ARC_PALETTE.len()).map(ArcColor).collect();
+        taken.push(ArcColor(0));
+
+        assert_eq!(ArcColor::unused(taken), ArcColor(1));
     }
 
     #[test]

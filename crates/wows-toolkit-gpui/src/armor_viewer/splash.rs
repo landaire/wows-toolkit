@@ -292,25 +292,29 @@ pub struct SplashBoxLabel {
     pub name: String,
 }
 
-/// The outlines of every named box, with somewhere to write each name.
-///
-/// The label sits at the top face's middle, which is clear of the hull for
-/// every box that is not buried in it.
-pub fn build_splash_box_wireframes(boxes: &[&SplashBox]) -> (Vec<Vertex>, Vec<u32>, Vec<SplashBoxLabel>) {
+/// The outlines of every named box.
+pub fn build_splash_box_wireframes(boxes: &[SplashBox]) -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let mut labels = Vec::new();
     for shape in boxes {
         let (shape_vertices, shape_indices) = build_box_wireframe(shape.min, shape.max, BOX_COLOR, EDGE_HALF_WIDTH);
         let base = vertices.len() as u32;
         vertices.extend(shape_vertices);
         indices.extend(shape_indices.into_iter().map(|index| index + base));
-        labels.push(SplashBoxLabel {
-            position: [(shape.min[0] + shape.max[0]) * 0.5, shape.max[1], (shape.min[2] + shape.max[2]) * 0.5],
-            name: shape.name.clone(),
-        });
     }
-    (vertices, indices, labels)
+    (vertices, indices)
+}
+
+/// Each box's name as the reader reads it, written at the middle of its top
+/// face, which is clear of the hull for every box that is not buried in it.
+pub fn box_labels(boxes: &[SplashBox]) -> Vec<SplashBoxLabel> {
+    boxes
+        .iter()
+        .map(|shape| SplashBoxLabel {
+            position: [(shape.min[0] + shape.max[0]) * 0.5, shape.max[1], (shape.min[2] + shape.max[2]) * 0.5],
+            name: prettify_box_name(&shape.name),
+        })
+        .collect()
 }
 
 /// A box drawn as twelve thin quads, one per edge.
@@ -536,25 +540,26 @@ mod tests {
         assert!(indices.iter().all(|index| (*index as usize) < vertices.len()));
     }
 
+    /// The outlines are drawn by the GPU and the names over them by the
+    /// overlay, so each box needs a label of its own to be named at all.
     #[test]
-    fn every_boxs_label_sits_on_its_top_face() {
-        let boxes = [splash_box("CM_SB_cit_1", [-2.0, -1.0, -3.0], [2.0, 4.0, 3.0])];
-        let refs: Vec<&SplashBox> = boxes.iter().collect();
+    fn every_box_is_named_on_its_top_face_as_the_reader_reads_it() {
+        let boxes = [
+            splash_box("CM_SB_cit_1", [-2.0, -1.0, -3.0], [2.0, 4.0, 3.0]),
+            splash_box("CM_SB_gk_2_1", [0.0; 3], [1.0; 3]),
+        ];
 
-        let (_, _, labels) = build_splash_box_wireframes(&refs);
+        let labels = box_labels(&boxes);
 
-        assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].position, [0.0, 4.0, 0.0]);
-        // The raw name is the identity; prettifying is the reader's view of it.
-        assert_eq!(labels[0].name, "CM_SB_cit_1");
+        let named: Vec<(&str, [f32; 3])> = labels.iter().map(|label| (label.name.as_str(), label.position)).collect();
+        assert_eq!(named, vec![("Citadel 1", [0.0, 4.0, 0.0]), ("Turret 2.1", [0.5, 1.0, 0.5])]);
     }
 
     #[test]
     fn wireframes_for_several_boxes_keep_their_indices_within_their_own_vertices() {
         let boxes = [splash_box("a", [0.0; 3], [1.0; 3]), splash_box("b", [2.0, 2.0, 2.0], [3.0, 3.0, 3.0])];
-        let refs: Vec<&SplashBox> = boxes.iter().collect();
 
-        let (vertices, indices, _) = build_splash_box_wireframes(&refs);
+        let (vertices, indices) = build_splash_box_wireframes(&boxes);
 
         // The second box's indices are offset past the first box's vertices;
         // getting that wrong draws one box's edges onto the other.

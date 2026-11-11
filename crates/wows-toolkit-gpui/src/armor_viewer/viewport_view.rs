@@ -53,8 +53,11 @@ use super::camera_rings;
 use super::gaps;
 use super::splash;
 use super::trajectory;
+use super::trajectory::ArcColor;
+use super::trajectory::ArcId;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
 use crate::armor_viewer::camo::build_active_camo;
+use crate::armor_viewer::legend::swatch_color;
 use crate::armor_viewer::load_ship;
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
@@ -181,17 +184,98 @@ pub(crate) enum Isolate {
     Zones,
 }
 
-/// One cast arc, as the analysis panel shows it.
+/// One cast arc, as the trajectory section shows it.
 pub(crate) struct ArcSummary {
-    /// The colour the arc is drawn in, so the row and the line match.
-    pub(crate) color: [f32; 4],
+    pub(crate) id: ArcId,
+    /// The colour the arc is drawn in, so the marker and the line match.
+    pub(crate) color: ArcColor,
     pub(crate) hits: usize,
     /// The plating the shell crossed, added up regardless of angle.
     pub(crate) total_armor: Millimeters,
     pub(crate) range: Km,
+    /// What it was fired with. `None` for an arc cast before any ship was
+    /// chosen, which shows the plates crossed without a shell.
+    pub(crate) shell: Option<CastShell>,
     pub(crate) isolating_plates: bool,
     pub(crate) isolating_zones: bool,
     pub(crate) outcome: ArcOutcome,
+}
+
+/// The ship and shell an arc is fired with.
+#[derive(Clone)]
+pub(crate) struct CastShell {
+    pub(crate) ship: ComparisonShip,
+    /// The shell in the ship's list. `None` fires its armour-piercing shell.
+    pub(crate) shell_index: Option<usize>,
+}
+
+impl CastShell {
+    /// Where the fired shell sits in the ship's list: the one chosen, else
+    /// the ship's armour-piercing shell, which is the one a trajectory
+    /// through plating says anything about, else whatever it carries rather
+    /// than refusing.
+    pub(crate) fn fired_index(&self) -> Option<usize> {
+        let shells = &self.ship.shells;
+        self.shell_index
+            .filter(|index| *index < shells.len())
+            .or_else(|| shells.iter().position(|shell| shell.ammo_type == AmmoType::AP))
+            .or_else(|| (!shells.is_empty()).then_some(0))
+    }
+
+    /// The shell fired.
+    pub(crate) fn shell(&self) -> Option<&ShellInfo> {
+        self.ship.shells.get(self.fired_index()?)
+    }
+
+    /// The shell's ballistics and how it lands from `range`. `None` for a
+    /// shell the solver cannot fire.
+    fn fire(&self, range: Km) -> Option<(ShellParams, ImpactResult)> {
+        let params = ShellParams::from_shell_info(self.shell()?)?;
+        let impact = solve_for_range(&params, range.to_meters())?;
+        Some((params, impact))
+    }
+
+    fn is_same(&self, other: &CastShell) -> bool {
+        self.ship.param_index == other.ship.param_index && self.shell_index == other.shell_index
+    }
+}
+
+/// A cast arc and what it was fired with.
+struct CastArc {
+    id: ArcId,
+    color: ArcColor,
+    shell: Option<CastShell>,
+    /// The bearing the shell came in on, which a new fall angle is built on.
+    approach: Vec3,
+    trajectory: trajectory::Trajectory,
+    /// The lines and markers `trajectory` is drawn with, worked out when it
+    /// changes rather than on every frame.
+    drawing: trajectory::ArcDrawing,
+}
+
+impl CastArc {
+    fn set_trajectory(&mut self, trajectory: trajectory::Trajectory) {
+        self.drawing = trajectory::drawing(&trajectory);
+        self.trajectory = trajectory;
+    }
+}
+
+/// The arc the trajectory section is editing, with the slider its range is
+/// edited by. Made when the arc is selected, seeded with its range.
+struct SelectedArc {
+    id: ArcId,
+    range: Entity<SliderField>,
+    _range_changed: Subscription,
+}
+
+/// What releasing a mouse button over the viewport does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClickAction {
+    SnapGizmo,
+    Cast,
+    Burst,
+    TogglePlate,
+    Nothing,
 }
 
 /// Whether the armor's openings are marked, and how many were found.
@@ -205,9 +289,14 @@ pub(crate) struct GapState {
 /// every plate on the way in rather than only those past the point clicked.
 const CAST_STANDOFF: f32 = 50.0;
 
-/// The camera distance trajectory markers are sized against, so one stays
-/// readable as the view pulls back.
-const CAST_SCALE_REFERENCE: f32 = 200.0;
+/// How a cast arc is drawn over the scene: its line, the line of the arc
+/// being edited, how far the dark outline under a line reaches past each
+/// edge, and the plate and burst markers.
+const ARC_LINE_WIDTH: Pixels = px(3.0);
+const SELECTED_ARC_LINE_WIDTH: Pixels = px(5.0);
+const ARC_OUTLINE: Pixels = px(1.5);
+const IMPACT_RADIUS: Pixels = px(4.5);
+const BURST_RADIUS: Pixels = px(7.0);
 
 /// How wide a ship is assumed to be before its bounds are known, so an arc
 /// drawn early has a length rather than none.
@@ -216,9 +305,9 @@ const DEFAULT_MODEL_EXTENT: f32 = 20.0;
 /// The range a cast shell is fired from until one is chosen.
 const DEFAULT_CAST_RANGE: Km = Km::new(10.0);
 
-/// The colours cast shells are drawn in, in the order they were cast.
-const TRAJECTORY_PALETTE: [[f32; 4]; 4] =
-    [[0.30, 0.75, 1.00, 1.0], [1.00, 0.65, 0.20, 1.0], [0.65, 1.00, 0.45, 1.0], [0.95, 0.45, 0.85, 1.0]];
+/// The span a cast range is chosen over, in kilometres: the egui viewer's
+/// own range slider.
+const CAST_RANGE_SLIDER: SliderRange = SliderRange::new(0.0, 30.0, 0.5);
 
 /// Whether clicks burst shells, and what the last burst reached.
 pub(crate) struct SplashState {
@@ -230,10 +319,9 @@ pub(crate) struct SplashState {
     pub(crate) zones_reached: usize,
 }
 
-/// Whether clicks cast shells, and what has been cast so far.
+/// How many shells have been cast, and whether a ricochet is followed.
 #[derive(Clone, Copy)]
 pub(crate) struct TrajectoryState {
-    pub(crate) shown: bool,
     pub(crate) count: usize,
     pub(crate) continue_on_ricochet: bool,
 }
@@ -283,7 +371,6 @@ const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
 pub(crate) enum ViewportChange {
     Camera,
     Settings,
-    TrajectoryMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -746,30 +833,34 @@ pub struct ViewportView {
     /// found last time they were looked for. The count is what the rail
     /// reports, so it is kept rather than recomputed per frame.
     show_gaps: bool,
-    /// Whether a click casts a shell instead of hiding the plate under it.
-    trajectory_mode: bool,
-    /// The shells cast so far. A plain click replaces them; a shift-click
-    /// adds to them, which is how two angles are compared.
-    trajectories: Vec<trajectory::Trajectory>,
+    /// The shells cast so far, one per Shift-click on the hull. Several are
+    /// kept at once, which is how two angles are compared.
+    arcs: Vec<CastArc>,
+    /// The id the next cast arc takes.
+    next_arc: ArcId,
+    /// The arc the trajectory section is editing.
+    selected_arc: Option<SelectedArc>,
     /// Whether a shell that ricochets is followed past the bounce.
     continue_on_ricochet: bool,
-    /// The attacker a cast is made with, pushed in by the pane, which owns
-    /// the comparison list. `None` until one is chosen, which still casts:
-    /// the plates a ray crosses are worth showing without a shell.
-    cast_ship: Option<ComparisonShip>,
-    /// Shell selected from that ship, when chosen in the trajectory panel.
-    cast_shell_index: Option<usize>,
-    /// The range the cast shell is fired from, which sets how steeply it
-    /// falls. The egui viewer offers the same slider over the same span.
+    /// The ship and shell the next cast is fired with, pushed in by the pane,
+    /// which owns the comparison list. `None` until one is chosen, which
+    /// still casts: the plates a ray crosses are worth showing without a
+    /// shell.
+    cast_shell: Option<CastShell>,
+    /// The range the next cast is fired from, which sets how steeply it
+    /// falls.
     cast_range: Km,
-    /// Whether a click bursts a shell instead of hiding the plate under it.
-    /// Mutually exclusive with trajectory mode: both want the click.
+    /// Whether a left click bursts a shell instead of hiding the plate under
+    /// it.
     splash_mode: bool,
     /// The burst on screen, and what it reached. `None` until one is placed.
     splash_result: Option<splash::SplashResult>,
     /// Whether the named boxes are outlined over the hull. Independent of the
     /// mode: the outlines are worth seeing while placing a burst and after.
     show_splash_boxes: bool,
+    /// The boxes' names and where each is written, while they are outlined.
+    /// Built with the outlines, in `upload_splash_boxes`.
+    splash_labels: Vec<splash::SplashBoxLabel>,
     gap_count: usize,
     /// Whether the viewport is showing only the plates the game's own armor
     /// viewer hides. A mode rather than a setting: it is not written back
@@ -876,15 +967,16 @@ impl ViewportView {
             camera_before_lock: None,
             aim_mesh_ids: Vec::new(),
             show_gaps: false,
-            trajectory_mode: false,
-            trajectories: Vec::new(),
+            arcs: Vec::new(),
+            next_arc: ArcId::FIRST,
+            selected_arc: None,
             continue_on_ricochet: false,
-            cast_ship: None,
-            cast_shell_index: None,
+            cast_shell: None,
             cast_range: DEFAULT_CAST_RANGE,
             splash_mode: false,
             splash_result: None,
             show_splash_boxes: false,
+            splash_labels: Vec::new(),
             gap_count: 0,
             show_hidden_only: false,
             part_visibility: HashMap::new(),
@@ -992,13 +1084,8 @@ impl ViewportView {
         // The ranges the trajectory itself is resolved over.
         let camera_fov = Self::new_slider(cx, const { SliderRange::new(0.0, 1.0, 0.01) }, 0.0, 0.0);
         let camera_height = Self::new_slider(cx, const { SliderRange::new(-1.0, 1.0, 0.01) }, 0.0, 0.0);
-        // The span the egui viewer's own range slider offers, in kilometres.
-        let cast_range = Self::new_slider(
-            cx,
-            const { SliderRange::new(0.0, 30.0, 0.5) },
-            DEFAULT_CAST_RANGE.value(),
-            DEFAULT_CAST_RANGE.value(),
-        );
+        let cast_range =
+            Self::new_slider(cx, CAST_RANGE_SLIDER, DEFAULT_CAST_RANGE.value(), DEFAULT_CAST_RANGE.value());
         let subs = vec![
             Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
@@ -1375,6 +1462,11 @@ impl ViewportView {
             &self.active_camo_uvs,
         );
         self.model_bounds = Some(armor.bounds);
+        // The arcs were cast at the plates of the ship before; on this one
+        // they mark nothing.
+        self.arcs.clear();
+        self.selected_arc = None;
+        self.upload_splash_boxes(device, &armor);
         // The camera the lock puts back is the one framed on the ship now
         // showing, not the one framed on the ship before it. A ship that names
         // no orbit has nothing to lock onto, and its control is not drawn, so
@@ -1388,6 +1480,20 @@ impl ViewportView {
             }
         }
         self.current_armor = Some(armor);
+    }
+
+    /// Outlines the named splash boxes while they are shown, and keeps their
+    /// names for the overlay. The outlines are meshes and the names are not,
+    /// so both are made here to stay in step.
+    fn upload_splash_boxes(&mut self, device: &wgpu::Device, armor: &LoadedShipArmor) {
+        self.splash_labels.clear();
+        let Some(data) = armor.splash_data.as_ref().filter(|_| self.show_splash_boxes) else { return };
+
+        let (vertices, indices) = splash::build_splash_box_wireframes(&data.boxes);
+        if !indices.is_empty() {
+            self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+        }
+        self.splash_labels = splash::box_labels(&data.boxes);
     }
 
     /// The device meshes are uploaded to, while there is one.
@@ -1805,63 +1911,39 @@ impl ViewportView {
         GapState { shown: self.show_gaps, count: self.gap_count }
     }
 
-    /// Marks the openings in the armor, or stops marking them.
-    /// Whether clicks cast shells, and how many have been cast.
+    /// How many shells have been cast, and whether a ricochet is followed.
     pub(crate) fn trajectory_state(&self) -> TrajectoryState {
-        TrajectoryState {
-            shown: self.trajectory_mode,
-            count: self.trajectories.len(),
-            continue_on_ricochet: self.continue_on_ricochet,
-        }
+        TrajectoryState { count: self.arcs.len(), continue_on_ricochet: self.continue_on_ricochet }
     }
 
-    /// Adopts the attacker casts are made with.
+    /// Adopts the ship and shell the next cast is fired with.
     ///
-    /// Everything already cast is re-run, since a different shell reaches a
-    /// different depth through the same plates.
-    pub(crate) fn set_cast_ship(
-        &mut self,
-        ship: Option<ComparisonShip>,
-        shell_index: Option<usize>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.cast_ship.as_ref().map(|held| &held.param_index) == ship.as_ref().map(|next| &next.param_index)
-            && self.cast_shell_index == shell_index
-        {
+    /// An arc cast before any ship was chosen takes it, since it was waiting
+    /// for one; an arc already fired with a shell keeps its own.
+    pub(crate) fn set_cast_shell(&mut self, shell: Option<CastShell>, cx: &mut Context<Self>) {
+        let unchanged = match (&self.cast_shell, &shell) {
+            (Some(held), Some(next)) => held.is_same(next),
+            (None, None) => true,
+            _ => false,
+        };
+        if unchanged {
             return;
         }
-        self.cast_ship = ship;
-        self.cast_shell_index = shell_index;
-        self.recast_trajectories(cx);
+
+        self.cast_shell = shell;
+        if let Some(shell) = self.cast_shell.clone() {
+            let waiting: Vec<ArcId> = self.arcs.iter().filter(|arc| arc.shell.is_none()).map(|arc| arc.id).collect();
+            for id in waiting {
+                self.set_arc_shell(id, shell.clone(), cx);
+            }
+        }
+        cx.notify();
     }
 
-    /// The range cast shells are fired from.
-    pub(crate) fn cast_range(&self) -> Km {
-        self.cast_range
-    }
-
+    /// Sets the range the next cast is fired from. Arcs already cast keep
+    /// their own; each is edited from its marker.
     pub(crate) fn set_cast_range(&mut self, range: Km, cx: &mut Context<Self>) {
-        if (self.cast_range.value() - range.value()).abs() < f32::EPSILON {
-            return;
-        }
         self.cast_range = range;
-        self.recast_trajectories(cx);
-    }
-
-    /// Turns trajectory casting on or off.
-    ///
-    /// Leaving the mode keeps what was cast: coming back to compare against
-    /// an earlier shell is the reason to leave it and return. Turning it on
-    /// leaves splash mode, since both want the click.
-    pub(crate) fn set_trajectory_mode(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.trajectory_mode == on {
-            return;
-        }
-        self.trajectory_mode = on;
-        if on {
-            self.splash_mode = false;
-        }
-        cx.emit(ViewportChange::TrajectoryMode);
         cx.notify();
     }
 
@@ -1876,16 +1958,12 @@ impl ViewportView {
         }
     }
 
-    /// Turns splash bursting on or off, leaving trajectory mode if it was on.
+    /// Turns splash bursting on or off.
     pub(crate) fn set_splash_mode(&mut self, on: bool, cx: &mut Context<Self>) {
         if self.splash_mode == on {
             return;
         }
         self.splash_mode = on;
-        if on && self.trajectory_mode {
-            self.trajectory_mode = false;
-            cx.emit(ViewportChange::TrajectoryMode);
-        }
         cx.notify();
     }
 
@@ -1936,7 +2014,7 @@ impl ViewportView {
     /// at the smallest reach rather than none, so the click is not silently
     /// ignored; the list beside it says no shell was found.
     fn burst_reach(&self) -> splash::ModelUnit {
-        let largest = self.cast_ship.as_ref().and_then(|ship| {
+        let largest = self.cast_shell.as_ref().map(|cast| &cast.ship).and_then(|ship| {
             ship.shells
                 .iter()
                 .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
@@ -1951,33 +2029,40 @@ impl ViewportView {
 
     /// Whether a ricocheting shell is followed past the bounce.
     ///
-    /// Everything already cast is re-cast, since the answer changes where
+    /// Everything already cast is fired again, since the answer changes where
     /// each of those shells ended.
     pub(crate) fn set_continue_on_ricochet(&mut self, on: bool, cx: &mut Context<Self>) {
         if self.continue_on_ricochet == on {
             return;
         }
         self.continue_on_ricochet = on;
-        self.recast_trajectories(cx);
+        let refired: Vec<trajectory::Trajectory> =
+            self.arcs.iter().map(|arc| self.refire(arc, arc.trajectory.range, arc.shell.as_ref())).collect();
+        for (arc, trajectory) in self.arcs.iter_mut().zip(refired) {
+            arc.set_trajectory(trajectory);
+        }
+        cx.notify();
     }
 
     /// Drops every cast shell.
     pub(crate) fn clear_trajectories(&mut self, cx: &mut Context<Self>) {
-        if self.trajectories.is_empty() {
+        if self.arcs.is_empty() {
             return;
         }
-        let was_isolating = self.trajectories.iter().any(|cast| cast.isolating_plates || cast.isolating_zones);
-        self.trajectories.clear();
+        let was_isolating =
+            self.arcs.iter().any(|arc| arc.trajectory.isolating_plates || arc.trajectory.isolating_zones);
+        self.arcs.clear();
+        self.selected_arc = None;
         // What the arcs were hiding is given back with them, rather than
         // leaving most of the ship gone with nothing on screen saying why.
         if was_isolating {
             self.apply_arc_isolation(cx);
             return;
         }
-        self.reupload_current_armor(cx);
         cx.notify();
     }
 
+    /// Marks the openings in the armor, or stops marking them.
     pub(crate) fn set_show_gaps(&mut self, show: bool, cx: &mut Context<Self>) {
         if self.show_gaps == show {
             return;
@@ -2053,6 +2138,41 @@ impl ViewportView {
             Ok(true) => self.viewport.clear_dirty(),
             Ok(false) => {}
             Err(error) => tracing::warn!("armor viewport: {error}"),
+        }
+    }
+
+    /// The names of the splash boxes and where each is written, while the
+    /// boxes are outlined.
+    pub(crate) fn splash_box_labels(&self) -> &[splash::SplashBoxLabel] {
+        &self.splash_labels
+    }
+
+    /// Draws what is laid over the scene in screen space: the splash box
+    /// names and the cast arcs. In screen space, so a label or a line keeps
+    /// its size however far the camera pulls back.
+    fn paint_annotations(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let rect = view_rect_from_bounds(bounds);
+        let camera = &self.viewport.camera;
+        let on_screen = |at: Vec2| point(px(at.x), px(at.y));
+
+        for label in self.splash_box_labels() {
+            let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
+            let Some(at) = camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else { continue };
+            paint_box_label(&label.name, on_screen(at), window, cx);
+        }
+
+        // The arc being edited is drawn last, over the others.
+        let selected = self.selected_arc.as_ref().map(|selected| selected.id);
+        let others = self.arcs.iter().filter(|arc| Some(arc.id) != selected);
+        let editing = self.arcs.iter().filter(|arc| Some(arc.id) == selected);
+        for arc in others.chain(editing) {
+            paint_arc(
+                &arc.drawing,
+                arc.color.rgba(),
+                Some(arc.id) == selected,
+                |at| camera.project_to_screen(at, rect).map(on_screen),
+                window,
+            );
         }
     }
 
@@ -2180,90 +2300,126 @@ impl ViewportView {
             return;
         }
         let plain_click = drag.is_some_and(|d| !d.moved);
-        if event.button == MouseButton::Left && self.gizmo_press_in_box && plain_click {
-            let pointer = point_to_vec2(event.position);
-            if let Some(rect) = self.gizmo_rect()
-                && let Some((axis, positive)) = gizmo::hit_test(rect, &self.viewport.camera, pointer)
-            {
-                self.snap_camera(axis, positive, cx);
+        let pointer = point_to_vec2(event.position);
+        let action =
+            click_action(event.button, plain_click, self.gizmo_press_in_box, self.splash_mode, event.modifiers.shift);
+        match action {
+            ClickAction::SnapGizmo => {
+                if let Some(rect) = self.gizmo_rect()
+                    && let Some((axis, positive)) = gizmo::hit_test(rect, &self.viewport.camera, pointer)
+                {
+                    self.snap_camera(axis, positive, cx);
+                }
             }
-        } else if event.button == MouseButton::Left && !self.gizmo_press_in_box && plain_click {
-            if self.trajectory_mode {
-                // Shift adds a shell to those already cast, which is how two
-                // angles are compared; a plain click starts again.
-                self.cast_at(point_to_vec2(event.position), event.modifiers.shift, cx);
-            } else if self.splash_mode {
-                self.burst_at(point_to_vec2(event.position), cx);
-            } else if self.camera_is_free()
-                && let Some(key) = self.hovered.as_ref().map(|h| h.key.clone())
-            {
+            ClickAction::Cast => self.cast_at(pointer, cx),
+            ClickAction::Burst => self.burst_at(pointer, cx),
+            ClickAction::TogglePlate => {
                 // A plain click on the model, outside the gizmo box, toggles
                 // the hovered plate's visibility, matching the egui app's
                 // `response.clicked()` click-to-hide (`tab.rs:5350-5362`).
-                self.toggle_plate(key, cx);
+                if self.camera_is_free()
+                    && let Some(key) = self.hovered.as_ref().map(|h| h.key.clone())
+                {
+                    self.toggle_plate(key, cx);
+                }
             }
+            ClickAction::Nothing => {}
         }
         self.gizmo_press_in_box = false;
     }
 
-    /// Casts a shell at whatever the pointer is over.
+    /// Casts a shell at whatever the pointer is over, adds it to the arcs
+    /// already cast, and opens its editor. A cast past the ship does nothing.
     ///
     /// The shell comes in along the camera's own bearing, flattened: a
     /// trajectory is read against the ship, and firing from wherever the eye
     /// happens to sit vertically would say more about the camera than the
-    /// armor. Clicking past the ship clears what was cast, which is how the
-    /// egui viewer dismisses them.
-    fn cast_at(&mut self, pointer: Vec2, keep_existing: bool, cx: &mut Context<Self>) {
+    /// armor.
+    fn cast_at(&mut self, pointer: Vec2, cx: &mut Context<Self>) {
         let Some(bounds) = self.last_bounds else { return };
         let rect = view_rect_from_bounds(bounds);
-        let Some(surface) = self.viewport.pick(pointer, rect) else {
-            if !keep_existing {
-                self.clear_trajectories(cx);
-            }
-            return;
-        };
+        let fired = self.viewport.pick(pointer, rect).and_then(|surface| {
+            let (_, ray) = self.viewport.screen_to_ray(pointer, rect)?;
+            let approach = trajectory::approach_xz(&ray);
+            Some((approach, self.fire_at(surface.world_position, approach)?))
+        });
+        let Some((approach, trajectory)) = fired else { return };
 
-        let Some((_, ray)) = self.viewport.screen_to_ray(pointer, rect) else { return };
-        let approach = trajectory::approach_xz(&ray);
-        let shell_dir = self.shell_direction(approach);
+        self.add_arc(approach, trajectory, cx);
+    }
+
+    /// Keeps a cast shell, fired with the next cast's ship and shell, in a
+    /// colour no other arc holds, and opens its editor: the arc just cast is
+    /// the one the reader means to look at.
+    pub(super) fn add_arc(
+        &mut self,
+        approach: Vec3,
+        trajectory: trajectory::Trajectory,
+        cx: &mut Context<Self>,
+    ) -> ArcId {
+        let id = self.next_arc;
+        self.next_arc = id.next();
+        let color = ArcColor::unused(self.arcs.iter().map(|arc| arc.color));
+        let drawing = trajectory::drawing(&trajectory);
+        self.arcs.push(CastArc { id, color, shell: self.cast_shell.clone(), approach, trajectory, drawing });
+        self.selected_arc = self.arc_editor(id, cx);
+        cx.notify();
+
+        id
+    }
+
+    /// A shell fired with the next cast's settings at `aim`, coming in on
+    /// `approach`. `None` when the ray crosses no plate anything is known
+    /// about.
+    fn fire_at(&self, aim: Vec3, approach: Vec3) -> Option<trajectory::Trajectory> {
+        let fired = self.cast_shell.as_ref().and_then(|shell| shell.fire(self.cast_range));
+        let shell_dir = fall_direction(approach, fired.as_ref().map(|(_, impact)| impact));
 
         // Cast from outside the hull so the ray crosses every plate on the
         // way in, not just those past the point clicked.
-        let origin = surface.world_position - shell_dir * CAST_STANDOFF;
+        let origin = aim - shell_dir * CAST_STANDOFF;
         let ray_hits = self.viewport.pick_all_ray(origin, shell_dir);
         let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
         if hits.is_empty() {
-            if !keep_existing {
-                self.clear_trajectories(cx);
-            }
-            return;
+            return None;
         }
 
-        let cast = self.build_cast(hits, shell_dir);
-        if !keep_existing {
-            self.trajectories.clear();
-        }
-        self.trajectories.push(cast);
-        self.reupload_current_armor(cx);
-        cx.notify();
+        let shell = fired.as_ref().map(|(params, impact)| (params, impact));
+        Some(trajectory::cast(hits, shell_dir, shell, self.model_extent(), self.continue_on_ricochet, self.cast_range))
     }
 
-    /// Every cast arc, as the analysis panel reads them.
+    /// `arc` fired again from `range` with `shell`, at the plates it first
+    /// crossed, keeping what it isolates.
+    fn refire(&self, arc: &CastArc, range: Km, shell: Option<&CastShell>) -> trajectory::Trajectory {
+        let fired = shell.and_then(|shell| shell.fire(range));
+        let shell_dir = fall_direction(arc.approach, fired.as_ref().map(|(_, impact)| impact));
+        let hits = trajectory::reaim(arc.trajectory.hits.clone(), &shell_dir);
+        let shell = fired.as_ref().map(|(params, impact)| (params, impact));
+        let mut refired =
+            trajectory::cast(hits, shell_dir, shell, self.model_extent(), self.continue_on_ricochet, range);
+        refired.isolating_plates = arc.trajectory.isolating_plates;
+        refired.isolating_zones = arc.trajectory.isolating_zones;
+        refired
+    }
+
+    /// Every cast arc, as the trajectory section lists them.
     pub(crate) fn arcs(&self) -> Vec<ArcSummary> {
-        self.trajectories
+        self.arcs
             .iter()
-            .enumerate()
-            .map(|(index, cast)| {
+            .map(|arc| {
+                let cast = &arc.trajectory;
                 let plates: Vec<ArcPlate> = cast
                     .hits
                     .iter()
                     .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material })
                     .collect();
                 ArcSummary {
-                    color: TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()],
+                    id: arc.id,
+                    color: arc.color,
                     hits: cast.hits.len(),
                     total_armor: Millimeters::from(cast.hits.iter().map(|hit| hit.thickness.value()).sum::<f32>()),
                     range: cast.range,
+                    shell: arc.shell.clone(),
                     isolating_plates: cast.isolating_plates,
                     isolating_zones: cast.isolating_zones,
                     outcome: describe_arc(cast.sim.as_ref(), &plates),
@@ -2272,52 +2428,79 @@ impl ViewportView {
             .collect()
     }
 
-    /// Drops one arc.
-    pub(crate) fn remove_trajectory(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.trajectories.len() {
-            return;
-        }
-        let dropped = self.trajectories.remove(index);
-        // Only what it was hiding has to be given back; an arc that hid nothing
-        // leaves the reader's own hiding where it is.
-        if dropped.isolating_plates || dropped.isolating_zones {
-            self.apply_arc_isolation(cx);
-        } else {
-            self.reupload_current_armor(cx);
-            cx.notify();
-        }
+    /// The arc being edited, and the slider its range is edited with.
+    pub(crate) fn selected_arc(&self) -> Option<(ArcId, Entity<SliderField>)> {
+        self.selected_arc.as_ref().map(|selected| (selected.id, selected.range.clone()))
     }
 
-    /// Fires one arc from a different range, leaving the others where they are.
-    pub(crate) fn set_trajectory_range(&mut self, index: usize, range: Km, cx: &mut Context<Self>) {
-        let Some(old) = self.trajectories.get(index) else { return };
-        if (old.range.value() - range.value()).abs() < f32::EPSILON {
+    /// Opens the editor on an arc, or puts it away when that arc is the one
+    /// open.
+    pub(crate) fn toggle_arc_selection(&mut self, id: ArcId, cx: &mut Context<Self>) {
+        let open = self.selected_arc.as_ref().is_some_and(|selected| selected.id == id);
+        self.selected_arc = if open { None } else { self.arc_editor(id, cx) };
+        cx.notify();
+    }
+
+    /// An editor on the arc `id`. `None` when no such arc is cast.
+    fn arc_editor(&mut self, id: ArcId, cx: &mut Context<Self>) -> Option<SelectedArc> {
+        let range = self.arcs.iter().find(|arc| arc.id == id)?.trajectory.range;
+        let slider = Self::new_slider(cx, CAST_RANGE_SLIDER, range.value(), DEFAULT_CAST_RANGE.value());
+        let changed = Self::subscribe_slider(cx, &slider, move |this, value, cx| {
+            this.set_arc_range(id, Km::new(value), cx);
+        });
+
+        Some(SelectedArc { id, range: slider, _range_changed: changed })
+    }
+
+    /// Drops one arc.
+    pub(crate) fn remove_arc(&mut self, id: ArcId, cx: &mut Context<Self>) {
+        let Some(index) = self.arcs.iter().position(|arc| arc.id == id) else { return };
+        let dropped = self.arcs.remove(index);
+        if self.selected_arc.as_ref().is_some_and(|selected| selected.id == id) {
+            self.selected_arc = None;
+        }
+
+        // Only what it was hiding has to be given back; an arc that hid nothing
+        // leaves the reader's own hiding where it is.
+        if dropped.trajectory.isolating_plates || dropped.trajectory.isolating_zones {
+            self.apply_arc_isolation(cx);
             return;
         }
-        let (hits, shell_dir) = (old.hits.clone(), old.shell_dir);
-        let (isolating_plates, isolating_zones) = (old.isolating_plates, old.isolating_zones);
-        let mut cast = self.build_cast_at(hits, shell_dir, range);
-        cast.isolating_plates = isolating_plates;
-        cast.isolating_zones = isolating_zones;
-        let isolating = cast.isolating_plates || cast.isolating_zones;
-        self.trajectories[index] = cast;
-        // A different range is a different set of plates crossed, so an arc
-        // that is isolating has to hide a different set. One that is not leaves
-        // the visibility alone, and with it the reader's own hiding.
-        if isolating {
-            self.apply_arc_isolation(cx);
-        } else {
-            self.reupload_current_armor(cx);
-            cx.notify();
+        cx.notify();
+    }
+
+    /// Fires one arc from a different range, leaving the others where they
+    /// are. The plates it crossed stay the same, so what it isolates does too.
+    pub(crate) fn set_arc_range(&mut self, id: ArcId, range: Km, cx: &mut Context<Self>) {
+        let Some(index) = self.arcs.iter().position(|arc| arc.id == id) else { return };
+        let held = &self.arcs[index];
+        if (held.trajectory.range.value() - range.value()).abs() < f32::EPSILON {
+            return;
         }
+
+        let refired = self.refire(held, range, held.shell.as_ref());
+        self.arcs[index].set_trajectory(refired);
+        cx.notify();
+    }
+
+    /// Fires one arc with a different ship's shell, or another of its own.
+    pub(crate) fn set_arc_shell(&mut self, id: ArcId, shell: CastShell, cx: &mut Context<Self>) {
+        let Some(index) = self.arcs.iter().position(|arc| arc.id == id) else { return };
+        let held = &self.arcs[index];
+
+        let refired = self.refire(held, held.trajectory.range, Some(&shell));
+        self.arcs[index].set_trajectory(refired);
+        self.arcs[index].shell = Some(shell);
+        cx.notify();
     }
 
     /// Hides what one arc did not cross, or stops hiding it.
     ///
     /// Plates and zones are two answers to one question, so asking for either
     /// withdraws the other.
-    pub(crate) fn isolate_arc(&mut self, index: usize, what: Isolate, on: bool, cx: &mut Context<Self>) {
-        let Some(cast) = self.trajectories.get_mut(index) else { return };
+    pub(crate) fn isolate_arc(&mut self, id: ArcId, what: Isolate, on: bool, cx: &mut Context<Self>) {
+        let Some(arc) = self.arcs.iter_mut().find(|arc| arc.id == id) else { return };
+        let cast = &mut arc.trajectory;
         match what {
             Isolate::Plates => {
                 cast.isolating_plates = on;
@@ -2333,9 +2516,9 @@ impl ViewportView {
 
     /// The same for every arc at once, which is what reads out the whole cast.
     pub(crate) fn isolate_all_arcs(&mut self, what: Isolate, cx: &mut Context<Self>) {
-        for cast in &mut self.trajectories {
-            cast.isolating_plates = what == Isolate::Plates;
-            cast.isolating_zones = what == Isolate::Zones;
+        for arc in &mut self.arcs {
+            arc.trajectory.isolating_plates = what == Isolate::Plates;
+            arc.trajectory.isolating_zones = what == Isolate::Zones;
         }
         self.apply_arc_isolation(cx);
     }
@@ -2348,7 +2531,7 @@ impl ViewportView {
     fn apply_arc_isolation(&mut self, cx: &mut Context<Self>) {
         let mut hit_zones: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut hit_plates: std::collections::HashSet<PlateKeyParts> = std::collections::HashSet::new();
-        for cast in &self.trajectories {
+        for cast in self.arcs.iter().map(|arc| &arc.trajectory) {
             for hit in &cast.hits {
                 if cast.isolating_zones {
                     hit_zones.insert(hit.zone.clone());
@@ -2391,83 +2574,6 @@ impl ViewportView {
                 })
                 .collect();
         }
-        self.reupload_current_armor(cx);
-        cx.notify();
-    }
-
-    /// The direction a shell travels, given the bearing it comes in on.
-    ///
-    /// With a shell to fire the fall angle is the solver's; without one the
-    /// shell comes in flat, which is what the lead-in line then shows.
-    fn shell_direction(&self, approach: Vec3) -> Vec3 {
-        match self.cast_shell() {
-            Some((_, impact)) => {
-                let fall = impact.impact_angle_horizontal.value().to_radians();
-                Vec3::new(approach[0] * fall.cos(), -fall.sin(), approach[2] * fall.cos()).normalize()
-            }
-            None => approach,
-        }
-    }
-
-    /// The shell a cast is made with: the first comparison ship's, preferring
-    /// one that can be simulated through armor.
-    ///
-    /// `None` with nothing in the comparison list, which is a real state: the
-    /// plates a ray crosses are still worth showing without a shell to send
-    /// through them.
-    fn cast_shell(&self) -> Option<(ShellParams, ImpactResult)> {
-        self.cast_shell_at(self.cast_range)
-    }
-
-    /// The same, fired from `range`.
-    fn cast_shell_at(&self, range: Km) -> Option<(ShellParams, ImpactResult)> {
-        let ship = self.cast_ship.as_ref()?;
-        // Armour-piercing first: it is the shell a trajectory through plating
-        // says anything about. A ship carrying none still casts with what it
-        // has rather than refusing.
-        let shell = self
-            .cast_shell_index
-            .and_then(|index| ship.shells.get(index))
-            .or_else(|| ship.shells.iter().find(|shell| shell.ammo_type == AmmoType::AP))
-            .or_else(|| ship.shells.first())?;
-        let params = ShellParams::from_shell_info(shell)?;
-        let impact = solve_for_range(&params, range.to_meters())?;
-        Some((params, impact))
-    }
-
-    fn build_cast(&self, hits: Vec<trajectory::TrajectoryHit>, shell_dir: Vec3) -> trajectory::Trajectory {
-        self.build_cast_at(hits, shell_dir, self.cast_range)
-    }
-
-    /// The same, at a range of its own: one arc's range is changed without
-    /// moving the others.
-    fn build_cast_at(
-        &self,
-        hits: Vec<trajectory::TrajectoryHit>,
-        shell_dir: Vec3,
-        range: Km,
-    ) -> trajectory::Trajectory {
-        let shell = self.cast_shell_at(range);
-        let parts = shell.as_ref().map(|(params, impact)| (params, impact));
-        trajectory::cast(hits, shell_dir, parts, self.model_extent(), self.continue_on_ricochet, range)
-    }
-
-    /// Re-runs every cast shell, for a change that alters where they end.
-    fn recast_trajectories(&mut self, cx: &mut Context<Self>) {
-        if self.trajectories.is_empty() {
-            cx.notify();
-            return;
-        }
-        let recast: Vec<trajectory::Trajectory> = std::mem::take(&mut self.trajectories)
-            .into_iter()
-            .map(|old| {
-                let mut cast = self.build_cast_at(old.hits, old.shell_dir, old.range);
-                cast.isolating_plates = old.isolating_plates;
-                cast.isolating_zones = old.isolating_zones;
-                cast
-            })
-            .collect();
-        self.trajectories = recast;
         self.reupload_current_armor(cx);
         cx.notify();
     }
@@ -2531,10 +2637,6 @@ impl ViewportView {
                 if let Some(pane) = self.pane() {
                     pane.update(cx, |pane, cx| pane.toggle_options(cx));
                 }
-                return;
-            }
-            if modifiers.secondary(cx) && key == "t" {
-                self.set_trajectory_mode(!self.trajectory_mode, cx);
                 return;
             }
             if modifiers.secondary(cx) && !modifiers.shift && key == "z" {
@@ -3100,27 +3202,6 @@ impl ViewportView {
             }
         }
 
-        // Scaled to the camera so a marker stays readable as the view pulls
-        // back, which is why these are rebuilt with the rest of the overlays.
-        let scale = (self.viewport.camera.distance / CAST_SCALE_REFERENCE).clamp(0.15, 3.0);
-        for (index, cast) in self.trajectories.iter().enumerate() {
-            let color = TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()];
-            let (vertices, indices) = trajectory::build_mesh(cast, color, scale);
-            if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
-            }
-        }
-
-        if self.show_splash_boxes
-            && let Some(data) = armor.splash_data.as_ref()
-        {
-            let shapes: Vec<&wowsunpack::models::geometry::SplashBox> = data.boxes.iter().collect();
-            let (vertices, indices, _labels) = splash::build_splash_box_wireframes(&shapes);
-            if !indices.is_empty() {
-                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
-            }
-        }
-
         if let Some(result) = self.splash_result.as_ref() {
             let (vertices, indices) =
                 splash::build_splash_cube_mesh(result.impact_point, result.half_extent, splash::CUBE_COLOR);
@@ -3141,8 +3222,9 @@ impl ViewportView {
             }
         }
         // After the passes that read the visibility filter, which borrows this
-        // viewport while the lock wants it back.
+        // viewport while these want it back.
         self.apply_perspective(device, &armor);
+        self.upload_splash_boxes(device, &armor);
 
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
@@ -3733,7 +3815,10 @@ impl Render for ViewportView {
             },
             move |bounds, (), window, cx| {
                 if scene_shown {
-                    let _ = weak.update(cx, |this, _cx| this.paint_scene(bounds, window));
+                    let _ = weak.update(cx, |this, cx| {
+                        this.paint_scene(bounds, window);
+                        this.paint_annotations(bounds, window, cx);
+                    });
                 }
                 if gizmo_drawn {
                     draw_gizmo_overlay(bounds, &camera_snapshot, hover, window, cx);
@@ -3781,14 +3866,14 @@ impl Render for ViewportView {
                 None => hover.tooltip.zone.clone(),
             };
             let material_label = self.material_label(hover.tooltip.material);
+            let hint = t!("ui.armor.cast_here_hint", key = crate::status_bar::ModifierKey::Shift.label(cx));
             let element = picking_ui::tooltip_element(
                 &hover.tooltip,
                 background,
                 border,
                 radius,
                 muted,
-                &zone_label,
-                &material_label,
+                picking_ui::TooltipLabels { zone: &zone_label, material: &material_label, hint: &hint },
             );
             let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
             deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
@@ -4213,6 +4298,141 @@ fn paint_axis_label(label: &'static str, tip: Point<Pixels>, window: &mut Window
     let _ = shaped.paint(origin, px(12.0), TextAlign::Left, None, window, cx);
 }
 
+/// What releasing `button` does. A press that moved past the drag threshold
+/// was an orbit or a pan, and does nothing more.
+///
+/// Shift-click casts: a plain left click hides a plate, a left drag orbits,
+/// a middle drag pans, a right click opens the menu, and Ctrl-click is a
+/// right click on macOS, so Shift is the modifier no other gesture holds. It
+/// is read before splash mode, which owns the plain click only.
+fn click_action(
+    button: MouseButton,
+    plain_click: bool,
+    press_in_gizmo: bool,
+    splash_mode: bool,
+    shift: bool,
+) -> ClickAction {
+    if !plain_click {
+        return ClickAction::Nothing;
+    }
+
+    match button {
+        MouseButton::Left if press_in_gizmo => ClickAction::SnapGizmo,
+        MouseButton::Left if shift => ClickAction::Cast,
+        MouseButton::Left if splash_mode => ClickAction::Burst,
+        MouseButton::Left => ClickAction::TogglePlate,
+        _ => ClickAction::Nothing,
+    }
+}
+
+/// The direction a shell travels, given the bearing it comes in on.
+///
+/// With a shell to fire the fall angle is the solver's; without one the
+/// shell comes in flat, which is what the lead-in line then shows.
+fn fall_direction(approach: Vec3, impact: Option<&ImpactResult>) -> Vec3 {
+    match impact {
+        Some(impact) => {
+            let fall = impact.impact_angle_horizontal.value().to_radians();
+            Vec3::new(approach[0] * fall.cos(), -fall.sin(), approach[2] * fall.cos()).normalize()
+        }
+        None => approach,
+    }
+}
+
+/// Paints a splash box's name centred above where it is anchored, on a dark
+/// plate so it reads against any hull, in the egui viewer's colours.
+fn paint_box_label(name: &str, anchor: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    let run = TextRun {
+        len: name.len(),
+        font: window.text_style().font(),
+        color: rgba(0xc8dcffdc).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line_height = px(13.0);
+    let shaped = window.text_system().shape_line(SharedString::from(name.to_string()), px(11.0), &[run], None);
+    let origin = point(anchor.x - shaped.width() * 0.5, anchor.y - line_height - px(2.0));
+
+    let plate = Bounds { origin, size: size(shaped.width(), line_height) }.dilate(px(2.0));
+    window.paint_quad(fill(plate, rgba(0x0000008c)).corner_radii(px(2.0)));
+    let _ = shaped.paint(origin, line_height, TextAlign::Left, None, window, cx);
+}
+
+/// Paints one cast shell: each line over a dark outline so it reads against
+/// any hull, a ringed dot at each plate reached in its strike-angle colour,
+/// and a larger one in the arc's own colour where the fuse went off.
+fn paint_arc(
+    drawing: &trajectory::ArcDrawing,
+    color: [f32; 4],
+    selected: bool,
+    project: impl Fn(Vec3) -> Option<Point<Pixels>>,
+    window: &mut Window,
+) {
+    let width = if selected { SELECTED_ARC_LINE_WIDTH } else { ARC_LINE_WIDTH };
+    let line_color = swatch_color(color);
+
+    for line in &drawing.lines {
+        let opacity = match line.stroke {
+            trajectory::Stroke::Solid => 1.0,
+            trajectory::Stroke::Faded => 0.45,
+        };
+        for run in visible_runs(&line.points, &project) {
+            paint_polyline(&run, width + ARC_OUTLINE * 2.0, black().opacity(0.8 * opacity), window);
+            paint_polyline(&run, width, line_color.opacity(opacity), window);
+        }
+    }
+
+    for impact in &drawing.impacts {
+        if let Some(at) = project(impact.position) {
+            paint_dot(at, IMPACT_RADIUS, swatch_color(impact.color), window);
+        }
+    }
+
+    if let Some(at) = drawing.detonation.and_then(&project) {
+        paint_dot(at, BURST_RADIUS, line_color, window);
+    }
+}
+
+/// The stretches of `points` in front of the camera that are long enough to
+/// draw. A point behind the camera has no place on screen, so the line is
+/// broken there rather than joined across it.
+fn visible_runs(points: &[Vec3], project: &impl Fn(Vec3) -> Option<Point<Pixels>>) -> Vec<Vec<Point<Pixels>>> {
+    let mut runs = Vec::new();
+    let mut run = Vec::new();
+    for point in points {
+        match project(*point) {
+            Some(at) => run.push(at),
+            None if run.len() >= 2 => runs.push(std::mem::take(&mut run)),
+            None => run.clear(),
+        }
+    }
+
+    if run.len() >= 2 {
+        runs.push(run);
+    }
+    runs
+}
+
+fn paint_polyline(points: &[Point<Pixels>], width: Pixels, color: Hsla, window: &mut Window) {
+    let Some((first, rest)) = points.split_first() else { return };
+
+    let mut path = PathBuilder::stroke(width);
+    path.move_to(*first);
+    for point in rest {
+        path.line_to(*point);
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, color);
+    }
+}
+
+/// A filled dot ringed in black, which reads on any colour under it.
+fn paint_dot(center: Point<Pixels>, radius: Pixels, color: Hsla, window: &mut Window) {
+    let bounds = Bounds { origin: point(center.x - radius, center.y - radius), size: size(radius * 2.0, radius * 2.0) };
+    window.paint_quad(quad(bounds, radius, color, px(1.5), black(), BorderStyle::default()));
+}
+
 #[cfg(test)]
 mod all_visible_tests {
     use super::AllVisible;
@@ -4270,11 +4490,13 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Axis;
+    use super::ClickAction;
     use super::HeldMotion;
     use super::MoveKey;
     use super::SyncedSettings;
     use super::axis_color;
     use super::ball_bounds;
+    use super::click_action;
     use super::point_to_vec2;
     use super::remap_camo_selection;
     use super::vec2_to_point;
@@ -4282,6 +4504,7 @@ mod tests {
     use crate::armor_viewer::upload::DisplaySettings;
     use crate::viewport::types::LightingSettings;
     use gpui_kit::Bounds;
+    use gpui_kit::MouseButton;
     use gpui_kit::point;
     use gpui_kit::px;
     use gpui_kit::size;
@@ -4316,6 +4539,32 @@ mod tests {
     fn releasing_an_arrow_stops_its_pan_whatever_shift_is() {
         let pan = MoveKey::from_key("right", true).expect("shift+right is a movement key");
         assert!(MoveKey::released_by("right").any(|key| key == pan));
+    }
+
+    /// Shift-click casts a shell with nothing to switch on first, in splash
+    /// mode too; a plain click keeps hiding plates.
+    #[test]
+    fn a_shift_click_casts_and_a_plain_click_hides_a_plate() {
+        assert_eq!(click_action(MouseButton::Left, true, false, false, true), ClickAction::Cast);
+        assert_eq!(click_action(MouseButton::Left, true, false, true, true), ClickAction::Cast);
+        assert_eq!(click_action(MouseButton::Left, true, false, false, false), ClickAction::TogglePlate);
+        assert_eq!(click_action(MouseButton::Left, true, false, true, false), ClickAction::Burst);
+    }
+
+    /// A Shift-drag is still an orbit, and the gizmo still snaps under Shift.
+    #[test]
+    fn a_shift_drag_orbits_and_the_gizmo_snaps_without_casting() {
+        assert_eq!(click_action(MouseButton::Left, false, false, false, true), ClickAction::Nothing);
+        assert_eq!(click_action(MouseButton::Left, true, true, false, true), ClickAction::SnapGizmo);
+    }
+
+    /// The middle button pans, so neither a middle click nor a middle drag
+    /// casts.
+    #[test]
+    fn the_middle_button_never_casts() {
+        assert_eq!(click_action(MouseButton::Middle, true, false, false, false), ClickAction::Nothing);
+        assert_eq!(click_action(MouseButton::Middle, true, false, false, true), ClickAction::Nothing);
+        assert_eq!(click_action(MouseButton::Middle, false, false, false, true), ClickAction::Nothing);
     }
 
     #[test]

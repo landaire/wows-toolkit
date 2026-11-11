@@ -1,8 +1,8 @@
-//! The armor viewer's options rail: the viewport tools, then the armor, hull
-//! and display sections.
+//! The armor viewer's options rail: the viewport tools, then the trajectory,
+//! penetration, armor, hull and display sections.
 //!
 //! The tools are the one-click toggles (also in the viewport's context menu).
-//! The three sections hold a tree or a row of sliders, which a popover can
+//! The sections hold a tree, a list or a row of sliders, which a popover can
 //! only show by covering the hull they describe, so they are a panel beside it
 //! instead.
 //!
@@ -76,8 +76,21 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 .cleanable(true),
         );
 
-    let pen = popover::PenCheckButton { open: view.analysis_open(), ship_count: view.comparison_count() };
-    let tools = popover::render_tools(viewport.read(cx), &viewport, pen, pane, &filter);
+    let tools = popover::render_tools(viewport.read(cx), &viewport, &filter);
+    let shift = crate::status_bar::ModifierKey::Shift.label(cx);
+    // Where the trajectory toggle was: a Shift-click casts, with nothing to
+    // switch on first, and this is where a reader looks for how.
+    let cast_hint = (!filter.is_active()).then(|| {
+        h_flex()
+            .id("armor-cast-hint")
+            .test_support()
+            .gap_1()
+            .items_start()
+            .text_xs()
+            .text_color(crate::theme::text_dim())
+            .child(crate::icons::icon(crate::icons::Glyph::Crosshair))
+            .child(div().flex_1().whitespace_normal().child(t!("ui.armor.cast_hint", key = shift).into_owned()))
+    });
 
     let visibility = viewport.clone();
     let hull = viewport.clone();
@@ -89,6 +102,21 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     };
 
     let sections: Vec<AnyElement> = [
+        section(
+            view,
+            pane,
+            OptionSection::Trajectory,
+            t!("ui.armor.trajectory").as_ref(),
+            &filter,
+            cx,
+            |filter, cx| {
+                // Nothing in it is a setting a filter could find.
+                (!filter.is_active()).then(|| super::trajectory_panel::render(view, pane, &viewport, cx))
+            },
+        ),
+        section(view, pane, OptionSection::PenCheck, t!("ui.armor.pen_check").as_ref(), &filter, cx, |filter, cx| {
+            (!filter.is_active()).then(|| super::analysis::render_section(view, pane, cx))
+        }),
         section(
             view,
             pane,
@@ -110,16 +138,8 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     .collect();
     let nothing_matched = filter.is_active() && tools.is_none() && sections.is_empty();
 
-    let body = v_flex()
-        .gap_2()
-        .p_2()
-        .children(tools)
-        // A mode's own panel, not a setting: put away while a filter is typed.
-        .when(!filter.is_active() && viewport.read(cx).trajectory_state().shown, |panel| {
-            panel.child(popover::render_trajectory_panel(view, pane, &viewport, cx))
-        })
-        .children(sections)
-        .when(nothing_matched, |body| {
+    let body =
+        v_flex().gap_2().p_2().children(tools).children(cast_hint).children(sections).when(nothing_matched, |body| {
             let said: SharedString = t!("ui.armor.no_matching_options").into_owned().into();
             body.child(
                 div()

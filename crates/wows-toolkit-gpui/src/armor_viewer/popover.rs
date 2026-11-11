@@ -37,6 +37,7 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::Slider;
+use gpui_kit::component::tooltip::Tooltip;
 
 use super::options_filter::OptionsFilter;
 use gpui_kit::component::v_flex;
@@ -63,7 +64,6 @@ use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
 use super::viewport_view::CameraRingSettings;
 use super::viewport_view::PerspectiveSettings;
-use super::viewport_view::TrajectoryState;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
 use super::visibility::TriState;
@@ -74,25 +74,19 @@ use super::visibility::part_on;
 use super::visibility::plate_explicitly_hidden;
 use super::visibility::zone_all_on;
 use super::visibility::zone_any_on;
-use crate::armor_viewer::analysis;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::pane::OptionSection;
-use wowsunpack::game_params::types::Km;
+use crate::status_bar::ModifierKey;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
 const CHECKBOX_BOX: Pixels = px(16.);
 
 /// The options rail's tool rows for the active viewport: the view toggles,
-/// then the tools that take over a click on the hull and the export.
-///
-/// `pen` is passed in rather than read: the rail renders inside the pane's
-/// own render (see the module doc).
+/// then the splash tools and the export.
 pub(super) fn render_tools(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    pen: PenCheckButton,
-    pane: &Entity<ArmorViewerPane>,
     filter: &OptionsFilter,
 ) -> Option<AnyElement> {
     let tools: Vec<AnyElement> = [
@@ -100,8 +94,6 @@ pub(super) fn render_tools(
         render_gaps_button(view, entity, filter),
         render_splash_button(view, entity, filter),
         render_splash_boxes_button(view, entity, filter),
-        render_trajectory_button(view, entity, filter),
-        render_penetration_button(pen, pane.clone(), filter),
         render_export_button(view, entity, filter),
     ]
     .into_iter()
@@ -121,13 +113,6 @@ pub(super) fn mark() -> Hsla {
     gpui_kit::Hsla::from(gpui_kit::rgb(crate::theme::semantic().notice)).opacity(0.3)
 }
 
-/// What the Pen Check toggle shows, read from the pane by the caller.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct PenCheckButton {
-    pub open: bool,
-    pub ship_count: usize,
-}
-
 /// The viewport context menu's toggles, read from `entity` and its pane as
 /// the menu opens.
 pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportView>, cx: &App) -> PopupMenu {
@@ -136,7 +121,6 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
     let show_hidden = view.show_hidden_only();
     let gaps_shown = view.gaps().shown;
     let splash = view.splash_state();
-    let trajectory_shown = view.trajectory_state().shown;
     let pane = view.pane();
 
     let toggle = |label: String,
@@ -167,26 +151,15 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
             splash.boxes_shown,
             splash.has_data,
             ViewportView::set_show_splash_boxes,
-        ))
-        .item(toggle(
-            t!("ui.armor.trajectory").into_owned(),
-            trajectory_shown,
-            has_armor,
-            ViewportView::set_trajectory_mode,
         ));
 
     if let Some(pane) = pane {
-        let (analysis_open, options_open) = {
-            let pane = pane.read(cx);
-            (pane.analysis_open(), pane.options_open())
-        };
-        let analysis_pane = pane.clone();
+        let options_open = pane.read(cx).options_open();
+        let pen_pane = pane.clone();
         menu = menu
-            .item(PopupMenuItem::new(t!("ui.armor.pen_check").into_owned()).checked(analysis_open).on_click(
-                move |_event, _window, cx| {
-                    analysis_pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
-                },
-            ))
+            .item(PopupMenuItem::new(t!("ui.armor.pen_check").into_owned()).on_click(move |_event, _window, cx| {
+                pen_pane.update(cx, |pane, cx| pane.open_option_section(OptionSection::PenCheck, cx));
+            }))
             .item(PopupMenuItem::new(t!("ui.armor.options_panel").into_owned()).checked(options_open).on_click(
                 move |_event, _window, cx| {
                     pane.update(cx, |pane, cx| pane.toggle_options(cx));
@@ -517,55 +490,6 @@ fn filtered_checkbox(
     )
 }
 
-/// The trajectory section of the display popover: the range a cast shell is
-/// fired from, whether a ricochet is followed, and a way to drop what has
-/// been cast.
-///
-/// Everything here is refused while the mode is off, because each of them
-/// only says something about a shell that has been or is about to be cast.
-fn render_trajectory_section(
-    entity: &Entity<ViewportView>,
-    state: &TrajectoryState,
-    range_slider: &Entity<SliderField>,
-    cx: &mut App,
-) -> AnyElement {
-    let on = state.shown;
-
-    v_flex()
-        .gap_1()
-        .children(labeled_slider_row(
-            t!("ui.armor.trajectory_range").into_owned(),
-            range_slider,
-            !on,
-            &OptionsFilter::default(),
-            cx,
-        ))
-        .child({
-            let entity = entity.clone();
-            let continuing = state.continue_on_ricochet;
-            Checkbox::new("armor-trajectory-ricochet")
-                .label(t!("ui.armor.continue_ricochet").to_string())
-                .checked(continuing)
-                .disabled(!on)
-                .on_click(move |checked, _window, cx| {
-                    let next = *checked;
-                    entity.update(cx, |view, cx| view.set_continue_on_ricochet(next, cx));
-                })
-        })
-        .child({
-            let entity = entity.clone();
-            Button::new("armor-trajectory-clear")
-                .label(t!("ui.armor.trajectory_clear").to_string())
-                .compact()
-                // Nothing cast is nothing to clear.
-                .disabled(state.count == 0)
-                .on_click(move |_event, _window, cx: &mut App| {
-                    entity.update(cx, |view, cx| view.clear_trajectories(cx));
-                })
-        })
-        .into_any_element()
-}
-
 /// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
 fn render_gaps_button(
@@ -603,198 +527,6 @@ fn render_gaps_button(
         )
         .into_any_element(),
     )
-}
-
-/// Rail toggle for trajectory mode, which carries how many shells have
-/// been cast: while the mode is on a click casts rather than hides a plate,
-/// and the count is what says whether the last click landed.
-fn render_trajectory_button(
-    view: &ViewportView,
-    entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
-) -> Option<AnyElement> {
-    let state = view.trajectory_state();
-    let has_armor = view.has_armor();
-    let entity = entity.clone();
-
-    let label = if state.shown {
-        format!("{} ({})", t!("ui.armor.trajectory_on"), state.count)
-    } else {
-        t!("ui.armor.trajectory").into_owned()
-    };
-
-    let label_text = filter.label(label, mark())?;
-
-    Some(
-        crate::ui::selectable(
-            "armor-trajectory",
-            state.shown,
-            Button::new("armor-trajectory-button")
-                .icon(crate::icons::Glyph::Crosshair)
-                .child(label_text)
-                .compact()
-                .w_full()
-                .selected(state.shown)
-                .when(state.shown, |button| {
-                    button.bg(crate::theme::accent()).text_color(crate::theme::accent_foreground())
-                })
-                .disabled(!has_armor)
-                .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
-                .on_click(move |_event, _window, cx: &mut App| {
-                    entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
-                }),
-        )
-        .into_any_element(),
-    )
-}
-
-/// The attacker and ammunition used by trajectory casts.
-fn render_firing_controls(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>) -> AnyElement {
-    let (ships, firing_ship, firing_shell) = {
-        let pen = view.penetration();
-        (pen.ships.clone(), pen.firing_ship.clone(), pen.firing_shell)
-    };
-    let selected_ship = ships.iter().find(|ship| Some(ship.param_index.as_str()) == firing_ship.as_deref());
-    let ship_label = selected_ship.map_or_else(
-        || t!("ui.armor.trajectory_select_ship").into_owned(),
-        |ship| format!("{} {}", t!("ui.armor.trajectory_ship"), ship.display_name),
-    );
-    let active_shell_index = selected_ship.and_then(|ship| {
-        firing_shell
-            .filter(|index| *index < ship.shells.len())
-            .or_else(|| {
-                ship.shells.iter().position(|shell| shell.ammo_type == wowsunpack::game_params::types::AmmoType::AP)
-            })
-            .or_else(|| (!ship.shells.is_empty()).then_some(0))
-    });
-    let shell_label = selected_ship
-        .zip(active_shell_index)
-        .map(|(ship, index)| {
-            let shell = &ship.shells[index];
-            format!(
-                "{} {} {:.0} mm",
-                t!("ui.armor.trajectory_shell"),
-                shell.ammo_type.display_name(),
-                shell.caliber.value(),
-            )
-        })
-        .unwrap_or_else(|| t!("ui.armor.trajectory_select_shell").into_owned());
-
-    let ship_picker: AnyElement = if ships.is_empty() {
-        div()
-            .text_xs()
-            .text_color(crate::theme::text_dim())
-            .child(t!("ui.armor.pen.add_a_ship").to_string())
-            .into_any_element()
-    } else {
-        let pane = pane.clone();
-        let menu_ships = ships.clone();
-        Button::new("armor-trajectory-ship")
-            .label(ship_label.clone())
-            .max_w(px(220.))
-            .compact()
-            .dropdown_caret(true)
-            .tooltip(format!("{}\n{}", ship_label, t!("ui.armor.trajectory_ship_tooltip")))
-            .dropdown_menu(move |mut menu, _window, _cx| {
-                for ship in &menu_ships {
-                    let pane = pane.clone();
-                    let param_index = ship.param_index.clone();
-                    let active = Some(ship.param_index.as_str()) == firing_ship.as_deref();
-                    let label =
-                        if active { format!("{} (selected)", ship.display_name) } else { ship.display_name.clone() };
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
-                        pane.update(cx, |pane, cx| pane.set_firing_ship(&param_index, cx));
-                    }));
-                }
-                menu
-            })
-            .into_any_element()
-    };
-
-    let shell_picker = {
-        let pane = pane.clone();
-        let selected_shells = selected_ship.map(|ship| ship.shells.clone()).unwrap_or_default();
-        Button::new("armor-trajectory-shell")
-            .label(shell_label)
-            .max_w(px(180.))
-            .compact()
-            .dropdown_caret(true)
-            .disabled(selected_shells.is_empty())
-            .tooltip(t!("ui.armor.trajectory_shell_tooltip").to_string())
-            .dropdown_menu(move |mut menu, _window, _cx| {
-                for (index, shell) in selected_shells.iter().enumerate() {
-                    let pane = pane.clone();
-                    let ammo = shell.ammo_type.display_name();
-                    let caliber = shell.caliber.value();
-                    let selected = Some(index) == active_shell_index;
-                    let label = if selected {
-                        format!("{} {:.0} mm (selected)", ammo, caliber)
-                    } else {
-                        format!("{} {:.0} mm", ammo, caliber)
-                    };
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
-                        pane.update(cx, |pane, cx| pane.set_firing_shell(index, cx));
-                    }));
-                }
-                menu
-            })
-    };
-
-    v_flex().min_w_0().gap_1().items_start().child(ship_picker).child(shell_picker).into_any_element()
-}
-
-pub(super) fn render_trajectory_panel(
-    view: &ArmorViewerPane,
-    pane: &Entity<ArmorViewerPane>,
-    viewport: &Entity<ViewportView>,
-    cx: &mut App,
-) -> AnyElement {
-    let viewport_view = viewport.read(cx);
-    let state = viewport_view.trajectory_state();
-    let slider = viewport_view.display_sliders.cast_range.clone();
-    v_flex()
-        .gap_2()
-        .p_2()
-        .min_w_0()
-        .border_1()
-        .border_color(crate::theme::accent().opacity(0.45))
-        .rounded_md()
-        .child(
-            div()
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .text_color(crate::theme::accent())
-                .child(t!("ui.armor.trajectory_on").to_string()),
-        )
-        .child(analysis::render_ship_search(view, pane, cx))
-        .child(render_firing_controls(view, pane))
-        .children(view.penetration().ships.iter().enumerate().map(|(index, ship)| {
-            let pane = pane.clone();
-            h_flex()
-                .min_w_0()
-                .gap_1()
-                .items_center()
-                .child(div().flex_1().min_w_0().text_xs().child(ship.display_name.clone()))
-                .child(
-                    Button::new(("trajectory-remove-ship", index))
-                        .icon(IconName::Close)
-                        .ghost()
-                        .compact()
-                        .tooltip("Remove ship")
-                        .on_click(move |_event, _window, cx| {
-                            pane.update(cx, |pane, cx| pane.remove_comparison_ship(index, cx));
-                        }),
-                )
-        }))
-        .child(render_trajectory_section(viewport, &state, &slider, cx))
-        .child(
-            div()
-                .text_xs()
-                .whitespace_normal()
-                .text_color(crate::theme::text_dim())
-                .child(t!("ui.armor.trajectory_tooltip").to_string()),
-        )
-        .into_any_element()
 }
 
 /// Rail toggle for splash mode, carrying how many zones the last burst
@@ -869,50 +601,6 @@ fn render_splash_boxes_button(
                 .tooltip(t!("ui.armor.splash_tooltip").to_string())
                 .on_click(move |_event, _window, cx: &mut App| {
                     entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
-                }),
-        )
-        .into_any_element(),
-    )
-}
-
-/// Rail toggle for the penetration checker, which belongs to the pane rather
-/// than to the viewport: the egui app puts its own Pen Check button beside
-/// the viewport toggles (`ui/armor.pen_check`).
-///
-/// A toggle rather than a popover trigger. The verdicts are read against the
-/// plate the pointer is on, so the panel has to stay up while the pointer is
-/// on the hull; a popover closes on the first click and swallows the pointer
-/// moves that would move the plate.
-fn render_penetration_button(
-    pen: PenCheckButton,
-    pane: Entity<ArmorViewerPane>,
-    filter: &OptionsFilter,
-) -> Option<AnyElement> {
-    let open = pen.open;
-    let label = if pen.ship_count > 0 {
-        format!("{} ({})", t!("ui.armor.pen_check"), pen.ship_count)
-    } else {
-        t!("ui.armor.pen_check").into_owned()
-    };
-
-    let label_text = filter.label(label, mark())?;
-
-    Some(
-        crate::ui::selectable(
-            "armor-analysis",
-            open,
-            Button::new("armor-analysis-toggle")
-                .icon(IconName::Search)
-                .child(label_text)
-                .compact()
-                .w_full()
-                .selected(open)
-                // Not gated on a loaded hull, as the egui button is not: the
-                // list is of attackers, and it is worth building before a target
-                // is opened.
-                .tooltip(t!("ui.armor.pen_check_tooltip").to_string())
-                .on_click(move |_event, _window, cx: &mut App| {
-                    pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
                 }),
         )
         .into_any_element(),
@@ -1016,7 +704,11 @@ pub(crate) fn render_popover_content(
         });
 
     let shown = entity.read(cx);
-    let names = TreeNames { bundle: shown.reload_bundle(), species: shown.shown_species() };
+    let names = TreeNames {
+        bundle: shown.reload_bundle(),
+        species: shown.shown_species(),
+        zone_tooltip: t!("ui.armor.zone_toggle_tooltip", key = ModifierKey::Secondary.label(cx)).into_owned().into(),
+    };
 
     let zones: Vec<AnyElement> = armor
         .zone_part_plates
@@ -1933,7 +1625,7 @@ fn labeled_color_row(
 /// reset. `disabled` matches the egui original's
 /// `ui.add_enabled_ui(pane.lighting.enabled, ..)` wrapping the lighting sliders
 /// (`tab.rs:5053`).
-fn labeled_slider_row(
+pub(super) fn labeled_slider_row(
     label: String,
     field: &Entity<SliderField>,
     disabled: bool,
@@ -1965,10 +1657,12 @@ fn labeled_slider_row(
 }
 
 /// Names the tree's zones and parts the way the game names them, as the egui
-/// popover does.
+/// popover does, and says what a zone's box does.
 struct TreeNames {
     bundle: Option<Arc<ArmorAssetsBundle>>,
     species: Option<Species>,
+    /// What a zone's box does, and what holding the solo key does instead.
+    zone_tooltip: SharedString,
 }
 
 impl TreeNames {
@@ -2058,16 +1752,21 @@ fn render_zone_row(
 
     let title = title.unwrap_or_else(|| StyledText::new(zone_label));
 
-    // Matches egui's own `ctrl_click_solo` hover-text on the zone label
-    // (`tab.rs:4512`); generic rows have no public tooltip hook in this
-    // port's widget set, so the hint is a plain muted label instead.
+    // The egui viewer says the same on hover of the zone's name
+    // (`tab.rs:4512`).
+    let tooltip = names.zone_tooltip.clone();
+    let toggle = h_flex()
+        .id(SharedString::from(format!("armor-vis-zone-toggle-{}", zone.name)))
+        .gap_1()
+        .items_center()
+        .child(checkbox)
+        .child(div().text_sm().child(title))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx));
     let header = hoverable_row(
         format!("armor-vis-zone-row-{}", zone.name),
         entity,
         SidebarHighlightKey::Zone(zone.name.clone()),
-        h_flex().gap_1().items_center().child(chevron).child(checkbox).child(div().text_sm().child(title)).child(
-            div().text_xs().text_color(crate::theme::text_faint()).child(t!("ui.armor.ctrl_click_solo").to_string()),
-        ),
+        h_flex().gap_1().items_center().child(chevron).child(toggle),
     );
 
     let mut column = v_flex().gap_1().child(header);

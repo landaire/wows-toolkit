@@ -60,6 +60,9 @@ use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::motion;
 use crate::replay_inspector::load::LoadedGameData;
+use crate::status_bar;
+use crate::status_bar::ModeHint;
+use crate::status_bar::ModifierKey;
 use crate::viewport::device::SharedSceneDevice;
 
 use gpui_kit::component::WindowExt as _;
@@ -79,7 +82,6 @@ use gpui_kit::component::select::SelectEvent;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
 
-use super::analysis;
 use super::analysis::PenetrationState;
 use super::dock::DockEvent;
 use super::dock::PanePosition;
@@ -95,6 +97,7 @@ use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
+use super::viewport_view::CastShell;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
 use wowsunpack::game_params::types::Millimeters;
@@ -182,11 +185,8 @@ pub struct ArmorViewerPane {
     sync_options: bool,
     /// The penetration checker's own state.
     pen: PenetrationState,
-    /// Whether the checker's panel is up beside the viewport. It stays up
-    /// while the pointer sweeps the hull, which is the whole interaction.
-    show_analysis: bool,
     /// Whether the options rail is up. Open by default: it holds the viewport
-    /// tools as well as the option sections.
+    /// tools, the trajectory and penetration sections and the options.
     show_options: bool,
     /// Whether the ships list is collapsed to its expand rail.
     sidebar_collapsed: bool,
@@ -203,6 +203,8 @@ pub struct ArmorViewerPane {
 /// A section of the options rail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptionSection {
+    Trajectory,
+    PenCheck,
     Visibility,
     Hull,
     Display,
@@ -220,6 +222,8 @@ pub(crate) enum OptionSection {
 /// popovers only paid for while they were open.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OptionSectionsOpen {
+    pub trajectory: bool,
+    pub pen_check: bool,
     pub visibility: bool,
     pub hull: bool,
     pub display: bool,
@@ -228,17 +232,28 @@ pub(crate) struct OptionSectionsOpen {
 }
 
 impl Default for OptionSectionsOpen {
-    /// Display alone: it is the one read most often and the cheapest of the
-    /// three to build. Its camera and lighting groups start closed, since
-    /// most readers only ever touch the model settings above them.
+    /// Trajectory and Display: the arcs cast are read there, and Display is
+    /// the section read most often and the cheapest of the trees to build.
+    /// The camera and lighting groups start closed, since most readers only
+    /// ever touch the model settings above them.
     fn default() -> Self {
-        Self { visibility: false, hull: false, display: true, camera_rings: false, lighting: false }
+        Self {
+            trajectory: true,
+            pen_check: false,
+            visibility: false,
+            hull: false,
+            display: true,
+            camera_rings: false,
+            lighting: false,
+        }
     }
 }
 
 impl OptionSectionsOpen {
     pub fn is_open(self, section: OptionSection) -> bool {
         match section {
+            OptionSection::Trajectory => self.trajectory,
+            OptionSection::PenCheck => self.pen_check,
             OptionSection::Visibility => self.visibility,
             OptionSection::Hull => self.hull,
             OptionSection::Display => self.display,
@@ -247,14 +262,20 @@ impl OptionSectionsOpen {
         }
     }
 
-    fn toggle(&mut self, section: OptionSection) {
-        let open = match section {
+    fn open_mut(&mut self, section: OptionSection) -> &mut bool {
+        match section {
+            OptionSection::Trajectory => &mut self.trajectory,
+            OptionSection::PenCheck => &mut self.pen_check,
             OptionSection::Visibility => &mut self.visibility,
             OptionSection::Hull => &mut self.hull,
             OptionSection::Display => &mut self.display,
             OptionSection::CameraRings => &mut self.camera_rings,
             OptionSection::Lighting => &mut self.lighting,
-        };
+        }
+    }
+
+    fn toggle(&mut self, section: OptionSection) {
+        let open = self.open_mut(section);
         *open = !*open;
     }
 }
@@ -315,7 +336,6 @@ impl ArmorViewerPane {
         let dock_event_sub = cx.subscribe_in(&dock, window, Self::on_dock_event);
 
         let pen = PenetrationState::new(window, cx);
-        let show_analysis = false;
         let pen_search_sub =
             cx.subscribe(&pen.search, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| cx.notify());
         let options_filter = cx.new(|cx| {
@@ -345,7 +365,6 @@ impl ArmorViewerPane {
             mirror_cameras: false,
             sync_options: false,
             pen,
-            show_analysis,
             show_options: true,
             sidebar_collapsed: false,
             sidebar_split: cx.new(|_| ResizableState::default()),
@@ -533,7 +552,9 @@ impl ArmorViewerPane {
         cx.notify();
     }
 
-    /// Hands the viewport the ship a trajectory cast fires.
+    /// Hands every viewport the ship a trajectory cast fires: the controls
+    /// are the pane's, so whichever viewport the reader casts in fires what
+    /// they show.
     ///
     /// The selected ship supplies the trajectory shell; the first ship is the
     /// default until the reader chooses another.
@@ -545,24 +566,10 @@ impl ArmorViewerPane {
             .and_then(|param_index| self.pen.ships.iter().find(|ship| ship.param_index == param_index).cloned());
         let first = selected.or_else(|| self.pen.ships.first().cloned());
         self.pen.firing_ship = first.as_ref().map(|ship| ship.param_index.clone());
-        let shell_index = self.pen.firing_shell;
-        let viewport = self.dock.read(cx).active_viewport().clone();
-        viewport.update(cx, |view, cx| view.set_cast_ship(first, shell_index, cx));
-    }
-
-    /// Whether the checker's panel is up.
-    pub(crate) fn analysis_open(&self) -> bool {
-        self.show_analysis
-    }
-
-    /// How many ships are being compared, which the Pen Check button carries.
-    pub(crate) fn comparison_count(&self) -> usize {
-        self.pen.ships.len()
-    }
-
-    pub(crate) fn toggle_analysis(&mut self, cx: &mut Context<Self>) {
-        self.show_analysis = !self.show_analysis;
-        cx.notify();
+        let shell = first.map(|ship| CastShell { ship, shell_index: self.pen.firing_shell });
+        for viewport in self.dock.read(cx).panes().to_vec() {
+            viewport.update(cx, |view, cx| view.set_cast_shell(shell.clone(), cx));
+        }
     }
 
     /// Whether the options rail is up.
@@ -587,6 +594,13 @@ impl ArmorViewerPane {
 
     pub(crate) fn toggle_option_section(&mut self, section: OptionSection, cx: &mut Context<Self>) {
         self.option_sections.toggle(section);
+        cx.notify();
+    }
+
+    /// Brings the rail up with `section` expanded.
+    pub(crate) fn open_option_section(&mut self, section: OptionSection, cx: &mut Context<Self>) {
+        self.show_options = true;
+        *self.option_sections.open_mut(section) = true;
         cx.notify();
     }
 
@@ -677,6 +691,7 @@ impl ArmorViewerPane {
                 self.dock.update(cx, |dock, cx| dock.reset_to(viewport, cx));
                 self.ship_loaded = false;
                 self.push_common_settings(cx);
+                self.push_cast_ship(cx);
                 cx.notify();
             }
         }
@@ -735,6 +750,7 @@ impl ArmorViewerPane {
             self.start_ship_load(ship.param_index.clone(), ship.display_name.clone(), cx);
         }
         self.push_common_settings(cx);
+        self.push_cast_ship(cx);
         cx.notify();
     }
 
@@ -745,12 +761,6 @@ impl ArmorViewerPane {
     /// never re-triggers the event it's reacting to.
     fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportChange, cx: &mut Context<Self>) {
         match event {
-            ViewportChange::TrajectoryMode => {
-                if source.read(cx).trajectory_state().shown {
-                    self.show_options = true;
-                }
-                cx.notify();
-            }
             ViewportChange::Camera if self.mirror_cameras => self.push_camera_from(&source, cx),
             ViewportChange::Settings => {
                 if self.sync_options {
@@ -1326,26 +1336,19 @@ struct UnportedDefaults {
 impl Render for ArmorViewerPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The checker reads its verdicts against whatever the pointer is on,
-        // so the plate is taken here, every frame, rather than once when a
-        // panel opens.
-        if self.follow_pointer_plate(cx) && self.show_analysis {
+        // so the plate is taken here, every frame, rather than once when its
+        // section opens.
+        if self.follow_pointer_plate(cx) && self.show_options && self.option_sections.pen_check {
             cx.notify();
         }
 
-        let analysis = self.show_analysis.then(|| {
-            resizable_panel()
-                .size(analysis::PANEL_WIDTH)
-                .size_range(analysis::PANEL_MIN_WIDTH..analysis::PANEL_MAX_WIDTH)
-                .flex_none()
-                .child(analysis::render_panel(self, &cx.entity(), cx))
-        });
+        // What a held key changes, for the status bar. Only with a ship
+        // loaded: before that neither key does anything here.
+        let mode = if self.ship_loaded { held_mode(window, cx) } else { None };
+        status_bar::set_mode(cx.weak_entity().into(), mode, cx);
 
         // Deliberately NOT a resizable panel. The sections it holds are their
-        // own fixed widths, so a drag handle could only overflow or pad them,
-        // and `ResizableState` is positional: a second conditional panel makes
-        // the first a middle one, whose close truncates the wrong entry and
-        // rescales every other panel. One optional panel in the group, at the
-        // end, is what keeps that state honest.
+        // own fixed widths, so a drag handle could only overflow or pad them.
         //
         // `motion::slide` does not fit: its content closure would hold `cx`
         // while the call itself also borrows it.
@@ -1366,11 +1369,7 @@ impl Render for ArmorViewerPane {
         let ships_open = !self.sidebar_collapsed;
         let ships_shown = motion::slide_progress("armor-viewer-ships-slide", ships_open, window, cx);
         let rest = |group: gpui_kit::component::resizable::ResizablePanelGroup| {
-            group
-                .child(resizable_panel().child(self.dock.clone()))
-                // `child`, not `children`: the group tracks its panels,
-                // and a plain `ParentElement` child is not one of them.
-                .when_some(analysis, |group, panel| group.child(panel))
+            group.child(resizable_panel().child(self.dock.clone()))
         };
         let split = if motion::settled(ships_shown) && ships_open {
             rest(
@@ -1443,6 +1442,18 @@ impl Render for ArmorViewerPane {
 /// unit-testable without a gpui_kit `Context`.
 fn other_pane_indices(panes_len: usize, source_ix: usize) -> Vec<usize> {
     (0..panes_len).filter(|&ix| ix != source_ix).collect()
+}
+
+/// What a held key changes in the viewer: Ctrl/Cmd makes a zone's checkbox
+/// show that zone alone, and Shift makes a click on the hull cast a shell
+/// instead of hiding the plate.
+fn held_mode(window: &Window, cx: &App) -> Option<ModeHint> {
+    if status_bar::is_held(ModifierKey::Secondary, window, cx) {
+        return Some(ModeHint { key: ModifierKey::Secondary, name_key: "ui.armor.mode_solo_zone" });
+    }
+
+    status_bar::is_held(ModifierKey::Shift, window, cx)
+        .then_some(ModeHint { key: ModifierKey::Shift, name_key: "ui.armor.mode_cast_trajectory" })
 }
 
 /// The egui-mirrored "already selected" decision (`ui/tab.rs:520-521`):

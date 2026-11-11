@@ -191,30 +191,35 @@ fn swatch(color: [f32; 4], size: Pixels) -> impl IntoElement {
     div().flex_none().w(size).h(size).rounded(px(2.)).bg(swatch_color(color))
 }
 
+/// What the thickness tooltip says in the reader's own language: the zone
+/// and material under the pointer, and what a click there can do.
+pub struct TooltipLabels<'a> {
+    pub zone: &'a str,
+    pub material: &'a str,
+    pub hint: &'a str,
+}
+
 /// Builds the thickness tooltip element for `tooltip`, reproducing the egui
 /// app's `show_armor_tooltip` V1 subset (`tab.rs:2778-2820`): a swatch +
-/// "{mm} mm" header, then "{zone} / {material}" from the caller's labels in
-/// the reader's own language -- then, only when there is more than one
-/// layer, a
-/// "N layers for this part:" label and a swatch + "{mm} mm" row per layer
-/// (bold when that layer matches the plate's total thickness). The
-/// penetration-check section (`tab.rs:2822-2884`) is out of scope until the
-/// analysis subsystem lands; this tooltip never shows it.
+/// "{mm} mm" header, then "{zone} / {material}" -- then, only when there is
+/// more than one layer, a "N layers for this part:" label and a swatch +
+/// "{mm} mm" row per layer (bold when that layer matches the plate's total
+/// thickness). A muted line at the foot says what a click there can do,
+/// which is the one place a reader looking at a plate is sure to see it.
 pub fn tooltip_element(
     tooltip: &ArmorTriangleTooltip,
     background: Hsla,
     border: Hsla,
     radius: Pixels,
     muted: Hsla,
-    zone_label: &str,
-    material_label: &str,
+    labels: TooltipLabels<'_>,
 ) -> AnyElement {
     let mut body = v_flex()
         .gap_1()
         .child(h_flex().gap_1().items_center().child(swatch(tooltip.color, px(12.))).child(
             div().font_weight(FontWeight::BOLD).text_size(px(14.)).child(format!("{:.0} mm", tooltip.thickness_mm)),
         ))
-        .child(div().text_sm().child(format!("{zone_label} / {material_label}")));
+        .child(div().text_sm().child(format!("{} / {}", labels.zone, labels.material)));
 
     if tooltip.layers.len() > 1 {
         body = body
@@ -232,6 +237,8 @@ pub fn tooltip_element(
             );
         }
     }
+
+    body = body.child(div().text_xs().text_color(muted).child(labels.hint.to_string()));
 
     div()
         .bg(background)

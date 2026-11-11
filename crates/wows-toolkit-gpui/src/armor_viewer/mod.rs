@@ -58,6 +58,7 @@ pub mod realtime;
 pub mod sidebar;
 pub mod splash;
 pub mod trajectory;
+mod trajectory_panel;
 pub mod upload;
 pub mod upload_hull;
 pub mod viewport_view;
