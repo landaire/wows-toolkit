@@ -4666,7 +4666,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#ec9c08224ac0cc6741e4744f00a092e38301678f"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#0c84e81b3d42f7e6737cf000ae31a4bd0be21445"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4707,7 +4707,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#ec9c08224ac0cc6741e4744f00a092e38301678f"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#0c84e81b3d42f7e6737cf000ae31a4bd0be21445"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4754,7 +4754,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#ec9c08224ac0cc6741e4744f00a092e38301678f"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#0c84e81b3d42f7e6737cf000ae31a4bd0be21445"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5074,7 +5074,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#ec9c08224ac0cc6741e4744f00a092e38301678f"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#0c84e81b3d42f7e6737cf000ae31a4bd0be21445"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -5090,7 +5090,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.9.0"
-source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#ec9c08224ac0cc6741e4744f00a092e38301678f"
+source = "git+https://github.com/landaire-contrib/gpui-component?branch=wows-toolkit#0c84e81b3d42f7e6737cf000ae31a4bd0be21445"
 dependencies = [
  "anyhow",
  "gpui-fast",

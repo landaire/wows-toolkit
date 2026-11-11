@@ -20,7 +20,7 @@ git_fetch(
 git_fetch(
     name = "gpui-component-7a7fee4f89b1d01e.git",
     repo = "https://github.com/landaire-contrib/gpui-component",
-    rev = "ec9c08224ac0cc6741e4744f00a092e38301678f",
+    rev = "0c84e81b3d42f7e6737cf000ae31a4bd0be21445",
     sub_targets = ["crates/assets"],
     visibility = [],
 )

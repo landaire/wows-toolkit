@@ -441,41 +441,38 @@ fn the_autoload_checkbox_reflects_the_loaded_setting(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
-/// The penetration checker is a panel, not a popover.
+/// The penetration checker is a section of the options rail, not a panel of
+/// its own beside the viewport.
 ///
 /// Its verdicts are read against the plate the pointer is on, so it has to
-/// survive clicking and hovering the ship. As a popover it closed on the
-/// first click on the hull and swallowed the pointer moves that would have
-/// moved the plate, which is what made it unusable.
+/// survive clicking and hovering the ship. A section of the rail does, and
+/// takes no width from the viewport that the rail does not already take.
 #[gpui_kit::test]
-fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppContext) {
+fn pen_check_is_a_section_of_the_options_rail(cx: &mut TestAppContext) {
     let window = open_wide_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ArmorViewer, cx);
         window.render_frame(cx);
 
-        assert!(window.try_find("armor-pen-search").is_none(), "the panel is down until it is asked for");
+        assert!(window.try_find("armor-analysis-toggle").is_none(), "there is no separate panel to bring up");
+        assert!(window.try_find("armor-pen-search").is_none(), "the section starts collapsed");
 
-        window.click("armor-analysis-toggle", cx);
+        window.click("armor-options-section-PenCheck", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-pen-search").is_some(), "the toggle brings the panel up");
+        assert!(
+            window.within("armor-options-panel").try_find("armor-pen-search").is_some(),
+            "its header opens it inside the rail"
+        );
 
-        // Whatever else is clicked, the panel is still there: this is the
-        // whole interaction the popover made impossible.
+        // Whatever else is clicked, the section is still there.
         window.click(SHIP_SEARCH, cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-pen-search").is_some(), "a click elsewhere does not dismiss it");
+        assert!(window.try_find("armor-pen-search").is_some(), "a click elsewhere does not put it away");
 
-        window.click("armor-analysis-toggle", cx);
+        window.click("armor-options-section-PenCheck", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-pen-search").is_none(), "the toggle puts it away again");
-
-        window.click("armor-analysis-toggle", cx);
-        window.render_frame(cx);
-        window.click("armor-pen-close", cx);
-        window.render_frame(cx);
-        assert!(window.try_find("armor-pen-search").is_none(), "and so does the panel's own close button");
+        assert!(window.try_find("armor-pen-search").is_none(), "and its header closes it again");
     })
     .expect("the test window stays open");
 }
@@ -748,7 +745,7 @@ fn the_options_filter_keeps_only_the_matching_controls(cx: &mut TestAppContext) 
         window.click("armor-options-filter", cx);
         window.input("pen ch", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-analysis").is_some(), "Pen Check matches");
+        assert!(window.try_find("armor-options-section-PenCheck").is_some(), "Pen Check matches");
         assert!(window.try_find("armor-show-hidden").is_none(), "Show Hidden does not");
         assert!(
             window.try_find("armor-options-section-Display").is_none(),
@@ -757,7 +754,7 @@ fn the_options_filter_keeps_only_the_matching_controls(cx: &mut TestAppContext) 
 
         window.input("zzz", cx);
         window.render_frame(cx);
-        assert!(window.try_find("armor-analysis").is_none(), "nothing is left");
+        assert!(window.try_find("armor-options-section-PenCheck").is_none(), "nothing is left");
         let said = rust_i18n::t!("ui.armor.no_matching_options");
         assert_eq!(window.find("armor-options-no-match").label(), Some(&*said), "the rail says nothing matched");
     })
@@ -2555,6 +2552,56 @@ fn dragging_across_a_selectable_run_selects_its_text(cx: &mut TestAppContext) {
             "SELECTABLE".starts_with(&selected) || selected.starts_with('S'),
             "the selection is part of the run, got {selected:?}"
         );
+    })
+    .expect("the test window stays open");
+}
+
+/// A selection clears when the reader clicks somewhere else, even when the
+/// text sits in a cell whose click handler stops the release, as the replay
+/// table's cells do.
+#[gpui_kit::test]
+fn clicking_elsewhere_clears_a_selection_made_in_a_clickable_cell(cx: &mut TestAppContext) {
+    use gpui_kit::base::TextSelection;
+
+    struct Probe;
+    impl gpui_kit::Render for Probe {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::InteractiveElement as _;
+            use gpui_kit::ParentElement as _;
+            use gpui_kit::StatefulInteractiveElement as _;
+            use gpui_kit::Styled as _;
+            use gpui_kit::base::TestSupportExt as _;
+            gpui_kit::div()
+                .size_full()
+                .p(px(20.))
+                .text_size(px(16.))
+                .child(
+                    gpui_kit::div()
+                        .id("cell")
+                        .on_click(|_event, _window, cx| cx.stop_propagation())
+                        .child(crate::ui::selectable_text("probe", "SELECTABLE")),
+                )
+                .child(gpui_kit::div().id("elsewhere").test_support().h(px(40.)).w_full())
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(400.), px(200.)), |window, cx| {
+        let probe: gpui_kit::AnyView = cx.new(|_| Probe).into();
+        gpui_kit::component::Root::new(probe, window, cx)
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.drag(gpui_kit::point(px(22.), px(28.)), gpui_kit::point(px(120.), px(28.)), cx);
+        assert!(TextSelection::has_selection(window, cx), "dragging over the run selected nothing");
+
+        window.click("elsewhere", cx);
+        assert!(!TextSelection::has_selection(window, cx), "the click elsewhere left the selection in place");
     })
     .expect("the test window stays open");
 }
