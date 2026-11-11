@@ -12,7 +12,6 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -129,6 +128,94 @@ impl Counts {
     }
 }
 
+/// A bar showing how much of a running piece of work is done, with a faint
+/// sheen crossing the filled part until the work is finished.
+#[derive(IntoElement)]
+pub struct RunningBar {
+    id: ElementId,
+    percent: f32,
+    height: Pixels,
+}
+
+impl RunningBar {
+    pub fn new(id: impl Into<ElementId>, percent: f32) -> Self {
+        Self { id: id.into(), percent, height: BAR_HEIGHT }
+    }
+
+    pub fn height(mut self, height: Pixels) -> Self {
+        self.height = height;
+        self
+    }
+}
+
+impl RenderOnce for RunningBar {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let percent = self.percent.clamp(0., 100.);
+        let color = cx.theme().tokens.progress_bar;
+        // A pill of half the bar's height, square when the theme is.
+        let radius = if cx.theme().radius.is_zero() { px(0.) } else { self.height / 2. };
+        let shown = gpui_kit::base::transition(
+            (self.id.clone(), "fill"),
+            percent,
+            gpui_kit::base::Transition::new(cx.theme().motion_tokens().duration_normal)
+                .easing(cx.theme().motion_tokens().easing_move.clone()),
+            window,
+            cx,
+        );
+        let running = percent < 100. && !cx.reduce_motion();
+
+        let fill = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .h_full()
+            .w(relative(shown / 100.))
+            .rounded(radius)
+            .overflow_hidden()
+            .bg(color)
+            .when(running, |fill| fill.child(sheen()));
+
+        gpui_kit::base::Progress::new(self.id)
+            .value(percent)
+            .relative()
+            .w_full()
+            .h(self.height)
+            .rounded(radius)
+            .overflow_hidden()
+            .bg(color.opacity(0.2))
+            .child(fill)
+    }
+}
+
+/// A soft band that crosses a bar's filled part, then rests out of sight
+/// before crossing again, at a capped rate as it runs for as long as the work.
+fn sheen() -> AnyElement {
+    const CYCLE: Duration = Duration::from_millis(2400);
+    /// The share of the cycle the band spends crossing.
+    const CROSSING: f32 = 0.5;
+    const WIDTH: f32 = 0.4;
+    const FPS: f32 = 20.;
+
+    let glint = crate::theme::accent_foreground().opacity(0.22);
+    let clear = glint.opacity(0.);
+    let half = |from, to| {
+        div().h_full().w(relative(0.5)).bg(linear_gradient(90., linear_color_stop(from, 0.), linear_color_stop(to, 1.)))
+    };
+    div()
+        .absolute()
+        .top_0()
+        .h_full()
+        .w(relative(WIDTH))
+        .flex()
+        .child(half(clear, glint))
+        .child(half(glint, clear))
+        .with_animation("running-bar-sheen", Animation::new(CYCLE).repeat().with_max_fps(FPS), |band, delta| {
+            let crossed = ease_in_out((delta / CROSSING).min(1.));
+            band.left(relative(-WIDTH + crossed * (1. + WIDTH)))
+        })
+        .into_any_element()
+}
+
 /// Where a wait sits in the space its content would fill.
 #[derive(Clone, Copy)]
 enum Placement {
@@ -184,7 +271,7 @@ impl RenderOnce for Loading {
             Placement::Centered => {
                 // The bar takes no label of its own: the root already names the wait.
                 let bar = match percent {
-                    Some(percent) => Progress::new("loading-progress").value(percent).into_any_element(),
+                    Some(percent) => RunningBar::new("loading-progress", percent).into_any_element(),
                     None => self.pace.sweep(cx),
                 };
                 root.size_full().items_center().justify_center().p_4().child(card(self.label, bar, cx))
@@ -202,7 +289,7 @@ impl RenderOnce for Loading {
                         .child(self.pace.spinner(Size::Medium))
                         .child(div().min_w_0().child(self.label)),
                 )
-                .when_some(percent, |this, percent| this.child(Progress::new("loading-progress").value(percent))),
+                .when_some(percent, |this, percent| this.child(RunningBar::new("loading-progress", percent))),
         }
     }
 }

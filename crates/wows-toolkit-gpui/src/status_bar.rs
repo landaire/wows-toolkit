@@ -8,6 +8,7 @@
 
 use std::num::NonZeroU64;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::AnyElement;
 use gpui_kit::AnyWeakEntity;
@@ -18,15 +19,18 @@ use gpui_kit::Entity;
 use gpui_kit::EntityId;
 use gpui_kit::Global;
 use gpui_kit::InteractiveElement as _;
-use gpui_kit::IntoElement as _;
+use gpui_kit::IntoElement;
 use gpui_kit::Modifiers;
 use gpui_kit::ParentElement as _;
+use gpui_kit::Pixels;
+use gpui_kit::RenderOnce;
 use gpui_kit::SharedString;
 use gpui_kit::StatefulInteractiveElement as _;
 use gpui_kit::Styled as _;
 use gpui_kit::Subscription;
 use gpui_kit::Window;
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::Transition;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Selectable as _;
 use gpui_kit::component::Sizable as _;
@@ -397,18 +401,22 @@ fn work(jobs: Vec<Job>) -> Option<AnyElement> {
         [only] => only.said(),
         _ => t!("ui.app.status_tasks", count = jobs.len()).into_owned(),
     };
+    let shown = match jobs.as_slice() {
+        [only] => JobLine { job: only.clone() }.into_any_element(),
+        _ => crate::ui::tabular(div().min_w_0().truncate()).child(said.clone()).into_any_element(),
+    };
     let several = jobs.len() > 1;
     let listed: Vec<String> = jobs.iter().map(Job::said).collect();
     let indicator =
         h_flex()
             .id("app-status-work")
             .test_support()
-            .aria_label(said.clone())
+            .aria_label(said)
             .gap_1()
             .items_center()
             .min_w_0()
             .child(Spinner::new().xsmall())
-            .child(div().min_w_0().truncate().child(said))
+            .child(shown)
             .when(several, |this| {
                 this.tooltip(move |window, cx| {
                     let listed = listed.clone();
@@ -421,6 +429,57 @@ fn work(jobs: Vec<Job>) -> Option<AnyElement> {
                 })
             });
     Some(crate::motion::fade_in("app-status-work-fade", indicator))
+}
+
+/// A job by name, and for one that counts, how far it has got beside a bar
+/// of the share done. The count rises to each new figure rather than jumping
+/// to it; the bar follows the count.
+#[derive(IntoElement)]
+struct JobLine {
+    job: Job,
+}
+
+impl RenderOnce for JobLine {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        const BAR_WIDTH: Pixels = px(64.);
+        const BAR_HEIGHT: Pixels = px(4.);
+
+        let line = crate::ui::tabular(div().min_w_0().truncate());
+        let Some(progress) = self.job.progress else {
+            return line.child(self.job.name).into_any_element();
+        };
+
+        let done = ticked(progress, window, cx);
+        let total = progress.total.get();
+        let said = format!("{} {}", self.job.name, t!("ui.app.status_of", done = done, total = total));
+        let percent = done.min(total) as f32 / total as f32 * 100.;
+        h_flex()
+            .gap_2()
+            .items_center()
+            .min_w_0()
+            .child(line.child(said))
+            .child(
+                div()
+                    .flex_none()
+                    .w(BAR_WIDTH)
+                    .child(crate::loading::RunningBar::new("app-status-work-bar", percent).height(BAR_HEIGHT)),
+            )
+            .into_any_element()
+    }
+}
+
+/// The finished count to show for `progress`, rising to it over a short
+/// time from the count shown before.
+fn ticked(progress: Progress, window: &mut Window, cx: &mut App) -> u64 {
+    const TICK: Duration = Duration::from_millis(400);
+
+    // Keyed by the total, so a new run starts at its own count rather than
+    // counting from the last run's.
+    let key = ElementId::NamedInteger("app-status-work-done".into(), progress.total.get());
+    let shown = gpui_kit::base::transition((key, "done"), progress.done as f32, Transition::new(TICK), window, cx);
+
+    // Floored, so a figure is not shown before it is reached.
+    (shown.floor() as u64).min(progress.done)
 }
 
 #[cfg(test)]
