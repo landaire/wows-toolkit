@@ -1013,8 +1013,7 @@ fn cell_element(
 /// A click toggles `PlayerTable::expanded` for this row via the entity handle
 /// (this closure runs inside the virtualized list's render callback, which
 /// only has `&mut App`, not `Context<PlayerTable>`).
-fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> AnyElement {
-    let icon = if is_expanded { IconName::ChevronDown } else { IconName::ChevronRight };
+fn expand_caret(ix: usize, entity: Entity<PlayerTable>, turn: f32) -> AnyElement {
     div()
         .id(("replay-row-caret", ix))
         .test_support()
@@ -1028,7 +1027,7 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> An
             // instead of the even (2) egui nets for the same gesture.
             cx.stop_propagation();
         })
-        .child(Icon::new(icon))
+        .child(crate::motion::chevron(turn))
         .into_any_element()
 }
 
@@ -1061,7 +1060,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         .items_center()
         .overflow_hidden();
     let mut cell = h_flex().flex_1().min_w_0().gap_1().items_center().overflow_hidden();
-    cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.is_expanded));
+    cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.turn));
 
     cell = match layout.icons.get(row.ship_class, icon_tint) {
         Some(image) => {
@@ -1716,7 +1715,7 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
             .gap_1()
             .overflow_hidden()
             .child(collapsed)
-            .child(detail)
+            .child(v_flex().opacity(layout.turn).child(detail))
             .into_any_element(),
         None => collapsed,
     }
@@ -1745,6 +1744,8 @@ struct RowLayout<'a> {
     h_scroll: &'a ScrollHandle,
     entity: Entity<PlayerTable>,
     is_expanded: bool,
+    /// How far the row's disclosure has turned; it also fades the detail in.
+    turn: f32,
     selected: bool,
     alt_held: bool,
     all_rows: &'a [PlayerRow],
@@ -1916,11 +1917,22 @@ impl Render for PlayerTable {
 
         let entity = cx.entity();
         let h_scroll = self.h_scroll.clone();
-        let render_item = move |ix: usize, _window: &mut Window, cx: &mut App| -> AnyElement {
+        let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
+            let (db_id, is_expanded) = {
+                let table = entity.read(cx);
+                let db_id = table.model.rows[ix].db_id;
+                (db_id, table.expanded.contains(&db_id))
+            };
+            // Keyed by `db_id`: the row's own ids are list positions.
+            let turn = crate::motion::disclosure_turn(
+                ("replay-row-chevron", db_id.raw().cast_unsigned()),
+                is_expanded,
+                window,
+                cx,
+            );
             let table = entity.read(cx);
             let row = &table.model.rows[ix];
-            let is_expanded = table.expanded.contains(&row.db_id);
-            let selected = table.selected == Some(row.db_id);
+            let selected = table.selected == Some(db_id);
             let layout = RowLayout {
                 sticky_cap,
                 sticky_columns: &sticky_columns,
@@ -1932,6 +1944,7 @@ impl Render for PlayerTable {
                 h_scroll: &h_scroll,
                 entity: entity.clone(),
                 is_expanded,
+                turn,
                 selected,
                 alt_held: table.alt_held,
                 all_rows: &table.model.rows,

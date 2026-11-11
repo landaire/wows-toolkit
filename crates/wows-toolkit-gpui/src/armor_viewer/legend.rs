@@ -132,8 +132,6 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
     let border = theme.border;
     let radius = theme.radius;
 
-    let collapse_icon = if state.collapsed { IconName::ChevronRight } else { IconName::ChevronDown };
-
     let header = h_flex()
         .flex_none()
         .items_center()
@@ -142,7 +140,8 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
         .py_1()
         .child(
             Button::new("armor-legend-collapse")
-                .icon(collapse_icon)
+                .child(crate::motion::DisclosureChevron::new("armor-legend-collapse-caret", !state.collapsed).xsmall())
+                .size_5()
                 .ghost()
                 .xsmall()
                 .tooltip(t!("ui.armor.legend_collapse").to_string())

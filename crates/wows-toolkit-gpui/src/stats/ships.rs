@@ -398,11 +398,13 @@ impl Render for StatsShipsPanel {
                                 .w_full()
                                 .gap_1()
                                 .items_center()
-                                .child(icons::icon(if open {
-                                    icons::Glyph::ChevronDown
-                                } else {
-                                    icons::Glyph::ChevronRight
-                                }))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .child(crate::motion::DisclosureChevron::new("caret", open)),
+                                )
                                 .when_some(nation_icon, |row, image| {
                                     row.child(img(image).w(px(23.)).h(px(16.)).flex_none())
                                 })

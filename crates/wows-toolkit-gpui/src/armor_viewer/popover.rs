@@ -1416,7 +1416,7 @@ fn render_camo_group(
     let chevron = div()
         .id(format!("armor-camo-group-expand-{label}"))
         .flex_none()
-        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(crate::motion::DisclosureChevron::new(viewport_caret_id(entity, "camo", label), expanded))
         .on_click(move |_, _window, cx| {
             expand_entity.update(cx, |view, cx| view.toggle_camo_group_expanded(expand_label.clone(), cx));
         });
@@ -1502,7 +1502,7 @@ fn render_hull_group_row(
     let chevron = div()
         .id(format!("armor-hull-vis-group-expand-{group}"))
         .flex_none()
-        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(crate::motion::DisclosureChevron::new(viewport_caret_id(entity, "hull", group), expanded))
         .when(!filter.is_active(), |chevron| {
             chevron.on_click(move |_, _window, cx| {
                 expand_entity.update(cx, |view, cx| view.toggle_hull_group_expanded(expand_group.clone(), cx));
@@ -1892,7 +1892,7 @@ fn display_group(
         .pt_1()
         .border_t_1()
         .border_color(cx.theme().border)
-        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall())
+        .child(crate::motion::DisclosureChevron::new("caret", open).xsmall())
         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
         .when(!filter.is_active(), |head| {
             head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {
@@ -2049,7 +2049,7 @@ fn render_zone_row(
     let chevron = div()
         .id(format!("armor-vis-zone-expand-{}", zone.name))
         .flex_none()
-        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(crate::motion::DisclosureChevron::new(viewport_caret_id(entity, "zone", &zone.name), expanded))
         .when(!filter.is_active(), |chevron| {
             chevron.on_click(move |_, _window, cx| {
                 expand_entity.update(cx, |view, cx| view.toggle_zone_expanded(expand_zone_name.clone(), cx));
@@ -2171,7 +2171,10 @@ fn render_part_row(
     let chevron = div()
         .id(format!("armor-vis-part-expand-{}-{}", zone_name, part.name))
         .flex_none()
-        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(crate::motion::DisclosureChevron::new(
+            ElementId::NamedChild(Arc::new(viewport_caret_id(entity, "part", zone_name)), part.name.clone().into()),
+            expanded,
+        ))
         .on_click(move |_, _window, cx| {
             expand_entity.update(cx, |view, cx| view.toggle_part_expanded(expand_key.clone(), cx));
         });
@@ -2296,4 +2299,11 @@ fn hoverable_row(
             leave_entity.update(cx, |view, cx| view.clear_sidebar_hover_if(&key, cx));
         }
     })
+}
+
+/// Keys a caret by the viewport whose expanded sets it shows, so switching
+/// the active viewport does not turn it.
+fn viewport_caret_id(entity: &Entity<ViewportView>, kind: &'static str, name: &str) -> ElementId {
+    let viewport = ElementId::NamedChild(Arc::new(ElementId::View(entity.entity_id())), kind.into());
+    ElementId::NamedChild(Arc::new(viewport), SharedString::from(name.to_string()))
 }

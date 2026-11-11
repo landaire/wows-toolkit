@@ -69,8 +69,6 @@ glyphs! {
     Castle => "castle",
     ChartColumn => "chart-column",
     ChartLine => "chart-line",
-    ChevronDown => "chevron-down",
-    ChevronRight => "chevron-right",
     Circle => "circle",
     CircleCheck => "circle-check",
     CircleX => "circle-x",

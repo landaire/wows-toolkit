@@ -493,8 +493,8 @@ impl Render for BrowserPanel {
 
         let row_paths = self.row_paths.clone();
         let entity = cx.entity();
-        let folder_tree = tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
-            render_folder_row(ix, entry, selected, &row_paths, entity.clone(), cx)
+        let folder_tree = tree(&self.tree_state, move |ix, entry, selected, window, cx| {
+            render_folder_row(ix, entry, selected, &row_paths, entity.clone(), window, cx)
         })
         .flex_1();
 
@@ -827,7 +827,8 @@ fn render_folder_row(
     selected: bool,
     row_paths: &HashMap<SharedString, String>,
     panel: Entity<BrowserPanel>,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> ListItem {
     let item = entry.item();
     // The chevron says whether a directory is open; the folder glyph follows
@@ -835,8 +836,8 @@ fn render_folder_row(
     // what it used to do -- a closed parent drew as open.
     let mut row = h_flex().gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if entry.is_folder() {
-        let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
-        row = row.child(Icon::new(chevron));
+        let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
+        row = row.child(crate::motion::chevron(turn));
     } else {
         row = row.child(div().w(INDENT));
     }

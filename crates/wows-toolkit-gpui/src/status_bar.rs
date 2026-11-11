@@ -233,12 +233,12 @@ pub fn render(toggles: Vec<PanelToggle>, extras: Vec<AnyElement>, jobs: Vec<Job>
         .children(toggles.into_iter().map(PanelToggle::render))
         .children(extras)
         .child(div().flex_1())
-        .children(work(jobs))
+        .children(work(jobs, cx))
         .into_any_element()
 }
 
 /// One job by name; several by count, listed on hover.
-fn work(jobs: Vec<Job>) -> Option<AnyElement> {
+fn work(jobs: Vec<Job>, cx: &App) -> Option<AnyElement> {
     let said = match jobs.as_slice() {
         [] => return None,
         [only] => only.said(),
@@ -246,7 +246,7 @@ fn work(jobs: Vec<Job>) -> Option<AnyElement> {
     };
     let several = jobs.len() > 1;
     let listed: Vec<String> = jobs.iter().map(Job::said).collect();
-    Some(
+    let indicator =
         h_flex()
             .id("app-status-work")
             .test_support()
@@ -266,7 +266,6 @@ fn work(jobs: Vec<Job>) -> Option<AnyElement> {
                     })
                     .build(window, cx)
                 })
-            })
-            .into_any_element(),
-    )
+            });
+    Some(crate::motion::fade_in("app-status-work-fade", indicator, cx))
 }

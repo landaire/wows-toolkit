@@ -29,6 +29,7 @@ mod interaction_tests;
 mod launcher;
 mod logging;
 mod minimap_preview;
+mod motion;
 mod notices;
 mod palette;
 mod personal_rating;

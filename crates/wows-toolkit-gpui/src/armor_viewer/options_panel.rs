@@ -186,7 +186,7 @@ fn section(
         .py_1()
         .rounded(cx.theme().radius)
         .bg(cx.theme().muted)
-        .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(crate::motion::DisclosureChevron::new("caret", expanded))
         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
         .when(!filter.is_active(), |head| {
             head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {

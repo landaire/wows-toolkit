@@ -1150,9 +1150,7 @@ impl App {
             alert
                 .width(px(640.))
                 .title(t!("ui.windows.crash_detected").into_owned())
-                .description(
-                    v_flex().gap_3().child(t!("ui.dialogs.crash_message").into_owned()).child(details),
-                )
+                .description(v_flex().gap_3().child(t!("ui.dialogs.crash_message").into_owned()).child(details))
                 .ok_text(t!("ui.buttons.copy").into_owned())
                 .show_cancel(true)
                 .on_ok(move |_event, window, cx| {

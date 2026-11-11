@@ -337,6 +337,7 @@ impl Sidebar {
 /// click handler that emits [`ShipSelected`]; nation/class rows rely on
 /// `TreeState`'s own click-to-expand behavior. Mirrors
 /// `replay_inspector::browser_view::render_browser_item`'s structure.
+#[allow(clippy::too_many_arguments)]
 fn render_sidebar_item(
     sidebar: Entity<Sidebar>,
     ix: usize,
@@ -344,7 +345,8 @@ fn render_sidebar_item(
     selected: bool,
     bundle: &ArmorAssetsBundle,
     row_info: &HashMap<SharedString, RowKind>,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> ListItem {
     let item = entry.item();
     let kind = row_info.get(&item.id);
@@ -352,8 +354,8 @@ fn render_sidebar_item(
     // A guide per level, so a ship reads as belonging to the class above it.
     let mut row = h_flex().gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if entry.is_folder() {
-        let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
-        row = row.child(Icon::new(chevron));
+        let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
+        row = row.child(crate::motion::chevron(turn));
     } else {
         row = row.child(div().w(INDENT));
     }
@@ -435,8 +437,8 @@ impl Render for Sidebar {
                 let row_info = self.row_info.clone();
                 let context_menu_entity = entity.clone();
                 let context_menu_row_info = self.row_info.clone();
-                tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
-                    render_sidebar_item(entity.clone(), ix, entry, selected, &bundle, &row_info, cx)
+                tree(&self.tree_state, move |ix, entry, selected, window, cx| {
+                    render_sidebar_item(entity.clone(), ix, entry, selected, &bundle, &row_info, window, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     let Some(RowKind::Ship { param_index, display_name }) = context_menu_row_info.get(&entry.item().id)

@@ -973,10 +973,9 @@ impl ReplayBrowser {
         let nodes = build_browser_tree(&translated, self.grouping, locale);
         let mut leaf_info = HashMap::new();
         let mut group_children = HashMap::new();
-        let mut next_group_id = 0usize;
         let items: Vec<TreeItem> = nodes
             .into_iter()
-            .map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info, &mut group_children, &mut hover).0)
+            .map(|node| node_to_tree_item(node, GROUP_ID_ROOT, &mut leaf_info, &mut group_children, &mut hover).0)
             .collect();
         self.leaf_info = Rc::new(leaf_info);
         self.group_children = Rc::new(group_children);
@@ -1085,32 +1084,41 @@ fn restore_expansion(item: TreeItem, closed: &HashSet<SharedString>) -> TreeItem
     TreeItem::new(item.id.clone(), item.label.clone()).children(children).expanded(expanded)
 }
 
-/// Converts one `BrowserNode` into a `TreeItem`, assigning group ids from
-/// `next_group_id` (group labels are not always unique -- see
-/// `browser.rs::build_date_groups`'s out-of-order-run doc -- so an
-/// incrementing counter is the only reliable id source) and recording every
-/// leaf's path/battle_result into `leaf_info`, keyed by the leaf's id (its
-/// full path string, which is unique per file). Groups default to expanded
-/// so the browser is immediately useful without an extra click per group.
+/// Root of the group ids, which are the labels' path from here.
+const GROUP_ID_ROOT: &str = "replay-browser-group";
+
+/// Converts one `BrowserNode` into a `TreeItem` and records every leaf's
+/// path/battle_result into `leaf_info`, keyed by the leaf's id (its full path
+/// string, which is unique per file). A group's id is its label path under
+/// `parent`, so a rescan that adds a group leaves the others' ids, and so
+/// their carets, alone. Labels are not always unique (see
+/// `browser.rs::build_date_groups`'s out-of-order-run doc), so a repeat takes
+/// a `#n` suffix. Groups default to expanded so the browser is immediately
+/// useful without an extra click per group.
 ///
 /// Builds one tree row, and reports the replays under it so a group's menu
 /// can act on all of them.
 fn node_to_tree_item(
     node: BrowserNode,
-    next_group_id: &mut usize,
+    parent: &str,
     leaf_info: &mut HashMap<SharedString, LeafInfo>,
     group_children: &mut HashMap<SharedString, Vec<PathBuf>>,
     hover: &mut HashMap<PathBuf, Rc<Vec<HoverFact>>>,
 ) -> (TreeItem, Vec<PathBuf>) {
     match node {
         BrowserNode::Group { label, children } => {
-            let id: SharedString = format!("replay-browser-group-{next_group_id}").into();
-            *next_group_id += 1;
+            let base = format!("{parent}/{label}");
+            let mut id = SharedString::from(base.clone());
+            let mut repeat = 1usize;
+            while group_children.contains_key(&id) {
+                id = format!("{base}#{repeat}").into();
+                repeat += 1;
+            }
             let mut under = Vec::new();
             let children: Vec<TreeItem> = children
                 .into_iter()
                 .map(|child| {
-                    let (item, paths) = node_to_tree_item(child, next_group_id, leaf_info, group_children, hover);
+                    let (item, paths) = node_to_tree_item(child, &id, leaf_info, group_children, hover);
                     under.extend(paths);
                     item
                 })
@@ -1153,7 +1161,8 @@ fn render_browser_item(
     leaf_info: &HashMap<SharedString, LeafInfo>,
     marked: &HashSet<PathBuf>,
     row_height: Pixels,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> ListItem {
     let item = entry.item();
     let is_folder = entry.is_folder();
@@ -1198,8 +1207,8 @@ fn render_browser_item(
     let mut row =
         h_flex().h(row_height).gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if is_folder {
-        let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
-        row = row.child(Icon::new(chevron));
+        let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
+        row = row.child(crate::motion::chevron(turn));
     } else {
         row = row.child(div().w(INDENT));
     }
@@ -1307,8 +1316,18 @@ impl Render for ReplayBrowser {
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
                 let marked = self.marked.clone();
-                let listing = tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
-                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, &marked, row_height, cx)
+                let listing = tree(&self.tree_state, move |ix, entry, selected, window, cx| {
+                    render_browser_item(
+                        entity.clone(),
+                        ix,
+                        entry,
+                        selected,
+                        &leaf_info,
+                        &marked,
+                        row_height,
+                        window,
+                        cx,
+                    )
                 })
                 .context_menu(move |_ix, entry, menu, _window, cx| {
                     let wows_dir = context_menu_wows_dir.clone();
@@ -1625,19 +1644,22 @@ impl Render for ReplayBrowser {
         let preview_popup = (preview_map.is_some() || hover_facts.is_some()).then(|| {
             let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
-            deferred(
-                anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
-                    v_flex()
-                        .gap_1()
-                        .p_1()
-                        .rounded(theme.radius)
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .children(preview_map)
-                        .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim()))),
-                ),
-            )
+            // Fades in when it goes up, not as the pointer moves between rows:
+            // the id stays the same for as long as the popup is drawn.
+            let card = v_flex()
+                .gap_1()
+                .p_1()
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .children(preview_map)
+                .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim())));
+            deferred(anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(crate::motion::fade_in(
+                "replay-preview-popup",
+                card,
+                cx,
+            )))
             .with_priority(1)
         });
 

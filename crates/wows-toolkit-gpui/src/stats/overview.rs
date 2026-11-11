@@ -412,11 +412,7 @@ impl Render for StatsOverviewPanel {
                                     h_flex()
                                         .items_center()
                                         .gap_1()
-                                        .child(Icon::new(if expanded {
-                                            IconName::ChevronDown
-                                        } else {
-                                            IconName::ChevronRight
-                                        }))
+                                        .child(crate::motion::DisclosureChevron::new("caret", expanded))
                                         .child(
                                             div()
                                                 .text_xs()

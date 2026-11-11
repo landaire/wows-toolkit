@@ -2365,21 +2365,22 @@ impl Render for SearchView {
         let preview = (preview_art.is_some() || preview_facts.is_some()).then(|| {
             let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
-            deferred(
-                anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
-                    v_flex()
-                        .id("search-preview")
-                        .test_support()
-                        .gap_1()
-                        .p_1()
-                        .rounded(theme.radius)
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .children(preview_art)
-                        .when_some(preview_facts, |this, facts| this.child(preview_hover_grid(&facts))),
-                ),
-            )
+            let card = v_flex()
+                .id("search-preview")
+                .test_support()
+                .gap_1()
+                .p_1()
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .children(preview_art)
+                .when_some(preview_facts, |this, facts| this.child(preview_hover_grid(&facts)));
+            deferred(anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(crate::motion::fade_in(
+                "search-preview-fade",
+                card,
+                cx,
+            )))
             .with_priority(1)
         });
 

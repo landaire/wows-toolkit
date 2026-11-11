@@ -1515,7 +1515,7 @@ impl PlayerTrackerView {
         let editing_note = self.editing_note;
         let note_input = self.note_input.clone();
         let note_error = self.note_error.clone();
-        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| match sub_tab {
+        let render_row = move |ix: usize, window: &mut Window, cx: &mut App| match sub_tab {
             SubTab::Players => {
                 let Some(row) = players.get(ix) else {
                     return div().into_any_element();
@@ -1535,12 +1535,19 @@ impl PlayerTrackerView {
                             .w(NAME_COLUMN_WIDTH)
                             .gap_1()
                             .items_center()
-                            .child(expand_caret(("tracker-player-expand", ix), open, {
-                                let tracker = tracker.clone();
-                                move |cx: &mut App| {
-                                    tracker.update(cx, |this, cx| this.toggle_player_expanded(account, cx));
-                                }
-                            }))
+                            .child(expand_caret(
+                                ("tracker-player-expand", ix),
+                                ElementId::from(("tracker-player-caret", account.raw().cast_unsigned())),
+                                open,
+                                window,
+                                cx,
+                                {
+                                    let tracker = tracker.clone();
+                                    move |cx: &mut App| {
+                                        tracker.update(cx, |this, cx| this.toggle_player_expanded(account, cx));
+                                    }
+                                },
+                            ))
                             .child(div().flex_1().min_w(px(0.)).text_sm().child(row.facet.latest_name.clone())),
                     )
                     .child(
@@ -1619,14 +1626,21 @@ impl PlayerTrackerView {
                             .w(CLAN_TAG_COLUMN_WIDTH)
                             .gap_1()
                             .items_center()
-                            .child(expand_caret(("tracker-clan-expand", ix), open, {
-                                let tracker = tracker.clone();
-                                let clan = row.clan.clone();
-                                move |cx: &mut App| {
-                                    let clan = clan.clone();
-                                    tracker.update(cx, |this, cx| this.toggle_clan_expanded(clan, cx));
-                                }
-                            }))
+                            .child(expand_caret(
+                                ("tracker-clan-expand", ix),
+                                ElementId::from((ElementId::from("tracker-clan-caret"), row.clan.clone())),
+                                open,
+                                window,
+                                cx,
+                                {
+                                    let tracker = tracker.clone();
+                                    let clan = row.clan.clone();
+                                    move |cx: &mut App| {
+                                        let clan = clan.clone();
+                                        tracker.update(cx, |this, cx| this.toggle_clan_expanded(clan, cx));
+                                    }
+                                },
+                            ))
                             .child(
                                 div()
                                     .flex_1()
@@ -2120,14 +2134,24 @@ fn clan_member_list(
 /// Spreads the member buttons' ids apart so two clans' lists cannot collide.
 const MEMBER_ID_STRIDE: usize = 1024;
 
-/// The triangle that opens a row.
-fn expand_caret(id: (&'static str, usize), open: bool, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
+/// The triangle that opens a row. `caret` keys the turn by the row's identity,
+/// which survives a re-sort where the button's index id does not.
+fn expand_caret(
+    id: (&'static str, usize),
+    caret: ElementId,
+    open: bool,
+    window: &mut Window,
+    cx: &mut App,
+    on_click: impl Fn(&mut App) + 'static,
+) -> AnyElement {
     Button::new(id)
-        .child(crate::icons::icon(if open {
-            crate::icons::Glyph::ChevronDown
-        } else {
-            crate::icons::Glyph::ChevronRight
-        }))
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(crate::motion::chevron(crate::motion::disclosure_turn(caret, open, window, cx))),
+        )
         .ghost()
         .xsmall()
         .on_click(move |_event, _window, cx: &mut App| on_click(cx))
