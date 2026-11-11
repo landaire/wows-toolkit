@@ -62,6 +62,8 @@ use wows_toolkit_viewmodel::listing_row::ListedReplay;
 use wows_toolkit_viewmodel::listing_row::hover_facts;
 use wows_toolkit_viewmodel::listing_row::listed_row_identity;
 use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
+use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
@@ -126,6 +128,8 @@ struct LeafInfo {
     /// What the hover popup says under the minimap: one labelled fact per
     /// line, laid out as a grid rather than run together.
     hover: Rc<Vec<HoverFact>>,
+    /// The recording player's rating in this battle, as the index scored it.
+    personal_rating: Option<PersonalRatingResult>,
 }
 
 /// Writes `paths` to the clipboard, one per line.
@@ -1114,7 +1118,10 @@ impl ReplayBrowser {
         let mut group_children = HashMap::new();
         let items: Vec<TreeItem> = nodes
             .into_iter()
-            .map(|node| node_to_tree_item(node, GROUP_ID_ROOT, &mut leaf_info, &mut group_children, &mut hover).0)
+            .map(|node| {
+                node_to_tree_item(node, GROUP_ID_ROOT, &mut leaf_info, &mut group_children, &mut hover, &self.summaries)
+                    .0
+            })
             .collect();
         self.leaf_info = Rc::new(leaf_info);
         self.group_children = Rc::new(group_children);
@@ -1283,6 +1290,7 @@ fn node_to_tree_item(
     leaf_info: &mut HashMap<SharedString, LeafInfo>,
     group_children: &mut HashMap<SharedString, Vec<PathBuf>>,
     hover: &mut HashMap<PathBuf, Rc<Vec<HoverFact>>>,
+    summaries: &HashMap<PathBuf, RowSummary>,
 ) -> (TreeItem, Vec<PathBuf>) {
     match node {
         BrowserNode::Group { label, children } => {
@@ -1297,7 +1305,7 @@ fn node_to_tree_item(
             let children: Vec<TreeItem> = children
                 .into_iter()
                 .map(|child| {
-                    let (item, paths) = node_to_tree_item(child, &id, leaf_info, group_children, hover);
+                    let (item, paths) = node_to_tree_item(child, &id, leaf_info, group_children, hover, summaries);
                     under.extend(paths);
                     item
                 })
@@ -1309,8 +1317,18 @@ fn node_to_tree_item(
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
             let under = vec![path.clone()];
-            let leaf =
-                LeafInfo { path, map_name, battle: battle.into(), stats: Rc::new(stats), outcome, in_division, hover };
+            let personal_rating =
+                summaries.get(&path).and_then(|summary| summary.self_pr).map(PersonalRatingResult::new);
+            let leaf = LeafInfo {
+                path,
+                map_name,
+                battle: battle.into(),
+                stats: Rc::new(stats),
+                outcome,
+                in_division,
+                hover,
+                personal_rating,
+            };
             leaf_info.insert(id.clone(), leaf);
             (TreeItem::new(id, label), under)
         }
@@ -1330,6 +1348,35 @@ fn leaf_label_color(outcome: MatchOutcome) -> Option<Hsla> {
         MatchOutcome::Unknown => return None,
     };
     Some(resolve_color(ColorRole::WinLoss(outcome)))
+}
+
+/// The row's left edge, in its outcome's colour. Drawn on every row, groups
+/// included, so the rows' content lines up whatever the outcome.
+fn result_edge(outcome: Option<MatchOutcome>) -> impl IntoElement {
+    const WIDTH: Pixels = px(3.);
+
+    div().flex_none().w(WIDTH).h_full().when_some(outcome.and_then(leaf_label_color), |edge, color| edge.bg(color))
+}
+
+/// The recording player's rating in a battle, in its band's colour over a
+/// faint tint of it, as the replay header and the player table colour it.
+fn personal_rating_chip(ix: usize, rating: &PersonalRatingResult) -> impl IntoElement {
+    let mut tint = resolve_color(ColorRole::PrTierTint(rating.category));
+    tint.a = f32::from(personal_rating::CHIP_TINT_ALPHA) / 255.;
+    let shown = format!("{:.0}", rating.pr);
+
+    crate::ui::tabular(div())
+        .id(("replay-row-pr", ix))
+        .test_support()
+        .aria_label(shown.clone())
+        .flex_none()
+        .px_1()
+        .rounded(px(2.))
+        .bg(tint)
+        .text_xs()
+        .font_weight(FontWeight::BOLD)
+        .text_color(resolve_color(ColorRole::PrTier(rating.category)))
+        .child(shown)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1352,16 +1399,21 @@ fn render_browser_item(
     // de-emphasised text, reports it. The same two lines the egui row draws
     // (`listing_row::row_layout_job`), as two elements rather than one
     // layout job.
-    let mut identity_el = div().overflow_hidden().text_ellipsis().whitespace_nowrap();
+    let mut identity_el = div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap();
     if let Some(leaf) = leaf {
         identity_el = identity_el.when_some(leaf_label_color(leaf.outcome), |el, color| el.text_color(color));
     }
-    let identity_el = h_flex().gap_1().items_center().child(identity_el.child(item.label.clone())).when_some(
-        leaf.filter(|leaf| leaf.in_division),
-        |row, _| {
+    let identity_el = h_flex()
+        .w_full()
+        .gap_1()
+        .items_center()
+        .child(identity_el.child(item.label.clone()))
+        .when_some(leaf.filter(|leaf| leaf.in_division), |row, _| {
             row.child(crate::icons::icon(DIVISION_GLYPH).text_color(gpui_kit::rgb(crate::theme::semantic().division)))
-        },
-    );
+        })
+        .when_some(leaf.and_then(|leaf| leaf.personal_rating.as_ref()), |row, rating| {
+            row.child(div().flex_1()).child(personal_rating_chip(ix, rating))
+        });
 
     let mut lines = v_flex().flex_1().justify_center().overflow_hidden().child(identity_el);
     if let Some(leaf) = leaf {
@@ -1384,8 +1436,12 @@ fn render_browser_item(
     // The indent is drawn rather than merely left blank: a guide per level
     // is what tells a deep row which group it belongs to, the way the egui
     // listing's tree lines do.
-    let mut row =
-        h_flex().h(row_height).gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
+    let mut row = h_flex()
+        .h(row_height)
+        .gap_1()
+        .items_center()
+        .child(result_edge(leaf.map(|leaf| leaf.outcome)))
+        .child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if is_folder {
         let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
         row = row.child(crate::motion::chevron(turn));
@@ -2169,6 +2225,55 @@ async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawRe
 
 #[cfg(test)]
 mod tests {
+
+    /// A row the index rated carries a chip with that rating; a row it did not
+    /// rate has none. Only a known outcome gets a coloured edge.
+    #[gpui_kit::test]
+    fn a_rated_row_carries_its_rating_and_outcome(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use std::path::PathBuf;
+        use wows_toolkit_config::index::rows::MatchOutcome;
+        use wows_toolkit_config::index::rows::RowSummary;
+
+        let summary = |outcome: MatchOutcome, self_pr: Option<f64>| RowSummary {
+            outcome,
+            self_damage: Some(50_000),
+            self_kills: Some(1),
+            self_survived: Some(true),
+            self_pr,
+            division_id: None,
+            division_mates: Vec::new(),
+            results_available: true,
+            file_mtime: None,
+        };
+
+        cx.update(gpui_kit::init);
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+        let rated = PathBuf::from("rated.wowsreplay");
+        let unrated = PathBuf::from("unrated.wowsreplay");
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| {
+                browser.summaries.insert(rated.clone(), summary(MatchOutcome::Win, Some(1650.4)));
+                browser.summaries.insert(unrated.clone(), summary(MatchOutcome::Unknown, None));
+                browser.seed_listing_for_test(rated.clone(), cx);
+                browser.seed_listing_for_test(unrated.clone(), cx);
+
+                let leaf = |path: &PathBuf| {
+                    browser.leaf_info.values().find(|leaf| leaf.path == *path).cloned().expect("the replay is listed")
+                };
+                let rated = leaf(&rated);
+                let unrated = leaf(&unrated);
+
+                let rating = rated.personal_rating.expect("the index rated the battle");
+                assert_eq!(format!("{:.0}", rating.pr), "1650");
+                assert!(unrated.personal_rating.is_none(), "an unrated battle has no chip");
+
+                assert!(super::leaf_label_color(rated.outcome).is_some(), "a win has an edge");
+                assert!(super::leaf_label_color(unrated.outcome).is_none(), "an unknown outcome has none");
+            });
+        });
+    }
 
     /// Ctrl-clicking builds a set: the row already highlighted joins it, so
     /// two ctrl-clicks mark two replays rather than only the second. Clicking
