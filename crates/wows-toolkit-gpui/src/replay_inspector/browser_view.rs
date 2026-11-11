@@ -1210,8 +1210,8 @@ impl ReplayBrowser {
             // the watch reports.
             let Ok(entries) = std::fs::read_dir(&dir) else { return };
             for entry in entries.flatten() {
-                let path = entry.path();
-                if is_finished_replay(&path) && !walked.contains(&path) {
+                let Some(path) = listed_replay(&entry) else { continue };
+                if !walked.contains(&path) {
                     let _ = messages.unbounded_send(WatchMessage::Missed(path));
                 }
             }
@@ -2459,18 +2459,7 @@ fn scan_replay_files(
     // many files there are to read before it starts reading them.
     let mut candidates = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(file_type) = entry.file_type() else { continue };
-        if !file_type.is_file() {
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("wowsreplay") {
-            continue;
-        }
-        if path.file_name().is_some_and(|name| name == "temp.wowsreplay") {
-            continue;
-        }
-        candidates.push(path);
+        candidates.extend(listed_replay(&entry));
     }
     let total = candidates.len();
     let mut walked = HashSet::with_capacity(total);
@@ -2764,6 +2753,22 @@ enum DirWatch {
 fn is_finished_replay(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
         && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+}
+
+/// The replay a directory entry names, when the listing shows it. The scan
+/// and the check for replays the watch missed both read entries through
+/// this, so a file one of them lists is never news to the other.
+///
+/// A symlink counts when it leads to a file: a replays directory of links
+/// into another install is a reader's own arrangement.
+fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
+    let path = entry.path();
+    if !is_finished_replay(&path) {
+        return None;
+    }
+    let file_type = entry.file_type().ok()?;
+    let is_file = file_type.is_file() || (file_type.is_symlink() && path.is_file());
+    is_file.then_some(path)
 }
 
 /// Starts watching `dir`, sending what happens in it to `sink`.
@@ -3291,6 +3296,30 @@ mod tests {
 
         let low = Bounds::new(point(px(0.), px(700.)), size(px(320.), px(40.)));
         assert_eq!(super::beside_row(low, popup, viewport), point(px(324.), px(240.)), "its bottom is the row's");
+    }
+
+    /// A replay reached through a symlink is walked by the scan, so the watch
+    /// never reports it as one that arrived after the listing was read.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_replay_is_walked_rather_than_reported_as_new() {
+        let real = tempfile::tempdir().expect("a temporary directory");
+        let listed = tempfile::tempdir().expect("a temporary directory");
+        let target = real.path().join("20260818_132652_PWSD610-Smaland.wowsreplay");
+        std::fs::write(&target, b"not a replay").expect("the file is written");
+        let link = listed.path().join("20260818_132652_PWSD610-Smaland.wowsreplay");
+        std::os::unix::fs::symlink(&target, &link).expect("the link is made");
+        let dangling = listed.path().join("20260818_132653_PWSD610-Gone.wowsreplay");
+        std::os::unix::fs::symlink(real.path().join("gone.wowsreplay"), &dangling).expect("the link is made");
+        // The scan counts a file written before it began as walked even when
+        // it cannot be read, so the written time must be in the past.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let (reports, _progress) = futures::channel::mpsc::unbounded();
+        let scanned = super::scan_replay_files(listed.path(), &reports);
+
+        assert!(scanned.walked.contains(&link), "the link to a replay is walked");
+        assert!(!scanned.walked.contains(&dangling), "a link to nothing is not a replay");
     }
 
     use super::is_finished_replay;
