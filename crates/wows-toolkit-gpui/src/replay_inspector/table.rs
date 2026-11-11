@@ -14,6 +14,7 @@
 //! ribbons/damage-events under Name, the build under Skills, the damage
 //! breakdowns under ActualDamage/ReceivedDamage; see `expanded.rs`).
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -156,7 +157,7 @@ fn measure_column_widths(
     expanded: &HashSet<AccountId>,
     closing: &HashSet<AccountId>,
     window: &mut Window,
-) -> Vec<Pixels> {
+) -> MeasuredWidths {
     let shows_detail = |id: &AccountId| expanded.contains(id) || closing.contains(id);
     let rem = window.rem_size().as_f32();
     let gap_1 = rem * 0.25;
@@ -171,6 +172,7 @@ fn measure_column_widths(
     let content_slack = rem * 0.5;
 
     let mut widths = vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()];
+    let mut details = HashMap::new();
     for &col in &model.columns {
         let header_w = text_width(column_label(col).into(), window, true);
         let content_w = match col {
@@ -192,7 +194,9 @@ fn measure_column_widths(
                         + ROW_ACTIONS_WIDTH
                         + status_count as f32 * (icon_default + gap_1);
                     if shows_detail(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
+                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        details.insert((row.db_id, col), px(detail_w));
+                        row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
                 }
@@ -212,7 +216,9 @@ fn measure_column_widths(
                         text_w
                     };
                     if shows_detail(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
+                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        details.insert((row.db_id, col), px(detail_w));
+                        row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
                 }
@@ -224,7 +230,9 @@ fn measure_column_widths(
                     let cell = cell_value(row, col, debug);
                     let mut row_w = text_width(cell.text.into(), window, false);
                     if shows_detail(&row.db_id) {
-                        row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
+                        let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
+                        details.insert((row.db_id, col), px(detail_w));
+                        row_w = row_w.max(detail_w);
                     }
                     max_w = max_w.max(row_w);
                 }
@@ -233,7 +241,16 @@ fn measure_column_widths(
         };
         widths[col as usize] = px((content_w + cell_padding + content_slack).clamp(COLUMN_MIN_WIDTH, COLUMN_MAX_WIDTH));
     }
-    widths
+    MeasuredWidths { columns: widths, details }
+}
+
+/// What `measure_column_widths` found.
+struct MeasuredWidths {
+    /// Each column's content-fit width, indexed by `ReplayColumn as usize`.
+    columns: Vec<Pixels>,
+    /// The width each shown row's detail needs in each column, so a cell
+    /// drawn narrower can mark where its detail is cut off.
+    details: HashMap<(AccountId, ReplayColumn), Pixels>,
 }
 
 /// Header label for a column, matching the egui app's `ui.replay.column.*`
@@ -388,6 +405,9 @@ pub struct PlayerTable {
     /// width needs `&mut Window` (real text measurement), which only `render`
     /// has.
     column_widths: Vec<Pixels>,
+    /// The width each shown row's detail needs per column, from the same
+    /// measurement.
+    detail_widths: HashMap<(AccountId, ReplayColumn), Pixels>,
     /// Set on construction and whenever the columns/data/debug flag change
     /// (`set_columns`, `set_debug`); cleared by `render` after it recomputes
     /// `column_widths`. Keeps the (17-column x up-to-24-row) measurement pass
@@ -507,6 +527,7 @@ impl PlayerTable {
             selected: None,
             alt_held: false,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
+            detail_widths: HashMap::new(),
             drawn_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
             widths_loaded: false,
             width_overrides: vec![None; ReplayColumn::ALL.len()],
@@ -938,17 +959,10 @@ fn fit_frozen_widths(widths: &mut [Pixels], frozen: &[ReplayColumn], cap: Pixels
 }
 
 /// The widest `col` may be dragged to before the frozen section passes
-/// `cap`. Columns that give way before `col` count at their minimum, the
-/// rest at their drawn width.
+/// `cap`, with the other frozen columns held at their drawn widths: a drag
+/// stops at the cap rather than squeezing the column beside it.
 fn frozen_room(frozen: &[ReplayColumn], widths: &[Pixels], cap: Pixels, col: ReplayColumn) -> Pixels {
-    let order = give_way_order(frozen);
-    let rank = |of: ReplayColumn| order.iter().position(|other| *other == of);
-    let held: Pixels = frozen
-        .iter()
-        .filter(|other| **other != col)
-        .map(|other| if rank(*other) < rank(col) { COLUMN_DRAG_MIN } else { widths[*other as usize] })
-        .sum();
-
+    let held: Pixels = frozen.iter().filter(|other| **other != col).map(|other| widths[*other as usize]).sum();
     cap - held
 }
 
@@ -1157,7 +1171,16 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
         );
     }
 
-    container.child(cell).into_any_element()
+    // The dots sit at the end of the player's name, between it and the ship:
+    // they are that player's actions, and the name is what says which player.
+    // Inside the cell, they stay on its line when the row opens below it.
+    let actions = row_actions(
+        ix,
+        Rc::new(ActionsMenuData::from_row(row, layout.icons)),
+        layout,
+        SharedString::from(format!("replay-row-{ix}")),
+    );
+    container.relative().child(cell).child(actions).into_any_element()
 }
 
 /// What a connection history says, in the egui app's own wording.
@@ -1662,13 +1685,7 @@ fn note_cell(
 /// `ix` keys the trigger's `ElementId` so every row's popover state is its own,
 /// and `group` ties the reveal to that row's hover. `layout.entity` is threaded
 /// through to `build_actions_menu` for the raw-metadata item's event.
-fn row_actions(
-    ix: usize,
-    row: Rc<ActionsMenuData>,
-    layout: &RowLayout,
-    group: SharedString,
-    name_edge: f32,
-) -> AnyElement {
+fn row_actions(ix: usize, row: Rc<ActionsMenuData>, layout: &RowLayout, group: SharedString) -> AnyElement {
     let debug = layout.debug;
     let entity = layout.entity.clone();
     let trigger = Button::new(("replay-row-actions", ix))
@@ -1680,19 +1697,15 @@ fn row_actions(
         build_actions_menu(menu, &row, debug, entity.clone(), MenuOrigin::RowDots, cx)
     });
 
-    // The full height of the row, with the dots centred on it like the cells
-    // beside them; an expanded row's cells start at its top instead, so there
-    // the dots sit on the first line, under the same padding as the row.
     div()
         .absolute()
         .top_0()
         .bottom_0()
-        .left(px((name_edge - ROW_ACTIONS_WIDTH).max(0.)))
+        .right_0()
         .w(px(ROW_ACTIONS_WIDTH))
         .flex()
-        .flex_col()
         .items_center()
-        .map(|el| if layout.detail.is_shown() { el.justify_start().pt_0p5() } else { el.justify_center() })
+        .justify_center()
         .invisible()
         .group_hover(group, |this| this.visible())
         .child(menu_button)
@@ -1701,6 +1714,9 @@ fn row_actions(
 
 /// Room for the dots at the end of the name.
 const ROW_ACTIONS_WIDTH: f32 = 24.0;
+
+/// How wide the fade at a cut-off detail's right edge is.
+const CUT_OFF_FADE_WIDTH: f32 = 28.0;
 
 /// One column's collapsed cell, dispatching to the Name/Skills special-cased
 /// layouts and falling back to the generic `cell_element` for everything else.
@@ -1737,7 +1753,25 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     };
     // The gap above the detail is part of what is revealed, so the row grows
     // from its first line in step with the progress.
-    let detail = v_flex().pt_1().child(detail);
+    // A column drawn narrower than the detail needs clips it; the fade says
+    // there is more to the right than shows.
+    let cut_off =
+        layout.detail_widths.get(&(row.db_id, col)).is_some_and(|needs| *needs > layout.column_widths[col as usize]);
+    let fade = |to: Hsla| linear_gradient(90., linear_color_stop(to.opacity(0.), 0.), linear_color_stop(to, 1.));
+    let hovered = layout.fade_to_hovered;
+    let detail = v_flex().relative().pt_1().child(detail).when(cut_off, |detail| {
+        detail.child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .w(px(CUT_OFF_FADE_WIDTH))
+                .bg(fade(layout.fade_to))
+                // The row repaints in its hover colour under the pointer.
+                .group_hover(SharedString::from(format!("replay-row-{ix}")), move |style| style.bg(fade(hovered))),
+        )
+    });
     // Kept in a reveal while open too, so a close starts from the height the
     // detail had rather than from nothing.
     let detail = crate::motion::Reveal::new(
@@ -1800,6 +1834,12 @@ struct RowLayout<'a> {
     scroll_columns: &'a [ReplayColumn],
     scroll_width: f32,
     column_widths: &'a [Pixels],
+    /// What each shown row's detail needs, against `column_widths`.
+    detail_widths: &'a HashMap<(AccountId, ReplayColumn), Pixels>,
+    /// The colour a cut-off detail fades into at the column's edge.
+    fade_to: Hsla,
+    /// The same, while the pointer is over the row.
+    fade_to_hovered: Hsla,
     icons: &'a IconCache,
     debug: bool,
     h_scroll: &'a ScrollHandle,
@@ -1840,22 +1880,6 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_column_cell(ix, col, row, layout));
     }
-    // The dots sit at the end of the player's name, between it and the ship:
-    // they are that player's actions, and the name is what says which player.
-    // Measured rather than guessed, since dragging the column moves them.
-    let name_edge: f32 = layout
-        .sticky_columns
-        .iter()
-        .take_while(|col| **col != ReplayColumn::ShipName)
-        .map(|col| layout.column_widths[*col as usize].as_f32())
-        .sum();
-    // Where the Name column ends as drawn: on a panel too narrow for the
-    // frozen pair the section is clipped, and the dots belong at the end of
-    // what is on screen rather than over the scrolling columns.
-    let name_edge = match layout.sticky_cap {
-        Some(cap) => name_edge.min(cap),
-        None => name_edge,
-    };
 
     let mut scrolling = h_flex()
         .w(px(layout.scroll_width))
@@ -1908,7 +1932,6 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
-        .child(row_actions(ix, Rc::clone(&menu_row), layout, group, name_edge))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, cx| {
@@ -1926,7 +1949,9 @@ impl Render for PlayerTable {
             self.alt_held = false;
         }
         if self.widths_dirty {
-            self.column_widths = measure_column_widths(&self.model, self.debug, &self.expanded, &self.closing, window);
+            let measured = measure_column_widths(&self.model, self.debug, &self.expanded, &self.closing, window);
+            self.column_widths = measured.columns;
+            self.detail_widths = measured.details;
             self.widths_dirty = false;
         }
 
@@ -2012,12 +2037,21 @@ impl Render for PlayerTable {
             let table = entity.read(cx);
             let row = &table.model.rows[ix];
             let selected = table.selected == Some(db_id);
+            // What the row is painted with, so a cut-off detail fades into it.
+            let fade_to = if selected {
+                cx.theme().selection
+            } else {
+                crate::ui::stripe(ix, cx).unwrap_or(cx.theme().background)
+            };
             let layout = RowLayout {
                 sticky_cap,
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
                 scroll_width,
                 column_widths: &table.drawn_widths,
+                detail_widths: &table.detail_widths,
+                fade_to,
+                fade_to_hovered: hover_bg,
                 icons: &table.icons,
                 debug: table.debug,
                 h_scroll: &h_scroll,
@@ -2255,7 +2289,7 @@ mod tests {
     /// On a panel too narrow for the frozen pair, the name gives way rather
     /// than the ship column: the frozen section is clipped at its right edge,
     /// and the grip that sizes the ship column against the scrolling ones sits
-    /// on that edge.
+    /// on that edge, where a drag still reaches it.
     #[gpui_kit::test]
     fn the_last_frozen_column_keeps_its_grip_on_a_narrow_panel(cx: &mut TestAppContext) {
         let panel = px(420.);
@@ -2266,20 +2300,55 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
         let (wanted, ship_before) = cx.update(|cx| {
             let table = table.read(cx);
-            (table.width_of(ReplayColumn::Name) + table.width_of(ship), table.width_of(ship))
+            (table.width_of(ReplayColumn::Name) + table.width_of(ship), table.drawn_widths[ship as usize])
         });
         assert!(wanted > panel * super::STICKY_MAX_FRACTION, "the frozen pair must exceed the cap for this to test it");
 
         cx.update_window(window.into(), |_, window, cx| {
             let grip = window.find(("replay-header-grip", ship as usize)).bounds().center();
-            window.drag(grip, gpui_kit::point(grip.x + px(20.), grip.y), cx);
+            window.drag(grip, gpui_kit::point(grip.x - px(20.), grip.y), cx);
             window.render_frame(cx);
         })
         .expect("the window is open");
 
         assert!(
-            cx.update(|cx| table.read(cx).width_of(ship)) > ship_before,
-            "the ship column's grip was in reach and the drag widened it"
+            cx.update(|cx| table.read(cx).width_of(ship)) < ship_before,
+            "the ship column's grip was in reach and the drag narrowed it"
+        );
+    }
+
+    /// Dragging the ship column wider stops where the frozen section reaches
+    /// its cap: the name column beside it keeps its width, so the ship
+    /// column's own left edge stays put under the drag.
+    #[gpui_kit::test]
+    fn a_frozen_drag_stops_at_the_cap_without_moving_its_neighbour(cx: &mut TestAppContext) {
+        let window = open_table_at(cx, px(900.));
+        let table = window.entity(cx).expect("the window has a root view");
+        let ship = ReplayColumn::ShipName;
+
+        let left_edge = |cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find(("replay-header-grip", ReplayColumn::Name as usize)).bounds().center().x
+            })
+            .expect("the window is open")
+        };
+        let before = left_edge(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            let grip = window.find(("replay-header-grip", ship as usize)).bounds().center();
+            window.drag(grip, gpui_kit::point(grip.x + px(800.), grip.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        assert_eq!(left_edge(cx), before, "the name column's edge did not move");
+        let frozen: gpui_kit::Pixels = cx.update(|cx| {
+            let table = table.read(cx);
+            table.drawn_widths[ReplayColumn::Name as usize] + table.drawn_widths[ship as usize]
+        });
+        assert!(
+            frozen <= px(900.) * super::STICKY_MAX_FRACTION + px(1.),
+            "the drag stopped at the cap, got {frozen:?}"
         );
     }
 
