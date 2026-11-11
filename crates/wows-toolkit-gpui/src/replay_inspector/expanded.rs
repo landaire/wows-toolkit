@@ -68,6 +68,22 @@ const RIBBON_ICON_SIZE: f32 = 64.0;
 const MODULE_ICON_SIZE: f32 = 28.0;
 const CONSUMABLE_ICON_SIZE: f32 = 20.0;
 
+/// One ribbon tile's width: a main ribbon fitted within `RIBBON_ICON_SIZE`,
+/// with its count centred below.
+const RIBBON_TILE_WIDTH: f32 = RIBBON_ICON_SIZE;
+const RIBBON_TILE_GAP: f32 = 6.0;
+/// The ribbon grid never measures narrower than this many tiles per line, so
+/// a narrow Name column still lays the ribbons out as a grid.
+const RIBBON_GRID_MIN_TILES: usize = 4;
+const RIBBON_TOOLTIP_MAX_WIDTH: f32 = 280.0;
+
+/// Captain skill, modernization and consumable icons are white glyphs drawn
+/// for the game's dark interface, so they sit on this dark tile in every
+/// theme: legible on light themes and identical across themes.
+const GAME_ICON_TILE_BG: u32 = 0x2a2d33;
+const GAME_ICON_TILE_PADDING: f32 = 2.0;
+const MODULE_TILE_SIZE: f32 = MODULE_ICON_SIZE + 2.0 * GAME_ICON_TILE_PADDING;
+
 /// Whether a damage-interaction line describes damage this row dealt to, or
 /// received from, the other player.
 #[derive(Clone, Copy)]
@@ -136,12 +152,22 @@ pub(super) fn expanded_detail_width(
     match col {
         ReplayColumn::Name => name_section_width(row, debug, window),
         ReplayColumn::Skills => build_section_width(row, debug, window),
-        ReplayColumn::ActualDamage => {
-            nda_gated_breakdown_width(row.actual_damage_breakdown.as_deref(), row, debug, window)
-        }
-        ReplayColumn::ReceivedDamage => {
-            nda_gated_breakdown_width(row.received_damage_breakdown.as_deref(), row, debug, window)
-        }
+        ReplayColumn::ActualDamage => damage_section_width(
+            row.actual_damage_breakdown.as_deref(),
+            row,
+            all_rows,
+            debug,
+            DamageDirection::Dealt,
+            window,
+        ),
+        ReplayColumn::ReceivedDamage => damage_section_width(
+            row.received_damage_breakdown.as_deref(),
+            row,
+            all_rows,
+            debug,
+            DamageDirection::Received,
+            window,
+        ),
         ReplayColumn::PotentialDamage => {
             nda_gated_breakdown_width(row.potential_damage_breakdown.as_deref(), row, debug, window)
         }
@@ -185,10 +211,10 @@ fn breakdown_grid_width(rows: &[BreakdownRow], window: &mut Window) -> f32 {
     labels + BREAKDOWN_GAP + values
 }
 
-/// Mirrors `render_name_section`: the section headings, each achievement/
-/// ribbon row's icon-box-plus-label width (`icon_label_row_width`), the
-/// damage-event grid (or the NDA placeholder when hidden), and the
-/// fire-chance block.
+/// Mirrors `render_name_section`: the section headings, each achievement
+/// row's icon-box-plus-label width (`icon_label_row_width`), the ribbon grid
+/// (`ribbon_grid_width`), the damage-event grid (or the NDA placeholder when
+/// hidden), and the fire-chance block.
 fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();
@@ -216,15 +242,7 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
 
     if has_ribbons {
         max_w = max_w.max(text_width(t!("ui.replay.sections.ribbons").into_owned().into(), window, true));
-        for ribbon in &row.ribbons {
-            // `ribbon_row`: subribbons render at LARGE_ICON_SIZE, others at
-            // RIBBON_ICON_SIZE; a fitted wide ribbon's width tops out at its
-            // box size (`fit_within_box`), so the box size is a safe bound.
-            let icon_box = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
-            let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
-            let label_w = text_width(label.into(), window, false);
-            max_w = max_w.max(icon_label_row_width(icon_box, label_w));
-        }
+        max_w = max_w.max(ribbon_grid_width(row.ribbons.len()));
     }
 
     if has_damage_events {
@@ -301,6 +319,17 @@ const HEADLINE_CHROME: f32 = 56.0;
 /// label gap (`icon_label_row`'s `gap(px(8.))`), then the label text.
 fn icon_label_row_width(icon_box: f32, label_width: f32) -> f32 {
     icon_box + 8.0 + label_width
+}
+
+/// Width `ribbons_view` asks of the column: `RIBBON_GRID_MIN_TILES` tiles per
+/// line, or fewer when there are fewer ribbons. A wider column fits more
+/// tiles per line, since the grid wraps to it.
+fn ribbon_grid_width(ribbon_count: usize) -> f32 {
+    let tiles = ribbon_count.min(RIBBON_GRID_MIN_TILES) as f32;
+    if tiles == 0.0 {
+        return 0.0;
+    }
+    tiles * RIBBON_TILE_WIDTH + (tiles - 1.0) * RIBBON_TILE_GAP
 }
 
 /// Mirrors `render_build_section`: the loadout/skill-tier hover text, the
@@ -393,7 +422,7 @@ fn build_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32
 /// Pure per-tier width for `captain_skill_grid_view`: the 14px cost-label
 /// cell, `gap_1` before it and after each skill cell (matching the line's
 /// `h_flex().gap_1()` across its `1 + skill_count` children), and one
-/// `MODULE_ICON_SIZE` cell per skill -- a resolved icon renders at exactly
+/// `MODULE_TILE_SIZE` cell per skill -- a resolved icon's tile is exactly
 /// that size, and an unresolved text-fallback cell is assumed to be no wider
 /// (a small overshoot beats clipping, per the column's overall 500px clamp).
 /// Returns the widest tier, since the tiers stack vertically.
@@ -401,7 +430,7 @@ fn skill_grid_width(rows: &[SkillGridRow], gap_1: f32) -> f32 {
     rows.iter()
         .map(|row| {
             let skill_count = row.skills.len() as f32;
-            14.0 + gap_1 + skill_count * (MODULE_ICON_SIZE + gap_1)
+            14.0 + gap_1 + skill_count * (MODULE_TILE_SIZE + gap_1)
         })
         .fold(0.0_f32, f32::max)
 }
@@ -485,11 +514,33 @@ fn nda_text() -> AnyElement {
     div().text_xs().child(detail_text(NDA)).into_any_element()
 }
 
-/// A small icon-or-text cell shared by achievements, ribbons, modernizations,
-/// and signals: a decoded icon when `icons.get_keyed(key)` has one, otherwise
-/// `display_name` as plain text; a hover tooltip either way. `tag` keys the
-/// `ElementId` so different lists in the same row never collide (see
-/// `DETAIL_ID_STRIDE`'s doc).
+/// What a game icon is drawn on.
+#[derive(Clone, Copy)]
+enum IconBackdrop {
+    /// Icons with their own colours and shape, such as signal flags.
+    Bare,
+    /// White glyph icons; see `GAME_ICON_TILE_BG`.
+    DarkTile,
+}
+
+/// `icon` at `icon_size` on a dark rounded tile `GAME_ICON_TILE_PADDING`
+/// larger on every side.
+fn game_icon_tile(icon: Img, icon_size: f32) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(px(icon_size + 2.0 * GAME_ICON_TILE_PADDING))
+        .rounded(px(4.))
+        .bg(rgb(GAME_ICON_TILE_BG))
+        .child(icon.size(px(icon_size)))
+}
+
+/// A small icon-or-text cell shared by modernizations and signals: a decoded
+/// icon when `icons.get_keyed(key)` has one, otherwise `display_name` as plain
+/// text; a hover tooltip either way. `tag` keys the `ElementId` so different
+/// lists in the same row never collide (see `DETAIL_ID_STRIDE`'s doc).
 #[allow(clippy::too_many_arguments)]
 fn icon_or_text_cell(
     tag: &'static str,
@@ -499,12 +550,14 @@ fn icon_or_text_cell(
     display_name: String,
     tooltip_text: String,
     size: f32,
+    backdrop: IconBackdrop,
     icons: &IconCache,
 ) -> AnyElement {
     let tooltip: SharedString = tooltip_text.into();
-    let el = match icons.get_keyed(key) {
-        Some(image) => div().child(img(image).w(px(size)).h(px(size))),
-        None => div().text_xs().child(detail_text(display_name)),
+    let el = match (icons.get_keyed(key), backdrop) {
+        (Some(image), IconBackdrop::Bare) => div().child(img(image).w(px(size)).h(px(size))),
+        (Some(image), IconBackdrop::DarkTile) => game_icon_tile(img(image), size),
+        (None, _) => div().text_xs().child(detail_text(display_name)),
     };
     el.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
@@ -514,10 +567,9 @@ fn icon_or_text_cell(
 /// Fitted `(width, height)` to render `image` within a `max` by `max` box
 /// while preserving its native aspect ratio. Matches the egui app's ribbon
 /// rendering, which uses `Image::fit_to_exact_size((64, 64))` -- a scale that
-/// keeps aspect ratio -- so a wide, short ribbon icon renders short (its row
-/// only as tall as the fitted icon) rather than being forced into a `max` by
-/// `max` square and inflating the row height. Square icons (achievements) are
-/// unaffected: they fit as `max` by `max`.
+/// keeps aspect ratio -- so a wide, short ribbon icon renders short rather
+/// than being forced into a `max` by `max` square. Square icons
+/// (achievements) are unaffected: they fit as `max` by `max`.
 fn fit_within_box(image: &RenderImage, max: f32) -> (f32, f32) {
     let size = image.size(0);
     fit_dims(size.width.0 as f32, size.height.0 as f32, max)
@@ -533,15 +585,14 @@ fn fit_dims(w: f32, h: f32, max: f32) -> (f32, f32) {
     (w * scale, h * scale)
 }
 
-/// An `[icon | label]` row shared by achievements and ribbons: an icon when
-/// `icons.get_keyed(key)` has one (no fallback text in its place, matching the
-/// egui app's `ui.horizontal` which only conditionally adds the image), then
-/// `label` always rendered alongside it. A hover tooltip covers the whole row.
+/// An `[icon | label]` achievement row: an icon when `icons.get_keyed(key)`
+/// has one (no fallback text in its place, matching the egui app's
+/// `ui.horizontal` which only conditionally adds the image), then `label`
+/// always rendered alongside it. A hover tooltip covers the whole row.
 /// The icon is fitted within a `size` by `size` box preserving its aspect
-/// ratio (`fit_within_box`), so wide ribbon icons stay short and their row
-/// with them. `items_center()` vertically centers the icon and label on a
-/// shared center line when the icon is taller than the text (e.g. a square
-/// achievement icon). The 8px icon-to-label gap matches egui's default
+/// ratio (`fit_within_box`). `items_center()` vertically centers the icon
+/// and label on a shared center line when the icon is taller than the text.
+/// The 8px icon-to-label gap matches egui's default
 /// `Spacing::item_spacing.x` (`egui::style::Spacing::default()`), the gap a
 /// `ui.horizontal` puts between the image and the label it adds next.
 /// `tag` keys the `ElementId` so different lists in the same row never
@@ -553,11 +604,11 @@ fn icon_label_row(
     idx: usize,
     key: &str,
     label: String,
-    tooltip_text: Option<String>,
+    tooltip_text: String,
     size: f32,
     icons: &IconCache,
 ) -> AnyElement {
-    let tooltip: Option<SharedString> = tooltip_text.map(SharedString::from);
+    let tooltip: SharedString = tooltip_text.into();
     let mut row = h_flex().w_full().gap(px(8.)).items_center();
     if let Some(image) = icons.get_keyed(key) {
         let (w, h) = fit_within_box(&image, size);
@@ -565,9 +616,7 @@ fn icon_label_row(
     }
     row = row.child(div().flex_1().min_w(px(0.)).text_xs().child(detail_text(label)));
     row.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
-        .when_some(tooltip, |row, tooltip| {
-            row.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        })
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .into_any_element()
 }
 
@@ -757,11 +806,10 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     }
 
     // 3px matches egui's default `Spacing::item_spacing.y`: the section
-    // heading, each achievement/ribbon row, the separators, and the damage
-    // event lines are all top-level children of one `ui.vertical` in the
-    // egui original, so they all share that one gap -- not a larger gap at
-    // this level and a tighter one nested inside `achievements_view`/
-    // `ribbons_view`.
+    // heading, each achievement row, the ribbon grid, the separators, and the
+    // damage event lines are all top-level children of one `ui.vertical` in
+    // the egui original, so they all share that one gap -- not a larger gap
+    // at this level and a tighter one nested inside `achievements_view`.
     // Set in from the table's edge, which the Name column starts at and the
     // ribbons would otherwise sit against.
     let mut col = v_flex().gap(px(3.)).pl(NAME_SECTION_INDENT);
@@ -852,16 +900,59 @@ fn achievements_view(row_ix: usize, achievements: &[AchievementResult], icons: &
     col.into_any_element()
 }
 
-/// A tight vertical list of ribbon rows (icon + label side by side), in the
-/// already-sorted/reordered display order. Matches the egui app's `ui.vertical`
-/// of per-ribbon `ui.horizontal` rows; see `achievements_view`'s doc for why
-/// the row gap matches the outer section gap.
+/// Ribbon tiles in the already-sorted/reordered display order, wrapping to
+/// the column width. Ribbons that stand alone come first; each ribbon with
+/// sub-ribbons then starts a line of its own with its sub-ribbons after it,
+/// so a family reads as one block rather than breaking into the plain run.
+/// `items_end` lines the counts of one line up despite unequal icon heights.
 fn ribbons_view(row_ix: usize, ribbons: Vec<&RibbonResult>, icons: &IconCache) -> AnyElement {
-    let mut col = v_flex().gap(px(3.));
-    for (idx, ribbon) in ribbons.into_iter().enumerate() {
-        col = col.child(ribbon_row(row_ix, idx, ribbon, icons));
+    let RibbonGroups { standalone, families } = group_ribbons(ribbons);
+    let mut next_idx = 0;
+    let mut grid =
+        |tiles: Vec<&RibbonResult>| {
+            let first = next_idx;
+            next_idx += tiles.len();
+            h_flex().w_full().flex_wrap().items_end().gap(px(RIBBON_TILE_GAP)).children(
+                tiles.into_iter().enumerate().map(|(at, ribbon)| ribbon_tile(row_ix, first + at, ribbon, icons)),
+            )
+        };
+    let mut col = v_flex().gap(px(RIBBON_TILE_GAP * 2.0));
+    if !standalone.is_empty() {
+        col = col.child(grid(standalone));
+    }
+    for family in families {
+        col = col.child(grid(family));
     }
     col.into_any_element()
+}
+
+/// Ribbons split for display: those with no sub-ribbons, and each ribbon
+/// that has some followed by them.
+struct RibbonGroups<'a> {
+    standalone: Vec<&'a RibbonResult>,
+    families: Vec<Vec<&'a RibbonResult>>,
+}
+
+/// Splits `ordered` into [`RibbonGroups`]. The name order already places
+/// each sub-ribbon after its parent, so a sub-ribbon belongs to the nearest
+/// ribbon before it that is not one.
+fn group_ribbons(ordered: Vec<&RibbonResult>) -> RibbonGroups<'_> {
+    let mut runs: Vec<Vec<&RibbonResult>> = Vec::new();
+    for ribbon in ordered {
+        match runs.last_mut() {
+            Some(run) if ribbon.is_subribbon => run.push(ribbon),
+            _ => runs.push(vec![ribbon]),
+        }
+    }
+    let mut standalone = Vec::new();
+    let mut families = Vec::new();
+    for run in runs {
+        match run.as_slice() {
+            [only] if !only.is_subribbon => standalone.push(*only),
+            _ => families.push(run),
+        }
+    }
+    RibbonGroups { standalone, families }
 }
 
 fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, icons: &IconCache) -> AnyElement {
@@ -877,21 +968,57 @@ fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, i
         idx,
         &key,
         label,
-        Some(achievement.description.clone()),
+        achievement.description.clone(),
         LARGE_ICON_SIZE,
         icons,
     )
 }
 
-fn ribbon_row(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCache) -> AnyElement {
+/// One ribbon: its icon fitted within its box (or, absent an icon, its name)
+/// over its count. The count reads "x20" rather than a bare "20" so it is
+/// read as a multiplier on the ribbon, not as a score. Hovering shows the
+/// name and description (`name_description_tooltip`).
+fn ribbon_tile(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCache) -> AnyElement {
     let key = if ribbon.is_subribbon {
         format!("subribbon:{}", ribbon.icon_key)
     } else {
         format!("ribbon:{}", ribbon.icon_key)
     };
     let size = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
-    let label = format!("{} ({}x)", ribbon.display_name, ribbon.count);
-    icon_label_row("replay-ribbon", row_ix, idx, &key, label, ribbon.description.clone(), size, icons)
+    let icon = match icons.get_keyed(&key) {
+        Some(image) => {
+            let (w, h) = fit_within_box(&image, size);
+            img(image).w(px(w)).h(px(h)).flex_none().into_any_element()
+        }
+        None => {
+            div().w_full().text_xs().text_center().child(detail_text(ribbon.display_name.clone())).into_any_element()
+        }
+    };
+    let name: SharedString = ribbon.display_name.clone().into();
+    let description: Option<SharedString> =
+        ribbon.description.as_deref().filter(|d| !d.trim().is_empty()).map(|d| SharedString::from(d.to_owned()));
+    v_flex()
+        .id(("replay-ribbon", row_ix * DETAIL_ID_STRIDE + idx))
+        .w(px(RIBBON_TILE_WIDTH))
+        .flex_none()
+        .items_center()
+        .gap_0p5()
+        .child(icon)
+        .child(div().text_xs().child(detail_text(format!("x{}", ribbon.count))))
+        .tooltip(move |window, cx| name_description_tooltip(name.clone(), description.clone()).build(window, cx))
+        .into_any_element()
+}
+
+/// `name` in bold over `description`, wrapped at `RIBBON_TOOLTIP_MAX_WIDTH`.
+fn name_description_tooltip(name: SharedString, description: Option<SharedString>) -> Tooltip {
+    Tooltip::element(move |_window, _cx| {
+        v_flex()
+            .max_w(px(RIBBON_TOOLTIP_MAX_WIDTH))
+            .gap_0p5()
+            .py_0p5()
+            .child(div().font_weight(FontWeight::BOLD).child(name.clone()))
+            .when_some(description.clone(), |this, description| this.child(div().child(description)))
+    })
 }
 
 /// Skills-column expanded content: the skill-tier hover text, then (when this
@@ -1002,6 +1129,7 @@ fn modernization_slots_view(row_ix: usize, slots: &[Option<TranslatedModule>], i
                     display_name,
                     tooltip,
                     MODULE_ICON_SIZE,
+                    IconBackdrop::DarkTile,
                     icons,
                 )
             }
@@ -1011,12 +1139,13 @@ fn modernization_slots_view(row_ix: usize, slots: &[Option<TranslatedModule>], i
     row.into_any_element()
 }
 
-/// A gray placeholder for an unfilled modernization slot, matching the egui
-/// app's faint filled rect (`render_modernization_slots`'s `None` arm).
+/// A placeholder for an unfilled modernization slot, matching the egui app's
+/// faint filled rect (`render_modernization_slots`'s `None` arm), sized like
+/// a filled slot's tile.
 fn empty_slot_box() -> AnyElement {
     div()
-        .w(px(MODULE_ICON_SIZE))
-        .h(px(MODULE_ICON_SIZE))
+        .w(px(MODULE_TILE_SIZE))
+        .h(px(MODULE_TILE_SIZE))
         .flex()
         .items_center()
         .justify_center()
@@ -1040,6 +1169,7 @@ fn signals_view(row_ix: usize, signals: &[TranslatedModule], icons: &IconCache) 
             display_name,
             tooltip,
             MODULE_ICON_SIZE,
+            IconBackdrop::Bare,
             icons,
         ));
     }
@@ -1062,9 +1192,10 @@ fn text_row(tag: &'static str, row_ix: usize, idx: usize, text: String, tooltip_
 }
 
 /// The captain-skill grid: one horizontal line per skill-point tier, a
-/// point-cost label, then a cell per skill in that tier -- a decoded icon
-/// (dimmed when not learned) or, absent one, `"(cost) name"` text (dimmed the
-/// same way). Mirrors `render_skill_grid`.
+/// point-cost label, then a cell per skill in that tier -- a decoded icon on
+/// a dark tile (`GAME_ICON_TILE_BG`; the glyph dimmed when not learned) or,
+/// absent one, `"(cost) name"` text (dimmed the same way). Mirrors
+/// `render_skill_grid`.
 fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCache) -> AnyElement {
     let mut col = v_flex().gap_1();
     let mut skill_idx = 0usize;
@@ -1095,8 +1226,10 @@ fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCac
     let key = format!("skill:{}", skill.internal_name.as_str());
     let el = match icons.get_keyed(&key) {
         Some(image) => {
+            // Dim only the glyph: the tile stays put so the grid keeps its
+            // shape, and white against dim gray separates learned skills.
             let opacity = if skill.learned { 1.0 } else { 0.35 };
-            div().opacity(opacity).child(img(image).w(px(MODULE_ICON_SIZE)).h(px(MODULE_ICON_SIZE)))
+            game_icon_tile(img(image).opacity(opacity), MODULE_ICON_SIZE)
         }
         None => {
             let label = match skill.point_cost {
@@ -1123,16 +1256,11 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
     const NAME_COL: f32 = 170.0;
     const COUNT_COL: f32 = 64.0;
 
+    // The name column needs no heading: the section's own heading says what
+    // the rows are.
     let header = h_flex()
         .gap_2()
-        .child(
-            div()
-                .w(px(NAME_COL))
-                .flex_none()
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .child(detail_text(t!("ui.replay.consumable_header_consumable").into_owned())),
-        )
+        .child(div().w(px(NAME_COL)).flex_none())
         .child(
             div()
                 .w(px(COUNT_COL))
@@ -1175,7 +1303,7 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
     let key = format!("consumable:{}", consumable.icon_key);
     let mut name_cell = h_flex().w(px(NAME_COL)).flex_none().gap_1().items_center();
     if let Some(image) = icons.get_keyed(&key) {
-        name_cell = name_cell.child(img(image).w(px(CONSUMABLE_ICON_SIZE)).h(px(CONSUMABLE_ICON_SIZE)));
+        name_cell = name_cell.child(game_icon_tile(img(image), CONSUMABLE_ICON_SIZE));
     }
     name_cell = name_cell.child(div().text_xs().child(detail_text(consumable.display_name.clone())));
 
@@ -1227,28 +1355,62 @@ fn render_damage_section(
         }
     }
 
-    if let Some(interactions) = interactions {
-        let mut entries: Vec<_> = interactions.iter().collect();
-        entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
-        let per_ship: Vec<BreakdownRow> = entries
-            .into_iter()
-            .filter_map(|(account_id, interaction)| {
-                let amount = interaction_amount(interaction, direction);
-                if amount == 0 {
-                    return None;
-                }
-                let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
-                let pct = interaction_percentage(interaction, direction, alt_held);
-                Some(BreakdownRow {
-                    label: other.ship_name.clone(),
-                    value: format!("{} ({pct:.0}%)", separate_number(amount)),
-                })
-            })
-            .collect();
-        col = col.child(breakdown_grid(&per_ship));
+    if interactions.is_some() {
+        col = col.child(breakdown_grid(&damage_interaction_rows(row, all_rows, direction, alt_held)));
     }
 
     Some(col.into_any_element())
+}
+
+/// One line per ship this row dealt damage to or took it from, largest
+/// first, as `amount (pct%)` against the ship's name.
+fn damage_interaction_rows(
+    row: &PlayerRow,
+    all_rows: &[PlayerRow],
+    direction: DamageDirection,
+    alt_held: bool,
+) -> Vec<BreakdownRow> {
+    let Some(interactions) = row.damage_interactions.as_ref() else {
+        return Vec::new();
+    };
+    let mut entries: Vec<_> = interactions.iter().collect();
+    entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
+    entries
+        .into_iter()
+        .filter_map(|(account_id, interaction)| {
+            let amount = interaction_amount(interaction, direction);
+            if amount == 0 {
+                return None;
+            }
+            let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
+            let pct = interaction_percentage(interaction, direction, alt_held);
+            Some(BreakdownRow {
+                label: other.ship_name.clone(),
+                value: format!("{} ({pct:.0}%)", separate_number(amount)),
+            })
+        })
+        .collect()
+}
+
+/// Mirrors `render_damage_section`: the breakdown above, and the per-ship
+/// lines below it at whichever share alt shows, so the column fits either.
+fn damage_section_width(
+    breakdown: Option<&[BreakdownRow]>,
+    row: &PlayerRow,
+    all_rows: &[PlayerRow],
+    debug: bool,
+    direction: DamageDirection,
+    window: &mut Window,
+) -> f32 {
+    let mut widest = nda_gated_breakdown_width(breakdown, row, debug, window);
+    if row.should_hide_stats() && !debug {
+        return widest;
+    }
+    for alt_held in [false, true] {
+        let lines = damage_interaction_rows(row, all_rows, direction, alt_held);
+        widest = widest.max(breakdown_grid_width(&lines, window));
+    }
+    widest
 }
 
 fn interaction_amount(interaction: &DamageInteraction, direction: DamageDirection) -> u64 {
@@ -1344,15 +1506,20 @@ mod tests {
     use super::DamageDirection;
     use super::IconCache;
     use super::MODULE_ICON_SIZE;
+    use super::RIBBON_GRID_MIN_TILES;
+    use super::RIBBON_TILE_GAP;
+    use super::RIBBON_TILE_WIDTH;
     use super::ReplayColumn;
     use super::consumables_width;
     use super::damage_event_rows;
     use super::fit_dims;
+    use super::group_ribbons;
     use super::icon_label_row_width;
     use super::interaction_amount;
     use super::interaction_percentage;
     use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
+    use super::ribbon_grid_width;
     use super::skill_grid_width;
     use super::spotting_target_rows;
     use crate::replay_inspector::test_support::base_row;
@@ -1422,6 +1589,30 @@ mod tests {
             is_subribbon: false,
             count: 1,
         }
+    }
+
+    /// Ribbons that stand alone come first; a ribbon with sub-ribbons is
+    /// kept with them and moved after every standalone one.
+    #[test]
+    fn ribbons_with_sub_ribbons_follow_the_standalone_ones() {
+        let sub = |name: &str| RibbonResult { is_subribbon: true, ..ribbon(name) };
+        let (fire, main, pen, ricochet, spotted, bulge) = (
+            ribbon("RIBBON_BURN"),
+            ribbon("RIBBON_MAIN_CALIBER"),
+            sub("RIBBON_MAIN_CALIBER_PENETRATION"),
+            sub("RIBBON_MAIN_CALIBER_RICOCHET"),
+            ribbon("RIBBON_SPOTTED"),
+            sub("RIBBON_BULGE"),
+        );
+        let ordered = vec![&fire, &main, &pen, &bulge, &ricochet, &spotted];
+        let groups = group_ribbons(ordered);
+        let names = |ribbons: &[&RibbonResult]| ribbons.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&groups.standalone), ["RIBBON_BURN", "RIBBON_SPOTTED"]);
+        assert_eq!(groups.families.len(), 1);
+        assert_eq!(
+            names(&groups.families[0]),
+            ["RIBBON_MAIN_CALIBER", "RIBBON_MAIN_CALIBER_PENETRATION", "RIBBON_BULGE", "RIBBON_MAIN_CALIBER_RICOCHET"]
+        );
     }
 
     #[test]
@@ -1562,9 +1753,20 @@ mod tests {
     fn skill_grid_width_matches_the_cost_label_plus_gap_plus_icon_formula() {
         let rows = [skill_tier(7)];
         let width = skill_grid_width(&rows, 4.0);
-        // 14 (cost label) + gap_1 + 7 skills * (MODULE_ICON_SIZE + gap_1).
-        let expected = 14.0 + 4.0 + 7.0 * (MODULE_ICON_SIZE + 4.0);
+        // 14 (cost label) + gap_1 + 7 skills * (icon tile + gap_1); the tile
+        // pads the 28px icon by 2px on each side.
+        let expected = 14.0 + 4.0 + 7.0 * (MODULE_ICON_SIZE + 4.0 + 4.0);
         assert!((width - expected).abs() < 1e-4, "width {width} != expected {expected}");
+    }
+
+    /// The grid asks the column for at most `RIBBON_GRID_MIN_TILES` tiles per
+    /// line and wraps the rest, rather than one line of every ribbon.
+    #[test]
+    fn ribbon_grid_width_caps_at_the_minimum_tiles_per_line() {
+        assert_eq!(ribbon_grid_width(0), 0.0);
+        assert_eq!(ribbon_grid_width(1), RIBBON_TILE_WIDTH);
+        assert_eq!(ribbon_grid_width(2), 2.0 * RIBBON_TILE_WIDTH + RIBBON_TILE_GAP);
+        assert_eq!(ribbon_grid_width(15), ribbon_grid_width(RIBBON_GRID_MIN_TILES));
     }
 
     #[test]
