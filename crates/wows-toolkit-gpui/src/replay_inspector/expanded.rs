@@ -558,7 +558,7 @@ fn detail_text(text: impl Into<SharedString>) -> impl IntoElement {
 }
 
 fn section_heading(text: String) -> AnyElement {
-    div().text_xs().font_weight(FontWeight::BOLD).child(detail_text(text)).into_any_element()
+    crate::ui::section_label(detail_text(text)).into_any_element()
 }
 
 fn body_text(text: impl Into<SharedString>) -> AnyElement {

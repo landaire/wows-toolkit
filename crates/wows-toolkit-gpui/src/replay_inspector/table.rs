@@ -109,12 +109,24 @@ const SHIP_ICON_WIDTH: f32 = 16.0;
 /// (the same one-shot pass, for expanded-row content) can reuse it instead of
 /// duplicating text shaping.
 pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) -> f32 {
-    if text.is_empty() {
-        return 0.0;
-    }
     let mut font = window.text_style().font();
     if bold {
         font.weight = FontWeight::BOLD;
+    }
+    font_width(text, font, window)
+}
+
+/// `text_width` for a cell drawn with `ui::tabular`, whose digits are wider
+/// than the font's own.
+fn figures_width(text: SharedString, window: &mut Window) -> f32 {
+    let mut font = window.text_style().font();
+    font.features = crate::fonts::tabular_figures();
+    font_width(text, font, window)
+}
+
+fn font_width(text: SharedString, font: Font, window: &mut Window) -> f32 {
+    if text.is_empty() {
+        return 0.0;
     }
     let run = TextRun {
         len: text.len(),
@@ -236,7 +248,11 @@ fn measure_column_widths(
                 let mut max_w = header_w;
                 for row in &model.rows {
                     let cell = cell_value(row, col, debug);
-                    let mut row_w = text_width(cell.text.into(), window, false);
+                    let mut row_w = if col == ReplayColumn::ShipName {
+                        text_width(cell.text.into(), window, false)
+                    } else {
+                        figures_width(cell.text.into(), window)
+                    };
                     if shows_detail(&row.db_id) {
                         let detail_w = expanded::expanded_detail_width(col, row, &model.rows, debug, window);
                         if detail_w > 0. {
@@ -1489,7 +1505,9 @@ fn cell_element(
         .whitespace_nowrap()
         .overflow_hidden()
         .text_ellipsis()
-        .when_some(cell.color, |el, role| el.text_color(resolve_color(role)));
+        .when_some(cell.color, |el, role| el.text_color(resolve_color(role)))
+        // Figures line up down a column; a ship name keeps the font's own.
+        .when(col != ReplayColumn::ShipName, crate::ui::tabular);
     let text = crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text);
     let base = match cell.color {
         // A rating is the band's chip, as on every other surface that shows
