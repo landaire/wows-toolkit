@@ -1540,6 +1540,7 @@ status_cache_validating = "กำลังตรวจสอบความถ�
 status_cache_downloading = "กำลังดาวน์โหลดข้อมูลเกม"
 status_cache_planning = "กำลังสอบถามข้อมูลเกมที่เผยแพร่"
 drop_to_load = "วางเพื่อโหลด %{file}"
+drop_to_list = "วางเพื่อแสดงรายการรีเพลย์ใน %{folder}"
 drop_one_at_a_time = "ทีละรีเพลย์"
 status_indexing = "กำลังจัดทำดัชนีรีเพลย์"
 status_of = "%{done} จาก %{total}"

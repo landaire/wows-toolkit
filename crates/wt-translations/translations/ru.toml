@@ -1494,6 +1494,7 @@ status_cache_validating = "Проверка целостности кэша иг
 status_cache_downloading = "Загрузка игровых данных"
 status_cache_planning = "Запрос списка опубликованных игровых данных"
 drop_to_load = "Отпустите, чтобы загрузить %{file}"
+drop_to_list = "Отпустите, чтобы показать реплеи из %{folder}"
 drop_one_at_a_time = "Один реплей за раз"
 status_indexing = "Индексация реплеев"
 status_of = "%{done} из %{total}"

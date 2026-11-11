@@ -128,10 +128,49 @@ fn availability_said(availability: &wows_data_mgr::download_repo::RemoteAvailabi
     }
 }
 
-/// Whether a dragged or dropped path is a replay, which is the only thing this
-/// window takes.
+/// Whether a dragged or dropped path is a replay.
 fn is_replay(path: &std::path::Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
+}
+
+/// What dropping a set of paths on the window would do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DropIntent {
+    OpenReplay(PathBuf),
+    /// Lists the directory in a folder tab of the Replay Inspector.
+    OpenFolder(PathBuf),
+    NotAReplay,
+    TooMany,
+}
+
+/// What a drop of `paths` would do, read from their names alone. `None` when
+/// no path names a replay, and [`folder_drop`] has to look at them.
+fn replay_drop(paths: &[PathBuf]) -> Option<DropIntent> {
+    let replays: Vec<&PathBuf> = paths.iter().filter(|path| is_replay(path)).collect();
+    match replays.as_slice() {
+        [one] => Some(DropIntent::OpenReplay((*one).clone())),
+        [_, _, ..] => Some(DropIntent::TooMany),
+        [] => None,
+    }
+}
+
+/// What a drop of `paths` that names no replay would do. Queries the
+/// filesystem per path, which can block on an offline share, so it runs off
+/// the UI thread.
+fn folder_drop(paths: &[PathBuf]) -> DropIntent {
+    let folders: Vec<&PathBuf> = paths.iter().filter(|path| path.is_dir()).collect();
+    match folders.as_slice() {
+        [one] => DropIntent::OpenFolder((*one).clone()),
+        [_, _, ..] => DropIntent::TooMany,
+        [] => DropIntent::NotAReplay,
+    }
+}
+
+/// Files being dragged over the window, with what dropping them would do.
+struct HoveringDrop {
+    paths: Vec<PathBuf>,
+    /// `None` while the paths are being looked at.
+    intent: Option<DropIntent>,
 }
 
 /// Who asked for the update check.
@@ -619,8 +658,8 @@ pub struct App {
     /// Whether the game-data cache has been tidied this session.
     cache_maintained: bool,
     /// The files being dragged over the window, while any are. What the scrim
-    /// says is which of them would open, or that only one may.
-    hovering_files: Option<Vec<PathBuf>>,
+    /// says is what letting go of them would do.
+    hovering_files: Option<HoveringDrop>,
     /// The name this app appears under to the peers in a session. Written
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
@@ -1100,11 +1139,42 @@ impl App {
 
     /// Notes the files now being dragged over the window.
     pub(crate) fn note_hovering_files(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        if self.hovering_files.as_deref() == Some(paths.as_slice()) {
+        if self.hovering_files.as_ref().is_some_and(|hovering| hovering.paths == paths) {
             return;
         }
-        self.hovering_files = Some(paths);
+        let intent = replay_drop(&paths);
+        let looked_at = intent.is_none().then(|| paths.clone());
+        self.hovering_files = Some(HoveringDrop { paths, intent });
         cx.notify();
+
+        let Some(paths) = looked_at else { return };
+        cx.spawn(async move |this, cx| {
+            let classified = paths.clone();
+            let intent = cx.background_spawn(async move { folder_drop(&classified) }).await;
+            let _ = this.update(cx, |this, cx| {
+                // The drag has moved on to other files, or left.
+                let Some(hovering) = this.hovering_files.as_mut().filter(|hovering| hovering.paths == paths) else {
+                    return;
+                };
+                hovering.intent = Some(intent);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Does what dropping files on the window asked for.
+    fn apply_drop(&mut self, intent: DropIntent, window: &mut Window, cx: &mut Context<Self>) {
+        match intent {
+            DropIntent::OpenReplay(path) => self.open_replay_from_search(path, window, cx),
+            DropIntent::OpenFolder(path) => {
+                self.replay_inspector.update(cx, |view, cx| view.open_folder(path, window, cx));
+                self.active_tab = AppTab::ReplayInspector;
+                cx.notify();
+            }
+            DropIntent::NotAReplay => crate::toast::warn(t!("ui.messages.drop_not_a_replay").into_owned(), window, cx),
+            DropIntent::TooMany => crate::toast::warn(t!("ui.messages.drop_one_at_a_time").into_owned(), window, cx),
+        }
     }
 
     /// Takes the scrim down, for a drag that has left the window or landed.
@@ -1120,24 +1190,23 @@ impl App {
     /// without it a drag has nothing to say it will be taken, and a reader
     /// dragging two files learns only after letting go that one was expected.
     pub(crate) fn drop_scrim(&self) -> Option<AnyElement> {
-        let hovering = self.hovering_files.as_deref()?;
-        let replays: Vec<&PathBuf> = hovering.iter().filter(|path| is_replay(path)).collect();
-        let said = match replays.as_slice() {
+        let hovering = self.hovering_files.as_ref()?;
+        let named = |path: &PathBuf| path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
+        // `None` while a directory is being looked for, which is brief.
+        let said = hovering.intent.as_ref().map(|intent| match intent {
             // The drop will say the same, rather than the scrim promising
             // something and the drop refusing it.
-            [] => t!("ui.messages.drop_not_a_replay").into_owned(),
-            [one] => {
-                let named = one.file_name().unwrap_or(one.as_os_str()).to_string_lossy().into_owned();
-                t!("ui.app.drop_to_load", file = named).into_owned()
-            }
-            _ => t!("ui.messages.drop_one_at_a_time").into_owned(),
-        };
+            DropIntent::NotAReplay => t!("ui.messages.drop_not_a_replay").into_owned(),
+            DropIntent::OpenReplay(path) => t!("ui.app.drop_to_load", file = named(path)).into_owned(),
+            DropIntent::OpenFolder(path) => t!("ui.app.drop_to_list", folder = named(path)).into_owned(),
+            DropIntent::TooMany => t!("ui.messages.drop_one_at_a_time").into_owned(),
+        });
 
         Some(
             div()
                 .id("app-drop-scrim")
                 .test_support()
-                .aria_label(said.clone())
+                .when_some(said.clone(), |scrim, said| scrim.aria_label(said))
                 .absolute()
                 .inset_0()
                 .flex()
@@ -1146,7 +1215,7 @@ impl App {
                 // theme-exempt: white on this overlay's own dark scrim, as the
                 // egui overlay is.
                 .bg(gpui_kit::black().opacity(0.75))
-                .child(div().text_lg().text_color(gpui_kit::white()).child(said))
+                .children(said.map(|said| div().text_lg().text_color(gpui_kit::white()).child(said)))
                 .into_any_element(),
         )
     }
@@ -3241,20 +3310,21 @@ impl Render for App {
             .child(div().flex_none().px_1().child(app_menu));
 
         // A replay dragged onto the window opens, which is what the egui app does
-        // with one (`app.rs`'s `ui_file_drag_and_drop`). Only a replay, and only
-        // one: the inspector opens a file, not a set.
+        // with one (`app.rs`'s `ui_file_drag_and_drop`); a directory is listed in
+        // a folder tab, as Open Folder does. One at a time: the inspector opens a
+        // file or a directory, not a set.
         let dropped = cx.listener(|this: &mut Self, paths: &gpui_kit::ExternalPaths, window, cx| {
             this.forget_hovering_files(cx);
-            let replays: Vec<std::path::PathBuf> =
-                paths.paths().iter().filter(|path| is_replay(path)).cloned().collect();
-            match replays.as_slice() {
-                [] => crate::toast::warn(t!("ui.messages.drop_not_a_replay").into_owned(), window, cx),
-                [one] => {
-                    this.active_tab = AppTab::ReplayInspector;
-                    this.open_replay_from_search(one.clone(), window, cx);
-                }
-                _ => crate::toast::warn(t!("ui.messages.drop_one_at_a_time").into_owned(), window, cx),
+            if let Some(intent) = replay_drop(paths.paths()) {
+                this.apply_drop(intent, window, cx);
+                return;
             }
+            let paths = paths.paths().to_vec();
+            cx.spawn_in(window, async move |this, cx| {
+                let intent = cx.background_spawn(async move { folder_drop(&paths) }).await;
+                let _ = this.update_in(cx, |this, window, cx| this.apply_drop(intent, window, cx));
+            })
+            .detach();
         });
 
         for report in std::mem::take(&mut self.job_said) {
@@ -3398,6 +3468,29 @@ mod tests {
 
     use super::MissingBuild;
     use super::describe_missing_builds;
+
+    /// A dropped directory lists it; a replay beside it wins; two of either is
+    /// refused; anything else is not a replay.
+    #[test]
+    fn a_drop_opens_one_replay_or_one_folder() {
+        use std::path::PathBuf;
+
+        use super::DropIntent;
+        use super::folder_drop;
+        use super::replay_drop;
+
+        let folder = tempfile::tempdir().expect("a temporary directory");
+        let other = tempfile::tempdir().expect("a second temporary directory");
+        let folder_path = folder.path().to_path_buf();
+        let replay = PathBuf::from("G:/replays/one.wowsreplay");
+
+        assert_eq!(replay_drop(std::slice::from_ref(&folder_path)), None, "a directory has to be looked at");
+        assert_eq!(folder_drop(std::slice::from_ref(&folder_path)), DropIntent::OpenFolder(folder_path.clone()));
+        assert_eq!(replay_drop(&[folder_path.clone(), replay.clone()]), Some(DropIntent::OpenReplay(replay.clone())));
+        assert_eq!(folder_drop(&[folder_path, other.path().to_path_buf()]), DropIntent::TooMany);
+        assert_eq!(replay_drop(&[replay.clone(), replay]), Some(DropIntent::TooMany));
+        assert_eq!(folder_drop(&[PathBuf::from("G:/notes.txt")]), DropIntent::NotAReplay);
+    }
 
     #[gpui_kit::test]
     fn manual_update_request_reports_a_pending_startup_failure(cx: &mut gpui_kit::TestAppContext) {
