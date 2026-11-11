@@ -1497,6 +1497,12 @@ fn arrival_glow(arrived: std::time::Instant, window: &mut Window, cx: &App) -> O
     Some(crate::theme::accent().opacity(STRENGTH * remaining * remaining))
 }
 
+/// The spinner over a map preview. Light whatever the theme: the map's
+/// water is dark in every palette, and the theme's text colour is not.
+fn map_spinner() -> Spinner {
+    Spinner::new().large().color(gpui_kit::white().opacity(0.9))
+}
+
 /// A row's map as a small square, or a plain tile while its art loads or
 /// when the open build has none for it.
 fn map_thumbnail(thumbnail: Option<&Thumbnail>, row_height: Pixels, cx: &App) -> AnyElement {
@@ -1999,7 +2005,7 @@ impl Render for ReplayBrowser {
                     .child(crate::frame_texture::frame_view(texture, None).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
                     .when(waiting, |this| {
                         this.child(
-                            h_flex().absolute().inset_0().items_center().justify_center().child(Spinner::new().large()),
+                            h_flex().absolute().inset_0().items_center().justify_center().child(map_spinner()),
                         )
                     })
                     .into_any_element(),
@@ -2016,7 +2022,7 @@ impl Render for ReplayBrowser {
                     .bg(crate::preview_hover::MAP_PLACEHOLDER)
                     .items_center()
                     .justify_center()
-                    .child(Spinner::new().large())
+                    .child(map_spinner())
                     .into_any_element(),
             ),
             // Why there is none, in the space the map would have taken: a
