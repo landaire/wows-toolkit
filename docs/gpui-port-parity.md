@@ -456,6 +456,12 @@ kept so the next audit does not re-report them.
   and Show Replay Controls are in the listing's row menu instead. The match
   timeline and the other-team perspective are not ported at all.
 - [done] Alt turns the damage breakdown's percentages around.
+- [done] While Alt is held over an open row with damage shares, the status
+  bar names the mode. Each share line explains on hover what its percentage
+  is of, naming player and ship, and says to hold Alt to invert (or release
+  it to go back). The egui app shows the inverted figures without either.
+- [done] Hovering a captain skill, consumable, ribbon, module or signal icon
+  shows the icon at twice its size above its name and description.
 - [done] An expanded row's breakdowns are grids: labels in one column and
   figures in another, rather than the padded `label   : value` block the egui
   app draws them as. The lines themselves come from

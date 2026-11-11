@@ -521,6 +521,9 @@ enum SettingsState {
 
 pub struct App {
     active_tab: AppTab,
+    /// The tab the status bar's reported modes belong to; see
+    /// `status_bar::clear_modes`.
+    modes_tab: AppTab,
     settings: SettingsState,
     /// The zoom the slider shows. Seeded from `settings.zoom` once the DB
     /// load completes, updated live as the slider moves, and written back so
@@ -819,6 +822,10 @@ impl App {
             this.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
             this.apply_wows_dir(path, window, cx);
         });
+        // Held keys are read as `!is_window_active()` once the window loses
+        // focus, which nothing retained would otherwise draw again for.
+        let activation = cx.observe_window_activation(window, |_this, window, _cx| window.refresh());
+        let modes_reported = crate::status_bar::observe_modes(cx);
 
         Self {
             theme: ThemeChoice::default(),
@@ -827,6 +834,7 @@ impl App {
             twitch_channel_input,
             _twitch_poll: None,
             active_tab: AppTab::ReplayInspector,
+            modes_tab: AppTab::ReplayInspector,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
             zoom_slider,
@@ -898,6 +906,8 @@ impl App {
                 tracker_event,
                 use_for_toolkit,
                 language_chosen,
+                activation,
+                modes_reported,
             ],
         }
     }
@@ -1020,7 +1030,7 @@ impl App {
 
     /// The status bar along the bottom of the window: the active tab's side
     /// panel toggles, its session control when it has one, and what is running.
-    fn status_strip(&self, cx: &Context<Self>) -> AnyElement {
+    fn status_strip(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let mut jobs: Vec<crate::status_bar::Job> = Vec::new();
         if let Some(job) = self.cache.running {
             let named = match job {
@@ -1061,7 +1071,7 @@ impl App {
         // A session belongs to the replay workspace it was started from.
         let session = inspector.map(|view| crate::collab_popover::render(&view, cx));
 
-        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, cx)
+        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, window, cx)
     }
 
     /// Notes the files now being dragged over the window.
@@ -3981,6 +3991,12 @@ fn open_directory(dir: &std::path::Path) {
 
 impl Render for App {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A hidden tab's views stay alive without rendering, so what they
+        // reported is dropped; the new tab's views report as they render.
+        if self.modes_tab != self.active_tab {
+            self.modes_tab = self.active_tab;
+            crate::status_bar::clear_modes(cx);
+        }
         // A tab can change without a pointer-leave event on the preview tile.
         if self.active_tab != AppTab::Settings && self.theme_preview.take().is_some() {
             theme::apply_egui_theme(self.theme, self.zoom, window, cx);
@@ -4181,6 +4197,13 @@ impl Render for App {
                 .absolute()
                 .size_0()
             })
+            // A frame for the views that read the held keys. Dispatch reaches
+            // this only while focus is inside the app view, not in a dialog
+            // the `Root` layer hosts; the keys themselves are read from the
+            // window, so whatever draws next reads them right.
+            .on_modifiers_changed(cx.listener(|_this, _event: &gpui_kit::ModifiersChangedEvent, _window, cx| {
+                cx.notify();
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
                 if event.is_held || !modifiers.control {
@@ -4203,7 +4226,7 @@ impl Render for App {
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
             .child(div().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)))
-            .child(self.status_strip(cx))
+            .child(self.status_strip(window, cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Over the rest of the view: a drag is about to become a drop, and
             // what it would do is the only thing worth reading while it hovers.

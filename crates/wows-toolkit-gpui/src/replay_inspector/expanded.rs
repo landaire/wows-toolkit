@@ -21,6 +21,9 @@
 //! currently returns `None` and falls back to a text label, matching the
 //! egui app's own icon-texture-missing fallback branches.
 
+use std::rc::Rc;
+use std::sync::Arc;
+
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::Button;
@@ -38,6 +41,8 @@ use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+use wows_toolkit_viewmodel::breakdown::BreakdownRow;
+use wows_toolkit_viewmodel::fire_chance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
@@ -48,8 +53,8 @@ use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
 use super::table::text_width;
-use wows_toolkit_viewmodel::breakdown::BreakdownRow;
-use wows_toolkit_viewmodel::fire_chance;
+use crate::status_bar::ModeHint;
+use crate::status_bar::ModifierKey;
 
 /// Multiplier for a detail-list item's `ElementId`
 /// (`row_ix * DETAIL_ID_STRIDE + item_ix`), spacing rows apart enough that no
@@ -75,7 +80,6 @@ const RIBBON_TILE_GAP: f32 = 6.0;
 /// The ribbon grid never measures narrower than this many tiles per line, so
 /// a narrow Name column still lays the ribbons out as a grid.
 const RIBBON_GRID_MIN_TILES: usize = 4;
-const RIBBON_TOOLTIP_MAX_WIDTH: f32 = 280.0;
 
 /// Captain skill, modernization and consumable icons are white glyphs drawn
 /// for the game's dark interface, so they sit on this dark tile in every
@@ -538,30 +542,95 @@ fn game_icon_tile(icon: Img, icon_size: f32) -> Div {
 }
 
 /// A small icon-or-text cell shared by modernizations and signals: a decoded
-/// icon when `icons.get_keyed(key)` has one, otherwise `display_name` as plain
-/// text; a hover tooltip either way. `tag` keys the `ElementId` so different
-/// lists in the same row never collide (see `DETAIL_ID_STRIDE`'s doc).
+/// icon when `icons.get_keyed(key)` has one, otherwise `name` as plain text;
+/// a hover tooltip either way. `tag` keys the `ElementId` so different lists
+/// in the same row never collide (see `DETAIL_ID_STRIDE`'s doc).
 #[allow(clippy::too_many_arguments)]
 fn icon_or_text_cell(
     tag: &'static str,
     row_ix: usize,
     idx: usize,
     key: &str,
-    display_name: String,
-    tooltip_text: String,
+    name: String,
+    description: Option<&str>,
     size: f32,
     backdrop: IconBackdrop,
     icons: &IconCache,
 ) -> AnyElement {
-    let tooltip: SharedString = tooltip_text.into();
-    let el = match (icons.get_keyed(key), backdrop) {
+    let image = icons.get_keyed(key);
+    let preview = image.as_ref().map(|image| IconPreview::new(Arc::clone(image), backdrop, size));
+    let el = match (image, backdrop) {
         (Some(image), IconBackdrop::Bare) => div().child(img(image).w(px(size)).h(px(size))),
         (Some(image), IconBackdrop::DarkTile) => game_icon_tile(img(image), size),
-        (None, _) => div().text_xs().child(detail_text(display_name)),
+        (None, _) => div().text_xs().child(detail_text(name.clone())),
     };
+    let tooltip = IconTooltip { preview, name: name.into(), description: description_text(description) };
     el.id((tag, row_ix * DETAIL_ID_STRIDE + idx))
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .tooltip(move |window, cx| tooltip.build().build(window, cx))
         .into_any_element()
+}
+
+/// A game icon as its tooltip draws it: larger than in the row, on the same
+/// backdrop.
+#[derive(Clone)]
+struct IconPreview {
+    image: Arc<RenderImage>,
+    backdrop: IconBackdrop,
+    size: f32,
+}
+
+impl IconPreview {
+    /// The preview of an icon drawn at `drawn_size` in the row: twice that,
+    /// but never smaller than `MIN_SIZE`.
+    fn new(image: Arc<RenderImage>, backdrop: IconBackdrop, drawn_size: f32) -> Self {
+        const MIN_SIZE: f32 = 64.0;
+
+        Self { image, backdrop, size: (drawn_size * 2.0).max(MIN_SIZE) }
+    }
+
+    fn render(&self) -> AnyElement {
+        match self.backdrop {
+            IconBackdrop::Bare => {
+                let (w, h) = fit_within_box(&self.image, self.size);
+                img(Arc::clone(&self.image)).w(px(w)).h(px(h)).flex_none().into_any_element()
+            }
+            IconBackdrop::DarkTile => game_icon_tile(img(Arc::clone(&self.image)), self.size).into_any_element(),
+        }
+    }
+}
+
+/// An icon's tooltip: the icon drawn larger, with `name` in bold and
+/// `description` centred under it.
+#[derive(Clone)]
+struct IconTooltip {
+    preview: Option<IconPreview>,
+    name: SharedString,
+    description: Option<SharedString>,
+}
+
+impl IconTooltip {
+    fn build(&self) -> Tooltip {
+        /// Where a description wraps.
+        const MAX_WIDTH: f32 = 300.0;
+
+        let this = self.clone();
+        Tooltip::element(move |_window, _cx| {
+            v_flex()
+                .max_w(px(MAX_WIDTH))
+                .items_center()
+                .gap_1()
+                .py_0p5()
+                .text_center()
+                .when_some(this.preview.as_ref(), |el, preview| el.child(preview.render()))
+                .child(div().font_weight(FontWeight::BOLD).child(this.name.clone()))
+                .when_some(this.description.clone(), |el, description| el.child(div().child(description)))
+        })
+    }
+}
+
+/// A description worth showing: present and not blank.
+fn description_text(description: Option<&str>) -> Option<SharedString> {
+    description.filter(|text| !text.trim().is_empty()).map(|text| SharedString::from(text.to_owned()))
 }
 
 /// Fitted `(width, height)` to render `image` within a `max` by `max` box
@@ -977,7 +1046,7 @@ fn achievement_row(row_ix: usize, idx: usize, achievement: &AchievementResult, i
 /// One ribbon: its icon fitted within its box (or, absent an icon, its name)
 /// over its count. The count reads "x20" rather than a bare "20" so it is
 /// read as a multiplier on the ribbon, not as a score. Hovering shows the
-/// name and description (`name_description_tooltip`).
+/// icon larger with the name and description (`IconTooltip`).
 fn ribbon_tile(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCache) -> AnyElement {
     let key = if ribbon.is_subribbon {
         format!("subribbon:{}", ribbon.icon_key)
@@ -985,7 +1054,9 @@ fn ribbon_tile(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCac
         format!("ribbon:{}", ribbon.icon_key)
     };
     let size = if ribbon.is_subribbon { LARGE_ICON_SIZE } else { RIBBON_ICON_SIZE };
-    let icon = match icons.get_keyed(&key) {
+    let image = icons.get_keyed(&key);
+    let preview = image.as_ref().map(|image| IconPreview::new(Arc::clone(image), IconBackdrop::Bare, size));
+    let icon = match image {
         Some(image) => {
             let (w, h) = fit_within_box(&image, size);
             img(image).w(px(w)).h(px(h)).flex_none().into_any_element()
@@ -994,9 +1065,11 @@ fn ribbon_tile(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCac
             div().w_full().text_xs().text_center().child(detail_text(ribbon.display_name.clone())).into_any_element()
         }
     };
-    let name: SharedString = ribbon.display_name.clone().into();
-    let description: Option<SharedString> =
-        ribbon.description.as_deref().filter(|d| !d.trim().is_empty()).map(|d| SharedString::from(d.to_owned()));
+    let tooltip = IconTooltip {
+        preview,
+        name: ribbon.display_name.clone().into(),
+        description: description_text(ribbon.description.as_deref()),
+    };
     v_flex()
         .id(("replay-ribbon", row_ix * DETAIL_ID_STRIDE + idx))
         .w(px(RIBBON_TILE_WIDTH))
@@ -1005,20 +1078,8 @@ fn ribbon_tile(row_ix: usize, idx: usize, ribbon: &RibbonResult, icons: &IconCac
         .gap_0p5()
         .child(icon)
         .child(div().text_xs().child(detail_text(format!("x{}", ribbon.count))))
-        .tooltip(move |window, cx| name_description_tooltip(name.clone(), description.clone()).build(window, cx))
+        .tooltip(move |window, cx| tooltip.build().build(window, cx))
         .into_any_element()
-}
-
-/// `name` in bold over `description`, wrapped at `RIBBON_TOOLTIP_MAX_WIDTH`.
-fn name_description_tooltip(name: SharedString, description: Option<SharedString>) -> Tooltip {
-    Tooltip::element(move |_window, _cx| {
-        v_flex()
-            .max_w(px(RIBBON_TOOLTIP_MAX_WIDTH))
-            .gap_0p5()
-            .py_0p5()
-            .child(div().font_weight(FontWeight::BOLD).child(name.clone()))
-            .when_some(description.clone(), |this, description| this.child(div().child(description)))
-    })
 }
 
 /// Skills-column expanded content: the skill-tier hover text, then (when this
@@ -1117,17 +1178,13 @@ fn modernization_slots_view(row_ix: usize, slots: &[Option<TranslatedModule>], i
         row = row.child(match slot {
             Some(module) => {
                 let display_name = module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
-                let tooltip = match module.description.as_deref() {
-                    Some(d) if !d.is_empty() => format!("{display_name}\n\n{d}"),
-                    _ => display_name.clone(),
-                };
                 icon_or_text_cell(
                     "replay-modernization",
                     row_ix,
                     idx,
                     &format!("modernization:{}", module.game_params_name),
                     display_name,
-                    tooltip,
+                    module.description.as_deref(),
                     MODULE_ICON_SIZE,
                     IconBackdrop::DarkTile,
                     icons,
@@ -1157,17 +1214,13 @@ fn signals_view(row_ix: usize, signals: &[TranslatedModule], icons: &IconCache) 
     let mut row = h_flex().flex_wrap().gap_1();
     for (idx, signal) in signals.iter().enumerate() {
         let display_name = signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
-        let tooltip = match signal.description.as_deref() {
-            Some(d) if !d.is_empty() => format!("{display_name}\n\n{d}"),
-            _ => display_name.clone(),
-        };
         row = row.child(icon_or_text_cell(
             "replay-signal",
             row_ix,
             idx,
             &format!("signal:{}", signal.game_params_name),
             display_name,
-            tooltip,
+            signal.description.as_deref(),
             MODULE_ICON_SIZE,
             IconBackdrop::Bare,
             icons,
@@ -1217,14 +1270,17 @@ fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCac
 fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCache) -> AnyElement {
     let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.as_str().to_string());
     let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
-    let tooltip_text: SharedString = match skill.description.as_deref() {
-        Some(desc) if !desc.is_empty() => format!("{display_name}{cost}\n\n{desc}"),
-        _ => format!("{display_name}{cost}"),
-    }
-    .into();
-
     let key = format!("skill:{}", skill.internal_name.as_str());
-    let el = match icons.get_keyed(&key) {
+    let image = icons.get_keyed(&key);
+    let tooltip = IconTooltip {
+        preview: image
+            .as_ref()
+            .map(|image| IconPreview::new(Arc::clone(image), IconBackdrop::DarkTile, MODULE_ICON_SIZE)),
+        name: format!("{display_name}{cost}").into(),
+        description: description_text(skill.description.as_deref()),
+    };
+
+    let el = match image {
         Some(image) => {
             // Dim only the glyph: the tile stays put so the grid keeps its
             // shape, and white against dim gray separates learned skills.
@@ -1243,15 +1299,15 @@ fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCac
         }
     };
     el.id(("replay-skill", row_ix * DETAIL_ID_STRIDE + idx))
-        .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
+        .tooltip(move |window, cx| tooltip.build().build(window, cx))
         .into_any_element()
 }
 
 /// The 3-column consumable inventory (Consumable/Remaining/Total). Mirrors
 /// `render_consumable_inventory`, including its `ChargeCount::Unlimited`
 /// quirk: the "remaining" column shows the activation count (there is no
-/// remaining-charges concept for an unlimited consumable) and "total" reads
-/// "Unlimited" instead of a number.
+/// remaining-charges concept for an unlimited consumable) and "total" holds
+/// the infinity mark instead of a number.
 fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &IconCache) -> AnyElement {
     const NAME_COL: f32 = 170.0;
     const COUNT_COL: f32 = 64.0;
@@ -1290,19 +1346,33 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
     const COUNT_COL: f32 = 64.0;
 
     let (remaining_text, total_text, hover_text) = match consumable.total_charges {
-        ChargeCount::Unlimited => {
-            (consumable.charges_used.to_string(), "Unlimited".to_string(), format!("Used: {}", consumable.charges_used))
-        }
+        ChargeCount::Unlimited => (
+            consumable.charges_used.to_string(),
+            t!("ui.replay.consumable_charges_infinite").into_owned(),
+            t!("ui.replay.consumable_charges_unlimited", used = consumable.charges_used).into_owned(),
+        ),
         ChargeCount::Finite(total) => {
             let remaining = total.saturating_sub(consumable.charges_used);
-            (remaining.to_string(), total.to_string(), format!("Remaining: {remaining} / Total: {total}"))
+            (
+                remaining.to_string(),
+                total.to_string(),
+                t!("ui.replay.consumable_charges_remaining", remaining = remaining, total = total).into_owned(),
+            )
         }
     };
-    let hover: SharedString = hover_text.into();
 
     let key = format!("consumable:{}", consumable.icon_key);
+    let image = icons.get_keyed(&key);
+    let tooltip = IconTooltip {
+        preview: image
+            .as_ref()
+            .map(|image| IconPreview::new(Arc::clone(image), IconBackdrop::DarkTile, CONSUMABLE_ICON_SIZE)),
+        name: consumable.display_name.clone().into(),
+        description: Some(hover_text.into()),
+    };
+
     let mut name_cell = h_flex().w(px(NAME_COL)).flex_none().gap_1().items_center();
-    if let Some(image) = icons.get_keyed(&key) {
+    if let Some(image) = image {
         name_cell = name_cell.child(game_icon_tile(img(image), CONSUMABLE_ICON_SIZE));
     }
     name_cell = name_cell.child(div().text_xs().child(detail_text(consumable.display_name.clone())));
@@ -1314,7 +1384,7 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
         .child(name_cell)
         .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(remaining_text)))
         .child(div().w(px(COUNT_COL)).flex_none().text_xs().child(detail_text(total_text)))
-        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .tooltip(move |window, cx| tooltip.build().build(window, cx))
         .into_any_element()
 }
 
@@ -1356,20 +1426,84 @@ fn render_damage_section(
     }
 
     if interactions.is_some() {
-        col = col.child(breakdown_grid(&damage_interaction_rows(row, all_rows, direction, alt_held)));
+        let section = InteractionSection {
+            direction,
+            this: Party { player: row.display_name.clone(), ship: row.ship_name.clone() },
+            lines: damage_interactions(row, all_rows, direction),
+        };
+        col = col.child(interaction_grid(Rc::new(section), alt_held));
     }
 
     Some(col.into_any_element())
 }
 
-/// One line per ship this row dealt damage to or took it from, largest
-/// first, as `amount (pct%)` against the ship's name.
-fn damage_interaction_rows(
-    row: &PlayerRow,
-    all_rows: &[PlayerRow],
+/// The mode alt puts the damage breakdowns in, as the status bar names it.
+pub(super) const SHARE_MODE: ModeHint = ModeHint { key: ModifierKey::Alt, name_key: "ui.replay.damage_share.mode" };
+
+/// Whether alt changes anything on screen: some row among `open`, the rows
+/// showing their detail, lists damage shares under one of `columns`.
+pub(super) fn shows_damage_shares<'a>(
+    open: impl IntoIterator<Item = &'a PlayerRow>,
+    columns: impl IntoIterator<Item = ReplayColumn>,
+    debug: bool,
+) -> bool {
+    let damage_shown =
+        columns.into_iter().any(|col| matches!(col, ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage));
+
+    damage_shown
+        && open.into_iter().any(|row| {
+            let shown = !row.should_hide_stats() || debug;
+            shown && row.damage_interactions.as_ref().is_some_and(|interactions| !interactions.is_empty())
+        })
+}
+
+/// A player as a share tooltip names them: by player and ship, as two rows
+/// can be in the same ship.
+struct Party {
+    player: String,
+    ship: String,
+}
+
+impl Party {
+    fn named(&self) -> String {
+        format!("{} ({})", self.player, self.ship)
+    }
+}
+
+/// One ship this row dealt damage to or took it from.
+struct InteractionLine {
+    other: Party,
+    amount: u64,
+    /// Percent of this row's total.
+    share: f64,
+    /// Percent of the other player's total.
+    inverse_share: f64,
+}
+
+impl InteractionLine {
+    fn shown_share(&self, inverted: bool) -> f64 {
+        if inverted { self.inverse_share } else { self.share }
+    }
+
+    fn value(&self, inverted: bool) -> String {
+        format!("{} ({:.0}%)", separate_number(self.amount), self.shown_share(inverted))
+    }
+
+    fn breakdown(&self, inverted: bool) -> BreakdownRow {
+        BreakdownRow { label: self.other.ship.clone(), value: self.value(inverted) }
+    }
+}
+
+/// One damage section's per-ship lines, shared with every line's tooltip.
+struct InteractionSection {
     direction: DamageDirection,
-    alt_held: bool,
-) -> Vec<BreakdownRow> {
+    this: Party,
+    lines: Vec<InteractionLine>,
+}
+
+/// One line per ship this row dealt damage to or took it from, largest
+/// first.
+fn damage_interactions(row: &PlayerRow, all_rows: &[PlayerRow], direction: DamageDirection) -> Vec<InteractionLine> {
     let Some(interactions) = row.damage_interactions.as_ref() else {
         return Vec::new();
     };
@@ -1383,13 +1517,107 @@ fn damage_interaction_rows(
                 return None;
             }
             let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
-            let pct = interaction_percentage(interaction, direction, alt_held);
-            Some(BreakdownRow {
-                label: other.ship_name.clone(),
-                value: format!("{} ({pct:.0}%)", separate_number(amount)),
+            Some(InteractionLine {
+                other: Party { player: other.display_name.clone(), ship: other.ship_name.clone() },
+                amount,
+                share: interaction_percentage(interaction, direction, false),
+                inverse_share: interaction_percentage(interaction, direction, true),
             })
         })
         .collect()
+}
+
+/// `breakdown_grid` for the per-ship lines, each line explaining its share
+/// on hover. The tooltip reads alt itself when drawn, so one left open while
+/// alt changes follows the line it explains.
+fn interaction_grid(section: Rc<InteractionSection>, alt_held: bool) -> AnyElement {
+    let explained = |index: usize, id: &'static str, text: String| {
+        let section = Rc::clone(&section);
+        div().id((id, index)).child(detail_text(text)).tooltip(move |window, cx| {
+            let section = Rc::clone(&section);
+            Tooltip::element(move |window, cx| {
+                let inverted = crate::status_bar::is_held(ModifierKey::Alt, window, cx);
+                let line = &section.lines[index];
+                let text = ShareText {
+                    direction: section.direction,
+                    inverted,
+                    share: line.shown_share(inverted),
+                    this: &section.this.named(),
+                    other: &line.other.named(),
+                    key: ModifierKey::Alt.label(cx),
+                };
+                div().child(text.said())
+            })
+            .build(window, cx)
+        })
+    };
+    h_flex()
+        .id("damage-interactions")
+        .gap(px(BREAKDOWN_GAP))
+        .items_start()
+        .text_xs()
+        .child(
+            v_flex().gap_px().children(
+                section
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| explained(index, "damage-interaction-ship", line.other.ship.clone())),
+            ),
+        )
+        .child(
+            v_flex().gap_px().items_end().children(
+                section
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| explained(index, "damage-interaction-share", line.value(alt_held))),
+            ),
+        )
+        .into_any_element()
+}
+
+/// What a damage line's share means in the mode it is shown in, then how to
+/// see the other one.
+struct ShareText<'a> {
+    direction: DamageDirection,
+    inverted: bool,
+    share: f64,
+    /// The row the line is under.
+    this: &'a str,
+    /// The player the line names.
+    other: &'a str,
+    /// The key that inverts the share.
+    key: &'a str,
+}
+
+impl ShareText<'_> {
+    /// While inverted the key is already down, so the hint says to let it go
+    /// rather than to hold it.
+    fn said(&self) -> String {
+        let (pct, ship, other) = (format!("{:.0}%", self.share), self.this, self.other);
+        let said = match (self.direction, self.inverted) {
+            (DamageDirection::Dealt, false) => {
+                t!("ui.replay.damage_share.dealt", pct = pct, ship = ship, other = other)
+            }
+            (DamageDirection::Dealt, true) => {
+                t!("ui.replay.damage_share.dealt_inverse", pct = pct, ship = ship, other = other)
+            }
+            (DamageDirection::Received, false) => {
+                t!("ui.replay.damage_share.received", pct = pct, ship = ship, other = other)
+            }
+            (DamageDirection::Received, true) => {
+                t!("ui.replay.damage_share.received_inverse", pct = pct, ship = ship, other = other)
+            }
+        };
+        let hint = if self.inverted {
+            t!("ui.replay.damage_share.release", key = self.key)
+        } else {
+            t!("ui.replay.damage_share.hold", key = self.key)
+        };
+
+        format!("{said}\n{hint}")
+    }
 }
 
 /// Mirrors `render_damage_section`: the breakdown above, and the per-ship
@@ -1406,9 +1634,10 @@ fn damage_section_width(
     if row.should_hide_stats() && !debug {
         return widest;
     }
+    let lines = damage_interactions(row, all_rows, direction);
     for alt_held in [false, true] {
-        let lines = damage_interaction_rows(row, all_rows, direction, alt_held);
-        widest = widest.max(breakdown_grid_width(&lines, window));
+        let rows: Vec<BreakdownRow> = lines.iter().map(|line| line.breakdown(alt_held)).collect();
+        widest = widest.max(breakdown_grid_width(&rows, window));
     }
     widest
 }
@@ -1510,6 +1739,7 @@ mod tests {
     use super::RIBBON_TILE_GAP;
     use super::RIBBON_TILE_WIDTH;
     use super::ReplayColumn;
+    use super::ShareText;
     use super::consumables_width;
     use super::damage_event_rows;
     use super::fit_dims;
@@ -1520,6 +1750,7 @@ mod tests {
     use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
     use super::ribbon_grid_width;
+    use super::shows_damage_shares;
     use super::skill_grid_width;
     use super::spotting_target_rows;
     use crate::replay_inspector::test_support::base_row;
@@ -1686,6 +1917,49 @@ mod tests {
 
         assert!((interaction_percentage(&i, DamageDirection::Dealt, true) - 71.2).abs() < 1e-9);
         assert!((interaction_percentage(&i, DamageDirection::Received, true) - 9.4).abs() < 1e-9);
+    }
+
+    /// Each mode says whose total the share is of, and the hint says how to
+    /// reach the other mode: hold the key from the plain one, let it go from
+    /// the inverted one.
+    #[test]
+    fn a_damage_share_explains_itself_in_each_mode() {
+        rust_i18n::set_locale("en");
+        let said = |direction, inverted| {
+            ShareText { direction, inverted, share: 34.4, this: "Yamato", other: "Iowa", key: "Alt" }.said()
+        };
+
+        assert_eq!(
+            said(DamageDirection::Dealt, false),
+            "34% of the damage Yamato dealt went to Iowa.\nHold Alt to invert."
+        );
+        assert_eq!(
+            said(DamageDirection::Dealt, true),
+            "34% of the damage Iowa received came from Yamato.\nRelease Alt to invert back."
+        );
+        assert_eq!(
+            said(DamageDirection::Received, false),
+            "34% of the damage Yamato received came from Iowa.\nHold Alt to invert."
+        );
+        assert_eq!(
+            said(DamageDirection::Received, true),
+            "34% of the damage Iowa dealt went to Yamato.\nRelease Alt to invert back."
+        );
+    }
+
+    /// Alt is worth naming on the status bar only while it changes something
+    /// on screen: an open row with damage shares under a shown damage column.
+    #[test]
+    fn alt_names_a_mode_only_over_damage_shares_on_screen() {
+        let mut open = base_row(1, Relation::new(0), true);
+        open.damage_interactions = Some([(AccountId(2), interaction(1_000, 10.0, 0, 0.0))].into_iter().collect());
+        let bare = base_row(3, Relation::new(1), false);
+        let damage = [ReplayColumn::ActualDamage];
+
+        assert!(shows_damage_shares([&open], damage, false));
+        assert!(!shows_damage_shares([&bare], damage, false), "the open row has no shares");
+        assert!(!shows_damage_shares([], damage, false), "no row is open");
+        assert!(!shows_damage_shares([&open], [ReplayColumn::Kills], false), "no damage column is shown");
     }
 
     /// Largest share first; a victim with no spotting damage, or one no row
