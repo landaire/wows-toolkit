@@ -374,11 +374,11 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Wind
     theme.border = rgb(palette.border).into();
     theme.secondary = rgb(palette.widget).into();
     theme.secondary_hover = rgb(palette.widget_hot).into();
-    theme.secondary_active = rgb(palette.widget_hot).into();
+    theme.secondary_active = pressed(rgb(palette.widget_hot).into());
     theme.secondary_foreground = rgb(palette.text).into();
     theme.button = rgb(palette.widget).into();
     theme.button_hover = rgb(palette.widget_hot).into();
-    theme.button_active = rgb(palette.widget_hot).into();
+    theme.button_active = pressed(rgb(palette.widget_hot).into());
     theme.button_foreground = rgb(palette.text).into();
     theme.button_secondary = theme.secondary;
     theme.button_secondary_hover = theme.secondary_hover;
@@ -515,6 +515,15 @@ pub fn accent_foreground() -> Hsla {
 /// A stationary halo for active controls on dark surfaces.
 pub fn phosphor_glow() -> BoxShadow {
     BoxShadow::new(px(0.), px(0.), accent().opacity(if is_dark_mode() { 0.18 } else { 0. })).blur_radius(px(8.))
+}
+
+/// A control held down: a step darker than under the pointer, so a press
+/// reads as the control going in. A fixed step reads alike on light and
+/// dark palettes.
+fn pressed(hot: Hsla) -> Hsla {
+    const STEP: f32 = 0.035;
+
+    Hsla { l: (hot.l - STEP).max(0.), ..hot }
 }
 
 fn palette_for(choice: ThemeChoice, system_dark: bool) -> &'static Palette {
