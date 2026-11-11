@@ -2560,6 +2560,28 @@ fn a_toast_reaches_the_screen(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A crash report is dozens of lines of backtrace. It scrolls inside its own
+/// box, so the dialog and its buttons stay inside the window.
+#[gpui_kit::test]
+fn a_long_crash_report_scrolls_inside_the_dialog(cx: &mut TestAppContext) {
+    let (window, app) = open_app_in_root(cx);
+    let report: String = (0..200).map(|line| format!("  {line}: frame::in::the::backtrace\n")).collect();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        app.update(cx, |app, cx| app.show_crash_report(report, window, cx));
+        window.render_frame(cx);
+
+        let details = window.find("crash-report-scroll").bounds();
+        assert!(
+            details.size.height <= px(super::app::CRASH_REPORT_HEIGHT + 0.5),
+            "the report box is held to its height, got {:?}",
+            details.size.height
+        );
+        assert!(details.bottom() < window.viewport_size().height, "and the dialog ends inside the window");
+    })
+    .expect("the test window stays open");
+}
+
 /// A state the reader has to fix stays on screen, and one per state: the egui
 /// app makes these permanent and closable, and arms each once, so an app that
 /// retries does not stack a column of the same complaint.

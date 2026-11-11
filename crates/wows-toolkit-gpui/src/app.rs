@@ -305,6 +305,9 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 /// How long a failure may be before it is worth a window rather than a toast.
 const TOO_LONG_TO_TOAST: usize = 160;
 
+/// The crash report box's height; the rest of the report scrolls.
+pub(crate) const CRASH_REPORT_HEIGHT: f32 = 260.;
+
 /// What a finished background job has to say, until the next draw says it.
 ///
 /// Kept rather than said where it is decided: a job finishes without a window,
@@ -1121,13 +1124,35 @@ impl App {
     /// clipboard, which is what a reader does with it next.
     pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(report) = crate::logging::take_crash_report() else { return };
+        self.show_crash_report(report, window, cx);
+    }
+
+    /// The crash dialog. The report is a backtrace dozens of lines long, so it
+    /// scrolls inside a box of its own and the dialog keeps a fixed height.
+    pub(crate) fn show_crash_report(&mut self, report: String, window: &mut Window, cx: &mut Context<Self>) {
         self.recent_crash_report = Some(report.clone());
-        let copied = report.clone();
-        window.open_alert_dialog(cx, move |alert, _window, _cx| {
-            let copied = copied.clone();
+        window.open_alert_dialog(cx, move |alert, _window, cx| {
+            let copied = report.clone();
+            let theme = cx.theme();
+            let details = div()
+                .id("crash-report-scroll")
+                .test_support()
+                .max_h(px(CRASH_REPORT_HEIGHT))
+                .overflow_y_scroll()
+                .p_2()
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.muted)
+                .font_family(theme.mono_font_family.clone())
+                .text_xs()
+                .child(crate::ui::selectable_text("crash-report", report.trim().to_owned()));
             alert
+                .width(px(640.))
                 .title(t!("ui.windows.crash_detected").into_owned())
-                .description(format!("{}\n\n{}", t!("ui.dialogs.crash_message"), copied.trim()))
+                .description(
+                    v_flex().gap_3().child(t!("ui.dialogs.crash_message").into_owned()).child(details),
+                )
                 .ok_text(t!("ui.buttons.copy").into_owned())
                 .show_cancel(true)
                 .on_ok(move |_event, window, cx| {
