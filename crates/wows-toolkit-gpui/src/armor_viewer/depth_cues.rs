@@ -29,17 +29,17 @@ use crate::viewport::types::Vertex;
 /// How long a landing hit's ring takes to spread and fade.
 pub(crate) const PULSE: Duration = Duration::from_millis(700);
 
-/// Shades the edges of the scene at `bounds` toward the frame, so the eye
-/// settles on the ship in the middle.
+/// Shades the edges of the scene at `bounds`, a narrow inset shadow that
+/// sets the scene just below the panels around it.
 pub(crate) fn paint_vignette(bounds: Bounds<Pixels>, window: &mut Window) {
-    /// How far in from each edge the shade reaches, as a share of the
-    /// shorter side.
-    const REACH: f32 = 0.16;
+    /// How far in from each edge the shade reaches. Fixed and narrow: a
+    /// wide shade reads as a shadow cast by the panels, far from them.
+    const REACH: Pixels = px(10.);
     /// The scene is drawn on a fixed dark ground whichever theme is chosen,
     /// so one strength serves both.
-    const STRENGTH: f32 = 0.26;
+    const STRENGTH: f32 = 0.3;
 
-    let reach = bounds.size.width.min(bounds.size.height) * REACH;
+    let reach = REACH.min(bounds.size.width.min(bounds.size.height) / 2.);
     let shade = black().opacity(STRENGTH);
     let clear = black().opacity(0.);
     let (left, top) = (bounds.origin.x, bounds.origin.y);
