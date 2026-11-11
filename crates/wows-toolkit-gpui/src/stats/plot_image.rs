@@ -80,7 +80,8 @@ impl Faces {
 
         // The desktop's own UI faces first, then everything else as fallback,
         // so a Latin label looks like the app and a CJK one still renders.
-        let preferred = ["Segoe UI", "Inter", "Helvetica Neue", "Arial", "DejaVu Sans", "Noto Sans"];
+        let preferred =
+            ["Segoe UI", "Adwaita Sans", "Cantarell", "Helvetica Neue", "Arial", "DejaVu Sans", "Noto Sans"];
         let mut order: Vec<fontdb::ID> = Vec::new();
         for family in preferred {
             let query = fontdb::Query { families: &[fontdb::Family::Name(family)], ..Default::default() };

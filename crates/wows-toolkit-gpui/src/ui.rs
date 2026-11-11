@@ -1,5 +1,8 @@
 //! Small rendering helpers shared across the tabs.
 
+use std::sync::Arc;
+use std::sync::LazyLock;
+
 use gpui_kit::base::SelectableText;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
@@ -99,7 +102,14 @@ pub fn selectable_text(id: impl Into<ElementId>, text: impl Into<SharedString>) 
 
 /// Sets `element`'s figures to one width, for numbers read down a column.
 pub fn tabular<E: Styled>(element: E) -> E {
-    element.font_features(crate::fonts::tabular_figures())
+    element.font_features(tabular_figures())
+}
+
+/// Figures of one width, so numbers in a column line up digit for digit.
+pub fn tabular_figures() -> FontFeatures {
+    static TABULAR: LazyLock<FontFeatures> = LazyLock::new(|| FontFeatures(Arc::new(vec![("tnum".into(), 1)])));
+
+    TABULAR.clone()
 }
 
 /// The height a `Select` occupies in a row, by its size.
@@ -130,8 +140,8 @@ pub fn rule_h(cx: &App) -> impl IntoElement {
 
 /// The title over a group of rows: small, semibold and muted, so it names the
 /// group without competing with the rows. `content` is the translated text as
-/// drawn, or an element such as selectable text that carries it; Inter has no
-/// small capitals and GPUI no letter spacing.
+/// drawn, or an element such as selectable text that carries it; the platform
+/// UI font need not have small capitals, and GPUI has no letter spacing.
 pub fn section_label(content: impl IntoElement) -> Div {
     div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(crate::theme::text_dim()).child(content)
 }

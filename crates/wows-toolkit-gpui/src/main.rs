@@ -19,7 +19,6 @@ mod collab_popover;
 mod constants;
 mod dialog;
 mod first_run;
-mod fonts;
 mod force_reindex;
 mod frame_texture;
 mod game_data_cache;
@@ -143,9 +142,6 @@ fn main() {
     heap_profile::mark("app.run");
     app.run(move |cx| {
         gpui_kit::component::init(cx);
-        if let Err(err) = fonts::register(cx) {
-            tracing::error!("the bundled UI font could not be registered: {err:#}");
-        }
         zoom::bind_keys(cx);
         if let Err(err) = runtime::init(cx) {
             tracing::error!("failed to start the tokio runtime: {err}");

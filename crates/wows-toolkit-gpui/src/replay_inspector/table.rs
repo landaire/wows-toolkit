@@ -120,7 +120,7 @@ pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) ->
 /// than the font's own.
 fn figures_width(text: SharedString, window: &mut Window) -> f32 {
     let mut font = window.text_style().font();
-    font.features = crate::fonts::tabular_figures();
+    font.features = crate::ui::tabular_figures();
     font_width(text, font, window)
 }
 
