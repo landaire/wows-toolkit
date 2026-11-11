@@ -508,26 +508,16 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 CellValue::plain(row.observed_damage_text.clone())
             }
         }
+        // The table draws these two cells' per-type split as a bar with its
+        // own tooltip (`damage_mix`).
         ReplayColumn::ActualDamage => match row.actual_damage_text.as_ref() {
             Some(_) if nda_active => CellValue::plain(NDA),
-            Some(text) => {
-                let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
-                if let Some(hover) = row.actual_damage_breakdown.as_ref() {
-                    cell = cell.with_hover(breakdown::padded_text(hover));
-                }
-                cell
-            }
+            Some(text) => CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row))),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::ReceivedDamage => match row.received_damage_text.as_ref() {
             Some(_) if nda_active => CellValue::plain(NDA),
-            Some(text) => {
-                let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
-                if let Some(hover) = row.received_damage_breakdown.as_ref() {
-                    cell = cell.with_hover(breakdown::padded_text(hover));
-                }
-                cell
-            }
+            Some(text) => CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row))),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::SpottingDamage => match row.spotting_damage_text.as_ref() {
@@ -672,17 +662,14 @@ mod tests {
         let row = PlayerRow {
             is_test_ship: true,
             actual_damage_text: Some("50,000".to_string()),
-            actual_damage_breakdown: Some(vec![BreakdownRow { label: "AP".to_string(), value: "50,000".to_string() }]),
             ..base_row(1, Relation::new(2), false)
         };
 
         let hidden = cell_value(&row, ReplayColumn::ActualDamage, false);
         assert_eq!(hidden.text, "NDA");
-        assert_eq!(hidden.hover, None);
 
         let debug_visible = cell_value(&row, ReplayColumn::ActualDamage, true);
         assert_eq!(debug_visible.text, "50,000");
-        assert_eq!(debug_visible.hover.as_deref(), Some("AP : 50,000"));
     }
 
     #[test]

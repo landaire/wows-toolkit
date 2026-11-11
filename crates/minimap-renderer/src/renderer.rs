@@ -266,8 +266,9 @@ fn consumable_radius_color(consumable: &Recognized<Consumable>, is_friendly: boo
 }
 
 /// Color for a shell ammo type. Single source of truth shared by the ship-name
-/// armament color and the shell-tracer tip so they cannot drift apart.
-fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
+/// armament color, the shell-tracer tip and the replay table's damage colors
+/// so they cannot drift apart.
+pub fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
     match ammo {
         AmmoType::AP => [140, 200, 255],
         AmmoType::HE => [255, 180, 80],
@@ -275,6 +276,15 @@ fn ammo_type_color(ammo: &AmmoType) -> [u8; 3] {
         AmmoType::Unknown(_) => [140, 200, 255],
     }
 }
+
+/// Armament color for torpedoes.
+pub const COLOR_TORP: [u8; 3] = [100, 255, 160];
+
+/// Armament color for aircraft.
+pub const COLOR_PLANES: [u8; 3] = [200, 160, 255];
+
+/// Armament color for the sonar pinger.
+pub const COLOR_SONAR: [u8; 3] = [100, 220, 255];
 
 /// Map a `DamageStatWeapon` to a short display group label for stats breakdown.
 pub fn weapon_group_label(weapon: &Recognized<DamageStatWeapon>) -> &'static str {
@@ -829,10 +839,6 @@ impl<'a> MinimapRenderer<'a> {
 
     /// Get the armament color for a ship based on its selected weapon/ammo.
     fn get_armament_color(&self, entity_id: &EntityId, controller: &BattleView<'_>) -> Option<[u8; 3]> {
-        const COLOR_TORP: [u8; 3] = [100, 255, 160]; // green
-        const COLOR_PLANES: [u8; 3] = [200, 160, 255]; // lavender
-        const COLOR_SONAR: [u8; 3] = [100, 220, 255]; // cyan
-
         let props = controller.vehicle_props(*entity_id)?;
         let weapon = props.selected_weapon()?.known()?;
         let selected_ammo = controller.selected_ammo();

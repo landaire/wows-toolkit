@@ -49,6 +49,9 @@ use wowsunpack::game_types::ChargeCount;
 
 use super::columns::NDA;
 use super::columns::ReplayColumn;
+use super::damage_mix;
+use super::damage_mix::DamageLine;
+use super::damage_mix::DamageMix;
 use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
@@ -157,7 +160,7 @@ pub(super) fn expanded_detail_width(
         ReplayColumn::Name => name_section_width(row, debug, window),
         ReplayColumn::Skills => build_section_width(row, debug, window),
         ReplayColumn::ActualDamage => damage_section_width(
-            row.actual_damage_breakdown.as_deref(),
+            row.actual_damage_by_type.as_deref(),
             row,
             all_rows,
             debug,
@@ -165,7 +168,7 @@ pub(super) fn expanded_detail_width(
             window,
         ),
         ReplayColumn::ReceivedDamage => damage_section_width(
-            row.received_damage_breakdown.as_deref(),
+            row.received_damage_by_type.as_deref(),
             row,
             all_rows,
             debug,
@@ -213,6 +216,23 @@ fn breakdown_grid_width(rows: &[BreakdownRow], window: &mut Window) -> f32 {
         values = values.max(text_width(row.value.clone().into(), window, false));
     }
     labels + BREAKDOWN_GAP + values
+}
+
+/// Mirrors `damage_lines_grid`: `breakdown_grid_width` with the colour key
+/// and its gap before each label.
+fn damage_lines_width(lines: &[DamageLine], window: &mut Window) -> f32 {
+    if lines.is_empty() {
+        return 0.0;
+    }
+
+    let mut labels = 0.0_f32;
+    let mut values = 0.0_f32;
+    for line in lines {
+        labels = labels.max(text_width(line.label.into(), window, false));
+        values = values.max(text_width(separate_number(line.amount).into(), window, false));
+    }
+
+    damage_mix::SWATCH_SIZE + SWATCH_GAP + labels + BREAKDOWN_GAP + values
 }
 
 /// Mirrors `render_name_section`: the section headings, each achievement
@@ -490,6 +510,37 @@ fn breakdown_grid(rows: &[BreakdownRow]) -> AnyElement {
 
 /// Between a breakdown grid's two columns.
 const BREAKDOWN_GAP: f32 = 8.0;
+
+/// The per-type damage listing: `breakdown_grid` with each type's colour key,
+/// the colour its stretch of the cell's bar is drawn in.
+fn damage_lines_grid(lines: &[DamageLine]) -> AnyElement {
+    let mix = DamageMix::of(lines);
+    let key = |line: &DamageLine| mix.as_ref().map_or(line.kind, |mix| mix.shown_kind(line.kind));
+    h_flex()
+        .id("damage-lines")
+        .gap(px(BREAKDOWN_GAP))
+        .items_start()
+        .text_xs()
+        .child(v_flex().gap_px().children(lines.iter().enumerate().map(|(index, line)| {
+            h_flex()
+                .id(("label", index))
+                .gap(px(SWATCH_GAP))
+                .child(damage_mix::swatch(key(line)))
+                .child(detail_text(line.label))
+        })))
+        .child(
+            v_flex().gap_px().items_end().children(
+                lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| div().id(("value", index)).child(detail_text(separate_number(line.amount)))),
+            ),
+        )
+        .into_any_element()
+}
+
+/// Between a colour key and the type it names.
+const SWATCH_GAP: f32 = 4.0;
 
 #[track_caller]
 fn detail_text(text: impl Into<SharedString>) -> impl IntoElement {
@@ -1388,8 +1439,8 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
         .into_any_element()
 }
 
-/// ActualDamage/ReceivedDamage expanded content: the per-ammo-type breakdown
-/// (`row.actual_damage_breakdown`/`received_damage_breakdown`), then a
+/// ActualDamage/ReceivedDamage expanded content: the per-type breakdown
+/// (`row.actual_damage_by_type`/`received_damage_by_type`), then a
 /// per-victim (or per-attacker) grid of `amount (pct%)` against ship name,
 /// sorted by amount descending, skipping zero entries. NDA-gated like the collapsed cell (`should_hide_stats() &&
 /// !debug`), mirroring the egui app's `dealt_damage_details`/
@@ -1408,8 +1459,8 @@ fn render_damage_section(
     }
 
     let breakdown = match direction {
-        DamageDirection::Dealt => row.actual_damage_breakdown.as_deref(),
-        DamageDirection::Received => row.received_damage_breakdown.as_deref(),
+        DamageDirection::Dealt => row.actual_damage_by_type.as_deref(),
+        DamageDirection::Received => row.received_damage_by_type.as_deref(),
     };
     let interactions = row.damage_interactions.as_ref();
     if breakdown.is_none() && interactions.is_none() {
@@ -1418,8 +1469,8 @@ fn render_damage_section(
 
     let mut col = v_flex().gap_1();
 
-    if let Some(rows) = breakdown {
-        col = col.child(breakdown_grid(rows));
+    if let Some(lines) = breakdown {
+        col = col.child(damage_lines_grid(lines));
         if interactions.is_some() {
             col = col.child(Separator::horizontal());
         }
@@ -1623,17 +1674,18 @@ impl ShareText<'_> {
 /// Mirrors `render_damage_section`: the breakdown above, and the per-ship
 /// lines below it at whichever share alt shows, so the column fits either.
 fn damage_section_width(
-    breakdown: Option<&[BreakdownRow]>,
+    breakdown: Option<&[DamageLine]>,
     row: &PlayerRow,
     all_rows: &[PlayerRow],
     debug: bool,
     direction: DamageDirection,
     window: &mut Window,
 ) -> f32 {
-    let mut widest = nda_gated_breakdown_width(breakdown, row, debug, window);
     if row.should_hide_stats() && !debug {
-        return widest;
+        return text_width(NDA.into(), window, false);
     }
+
+    let mut widest = breakdown.map(|lines| damage_lines_width(lines, window)).unwrap_or(0.0);
     let lines = damage_interactions(row, all_rows, direction);
     for alt_held in [false, true] {
         let rows: Vec<BreakdownRow> = lines.iter().map(|line| line.breakdown(alt_held)).collect();

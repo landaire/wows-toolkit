@@ -59,6 +59,8 @@ use super::columns::name_color_kind;
 use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
 use super::columns::relation_color_rgb;
+use super::damage_mix;
+use super::damage_mix::DamageMix;
 use super::expanded;
 use super::icons::IconCache;
 use super::model::MatchContext;
@@ -2194,8 +2196,36 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     match col {
         ReplayColumn::Name => name_cell(ix, row, layout, width),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width, &layout.entity),
+        ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(ix, col, row, layout, width),
         _ => cell_element(ix, row.db_id, col, cell_value(row, col, layout.debug), width, &layout.entity),
     }
+}
+
+/// A damage cell with the player's split by type in a bar under the figure,
+/// listed with its colour key on hover. The bare cell when there is no split
+/// to show.
+fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
+    let cell = cell_element(ix, row.db_id, col, cell_value(row, col, layout.debug), width, &layout.entity);
+    let Some(lines) = damage_mix::shown_lines(row, col, layout.debug) else {
+        return cell;
+    };
+    let Some(mix) = DamageMix::of(lines) else {
+        return cell;
+    };
+
+    let bar = div().px_1().child(mix.bar());
+    let shown = Rc::new((mix, lines.to_vec()));
+    v_flex()
+        .id(("replay-damage-mix", ix * CELL_ID_STRIDE + col as usize))
+        .w(px(width))
+        .flex_none()
+        .child(cell)
+        .child(bar)
+        .tooltip(move |window, cx| {
+            let shown = Rc::clone(&shown);
+            Tooltip::element(move |_window, _cx| shown.0.listing(&shown.1)).build(window, cx)
+        })
+        .into_any_element()
 }
 
 /// One column's full cell: the collapsed content and, while the row's detail

@@ -56,6 +56,7 @@ use wowsunpack::game_params::types::Species;
 
 use super::columns::ReplayColumn;
 use super::columns::relation_color_rgb;
+use super::damage_mix::DamageLine;
 use super::links;
 
 /// One player's presentation-ready row: scalars and formatted strings pulled
@@ -120,7 +121,7 @@ pub struct PlayerRow {
     pub actual_damage: Option<u64>,
     pub actual_damage_report: Option<Damage>,
     pub actual_damage_text: Option<String>,
-    pub actual_damage_breakdown: Option<Vec<BreakdownRow>>,
+    pub actual_damage_by_type: Option<Vec<DamageLine>>,
 
     pub hits: Option<u64>,
     pub hits_report: Option<Hits>,
@@ -140,7 +141,7 @@ pub struct PlayerRow {
 
     pub received_damage: Option<u64>,
     pub received_damage_text: Option<String>,
-    pub received_damage_breakdown: Option<Vec<BreakdownRow>>,
+    pub received_damage_by_type: Option<Vec<DamageLine>>,
     pub received_damage_report: Option<Damage>,
     pub damage_interactions: Option<HashMap<AccountId, DamageInteraction>>,
 
@@ -699,12 +700,14 @@ impl PlayerRow {
         let observed_damage = np.observed_results.damage;
         let observed_damage_text = separate_number(observed_damage);
 
-        let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_breakdown) = match server {
+        let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_by_type) = match server {
             Some(sr) if sr.damage.is_some() => {
                 let damage_number = sr.damage.expect("damage present");
                 let text = separate_number(damage_number);
-                let lines =
-                    breakdown_rows(&DAMAGE_DESCRIPTIONS, |key| sr.damage_by_type.get(key).copied().unwrap_or(0));
+                // The map holds only the types dealt; an absent key is none.
+                let lines = DamageLine::from_results(&DAMAGE_DESCRIPTIONS, |key| {
+                    sr.damage_by_type.get(key).copied().unwrap_or(0)
+                });
                 (Some(damage_number), Some(sr.damage_details.clone()), Some(text), Some(lines))
             }
             _ => (None, None, None, None),
@@ -720,11 +723,11 @@ impl PlayerRow {
             None => (None, None, None, None),
         };
 
-        let (received_damage, received_damage_text, received_damage_breakdown, received_damage_report) = match server {
+        let (received_damage, received_damage_text, received_damage_by_type, received_damage_report) = match server {
             Some(sr) => {
                 let total = sr.received_damage;
                 let text = separate_number(total);
-                let lines = breakdown_rows(&RECEIVED_DAMAGE_DESCRIPTIONS, |key| {
+                let lines = DamageLine::from_results(&RECEIVED_DAMAGE_DESCRIPTIONS, |key| {
                     sr.received_damage_by_type.get(key).copied().unwrap_or(0)
                 });
                 (Some(total), Some(text), Some(lines), Some(sr.received_damage_details.clone()))
@@ -806,7 +809,7 @@ impl PlayerRow {
             actual_damage,
             actual_damage_report,
             actual_damage_text,
-            actual_damage_breakdown,
+            actual_damage_by_type,
             hits,
             hits_report,
             hits_text,
@@ -820,7 +823,7 @@ impl PlayerRow {
             potential_damage_report,
             received_damage,
             received_damage_text,
-            received_damage_breakdown,
+            received_damage_by_type,
             received_damage_report,
             damage_interactions,
             fires,
@@ -911,14 +914,14 @@ mod tests {
 
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
         assert!(self_row.actual_damage_report.is_some());
-        assert!(self_row.actual_damage_breakdown.is_some());
+        assert!(self_row.actual_damage_by_type.is_some());
         assert!(self_row.received_damage_report.is_some());
         assert_eq!(self_row.fires, Some(1));
 
         let enemy_row = model.rows.iter().find(|r| !r.is_self).expect("enemy row present");
         assert!(enemy_row.actual_damage.is_none());
         assert!(enemy_row.actual_damage_report.is_none());
-        assert!(enemy_row.actual_damage_breakdown.is_none());
+        assert!(enemy_row.actual_damage_by_type.is_none());
         assert!(enemy_row.fires.is_none());
     }
 

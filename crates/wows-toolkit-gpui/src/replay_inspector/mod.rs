@@ -18,6 +18,7 @@ pub mod browser_view;
 pub mod chat;
 pub mod columns;
 pub mod controls;
+pub mod damage_mix;
 mod debug_view;
 pub mod expanded;
 pub mod icons;
