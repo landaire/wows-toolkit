@@ -19,6 +19,7 @@ mod collab_popover;
 mod constants;
 mod dialog;
 mod first_run;
+mod force_reindex;
 mod frame_texture;
 mod game_data_cache;
 mod heap_profile;

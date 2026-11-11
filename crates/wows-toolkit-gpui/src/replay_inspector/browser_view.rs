@@ -73,6 +73,8 @@ use super::browser::ReplayLite;
 use super::browser::build_browser_tree;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
+use crate::force_reindex::Confirm;
+use crate::force_reindex::ReindexCandidate;
 use crate::preview_hover::PreviewHover;
 
 use super::load::GameDataCache;
@@ -96,10 +98,11 @@ const SPECTATOR_LABEL: &str = "Spectator";
 struct RawReplay {
     path: PathBuf,
     listed: ListedReplay,
-    /// The `major.minor.patch` the replay names, kept because a build number
+    /// The version and build the replay names, kept because a build number
     /// alone does not identify data to fetch: build numbers are per server, so a
     /// download falls back on the version to find the nearest published build.
-    version: Option<String>,
+    /// `None` when the header's version does not parse.
+    version: Option<Version>,
 }
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
@@ -287,6 +290,9 @@ pub enum ReplayBrowserEvent {
     /// A replay the listing already held has been written to again, and the
     /// listing now holds the new read. A tab open on it is reading the old one.
     ReplayChanged(PathBuf),
+    /// A replay the listing held is gone from the watched directory, and the
+    /// listing no longer holds it.
+    ReplayRemoved(PathBuf),
     /// The replays directory cannot be watched, so a finished match will not
     /// appear on its own. Said out loud, because the reader would otherwise wait
     /// for a listing that never grows.
@@ -296,6 +302,11 @@ pub enum ReplayBrowserEvent {
     SessionStats {
         paths: Vec<PathBuf>,
         replace: bool,
+    },
+    /// Read these replays again and rewrite what the index holds for them.
+    ForceReindex {
+        candidates: Vec<ReindexCandidate>,
+        confirm: Confirm,
     },
 }
 
@@ -317,9 +328,11 @@ pub struct ReplayBrowser {
     chosen_directory: Option<PathBuf>,
     /// How far the running scan has got. `None` when none is running.
     scan_progress: Option<ScanProgress>,
-    /// The replays the reader has ctrl-clicked, which every batch action
-    /// works over. Empty means the one highlighted row, if any.
+    /// The replays the reader has ctrl- or shift-clicked, which every batch
+    /// action works over. Empty means the one highlighted row, if any.
     marked: HashSet<PathBuf>,
+    /// Where a shift-click range starts: the row last clicked without shift.
+    selection_anchor: Option<PathBuf>,
     /// The install the listing is reading, empty until one is known. Only
     /// "Open in Game" needs it: the scan takes its own copy.
     wows_dir: String,
@@ -359,12 +372,27 @@ pub struct ReplayBrowser {
     /// Where the pointer was when it entered the previewed row, so the popup
     /// is anchored beside it like the egui app's own hover popup.
     preview_anchor: Point<Pixels>,
+    /// Whether the listing follows its directory as it changes.
+    watch: ListingWatch,
     /// The watch on the replays directory. Held because dropping it stops the
     /// watch; replaced whenever the directory changes.
-    watcher: Option<notify::RecommendedWatcher>,
+    watcher: Option<DirWatch>,
     /// Bumped per scan, so a slower earlier scan (and the watch task it
     /// started) cannot write over a later one's listing.
     scan_generation: u64,
+    /// Bumped whenever the watch is replaced or stopped, so a change the
+    /// ended watch reported is not applied after it.
+    watch_generation: u64,
+    /// Bumped per summaries load, so a slower earlier load cannot write over
+    /// a later one.
+    summaries_generation: u64,
+}
+
+/// Whether a listing follows its directory as it changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListingWatch {
+    Watched,
+    Unwatched,
 }
 
 /// What the browser can translate its labels with.
@@ -419,6 +447,43 @@ impl ReplayBrowser {
         self.rebuild_tree(cx);
     }
 
+    /// Seeds the listing with a replay recorded on `version` and `build` at
+    /// `date_time`, as a scan would. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_release_for_test(
+        &mut self,
+        path: std::path::PathBuf,
+        version: &str,
+        build: u32,
+        date_time: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.files.push(RawReplay {
+            version: Version::try_from_client_exe(&format!("{},{build}", version.replace('.', ","))),
+            path,
+            listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
+                ship_id: None,
+                map_name: "spaces/00_CO_ocean".to_owned(),
+                game_type: String::new(),
+                scenario: String::new(),
+                date_time: date_time.to_owned(),
+                build: Some(build),
+            },
+        });
+        self.status = ScanStatus::Loaded;
+        self.rebuild_tree(cx);
+    }
+
+    /// The tree row showing `path`, while one does. Test-only.
+    #[cfg(test)]
+    pub(crate) fn row_for_test(&self, path: &Path, cx: &App) -> Option<usize> {
+        let state = self.tree_state.read(cx);
+        (0..)
+            .map_while(|ix| state.entry(ix).map(|entry| (ix, entry)))
+            .find(|(_, entry)| self.leaf_info.get(&entry.item().id).is_some_and(|leaf| leaf.path == path))
+            .map(|(ix, _)| ix)
+    }
+
     /// What the listing holds, by path. Test-only.
     #[cfg(test)]
     pub(crate) fn listed_paths_for_test(&self) -> Vec<std::path::PathBuf> {
@@ -443,6 +508,7 @@ impl ReplayBrowser {
             files: Vec::new(),
             scan_progress: None,
             marked: HashSet::new(),
+            selection_anchor: None,
             wows_dir: String::new(),
             grouping: ReplayGrouping::default(),
             tree_state,
@@ -458,8 +524,11 @@ impl ReplayBrowser {
             build_cache: None,
             preview: PreviewHover::default(),
             preview_anchor: Point::default(),
+            watch: ListingWatch::Watched,
             watcher: None,
             scan_generation: 0,
+            watch_generation: 0,
+            summaries_generation: 0,
         }
     }
 
@@ -477,6 +546,11 @@ impl ReplayBrowser {
     /// not listed.
     pub(crate) fn battle_label(&self, path: &Path) -> Option<SharedString> {
         self.leaf_info.get(path.to_string_lossy().as_ref()).map(|leaf| leaf.battle.clone())
+    }
+
+    /// Whether the listing holds the replay at `path`.
+    pub(crate) fn holds(&self, path: &Path) -> bool {
+        self.leaf_info.contains_key(path.to_string_lossy().as_ref())
     }
 
     /// The currently active grouping strategy. The browser is the single
@@ -536,8 +610,12 @@ impl ReplayBrowser {
     /// which is what the egui listing shows for the same file.
     pub fn load_summaries(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.summaries_generation = self.summaries_generation.wrapping_add(1);
+        let generation = self.summaries_generation;
         cx.spawn(async move |this, cx| {
-            let loaded = crate::runtime::spawn(cx, async move {
+            // Waited on from a GPUI background thread rather than awaited on a
+            // tokio worker: the test scheduler refuses a wakeup from one.
+            let loaded = crate::runtime::block_on(cx, move || async move {
                 let Some(source) = query::live_source_id(&pool).await? else {
                     return Ok(HashMap::new());
                 };
@@ -546,18 +624,18 @@ impl ReplayBrowser {
             .await;
 
             let summaries = match loaded {
-                Ok(Ok(summaries)) => summaries,
-                Ok(Err(err)) => {
-                    tracing::warn!("replay browser: the index summaries could not be read: {err}");
-                    return;
-                }
+                Ok(summaries) => summaries,
                 Err(err) => {
-                    tracing::warn!("replay browser: the index summaries did not load: {err}");
+                    tracing::warn!("replay browser: the index summaries could not be read: {err}");
                     return;
                 }
             };
 
             let _ = this.update(cx, |this, cx| {
+                // A later load was asked for, and it reads what this one would not.
+                if this.summaries_generation != generation {
+                    return;
+                }
                 this.summaries = summaries;
                 crate::heap_profile::mark("summaries.loaded");
                 this.rebuild_tree(cx);
@@ -661,7 +739,7 @@ impl ReplayBrowser {
             let Some(build) = file.listed.build else { continue };
             let entry = builds.entry(build).or_default();
             if entry.is_none() {
-                *entry = file.version.clone();
+                *entry = file.version.as_ref().map(crate::force_reindex::version_said);
             }
         }
         builds.into_iter().collect()
@@ -672,9 +750,63 @@ impl ReplayBrowser {
         self.files.iter().map(|file| file.path.clone()).collect()
     }
 
+    /// Every listed replay as a forced re-index sees it, in listing order.
+    pub fn reindex_candidates(&self) -> Vec<ReindexCandidate> {
+        self.files.iter().map(reindex_candidate).collect()
+    }
+
+    /// Asks for `paths` to be read again and their index entries rewritten.
+    ///
+    /// A file the listing no longer holds is left out: its header is what says
+    /// which game data it needs.
+    pub(crate) fn force_reindex(&mut self, paths: &[PathBuf], confirm: Confirm, cx: &mut Context<Self>) {
+        let wanted: HashSet<&PathBuf> = paths.iter().collect();
+        let candidates: Vec<ReindexCandidate> =
+            self.files.iter().filter(|file| wanted.contains(&file.path)).map(reindex_candidate).collect();
+        if candidates.is_empty() {
+            return;
+        }
+        cx.emit(ReplayBrowserEvent::ForceReindex { candidates, confirm });
+    }
+
     /// The directory the listing is reading, when it is not the install's.
     pub fn chosen_directory(&self) -> Option<&Path> {
         self.chosen_directory.as_deref()
+    }
+
+    /// The directory the listing reads: the chosen one, or the install's
+    /// replays directory. `None` until either is known.
+    pub fn replays_dir(&self) -> Option<PathBuf> {
+        match &self.chosen_directory {
+            Some(directory) => Some(directory.clone()),
+            None if self.wows_dir.is_empty() => None,
+            None => Some(resolve_replays_dir(Path::new(&self.wows_dir))),
+        }
+    }
+
+    /// Starts or stops following the directory as it changes.
+    ///
+    /// Starting reads the directory again, since whatever changed while it was
+    /// not watched is otherwise missing from the listing.
+    pub fn set_watch(&mut self, watch: ListingWatch, cx: &mut Context<Self>) {
+        if self.watch == watch {
+            return;
+        }
+
+        self.watch = watch;
+        match watch {
+            ListingWatch::Unwatched => self.stop_watching(),
+            // The scan in flight starts the watch when it finishes.
+            ListingWatch::Watched if matches!(self.status, ScanStatus::Loading) => {}
+            ListingWatch::Watched => self.relist(cx),
+        }
+    }
+
+    /// Ends the watch, and with it whatever the ended watch reported that the
+    /// listing has not yet read.
+    fn stop_watching(&mut self) {
+        self.watcher = None;
+        self.watch_generation = self.watch_generation.wrapping_add(1);
     }
 
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
@@ -693,7 +825,7 @@ impl ReplayBrowser {
             // and there is no new one; dropping it is what stops a match
             // finishing there from refilling a listing that says there is no
             // directory set.
-            self.watcher = None;
+            self.stop_watching();
             self.status = ScanStatus::Failed(ScanError::WowsDirMissing);
             cx.notify();
             return;
@@ -818,53 +950,22 @@ impl ReplayBrowser {
     /// Latest Replay" mean anything (the egui app's own watcher,
     /// `tab_state.rs`).
     fn watch_replays_dir(&mut self, replays_dir: PathBuf, generation: u64, cx: &mut Context<Self>) {
-        use notify::Watcher as _;
-
         // Dropped before the new one is installed, so the old directory stops
         // reporting rather than both being watched.
-        self.watcher = None;
-
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<DirChange>();
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let Ok(event) = event else { return };
-            let make = match event.kind {
-                notify::EventKind::Create(_)
-                | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
-                    DirChange::Appeared
-                }
-                // A replay written to again: a re-save, a copy that landed
-                // before the writer had finished with it, or battle results
-                // added to a battle the client left early. Windows reports a
-                // content change as `Any`.
-                notify::EventKind::Modify(notify::event::ModifyKind::Data(_) | notify::event::ModifyKind::Any) => {
-                    DirChange::Changed
-                }
-                notify::EventKind::Remove(_) => DirChange::Removed,
-                _ => return,
-            };
-            for path in event.paths {
-                if is_finished_replay(&path) {
-                    // The receiver is gone once the directory changes or the
-                    // app closes; this runs on notify's own thread, so a send
-                    // that fails is dropped rather than unwinding it.
-                    let _ = tx.unbounded_send(make(path));
-                }
-            }
-        });
-        let mut watcher = match watcher {
-            Ok(watcher) => watcher,
-            Err(err) => {
-                tracing::warn!(error = ?err, "replay browser: no filesystem watcher available");
-                cx.emit(ReplayBrowserEvent::WatchFailed(WatchFailure::NoWatcher(err.to_string())));
-                return;
-            }
-        };
-        if let Err(err) = watcher.watch(&replays_dir, notify::RecursiveMode::NonRecursive) {
-            tracing::warn!(dir = %replays_dir.display(), error = ?err, "replay browser: the replays directory is not watchable");
-            cx.emit(ReplayBrowserEvent::WatchFailed(WatchFailure::NotWatchable(err.to_string())));
+        self.stop_watching();
+        if self.watch == ListingWatch::Unwatched {
             return;
         }
-        self.watcher = Some(watcher);
+        let watch_generation = self.watch_generation;
+
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<DirChange>();
+        match start_watch(&replays_dir, tx) {
+            Ok(watcher) => self.watcher = Some(watcher),
+            Err(failure) => {
+                cx.emit(ReplayBrowserEvent::WatchFailed(failure));
+                return;
+            }
+        }
 
         cx.spawn(async move |this, cx| {
             while let Some(change) = futures::StreamExt::next(&mut rx).await {
@@ -873,10 +974,11 @@ impl ReplayBrowser {
                 if let DirChange::Removed(path) = &change {
                     let path = path.clone();
                     let updated = this.update(cx, |this, cx| {
-                        if this.scan_generation != generation {
+                        if !this.is_current_watch(generation, watch_generation) {
                             return;
                         }
                         this.forget(&path, cx);
+                        cx.emit(ReplayBrowserEvent::ReplayRemoved(path.clone()));
                     });
                     if updated.is_err() {
                         break;
@@ -887,9 +989,10 @@ impl ReplayBrowser {
                 let Some(raw) = read_replay_when_complete(change.path().to_path_buf(), cx).await else { continue };
                 let touched = raw.path.clone();
                 let updated = this.update(cx, |this, cx| {
-                    // A scan started while this read was waiting means the
-                    // listing is no longer the one this replay belongs to.
-                    if this.scan_generation != generation {
+                    // A scan started or the watch ended while this read was
+                    // waiting, so the listing is no longer the one this
+                    // replay belongs to.
+                    if !this.is_current_watch(generation, watch_generation) {
                         return false;
                     }
                     let held = this.files.iter().position(|existing| existing.path == raw.path);
@@ -921,6 +1024,10 @@ impl ReplayBrowser {
         .detach();
     }
 
+    fn is_current_watch(&self, scan_generation: u64, watch_generation: u64) -> bool {
+        self.scan_generation == scan_generation && self.watch_generation == watch_generation
+    }
+
     /// Drops a replay the directory no longer holds, with whatever the listing
     /// remembered about it.
     fn forget(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -930,6 +1037,9 @@ impl ReplayBrowser {
         self.marked.remove(path);
         if self.selected_path.as_deref() == Some(path) {
             self.selected_path = None;
+        }
+        if self.selection_anchor.as_deref() == Some(path) {
+            self.selection_anchor = None;
         }
         self.rebuild_tree(cx);
         cx.notify();
@@ -1022,8 +1132,15 @@ impl ReplayBrowser {
     /// Handles a click on a leaf's rendered item: any click records the
     /// selection, a double-click additionally records/emits the open intent.
     fn handle_leaf_click(&mut self, path: PathBuf, click_count: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
+        // Shift marks the run of rows from the last row clicked without it.
+        if modifiers.shift {
+            self.select_range(path, cx);
+            return;
+        }
+
         // Ctrl adds to or removes from the set, the way a file manager does;
         // a plain click replaces it, so the common case stays one replay.
+        self.selection_anchor = Some(path.clone());
         if modifiers.secondary(cx) {
             self.toggle_selected(path, cx);
             return;
@@ -1054,6 +1171,39 @@ impl ReplayBrowser {
             self.selected_path = Some(path);
         }
         cx.notify();
+    }
+
+    /// Marks every visible replay between the anchor and `path`, inclusive,
+    /// in place of the set.
+    ///
+    /// Visible rows only: a row inside a closed group is not one the reader
+    /// can see they are choosing. With no anchor on screen the click selects
+    /// the one row, as a plain click does.
+    fn select_range(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let visible = self.visible_leaves(cx);
+        let anchor = self.selection_anchor.clone().or_else(|| self.selected_path.clone());
+        let from = anchor.as_ref().and_then(|anchor| visible.iter().position(|leaf| leaf == anchor));
+        let to = visible.iter().position(|leaf| *leaf == path);
+
+        self.marked = match (from, to) {
+            (Some(from), Some(to)) => visible[from.min(to)..=from.max(to)].iter().cloned().collect(),
+            _ => {
+                self.selection_anchor = Some(path.clone());
+                HashSet::new()
+            }
+        };
+        self.selected_path = Some(path);
+        cx.notify();
+    }
+
+    /// The replay rows the tree is showing, top to bottom.
+    fn visible_leaves(&self, cx: &App) -> Vec<PathBuf> {
+        let state = self.tree_state.read(cx);
+        (0..)
+            .map_while(|ix| state.entry(ix))
+            .filter_map(|entry| self.leaf_info.get(&entry.item().id))
+            .map(|leaf| leaf.path.clone())
+            .collect()
     }
 
     /// Every replay the reader has marked, in listing order.
@@ -1228,8 +1378,11 @@ fn render_browser_item(
     // scannable (`ui::stripe`).
     let striped = (!is_folder).then(|| crate::ui::stripe(ix, cx)).flatten();
     let selected = selected || leaf.is_some_and(|leaf| marked.contains(&leaf.path));
-    let mut list_item =
-        ListItem::new(ix).selected(selected).when_some(striped, |item, color| item.bg(color)).child(row);
+    // Named, so a row is told apart from the tree's own wrapper at the same index.
+    let mut list_item = ListItem::new(("replay-browser-row", ix))
+        .selected(selected)
+        .when_some(striped, |item, color| item.bg(color))
+        .child(row);
 
     if let Some(leaf) = leaf {
         // No tooltip here: the hover popup carries the same words under the
@@ -1331,13 +1484,25 @@ impl Render for ReplayBrowser {
                         let copy_paths_label = t!("ui.replay.context.copy_paths", count = paths.len()).into_owned();
                         let copy_files_label = t!("ui.replay.context.copy_replays", count = paths.len()).into_owned();
                         let path_list = paths.clone();
+                        let reindex_paths = paths.clone();
+                        let reindex_entity = context_menu_entity.clone();
                         return menu
                             .item(PopupMenuItem::new(copy_files_label).on_click(move |_event, window, cx| {
                                 copy_replay_files(&paths, window, cx);
                             }))
                             .item(PopupMenuItem::new(copy_paths_label).on_click(move |_event, _window, cx| {
                                 copy_paths(&path_list, cx);
-                            }));
+                            }))
+                            .separator()
+                            // A group can hold thousands of replays the reader has
+                            // not looked at one by one, so it always asks.
+                            .item(PopupMenuItem::new(force_reindex_label(reindex_paths.len())).on_click(
+                                move |_event, _window, cx| {
+                                    reindex_entity.update(cx, |browser, cx| {
+                                        browser.force_reindex(&reindex_paths, Confirm::Always, cx)
+                                    });
+                                },
+                            ));
                     };
 
                     // Right-clicking a row that is not in the set acts on
@@ -1358,6 +1523,8 @@ impl Render for ReplayBrowser {
                     let add_paths = session_paths.clone();
                     let add_entity = context_menu_entity.clone();
                     let session_count = session_paths.len();
+                    let reindex_paths = session_paths.clone();
+                    let reindex_entity = context_menu_entity.clone();
                     let batch_files = batch.clone();
                     let batch_paths = batch.clone();
                     let batch_render = batch.clone();
@@ -1473,6 +1640,15 @@ impl Render for ReplayBrowser {
                             });
                         }),
                     )
+                    // An explicit choice of rows, so a small one that can all be
+                    // read runs without a question; the app asks otherwise.
+                    .item(PopupMenuItem::new(force_reindex_label(reindex_paths.len())).on_click(
+                        move |_event, _window, cx| {
+                            reindex_entity.update(cx, |browser, cx| {
+                                browser.force_reindex(&reindex_paths, Confirm::WhenNotPlain, cx)
+                            });
+                        },
+                    ))
                     .separator()
                     .item(PopupMenuItem::new(t!("ui.replay.context.copy_replay").into_owned()).on_click(
                         move |_event, window, cx| {
@@ -1747,8 +1923,7 @@ fn scan_replay_files(
     for (read, path) in candidates.into_iter().enumerate() {
         match ReplayFile::meta_from_file(&path) {
             Ok(meta) => out.push(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
-                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
                 listed: ListedReplay::from_meta(&meta),
                 path,
             }),
@@ -1776,6 +1951,20 @@ fn loading_said(game_data: &GameData) -> String {
     }
 }
 
+/// The menu item, naming how many replays it acts on when it is more than one.
+fn force_reindex_label(count: usize) -> String {
+    if count == 1 {
+        t!("ui.reindex.context_one").into_owned()
+    } else {
+        t!("ui.reindex.context_many", count = count).into_owned()
+    }
+}
+
+/// One listed replay as a forced re-index sees it.
+fn reindex_candidate(file: &RawReplay) -> ReindexCandidate {
+    ReindexCandidate::from_listing(file.path.clone(), file.version, &file.listed.date_time)
+}
+
 /// The listed builds nothing on this machine can read, with how many replays
 /// each one accounts for.
 ///
@@ -1789,7 +1978,7 @@ fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuil
         let entry = counted.entry(build).or_insert_with(|| MissingBuild { build, version: None, replays: 0 });
         entry.replays += 1;
         if entry.version.is_none() {
-            entry.version = file.version.clone();
+            entry.version = file.version.as_ref().map(crate::force_reindex::version_said);
         }
     }
 
@@ -1830,7 +2019,8 @@ impl WatchFailure {
 /// Carried rather than three channels, so the reads stay in the order the
 /// directory reported them: a replay created and then written to must not be
 /// read in the other order.
-enum DirChange {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DirChange {
     Appeared(PathBuf),
     Changed(PathBuf),
     Removed(PathBuf),
@@ -1844,9 +2034,83 @@ impl DirChange {
     }
 }
 
+/// Holds a directory's watch open; dropping it ends the watch.
+enum DirWatch {
+    Filesystem {
+        _watcher: notify::RecommendedWatcher,
+    },
+    #[cfg(test)]
+    Simulated {
+        _registration: super::simulated_watch::Registration,
+    },
+}
+
 fn is_finished_replay(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
         && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+}
+
+/// Starts watching `dir`, sending what changes in it to `changes`.
+fn start_watch(
+    dir: &Path,
+    changes: futures::channel::mpsc::UnboundedSender<DirChange>,
+) -> Result<DirWatch, WatchFailure> {
+    // The test scheduler refuses wakeups from notify's own thread, so a test
+    // reports changes itself.
+    #[cfg(test)]
+    if let Some(registration) = super::simulated_watch::register(dir, &changes) {
+        return Ok(DirWatch::Simulated { _registration: registration });
+    }
+
+    filesystem_watch(dir, changes).map(|watcher| DirWatch::Filesystem { _watcher: watcher })
+}
+
+/// Watches `dir` on notify's own thread.
+fn filesystem_watch(
+    dir: &Path,
+    changes: futures::channel::mpsc::UnboundedSender<DirChange>,
+) -> Result<notify::RecommendedWatcher, WatchFailure> {
+    use notify::Watcher as _;
+
+    let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else { return };
+        let make = match event.kind {
+            notify::EventKind::Create(_)
+            | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
+                DirChange::Appeared
+            }
+            // A replay written to again: a re-save, a copy that landed
+            // before the writer had finished with it, or battle results
+            // added to a battle the client left early. Windows reports a
+            // content change as `Any`.
+            notify::EventKind::Modify(notify::event::ModifyKind::Data(_) | notify::event::ModifyKind::Any) => {
+                DirChange::Changed
+            }
+            notify::EventKind::Remove(_) => DirChange::Removed,
+            _ => return,
+        };
+        for path in event.paths {
+            if is_finished_replay(&path) {
+                // The receiver is gone once the directory changes or the
+                // app closes; this runs on notify's own thread, so a send
+                // that fails is dropped rather than unwinding it.
+                let _ = changes.unbounded_send(make(path));
+            }
+        }
+    });
+    let mut watcher = match watcher {
+        Ok(watcher) => watcher,
+        Err(err) => {
+            tracing::warn!(error = ?err, "replay browser: no filesystem watcher available");
+            return Err(WatchFailure::NoWatcher(err.to_string()));
+        }
+    };
+    if let Err(err) = watcher.watch(dir, notify::RecursiveMode::NonRecursive) {
+        tracing::warn!(dir = %dir.display(), error = ?err, "replay browser: the replays directory is not watchable");
+        return Err(WatchFailure::NotWatchable(err.to_string()));
+    }
+
+    Ok(watcher)
 }
 
 /// How long to keep retrying a replay the watcher has just reported, and how
@@ -1872,8 +2136,7 @@ async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawRe
         let parsed = cx.background_spawn(async move { ReplayFile::meta_from_file(&read).ok() }).await;
         if let Some(meta) = parsed {
             return Some(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
-                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
                 listed: ListedReplay::from_meta(&meta),
                 path,
             });
@@ -2019,7 +2282,10 @@ mod tests {
 
         let listed = |build: Option<u32>, version: &str| super::RawReplay {
             path: PathBuf::from(format!("{}-{version}.wowsreplay", build.unwrap_or_default())),
-            version: (!version.is_empty()).then(|| version.to_owned()),
+            version: (!version.is_empty()).then(|| {
+                let client_exe = format!("{},{}", version.replace('.', ","), build.unwrap_or_default());
+                wowsunpack::data::Version::try_from_client_exe(&client_exe).expect("the test version parses")
+            }),
             listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
                 ship_id: None,
                 map_name: String::new(),
@@ -2153,6 +2419,51 @@ mod tests {
         assert!(!is_finished_replay(Path::new("replays/temp.wowsreplay")));
         assert!(!is_finished_replay(Path::new("replays/tempArenaInfo.json")));
         assert!(!is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland")));
+    }
+
+    /// The filesystem watch reports a replay written into its directory, and
+    /// reports nothing more once it is dropped.
+    #[test]
+    fn the_filesystem_watch_reports_a_new_replay_until_it_is_dropped() {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use futures::channel::mpsc::TryRecvError;
+
+        use super::DirChange;
+
+        // Waits for the next report; `None` once the watch has closed the
+        // channel or nothing arrives in time.
+        fn next(
+            changes: &mut futures::channel::mpsc::UnboundedReceiver<DirChange>,
+            deadline: Instant,
+        ) -> Option<DirChange> {
+            loop {
+                match changes.try_recv() {
+                    Ok(change) => return Some(change),
+                    Err(TryRecvError::Empty) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(20))
+                    }
+                    Err(TryRecvError::Empty | TryRecvError::Closed) => return None,
+                }
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let (sender, mut changes) = futures::channel::mpsc::unbounded();
+        let watcher = super::filesystem_watch(dir.path(), sender).expect("the directory is watchable");
+
+        let landed = dir.path().join("landed.wowsreplay");
+        std::fs::write(&landed, b"not yet a replay").expect("the file is written");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        assert_eq!(next(&mut changes, deadline), Some(DirChange::Appeared(landed)), "the new file is reported first");
+
+        // Dropping it closes the channel, which is what ends the listing's
+        // task for the watch. Reports queued before the drop may come first.
+        drop(watcher);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while next(&mut changes, deadline).is_some() {}
+        assert!(matches!(changes.try_recv(), Err(TryRecvError::Closed)), "the dropped watch closes its channel");
     }
 
     #[test]

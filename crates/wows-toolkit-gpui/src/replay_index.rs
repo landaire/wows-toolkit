@@ -103,9 +103,31 @@ impl IndexMode {
 #[derive(Debug, thiserror::Error)]
 pub enum IndexOneError {
     #[error("the replay could not be read")]
-    Parse(String),
+    Parse(#[source] crate::replay_inspector::ReplayLoadError),
     #[error("the rows could not be stored")]
     Store(#[from] wows_toolkit_config::index::rows::IndexError),
+}
+
+impl IndexOneError {
+    /// Whether the file itself is what failed, and so is worth recording as
+    /// unreadable until it changes.
+    ///
+    /// Missing or broken game data and a database that would not take the
+    /// rows are this machine's state, not the file's: recording them would
+    /// have later passes skip a good replay.
+    pub fn is_unreadable_file(&self) -> bool {
+        use crate::replay_inspector::ReplayLoadError;
+
+        match self {
+            Self::Parse(ReplayLoadError::Io(_) | ReplayLoadError::VersionParse | ReplayLoadError::Parse(_)) => true,
+            Self::Parse(
+                ReplayLoadError::UnsupportedVersion { .. }
+                | ReplayLoadError::GameData(_)
+                | ReplayLoadError::AltRefused(_),
+            )
+            | Self::Store(_) => false,
+        }
+    }
 }
 
 /// Parses one replay and stores what it says.
@@ -121,7 +143,7 @@ pub fn index_one(
     indexed_at: Timestamp,
     mode: IndexWriteMode,
 ) -> Result<(), IndexOneError> {
-    let parsed = parse_replay(path, game_data, None).map_err(|err| IndexOneError::Parse(err.to_string()))?;
+    let parsed = parse_replay(path, game_data, None).map_err(IndexOneError::Parse)?;
     let battle = &parsed.indexable;
 
     let context = IndexContext {
@@ -214,7 +236,9 @@ pub fn build_index(
             Err(err) => {
                 tracing::warn!("replay index: {} contributed nothing: {err}", path.display());
                 progress.failed += 1;
-                ledger_grew |= unindexable.insert(&path);
+                if err.is_unreadable_file() {
+                    ledger_grew |= unindexable.insert(&path);
+                }
             }
         }
         progress.done += 1;
@@ -231,6 +255,61 @@ pub fn build_index(
     Ok(progress)
 }
 
+/// Reads each of `paths` again and rewrites everything the index holds for
+/// it, whatever an earlier pass stored or recorded as unreadable.
+///
+/// `root` is the install's replays directory, which the index's own source
+/// is rooted at if this pass is the first to create it; the replays need not
+/// be under it. `cancel` is checked between replays, as in [`build_index`].
+#[allow(clippy::too_many_arguments)]
+pub fn reindex_replays(
+    runtime: &tokio::runtime::Runtime,
+    pool: &SqlitePool,
+    root: &Path,
+    paths: &[PathBuf],
+    game_data: &GameDataCache,
+    cancel: &AtomicBool,
+    report: impl Fn(IndexProgress),
+) -> Result<IndexProgress, wows_toolkit_config::index::rows::IndexError> {
+    let mut progress = IndexProgress { total: paths.len() as u64, ..IndexProgress::default() };
+    if paths.is_empty() {
+        return Ok(progress);
+    }
+
+    let source_id = runtime.block_on(query::ensure_default_source(pool, root, Timestamp::now()))?;
+    let mut unindexable = runtime.block_on(Unindexable::load(pool));
+    let mut ledger_changed = false;
+    report(progress);
+
+    for path in paths {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        match index_one(runtime, pool, path, game_data, source_id, Timestamp::now(), IndexWriteMode::Replace) {
+            // A file that reads is no longer one for later passes to skip.
+            Ok(()) => {
+                progress.indexed += 1;
+                ledger_changed |= unindexable.remove(path);
+            }
+            Err(err) => {
+                tracing::warn!("replay index: {} contributed nothing when re-indexed: {err}", path.display());
+                progress.failed += 1;
+                if err.is_unreadable_file() {
+                    ledger_changed |= unindexable.insert(path);
+                }
+            }
+        }
+        progress.done += 1;
+        report(progress);
+    }
+
+    if ledger_changed && let Err(err) = runtime.block_on(unindexable.save(pool)) {
+        tracing::warn!("replay index: the unreadable-file ledger was not written: {err}");
+    }
+
+    Ok(progress)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +318,19 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, b"not a real replay").expect("the file can be written");
         path
+    }
+
+    /// Only a file that will not read is recorded as unreadable. Game data
+    /// this machine lacks, or a store that refused the rows, is put right
+    /// without touching the file, so later passes must try it again.
+    #[test]
+    fn only_a_file_that_will_not_read_is_recorded_as_unreadable() {
+        use crate::replay_inspector::ReplayLoadError;
+
+        assert!(IndexOneError::Parse(ReplayLoadError::Parse("garbage".to_owned())).is_unreadable_file());
+        assert!(IndexOneError::Parse(ReplayLoadError::Io("truncated".to_owned())).is_unreadable_file());
+        assert!(!IndexOneError::Parse(ReplayLoadError::UnsupportedVersion { build: 300 }).is_unreadable_file());
+        assert!(!IndexOneError::Parse(ReplayLoadError::GameData("broken dump".to_owned())).is_unreadable_file());
     }
 
     #[test]

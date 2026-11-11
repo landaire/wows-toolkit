@@ -31,6 +31,8 @@ pub mod table;
 pub mod view;
 
 #[cfg(test)]
+pub(crate) mod simulated_watch;
+#[cfg(test)]
 pub(crate) mod test_support;
 
 pub use browser::BrowserNode;

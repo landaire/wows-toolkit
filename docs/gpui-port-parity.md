@@ -528,12 +528,20 @@ kept so the next audit does not re-report them.
 - [changed] A column can be moved by dragging its header, and pinned or
   unpinned from its header's right-click menu or by dragging it into or out
   of the pinned zone. The egui table has a fixed order with three frozen
-  columns. The order and the pinned set are written back like the widths.
+  columns. A pin that would leave no column to scroll, or more pinned
+  columns than their share of the table holds, is refused. The order and the
+  pinned set are written back like the widths, and a table opened later
+  starts from the last ones known.
 - [changed] A column the reader set narrower than an open row's detail
   widens to fit the widest detail shown in it and returns to their width
-  once the last such row has closed. The egui table clips the detail.
+  once the last such row has closed. A width dragged while it is widened is
+  drawn as dragged. The egui table clips the detail.
 - [done] The replays directory is watched; a finished match joins the
   listing and, with the checkbox on, opens.
+- [changed] Directories the reader opens are tabs above the listing rather
+  than workspaces of their own. A pinned one is watched, reopens at startup,
+  and badges the replays that arrive while another tab is shown. The egui app
+  keeps its workspaces for the session only.
 
 ## Armor Viewer
 

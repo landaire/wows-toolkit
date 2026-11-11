@@ -1,7 +1,7 @@
 #[path = "directory_stats.rs"]
 mod directory_stats;
-#[path = "replay_directories.rs"]
-mod replay_directories;
+#[path = "force_reindex_flow.rs"]
+mod force_reindex_flow;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -404,7 +404,6 @@ enum TwitchStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
     ReplayInspector,
-    ReplayDirectory(EntityId),
     Stats,
     /// Stats over the replays in one directory, keyed by its view.
     DirectoryStats(EntityId),
@@ -436,7 +435,6 @@ impl AppTab {
     pub const fn label_key(self) -> &'static str {
         match self {
             AppTab::ReplayInspector => "ui.tabs.replay_parser",
-            AppTab::ReplayDirectory(_) => "ui.tabs.replay_directory",
             AppTab::Stats | AppTab::DirectoryStats(_) => "ui.tabs.stats",
             AppTab::PlayerTracker => "ui.tabs.player_tracker",
             AppTab::Search => "ui.tabs.search",
@@ -457,7 +455,6 @@ impl AppTab {
     pub fn glyph(self) -> crate::icons::Glyph {
         match self {
             AppTab::ReplayInspector => crate::icons::Glyph::Search,
-            AppTab::ReplayDirectory(_) => crate::icons::Glyph::FolderOpen,
             AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::Glyph::ChartColumn,
             AppTab::PlayerTracker => crate::icons::Glyph::VenetianMask,
             AppTab::Search => crate::icons::Glyph::Search,
@@ -545,12 +542,7 @@ pub struct App {
     /// Starts its background directory scan once `apply_settings` knows the
     /// WoWs directory.
     replay_inspector: Entity<ReplayInspectorView>,
-    armor_owner: Option<WeakEntity<ReplayInspectorView>>,
-    replay_directories: Vec<replay_directories::DirectoryTab>,
     directory_stats: Vec<directory_stats::DirectoryStatsTab>,
-    directories_loaded: bool,
-    directories_restoring: bool,
-    directory_save_lock: Arc<futures::lock::Mutex<()>>,
     /// App-wide debug-mode flag, seeded from `AppPreferences.debug_mode` in
     /// `apply_settings`, then flippable at runtime via the global Ctrl+Shift+D
     /// shortcut (`toggle_debug_mode`), matching the egui app's
@@ -694,7 +686,6 @@ impl App {
         // including if it already landed before this tab is ever opened.
         let subscription = cx.observe_in(&replay_inspector, window, |this, _replay_inspector, window, cx| {
             this.poll_armor_game_data(window, cx);
-            this.sync_directory_game_data(cx);
         });
         // A column toggle or the listing's collapse is a preference, so the
         // tab says when one changed and the row is written here.
@@ -702,7 +693,6 @@ impl App {
         // ships: the tab it lives in is this view's to switch to.
         let show_armor_requested = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
             let crate::replay_inspector::view::ShowArmorRequested { param_index, display_name, hits, incoming } = event;
-            this.armor_owner = Some(_view.downgrade());
             let (param_index, display_name) = (param_index.clone(), display_name.clone());
             let (hits, incoming) = (hits.clone(), incoming.clone());
             this.active_tab = AppTab::ArmorViewer;
@@ -715,20 +705,12 @@ impl App {
         let armor_seek = cx.subscribe_in(&armor_pane, window, |this, _pane, event, window, cx| {
             let crate::armor_viewer::pane::SeekRequested(clock) = event;
             let clock = *clock;
-            let owner = this
-                .armor_owner
-                .as_ref()
-                .and_then(|owner| owner.upgrade())
-                .unwrap_or_else(|| this.replay_inspector.clone());
-            owner.update(cx, |view, cx| view.seek_following_playback(clock, window, cx));
+            this.replay_inspector.update(cx, |view, cx| view.seek_following_playback(clock, window, cx));
         });
 
         // The followed ship took more hits, which the open viewer shows
         // without pulling the reader away from what they are watching.
         let armor_followed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
-            if this.armor_owner.as_ref().is_some_and(|owner| owner.entity_id() != _view.entity_id()) {
-                return;
-            }
             let crate::replay_inspector::view::ArmorFollowed { at, hits, health } = event;
             let (at, hits, health) = (*at, hits.clone(), *health);
             this.armor_pane.update(cx, |pane, cx| pane.follow_hits(at, hits, health, cx));
@@ -743,6 +725,11 @@ impl App {
         let game_data_missing = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
             let GameDataMissing(missing) = event;
             this.offer_missing_game_data(missing.clone(), window, cx);
+        });
+        // Rows the reader chose in the listing, to be read again.
+        let force_reindex = cx.subscribe_in(&replay_inspector, window, |this, view, event, window, cx| {
+            let crate::replay_inspector::view::ForceReindexRequested { candidates, confirm } = event;
+            this.prepare_force_reindex(candidates.clone(), *confirm, view, window, cx);
         });
         // A mapping that does not fit means the commit this app last checked at
         // is no answer: forget it so the newest published one is fetched rather
@@ -774,14 +761,37 @@ impl App {
         );
         let autoload_changed = cx.subscribe(
             &replay_inspector,
-            |this, _view, event: &crate::replay_inspector::view::AutoloadChanged, cx| {
-                this.adopt_directory_autoload(event.0, cx);
+            |this, _view, event: &crate::replay_inspector::view::AutoloadChanged, _cx| {
+                if let Some(settings) = this.settings_mut() {
+                    settings.auto_load_latest_replay = event.0;
+                }
             },
         );
-        let directory_requested = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
-            let crate::replay_inspector::view::OpenDirectoryRequested(root) = event;
-            this.open_directory_tab(root.clone(), false, true, window, cx);
-        });
+        // An opened directory's header asks which of its builds have no game
+        // data here, which the app offers to fetch.
+        let check_game_data = cx.subscribe_in(
+            &replay_inspector,
+            window,
+            |this, _view, event: &crate::replay_inspector::view::CheckGameDataRequested, window, cx| {
+                let crate::replay_inspector::view::CheckGameDataRequested(missing) = event;
+                if missing.is_empty() {
+                    crate::toast::info(t!("ui.replay_folders.game_data_available").into_owned(), window, cx);
+                    return;
+                }
+                // Asked for, so offered again even where it was declined before.
+                for build in missing {
+                    this.offered_builds.remove(&build.build);
+                }
+                this.offer_missing_game_data(missing.clone(), window, cx);
+            },
+        );
+        let directory_stats_requested = cx.subscribe_in(
+            &replay_inspector,
+            window,
+            |this, _view, event: &crate::stats::directory::DirectoryStatsRequested, window, cx| {
+                this.open_directory_stats(event.0.clone(), window, cx);
+            },
+        );
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -839,12 +849,7 @@ impl App {
             zoom: DEFAULT_ZOOM,
             zoom_slider,
             replay_inspector,
-            armor_owner: None,
-            replay_directories: Vec::new(),
             directory_stats: Vec::new(),
-            directories_loaded: false,
-            directories_restoring: false,
-            directory_save_lock: Arc::new(futures::lock::Mutex::new(())),
             debug_mode: false,
             focus_handle,
             armor_pane,
@@ -885,13 +890,15 @@ impl App {
             settings_scroll: ScrollHandle::new(),
             _subscriptions: vec![
                 subscription,
-                directory_requested,
+                check_game_data,
+                directory_stats_requested,
                 autoload_changed,
                 show_armor_requested,
                 armor_followed,
                 armor_seek,
                 replay_settings_changed,
                 game_data_missing,
+                force_reindex,
                 constants_unfit,
                 search_directory,
                 session_shared,
@@ -1012,20 +1019,24 @@ impl App {
         .detach();
     }
 
-    /// The inspector the replay directory tab `id` shows. An id that names no
-    /// open tab shows the main inspector, so the body and the status bar agree.
-    fn shown_inspector(&self, id: EntityId) -> Entity<ReplayInspectorView> {
-        self.replay_directories
-            .iter()
-            .find(|tab| tab.inspector.entity_id() == id)
-            .map(|tab| tab.inspector.clone())
-            .unwrap_or_else(|| self.replay_inspector.clone())
-    }
-
-    /// The stats view the directory stats tab `id` shows, falling back the same
-    /// way as [`Self::shown_inspector`].
+    /// The stats view the directory stats tab `id` shows. An id that names no
+    /// open tab shows the session's, so the body and the status bar agree.
     fn shown_stats(&self, id: EntityId) -> Entity<StatsView> {
         self.directory_stats_view(id).unwrap_or_else(|| self.stats.clone())
+    }
+
+    /// The tab strip, left to right: every tab once, with each directory's
+    /// stats beside the session's.
+    fn tab_order(&self) -> Vec<AppTab> {
+        let mut tabs = Vec::new();
+        for tab in AppTab::ALL {
+            tabs.push(tab);
+            if tab == AppTab::Stats {
+                tabs.extend(self.directory_stats_tabs());
+            }
+        }
+
+        tabs
     }
 
     /// The status bar along the bottom of the window: the active tab's side
@@ -1052,15 +1063,9 @@ impl App {
         }
         jobs.extend(crate::status_bar::running(cx));
 
-        let inspector = match self.active_tab {
-            AppTab::ReplayInspector => Some(self.replay_inspector.clone()),
-            AppTab::ReplayDirectory(id) => Some(self.shown_inspector(id)),
-            _ => None,
-        };
+        let inspector = (self.active_tab == AppTab::ReplayInspector).then(|| self.replay_inspector.clone());
         let toggles = match self.active_tab {
-            AppTab::ReplayInspector | AppTab::ReplayDirectory(_) => {
-                inspector.as_ref().map(|view| view.read(cx).panel_toggles(view, cx)).unwrap_or_default()
-            }
+            AppTab::ReplayInspector => self.replay_inspector.read(cx).panel_toggles(&self.replay_inspector, cx),
             AppTab::ArmorViewer => self.armor_pane.read(cx).panel_toggles(&self.armor_pane),
             AppTab::Stats => self.stats.read(cx).panel_toggles(cx),
             AppTab::DirectoryStats(id) => self.shown_stats(id).read(cx).panel_toggles(cx),
@@ -1467,9 +1472,6 @@ impl App {
                 // the directory is walked, so it is walked again.
                 if fetched {
                     this.replay_inspector.update(cx, |view, cx| view.relist(cx));
-                    for tab in &this.replay_directories {
-                        tab.inspector.update(cx, |view, cx| view.relist(cx));
-                    }
                 }
             },
         );
@@ -1491,9 +1493,6 @@ impl App {
         wows_toolkit_viewmodel::set_locale(&code);
 
         self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
-        for tab in &self.replay_directories {
-            tab.inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
-        }
         self.stats.update(cx, |view, cx| view.set_locale(cx));
         self.set_directory_stats_locale(cx);
         // Placeholders are stored on their input states, so the ones the
@@ -1603,9 +1602,6 @@ impl App {
                     settings_store::save(keys::CONSTANTS_FILE_COMMIT, &Some(commit), cx);
                     crate::toast::info(t!("ui.replay.constants_latest_written").into_owned(), window, cx);
                     this.replay_inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
-                    for tab in &this.replay_directories {
-                        tab.inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
-                    }
                 }
                 crate::constants::Checked::UpToDate => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
@@ -1997,6 +1993,16 @@ impl App {
             crate::palette::PaletteMode::Players | crate::palette::PaletteMode::MyShips => {
                 crate::palette::ModeSource::Index
             }
+            crate::palette::PaletteMode::ReindexVersions => {
+                let candidates = self.listed_reindex_candidates(cx);
+                crate::palette::ModeSource::Versions(crate::force_reindex::versions(&candidates).into())
+            }
+            crate::palette::PaletteMode::ReplayFolders => {
+                let history = self.replay_inspector.read(cx).folder_history();
+                let rows: Vec<crate::palette::FolderRow> =
+                    history.folders().iter().cloned().map(crate::palette::FolderRow::new).collect();
+                crate::palette::ModeSource::Folders(rows.into())
+            }
         };
 
         self.palette = cx.new(|cx| CommandState::new(window, cx));
@@ -2006,6 +2012,7 @@ impl App {
         let mode_view = cx.new(|cx| {
             let mut dialog = crate::palette::ModeDialog::new(command.clone(), owner, mode, source);
             dialog.wait_for_ships(&inspector, &armor_pane, window, cx);
+            dialog.check_folders(cx);
             dialog
         });
         mode_view.update(cx, |dialog, cx| dialog.search(String::new(), window, cx));
@@ -2092,8 +2099,7 @@ impl App {
             }
             PaletteAction::SetTheme(choice) => self.set_theme(choice, window, cx),
             PaletteAction::OpenReplayFile => {
-                let inspector = self.active_replay_inspector();
-                inspector.update(cx, |view, cx| view.open_manually(window, cx));
+                self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
             }
             PaletteAction::SearchFor(query) => self.run_search(query, window, cx),
             PaletteAction::EnterMode(mode) => self.enter_palette_mode(mode, window, cx),
@@ -2113,6 +2119,7 @@ impl App {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
             PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
+            PaletteAction::ForceReindex(scope) => self.force_reindex_scope(scope, window, cx),
             PaletteAction::ImportConstants => {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.import_constants(window, cx));
@@ -2121,9 +2128,13 @@ impl App {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.contribute_all(ledger, window, cx));
             }
-            PaletteAction::OpenReplayDirectory => {
+            PaletteAction::BrowseReplayFolder => {
                 self.active_tab = AppTab::ReplayInspector;
-                self.replay_inspector.update(cx, |view, cx| view.open_directory(window, cx));
+                self.replay_inspector.update(cx, |view, cx| view.browse_folder(window, cx));
+            }
+            PaletteAction::OpenReplayFolder(root) => {
+                self.active_tab = AppTab::ReplayInspector;
+                self.replay_inspector.update(cx, |view, cx| view.open_recent_folder(root, window, cx));
             }
         }
         cx.notify();
@@ -2316,9 +2327,6 @@ impl App {
     pub fn apply_session_stats(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(table) = data.personal_rating.clone() {
             self.replay_inspector.update(cx, |view, cx| view.set_personal_rating(table.clone(), cx));
-            for tab in &self.replay_directories {
-                tab.inspector.update(cx, |view, cx| view.set_personal_rating(table.clone(), cx));
-            }
         }
         self.stats.update(cx, |stats, cx| stats.apply_session(data, window, cx));
         cx.notify();
@@ -2394,7 +2402,7 @@ impl App {
         });
         self.poll_armor_game_data(window, cx);
         self.settings = SettingsState::Loaded(Box::new(settings));
-        self.restore_directories(window, cx);
+        self.replay_inspector.update(cx, |view, cx| view.restore_folders(window, cx));
     }
 
     /// Record that the DB load failed. Called once from `main.rs` in place of
@@ -2410,9 +2418,6 @@ impl App {
         self.debug_mode = !self.debug_mode;
         let debug_mode = self.debug_mode;
         self.replay_inspector.update(cx, |view, cx| view.set_debug_mode(debug_mode, cx));
-        for tab in &self.replay_directories {
-            tab.inspector.update(cx, |view, cx| view.set_debug_mode(debug_mode, cx));
-        }
         cx.notify();
     }
 }
@@ -2682,22 +2687,7 @@ impl App {
         self.index_progress = Some(crate::replay_index::IndexProgress::default());
         cx.notify();
 
-        let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded();
-        cx.spawn(async move |this, cx| {
-            use futures::StreamExt as _;
-            while let Some(step) = progress_rx.next().await {
-                if this
-                    .update(cx, |this: &mut Self, cx| {
-                        this.index_progress = Some(step);
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
+        let progress_tx = self.follow_index_progress(cx);
 
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let built = cx
@@ -2738,6 +2728,32 @@ impl App {
                 cx.notify();
             });
         }));
+    }
+
+    /// Moves the index pass's progress line along as the pass reports, and
+    /// hands back where the pass sends its reports.
+    fn follow_index_progress(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> futures::channel::mpsc::UnboundedSender<crate::replay_index::IndexProgress> {
+        let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded();
+        cx.spawn(async move |this, cx| {
+            use futures::StreamExt as _;
+            while let Some(step) = progress_rx.next().await {
+                if this
+                    .update(cx, |this: &mut Self, cx| {
+                        this.index_progress = Some(step);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        progress_tx
     }
 
     /// Adopts a new session display name once the edit has settled.
@@ -3343,9 +3359,6 @@ impl App {
         // choice on its next start.
         settings_store::save(keys::SEND_REPLAY_DATA, &mode.shares_anything(), cx);
         self.replay_inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
-        for tab in &self.replay_directories {
-            tab.inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
-        }
     }
 
     /// Rewrites the whole `ReplaySettings` blob, which is stored as one row,
@@ -3356,9 +3369,6 @@ impl App {
         let replay = settings.replay.clone();
         settings_store::save(keys::REPLAY_SETTINGS, &replay, cx);
         self.replay_inspector.update(cx, |view, cx| view.set_replay_settings(replay.clone(), cx));
-        for tab in &self.replay_directories {
-            tab.inspector.update(cx, |view, cx| view.set_replay_settings(replay.clone(), cx));
-        }
         cx.notify();
     }
 
@@ -3973,6 +3983,18 @@ fn open_data_directory() {
     open_directory(&dir);
 }
 
+/// One tab's glyph and name. `attention` marks a tab that needs looking at.
+fn tab_label(tab: AppTab, attention: bool, selected: bool, cx: &gpui_kit::App) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .items_center()
+        .when(selected, |row| row.text_color(cx.theme().tab_active_foreground).font_weight(FontWeight::SEMIBOLD))
+        .when(attention, |row| row.text_color(cx.theme().danger))
+        .child(crate::icons::icon(tab.glyph()))
+        .child(tab.label())
+        .into_any_element()
+}
+
 /// Shows `dir` in the desktop's own file manager.
 fn open_directory(dir: &std::path::Path) {
     #[cfg(target_os = "windows")]
@@ -4044,7 +4066,7 @@ impl Render for App {
                     })
                     .child(match *t {
                         AppTab::DirectoryStats(id) => self.directory_stats_tab_label(id, selected, cx),
-                        _ => self.directory_tab_label(*t, attention, selected, cx),
+                        _ => tab_label(*t, attention, selected, cx),
                     })
             }))
             .on_click(cx.listener(move |this, ix: &usize, window, cx| {
@@ -4126,7 +4148,6 @@ impl Render for App {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::Launcher => self.launcher.clone().into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
-            AppTab::ReplayDirectory(id) => self.shown_inspector(id).into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
             AppTab::DirectoryStats(id) => self.shown_stats(id).into_any_element(),

@@ -2,10 +2,13 @@
 //!
 //! Ports the egui app's `ui/command_palette.rs`, which opens on ctrl+k or
 //! ctrl+p. The root list is built once and `Command` filters it. Some root
-//! entries open a second layer (`ModeDialog`) that queries the replay index or
-//! filters the ship catalogue as the reader types; Escape, or Backspace in an
-//! empty field, returns to the root.
+//! entries open a second layer (`ModeDialog`) that queries the replay index,
+//! filters the ship catalogue, lists the replay listing's game versions, or
+//! lists the recently opened replay directories as the reader types; Escape,
+//! or Backspace in an empty field, returns to the root.
 
+use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::AppContext as _;
@@ -21,6 +24,7 @@ use gpui_kit::Subscription;
 use gpui_kit::Task;
 use gpui_kit::WeakEntity;
 use gpui_kit::Window;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -34,6 +38,7 @@ use gpui_kit::component::command::CommandState;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::div;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::px;
 use rust_i18n::t;
 use wowsunpack::game_params::types::Species;
@@ -44,7 +49,10 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::armor_viewer::ShipCatalog;
 use crate::armor_viewer::catalog::species_name;
 use crate::armor_viewer::catalog::tier_roman;
+use crate::force_reindex::ReindexScope;
+use crate::force_reindex::VersionCount;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::replay_inspector::view::shown_path;
 use crate::runtime;
 use crate::settings_store;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -72,8 +80,10 @@ pub enum PaletteAction {
     CopyLatestLog,
     /// Put the small support summary on the clipboard.
     CopyBugReportInfo,
-    /// List a directory of replays other than the install's.
-    OpenReplayDirectory,
+    /// Ask for a directory of replays and open it as a tab of the listing.
+    BrowseReplayFolder,
+    /// Open a recently opened directory as a tab of the listing.
+    OpenReplayFolder(PathBuf),
     /// Read every replay that is not indexed yet.
     IndexAllReplays,
     /// Read every replay again and rewrite what the index holds, once the reader
@@ -83,6 +93,9 @@ pub enum PaletteAction {
     ContributeAllReplays(crate::upload::LedgerUse),
     /// Take a result mapping the reader points at as the loaded build's.
     ImportConstants,
+    /// Read the listed replays in scope again and rewrite their index entries,
+    /// once the reader has confirmed it.
+    ForceReindex(ReindexScope),
 }
 
 /// Which cascading list the palette is showing.
@@ -94,9 +107,16 @@ pub enum PaletteMode {
     MyShips,
     /// Every ship in the loaded build, to open in the Armor Viewer.
     ArmorShips,
+    /// The game versions the listing holds, to force a re-index of one.
+    ReindexVersions,
+    /// "Browse..." and the directories most recently opened, to open one in
+    /// the listing.
+    ReplayFolders,
 }
 
 impl PaletteMode {
+    /// The modes the root list leads into from its searches. The version list
+    /// is offered beside the other re-index command instead.
     pub const ALL: [PaletteMode; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
 
     /// What the root entry that enters this mode is called.
@@ -105,6 +125,8 @@ impl PaletteMode {
             Self::Players => "ui.palette.search_players",
             Self::MyShips => "ui.palette.my_matches_in_ship",
             Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
+            Self::ReindexVersions => "ui.reindex.palette_by_version",
+            Self::ReplayFolders => "ui.replay.open_directory",
         }
     }
 
@@ -114,6 +136,8 @@ impl PaletteMode {
             Self::Players => "ui.palette.players_title",
             Self::MyShips => "ui.palette.my_ships_title",
             Self::ArmorShips => "ui.palette.armor_ships_title",
+            Self::ReindexVersions => "ui.reindex.versions_title",
+            Self::ReplayFolders => "ui.replay_folders.recent_title",
         }
     }
 
@@ -122,6 +146,8 @@ impl PaletteMode {
             Self::Players => "ui.palette.players_placeholder",
             Self::MyShips => "ui.palette.my_ships_placeholder",
             Self::ArmorShips => "ui.palette.armor_ships_placeholder",
+            Self::ReindexVersions => "ui.reindex.versions_placeholder",
+            Self::ReplayFolders => "ui.replay_folders.recent_placeholder",
         }
     }
 }
@@ -236,6 +262,110 @@ pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntr
         .collect()
 }
 
+/// The version layer's rows for `query`: every version, newest first, with
+/// the ones whose `major.minor.patch` does not contain the query left out.
+pub fn version_entries(rows: &[VersionCount], query: &str) -> Vec<PaletteEntry> {
+    let needle = query.trim();
+    rows.iter()
+        .map(|row| (crate::force_reindex::version_said(&row.version), row))
+        .filter(|(said, _)| said.contains(needle))
+        .map(|(said, row)| PaletteEntry {
+            label: t!("ui.reindex.version_row", version = said, count = row.replays).into_owned(),
+            action: PaletteAction::ForceReindex(ReindexScope::Version(row.version)),
+        })
+        .collect()
+}
+
+/// Whether a recent directory is still there, as far as the layer knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderPresence {
+    /// Not looked for yet: listed as present until the check returns.
+    Unchecked,
+    Present,
+    /// Listed dimmed.
+    Missing,
+}
+
+/// A recently opened directory as the directory layer lists it.
+#[derive(Clone, Debug)]
+pub struct FolderRow {
+    pub path: PathBuf,
+    pub presence: FolderPresence,
+}
+
+impl FolderRow {
+    /// A row whose directory has not been looked for: that happens off the UI
+    /// thread, since a directory on an offline share can take many seconds
+    /// to answer.
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, presence: FolderPresence::Unchecked }
+    }
+}
+
+/// What a directory row is called: the directory's own name.
+fn folder_label(path: &Path) -> String {
+    match path.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => shown_path(path),
+    }
+}
+
+/// The directory layer's rows for `query`: "Browse..." first, then the
+/// recently opened directories whose name or path contains the query, in the
+/// order they were opened, most recent first.
+pub fn folder_entries(rows: &[FolderRow], query: &str) -> Vec<PaletteEntry> {
+    let needle = query.trim().to_lowercase();
+    let browse =
+        PaletteEntry { label: t!("ui.replay_folders.browse").into_owned(), action: PaletteAction::BrowseReplayFolder };
+    let recent = rows
+        .iter()
+        .filter(|row| needle.is_empty() || shown_path(&row.path).to_lowercase().contains(&needle))
+        .map(|row| PaletteEntry {
+            label: folder_label(&row.path),
+            action: PaletteAction::OpenReplayFolder(row.path.clone()),
+        });
+
+    std::iter::once(browse).chain(recent).collect()
+}
+
+/// The directory layer's rows as the component draws them: the name, with
+/// the whole path dimmed after it, and the row dimmed and marked when the
+/// directory is gone.
+fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow]) -> Vec<CommandItem> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let PaletteAction::OpenReplayFolder(path) = &entry.action else {
+                return CommandItem::new().label(entry.label.clone()).icon(IconName::FolderOpen);
+            };
+            let missing = rows.iter().any(|row| row.path == *path && row.presence == FolderPresence::Missing);
+            let name = entry.label.clone();
+            let shown = shown_path(path);
+            CommandItem::new().label(entry.label.clone()).child(move |_window, cx| {
+                let dim = crate::theme::text_dim();
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_2()
+                    .items_center()
+                    .when(missing, |row| row.opacity(0.5))
+                    .child(crate::icons::icon(crate::icons::Glyph::Folder).text_color(dim))
+                    .child(div().flex_none().text_sm().text_color(cx.theme().foreground).child(name.clone()))
+                    .when(missing, |row| {
+                        row.child(
+                            crate::icons::icon(crate::icons::Glyph::TriangleAlert)
+                                .id(("palette-folder-missing", index))
+                                .test_support()
+                                .text_color(cx.theme().warning),
+                        )
+                    })
+                    .child(div().min_w_0().truncate().text_xs().text_color(dim).child(shown.clone()))
+            })
+        })
+        .collect()
+}
+
 /// The ship catalogue as the ship layer sees it.
 pub enum ShipList {
     /// Still loading; the layer fills in once it lands.
@@ -251,6 +381,10 @@ pub enum ModeSource {
     Index,
     /// The ship catalogue, filtered in memory.
     Ships(ShipList),
+    /// The game versions the listing holds, newest first.
+    Versions(Rc<[VersionCount]>),
+    /// The directories most recently opened, most recent first.
+    Folders(Rc<[FolderRow]>),
 }
 
 /// Stands in for the ship catalogue in tests, which have no game data to
@@ -278,6 +412,8 @@ pub struct ModeDialog {
     _query_task: Option<Task<()>>,
     /// Held while the ship catalogue is still loading.
     _catalog_watch: Vec<Subscription>,
+    /// Looks for the recent directories, while that runs.
+    _folder_check: Option<Task<()>>,
 }
 
 impl ModeDialog {
@@ -292,6 +428,7 @@ impl ModeDialog {
             generation: 0,
             _query_task: None,
             _catalog_watch: Vec::new(),
+            _folder_check: None,
         }
     }
 
@@ -311,6 +448,32 @@ impl ModeDialog {
             cx.observe_in(inspector, window, |this, _, window, cx| this.refresh_ships(window, cx)),
             cx.observe_in(armor_pane, window, |this, _, window, cx| this.refresh_ships(window, cx)),
         ];
+    }
+
+    /// Looks for the recent directories off the UI thread, and dims the ones
+    /// that are gone once it knows.
+    pub fn check_folders(&mut self, cx: &mut Context<Self>) {
+        let ModeSource::Folders(rows) = &self.source else { return };
+
+        let paths: Vec<PathBuf> = rows.iter().map(|row| row.path.clone()).collect();
+        self._folder_check = Some(cx.spawn(async move |this, cx| {
+            let checked: Vec<FolderRow> = cx
+                .background_spawn(async move {
+                    paths
+                        .into_iter()
+                        .map(|path| {
+                            let presence =
+                                if path.is_dir() { FolderPresence::Present } else { FolderPresence::Missing };
+                            FolderRow { path, presence }
+                        })
+                        .collect()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.source = ModeSource::Folders(checked.into());
+                cx.notify();
+            });
+        }));
     }
 
     fn refresh_ships(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -340,6 +503,16 @@ impl ModeDialog {
             }
             ModeSource::Ships(ShipList::Pending | ShipList::Unavailable(_)) => {
                 self.entries = Rc::default();
+                cx.notify();
+                return;
+            }
+            ModeSource::Versions(rows) => {
+                self.entries = Rc::new(version_entries(rows, &needle));
+                cx.notify();
+                return;
+            }
+            ModeSource::Folders(rows) => {
+                self.entries = Rc::new(folder_entries(rows, &needle));
                 cx.notify();
                 return;
             }
@@ -401,6 +574,7 @@ impl ModeDialog {
             (ModeSource::Ships(ShipList::Unavailable(reason)), _) => {
                 t!("ui.palette.ships_unavailable", reason = reason).into_owned()
             }
+            (ModeSource::Versions(rows), _) if rows.is_empty() => t!("ui.reindex.no_versions").into_owned(),
             (_, Some(error)) => t!("ui.search.failed", reason = error).into_owned(),
             (_, None) => t!("ui.search.no_matches").into_owned(),
         }
@@ -434,7 +608,10 @@ impl Render for ModeDialog {
             .filterable(false)
             .placeholder(t!(self.mode.placeholder_key()).to_string())
             .max_h(px(400.))
-            .items(items(&entries))
+            .items(match &self.source {
+                ModeSource::Folders(rows) => folder_items(&entries, rows),
+                _ => items(&entries),
+            })
             .header({
                 let owner = self.owner.clone();
                 move |_state, _window, cx| {
@@ -557,12 +734,20 @@ pub fn entries() -> Vec<PaletteEntry> {
         action: PaletteAction::OpenReplayFile,
     });
     entries.push(PaletteEntry {
-        label: t!("ui.replay.open_directory").into_owned(),
-        action: PaletteAction::OpenReplayDirectory,
+        label: t!(PaletteMode::ReplayFolders.label_key()).into_owned(),
+        action: PaletteAction::EnterMode(PaletteMode::ReplayFolders),
     });
     entries.push(PaletteEntry {
         label: t!("ui.settings.replay.index_all_replays").into_owned(),
         action: PaletteAction::IndexAllReplays,
+    });
+    entries.push(PaletteEntry {
+        label: t!(PaletteMode::ReindexVersions.label_key()).into_owned(),
+        action: PaletteAction::EnterMode(PaletteMode::ReindexVersions),
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.reindex.palette_all").into_owned(),
+        action: PaletteAction::ForceReindex(ReindexScope::All),
     });
     entries.push(PaletteEntry {
         label: t!("ui.replay.refresh_persisted_data").into_owned(),
@@ -661,8 +846,9 @@ pub async fn mode_entries(
             })
             .map_err(|err| format!("The indexed ships could not be read: {err}")),
         // Read from the loaded build rather than the index: armor is a property of
-        // the ship, not of anything the reader has played.
-        PaletteMode::ArmorShips => Ok(Vec::new()),
+        // the ship, not of anything the reader has played. The versions and the
+        // recent directories are the listing's, read when the layer opens.
+        PaletteMode::ArmorShips | PaletteMode::ReindexVersions | PaletteMode::ReplayFolders => Ok(Vec::new()),
     }
 }
 
@@ -737,6 +923,39 @@ mod tests {
         for mode in PaletteMode::ALL {
             assert!(offered.contains(&mode), "{mode:?} is not in the palette");
         }
+    }
+
+    /// Both forced re-index commands are on the root list, and the version
+    /// layer keeps the newest-first order it is given while it filters.
+    #[test]
+    fn the_reindex_commands_are_offered_and_versions_filter_in_order() {
+        use super::version_entries;
+        use crate::force_reindex::ReindexScope;
+        use crate::force_reindex::VersionCount;
+        use wowsunpack::data::Version;
+
+        let offered: Vec<PaletteAction> = entries().into_iter().map(|entry| entry.action).collect();
+        assert!(offered.contains(&PaletteAction::EnterMode(PaletteMode::ReindexVersions)));
+        assert!(offered.contains(&PaletteAction::ForceReindex(ReindexScope::All)));
+
+        let rows = [
+            VersionCount { version: Version::base(14, 3, 0), replays: 4 },
+            VersionCount { version: Version::base(14, 2, 1), replays: 1 },
+            VersionCount { version: Version::base(13, 4, 0), replays: 7 },
+        ];
+        let chosen = |query: &str| -> Vec<Version> {
+            version_entries(&rows, query)
+                .into_iter()
+                .map(|entry| match entry.action {
+                    PaletteAction::ForceReindex(ReindexScope::Version(version)) => version,
+                    other => panic!("a version row re-indexes that version, not {other:?}"),
+                })
+                .collect()
+        };
+
+        assert_eq!(chosen(""), [Version::base(14, 3, 0), Version::base(14, 2, 1), Version::base(13, 4, 0)]);
+        assert_eq!(chosen(" 14."), [Version::base(14, 3, 0), Version::base(14, 2, 1)]);
+        assert!(chosen("15").is_empty());
     }
 
     /// A player row leads to the search that finds their battles, and a ship row

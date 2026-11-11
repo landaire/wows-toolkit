@@ -6,6 +6,9 @@
 //! `panel.rs`). A repeat double-click on an already-open replay brings its
 //! tab forward rather than adding a second one (see `open_replay`).
 
+#[path = "folders.rs"]
+mod folders;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,6 +45,7 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
+use super::browser_view::ListingWatch;
 use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
@@ -58,8 +62,17 @@ use super::panel::ReplayPanel;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
 use crate::stats::directory::DirectoryStatsRequested;
+use folders::FolderHistory;
+use folders::FolderId;
+use folders::FolderSource;
+use folders::FolderState;
+use folders::ReplayFolder;
+use folders::SavedList;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
+
+pub(crate) use folders::shortened_path;
+pub(crate) use folders::shown_path;
 
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.
@@ -125,7 +138,29 @@ fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
 }
 
 pub struct ReplayInspectorView {
-    browser: Entity<ReplayBrowser>,
+    /// One tab per directory the listing can show, the install's first.
+    folders: Vec<ReplayFolder>,
+    /// The tab whose listing is on screen.
+    selected_folder: FolderId,
+    /// Scrolls the tab strip, so a tab selected from outside it comes into
+    /// view.
+    folder_scroll: ScrollHandle,
+    /// Whether the pinned directories have been read from the settings.
+    pins_saved: SavedList,
+    /// The directories most recently opened, for the palette.
+    folder_history: FolderHistory,
+    /// Whether `folder_history` has been read from the settings.
+    history_saved: SavedList,
+    /// Recent directories dropped before the stored list was read, kept out
+    /// of it once it is.
+    history_dropped: Vec<PathBuf>,
+    /// The install's replays directory as tabs are compared, once
+    /// `scan_install` has found it.
+    install_root: Option<PathBuf>,
+    /// Finds `install_root` off the UI thread.
+    _install_root_check: Option<Task<()>>,
+    /// The language the listings' figures are grouped in.
+    locale: Option<String>,
     /// The listing's split, held so its dragged width can be read while the
     /// listing slides open or shut outside the split.
     listing_split: Entity<ResizableState>,
@@ -193,9 +228,9 @@ pub struct ReplayInspectorView {
     /// Session-local copy of the persisted `ReplaySettings`, seeded from the
     /// shared config DB in `apply_settings`. The header toolbar's
     /// column-filter checkboxes read/write this and drive `default_columns`
-    /// off it (`set_column_filter`). The live grouping selection lives on
-    /// `browser`; `set_grouping` keeps this copy and the stored row in step
-    /// with it.
+    /// off it (`set_column_filter`). The live grouping selection lives on the
+    /// listings; `set_grouping` keeps this copy, every listing and the stored
+    /// row in step.
     replay_settings: ReplaySettings,
     /// What the reader agreed to share, which decides what a finished battle
     /// contributes. Seeded from the row the Settings tab writes.
@@ -258,22 +293,7 @@ pub struct SessionShared(pub crate::collab::CollabLink);
 /// the ask goes up rather than opening anything here.
 pub struct TacticsBoardRequested;
 
-#[derive(Clone)]
-pub(crate) struct DirectoryContext {
-    game_data: Option<GameDataCache>,
-    status: GameDataStatus,
-    install_dir: String,
-    personal_rating: Option<Arc<PersonalRatingData>>,
-    replay_settings: ReplaySettings,
-    data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
-    debug_mode: bool,
-    auto_load_latest_replay: bool,
-    collab_display_name: String,
-}
-
-pub(crate) struct OpenDirectoryRequested(pub PathBuf);
-impl EventEmitter<OpenDirectoryRequested> for ReplayInspectorView {}
-
+/// The reader asked which of the listed replays' game data is missing.
 pub(crate) struct CheckGameDataRequested(pub Vec<MissingBuild>);
 impl EventEmitter<CheckGameDataRequested> for ReplayInspectorView {}
 
@@ -295,6 +315,16 @@ pub struct GameDataMissing(pub Vec<MissingBuild>);
 /// checked at: forgetting it is what makes the next check fetch again rather
 /// than report the repository unchanged.
 pub struct ConstantsUnfit;
+
+/// The reader asked for these replays to be read again and their index
+/// entries rewritten.
+///
+/// Raised to the app, which owns the index pass and the game-data cache a
+/// pass may have to fetch into first.
+pub struct ForceReindexRequested {
+    pub candidates: Vec<crate::force_reindex::ReindexCandidate>,
+    pub confirm: crate::force_reindex::Confirm,
+}
 
 /// A replay tab that is the one showing in its dock group.
 #[derive(Clone)]
@@ -325,6 +355,7 @@ impl EventEmitter<SearchDirectory> for ReplayInspectorView {}
 impl EventEmitter<SessionShared> for ReplayInspectorView {}
 impl EventEmitter<TacticsBoardRequested> for ReplayInspectorView {}
 impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
+impl EventEmitter<ForceReindexRequested> for ReplayInspectorView {}
 
 /// A viewport asked for an armor viewer on one of the battle's ships, with
 /// what that ship had taken by where playback is.
@@ -370,7 +401,8 @@ impl ReplayInspectorView {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let browser = cx.new(ReplayBrowser::new);
+        let install = Self::new_folder(FolderSource::Install, false, FolderState::Listed, window, cx);
+        let selected_folder = install.id();
         // The skinned area is what draws a tab bar over a group holding more
         // than one panel; a bare one renders only the displayed panel.
         let (dock_area, skin) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
@@ -385,11 +417,19 @@ impl ReplayInspectorView {
                 }
             }
         });
-        let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
         Self {
             data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode::default(),
-            browser,
+            folders: vec![install],
+            selected_folder,
+            folder_scroll: ScrollHandle::new(),
+            pins_saved: SavedList::NotRead,
+            folder_history: FolderHistory::default(),
+            history_saved: SavedList::NotRead,
+            history_dropped: Vec::new(),
+            install_root: None,
+            _install_root_check: None,
+            locale: None,
             listing_split: cx.new(|_| ResizableState::default()),
             collab: crate::collab::CollabState::default(),
             collab_name: cx
@@ -416,7 +456,7 @@ impl ReplayInspectorView {
             contributing: None,
             next_batch: crate::status_bar::RunNumber(0),
             auto_exports: HashMap::new(),
-            _subscriptions: vec![subscription, dock_subscription],
+            _subscriptions: vec![dock_subscription],
         }
     }
 
@@ -439,7 +479,10 @@ impl ReplayInspectorView {
         }
         // Kept preview tracks carry ship names in the previous language.
         crate::minimap_preview::forget_kept_previews();
-        self.browser.update(cx, |browser, cx| browser.set_locale(locale, cx));
+        self.locale = locale.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.set_locale(locale.clone(), cx));
+        }
         cx.notify();
     }
 
@@ -463,12 +506,15 @@ impl ReplayInspectorView {
             self.collab.display_name = collab_display_name.clone();
             self.collab_name.update(cx, |state, cx| state.set_value(collab_display_name, window, cx));
         }
-        self.browser.update(cx, |browser, cx| {
-            browser.set_locale(locale.clone(), cx);
-            // The listing's second line is what the index knows about each
-            // file, so it is read once the directory is known.
-            browser.load_summaries(cx);
-        });
+        self.locale = locale.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| {
+                browser.set_locale(locale.clone(), cx);
+                // The listing's second line is what the index knows about each
+                // file, so it is read once the directory is known.
+                browser.load_summaries(cx);
+            });
+        }
         self.debug_mode = debug_mode;
         self.data_sharing = data_sharing;
         self.auto_load_latest_replay = auto_load_latest_replay;
@@ -490,12 +536,8 @@ impl ReplayInspectorView {
                 let _ = panel.update(cx, |panel, _cx| panel.set_game_data(cache.clone()));
             }
             self.game_data_status = GameDataStatus::Failed(t!("ui.messages.wows_dir_not_set").into_owned());
-            let status = self.game_data_status.clone();
-            self.browser.update(cx, |browser, cx| {
-                browser.start_scan(wows_dir, cx);
-                browser.set_game_data(&status, cx);
-                browser.set_build_cache(Some(cache));
-            });
+            self.scan_install(wows_dir, cx);
+            self.share_game_data(cx);
             return;
         }
 
@@ -526,29 +568,24 @@ impl ReplayInspectorView {
             version: super::load::installed_version(std::path::Path::new(&wows_dir))
                 .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
         };
-        let status = self.game_data_status.clone();
-        self.browser.update(cx, |browser, cx| {
-            browser.start_scan(wows_dir.clone(), cx);
-            browser.set_game_data(&status, cx);
-            // The listing's hover previews bake against whichever build a
-            // replay was recorded on, which is what this cache loads.
-            browser.set_build_cache(Some(game_data.clone()));
-        });
+        self.scan_install(wows_dir.clone(), cx);
+        // The listing's hover previews bake against whichever build a replay
+        // was recorded on, which is what this cache loads.
+        self.share_game_data(cx);
 
         let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);
         cx.spawn_in(window, async move |this, cx| {
             let status = preload.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.game_data_status = status.clone();
-                let browser = this.browser.clone();
-                browser.update(cx, |browser, cx| browser.set_game_data(&status, cx));
+                this.share_game_data(cx);
                 // What the egui app reports when the same load finishes
                 // (`app.rs`'s `GameDataLoaded`): the install is readable, and
                 // separately whether it has any replays to show.
                 match &status {
                     GameDataStatus::Ready(_) => {
                         crate::toast::ok(t!("ui.messages.game_data_loaded").to_string(), window, cx);
-                        if this.browser.read(cx).is_empty() {
+                        if this.install_browser().read(cx).is_empty() {
                             crate::toast::warn(t!("ui.messages.no_replays_detected").to_string(), window, cx);
                         }
                     }
@@ -561,6 +598,22 @@ impl ReplayInspectorView {
             });
         })
         .detach();
+    }
+
+    /// Hands every listing the install and the game data its rows are named
+    /// and its previews baked with.
+    fn share_game_data(&self, cx: &mut Context<Self>) {
+        let install_dir = self.install_dir.clone();
+        let cache = self.game_data.clone();
+        let status = self.game_data_status.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| {
+                // "Open in Game" launches the install whichever directory is listed.
+                browser.set_wows_dir(install_dir.clone());
+                browser.set_build_cache(cache.clone());
+                browser.set_game_data(&status, cx);
+            });
+        }
     }
 
     /// The current game-data preload status. Read by `App` so the Armor
@@ -603,6 +656,14 @@ impl ReplayInspectorView {
                 self.auto_export_landed(path, window, cx);
                 self.index_landed(path, cx);
                 self.contribute_landed(path, cx);
+                // A battle the game has just finished opens and is announced
+                // whichever tab is shown, as the checkbox promises. Elsewhere,
+                // a directory not on screen counts it on its tab rather than
+                // taking the reader away from the one they are looking at.
+                let noted = self.note_unseen(browser, path, cx);
+                if noted && browser != self.install_browser() {
+                    return;
+                }
                 let battle = battle_label(browser, path, cx);
                 let opened = self.auto_load_latest_replay
                     && self.open_replay_into(path.clone(), OpenTarget::ShowingTab, window, cx).is_some();
@@ -620,11 +681,16 @@ impl ReplayInspectorView {
             ReplayBrowserEvent::ReplayChanged(path) => {
                 self.auto_export_landed(path, window, cx);
                 self.reparse_open_replay(path, ReparseCause::FileRewritten, window, cx);
+                self.note_unseen(browser, path, cx);
             }
+            ReplayBrowserEvent::ReplayRemoved(path) => self.forget_unseen(browser, path, cx),
             ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
             // The app owns the cache and the jobs that fill it, so the offer to
             // fetch these builds is raised to it.
             ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),
+            ReplayBrowserEvent::ForceReindex { candidates, confirm } => {
+                cx.emit(ForceReindexRequested { candidates: candidates.clone(), confirm: *confirm })
+            }
         }
     }
 
@@ -800,115 +866,40 @@ impl ReplayInspectorView {
         .detach();
     }
 
-    /// Reads the listed directory again, for game data that has since arrived.
+    /// Reads every listed directory again, for game data that has since
+    /// arrived.
     pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
-        self.browser.update(cx, |browser, cx| browser.relist(cx));
+        for folder in &self.folders {
+            // A missing directory has nothing to walk; Refresh lists it once it is back.
+            if folder.state() == FolderState::Listed {
+                folder.browser().update(cx, |browser, cx| browser.relist(cx));
+            }
+        }
     }
 
-    /// Lists a directory the reader picks, instead of the install's own.
+    /// Every replay a palette command re-indexes, each once: the install's
+    /// directory and the pinned ones.
     ///
-    /// Opened as a workspace of its own, as the egui app opens one: a tab per
-    /// directory, titled by its root and closeable, so an archive sits beside
-    /// the install's own listing rather than replacing it. Everything else --
-    /// previews, opening, indexing -- works on it as it does on the install's.
-    pub(crate) fn open_directory(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder(&t!("ui.replay.open_directory"));
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(directory) = asked.await else { return };
-            let _ = this.update_in(cx, |this, window, cx| this.open_workspace(directory, window, cx));
-        })
-        .detach();
+    /// A directory opened once is left out; it may hold other players'
+    /// replays, which do not belong in the reader's own index unasked.
+    pub(crate) fn reindex_candidates(&self, cx: &App) -> Vec<crate::force_reindex::ReindexCandidate> {
+        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        let mut candidates = Vec::new();
+        let kept = self.folders.iter().filter(|folder| folder.source() == &FolderSource::Install || folder.is_pinned());
+        for folder in kept {
+            let listed = folder.browser().read(cx).reindex_candidates();
+            candidates.extend(listed.into_iter().filter(|candidate| seen.insert(candidate.path.clone())));
+        }
+
+        candidates
     }
 
-    pub(crate) fn open_workspace(&mut self, root: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(OpenDirectoryRequested(root));
-    }
-
-    pub(crate) fn directory_context(&self) -> DirectoryContext {
-        DirectoryContext {
-            game_data: self.game_data.clone(),
-            status: self.game_data_status.clone(),
-            install_dir: self.install_dir.clone(),
-            personal_rating: self.personal_rating.clone(),
-            replay_settings: self.replay_settings.clone(),
-            data_sharing: self.data_sharing,
-            debug_mode: self.debug_mode,
-            auto_load_latest_replay: self.auto_load_latest_replay,
-            collab_display_name: self.collab.display_name.clone(),
+    /// Reads what the index holds for every listing's replays again, so the
+    /// rows show what a pass that has just finished wrote.
+    pub(crate) fn reload_index_summaries(&mut self, cx: &mut Context<Self>) {
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.load_summaries(cx));
         }
-    }
-
-    pub(crate) fn configure_directory(
-        &mut self,
-        context: DirectoryContext,
-        locale: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.game_data = context.game_data.clone();
-        self.game_data_status = context.status.clone();
-        self.install_dir = context.install_dir.clone();
-        self.data_sharing = context.data_sharing;
-        self.debug_mode = context.debug_mode;
-        self.auto_load_latest_replay = context.auto_load_latest_replay;
-        self.collab.display_name = context.collab_display_name.clone();
-        self.collab_name.update(cx, |state, cx| state.set_value(context.collab_display_name, window, cx));
-        self.adopt_grouping(context.replay_settings.grouping, cx);
-        self.set_replay_settings(context.replay_settings, cx);
-        if let Some(table) = context.personal_rating {
-            self.set_personal_rating(table, cx);
-        }
-        for panel in self.open_panels.values() {
-            if let Some(cache) = context.game_data.clone() {
-                let _ = panel.update(cx, |panel, _cx| panel.set_game_data(cache));
-            }
-        }
-        self.browser.update(cx, |browser, cx| {
-            browser.set_wows_dir(context.install_dir);
-            browser.set_locale(locale, cx);
-            browser.set_build_cache(context.game_data);
-            browser.set_game_data(&context.status, cx);
-            browser.load_summaries(cx);
-        });
-        cx.notify();
-    }
-
-    pub(crate) fn list_directory(&mut self, root: PathBuf, cx: &mut Context<Self>) {
-        self.browser.update(cx, |browser, cx| browser.scan_directory(root, cx));
-    }
-
-    pub(crate) fn update_directory_game_data(&mut self, context: DirectoryContext, cx: &mut Context<Self>) {
-        let same_cache = match (&self.game_data, &context.game_data) {
-            (Some(a), Some(b)) => a.same_source(b),
-            (None, None) => true,
-            _ => false,
-        };
-        let unchanged = same_cache
-            && self.install_dir == context.install_dir
-            && match (&self.game_data_status, &context.status) {
-                (GameDataStatus::Ready(a), GameDataStatus::Ready(b)) => Arc::ptr_eq(a, b),
-                (GameDataStatus::Loading { version: a }, GameDataStatus::Loading { version: b }) => a == b,
-                (GameDataStatus::Failed(a), GameDataStatus::Failed(b)) => a == b,
-                _ => false,
-            };
-        if unchanged {
-            return;
-        }
-        self.game_data = context.game_data.clone();
-        self.game_data_status = context.status.clone();
-        self.install_dir = context.install_dir.clone();
-        for panel in self.open_panels.values() {
-            if let Some(cache) = context.game_data.clone() {
-                let _ = panel.update(cx, |panel, _cx| panel.set_game_data(cache));
-            }
-        }
-        self.browser.update(cx, |browser, cx| {
-            browser.set_wows_dir(context.install_dir);
-            browser.set_build_cache(context.game_data);
-            browser.set_game_data(&context.status, cx);
-            browser.report_missing_builds(cx);
-        });
-        cx.notify();
     }
 
     /// Writes a video of each marked battle into a directory the reader picks.
@@ -1070,7 +1061,7 @@ impl ReplayInspectorView {
         }
         let Some(game_data) = self.game_data.clone() else { return };
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        let paths = self.browser.read(cx).listed_paths();
+        let paths = self.browser().read(cx).listed_paths();
         if paths.is_empty() {
             crate::toast::warn(t!("ui.replay.contribute_none_listed").into_owned(), window, cx);
             return;
@@ -1744,10 +1735,20 @@ impl ReplayInspectorView {
         self.game_data = Some(GameDataCache::new(PathBuf::from(wows_dir)));
     }
 
-    /// The listing, so a test can raise what its directory watcher raises.
+    /// The listing on screen, so a test can raise what its directory watcher
+    /// raises.
     #[cfg(test)]
     pub(crate) fn browser_for_test(&self) -> &Entity<ReplayBrowser> {
-        &self.browser
+        self.browser()
+    }
+
+    /// The listing of the tab for `root`, as the tab compares it.
+    #[cfg(test)]
+    pub(crate) fn folder_browser_for_test(&self, root: &std::path::Path) -> Option<&Entity<ReplayBrowser>> {
+        self.folders
+            .iter()
+            .find(|folder| *folder.source() == FolderSource::Chosen(root.to_path_buf()))
+            .map(ReplayFolder::browser)
     }
 
     pub(crate) fn game_data(&self) -> Option<GameDataCache> {
@@ -1830,10 +1831,10 @@ impl ReplayInspectorView {
         cx.notify();
     }
 
-    /// The browser's current grouping strategy. The browser is the single
+    /// The grouping the listing on screen shows. The listings are the single
     /// source of truth for it; the listing's options only show it.
     pub(crate) fn grouping(&self, cx: &App) -> ReplayGrouping {
-        self.browser.read(cx).grouping()
+        self.browser().read(cx).grouping()
     }
 
     /// Shows or hides the replay listing beside the open replays.
@@ -1844,8 +1845,8 @@ impl ReplayInspectorView {
         self.set_column_filter(|settings| settings.listing_collapsed = collapsed, cx);
     }
 
-    /// Switches the browser's grouping strategy. The only writer, so the
-    /// stored row cannot drift from the browser.
+    /// Switches every listing's grouping strategy. The only writer, so the
+    /// stored row cannot drift from the listings.
     fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
         self.adopt_grouping(grouping, cx);
         // Written back as the egui header writes it, so the listing is grouped
@@ -1856,7 +1857,9 @@ impl ReplayInspectorView {
     /// Shows `grouping` without writing it back, for the seed from the stored
     /// row: announcing that would ask the app to save what it just read.
     fn adopt_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
-        self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        }
         cx.notify();
     }
 
@@ -1919,7 +1922,7 @@ fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorVie
 }
 
 /// The listing's open actions: one replay file, or a directory of replays
-/// opened as a workspace of its own.
+/// opened as a tab of its own above the listing.
 fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
     let opening = entity.downgrade();
     Button::new("replay-listing-open")
@@ -1937,7 +1940,7 @@ fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
             .item(PopupMenuItem::new(t!("ui.replay.open_directory").into_owned()).on_click(
                 move |_event, window, cx| {
                     let Some(view) = directory.upgrade() else { return };
-                    view.update(cx, |view, cx| view.open_directory(window, cx));
+                    view.update(cx, |view, cx| view.browse_folder(window, cx));
                 },
             ))
         })
@@ -2107,12 +2110,12 @@ impl Render for ReplayInspectorView {
         }
         self.share_session_with_renderers(cx);
         cx.defer_in(window, Self::open_what_the_host_asked_for);
-        let chosen_directory = self.browser.read(cx).chosen_directory().map(std::path::Path::to_path_buf);
+        let chosen_directory = self.browser().read(cx).chosen_directory().map(std::path::Path::to_path_buf);
         let game_data_ready = matches!(self.game_data_status, GameDataStatus::Ready(_));
-        // Only a directory workspace has anything to say above the listing:
-        // which directory it is, and the actions on it.
+        // Only a directory the reader opened has anything to say above the
+        // listing: which directory it is, and the actions on it.
         let directory_header = chosen_directory.map(|directory| {
-            let shown = directory.display().to_string();
+            let shown = shown_path(&directory);
             crate::ui::toolbar(cx)
                 .flex_wrap()
                 // Which directory is being listed, when it is not the
@@ -2140,7 +2143,7 @@ impl Render for ReplayInspectorView {
                         .compact()
                         .tooltip(t!("ui.replay.check_game_data_tooltip").to_string())
                         .on_click(cx.listener(|this, _event, _window, cx| {
-                            let missing = this.browser.read(cx).missing_builds();
+                            let missing = this.browser().read(cx).missing_builds();
                             cx.emit(CheckGameDataRequested(missing));
                         })),
                 )
@@ -2172,10 +2175,16 @@ impl Render for ReplayInspectorView {
                 div().flex().flex_row().flex_1().min_h(px(0.)).child({
                     let open = !self.replay_settings.listing_collapsed;
                     let shown = crate::motion::slide_progress("replay-listing-slide", open, window, cx);
+                    let folder_tabs = self.render_folder_tabs(cx);
+                    let body = match self.render_folder_notice(cx) {
+                        Some(missing) => missing,
+                        None => self.browser().clone().into_any_element(),
+                    };
                     let listing = v_flex()
                         .size_full()
+                        .child(folder_tabs)
                         .child(listing_header(entity.clone(), self, cx))
-                        .child(div().flex_1().min_h(px(0.)).child(self.browser.clone()));
+                        .child(div().flex_1().min_h(px(0.)).child(body));
                     if crate::motion::settled(shown) && !open {
                         div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
                     } else if crate::motion::settled(shown) {

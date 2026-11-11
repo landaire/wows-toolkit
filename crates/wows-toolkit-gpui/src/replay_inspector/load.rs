@@ -428,13 +428,6 @@ impl GameDataCache {
         Self::with_install(Some(wows_dir))
     }
 
-    pub(super) fn same_source(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.loaded, &other.loaded)
-            && self.wows_dir == other.wows_dir
-            && self.dump_base == other.dump_base
-            && self.auto_dump == other.auto_dump
-    }
-
     pub fn without_install() -> Self {
         Self::with_install(None)
     }

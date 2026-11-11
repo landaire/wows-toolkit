@@ -3024,3 +3024,188 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
     })
     .expect("the test window stays open");
 }
+
+/// Installs the background runtime and an empty index, as startup does.
+fn open_index(cx: &mut TestAppContext) -> sqlx::SqlitePool {
+    cx.update(|cx| crate::runtime::init(cx).expect("the runtime starts"));
+    let runtime = cx.update(|cx| crate::runtime::runtime(cx)).expect("the runtime is installed");
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    cx.update(|cx| crate::settings_store::init(pool.clone(), cx));
+    pool
+}
+
+/// A listing row in the replay browser, by its place in the tree.
+fn browser_row(row: usize) -> (&'static str, usize) {
+    ("replay-browser-row", row)
+}
+
+/// Picking rows with ctrl and shift and asking the menu to re-index them reads
+/// exactly the rows picked, without a question: their build is installed.
+///
+/// The files are not real replays, so each read fails and lands in the
+/// unreadable-file ledger, which is what shows which files were read. They are
+/// not under the install's replays directory, and the index's own source is
+/// rooted there all the same.
+#[gpui_kit::test]
+fn a_forced_reindex_of_chosen_rows_reads_exactly_those_rows(cx: &mut TestAppContext) {
+    use crate::replay_inspector::GameDataStatus;
+    use wows_toolkit_config::index::unindexable::Unindexable;
+
+    let (window, app) = open_app_in_root(cx);
+    let pool = open_index(cx);
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let wows = dir.path().join("wows");
+    let mut settings = test_settings();
+    settings.wows_dir = wows.to_string_lossy().into_owned();
+    app.update(cx, |app, _cx| app.seed_settings_for_test(settings));
+
+    std::fs::create_dir_all(wows.join("bin").join("100")).expect("the build directory can be made");
+    let replays = dir.path().join("replays");
+    std::fs::create_dir_all(&replays).expect("the replays directory can be made");
+    let [a, b, c, d] = ["a", "b", "c", "d"].map(|name| {
+        let path = replays.join(format!("{name}.wowsreplay"));
+        std::fs::write(&path, b"not a replay").expect("the file can be written");
+        path
+    });
+
+    let inspector = cx.update(|cx| app.read(cx).replay_inspector().clone());
+    inspector.update(cx, |view, _cx| view.seed_game_data(&wows.to_string_lossy()));
+    let browser = cx.update(|cx| inspector.read(cx).browser_for_test().clone());
+    browser.update(cx, |browser, cx| {
+        // Rows are listed once the game data has settled, whichever way.
+        browser.set_game_data(&GameDataStatus::Failed("no install in a test".to_owned()), cx);
+        for (path, played) in [
+            (&a, "01.01.2026 10:00:00"),
+            (&b, "02.01.2026 10:00:00"),
+            (&c, "03.01.2026 10:00:00"),
+            (&d, "04.01.2026 10:00:00"),
+        ] {
+            browser.seed_release_for_test(path.clone(), "1.0.0", 100, played, cx);
+        }
+    });
+
+    // Plain click on a, shift-click on c marks a to c, ctrl-click takes b out.
+    let row = |path: &PathBuf, cx: &mut TestAppContext| -> (&'static str, usize) {
+        let row = cx.update(|cx| browser.read(cx).row_for_test(path, cx)).expect("the replay is on a row");
+        browser_row(row)
+    };
+    let (row_a, row_b, row_c) = (row(&a, cx), row(&b, cx), row(&c, cx));
+    let shift = gpui_kit::Modifiers { shift: true, ..gpui_kit::Modifiers::default() };
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within("replay-browser-rows").click(row_a, cx);
+        window.render_frame(cx);
+        window.within("replay-browser-rows").click_with_modifiers(row_c, shift, cx);
+        window.render_frame(cx);
+        let secondary = gpui_kit::Modifiers::secondary_key(cx);
+        window.within("replay-browser-rows").click_with_modifiers(row_b, secondary, cx);
+        window.render_frame(cx);
+        window.within("replay-browser-rows").right_click(row_a, cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    let label = rust_i18n::t!("ui.reindex.context_many", count = 2).into_owned();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let offered = menu_items(window);
+        let labels: Vec<Option<String>> = offered.iter().map(|(_, item)| item.label().map(str::to_owned)).collect();
+        let (row, _) = offered
+            .into_iter()
+            .find(|(_, item)| item.label() == Some(label.as_str()))
+            .unwrap_or_else(|| panic!("the row menu offers {label}, offered {labels:?}"));
+        window.within("popup-menu").click(gpui_kit::ElementId::Integer(row), cx);
+    })
+    .expect("the test window stays open");
+
+    let before = crate::toast::said_for_test().len();
+    for _ in 0..4 {
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    assert!(
+        cx.update_window(window.into(), |_, window, _cx| window.try_find("force-reindex-summary").is_none())
+            .expect("the test window stays open"),
+        "rows the reader picked, all readable here, are re-indexed without a question"
+    );
+    let runtime = cx.update(|cx| crate::runtime::runtime(cx)).expect("the runtime is installed");
+    let ledger = runtime.block_on(Unindexable::load(&pool));
+    assert!(ledger.contains(&a) && ledger.contains(&c), "both picked rows were read");
+    assert!(!ledger.contains(&b), "the row ctrl-clicked out of the range was not");
+    assert!(!ledger.contains(&d), "nor the row outside the range");
+    assert_eq!(ledger.len(), 2);
+    let sources = runtime.block_on(wows_toolkit_config::index::query::list_sources(&pool)).expect("the sources read");
+    let roots: Vec<Option<PathBuf>> = sources.into_iter().map(|source| source.root_path).collect();
+    assert_eq!(roots, [Some(wows.join("replays"))], "the source is the install's, not the chosen rows' directory");
+
+    let said = crate::toast::said_for_test().split_off(before);
+    assert!(
+        said.contains(&rust_i18n::t!("ui.reindex.done", indexed = 0, failed = 2, skipped = 0).into_owned()),
+        "the end of the pass is announced with its counts, said {said:?}"
+    );
+}
+
+/// The palette lists the listing's game versions newest first, each with its
+/// replay count, and choosing one asks first with the count and the dates.
+#[gpui_kit::test]
+fn the_palette_offers_versions_newest_first_and_asks_before_reindexing(cx: &mut TestAppContext) {
+    use crate::replay_inspector::GameDataStatus;
+
+    let (window, app) = open_app_in_root(cx);
+    open_index(cx);
+
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let wows = dir.path().join("wows");
+    std::fs::create_dir_all(wows.join("bin").join("300")).expect("the build directory can be made");
+    let mut settings = test_settings();
+    settings.wows_dir = wows.to_string_lossy().into_owned();
+    app.update(cx, |app, _cx| app.seed_settings_for_test(settings));
+
+    let inspector = cx.update(|cx| app.read(cx).replay_inspector().clone());
+    inspector.update(cx, |view, _cx| view.seed_game_data(&wows.to_string_lossy()));
+    let browser = cx.update(|cx| inspector.read(cx).browser_for_test().clone());
+    browser.update(cx, |browser, cx| {
+        browser.set_game_data(&GameDataStatus::Failed("no install in a test".to_owned()), cx);
+        for (name, version, build, played) in [
+            ("old", "0.11.0", 50, "01.01.2022 12:00:00"),
+            ("mid-a", "13.5.1", 200, "15.12.2024 20:15:00"),
+            ("mid-b", "13.5.1", 200, "16.12.2024 20:15:00"),
+            ("new-a", "14.2.0", 300, "01.04.2025 09:30:00"),
+            ("new-b", "14.2.0", 300, "02.04.2025 18:00:00"),
+        ] {
+            browser.seed_release_for_test(dir.path().join(format!("{name}.wowsreplay")), version, build, played, cx);
+        }
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        app.update(cx, |app, cx| app.open_palette_mode(crate::palette::PaletteMode::ReindexVersions, window, cx));
+    })
+    .expect("the test window stays open");
+    settle(cx, window);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        let row = |ix: usize| window.find(IndexPath::new(ix)).label().map(str::to_owned);
+        assert_eq!(row(0), Some(rust_i18n::t!("ui.reindex.version_row", version = "14.2.0", count = 2).into_owned()));
+        assert_eq!(row(1), Some(rust_i18n::t!("ui.reindex.version_row", version = "13.5.1", count = 2).into_owned()));
+        assert_eq!(row(2), Some(rust_i18n::t!("ui.reindex.version_row", version = "0.11.0", count = 1).into_owned()));
+        assert!(window.try_find(IndexPath::new(3)).is_none(), "one row per version");
+        window.press("enter", cx);
+    })
+    .expect("the test window stays open");
+    for _ in 0..3 {
+        settle(cx, window);
+    }
+
+    cx.update_window(window.into(), |_, window, _cx| {
+        let summary = window.find("force-reindex-summary");
+        let expected = [
+            rust_i18n::t!("ui.reindex.confirm_count", count = 2).into_owned(),
+            rust_i18n::t!("ui.reindex.confirm_range", oldest = "2025-04-01 09:30", newest = "2025-04-02 18:00")
+                .into_owned(),
+        ]
+        .join("\n");
+        assert_eq!(summary.label(), Some(expected.as_str()), "a palette command always asks, with the count and dates");
+    })
+    .expect("the test window stays open");
+}

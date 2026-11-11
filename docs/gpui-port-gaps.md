@@ -168,16 +168,17 @@ something here steer the one device this port does pick.
     listed again. Everything that works on the install's listing -- previews,
     opening, indexing, the missing-build offer -- works on it.
 
-    Workspaces landed the same day: a directory the reader opens is listed in a
-    tab of its own in the inspector's dock, titled by its root and closeable,
-    beside the install's own listing rather than in place of it. The tab carries
-    "Search these replays", which runs the query naming the index source that
-    directory was read under (`query_bar::seed::source_scoped`) and says so when
-    nothing has indexed it yet. Its listing raises the same events the sidebar's
-    does and is handled through the same arm, so a replay opens from an archive
-    exactly as it does from the install. Neither app keeps the open directories
-    across launches; the egui one has the same gap
-    (`tab_state.rs`'s `workspaces` is session state).
+    Each directory the reader opens gets a tab in a strip above the listing,
+    after the install's own, and the listing shows the selected one. Its
+    listing raises the same events the install's does and is handled through
+    the same arm, so a replay opens from an archive exactly as it does from the
+    install. Pinned directories are watched like the install's, kept in the
+    settings in tab order and reopened at startup; any other is read once and
+    again on Refresh. A watched directory that is not selected counts the
+    replays added or changed in it until it is. The palette's Open Replay
+    Directory lists Browse... and the ten directories most recently opened. The
+    egui app keeps its open directories for the session only (`tab_state.rs`'s
+    `workspaces`).
 
     One difference stands: the egui Search tab is a closeable dock tab that can
     be pushed again, where the port's is a fixed entry in the tab strip and so is

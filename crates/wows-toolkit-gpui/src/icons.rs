@@ -104,6 +104,7 @@ glyphs! {
     PanelBottom => "panel-bottom",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",
+    Pin => "pin",
     Plug => "plug",
     Radio => "radio",
     Rewind => "rewind",

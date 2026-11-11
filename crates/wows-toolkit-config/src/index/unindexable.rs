@@ -46,6 +46,16 @@ impl Unindexable {
         }
     }
 
+    /// Forgets the file as unreadable, for one that has since been read.
+    /// `true` when it was recorded, so a caller knows the ledger is worth
+    /// writing.
+    pub fn remove(&mut self, path: &Path) -> bool {
+        match Self::key(path) {
+            Some(key) => self.entries.remove(&key),
+            None => false,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -88,6 +98,21 @@ mod tests {
         filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(later))
             .expect("the modification time is set");
         assert!(!ledger.contains(&path), "a replaced file is tried again");
+    }
+
+    /// A file read since it was recorded is forgotten, so later passes read
+    /// it rather than skip it as unreadable.
+    #[test]
+    fn a_file_that_has_since_been_read_is_forgotten() {
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let path = dir.path().join("fixed.wowsreplay");
+        std::fs::write(&path, b"x").expect("the file is written");
+        let mut ledger = Unindexable::default();
+        ledger.insert(&path);
+
+        assert!(ledger.remove(&path), "a recorded file is removed");
+        assert!(!ledger.remove(&path), "and only once");
+        assert!(!ledger.contains(&path));
     }
 
     /// It round-trips through the row both apps read.
