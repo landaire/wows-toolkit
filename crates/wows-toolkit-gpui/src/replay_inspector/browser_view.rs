@@ -22,6 +22,7 @@
 //! showing blank figures, and the panel waits for the game data rather than
 //! listing raw ship and map ids (see `render`).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem::ManuallyDrop;
@@ -225,10 +226,6 @@ const INDENT: Pixels = px(16.);
 /// The hover grid's label column, wide enough for the longest of them.
 const HOVER_LABEL_WIDTH: Pixels = px(58.);
 
-/// How far to the right of the pointer the hover preview sits, so it never
-/// covers the row it belongs to.
-const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
-
 /// The preview's edge length. Square, as the minimap is; the egui app's own
 /// popup uses 384 (`preview_popup::PREVIEW_SIZE`).
 const PREVIEW_SIZE: f32 = 384.;
@@ -391,9 +388,9 @@ pub struct ReplayBrowser {
     /// Hover-to-preview: the same behaviour the Search tab has, over the
     /// listing's own rows (`preview_hover`).
     preview: PreviewHover,
-    /// Where the pointer was when it entered the previewed row, so the popup
-    /// is anchored beside it like the egui app's own hover popup.
-    preview_anchor: Point<Pixels>,
+    /// Where the previewed row was drawn. The row records it as it is placed
+    /// and the popup beside it reads it later in the same frame (`BesideRow`).
+    preview_row: Rc<Cell<Option<RowPlacement>>>,
     /// Whether the listing follows its directory as it changes.
     watch: ListingWatch,
     /// The watch on the replays directory. Held because dropping it stops the
@@ -557,7 +554,7 @@ impl ReplayBrowser {
             locale: None,
             build_cache: None,
             preview: PreviewHover::default(),
-            preview_anchor: Point::default(),
+            preview_row: Rc::default(),
             watch: ListingWatch::Watched,
             watcher: None,
             watch_state: WatchState::Starting,
@@ -686,13 +683,20 @@ impl ReplayBrowser {
         .detach();
     }
 
-    /// The pointer settled on a row: after the shared dwell, its battle plays
-    /// back beside the listing.
-    fn hover_leaf(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
-        self.preview_anchor = position;
+    /// The pointer moved over a row: after the shared dwell, its battle plays
+    /// back beside it. Called on every pointer move, so a row already watched
+    /// is left as it is.
+    fn hover_leaf(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if self.preview.watched_path() == Some(path) {
+            return;
+        }
+        // The row records itself as it is drawn; until then there is no place
+        // for the popup, rather than the previous row's.
+        self.preview_row.set(None);
+
         let cache = self.build_cache.clone();
         let map_name = self.leaf_info.values().find(|leaf| leaf.path == path).map(|leaf| leaf.map_name.clone());
-        self.preview.enter(path, map_name, cache, cx, |browser| &mut browser.preview);
+        self.preview.enter(path.to_path_buf(), map_name, cache, cx, |browser| &mut browser.preview);
     }
 
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
@@ -1480,6 +1484,141 @@ impl ReplayBrowser {
     }
 }
 
+/// Where the previewed row was drawn.
+#[derive(Clone, Copy)]
+struct RowPlacement {
+    /// The row's bounds in window coordinates.
+    bounds: Bounds<Pixels>,
+    /// The listing's scroll offset when `bounds` was taken.
+    scrolled: Point<Pixels>,
+}
+
+/// The previewed row's recorded placement, and the listing's scroll it was
+/// recorded against. A scroll the listing composites from its layer moves the
+/// rows without placing them again, so the popup moves the recorded bounds by
+/// the scroll since.
+#[derive(Clone)]
+struct PreviewRow {
+    placed: Rc<Cell<Option<RowPlacement>>>,
+    scroll: UniformListScrollHandle,
+}
+
+impl PreviewRow {
+    /// Records the row as drawn at `bounds`.
+    fn record(&self, bounds: Bounds<Pixels>) {
+        let scrolled = self.scroll.0.borrow().base_handle.offset();
+        self.placed.set(Some(RowPlacement { bounds, scrolled }));
+    }
+
+    /// Where the row is now, while any of it shows in the listing.
+    fn shown(&self) -> Option<Bounds<Pixels>> {
+        let placed = self.placed.get()?;
+        let (scrolled, listing) = {
+            let scroll = self.scroll.0.borrow();
+            (scroll.base_handle.offset(), scroll.base_handle.bounds())
+        };
+        let row = Bounds { origin: placed.bounds.origin + (scrolled - placed.scrolled), size: placed.bounds.size };
+
+        (row.bottom() > listing.top() && row.top() < listing.bottom()).then_some(row)
+    }
+}
+
+/// The preview popup, placed beside the previewed row. Drawn deferred, so it
+/// is placed after the rows are and follows the row drawn in the same frame.
+/// Nothing is drawn while no row has been recorded or the row is scrolled out
+/// of the listing.
+struct BesideRow {
+    row: PreviewRow,
+    child: AnyElement,
+}
+
+impl IntoElement for BesideRow {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for BesideRow {
+    /// The child's layout node, whose size is what gets placed.
+    type RequestLayoutState = LayoutId;
+    /// Whether a row was recorded, and so whether the child was placed.
+    type PrepaintState = bool;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let child = self.child.request_layout(window, cx);
+        let style = Style { position: Position::Absolute, display: Display::Flex, ..Style::default() };
+
+        (window.request_layout(style, [child], cx), child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let Some(row) = self.row.shown() else { return false };
+
+        let size = window.layout_bounds(*child).size;
+        let offset = beside_row(row, size, window.viewport_size()) - bounds.origin;
+        window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| self.child.prepaint(window, cx));
+
+        true
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        placed: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if *placed {
+            self.child.paint(window, cx);
+        }
+    }
+}
+
+/// Where a popup of `size` goes beside `row`: just right of the row's right
+/// edge with its top at the row's top. Too close to the bottom of the window,
+/// it ends at the row's bottom instead, and it is kept inside the window
+/// either way.
+fn beside_row(row: Bounds<Pixels>, size: Size<Pixels>, viewport: Size<Pixels>) -> Point<Pixels> {
+    const GAP: Pixels = px(4.);
+    const MARGIN: Pixels = px(8.);
+
+    let rightmost = viewport.width - MARGIN - size.width;
+    let x = (row.right() + GAP).min(rightmost).max(MARGIN);
+
+    let lowest = viewport.height - MARGIN - size.height;
+    let y = if row.top() <= lowest { row.top() } else { row.bottom() - size.height };
+    let y = y.min(lowest).max(MARGIN);
+
+    point(x, y)
+}
+
 /// The hover's facts as a two-column grid: labels down the left, values down
 /// the right, so a reader finds the damage without reading the whole caption.
 fn hover_grid(facts: &[HoverFact], label_color: Hsla) -> impl IntoElement {
@@ -1683,6 +1822,8 @@ fn render_browser_item(
     new_arrivals: &HashMap<PathBuf, std::time::Instant>,
     thumbnails: &HashMap<MapSpace, Thumbnail>,
     row_height: Pixels,
+    previewed: Option<&Path>,
+    preview_row: &PreviewRow,
     window: &mut Window,
     cx: &mut App,
 ) -> ListItem {
@@ -1774,11 +1915,19 @@ fn render_browser_item(
         let path = leaf.path.clone();
         let hover_browser = browser.clone();
         let hover_path = path.clone();
-        list_item = list_item.on_mouse_enter(move |event: &MouseMoveEvent, _window, cx: &mut App| {
-            let path = hover_path.clone();
-            let position = event.position;
-            hover_browser.update(cx, |browser, cx| browser.hover_leaf(path, position, cx));
+        list_item = list_item.on_mouse_enter(move |_event: &MouseMoveEvent, _window, cx: &mut App| {
+            hover_browser.update(cx, |browser, cx| browser.hover_leaf(&hover_path, cx));
         });
+        // A suffix, so it covers the whole item rather than its padded content.
+        if previewed == Some(path.as_path()) {
+            let preview_row = preview_row.clone();
+            list_item = list_item.suffix(move |_window, _cx| {
+                let preview_row = preview_row.clone();
+                canvas(move |bounds, _window, _cx| preview_row.record(bounds), |_bounds, (), _window, _cx| {})
+                    .absolute()
+                    .inset_0()
+            });
+        }
         list_item = list_item.on_click(move |event: &ClickEvent, window, cx: &mut App| {
             let modifiers = window.modifiers();
             browser
@@ -1792,6 +1941,10 @@ fn render_browser_item(
 impl Render for ReplayBrowser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.sync_with_window(window);
+        let preview_row = PreviewRow {
+            placed: Rc::clone(&self.preview_row),
+            scroll: self.tree_state.read(cx).scroll_handle().clone(),
+        };
         let body = match &self.status {
             ScanStatus::Loading => {
                 let ScanProgress { done, total } = self.scan_progress.unwrap_or_default();
@@ -1852,6 +2005,8 @@ impl Render for ReplayBrowser {
                 let marked = self.marked.clone();
                 let new_arrivals = Rc::clone(&self.new_arrivals);
                 let thumbnails = self.thumbnails.slots();
+                let previewed = self.preview.watched_path().map(Path::to_path_buf);
+                let row_preview = preview_row.clone();
                 let listing = tree(&self.tree_state, move |ix, entry, selected, window, cx| {
                     render_browser_item(
                         entity.clone(),
@@ -1863,6 +2018,8 @@ impl Render for ReplayBrowser {
                         &new_arrivals,
                         &thumbnails.borrow(),
                         row_height,
+                        previewed.as_deref(),
+                        &row_preview,
                         window,
                         cx,
                     )
@@ -2134,10 +2291,10 @@ impl Render for ReplayBrowser {
             }
         };
 
-        // The hovered row's battle, played back beside the listing. Anchored
-        // at the pointer like the egui app's own hover popup
-        // (`ui/replay_parser/preview_popup.rs`), and deferred so it paints
-        // over the panel rather than inside its scroll area.
+        // The hovered row's battle, played back beside the listing. Placed at
+        // the row rather than the pointer, so moving within the row leaves it
+        // where it is, and deferred so it paints over the panel rather than
+        // inside its scroll area.
         // A bake reads the replay and loads the build it was recorded on,
         // which takes seconds the first time. The map goes up first, from a
         // build already open, with the spinner over it until the battle is
@@ -2207,21 +2364,17 @@ impl Render for ReplayBrowser {
         // The popup is what a hovered row says, so it goes up as soon as the
         // row is known -- with the map once there is one.
         let preview_popup = (preview_map.is_some() || hover_facts.is_some()).then(|| {
-            let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
             // Fades in when it goes up, not as the pointer moves between rows:
             // the id stays the same for as long as the popup is drawn.
             let card = crate::ui::overlay_surface(v_flex(), cx)
+                .id("replay-preview-card")
+                .test_support()
                 .gap_1()
                 .p_1()
                 .children(preview_map)
                 .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim())));
-            deferred(
-                anchored()
-                    .position(anchor)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(crate::motion::fade_in("replay-preview-popup", card)),
-            )
-            .with_priority(1)
+            let popup = BesideRow { row: preview_row, child: crate::motion::fade_in("replay-preview-popup", card) };
+            deferred(popup).with_priority(1)
         });
 
         v_flex()
@@ -2817,7 +2970,11 @@ mod tests {
         let said = "No game data for client version 0.10.5.0";
         window
             .update(cx, |browser, _window, cx| {
-                browser.seed_failed_preview_for_test(PathBuf::from("old.wowsreplay"), said);
+                let old = PathBuf::from("old.wowsreplay");
+                // The popup is drawn beside its row, so the row is listed.
+                browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+                browser.seed_listing_for_test(old.clone(), cx);
+                browser.seed_failed_preview_for_test(old, said);
                 cx.notify();
             })
             .expect("the test window stays open");
@@ -2990,7 +3147,11 @@ mod tests {
         // Nothing is being baked yet, and the space is already held.
         window
             .update(cx, |browser, _window, cx| {
-                browser.seed_dwelling_preview_for_test(PathBuf::from("a.wowsreplay"));
+                let a = PathBuf::from("a.wowsreplay");
+                // The popup is drawn beside its row, so the row is listed.
+                browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+                browser.seed_listing_for_test(a.clone(), cx);
+                browser.seed_dwelling_preview_for_test(a);
                 cx.notify();
             })
             .expect("the test window stays open");
@@ -3020,6 +3181,120 @@ mod tests {
             assert!(window.try_find("replay-preview-placeholder").is_some(), "still held while the bake runs");
         })
         .expect("the test window stays open");
+    }
+
+    /// The listing as a panel at the window's left, so there is room for the
+    /// popup beside its rows.
+    struct Panel(gpui_kit::Entity<super::ReplayBrowser>);
+
+    impl gpui_kit::Render for Panel {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::ParentElement as _;
+            use gpui_kit::Styled as _;
+
+            gpui_kit::div().size_full().child(gpui_kit::div().w(gpui_kit::px(320.)).h_full().child(self.0.clone()))
+        }
+    }
+
+    /// The popup goes up at the hovered row's top-right, stays there while the
+    /// pointer moves within the row, and moves once to the next row hovered.
+    #[gpui_kit::test]
+    fn the_preview_sits_beside_the_hovered_row(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::InputEvent as _;
+        use gpui_kit::point;
+        use gpui_kit::px;
+        use gpui_kit::size;
+        use std::path::PathBuf;
+
+        use gpui_kit::test::TestWindowExt as _;
+
+        cx.update(gpui_kit::init);
+        let a = PathBuf::from("a.wowsreplay");
+        let b = PathBuf::from("b.wowsreplay");
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+        browser.update(cx, |browser, cx| {
+            browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+            browser.seed_listing_for_test(a.clone(), cx);
+            browser.seed_listing_for_test(b.clone(), cx);
+        });
+        let row = |path: &PathBuf, cx: &mut gpui_kit::TestAppContext| {
+            let row = cx.update(|cx| browser.read(cx).row_for_test(path, cx)).expect("the replay is on a row");
+            ("replay-browser-row", row)
+        };
+        let (row_a, row_b) = (row(&a, cx), row(&b, cx));
+        let panel = browser.clone();
+        let window = cx.open_window(size(px(1200.), px(800.)), move |_window, _cx| Panel(panel));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let beside = |window: &gpui_kit::Window, row| {
+                let row = window.find(row).bounds();
+                point(row.right() + px(4.), row.top())
+            };
+            let assert_at = |window: &gpui_kit::Window, at: gpui_kit::Point<gpui_kit::Pixels>, said: &str| {
+                let card = window.find("replay-preview-card").bounds().origin;
+                // Placed on whole pixels, so a row at a fractional height is
+                // matched to within one.
+                assert!((card.x - at.x).abs() < px(1.) && (card.y - at.y).abs() < px(1.), "{said}: {card:?} vs {at:?}");
+            };
+
+            window.render_frame(cx);
+            window.within("replay-browser-rows").hover(row_a, cx);
+            window.render_frame(cx);
+            let at_a = beside(window, row_a);
+            assert_at(window, at_a, "the popup sits at the hovered row's top-right");
+
+            let row_a_bounds = window.find(row_a).bounds();
+            window.dispatch_event(
+                gpui_kit::MouseMoveEvent {
+                    position: row_a_bounds.origin + point(px(10.), px(3.)),
+                    pressed_button: None,
+                    modifiers: gpui_kit::Modifiers::default(),
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+            assert_at(window, at_a, "moving within the row leaves it in place");
+
+            window.within("replay-browser-rows").hover(row_b, cx);
+            window.render_frame(cx);
+            let at_b = beside(window, row_b);
+            assert_ne!(at_a.y, at_b.y, "the rows are at different heights");
+            assert_at(window, at_b, "hovering another row moves it there");
+        })
+        .expect("the test window stays open");
+
+        cx.update(|cx| {
+            assert_eq!(
+                browser.read(cx).preview.watched_path(),
+                Some(b.as_path()),
+                "the second row is the one previewed"
+            );
+        });
+    }
+
+    /// A row too near the bottom of the window for the popup below its top
+    /// has the popup end at its bottom instead, still beside it.
+    #[test]
+    fn the_preview_rises_beside_a_row_near_the_bottom() {
+        use gpui_kit::Bounds;
+        use gpui_kit::point;
+        use gpui_kit::px;
+        use gpui_kit::size;
+
+        let viewport = size(px(1200.), px(800.));
+        let popup = size(px(392.), px(500.));
+
+        let high = Bounds::new(point(px(0.), px(100.)), size(px(320.), px(40.)));
+        assert_eq!(super::beside_row(high, popup, viewport), point(px(324.), px(100.)));
+
+        let low = Bounds::new(point(px(0.), px(700.)), size(px(320.), px(40.)));
+        assert_eq!(super::beside_row(low, popup, viewport), point(px(324.), px(240.)), "its bottom is the row's");
     }
 
     use super::is_finished_replay;
