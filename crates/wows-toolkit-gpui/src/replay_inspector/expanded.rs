@@ -236,8 +236,11 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
         }
     }
 
-    max_w.max(fire_chance_width(row, debug, window))
+    max_w.max(fire_chance_width(row, debug, window)) + NAME_SECTION_INDENT.as_f32()
 }
+
+/// How far the Name column's detail sits in from the table's edge.
+const NAME_SECTION_INDENT: Pixels = px(8.);
 
 /// Mirrors `render_fire_chance_section`: its heading, the line it stands down
 /// to when there is nothing to state, the headline (the fire glyph, the counts,
@@ -759,7 +762,9 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     // egui original, so they all share that one gap -- not a larger gap at
     // this level and a tighter one nested inside `achievements_view`/
     // `ribbons_view`.
-    let mut col = v_flex().gap(px(3.));
+    // Set in from the table's edge, which the Name column starts at and the
+    // ribbons would otherwise sit against.
+    let mut col = v_flex().gap(px(3.)).pl(NAME_SECTION_INDENT);
 
     if has_achievements {
         col = col.child(section_heading(t!("ui.replay.sections.achievements").into_owned()));
