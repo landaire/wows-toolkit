@@ -64,6 +64,7 @@ use super::damage_mix::DamageLine;
 use super::damage_mix::DamageMix;
 use super::expanded;
 use super::icons::IconCache;
+use super::icons::nation_flag_key;
 use super::model::MatchContext;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
@@ -257,7 +258,11 @@ fn measure_column_widths(
                 for row in &model.rows {
                     let cell = cell_value(row, col, debug);
                     let mut row_w = if col == ReplayColumn::ShipName {
-                        text_width(cell.text.into(), window, false)
+                        // The nation flag ahead of the name, with its gap. Held
+                        // whether or not the flag has loaded yet, as the Name
+                        // column holds its class icon.
+                        let flag_w = if row.ship_nation.is_some() { rem * SHIP_FLAG_WIDTH_REMS + gap_1 } else { 0. };
+                        flag_w + text_width(cell.text.into(), window, false)
                     } else {
                         figures_width(cell.text.into(), window)
                     };
@@ -1526,12 +1531,14 @@ fn hover_tooltip(text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyVie
 /// explanatory text. `ix`/`col` key the cell's `ElementId` so the tooltip
 /// hookup is unique per row/column; `player` is who the cell is about, which
 /// is what a right-click records.
+/// `leading` is drawn ahead of the text, such as a ship's nation flag.
 #[allow(clippy::too_many_arguments)]
 fn cell_element(
     ix: usize,
     player: AccountId,
     col: ReplayColumn,
     cell: CellValue,
+    leading: Option<AnyElement>,
     width: f32,
     entity: &Entity<PlayerTable>,
 ) -> AnyElement {
@@ -1571,7 +1578,7 @@ fn cell_element(
             .bg(resolve_color(ColorRole::PrTierTint(category)).opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.)),
         _ => text,
     };
-    let base = base.child(text);
+    let base = base.children(leading).child(text);
 
     match cell.hover {
         Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
@@ -1835,7 +1842,7 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Ent
     let cell = cell_value(row, ReplayColumn::Skills, debug);
     let shows_real_label = row.has_vehicle_entity && (!row.relation.is_enemy() || debug);
     if !shows_real_label {
-        return cell_element(ix, row.db_id, ReplayColumn::Skills, cell, width, entity);
+        return cell_element(ix, row.db_id, ReplayColumn::Skills, cell, None, width, entity);
     }
 
     let color = cell
@@ -2283,9 +2290,35 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         ReplayColumn::Name => name_cell(ix, row, layout, width),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width, &layout.entity),
         ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(ix, col, row, layout, width),
+        ReplayColumn::ShipName => ship_name_cell(ix, row, layout, width),
         _ => number_cell(ix, col, row, layout, width),
     }
 }
+
+/// The ship's name after its nation's flag. No flag, and no room held for
+/// one, where the nation or its flag is unknown.
+fn ship_name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
+    let flag =
+        row.ship_nation.as_deref().and_then(|nation| layout.icons.get_keyed(&nation_flag_key(nation))).map(|image| {
+            div()
+                .id(("replay-ship-flag", ix))
+                .test_support()
+                .flex_none()
+                .mr_1()
+                .flex()
+                .items_center()
+                .child(img(image).w(rems(SHIP_FLAG_WIDTH_REMS)).h(rems(SHIP_FLAG_HEIGHT_REMS)))
+                .into_any_element()
+        });
+    let cell = cell_value(row, ReplayColumn::ShipName, layout.debug);
+
+    cell_element(ix, row.db_id, ReplayColumn::ShipName, cell, flag, width, &layout.entity)
+}
+
+/// A nation flag's size beside a ship name: the height of the text, at the
+/// flags' own aspect, the same for every row so the names line up.
+const SHIP_FLAG_WIDTH_REMS: f32 = 23. / 16.;
+const SHIP_FLAG_HEIGHT_REMS: f32 = 1.;
 
 /// The generic `cell_element`, over a faint bar of the row's share of its
 /// team's total where the column has one. The hover states the share.
@@ -2318,7 +2351,7 @@ fn share_bar_cell(
     width: f32,
 ) -> AnyElement {
     let color = cell.color.map_or(layout.foreground, resolve_color);
-    let element = cell_element(ix, row.db_id, col, cell, width, &layout.entity);
+    let element = cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
     let Some(share) = share else {
         return element;
     };
@@ -3667,6 +3700,35 @@ mod tests {
 
     fn header_left(window: &gpui_kit::Window, col: ReplayColumn) -> gpui_kit::Pixels {
         window.find(("replay-header", col as usize)).bounds().origin.x
+    }
+
+    /// A ship with a known nation is named after its flag; one without has
+    /// no flag.
+    #[gpui_kit::test]
+    fn a_ship_name_follows_its_nations_flag(cx: &mut TestAppContext) {
+        let mut model = two_row_model();
+        model.rows[0].ship_nation = Some("usa".to_string());
+        let window = open_still_table(cx, model);
+        let table = window.entity(cx).expect("the window has a root view");
+        // Let the table's own icon load land before the flag is put in place.
+        cx.run_until_parked();
+        let mut png = Vec::new();
+        image::RgbaImage::new(23, 16)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("a flag image encodes");
+        cx.update(|cx| {
+            table.update(cx, |table, cx| {
+                assert!(table.icons.set_keyed(super::nation_flag_key("usa"), &png), "the flag decodes");
+                cx.notify();
+            })
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(("replay-ship-flag", 0usize)).is_some(), "the known nation's flag is drawn");
+            assert!(window.try_find(("replay-ship-flag", 1usize)).is_none(), "an unknown nation draws none");
+        })
+        .expect("the window is open");
     }
 
     /// Dragging a header across the others moves its column there, without

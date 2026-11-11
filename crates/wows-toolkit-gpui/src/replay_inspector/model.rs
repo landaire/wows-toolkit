@@ -91,6 +91,9 @@ pub struct PlayerRow {
     pub ship_name: String,
     pub ship_species_text: String,
     pub ship_class: Species,
+    /// The game's nation key for the ship (`"usa"`, `"japan"`), naming its
+    /// flag. `None` when the ship's parameters name no nation.
+    pub ship_nation: Option<String>,
     /// The ship's `GameParams` id, resolved from `ship_index` via the
     /// metadata provider (`GameParamProvider::game_param_by_index`). `None`
     /// only if the index cannot be resolved against the loaded provider;
@@ -797,6 +800,7 @@ impl PlayerRow {
             ship_name: np.ship_display_name(),
             ship_species_text,
             ship_class: np.ship_class,
+            ship_nation: (!np.ship_nation.is_empty()).then(|| np.ship_nation.clone()),
             ship_id,
             has_vehicle_entity,
             base_xp,

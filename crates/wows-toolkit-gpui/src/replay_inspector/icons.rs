@@ -202,6 +202,9 @@ impl IconCache {
             if species_seen.insert((row.ship_class, tint)) {
                 self.load_ship_class(row.ship_class, tint, vfs, svg_renderer);
             }
+            if let Some(nation) = row.ship_nation.as_deref() {
+                self.load_keyed(&mut keys_seen, vfs, nation_flag_key(nation), GuiAsset::NationFlag(nation));
+            }
 
             for achievement in &row.achievements {
                 let key = format!("achievement:{}", achievement.icon_key);
@@ -272,6 +275,11 @@ impl IconCache {
             self.set_keyed(key, &bytes);
         }
     }
+}
+
+/// The `IconCache` key a nation's flag is held under.
+pub fn nation_flag_key(nation: &str) -> String {
+    format!("nation:{nation}")
 }
 
 #[cfg(test)]

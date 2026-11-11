@@ -73,6 +73,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
         ship_name: "Test Ship".to_string(),
         ship_species_text: "Destroyer".to_string(),
         ship_class: Species::Destroyer,
+        ship_nation: None,
         ship_id: None,
         has_vehicle_entity: true,
         base_xp: None,
