@@ -2258,16 +2258,20 @@ fn number_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         });
     }
 
-    share_bar_cell(ix, col, row, cell, share, layout, width)
+    share_bar_cell(ix, col, row, cell, share, None, layout, width)
 }
 
-/// `cell_element` for `cell`, over a faint bar as wide as `share`.
+/// `cell_element` for `cell` with a bar as long as `share`: the damage types
+/// of `mix` stacked under the figure, or one faint bar behind it in the
+/// text's colour without one.
+#[allow(clippy::too_many_arguments)]
 fn share_bar_cell(
     ix: usize,
     col: ReplayColumn,
     row: &PlayerRow,
     cell: CellValue,
     share: Option<TeamShare>,
+    mix: Option<&DamageMix>,
     layout: &RowLayout,
     width: f32,
 ) -> AnyElement {
@@ -2277,21 +2281,22 @@ fn share_bar_cell(
         return element;
     };
 
-    div()
-        .relative()
-        .w(px(width))
-        .flex_none()
-        .child(
-            div()
-                .absolute()
-                .left_0()
-                .top_0()
-                .bottom_0()
-                .w(relative(share.fraction))
-                .bg(color.opacity(MAGNITUDE_BAR_OPACITY)),
-        )
-        .child(element)
-        .into_any_element()
+    let cell = div().relative().w(px(width)).flex_none();
+    match mix {
+        Some(mix) => cell.child(element).child(div().px_1().child(mix.stacked_bar(share.fraction))),
+        None => cell
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(relative(share.fraction))
+                    .bg(color.opacity(MAGNITUDE_BAR_OPACITY)),
+            )
+            .child(element),
+    }
+    .into_any_element()
 }
 
 /// Strength of a magnitude bar against the text colour it is drawn in.
@@ -2304,6 +2309,7 @@ fn bar_figure(row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<u64> {
     let hidden = row.should_hide_stats() && !debug;
     match col {
         ReplayColumn::ActualDamage if !hidden => row.actual_damage,
+        ReplayColumn::ReceivedDamage if !hidden => row.received_damage,
         ReplayColumn::PotentialDamage if !hidden => row.potential_damage,
         // Shown on every row: it is damage allies dealt on this player's spotting.
         ReplayColumn::SpottingDamage => row.spotting_damage,
@@ -2360,9 +2366,9 @@ impl TeamTotals {
     }
 }
 
-/// A damage cell with the player's split by type in a bar under the figure,
-/// listed with its colour key on hover. The bare cell when there is no split
-/// to show.
+/// A damage cell whose share bar is stacked by damage type, listed with its
+/// colour key on hover. The plain number cell when there is no split to
+/// show.
 fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let Some(lines) = damage_mix::shown_lines(row, col, layout.debug) else {
         return number_cell(ix, col, row, layout, width);
@@ -2373,18 +2379,16 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 
     // The share is stated under the split, on the one tooltip the cell has.
     let share = layout.team_totals.share(row, col, layout.debug);
-    let cell = share_bar_cell(ix, col, row, cell_value(row, col, layout.debug), share, layout, width);
-    let bar = div().px_1().child(mix.bar());
+    let cell = share_bar_cell(ix, col, row, cell_value(row, col, layout.debug), share, Some(&mix), layout, width);
     let mix = Rc::new(mix);
     let lines: Rc<[DamageLine]> = lines.into();
     let share_text = share.map(|share| SharedString::from(share.text()));
-    v_flex()
+    div()
         .id(("replay-damage-mix", ix * CELL_ID_STRIDE + col as usize))
         .test_support()
         .w(px(width))
         .flex_none()
         .child(cell)
-        .child(bar)
         .tooltip(move |window, cx| {
             let mix = Rc::clone(&mix);
             let lines = Rc::clone(&lines);
@@ -4063,7 +4067,7 @@ mod tests {
         assert_eq!(totals.share(&rows[2], ReplayColumn::SpottingDamage, false), share(TeamSide::Enemies, 0.75));
         assert_eq!(totals.share(&rows[3], ReplayColumn::SpottingDamage, false), share(TeamSide::Enemies, 0.25));
         assert_eq!(totals.share(&rows[1], ReplayColumn::SpottingDamage, false), None, "no bar for nothing");
-        assert_eq!(totals.share(&rows[0], ReplayColumn::ReceivedDamage, false), None, "not a barred column");
+        assert_eq!(totals.share(&rows[0], ReplayColumn::Kills, false), None, "not a barred column");
 
         let debug = TeamTotals::of(&rows, TeamId::from(0i64), true);
         assert_eq!(debug.column(ReplayColumn::ActualDamage).enemies, Some(110_000));

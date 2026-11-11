@@ -40,7 +40,7 @@ use super::columns::ReplayColumn;
 use super::model::PlayerRow;
 use super::model::separate_number;
 
-/// Height of the bar under a damage figure.
+/// Height of the stacked bar under a damage figure.
 const BAR_HEIGHT: Pixels = px(4.);
 
 /// Side of the colour key square beside a listed type.
@@ -225,20 +225,26 @@ impl DamageMix {
         amount as f64 * 100. / self.total as f64
     }
 
-    /// The bar, filling the width it is given.
-    pub fn bar(&self) -> impl IntoElement {
+    /// Each segment's part of the bar, from 0 to 1, in drawing order.
+    pub fn proportions(&self) -> impl Iterator<Item = (DamageKind, f32)> + '_ {
+        self.segments.iter().map(|segment| (segment.kind, (segment.amount as f64 / self.total as f64) as f32))
+    }
+
+    /// The segments stacked from the left across `extent` of the width given,
+    /// in full colour under the figure: the types stay recognisable and the
+    /// figure never sits on a coloured ground, so it reads the same on every
+    /// panel and in every player colour.
+    pub fn stacked_bar(&self, extent: f32) -> impl IntoElement {
         let last = self.segments.len() - 1;
-        h_flex().w_full().h(BAR_HEIGHT).flex_none().children(self.segments.iter().enumerate().map(
-            |(index, segment)| {
-                let piece = div().h_full().bg(segment.kind.color());
+        let stack = h_flex().h_full().flex_none().w(relative(extent)).children(self.proportions().enumerate().map(
+            |(index, (kind, proportion))| {
+                let piece = div().id(("damage-segment", index)).test_support().h_full().bg(kind.color());
                 // The last takes what is left, so rounding leaves no gap at the end.
-                if index == last {
-                    piece.flex_1()
-                } else {
-                    piece.flex_none().w(relative((segment.amount as f64 / self.total as f64) as f32))
-                }
+                if index == last { piece.flex_1() } else { piece.flex_none().w(relative(proportion)) }
             },
-        ))
+        ));
+
+        h_flex().w_full().h(BAR_HEIGHT).flex_none().overflow_hidden().child(stack)
     }
 
     /// Every line with its colour key, amount and share of the total, for a
@@ -401,6 +407,43 @@ mod tests {
     #[test]
     fn no_damage_is_no_bar() {
         assert_eq!(DamageMix::of(&[]), None);
+    }
+
+    /// The stacked bar runs as far as the player's share of the team and
+    /// splits that length in each type's proportion of the player's damage.
+    #[gpui_kit::test]
+    fn a_stack_spans_the_share_in_each_types_proportion(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::ParentElement as _;
+        use gpui_kit::Styled as _;
+        use gpui_kit::test::TestWindowExt as _;
+
+        struct Bar(DamageMix);
+
+        impl gpui_kit::Render for Bar {
+            fn render(
+                &mut self,
+                _window: &mut gpui_kit::Window,
+                _cx: &mut gpui_kit::Context<Self>,
+            ) -> impl gpui_kit::IntoElement {
+                gpui_kit::div().w(gpui_kit::px(500.)).child(self.0.stacked_bar(0.4))
+            }
+        }
+
+        let lines = [line(DamageKind::Ap, 30_000), line(DamageKind::He, 10_000), line(DamageKind::Fire, 10_000)];
+        let mix = DamageMix::of(&lines).expect("damage was dealt");
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(gpui_kit::size(gpui_kit::px(600.), gpui_kit::px(100.)), |_window, _cx| Bar(mix));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let widths =
+                [0usize, 1, 2].map(|index| window.find(("damage-segment", index)).bounds().size.width.as_f32());
+            for (width, expected) in widths.iter().zip([120., 40., 40.]) {
+                assert!((width - expected).abs() < 0.5, "{widths:?}");
+            }
+        })
+        .expect("the window is open");
     }
 
     #[test]
