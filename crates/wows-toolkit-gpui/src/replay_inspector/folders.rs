@@ -7,9 +7,11 @@
 //! is not selected counts the replays added or changed in it until the reader
 //! selects it.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -57,6 +59,30 @@ pub(crate) enum FolderState {
     Missing,
 }
 
+/// How long the ring a landing replay sends out from a watched tab's dot
+/// takes to spread and fade. The tab's count changes once it has.
+const LANDING_PULSE: Duration = Duration::from_millis(600);
+
+/// Numbers the replays noted in one tab, so each landing draws its own ring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LandingNumber(u64);
+
+/// The latest replay noted in a tab.
+#[derive(Clone, Copy, Debug)]
+struct Landing {
+    number: LandingNumber,
+    at: Instant,
+}
+
+/// What brought a replay to a tab's notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Noted {
+    /// A replay new to the directory, which sends out a ring.
+    Landed,
+    /// A replay already there written again.
+    Rewritten,
+}
+
 /// Whether a saved list has been read, which decides whether it may be
 /// written: a list that was never read must not be written over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +102,12 @@ pub(crate) struct ReplayFolder {
     /// the Live source and leaves this unresolved.
     index: FolderIndex,
 
-    /// Replays added or changed since the reader last had this tab selected.
-    unseen: HashSet<PathBuf>,
+    /// Replays added or changed since the reader last had this tab selected,
+    /// with when the badge starts counting each.
+    unseen: HashMap<PathBuf, Instant>,
+    landing: Option<Landing>,
+    /// Renders the tab again when the latest landing's ring has spread.
+    _count_wake: Option<Task<()>>,
     _events: Subscription,
 }
 
@@ -114,7 +144,18 @@ impl ReplayFolder {
     /// still holds.
     pub(crate) fn unseen(&self, cx: &App) -> usize {
         let browser = self.browser.read(cx);
-        self.unseen.iter().filter(|path| browser.holds(path)).count()
+        self.unseen.keys().filter(|path| browser.holds(path)).count()
+    }
+
+    /// What the badge counts at `now`: a landed replay once its ring has
+    /// spread, so the count changes after the ring rather than with it.
+    fn counted(&self, now: Instant, cx: &App) -> usize {
+        let reduce_motion = cx.reduce_motion();
+        let browser = self.browser.read(cx);
+        self.unseen
+            .iter()
+            .filter(|(path, counts_from)| (reduce_motion || now >= **counts_from) && browser.holds(path))
+            .count()
     }
 
     fn watch(&self) -> ListingWatch {
@@ -259,7 +300,9 @@ impl ReplayInspectorView {
             pinned,
             state,
             index: FolderIndex::new(),
-            unseen: HashSet::new(),
+            unseen: HashMap::new(),
+            landing: None,
+            _count_wake: None,
             _events: events,
         }
     }
@@ -347,15 +390,40 @@ impl ReplayInspectorView {
 
     /// Notes a change in a tab's directory that the reader has not seen, when
     /// the tab is not the one selected. Says whether it was noted.
-    pub(super) fn note_unseen(&mut self, browser: &Entity<ReplayBrowser>, path: &Path, cx: &mut Context<Self>) -> bool {
+    pub(super) fn note_unseen(
+        &mut self,
+        browser: &Entity<ReplayBrowser>,
+        path: &Path,
+        noted: Noted,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let selected = self.selected_folder;
         let Some(folder) = self.folders.iter_mut().find(|folder| folder.browser == *browser) else { return false };
         if folder.id() == selected {
             return false;
         }
 
-        folder.unseen.insert(path.to_path_buf());
         cx.notify();
+        if folder.unseen.contains_key(path) {
+            return true;
+        }
+
+        let now = cx.background_executor().now();
+        if noted == Noted::Rewritten {
+            folder.unseen.insert(path.to_path_buf(), now);
+            return true;
+        }
+
+        folder.unseen.insert(path.to_path_buf(), now + LANDING_PULSE);
+        let number = folder.landing.map_or(LandingNumber(0), |landing| LandingNumber(landing.number.0 + 1));
+        folder.landing = Some(Landing { number, at: now });
+        // Replaces the wake for an earlier landing, whose count waits for this ring.
+        folder._count_wake = (!cx.reduce_motion()).then(|| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(LANDING_PULSE).await;
+                let _ = this.update(cx, |_this, cx| cx.notify());
+            })
+        });
 
         true
     }
@@ -363,7 +431,7 @@ impl ReplayInspectorView {
     /// Drops a replay that left a tab's directory from what its badge counts.
     pub(super) fn forget_unseen(&mut self, browser: &Entity<ReplayBrowser>, path: &Path, cx: &mut Context<Self>) {
         let Some(folder) = self.folders.iter_mut().find(|folder| folder.browser == *browser) else { return };
-        if folder.unseen.remove(path) {
+        if folder.unseen.remove(path).is_some() {
             cx.notify();
         }
     }
@@ -798,8 +866,10 @@ impl ReplayInspectorView {
         let id = folder.id();
         let index = id.element_index();
         let selected = id == self.selected_folder;
+        let now = cx.background_executor().now();
         // The selected tab is what the reader is looking at, so it counts nothing.
-        let unseen = if selected { 0 } else { folder.unseen(cx) };
+        let unseen = if selected { 0 } else { folder.counted(now, cx) };
+        let watched = folder.watch() == ListingWatch::Watched;
         let (glyph, label) = match &folder.source {
             FolderSource::Install => (crate::icons::Glyph::Monitor, t!("ui.replay_folders.install").into_owned()),
             FolderSource::Chosen(root) => (crate::icons::Glyph::Folder, folder_name(root)),
@@ -833,6 +903,7 @@ impl ReplayInspectorView {
             .when(folder.pinned, |tab| {
                 tab.child(crate::icons::icon(crate::icons::Glyph::Pin).id(("replay-folder-pin", index)).test_support())
             })
+            .when(watched, |tab| tab.child(watch_dot(index, folder.landing, now, cx)))
             .when(unseen > 0, |tab| tab.child(unseen_badge(index, unseen, cx)))
             .tooltip({
                 let view = view.clone();
@@ -993,6 +1064,40 @@ fn unseen_badge(index: usize, unseen: usize, cx: &App) -> AnyElement {
     crate::motion::fade_in(("replay-folder-badge-fade", index), badge)
 }
 
+/// The dot on a watched tab, which sends out one ring as a replay lands in
+/// its directory.
+fn watch_dot(index: usize, landing: Option<Landing>, now: Instant, cx: &App) -> AnyElement {
+    const DOT: Pixels = px(6.);
+    /// How many dot widths across the ring is when it has faded.
+    const REACH: f32 = 3.;
+
+    let color = cx.theme().success;
+    let spreading =
+        landing.filter(|landing| !cx.reduce_motion() && now.saturating_duration_since(landing.at) < LANDING_PULSE);
+    let ring = spreading.map(|landing| {
+        div().absolute().rounded_full().border_1().border_color(color).with_animation(
+            ElementId::NamedInteger("replay-folder-ring".into(), landing.number.0),
+            Animation::new(LANDING_PULSE).with_easing(ease_out_quint()),
+            |ring, delta| {
+                let across = DOT * (1. + delta * (REACH - 1.));
+                let offset = (DOT - across) / 2.;
+                ring.size(across).top(offset).left(offset).opacity(1. - delta)
+            },
+        )
+    });
+
+    div()
+        .id(("replay-folder-watched", index))
+        .test_support()
+        .relative()
+        .flex_none()
+        .size(DOT)
+        .rounded_full()
+        .bg(color)
+        .children(ring)
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1149,8 +1254,16 @@ mod tests {
         .expect("the test window stays open")
     }
 
-    /// The count a tab's badge shows, while it shows one.
+    /// The count a tab's badge shows, while it shows one, once the ring of
+    /// the latest landing has spread.
     fn badge(window: WindowHandle<Root>, id: FolderId, cx: &mut TestAppContext) -> Option<String> {
+        cx.executor().advance_clock(super::LANDING_PULSE);
+        cx.run_until_parked();
+        badge_now(window, id, cx)
+    }
+
+    /// The count a tab's badge shows at once.
+    fn badge_now(window: WindowHandle<Root>, id: FolderId, cx: &mut TestAppContext) -> Option<String> {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             window
@@ -1444,6 +1557,43 @@ mod tests {
         assert_eq!(badge(window, busy_id, cx), None, "the directory on screen never counts");
         click_tab(window, quiet_id, cx);
         assert_eq!(badge(window, busy_id, cx), None, "nor counts later what landed while it was shown");
+    }
+
+    /// A watched tab carries a dot and an unwatched one does not; a landing
+    /// replay changes the count only once its ring has spread.
+    #[gpui_kit::test]
+    fn the_count_changes_after_the_landing_ring(cx: &mut TestAppContext) {
+        let (window, app) = open_app_in_root(cx);
+        simulated_watch::install();
+        hold_constants_for_fixture();
+        let watched = tempfile::tempdir().expect("a temp directory");
+        let unwatched = tempfile::tempdir().expect("a temp directory");
+        let (watched, unwatched) = (canonical(watched.path()), canonical(unwatched.path()));
+        let view = inspector(&app, cx);
+
+        with_view(window, &view, cx, |view, window, cx| {
+            view.adopt_pinned_folders(PinnedFolders(vec![watched.clone()]), window, cx);
+            view.add_folder(unwatched.clone(), false, window, cx);
+        });
+        cx.run_until_parked();
+        let (watched_id, unwatched_id) = (folder_id(&view, &watched, cx), folder_id(&view, &unwatched, cx));
+        let shows_dot = |id: FolderId, cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(("replay-folder-watched", id.element_index())).is_some()
+            })
+            .expect("the test window stays open")
+        };
+        assert!(shows_dot(watched_id, cx), "a pinned directory is watched");
+        assert!(shows_dot(install_id(&view, cx), cx), "so is the install's");
+        assert!(!shows_dot(unwatched_id, cx), "a directory read once is not");
+
+        land(&watched, "first.wowsreplay", cx);
+        assert_eq!(badge(window, watched_id, cx).as_deref(), Some("1"));
+
+        land(&watched, "second.wowsreplay", cx);
+        assert_eq!(badge_now(window, watched_id, cx).as_deref(), Some("1"), "the count holds while the ring spreads");
+        assert_eq!(badge(window, watched_id, cx).as_deref(), Some("2"), "and changes once it has");
     }
 
     /// The recently opened directories survive a restart through the

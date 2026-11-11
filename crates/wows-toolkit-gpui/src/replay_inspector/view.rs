@@ -685,7 +685,7 @@ impl ReplayInspectorView {
                 // whichever tab is shown, as the checkbox promises. Elsewhere,
                 // a directory not on screen counts it on its tab rather than
                 // taking the reader away from the one they are looking at.
-                let noted = self.note_unseen(browser, path, cx);
+                let noted = self.note_unseen(browser, path, folders::Noted::Landed, cx);
                 if noted && browser != self.install_browser() {
                     return;
                 }
@@ -706,7 +706,7 @@ impl ReplayInspectorView {
             ReplayBrowserEvent::ReplayChanged(path) => {
                 self.auto_export_landed(path, window, cx);
                 self.reparse_open_replay(path, ReparseCause::FileRewritten, window, cx);
-                self.note_unseen(browser, path, cx);
+                self.note_unseen(browser, path, folders::Noted::Rewritten, cx);
             }
             ReplayBrowserEvent::ReplayRemoved(path) => self.forget_unseen(browser, path, cx),
             ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
