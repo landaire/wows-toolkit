@@ -1510,7 +1510,9 @@ impl Render for ReplayPanel {
                                 )
                             }),
                     );
-                content.into_any_element()
+                // Fades in where the outline was. The id holds while the
+                // panel shows a battle, so a re-read does not fade it again.
+                crate::motion::fade_in("replay-panel-loaded", content)
             }
         };
 

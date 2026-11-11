@@ -2380,7 +2380,7 @@ impl Render for SearchView {
                 anchored()
                     .position(anchor)
                     .snap_to_window_with_margin(px(8.))
-                    .child(crate::motion::fade_in("search-preview-fade", card, cx)),
+                    .child(crate::motion::fade_in("search-preview-fade", card)),
             )
             .with_priority(1)
         });

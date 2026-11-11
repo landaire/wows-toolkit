@@ -1646,7 +1646,7 @@ impl Render for ReplayBrowser {
                 anchored()
                     .position(anchor)
                     .snap_to_window_with_margin(px(8.))
-                    .child(crate::motion::fade_in("replay-preview-popup", card, cx)),
+                    .child(crate::motion::fade_in("replay-preview-popup", card)),
             )
             .with_priority(1)
         });

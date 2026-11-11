@@ -18,7 +18,6 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui_kit::base::MotionReveal;
 use gpui_kit::base::MotionStatus;
 use gpui_kit::base::MotionValue;
 use gpui_kit::base::TestSupportExt as _;
@@ -1726,10 +1725,10 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 /// (flex). A row whose detail is hidden returns the bare cell.
 fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     let collapsed = render_cell(ix, col, row, layout);
-    let moving = match layout.detail {
+    let (extent, opacity) = match layout.detail {
         RowDetail::Hidden => return collapsed,
-        RowDetail::Moving(progress) => Some(progress),
-        RowDetail::Open => None,
+        RowDetail::Moving(progress) => (crate::motion::Extent::Moving(progress), progress),
+        RowDetail::Open => (crate::motion::Extent::Open, 1.0),
     };
     let Some(detail) =
         expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held)
@@ -1739,18 +1738,14 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     // The gap above the detail is part of what is revealed, so the row grows
     // from its first line in step with the progress.
     let detail = v_flex().pt_1().child(detail);
-    // Only a moving detail is measured and clipped: the reveal lays out at
-    // the height it measured the frame before, which an open detail would
-    // lag behind on every column drag or alt press.
-    let detail = match moving {
-        Some(progress) => MotionReveal::new(
-            ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
-            progress,
-            detail.opacity(progress).into_any_element(),
-        )
-        .into_any_element(),
-        None => detail.into_any_element(),
-    };
+    // Kept in a reveal while open too, so a close starts from the height the
+    // detail had rather than from nothing.
+    let detail = crate::motion::Reveal::new(
+        ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
+        extent,
+        detail.opacity(opacity).into_any_element(),
+    )
+    .into_any_element();
     v_flex()
         .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
         .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
@@ -2341,6 +2336,55 @@ mod tests {
             );
         })
         .expect("the window is open");
+    }
+
+    /// A row's detail opens and closes over several frames: partway through
+    /// either it is between its closed and open heights, and a close starts
+    /// from the open height rather than from nothing.
+    #[gpui_kit::test]
+    fn a_rows_detail_grows_and_shrinks_rather_than_jumping(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
+            let mut model = two_row_model();
+            for row in &mut model.rows {
+                row.fires = Some(3);
+                row.floods = Some(1);
+                row.citadels = Some(2);
+                row.crits = Some(4);
+            }
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(model, vfs, false, cx)
+        });
+        let height = |cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find(0usize).bounds().size.height
+            })
+            .expect("the window is open")
+        };
+        let toggle = |cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| window.click(("replay-row-caret", 0usize), cx))
+                .expect("the window is open");
+        };
+        let step = std::time::Duration::from_millis(80);
+
+        let closed = height(cx);
+        toggle(cx);
+        height(cx);
+        cx.executor().advance_clock(step);
+        let opening = height(cx);
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        let open = height(cx);
+        assert!(closed < opening && opening < open, "opening passes between {closed:?} and {open:?}, got {opening:?}");
+
+        toggle(cx);
+        let closing_starts = height(cx);
+        assert!(closing_starts > (closed + open) / 2., "a close starts near the open height, got {closing_starts:?}");
+        cx.executor().advance_clock(step);
+        let closing = height(cx);
+        assert!(closed < closing && closing < open, "closing passes between them, got {closing:?}");
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        assert_eq!(height(cx), closed, "and ends closed");
     }
 
     /// A column follows its content until the reader sets its width, and then
