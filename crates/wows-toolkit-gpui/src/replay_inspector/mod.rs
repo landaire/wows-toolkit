@@ -24,6 +24,7 @@ pub mod expanded;
 pub mod icons;
 pub mod links;
 pub mod load;
+mod map_thumbnails;
 pub mod model;
 pub mod panel;
 pub mod sample;

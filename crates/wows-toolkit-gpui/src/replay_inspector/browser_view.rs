@@ -82,6 +82,9 @@ use crate::replay_index::SourceScope;
 
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
+use super::map_thumbnails::MapSpace;
+use super::map_thumbnails::MapThumbnails;
+use super::map_thumbnails::Thumbnail;
 use super::table::resolve_color;
 
 /// The egui app's `t!("ui.replay.spectator")` value
@@ -394,6 +397,8 @@ pub struct ReplayBrowser {
     /// Replays the watcher listed since the reader last left this listing,
     /// with when each arrived. Each carries a New tag until it is opened.
     new_arrivals: Rc<HashMap<PathBuf, std::time::Instant>>,
+    /// Each listed map's art, scaled down for the rows.
+    thumbnails: MapThumbnails,
 }
 
 /// Whether a listing follows its directory as it changes.
@@ -512,6 +517,8 @@ impl ReplayBrowser {
 
     pub fn new(cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
+        // Thumbnails sit in every window's sprite atlas until released.
+        cx.on_release(|this: &mut Self, cx| this.thumbnails.release(cx)).detach();
         Self {
             files: Vec::new(),
             scan_progress: None,
@@ -538,6 +545,7 @@ impl ReplayBrowser {
             watch_generation: 0,
             summaries_generation: 0,
             new_arrivals: Rc::new(HashMap::new()),
+            thumbnails: MapThumbnails::new(),
         }
     }
 
@@ -1189,6 +1197,42 @@ impl ReplayBrowser {
                 state.set_selected_index(ix, cx);
             }
         });
+        self.load_thumbnails(cx);
+    }
+
+    /// Reads the art of every listed map without a thumbnail yet, one map
+    /// at a time off the UI thread, each row's tile filled in as its map
+    /// arrives. With no build open, the thumbnails of an earlier one are
+    /// released and the next rebuild asks again.
+    fn load_thumbnails(&mut self, cx: &mut Context<Self>) {
+        let cache = self.build_cache.clone();
+        let Some((cache, source)) =
+            cache.and_then(|cache| super::map_thumbnails::source_build(&cache).map(|source| (cache, source)))
+        else {
+            self.thumbnails.release(cx);
+            return;
+        };
+        let spaces = self.files.iter().map(|file| file.listed.map_name.as_str());
+        let Some(request) = self.thumbnails.claim(source, spaces, cx) else { return };
+
+        cx.spawn(async move |this, cx| {
+            for space in request.spaces {
+                let image = cx.background_spawn({
+                    let cache = cache.clone();
+                    let space = space.clone();
+                    async move { super::map_thumbnails::load(&cache, source, &space) }
+                });
+                let image = image.await;
+                let settled = this.update(cx, |this, cx| {
+                    this.thumbnails.settle(source, space, image);
+                    cx.notify();
+                });
+                if settled.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
     }
 
     /// Handles a click on a leaf's rendered item: any click records the
@@ -1451,6 +1495,24 @@ fn arrival_glow(arrived: std::time::Instant, window: &mut Window, cx: &App) -> O
     Some(crate::theme::accent().opacity(STRENGTH * remaining * remaining))
 }
 
+/// A row's map as a small square, or a plain tile while its art loads or
+/// when the open build has none for it.
+fn map_thumbnail(thumbnail: Option<&Thumbnail>, row_height: Pixels, cx: &App) -> AnyElement {
+    const MARGIN: Pixels = px(8.);
+
+    let edge = row_height - MARGIN;
+    let tile = div().flex_none().size(edge).rounded(px(2.)).overflow_hidden();
+
+    match thumbnail {
+        Some(Thumbnail::Ready(image)) => tile.child(img(Arc::clone(image)).size_full()).into_any_element(),
+        // Ocean's water, which the art then replaces without a jump.
+        Some(Thumbnail::Loading) | None => tile.bg(crate::preview_hover::MAP_PLACEHOLDER).into_any_element(),
+        Some(Thumbnail::Missing) => {
+            tile.bg(cx.theme().muted).border_1().border_color(cx.theme().border).into_any_element()
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_browser_item(
     browser: Entity<ReplayBrowser>,
@@ -1460,6 +1522,7 @@ fn render_browser_item(
     leaf_info: &HashMap<SharedString, LeafInfo>,
     marked: &HashSet<PathBuf>,
     new_arrivals: &HashMap<PathBuf, std::time::Instant>,
+    thumbnails: &HashMap<MapSpace, Thumbnail>,
     row_height: Pixels,
     window: &mut Window,
     cx: &mut App,
@@ -1522,6 +1585,9 @@ fn render_browser_item(
         row = row.child(crate::motion::chevron(turn));
     } else {
         row = row.child(div().w(INDENT));
+    }
+    if let Some(leaf) = leaf {
+        row = row.child(map_thumbnail(thumbnails.get(leaf.map_name.as_str()), row_height, cx));
     }
     row = row.child(lines);
 
@@ -1615,6 +1681,7 @@ impl Render for ReplayBrowser {
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
                 let marked = self.marked.clone();
                 let new_arrivals = Rc::clone(&self.new_arrivals);
+                let thumbnails = self.thumbnails.slots();
                 let listing = tree(&self.tree_state, move |ix, entry, selected, window, cx| {
                     render_browser_item(
                         entity.clone(),
@@ -1624,6 +1691,7 @@ impl Render for ReplayBrowser {
                         &leaf_info,
                         &marked,
                         &new_arrivals,
+                        &thumbnails.borrow(),
                         row_height,
                         window,
                         cx,
