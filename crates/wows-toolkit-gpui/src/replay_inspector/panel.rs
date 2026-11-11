@@ -87,6 +87,7 @@ use super::load::spawn_parse;
 use super::load::spawn_parse_with_alts;
 use super::model::MatchContext;
 use super::model::ReplayReportModel;
+use super::model::battle_title;
 use super::model::separate_number;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
@@ -172,6 +173,26 @@ enum LoadState {
     Failed(ReplayLoadError),
 }
 
+/// Why a tab reads its replay again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReparseCause {
+    /// The file on disk changed, which is how the results of a battle the
+    /// client left early arrive.
+    FileRewritten,
+    /// A mapping or game data the battle is read through has arrived.
+    GameDataArrived,
+    /// A recording of the same battle was added or taken back out.
+    AltPerspective,
+}
+
+impl ReparseCause {
+    /// The cause of one read that answers both requests. A file change
+    /// outranks the others, since only it is announced.
+    fn with(self, other: Self) -> Self {
+        if other == Self::FileRewritten { other } else { self }
+    }
+}
+
 struct TitleIcons {
     nation: Option<Arc<RenderImage>>,
     class: Option<Arc<RenderImage>>,
@@ -230,7 +251,10 @@ pub struct ReplayPanel {
     /// Whether a parse is running. Repeated file events are folded into one
     /// follow-up parse rather than replacing the loading panel repeatedly.
     parse_in_flight: bool,
-    reparse_queued: bool,
+    /// Why the running parse was started. `None` for the first read.
+    reading_for: Option<ReparseCause>,
+    /// A read asked for while another was running, and why.
+    queued_reparse: Option<ReparseCause>,
     /// An alternative accepted while another parse was running. Assigned to
     /// `alt_on_trial` only when the parse that includes it starts.
     queued_alt_trial: Option<PathBuf>,
@@ -286,7 +310,8 @@ impl ReplayPanel {
             export_stem: None,
             export_status: None,
             parse_in_flight: true,
-            reparse_queued: false,
+            reading_for: None,
+            queued_reparse: None,
             queued_alt_trial: None,
             path,
             alts: Vec::new(),
@@ -305,26 +330,39 @@ impl ReplayPanel {
         self.game_data = game_data;
     }
 
-    /// Reads the replay again, for a file that has changed under an open tab.
+    /// Reads the replay again, leaving the tab where it is.
     ///
-    /// The loaded view remains visible while new data is read. Repeated file
-    /// notifications during a parse collapse into one later read.
-    pub fn reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+    /// The loaded view remains visible while new data is read. Repeated
+    /// requests during a parse collapse into one later read.
+    pub fn reparse(
+        &mut self,
+        game_data: GameDataCache,
+        cause: ReparseCause,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.parse_in_flight {
-            self.reparse_queued = true;
+            self.queued_reparse = Some(self.queued_reparse.map_or(cause, |queued| queued.with(cause)));
             cx.notify();
             return;
         }
-        self.start_reparse(game_data, window, cx);
+        self.start_reparse(game_data, cause, window, cx);
     }
 
-    fn start_reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_reparse(
+        &mut self,
+        game_data: GameDataCache,
+        cause: ReparseCause,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(alt) = self.queued_alt_trial.take() {
             self.alt_on_trial = Some(alt);
         }
         let parse_task =
             spawn_parse_with_alts(self.path.clone(), self.alts.clone(), game_data, self.personal_rating.clone(), cx);
         self.parse_in_flight = true;
+        self.reading_for = Some(cause);
         self._parse_task = cx.spawn_in(window, async move |this, cx| {
             let result = parse_task.await;
             let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
@@ -369,12 +407,11 @@ impl ReplayPanel {
                         }
                         if this.parse_in_flight {
                             this.queued_alt_trial = Some(alt.clone());
-                            this.reparse_queued = true;
                         } else {
                             this.alt_on_trial = Some(alt.clone());
                         }
                         this.alts.push(alt);
-                        this.reparse(game_data.clone(), window, cx);
+                        this.reparse(game_data.clone(), ReparseCause::AltPerspective, window, cx);
                     });
                 }
                 Err(refused) => {
@@ -519,12 +556,22 @@ impl ReplayPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.reparse_queued && self.alt_on_trial.is_none() {
-            self.reparse_queued = false;
-            self.start_reparse(self.game_data.clone(), window, cx);
+        if let Some(queued) = self.queued_reparse
+            && self.alt_on_trial.is_none()
+        {
+            self.queued_reparse = None;
+            let cause = self.reading_for.map_or(queued, |running| running.with(queued));
+            self.start_reparse(self.game_data.clone(), cause, window, cx);
             return;
         }
         self.parse_in_flight = false;
+        let cause = self.reading_for.take();
+        // A battle the client left early gets its results when the game
+        // rewrites the file, which is the one re-read worth saying: the tab
+        // then shows a win or a loss. Read from the raw results rather than
+        // the outcome, which a mapping that arrives later can also fill in.
+        let awaited_results = cause == Some(ReparseCause::FileRewritten)
+            && matches!(&self.state, LoadState::Loaded(loaded) if loaded.raw_results_panel.is_none());
         self.state = match result {
             Ok(ParsedReplay {
                 model,
@@ -562,14 +609,17 @@ impl ReplayPanel {
                 // battle again without it.
                 if let Some(refused) = self.alt_on_trial.take() {
                     self.alts.retain(|kept| !same_file(kept, &refused));
-                    self.reparse_queued = false;
+                    let again = [cause, self.queued_reparse.take()]
+                        .into_iter()
+                        .flatten()
+                        .fold(ReparseCause::AltPerspective, ReparseCause::with);
                     crate::toast::failed(
                         t!("ui.replay.load_alt_perspective_failed", error = err.to_string()).into_owned(),
                         window,
                         cx,
                     );
                     let game_data = self.game_data.clone();
-                    self.reparse(game_data, window, cx);
+                    self.reparse(game_data, again, window, cx);
                     return;
                 }
                 // The panel says what went wrong; the toast is so a reader
@@ -579,9 +629,14 @@ impl ReplayPanel {
                 LoadState::Failed(err)
             }
         };
-        if self.reparse_queued {
-            self.reparse_queued = false;
-            self.start_reparse(self.game_data.clone(), window, cx);
+        if let LoadState::Loaded(loaded) = &self.state
+            && awaited_results
+            && loaded.raw_results_panel.is_some()
+        {
+            crate::toast::info(t!("ui.replay.results_arrived", battle = loaded.title).into_owned(), window, cx);
+        }
+        if let Some(queued) = self.queued_reparse.take() {
+            self.start_reparse(self.game_data.clone(), queued, window, cx);
         }
         cx.notify();
     }
@@ -608,9 +663,8 @@ impl ReplayPanel {
         if let Some(table) = self.personal_rating.as_ref() {
             model.populate_personal_ratings(table);
         }
-        let ship_name = model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
-        let title: SharedString =
-            if ship_name.is_empty() { model.map.clone() } else { format!("{ship_name} - {}", model.map) }.into();
+        let ship_name = model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.as_str()).unwrap_or_default();
+        let title: SharedString = battle_title(ship_name, &model.map).into();
         let battle_result = model.battle_result;
         let chat = std::mem::take(&mut model.chat);
         let chat_title = title.to_string();
@@ -697,7 +751,8 @@ impl ReplayPanel {
             alts: Vec::new(),
             game_data: GameDataCache::new(PathBuf::from("test")),
             parse_in_flight: false,
-            reparse_queued: false,
+            reading_for: None,
+            queued_reparse: None,
             queued_alt_trial: None,
             _parse_task: Task::ready(()),
             _table_subscription: None,

@@ -52,6 +52,7 @@ use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::RenderRequested;
+use super::panel::ReparseCause;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
@@ -62,6 +63,13 @@ use gpui_kit::component::input::InputState;
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.
 const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
+
+/// Identifies the message that a battle was exported, so a burst of battles
+/// says only the latest.
+const AUTO_EXPORTED: &str = "replay-auto-exported";
+
+/// Identifies the message that a battle landed, for the same reason.
+const NEW_BATTLE: &str = "replay-new-battle";
 
 /// How long a replay must go unchanged before it is exported. The game writes
 /// a replay in bursts and each write is a file event.
@@ -97,6 +105,15 @@ enum BatchTarget {
     Directory,
     /// A temporary directory, whose files go on the clipboard afterwards.
     Clipboard,
+}
+
+/// What a toast calls the battle at `path`: its "Ship - Map" from the
+/// listing, or its file name while the file is not listed.
+fn battle_label(browser: &Entity<ReplayBrowser>, path: &std::path::Path, cx: &App) -> String {
+    match browser.read(cx).battle_label(path) {
+        Some(label) => label.to_string(),
+        None => path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+    }
 }
 
 /// Puts the rendered videos on the clipboard, or says why they are not there.
@@ -288,6 +305,14 @@ enum OpenTarget {
     /// In place of the replay tab already showing.
     ShowingTab,
     NewTab,
+}
+
+/// What an open did.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TabShown {
+    Opened,
+    /// The replay was already open, and its tab came forward.
+    BroughtForward,
 }
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
@@ -544,7 +569,7 @@ impl ReplayInspectorView {
 
     fn on_browser_event(
         &mut self,
-        _browser: &Entity<ReplayBrowser>,
+        browser: &Entity<ReplayBrowser>,
         event: &ReplayBrowserEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -573,9 +598,15 @@ impl ReplayInspectorView {
                 self.auto_export_landed(path, window, cx);
                 self.index_landed(path, cx);
                 self.contribute_landed(path, cx);
-                if self.auto_load_latest_replay {
-                    self.open_replay(path.clone(), window, cx);
-                }
+                let battle = battle_label(browser, path, cx);
+                let opened = self.auto_load_latest_replay
+                    && self.open_replay_into(path.clone(), OpenTarget::ShowingTab, window, cx).is_some();
+                let said = if opened {
+                    t!("ui.replay.opened_new_battle", battle = battle)
+                } else {
+                    t!("ui.replay.new_battle_listed", battle = battle)
+                };
+                crate::toast::replacing(NEW_BATTLE, crate::toast::Level::Info, said.into_owned(), window, cx);
             }
             // The file under an open tab has changed, so that tab is reading
             // something that is no longer on disk. The change may be the
@@ -583,7 +614,7 @@ impl ReplayInspectorView {
             // the export is tried again.
             ReplayBrowserEvent::ReplayChanged(path) => {
                 self.auto_export_landed(path, window, cx);
-                self.reparse_open_replay(path, window, cx);
+                self.reparse_open_replay(path, ReparseCause::FileRewritten, window, cx);
             }
             ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
             // The app owns the cache and the jobs that fill it, so the offer to
@@ -731,7 +762,7 @@ impl ReplayInspectorView {
     pub(crate) fn reparse_open_replays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open: Vec<PathBuf> = self.open_panels.keys().cloned().collect();
         for path in open {
-            self.reparse_open_replay(&path, window, cx);
+            self.reparse_open_replay(&path, ReparseCause::GameDataArrived, window, cx);
         }
     }
 
@@ -1252,6 +1283,7 @@ impl ReplayInspectorView {
                 return;
             }
             let out = directory.join(&parsed.export_stem).with_extension(format.extension());
+            let file = out.file_name().unwrap_or(out.as_os_str()).to_string_lossy().into_owned();
 
             let export = if debug { parsed.export } else { parsed.export.stripped() };
             let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
@@ -1260,7 +1292,16 @@ impl ReplayInspectorView {
                     tracing::info!(path = %named.display(), "auto-export: the battle was written");
                     // Whatever stopped the last one has passed, so the notice
                     // about it comes down.
-                    let _ = cx.update(|window, cx| crate::toast::resolved(AUTO_EXPORT_FAILED, window, cx));
+                    let _ = cx.update(|window, cx| {
+                        crate::toast::resolved(AUTO_EXPORT_FAILED, window, cx);
+                        crate::toast::replacing(
+                            AUTO_EXPORTED,
+                            crate::toast::Level::Ok,
+                            t!("ui.replay.auto_exported", file = file).into_owned(),
+                            window,
+                            cx,
+                        );
+                    });
                 }
                 Err(err) => {
                     tracing::warn!(path = %named.display(), error = %err, "auto-export failed");
@@ -1282,10 +1323,16 @@ impl ReplayInspectorView {
     }
 
     /// Re-reads a replay a tab is open on, leaving the tab where it is.
-    fn reparse_open_replay(&mut self, path: &PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    fn reparse_open_replay(
+        &mut self,
+        path: &PathBuf,
+        cause: ReparseCause,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(panel) = self.open_panels.get(path).and_then(|panel| panel.upgrade()) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
-        panel.update(cx, |panel, cx| panel.reparse(game_data, window, cx));
+        panel.update(cx, |panel, cx| panel.reparse(game_data, cause, window, cx));
     }
 
     /// Opens `path` in a dock tab. A repeat double-click on a replay that is
@@ -1307,13 +1354,21 @@ impl ReplayInspectorView {
         self.open_replay_into(path, OpenTarget::NewTab, window, cx);
     }
 
-    fn open_replay_into(&mut self, path: PathBuf, target: OpenTarget, window: &mut Window, cx: &mut Context<Self>) {
+    /// Shows `path` in a tab. `None` when nothing could be shown, because no
+    /// game data is loaded to read it with.
+    fn open_replay_into(
+        &mut self,
+        path: PathBuf,
+        target: OpenTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<TabShown> {
         let Some(game_data) = self.game_data.clone() else {
             tracing::warn!(
                 path = %path.display(),
                 "replay inspector: open requested before the WoWs directory was known"
             );
-            return;
+            return None;
         };
 
         // A replay that is already open is shown, not opened twice: the tab
@@ -1324,7 +1379,7 @@ impl ReplayInspectorView {
             self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
             self.current_replay = Some(path);
             cx.notify();
-            return;
+            return Some(TabShown::BroughtForward);
         }
 
         // A plain open takes the place of the replay tab on screen, as the
@@ -1365,6 +1420,7 @@ impl ReplayInspectorView {
         // map is only walked when one is asked for, so it is swept here.
         self.open_renderers.retain(|_, panel| panel.upgrade().is_some());
         cx.notify();
+        Some(TabShown::Opened)
     }
 
     /// The replay tab a plain open replaces: one that is the active tab of
@@ -1681,6 +1737,12 @@ impl ReplayInspectorView {
     #[cfg(test)]
     pub(crate) fn seed_game_data(&mut self, wows_dir: &str) {
         self.game_data = Some(GameDataCache::new(PathBuf::from(wows_dir)));
+    }
+
+    /// The listing, so a test can raise what its directory watcher raises.
+    #[cfg(test)]
+    pub(crate) fn browser_for_test(&self) -> &Entity<ReplayBrowser> {
+        &self.browser
     }
 
     pub(crate) fn game_data(&self) -> Option<GameDataCache> {

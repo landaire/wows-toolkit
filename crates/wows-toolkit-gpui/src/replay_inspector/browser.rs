@@ -50,6 +50,8 @@ pub enum BrowserNode {
     },
     Leaf {
         label: String,
+        /// "Ship - Map", whatever the grouping drops from `label`.
+        battle: String,
         /// The second line: damage, kills and the timestamp. In pieces, since
         /// this front end draws its glyphs as icons.
         stats: Vec<LinePart>,
@@ -83,6 +85,7 @@ pub fn build_browser_tree(files: &[ReplayLite], grouping: ReplayGrouping, locale
 fn leaf(r: &ReplayLite, grouping: ReplayGrouping, locale: Option<&str>) -> BrowserNode {
     BrowserNode::Leaf {
         label: identity_line(&r.identity, grouping),
+        battle: super::model::battle_title(&r.identity.ship, &r.identity.map),
         stats: stats_line_parts(&r.identity, &r.stats, grouping, locale),
         path: r.path.clone(),
         map_name: r.map_name.clone(),

@@ -112,6 +112,9 @@ struct LeafInfo {
     /// The map as the replay names it, so the hover can draw the map before
     /// the replay has been read.
     map_name: String,
+    /// "Ship - Map", which names the battle in a message whatever the
+    /// listing's grouping leaves off the row.
+    battle: SharedString,
     /// The row's second line: damage, kills and the timestamp, in the pieces
     /// it is drawn from (the glyphs are drawn as icons).
     stats: Rc<Vec<LinePart>>,
@@ -469,6 +472,12 @@ impl ReplayBrowser {
     /// The path most recently opened via double-click, if any.
     pub fn open_requested(&self) -> Option<&Path> {
         self.open_requested.as_deref()
+    }
+
+    /// What a message calls the battle at `path`. `None` while the file is
+    /// not listed.
+    pub(crate) fn battle_label(&self, path: &Path) -> Option<SharedString> {
+        self.leaf_info.get(path.to_string_lossy().as_ref()).map(|leaf| leaf.battle.clone())
     }
 
     /// The currently active grouping strategy. The browser is the single
@@ -1126,12 +1135,13 @@ fn node_to_tree_item(
             group_children.insert(id.clone(), under.clone());
             (TreeItem::new(id, label).children(children).expanded(true), under)
         }
-        BrowserNode::Leaf { label, stats, path, map_name, outcome, in_division } => {
+        BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division } => {
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
             let under = vec![path.clone()];
-            leaf_info
-                .insert(id.clone(), LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover });
+            let leaf =
+                LeafInfo { path, map_name, battle: battle.into(), stats: Rc::new(stats), outcome, in_division, hover };
+            leaf_info.insert(id.clone(), leaf);
             (TreeItem::new(id, label), under)
         }
     }

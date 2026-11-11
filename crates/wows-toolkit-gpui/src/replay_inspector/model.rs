@@ -343,6 +343,13 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
     }
 }
 
+/// What a battle is called where one name has to do: the replay tab's title,
+/// and the messages about a battle that landed. The map alone when the ship
+/// is not known.
+pub fn battle_title(ship: &str, map: &str) -> String {
+    if ship.is_empty() { map.to_owned() } else { format!("{ship} - {map}") }
+}
+
 /// A replay's player table: rows plus the outcome and the active column set.
 /// `columns` starts as every `ReplayColumn` (mirroring `UiReport::new`'s
 /// initial full list); callers apply `columns::default_columns(&settings)` to

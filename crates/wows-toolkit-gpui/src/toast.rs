@@ -37,6 +37,36 @@ pub fn warn(message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui
     push(Notification::warning(message.clone()), &message, window, cx);
 }
 
+/// How a [`replacing`] message reads.
+#[derive(Clone, Copy)]
+pub enum Level {
+    /// As [`ok`].
+    Ok,
+    /// As [`info`].
+    Info,
+}
+
+/// A message that slides away like any other, but that the next one under
+/// the same `key` replaces rather than stacks under, so a burst of the same
+/// event says only its latest.
+pub fn replacing(
+    key: &'static str,
+    level: Level,
+    message: impl Into<SharedString>,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) {
+    let message = message.into();
+    let notification = match level {
+        Level::Ok => Notification::success(message.clone()),
+        Level::Info => Notification::info(message.clone()),
+    };
+    push(notification.id1::<Replacing>(key), &message, window, cx);
+}
+
+/// The identity of a [`replacing`] message.
+struct Replacing;
+
 /// A state the reader has to act on, which stays until they dismiss it.
 ///
 /// For the settings the app cannot work without: the egui app makes these two
@@ -70,9 +100,24 @@ pub fn resolved(key: &'static str, window: &mut Window, cx: &mut gpui_kit::App) 
 /// root rather than saying so, which would turn a report into a crash on a
 /// window opened bare (a test window, or a surface not yet given a `Root`).
 fn push(notification: Notification, said: &str, window: &mut Window, cx: &mut gpui_kit::App) {
+    #[cfg(test)]
+    SAID.with(|all| all.borrow_mut().push(said.to_owned()));
     if window.root::<Root>().flatten().is_none() {
         tracing::warn!("toast: this window has no Root to show a message on, so it is only logged: {said}");
         return;
     }
     window.push_notification(notification, cx);
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every message put up on this thread: the kit's notification layer
+    /// exposes no text to the test harness.
+    static SAID: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Every message put up on this thread so far.
+#[cfg(test)]
+pub(crate) fn said_for_test() -> Vec<String> {
+    SAID.with(|all| all.borrow().clone())
 }

@@ -2582,6 +2582,49 @@ fn a_long_crash_report_scrolls_inside_the_dialog(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A battle landing in the replays directory says so. It says the battle was
+/// opened only when a tab did open, and names it as the replay tab would when
+/// the listing holds it.
+#[gpui_kit::test]
+fn a_landed_battle_is_announced_whether_or_not_it_is_opened(cx: &mut TestAppContext) {
+    use crate::replay_inspector::browser_view::ReplayBrowserEvent;
+
+    let (window, app) = open_app_in_root(cx);
+    let inspector = cx.update(|cx| app.read(cx).replay_inspector().clone());
+    let browser = cx.update(|cx| inspector.read(cx).browser_for_test().clone());
+    let listed = PathBuf::from("/replays/listed.wowsreplay");
+    browser.update(cx, |browser, cx| browser.seed_listing_for_test(listed.clone(), cx));
+    // No ship is known without game data, and the map is the raw space name.
+    let listed_battle = "Spectator - spaces/00_CO_ocean";
+
+    let announce = |path: PathBuf, cx: &mut TestAppContext| -> Vec<String> {
+        let before = crate::toast::said_for_test().len();
+        browser.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::ReplayAppeared(path)));
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+        crate::toast::said_for_test().split_off(before)
+    };
+
+    // Autoload is on, but with no game data nothing can be opened, and a file
+    // the listing does not hold is named by its file name.
+    inspector.update(cx, |view, cx| view.adopt_autoload(true, cx));
+    let said = announce(PathBuf::from("/replays/unlisted.wowsreplay"), cx);
+    assert_eq!(said.first(), Some(&rust_i18n::t!("ui.replay.new_battle_listed", battle = "unlisted").into_owned()));
+
+    // Autoload off: listed, under the listing's name for it.
+    inspector.update(cx, |view, cx| view.adopt_autoload(false, cx));
+    let said = announce(listed.clone(), cx);
+    assert_eq!(said.first(), Some(&rust_i18n::t!("ui.replay.new_battle_listed", battle = listed_battle).into_owned()));
+
+    // With game data to read it, autoload opens it.
+    inspector.update(cx, |view, cx| {
+        view.seed_game_data("G:/does-not-exist");
+        view.adopt_autoload(true, cx);
+    });
+    let said = announce(listed, cx);
+    assert_eq!(said.first(), Some(&rust_i18n::t!("ui.replay.opened_new_battle", battle = listed_battle).into_owned()));
+}
+
 /// A state the reader has to fix stays on screen, and one per state: the egui
 /// app makes these permanent and closable, and arms each once, so an app that
 /// retries does not stack a column of the same complaint.
