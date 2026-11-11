@@ -204,7 +204,15 @@ pub fn start_peer_session(
     }
     let state_clone = Arc::clone(&state);
 
-    runtime.spawn(peer_task(mode, event_tx, command_rx, frame_broadcast_rx, local_rx, state_clone));
+    let task = runtime.spawn(peer_task(
+        mode,
+        event_tx.clone(),
+        command_rx,
+        frame_broadcast_rx,
+        local_rx,
+        Arc::clone(&state_clone),
+    ));
+    runtime.spawn(report_panic(task, event_tx, state_clone));
 
     PeerSessionHandle { event_inbox, command_tx, frame_tx, local_tx, state }
 }
@@ -2387,6 +2395,29 @@ fn set_status(state: &Arc<Mutex<SessionState>>, status: SessionStatus) {
     state.lock().status = status;
 }
 
+/// Ends the session with an error when the peer task panics, which would
+/// otherwise end it without the event that tells the front end, leaving it
+/// showing a session that is no longer there.
+async fn report_panic(
+    task: tokio::task::JoinHandle<()>,
+    event_tx: crate::EventSender,
+    ui_state: Arc<Mutex<SessionState>>,
+) {
+    let Err(err) = task.await else { return };
+    // Cancelled only as the runtime shuts down, which ends the front end too.
+    let Ok(payload) = err.try_into_panic() else { return };
+
+    let message = match (payload.downcast_ref::<&str>(), payload.downcast_ref::<String>()) {
+        (Some(message), _) => (*message).to_owned(),
+        (None, Some(message)) => message.clone(),
+        (None, None) => "a panic with no message".to_owned(),
+    };
+    error!("collab session task panicked: {message}");
+    let reason = format!("internal error: {message}");
+    event_tx.send(SessionEvent::Error(reason.clone()));
+    set_status(&ui_state, SessionStatus::Error(reason));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3202,5 +3233,24 @@ mod tests {
         let m = h.mesh.lock();
         assert!(m.permissions.annotations_locked);
         assert!(m.permissions.settings_locked);
+    }
+
+    /// A peer task that panics ends the session with an error, as one that
+    /// fails does, rather than leaving it shown as running.
+    #[test]
+    fn a_panicked_peer_task_ends_the_session_with_an_error() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().expect("a tokio runtime");
+        let ui_state = Arc::new(Mutex::new(SessionState::default()));
+        ui_state.lock().status = SessionStatus::Active;
+        let inbox = crate::EventInbox::new(None);
+
+        runtime.block_on(async {
+            let task = tokio::spawn(async { panic!("the mesh state was inconsistent") });
+            report_panic(task, inbox.sender(), Arc::clone(&ui_state)).await;
+        });
+
+        let reason = "internal error: the mesh state was inconsistent".to_owned();
+        assert!(matches!(&inbox.drain()[..], [SessionEvent::Error(said)] if *said == reason));
+        assert_eq!(ui_state.lock().status, SessionStatus::Error(reason));
     }
 }
