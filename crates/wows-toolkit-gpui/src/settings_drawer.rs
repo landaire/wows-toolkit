@@ -1435,8 +1435,9 @@ fn settings_heading(section: SettingsSection, first: bool) -> AnyElement {
         .items_center()
         .pb_2()
         .when(!first, |heading| heading.pt_5())
+        .text_xs()
         .child(crate::icons::icon(section.glyph()).text_color(crate::theme::icon_accent()))
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(section.name()))
+        .child(crate::ui::section_label(section.name()))
         .into_any_element()
 }
 

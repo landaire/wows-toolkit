@@ -128,6 +128,13 @@ pub fn rule_h(cx: &App) -> impl IntoElement {
     div().flex_none().h(px(1.)).w_full().my_1().bg(cx.theme().border)
 }
 
+/// The title over a group of rows: small, semibold and muted, so it names the
+/// group without competing with the rows. The text is drawn as translated;
+/// Inter has no small capitals and GPUI no letter spacing.
+pub fn section_label(text: impl Into<SharedString>) -> Div {
+    div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(crate::theme::text_dim()).child(text.into())
+}
+
 /// The card level: one surface step above the panel, edged by a 1px rule.
 pub fn card_surface<E: Styled>(element: E, cx: &App) -> E {
     let element =
