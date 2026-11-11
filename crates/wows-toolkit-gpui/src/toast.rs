@@ -8,6 +8,7 @@
 
 use std::rc::Rc;
 
+use gpui_kit::ElementId;
 use gpui_kit::SharedString;
 use gpui_kit::Window;
 use gpui_kit::component::Root;
@@ -63,13 +64,25 @@ pub fn warn_with_action(message: impl Into<SharedString>, action: Action, window
     push(with_action(Notification::warning(message.clone()), action, true), &message, window, cx);
 }
 
-/// How a [`replacing`] message reads.
+/// How a [`replacing`] or [`about`] message reads.
 #[derive(Clone, Copy)]
 pub enum Level {
     /// As [`ok`].
     Ok,
     /// As [`info`].
     Info,
+    /// As [`warn`].
+    Warning,
+}
+
+impl Level {
+    fn notification(self, message: SharedString) -> Notification {
+        match self {
+            Self::Ok => Notification::success(message),
+            Self::Info => Notification::info(message),
+            Self::Warning => Notification::warning(message),
+        }
+    }
 }
 
 /// A message that slides away like any other, but that the next one under
@@ -83,12 +96,60 @@ pub fn replacing(
     cx: &mut gpui_kit::App,
 ) {
     let message = message.into();
-    let notification = match level {
-        Level::Ok => Notification::success(message.clone()),
-        Level::Info => Notification::info(message.clone()),
-    };
-    push(notification.id1::<Replacing>(key), &message, window, cx);
+    push(level.notification(message.clone()).id1::<Replacing>(key), &message, window, cx);
 }
+
+/// How long an [`about`] message stays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stay {
+    Briefly,
+    UntilDismissed,
+}
+
+/// A message about one thing, which the next message about the same `key`
+/// replaces and [`withdraw`] takes down.
+///
+/// For a state that may change again while the reader is still reading about
+/// it, such as a worker that stopped and has since been started again. A
+/// button on it takes the message down when pressed.
+pub fn about(
+    key: impl Into<ElementId>,
+    level: Level,
+    message: impl Into<SharedString>,
+    action: Option<Action>,
+    stay: Stay,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) {
+    let message = message.into();
+    let notification = level.notification(message.clone()).id1::<About>(key).autohide(stay == Stay::Briefly);
+    let notification = match action {
+        Some(action) => with_action(notification, action, true),
+        None => notification,
+    };
+    push(notification, &message, window, cx);
+}
+
+/// Takes down the [`about`] message under `key`, if one is up.
+pub fn withdraw(key: impl Into<ElementId>, window: &mut Window, cx: &mut gpui_kit::App) {
+    if window.root::<Root>().flatten().is_none() {
+        return;
+    }
+    window.remove_notification1::<About>(key, cx);
+}
+
+/// As [`withdraw`], for an owner that has no window to hand: every window is
+/// asked once the current update is done, and only one holds `key`.
+pub fn withdraw_everywhere(key: ElementId, cx: &mut gpui_kit::App) {
+    cx.defer(move |cx| {
+        for window in cx.windows() {
+            let _ = window.update(cx, |_root, window, cx| withdraw(key.clone(), window, cx));
+        }
+    });
+}
+
+/// The identity of an [`about`] message.
+struct About;
 
 /// The identity of a [`replacing`] message.
 struct Replacing;

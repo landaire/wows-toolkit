@@ -111,6 +111,7 @@ download_objects_to_fetch = "チェックしたビルドで取得するオブジ
 download_plan_failed = "取得が必要なものを判別できませんでした"
 download_plan_no_cache_dir = "ゲームデータのキャッシュディレクトリが設定されていません。設定で選択してから再試行してください。"
 refresh_persisted_data_message = "リプレイディレクトリ内の全リプレイを再解析し、保存データを書き直します。ゲームビルドと一致しないリプレイデータマッピングで記録されたエントリはそのまま残りますが、Personal Rating とゲームモードは全リプレイについて現在の期待値から再計算されます。時間がかかる場合があります。"
+file_dialog_failed = "ファイルダイアログを開けませんでした: %{reason}"
 
 # -- ラベル --
 
@@ -1911,3 +1912,13 @@ indexing = "%{dir} をインデックス化中"
 indexing_in_background = "このディレクトリはまだインデックス化中です"
 search_while_indexing = "このディレクトリはまだインデックス化中のため、結果はまだ完全ではありません。完了後にもう一度検索してください。"
 source_failed = "このディレクトリのリプレイをインデックス化できません: %{error}"
+restart_watch = "監視を再開"
+watch_stopped = "%{folder} の監視が停止しました: %{cause}。"
+watch_restarting = "%{seconds} 秒後に再開します (試行 %{attempt}/%{attempts})。"
+watch_gave_up = "再開に %{attempts} 回失敗したため、これ以上試行しません。"
+watch_restart_hint = "赤い点をクリックするか、タブのメニューから「監視を再開」を選ぶと、今すぐ再開できます。"
+watch_resumed = "%{folder} の監視を再開しました。"
+watch_cause_backend = "ファイルシステムがエラーを報告しました: %{error}"
+watch_cause_gone = "フォルダーが移動または削除されました"
+watch_cause_panicked = "内部エラー: %{error}"
+watch_cause_exited = "監視が予期せず終了しました"

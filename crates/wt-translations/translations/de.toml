@@ -111,6 +111,7 @@ download_objects_to_fetch = "Herunterzuladende Objekte für die markierten Build
 download_plan_failed = "Konnte nicht ermitteln, was heruntergeladen werden muss"
 download_plan_no_cache_dir = "Es ist kein Cache-Verzeichnis für Spieldaten festgelegt. Wählen Sie eines in den Einstellungen und versuchen Sie es erneut."
 refresh_persisted_data_message = "Jedes Replay in Ihrem Replay-Verzeichnis erneut auswerten und seine gespeicherten Daten neu schreiben. Einträge, die mit einer Replay-Datenzuordnung erfasst wurden, die nicht zu ihrem Spiel-Build passt, bleiben unverändert, mit der Ausnahme, dass persönliche Bewertung und Spielmodus für jedes Replay anhand der heutigen Erwartungswerte neu berechnet werden. Dies kann eine Weile dauern."
+file_dialog_failed = "Der Dateidialog konnte nicht geöffnet werden: %{reason}"
 
 # -- Beschriftungen --
 
@@ -1911,3 +1912,13 @@ indexing = "%{dir} wird indexiert"
 indexing_in_background = "Dieses Verzeichnis wird noch indexiert"
 search_while_indexing = "Dieses Verzeichnis wird noch indexiert, daher sind die Ergebnisse noch nicht vollständig. Suchen Sie erneut, sobald der Vorgang abgeschlossen ist."
 source_failed = "Die Replays dieses Verzeichnisses können nicht indexiert werden: %{error}"
+restart_watch = "Überwachung neu starten"
+watch_stopped = "Die Überwachung von %{folder} wurde beendet: %{cause}."
+watch_restarting = "Neustart in %{seconds} s (Versuch %{attempt} von %{attempts})."
+watch_gave_up = "Der Neustart ist %{attempts}-mal fehlgeschlagen und wird nicht erneut versucht."
+watch_restart_hint = "Klicke auf den roten Punkt oder wähle im Tab-Menü „Überwachung neu starten“, um sie jetzt neu zu starten."
+watch_resumed = "Die Überwachung von %{folder} läuft wieder."
+watch_cause_backend = "das Dateisystem hat einen Fehler gemeldet: %{error}"
+watch_cause_gone = "das Verzeichnis wurde verschoben oder entfernt"
+watch_cause_panicked = "interner Fehler: %{error}"
+watch_cause_exited = "die Überwachung wurde unerwartet beendet"

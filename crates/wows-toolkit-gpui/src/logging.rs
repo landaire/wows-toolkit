@@ -119,12 +119,16 @@ pub fn panic_log_path() -> PathBuf {
 ///
 /// Only the main thread: a background task that panics is caught where it is
 /// spawned (the replay parse does this) and does not end the session, so
-/// reporting it as a crash on the next launch would be wrong.
+/// reporting it as a crash on the next launch would be wrong. A panic on
+/// another thread is logged instead, since the default hook writes only to
+/// stderr, and noted for whatever supervises that thread.
 pub fn install_panic_hook() {
     let main_thread = std::thread::current().id();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        crate::supervision::record_panic(info);
         if std::thread::current().id() != main_thread {
+            tracing::error!(thread = ?std::thread::current().name(), "background thread panicked: {info}");
             default_hook(info);
             return;
         }

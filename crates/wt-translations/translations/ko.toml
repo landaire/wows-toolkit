@@ -111,6 +111,7 @@ download_objects_to_fetch = "선택한 빌드에서 가져올 오브젝트: %{co
 download_plan_failed = "가져와야 할 항목을 확인하지 못했습니다"
 download_plan_no_cache_dir = "게임 데이터 캐시 디렉토리가 설정되지 않았습니다. 설정에서 지정한 후 다시 시도하세요."
 refresh_persisted_data_message = "리플레이 디렉토리의 모든 리플레이를 다시 분석하고 저장된 데이터를 다시 씁니다. 게임 빌드와 일치하지 않는 리플레이 데이터 매핑으로 기록된 항목은 그대로 두지만, 개인 평점과 게임 모드는 모든 리플레이에 대해 현재 기댓값으로 다시 계산합니다. 시간이 걸릴 수 있습니다."
+file_dialog_failed = "파일 대화 상자를 열 수 없습니다: %{reason}"
 
 # -- 레이블 --
 
@@ -1911,3 +1912,13 @@ indexing = "%{dir} 색인 중"
 indexing_in_background = "이 디렉토리는 아직 색인 중입니다"
 search_while_indexing = "이 디렉토리는 아직 색인 중이므로 결과가 아직 완전하지 않습니다. 완료되면 다시 검색하세요."
 source_failed = "이 디렉토리의 리플레이를 색인할 수 없습니다: %{error}"
+restart_watch = "감시 다시 시작"
+watch_stopped = "%{folder} 감시가 중지되었습니다: %{cause}."
+watch_restarting = "%{seconds}초 후 다시 시작합니다(시도 %{attempt}/%{attempts})."
+watch_gave_up = "다시 시작에 %{attempts}번 실패하여 더 이상 시도하지 않습니다."
+watch_restart_hint = "빨간 점을 클릭하거나 탭 메뉴에서 감시 다시 시작을 선택하면 지금 다시 시작합니다."
+watch_resumed = "%{folder} 감시를 다시 시작했습니다."
+watch_cause_backend = "파일 시스템이 오류를 보고했습니다: %{error}"
+watch_cause_gone = "폴더가 이동되었거나 삭제되었습니다"
+watch_cause_panicked = "내부 오류: %{error}"
+watch_cause_exited = "감시가 예기치 않게 종료되었습니다"

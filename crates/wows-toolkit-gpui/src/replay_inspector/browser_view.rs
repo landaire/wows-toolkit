@@ -24,10 +24,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use futures::StreamExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -79,6 +82,9 @@ use crate::force_reindex::Confirm;
 use crate::force_reindex::ReindexCandidate;
 use crate::preview_hover::PreviewHover;
 use crate::replay_index::SourceScope;
+use crate::supervision::NextStep;
+use crate::supervision::PanicReport;
+use crate::supervision::RestartPolicy;
 
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
@@ -302,10 +308,17 @@ pub enum ReplayBrowserEvent {
     /// A replay the listing held is gone from the watched directory, and the
     /// listing no longer holds it.
     ReplayRemoved(PathBuf),
-    /// The replays directory cannot be watched, so a finished match will not
-    /// appear on its own. Said out loud, because the reader would otherwise wait
-    /// for a listing that never grows.
-    WatchFailed(WatchFailure),
+    /// The directory watch stopped, so a finished match will not appear on
+    /// its own until it is running again. `next` says whether it is restarted.
+    WatchStopped {
+        cause: WatchStopCause,
+        next: NextStep,
+    },
+    /// A stopped watch is running again.
+    WatchResumed,
+    /// A stopped watch was ended on purpose, so what was said of it no longer
+    /// applies.
+    WatchWithdrawn,
     /// Record these battles in the Stats tab's session. `replace` forgets
     /// what is already recorded first, which is what "Set as" means.
     SessionStats {
@@ -386,6 +399,11 @@ pub struct ReplayBrowser {
     /// The watch on the replays directory. Held because dropping it stops the
     /// watch; replaced whenever the directory changes.
     watcher: Option<DirWatch>,
+    /// Whether the watch is running, and why not when it has stopped.
+    watch_state: WatchState,
+    watch_restarts: RestartPolicy,
+    /// The automatic restart of a stopped watch, while it waits.
+    _watch_restart: Option<Task<()>>,
     /// Bumped per scan, so a slower earlier scan (and the watch task it
     /// started) cannot write over a later one's listing.
     scan_generation: u64,
@@ -542,6 +560,9 @@ impl ReplayBrowser {
             preview_anchor: Point::default(),
             watch: ListingWatch::Watched,
             watcher: None,
+            watch_state: WatchState::Starting,
+            watch_restarts: RestartPolicy::new(),
+            _watch_restart: None,
             scan_generation: 0,
             watch_generation: 0,
             summaries_generation: 0,
@@ -732,7 +753,7 @@ impl ReplayBrowser {
                 }
             };
 
-            let (files, ()) = futures::future::join(scan, listen).await;
+            let (ScannedDir { files, walked }, ()) = futures::future::join(scan, listen).await;
             let _ = this.update(cx, |this, cx| {
                 if this.scan_generation != generation {
                     return;
@@ -743,7 +764,7 @@ impl ReplayBrowser {
                 crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
                 crate::heap_profile::mark("scan.tree");
-                this.watch_replays_dir(directory, generation, cx);
+                this.watch_replays_dir(directory, generation, walked, cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
                 cx.notify();
@@ -833,7 +854,7 @@ impl ReplayBrowser {
 
         self.watch = watch;
         match watch {
-            ListingWatch::Unwatched => self.stop_watching(),
+            ListingWatch::Unwatched => self.end_watch(cx),
             // The scan in flight starts the watch when it finishes.
             ListingWatch::Watched if matches!(self.status, ScanStatus::Loading) => {}
             ListingWatch::Watched => self.relist(cx),
@@ -845,6 +866,65 @@ impl ReplayBrowser {
     fn stop_watching(&mut self) {
         self.watcher = None;
         self.watch_generation = self.watch_generation.wrapping_add(1);
+    }
+
+    /// Ends the watch on purpose, with any restart of it that was waiting.
+    fn end_watch(&mut self, cx: &mut Context<Self>) {
+        self.stop_watching();
+        self._watch_restart = None;
+        self.watch_restarts.reset();
+        self.watch_state = WatchState::Starting;
+        cx.emit(ReplayBrowserEvent::WatchWithdrawn);
+    }
+
+    /// Whether the watch is running, and why not when it has stopped.
+    pub(crate) fn watch_state(&self) -> &WatchState {
+        &self.watch_state
+    }
+
+    /// Starts a stopped watch at the reader's request, with the full set of
+    /// automatic restarts behind it again.
+    pub(crate) fn restart_watch(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.watch_state, WatchState::Stopped { .. }) {
+            return;
+        }
+
+        self.watch_restarts.reset();
+        self._watch_restart = None;
+        self.relist(cx);
+    }
+
+    fn watch_started(&mut self, cx: &mut Context<Self>) {
+        self.watch_restarts.started(cx.background_executor().now());
+        self._watch_restart = None;
+        let was_stopped = matches!(self.watch_state, WatchState::Stopped { .. });
+        self.watch_state = WatchState::Running;
+        if was_stopped {
+            tracing::info!(dir = ?self.replays_dir(), "replay browser: the directory watch is running again");
+            cx.emit(ReplayBrowserEvent::WatchResumed);
+        }
+        cx.notify();
+    }
+
+    /// Records the watch as stopped and restarts it when the policy says.
+    ///
+    /// A restart reads the directory again, which lists whatever landed while
+    /// the watch was down, and starts the watch once it has.
+    fn watch_stopped(&mut self, cause: WatchStopCause, cx: &mut Context<Self>) {
+        self.stop_watching();
+        let next = self.watch_restarts.stopped(cx.background_executor().now());
+        tracing::error!(dir = ?self.replays_dir(), %cause, ?next, "replay browser: the directory watch stopped");
+
+        self._watch_restart = match next {
+            NextStep::Retry { delay, .. } => Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                let _ = this.update(cx, |this, cx| this.relist(cx));
+            })),
+            NextStep::GaveUp => None,
+        };
+        self.watch_state = WatchState::Stopped { cause: cause.clone(), next };
+        cx.emit(ReplayBrowserEvent::WatchStopped { cause, next });
+        cx.notify();
     }
 
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
@@ -863,7 +943,7 @@ impl ReplayBrowser {
             // and there is no new one; dropping it is what stops a match
             // finishing there from refilling a listing that says there is no
             // directory set.
-            self.stop_watching();
+            self.end_watch(cx);
             self.status = ScanStatus::Failed(ScanError::WowsDirMissing);
             cx.notify();
             return;
@@ -903,7 +983,7 @@ impl ReplayBrowser {
                 }
             };
 
-            let (files, ()) = futures::future::join(scan, listen).await;
+            let (ScannedDir { files, walked }, ()) = futures::future::join(scan, listen).await;
             let _ = this.update(cx, |this, cx| {
                 if this.scan_generation != generation {
                     return;
@@ -915,7 +995,7 @@ impl ReplayBrowser {
                 crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
                 crate::heap_profile::mark("scan.tree");
-                this.watch_replays_dir(replays_dir, generation, cx);
+                this.watch_replays_dir(replays_dir, generation, walked, cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
                 cx.notify();
@@ -988,7 +1068,13 @@ impl ReplayBrowser {
     /// joins the listing without a rescan, which is what makes "Autoload
     /// Latest Replay" mean anything (the egui app's own watcher,
     /// `tab_state.rs`).
-    fn watch_replays_dir(&mut self, replays_dir: PathBuf, generation: u64, cx: &mut Context<Self>) {
+    fn watch_replays_dir(
+        &mut self,
+        replays_dir: PathBuf,
+        generation: u64,
+        walked: HashSet<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
         // Dropped before the new one is installed, so the old directory stops
         // reporting rather than both being watched.
         self.stop_watching();
@@ -997,17 +1083,48 @@ impl ReplayBrowser {
         }
         let watch_generation = self.watch_generation;
 
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<DirChange>();
-        match start_watch(&replays_dir, tx) {
-            Ok(watcher) => self.watcher = Some(watcher),
-            Err(failure) => {
-                cx.emit(ReplayBrowserEvent::WatchFailed(failure));
+        let (messages, mut received) = futures::channel::mpsc::unbounded::<WatchMessage>();
+        let unwatched = messages.clone();
+        match start_watch(&replays_dir, WatchSink::new(replays_dir.clone(), messages)) {
+            Ok(watcher) => {
+                self.watcher = Some(watcher);
+                self.watch_started(cx);
+            }
+            Err(cause) => {
+                self.watch_stopped(cause, cx);
                 return;
             }
         }
+        self.read_unwatched_arrivals(replays_dir, walked, unwatched, cx);
 
         cx.spawn(async move |this, cx| {
-            while let Some(change) = futures::StreamExt::next(&mut rx).await {
+            let cause = loop {
+                // The sink goes with the watcher's thread, so the messages
+                // ending without a stop is a thread that ended.
+                let Some(message) = received.next().await else { break WatchStopCause::Exited };
+                let change = match message {
+                    WatchMessage::Change(change) => change,
+                    WatchMessage::Stopped(cause) => break cause,
+                    // Already listed when the watch reported it first.
+                    WatchMessage::Missed(path) => match this.read_with(cx, |this, _cx| this.holds(&path)) {
+                        Ok(true) => continue,
+                        Ok(false) => DirChange::Appeared(path),
+                        Err(_) => return,
+                    },
+                    WatchMessage::Rescan => {
+                        let relisted = this.update(cx, |this, cx| {
+                            if this.is_current_watch(generation, watch_generation) {
+                                tracing::warn!(dir = ?this.replays_dir(), "replay browser: the watcher lost events");
+                                this.relist(cx);
+                            }
+                        });
+                        if relisted.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                };
+
                 // A removal is the one change with nothing to read: the file is
                 // gone, which is what the listing is being told.
                 if let DirChange::Removed(path) = &change {
@@ -1020,7 +1137,7 @@ impl ReplayBrowser {
                         cx.emit(ReplayBrowserEvent::ReplayRemoved(path.clone()));
                     });
                     if updated.is_err() {
-                        break;
+                        return;
                     }
                     continue;
                 }
@@ -1057,7 +1174,41 @@ impl ReplayBrowser {
                     true
                 });
                 if updated.is_err() {
-                    break;
+                    return;
+                }
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                // A watch ended on purpose ends its messages too.
+                if this.is_current_watch(generation, watch_generation) {
+                    this.watch_stopped(cause, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Reports the replays the scan did not walk, which reached the
+    /// directory before the watch started and after the scan read it, so
+    /// neither saw them.
+    ///
+    /// Sent on the watch's own messages, so they are read in turn with what
+    /// the watch reports; the sender is dropped once they are sent.
+    fn read_unwatched_arrivals(
+        &self,
+        dir: PathBuf,
+        walked: HashSet<PathBuf>,
+        messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.background_spawn(async move {
+            // A directory that cannot be read cannot be watched either, which
+            // the watch reports.
+            let Ok(entries) = std::fs::read_dir(&dir) else { return };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if is_finished_replay(&path) && !walked.contains(&path) {
+                    let _ = messages.unbounded_send(WatchMessage::Missed(path));
                 }
             }
         })
@@ -1588,11 +1739,11 @@ fn render_browser_item(
         .items_center()
         .child(result_edge(leaf.map(|leaf| leaf.outcome)))
         .child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
+    // A replay row has no chevron and keeps no slot for one: the guides
+    // already say which group it sits in, and the slot doubled its indent.
     if is_folder {
         let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
         row = row.child(crate::motion::chevron(turn));
-    } else {
-        row = row.child(div().w(INDENT));
     }
     if let Some(leaf) = leaf {
         row = row.child(map_thumbnail(thumbnails.get(leaf.map_name.as_str()), row_height, cx));
@@ -2004,9 +2155,7 @@ impl Render for ReplayBrowser {
                     .h(px(PREVIEW_SIZE))
                     .child(crate::frame_texture::frame_view(texture, None).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
                     .when(waiting, |this| {
-                        this.child(
-                            h_flex().absolute().inset_0().items_center().justify_center().child(map_spinner()),
-                        )
+                        this.child(h_flex().absolute().inset_0().items_center().justify_center().child(map_spinner()))
                     })
                     .into_any_element(),
             ),
@@ -2132,6 +2281,15 @@ pub(super) fn last_server_version(data: &str) -> Option<String> {
     Some(version_str.trim().to_string())
 }
 
+/// What a scan read of a directory.
+struct ScannedDir {
+    files: Vec<RawReplay>,
+    /// The replay files the scan settled: those it read, and those it could
+    /// not read that were last written before it began. The watch started
+    /// after it reports the rest, which arrived or were still being written.
+    walked: HashSet<PathBuf>,
+}
+
 /// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
 /// reads each one's header-only metadata. Ports
 /// `task/replays.rs::replay_filepaths`'s filter (minus the creation-time
@@ -2142,9 +2300,10 @@ pub(super) fn last_server_version(data: &str) -> Option<String> {
 fn scan_replay_files(
     replays_dir: &Path,
     reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
-) -> Vec<RawReplay> {
+) -> ScannedDir {
+    let began = std::time::SystemTime::now();
     let Ok(entries) = std::fs::read_dir(replays_dir) else {
-        return Vec::new();
+        return ScannedDir { files: Vec::new(), walked: HashSet::new() };
     };
 
     // The walk is separated from the meta reads so the listing can say how
@@ -2165,24 +2324,36 @@ fn scan_replay_files(
         candidates.push(path);
     }
     let total = candidates.len();
+    let mut walked = HashSet::with_capacity(total);
     let _ = reports.unbounded_send(ScanProgress { done: 0, total });
 
     let mut out = Vec::with_capacity(total);
     for (read, path) in candidates.into_iter().enumerate() {
         match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => out.push(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
-                listed: ListedReplay::from_meta(&meta),
-                path,
-            }),
-            Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
+            Ok(meta) => {
+                walked.insert(path.clone());
+                out.push(RawReplay {
+                    version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
+                    listed: ListedReplay::from_meta(&meta),
+                    path,
+                });
+            }
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta");
+                // A time that cannot be read leaves the file to be read again.
+                let written = std::fs::metadata(&path).and_then(|metadata| metadata.modified());
+                if written.is_ok_and(|written| written < began) {
+                    walked.insert(path);
+                }
+            }
         }
         let done = read + 1;
         if done % SCAN_REPORT_EVERY == 0 || done == total {
             let _ = reports.unbounded_send(ScanProgress { done, total });
         }
     }
-    out
+
+    ScannedDir { files: out, walked }
 }
 
 /// What the listing says while it waits for the game data.
@@ -2233,31 +2404,50 @@ fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuil
     counted.into_values().filter(|missing| !cache.can_read_build(missing.build, missing.version.as_deref())).collect()
 }
 
-/// The build the most listed replays were recorded on.
-///
-/// The most common one rather than the newest: a directory holding one
-/// replay from a build nobody plays any more should not have the session
-/// spend a second loading it.
-/// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
-/// match in progress: it has no container or metadata until the battle ends,
-/// and the game renames it into place then.
-/// Why the replays directory is not being watched.
-///
-/// The two are separate messages in the catalogue, and separate causes: no
-/// watcher at all is a platform or resource failure, while an unwatchable
-/// directory is usually a network share or one that has since gone.
+/// Whether a listing's directory watch is running.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WatchFailure {
-    NoWatcher(String),
-    NotWatchable(String),
+pub(crate) enum WatchState {
+    /// Not started: the listing starts it when its scan finishes.
+    Starting,
+    Running,
+    /// Stopped; `next` says whether a restart is waiting.
+    Stopped {
+        cause: WatchStopCause,
+        next: NextStep,
+    },
 }
 
-impl WatchFailure {
-    /// The message the reader is shown, in the words the egui app uses.
+/// Why a directory watch stopped, or never started.
+///
+/// No watcher at all is a platform or resource failure, while an unwatchable
+/// directory is usually a network share or one that has since gone.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum WatchStopCause {
+    #[error("no filesystem watcher could be created: {error}")]
+    NoWatcher { error: String },
+    #[error("the directory could not be watched: {error}")]
+    NotWatchable { error: String },
+    #[error("the watcher reported an error: {error}")]
+    Backend { error: String },
+    #[error("the watched directory was moved or removed")]
+    DirectoryGone,
+    #[error("the watcher panicked: {report}")]
+    Panicked { report: PanicReport },
+    #[error("the watcher's thread ended")]
+    Exited,
+}
+
+impl WatchStopCause {
+    /// What the reader is shown. The two start failures read as the egui app
+    /// words them.
     pub fn said(&self) -> String {
         match self {
-            Self::NoWatcher(error) => t!("error.file_watcher_creation", error = error).into_owned(),
-            Self::NotWatchable(error) => t!("error.replay_dir_watch", error = error).into_owned(),
+            Self::NoWatcher { error } => t!("error.file_watcher_creation", error = error).into_owned(),
+            Self::NotWatchable { error } => t!("error.replay_dir_watch", error = error).into_owned(),
+            Self::Backend { error } => t!("ui.replay_folders.watch_cause_backend", error = error).into_owned(),
+            Self::DirectoryGone => t!("ui.replay_folders.watch_cause_gone").into_owned(),
+            Self::Panicked { report } => t!("ui.replay_folders.watch_cause_panicked", error = report).into_owned(),
+            Self::Exited => t!("ui.replay_folders.watch_cause_exited").into_owned(),
         }
     }
 }
@@ -2282,46 +2472,70 @@ impl DirChange {
     }
 }
 
-/// Holds a directory's watch open; dropping it ends the watch.
-enum DirWatch {
-    Filesystem {
-        _watcher: notify::RecommendedWatcher,
-    },
-    #[cfg(test)]
-    Simulated {
-        _registration: super::simulated_watch::Registration,
-    },
+/// What a directory watch sends its listing.
+pub(crate) enum WatchMessage {
+    Change(DirChange),
+    /// The watcher dropped events, so the directory is read again.
+    Rescan,
+    /// A replay the scan did not walk, found once the watch had started.
+    Missed(PathBuf),
+    Stopped(WatchStopCause),
 }
 
-fn is_finished_replay(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
-        && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+/// The end of a directory watch that runs on the watcher's own thread.
+///
+/// Says when the watch stops: on an error from the watcher, on its directory
+/// being removed, and on a panic, whether in this code or in the watcher's,
+/// which drops this as it unwinds the thread.
+pub(crate) struct WatchSink {
+    dir: PathBuf,
+    messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
+    stopped: bool,
+    /// Cleared when this is dropped, which the watcher's thread does as it
+    /// ends.
+    thread_alive: Arc<AtomicBool>,
 }
 
-/// Starts watching `dir`, sending what changes in it to `changes`.
-fn start_watch(
-    dir: &Path,
-    changes: futures::channel::mpsc::UnboundedSender<DirChange>,
-) -> Result<DirWatch, WatchFailure> {
-    // The test scheduler refuses wakeups from notify's own thread, so a test
-    // reports changes itself.
-    #[cfg(test)]
-    if let Some(registration) = super::simulated_watch::register(dir, &changes) {
-        return Ok(DirWatch::Simulated { _registration: registration });
+impl WatchSink {
+    fn new(dir: PathBuf, messages: futures::channel::mpsc::UnboundedSender<WatchMessage>) -> Self {
+        Self { dir, messages, stopped: false, thread_alive: Arc::new(AtomicBool::new(true)) }
     }
 
-    filesystem_watch(dir, changes).map(|watcher| DirWatch::Filesystem { _watcher: watcher })
-}
+    pub(crate) fn handle(&mut self, event: notify::Result<notify::Event>) {
+        if self.stopped {
+            return;
+        }
 
-/// Watches `dir` on notify's own thread.
-fn filesystem_watch(
-    dir: &Path,
-    changes: futures::channel::mpsc::UnboundedSender<DirChange>,
-) -> Result<notify::RecommendedWatcher, WatchFailure> {
-    use notify::Watcher as _;
+        let forwarded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.forward(event)));
+        let cause = match forwarded {
+            Ok(None) => return,
+            Ok(Some(cause)) => cause,
+            Err(payload) => WatchStopCause::Panicked { report: PanicReport::caught(payload.as_ref()) },
+        };
+        self.stop(cause);
+    }
 
-    let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        let Ok(event) = event else { return };
+    /// Passes on what happened to a finished replay, or says why the watch
+    /// has stopped.
+    fn forward(&self, event: notify::Result<notify::Event>) -> Option<WatchStopCause> {
+        let event = match event {
+            Ok(event) => event,
+            Err(err) => return Some(WatchStopCause::Backend { error: err.to_string() }),
+        };
+        // The watch goes with its directory. A move reads as a rename of the
+        // directory itself, after which inotify follows it to its new path.
+        let gone = matches!(
+            event.kind,
+            notify::EventKind::Remove(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+        );
+        if gone && event.paths.contains(&self.dir) {
+            return Some(WatchStopCause::DirectoryGone);
+        }
+        if event.need_rescan() {
+            let _ = self.messages.unbounded_send(WatchMessage::Rescan);
+            return None;
+        }
+
         let make = match event.kind {
             notify::EventKind::Create(_)
             | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
@@ -2335,30 +2549,101 @@ fn filesystem_watch(
                 DirChange::Changed
             }
             notify::EventKind::Remove(_) => DirChange::Removed,
-            _ => return,
+            _ => return None,
         };
         for path in event.paths {
             if is_finished_replay(&path) {
-                // The receiver is gone once the directory changes or the
-                // app closes; this runs on notify's own thread, so a send
-                // that fails is dropped rather than unwinding it.
-                let _ = changes.unbounded_send(make(path));
+                self.change(make(path));
             }
         }
-    });
-    let mut watcher = match watcher {
-        Ok(watcher) => watcher,
-        Err(err) => {
-            tracing::warn!(error = ?err, "replay browser: no filesystem watcher available");
-            return Err(WatchFailure::NoWatcher(err.to_string()));
-        }
-    };
-    if let Err(err) = watcher.watch(dir, notify::RecursiveMode::NonRecursive) {
-        tracing::warn!(dir = %dir.display(), error = ?err, "replay browser: the replays directory is not watchable");
-        return Err(WatchFailure::NotWatchable(err.to_string()));
+
+        None
     }
 
-    Ok(watcher)
+    /// Sends `change` to the listing, saying whether it is still there to
+    /// read it. It is gone once the directory changes or the app closes.
+    pub(crate) fn change(&self, change: DirChange) -> bool {
+        self.messages.unbounded_send(WatchMessage::Change(change)).is_ok()
+    }
+
+    fn stop(&mut self, cause: WatchStopCause) {
+        self.stopped = true;
+        // A listing that has gone has nothing to restart.
+        let _ = self.messages.unbounded_send(WatchMessage::Stopped(cause));
+    }
+}
+
+impl Drop for WatchSink {
+    fn drop(&mut self) {
+        self.thread_alive.store(false, Ordering::Release);
+        // Dropped by a panic unwinding the watcher's thread, which ends the
+        // watch with it.
+        if std::thread::panicking() && !self.stopped {
+            self.stop(WatchStopCause::Panicked { report: PanicReport::unwinding() });
+        }
+    }
+}
+
+/// A watcher on notify's own thread; dropping it ends the watch.
+struct FilesystemWatch {
+    watcher: ManuallyDrop<notify::RecommendedWatcher>,
+    thread_alive: Arc<AtomicBool>,
+}
+
+impl Drop for FilesystemWatch {
+    fn drop(&mut self) {
+        // notify's inotify watcher panics as it is dropped once its thread has
+        // ended, so one whose thread has ended is leaked instead.
+        if self.thread_alive.load(Ordering::Acquire) {
+            // SAFETY: dropped once, here, and never used again.
+            unsafe { ManuallyDrop::drop(&mut self.watcher) };
+        }
+    }
+}
+
+/// Holds a directory's watch open; dropping it ends the watch.
+enum DirWatch {
+    Filesystem {
+        _watch: FilesystemWatch,
+    },
+    #[cfg(test)]
+    Simulated {
+        _registration: super::simulated_watch::Registration,
+    },
+}
+
+fn is_finished_replay(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
+        && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+}
+
+/// Starts watching `dir`, sending what happens in it to `sink`.
+fn start_watch(dir: &Path, sink: WatchSink) -> Result<DirWatch, WatchStopCause> {
+    // The test scheduler refuses wakeups from notify's own thread, so a test
+    // reports changes itself.
+    #[cfg(test)]
+    if super::simulated_watch::is_installed() {
+        return super::simulated_watch::register(dir, sink)
+            .map(|registration| DirWatch::Simulated { _registration: registration });
+    }
+
+    filesystem_watch(dir, sink).map(|watch| DirWatch::Filesystem { _watch: watch })
+}
+
+/// Watches `dir` on notify's own thread.
+fn filesystem_watch(dir: &Path, mut sink: WatchSink) -> Result<FilesystemWatch, WatchStopCause> {
+    use notify::Watcher as _;
+
+    let thread_alive = Arc::clone(&sink.thread_alive);
+    let watcher = notify::recommended_watcher(move |event| sink.handle(event))
+        .map_err(|err| WatchStopCause::NoWatcher { error: err.to_string() })?;
+    let mut watch = FilesystemWatch { watcher: ManuallyDrop::new(watcher), thread_alive };
+    watch
+        .watcher
+        .watch(dir, notify::RecursiveMode::NonRecursive)
+        .map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
+
+    Ok(watch)
 }
 
 /// How long to keep retrying a replay the watcher has just reported, and how
@@ -2761,16 +3046,18 @@ mod tests {
         use futures::channel::mpsc::TryRecvError;
 
         use super::DirChange;
+        use super::WatchMessage;
+        use super::WatchSink;
 
         // Waits for the next report; `None` once the watch has closed the
         // channel or nothing arrives in time.
         fn next(
-            changes: &mut futures::channel::mpsc::UnboundedReceiver<DirChange>,
+            messages: &mut futures::channel::mpsc::UnboundedReceiver<WatchMessage>,
             deadline: Instant,
-        ) -> Option<DirChange> {
+        ) -> Option<WatchMessage> {
             loop {
-                match changes.try_recv() {
-                    Ok(change) => return Some(change),
+                match messages.try_recv() {
+                    Ok(message) => return Some(message),
                     Err(TryRecvError::Empty) if Instant::now() < deadline => {
                         std::thread::sleep(Duration::from_millis(20))
                     }
@@ -2780,20 +3067,58 @@ mod tests {
         }
 
         let dir = tempfile::tempdir().expect("a temp directory");
-        let (sender, mut changes) = futures::channel::mpsc::unbounded();
-        let watcher = super::filesystem_watch(dir.path(), sender).expect("the directory is watchable");
+        let (sender, mut messages) = futures::channel::mpsc::unbounded();
+        let sink = WatchSink::new(dir.path().to_path_buf(), sender);
+        let watcher = super::filesystem_watch(dir.path(), sink).expect("the directory is watchable");
 
         let landed = dir.path().join("landed.wowsreplay");
         std::fs::write(&landed, b"not yet a replay").expect("the file is written");
         let deadline = Instant::now() + Duration::from_secs(10);
-        assert_eq!(next(&mut changes, deadline), Some(DirChange::Appeared(landed)), "the new file is reported first");
+        let first = next(&mut messages, deadline);
+        assert!(
+            matches!(&first, Some(WatchMessage::Change(DirChange::Appeared(path))) if *path == landed),
+            "the new file is reported first"
+        );
 
         // Dropping it closes the channel, which is what ends the listing's
         // task for the watch. Reports queued before the drop may come first.
         drop(watcher);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while next(&mut changes, deadline).is_some() {}
-        assert!(matches!(changes.try_recv(), Err(TryRecvError::Closed)), "the dropped watch closes its channel");
+        while next(&mut messages, deadline).is_some() {}
+        assert!(matches!(messages.try_recv(), Err(TryRecvError::Closed)), "the dropped watch closes its channel");
+    }
+
+    /// Removing the watched directory ends the watch with it, which the watch
+    /// says rather than falling silent.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_filesystem_watch_says_its_directory_was_removed() {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use super::WatchMessage;
+        use super::WatchSink;
+        use super::WatchStopCause;
+
+        let parent = tempfile::tempdir().expect("a temp directory");
+        let dir = parent.path().join("replays");
+        std::fs::create_dir(&dir).expect("the directory is made");
+        let (sender, mut messages) = futures::channel::mpsc::unbounded();
+        let _watcher =
+            super::filesystem_watch(&dir, WatchSink::new(dir.clone(), sender)).expect("the directory is watchable");
+
+        std::fs::remove_dir(&dir).expect("the directory is removed");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let stopped = loop {
+            match messages.try_recv() {
+                Ok(WatchMessage::Stopped(cause)) => break Some(cause),
+                Ok(WatchMessage::Change(_) | WatchMessage::Rescan | WatchMessage::Missed(_)) => {}
+                Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                Err(_) => break None,
+            }
+        };
+        assert_eq!(stopped, Some(WatchStopCause::DirectoryGone));
     }
 
     #[test]

@@ -50,6 +50,7 @@ mod side_split;
 mod slider_field;
 mod stats;
 mod status_bar;
+mod supervision;
 mod tactics;
 mod theme;
 mod toast;

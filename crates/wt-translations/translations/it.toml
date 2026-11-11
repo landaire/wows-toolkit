@@ -111,6 +111,7 @@ download_objects_to_fetch = "Oggetti da scaricare per le build selezionate: %{co
 download_plan_failed = "Impossibile determinare cosa serve scaricare"
 download_plan_no_cache_dir = "Nessuna cartella di cache dei dati di gioco impostata. Scegline una nelle Impostazioni, poi riprova."
 refresh_persisted_data_message = "Rianalizza ogni replay nella cartella dei replay e riscrive i dati salvati. Le voci registrate con una mappatura dati replay che non corrisponde alla loro build di gioco restano invariate, tranne che Personal Rating e modalità di gioco vengono ricalcolati per ogni replay in base ai valori attesi attuali. L'operazione può richiedere un po' di tempo."
+file_dialog_failed = "Impossibile aprire la finestra di selezione file: %{reason}"
 
 # -- Etichette --
 
@@ -1911,3 +1912,13 @@ indexing = "Indicizzazione di %{dir}"
 indexing_in_background = "Questa cartella è ancora in fase di indicizzazione"
 search_while_indexing = "Questa cartella è ancora in fase di indicizzazione, quindi i risultati non sono ancora completi. Ripeti la ricerca al termine."
 source_failed = "Impossibile indicizzare i replay di questa cartella: %{error}"
+restart_watch = "Riavvia monitoraggio"
+watch_stopped = "Il monitoraggio di %{folder} si è interrotto: %{cause}."
+watch_restarting = "Riavvio tra %{seconds} s (tentativo %{attempt} di %{attempts})."
+watch_gave_up = "Il riavvio non è riuscito %{attempts} volte e non verrà ritentato."
+watch_restart_hint = "Fai clic sul punto rosso o scegli Riavvia monitoraggio dal menu della scheda per riavviarlo ora."
+watch_resumed = "Il monitoraggio di %{folder} è ripreso."
+watch_cause_backend = "il file system ha segnalato un errore: %{error}"
+watch_cause_gone = "la cartella è stata spostata o rimossa"
+watch_cause_panicked = "errore interno: %{error}"
+watch_cause_exited = "il monitoraggio è terminato in modo imprevisto"

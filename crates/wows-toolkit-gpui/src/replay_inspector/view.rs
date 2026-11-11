@@ -708,7 +708,11 @@ impl ReplayInspectorView {
                 self.note_unseen(browser, path, folders::Noted::Rewritten, cx);
             }
             ReplayBrowserEvent::ReplayRemoved(path) => self.forget_unseen(browser, path, cx),
-            ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
+            ReplayBrowserEvent::WatchStopped { cause, next } => {
+                self.say_watch_stopped(browser, cause, *next, window, cx);
+            }
+            ReplayBrowserEvent::WatchResumed => self.say_watch_resumed(browser, window, cx),
+            ReplayBrowserEvent::WatchWithdrawn => crate::toast::withdraw(folders::watch_toast_key(browser), window, cx),
             // The app owns the cache and the jobs that fill it, so the offer to
             // fetch these builds is raised to it.
             ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),

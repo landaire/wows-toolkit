@@ -19,7 +19,13 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::*;
+use crate::replay_inspector::browser_view::WatchState;
+use crate::replay_inspector::browser_view::WatchStopCause;
 use crate::replay_inspector::browser_view::resolve_replays_dir;
+use crate::supervision::NextStep;
+use crate::supervision::RestartPolicy;
+use crate::toast::Level;
+use crate::toast::Stay;
 
 /// The settings row the pinned directories are kept in, in tab order.
 pub(crate) const PINNED_FOLDERS: &str = "gpui.pinned_replay_directories";
@@ -165,6 +171,21 @@ impl ReplayFolder {
             }
             (FolderSource::Chosen(_), _, _) => ListingWatch::Unwatched,
         }
+    }
+
+    /// What the tab is called: the game's own directory, or the opened
+    /// directory's name.
+    fn label(&self) -> String {
+        match &self.source {
+            FolderSource::Install => t!("ui.replay_folders.install").into_owned(),
+            FolderSource::Chosen(root) => folder_name(root),
+        }
+    }
+
+    /// Whether the tab's directory is watched but its watch has stopped.
+    fn watch_stopped(&self, cx: &App) -> bool {
+        self.watch() == ListingWatch::Watched
+            && matches!(self.browser.read(cx).watch_state(), WatchState::Stopped { .. })
     }
 }
 
@@ -570,6 +591,7 @@ impl ReplayInspectorView {
         let Some(at) = self.folders.iter().position(|folder| folder.id() == from) else { return };
 
         let merged = self.folders.remove(at);
+        crate::toast::withdraw_everywhere(watch_toast_key(&merged.browser), cx);
         if merged.pinned {
             if let Some(folder) = self.folder_mut(into).filter(|folder| folder.source != FolderSource::Install) {
                 folder.pinned = true;
@@ -704,6 +726,7 @@ impl ReplayInspectorView {
         }
 
         let closed = self.folders.remove(at);
+        crate::toast::withdraw_everywhere(watch_toast_key(&closed.browser), cx);
         if closed.pinned {
             self.save_pinned_folders(cx);
         }
@@ -878,10 +901,18 @@ impl ReplayInspectorView {
         // The selected tab is what the reader is looking at, so it counts nothing.
         let unseen = if selected { 0 } else { folder.counted(now, cx) };
         let watched = folder.watch() == ListingWatch::Watched;
-        let (glyph, label) = match &folder.source {
-            FolderSource::Install => (crate::icons::Glyph::Monitor, t!("ui.replay_folders.install").into_owned()),
-            FolderSource::Chosen(root) => (crate::icons::Glyph::Folder, folder_name(root)),
+        let stopped = folder.watch_stopped(cx);
+        let glyph = match &folder.source {
+            FolderSource::Install => crate::icons::Glyph::Monitor,
+            FolderSource::Chosen(_) => crate::icons::Glyph::Folder,
         };
+        let label = folder.label();
+        let indicator = watched.then(|| {
+            if !stopped {
+                return watch_dot(index, folder.landing, now, cx);
+            }
+            stopped_dot(id, cx)
+        });
         let view = cx.entity();
 
         let tab = h_flex()
@@ -911,7 +942,7 @@ impl ReplayInspectorView {
             .when(folder.pinned, |tab| {
                 tab.child(crate::icons::icon(crate::icons::Glyph::Pin).id(("replay-folder-pin", index)).test_support())
             })
-            .when(watched, |tab| tab.child(watch_dot(index, folder.landing, now, cx)))
+            .children(indicator)
             .when(unseen > 0, |tab| tab.child(unseen_badge(index, unseen, cx)))
             .tooltip({
                 let view = view.clone();
@@ -929,6 +960,7 @@ impl ReplayInspectorView {
         let pins_ready = self.pins_saved == SavedList::Read;
         tab.context_menu(move |menu, _window, _cx| {
             let pin = view.clone();
+            let restart = view.clone();
             let refresh = view.clone();
             let close = view.clone();
             let menu = match (&source, pinned, state) {
@@ -941,6 +973,15 @@ impl ReplayInspectorView {
                         },
                     ))
                 }
+            };
+            let menu = if stopped {
+                menu.item(PopupMenuItem::new(t!("ui.replay_folders.restart_watch").into_owned()).on_click(
+                    move |_event, _window, cx| {
+                        restart.update(cx, |view, cx| view.restart_folder_watch(id, cx));
+                    },
+                ))
+            } else {
+                menu
             };
             let menu = menu.item(PopupMenuItem::new(t!("ui.replay_folders.refresh").into_owned()).on_click(
                 move |_event, _window, cx| {
@@ -961,6 +1002,57 @@ impl ReplayInspectorView {
         .into_any_element()
     }
 
+    /// Starts a tab's stopped watch again.
+    pub(crate) fn restart_folder_watch(&mut self, id: FolderId, cx: &mut Context<Self>) {
+        let Some(folder) = self.folder(id) else { return };
+        folder.browser.clone().update(cx, |browser, cx| browser.restart_watch(cx));
+    }
+
+    /// Tells the reader a tab's watch has stopped, with a button to restart
+    /// it.
+    ///
+    /// Only the first stop of a run of failures is said, and the one that
+    /// ends the automatic restarts, which stays until dismissed; the restarts
+    /// between are only logged. Each replaces what was last said of the tab.
+    pub(super) fn say_watch_stopped(
+        &self,
+        browser: &Entity<ReplayBrowser>,
+        cause: &WatchStopCause,
+        next: NextStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A restart that ran only briefly leaves its resumed message up,
+        // which is no longer so.
+        if !next.is_announced() {
+            crate::toast::withdraw(watch_toast_key(browser), window, cx);
+            return;
+        }
+        let Some(id) = self.folder_of(browser) else { return };
+        let Some(folder) = self.folder(id) else { return };
+
+        let said = watch_stopped_said(&folder.label(), cause, next).join(" ");
+        let view = cx.entity().downgrade();
+        let restart =
+            crate::toast::Action::new(t!("ui.replay_folders.restart_watch").into_owned(), move |_window, cx| {
+                let _ = view.update(cx, |view, cx| view.restart_folder_watch(id, cx));
+            });
+        let stay = match next {
+            NextStep::Retry { .. } => Stay::Briefly,
+            NextStep::GaveUp => Stay::UntilDismissed,
+        };
+        crate::toast::about(watch_toast_key(browser), Level::Warning, said, Some(restart), stay, window, cx);
+    }
+
+    /// Tells the reader a tab's stopped watch is running again, in place of
+    /// what was said of it stopping.
+    pub(super) fn say_watch_resumed(&self, browser: &Entity<ReplayBrowser>, window: &mut Window, cx: &mut App) {
+        let Some(folder) = self.folder_of(browser).and_then(|id| self.folder(id)) else { return };
+
+        let said = t!("ui.replay_folders.watch_resumed", folder = folder.label()).into_owned();
+        crate::toast::about(watch_toast_key(browser), Level::Ok, said, None, Stay::Briefly, window, cx);
+    }
+
     /// What hovering a tab says: the whole path, whether it is watched, and
     /// what its badge counts.
     fn folder_tooltip(&self, id: FolderId, cx: &App) -> Option<String> {
@@ -978,12 +1070,17 @@ impl ReplayInspectorView {
             FolderState::Listed => {}
         }
 
-        let watched = match folder.watch() {
-            ListingWatch::Watched => t!("ui.replay_folders.watched"),
-            ListingWatch::Unwatched => t!("ui.replay_folders.unwatched"),
-        };
         let mut lines: Vec<String> = shown.into_iter().collect();
-        lines.push(watched.into_owned());
+        match (folder.watch(), folder.browser.read(cx).watch_state()) {
+            (ListingWatch::Watched, WatchState::Stopped { cause, next }) => {
+                lines.extend(watch_stopped_said(&folder.label(), cause, *next));
+                lines.push(t!("ui.replay_folders.watch_restart_hint").into_owned());
+            }
+            (ListingWatch::Watched, WatchState::Starting | WatchState::Running) => {
+                lines.push(t!("ui.replay_folders.watched").into_owned());
+            }
+            (ListingWatch::Unwatched, _) => lines.push(t!("ui.replay_folders.unwatched").into_owned()),
+        }
         let unseen = folder.unseen(cx);
         if id != self.selected_folder && unseen > 0 {
             lines.push(t!("ui.replay_folders.unseen", count = unseen).into_owned());
@@ -1072,10 +1169,12 @@ fn unseen_badge(index: usize, unseen: usize, cx: &App) -> AnyElement {
     crate::motion::fade_in(("replay-folder-badge-fade", index), badge)
 }
 
+/// How wide the dot on a watched tab is.
+const WATCH_DOT: Pixels = px(6.);
+
 /// The dot on a watched tab, which sends out one ring as a replay lands in
 /// its directory.
 fn watch_dot(index: usize, landing: Option<Landing>, now: Instant, cx: &App) -> AnyElement {
-    const DOT: Pixels = px(6.);
     /// How many dot widths across the ring is when it has faded.
     const REACH: f32 = 3.;
 
@@ -1087,8 +1186,8 @@ fn watch_dot(index: usize, landing: Option<Landing>, now: Instant, cx: &App) -> 
             ElementId::NamedInteger("replay-folder-ring".into(), landing.number.0),
             Animation::new(LANDING_PULSE).with_easing(ease_out_quint()),
             |ring, delta| {
-                let across = DOT * (1. + delta * (REACH - 1.));
-                let offset = (DOT - across) / 2.;
+                let across = WATCH_DOT * (1. + delta * (REACH - 1.));
+                let offset = (WATCH_DOT - across) / 2.;
                 ring.size(across).top(offset).left(offset).opacity(1. - delta)
             },
         )
@@ -1099,11 +1198,54 @@ fn watch_dot(index: usize, landing: Option<Landing>, now: Instant, cx: &App) -> 
         .test_support()
         .relative()
         .flex_none()
-        .size(DOT)
+        .size(WATCH_DOT)
         .rounded_full()
         .bg(color)
         .children(ring)
         .into_any_element()
+}
+
+/// The dot on a watched tab whose watch has stopped, which restarts it when
+/// clicked.
+fn stopped_dot(id: FolderId, cx: &Context<ReplayInspectorView>) -> AnyElement {
+    div()
+        .id(("replay-folder-watch-stopped", id.element_index()))
+        .on_click(cx.listener(move |this, _event, _window, cx| {
+            // Restarting is all the dot does; the tab stays as it is.
+            cx.stop_propagation();
+            this.restart_folder_watch(id, cx);
+        }))
+        .test_support()
+        .flex_none()
+        .size(WATCH_DOT)
+        .rounded_full()
+        .bg(cx.theme().danger)
+        .cursor_pointer()
+        .into_any_element()
+}
+
+/// What is said of a stopped watch: what stopped and why, then whether it is
+/// started again.
+fn watch_stopped_said(folder: &str, cause: &WatchStopCause, next: NextStep) -> [String; 2] {
+    let attempts = RestartPolicy::ATTEMPTS.get();
+    let stopped = t!("ui.replay_folders.watch_stopped", folder = folder, cause = cause.said()).into_owned();
+    let next = match next {
+        NextStep::Retry { attempt, delay } => t!(
+            "ui.replay_folders.watch_restarting",
+            seconds = delay.as_secs(),
+            attempt = attempt.get(),
+            attempts = attempts
+        ),
+        NextStep::GaveUp => t!("ui.replay_folders.watch_gave_up", attempts = attempts),
+    };
+
+    [stopped, next.into_owned()]
+}
+
+/// The identity of what is said about a listing's watch, so each message
+/// replaces the last.
+pub(super) fn watch_toast_key(browser: &Entity<ReplayBrowser>) -> ElementId {
+    ElementId::NamedInteger("replay-folder-watch".into(), browser.entity_id().as_u64())
 }
 
 #[cfg(test)]
@@ -1135,7 +1277,10 @@ mod tests {
     use crate::replay_inspector::ReplayBrowser;
     use crate::replay_inspector::ReplayInspectorView;
     use crate::replay_inspector::browser_view::DirChange;
+    use crate::replay_inspector::browser_view::WatchState;
+    use crate::replay_inspector::browser_view::WatchStopCause;
     use crate::replay_inspector::simulated_watch;
+    use crate::supervision::NextStep;
 
     /// A real replay, so a reported change is read as the game's would be.
     fn fixture() -> PathBuf {
@@ -1944,5 +2089,179 @@ mod tests {
 
         assert_eq!(json, r#"["/replays/b","/replays/a"]"#);
         assert_eq!(serde_json::from_str::<FolderHistory>(&json).expect("the list reads back"), stored);
+    }
+
+    fn watch_state(browser: &Entity<ReplayBrowser>, cx: &mut TestAppContext) -> WatchState {
+        cx.update(|cx| browser.read(cx).watch_state().clone())
+    }
+
+    /// Which dot a tab shows: `Some(true)` for a running watch, `Some(false)`
+    /// for a stopped one.
+    fn dot(window: WindowHandle<Root>, id: FolderId, cx: &mut TestAppContext) -> Option<bool> {
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let running = window.try_find(("replay-folder-watched", id.element_index())).is_some();
+            let stopped = window.try_find(("replay-folder-watch-stopped", id.element_index())).is_some();
+            match (running, stopped) {
+                (false, false) => None,
+                (true, false) => Some(true),
+                (false, true) => Some(false),
+                (true, true) => panic!("a tab shows one dot"),
+            }
+        })
+        .expect("the test window stays open")
+    }
+
+    /// The messages put up since `before` were.
+    fn said_since(before: usize) -> Vec<String> {
+        crate::toast::said_for_test().split_off(before)
+    }
+
+    /// An error from the install's watcher turns the Game tab's dot red and
+    /// says so; the restart a second later reads the directory again, which
+    /// lists what landed while the watch was down, and the dot is green again.
+    /// A second stop in the same run of failures is not said again.
+    #[gpui_kit::test]
+    fn a_failed_watch_turns_red_and_restarts_with_a_rescan(cx: &mut TestAppContext) {
+        let (window, app) = open_app_in_root(cx);
+        simulated_watch::install();
+        hold_constants_for_fixture();
+        let install = tempfile::tempdir().expect("a temp directory");
+        let main_dir = install.path().join("replays");
+        std::fs::create_dir(&main_dir).expect("the replays directory is made");
+        let view = inspector(&app, cx);
+        let main = cx.update(|cx| view.read(cx).install_browser().clone());
+        let wows_dir = install.path().display().to_string();
+        with_view(window, &view, cx, |view, _window, cx| view.scan_install(wows_dir, cx));
+        let id = install_id(&view, cx);
+        assert_eq!(dot(window, id, cx), Some(true), "a running watch shows green");
+        let before = crate::toast::said_for_test().len();
+
+        simulated_watch::fail(&main_dir, "the event queue overflowed");
+        cx.run_until_parked();
+
+        assert_eq!(dot(window, id, cx), Some(false), "a stopped watch shows red");
+        assert_eq!(simulated_watch::watching(&main_dir), 0, "the failed watch is let go");
+        let WatchState::Stopped { cause: WatchStopCause::Backend { error }, next } = watch_state(&main, cx) else {
+            panic!("the watch stopped on the watcher's error")
+        };
+        assert!(error.contains("the event queue overflowed"));
+        assert!(matches!(next, NextStep::Retry { delay, .. } if delay == std::time::Duration::from_secs(1)));
+        let said = said_since(before);
+        let game = t!("ui.replay_folders.install").into_owned();
+        assert_eq!(said.len(), 1, "the stop is said once: {said:?}");
+        assert!(said[0].contains(&game) && said[0].contains("the event queue overflowed"), "{said:?}");
+        let tooltip = cx.update(|cx| view.read(cx).folder_tooltip(id, cx)).expect("the tab is there");
+        assert!(tooltip.contains(&t!("ui.replay_folders.watch_restart_hint").into_owned()), "{tooltip}");
+
+        let landed = main_dir.join("landed.wowsreplay");
+        std::fs::copy(fixture(), &landed).expect("the replay is copied");
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        assert_eq!(watch_state(&main, cx), WatchState::Running);
+        assert_eq!(dot(window, id, cx), Some(true), "a restarted watch shows green");
+        assert_eq!(simulated_watch::watching(&main_dir), 1);
+        assert_eq!(listed(&main, cx), vec![landed], "the restart reads what landed while it was down");
+        let resumed = t!("ui.replay_folders.watch_resumed", folder = game).into_owned();
+        let said = said_since(before);
+        assert!(said.contains(&resumed), "the restart is said: {said:?}");
+
+        simulated_watch::exit(&main_dir);
+        cx.run_until_parked();
+
+        let WatchState::Stopped { cause, next } = watch_state(&main, cx) else { panic!("the watch stopped") };
+        assert_eq!(cause, WatchStopCause::Exited, "a watcher's thread that ends is a stop");
+        assert!(!next.is_announced(), "a stop soon after a restart is the same run of failures");
+        assert_eq!(said_since(before).len(), said.len(), "and is not said again");
+    }
+
+    /// A watcher that dropped events has its directory read again, so what it
+    /// missed is listed.
+    #[gpui_kit::test]
+    fn a_watcher_that_lost_events_reads_the_directory_again(cx: &mut TestAppContext) {
+        let (window, app) = open_app_in_root(cx);
+        simulated_watch::install();
+        hold_constants_for_fixture();
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let dir = canonical(dir.path());
+        let view = inspector(&app, cx);
+        with_view(window, &view, cx, |view, window, cx| {
+            view.adopt_pinned_folders(PinnedFolders(vec![dir.clone()]), window, cx);
+        });
+        let folder = listing(&view, &dir, cx);
+        let missed = dir.join("missed.wowsreplay");
+        std::fs::copy(fixture(), &missed).expect("the replay is copied");
+
+        simulated_watch::overflow(&dir);
+        cx.run_until_parked();
+
+        assert_eq!(listed(&folder, cx), vec![missed]);
+        assert_eq!(watch_state(&folder, cx), WatchState::Running, "a lost event is not a stop");
+        assert_eq!(simulated_watch::watching(&dir), 1);
+    }
+
+    /// A watch whose thread panics, and whose restarts fail, is restarted
+    /// three times and then left for the reader, who restarts it from the
+    /// tab's dot. Only the first stop and the last are said.
+    #[gpui_kit::test]
+    fn a_panicked_watch_backs_off_then_waits_for_the_reader(cx: &mut TestAppContext) {
+        let (window, app) = open_app_in_root(cx);
+        simulated_watch::install();
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let dir = canonical(dir.path());
+        let view = inspector(&app, cx);
+        with_view(window, &view, cx, |view, window, cx| {
+            view.adopt_pinned_folders(PinnedFolders(vec![dir.clone()]), window, cx);
+        });
+        let (id, folder) = (folder_id(&view, &dir, cx), listing(&view, &dir, cx));
+        assert_eq!(simulated_watch::asked(&dir), 1);
+        let before = crate::toast::said_for_test().len();
+
+        simulated_watch::refuse(&dir, true);
+        simulated_watch::crash(&dir, "poll failed");
+        cx.run_until_parked();
+        assert!(matches!(
+            watch_state(&folder, cx),
+            WatchState::Stopped { cause: WatchStopCause::Panicked { .. }, next: NextStep::Retry { .. } }
+        ));
+        assert_eq!(dot(window, id, cx), Some(false));
+
+        for (seconds, asked) in [(1, 2), (5, 3), (30, 4)] {
+            cx.executor().advance_clock(std::time::Duration::from_secs(seconds));
+            cx.run_until_parked();
+            assert_eq!(simulated_watch::asked(&dir), asked, "restarted after {seconds} s");
+        }
+        assert!(matches!(watch_state(&folder, cx), WatchState::Stopped { next: NextStep::GaveUp, .. }));
+        cx.executor().advance_clock(std::time::Duration::from_secs(60 * 60));
+        cx.run_until_parked();
+        assert_eq!(simulated_watch::asked(&dir), 4, "no restart follows the last");
+        let said = said_since(before);
+        assert_eq!(said.len(), 2, "the first stop and the last are said: {said:?}");
+        let gave_up = t!("ui.replay_folders.watch_gave_up", attempts = 3).into_owned();
+        assert!(said[1].ends_with(&gave_up), "{said:?}");
+
+        choose_from_tab_menu(window, id, &t!("ui.replay_folders.restart_watch"), cx);
+        assert_eq!(simulated_watch::asked(&dir), 5, "the menu restarts it");
+        assert!(
+            matches!(watch_state(&folder, cx), WatchState::Stopped { next, .. } if next.is_announced() && next != NextStep::GaveUp),
+            "with the full set of restarts behind it again"
+        );
+        assert_eq!(said_since(before).len(), 3, "and its failure is said");
+
+        simulated_watch::refuse(&dir, false);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("replay-folder-watch-stopped", id.element_index()), cx);
+        })
+        .expect("the test window stays open");
+        cx.run_until_parked();
+
+        assert_eq!(watch_state(&folder, cx), WatchState::Running, "the dot restarts it");
+        assert_eq!(dot(window, id, cx), Some(true));
+        assert_eq!(simulated_watch::watching(&dir), 1);
+        let resumed = t!("ui.replay_folders.watch_resumed", folder = super::folder_name(&dir)).into_owned();
+        assert_eq!(said_since(before).len(), 4);
+        assert_eq!(said_since(before).last(), Some(&resumed));
     }
 }

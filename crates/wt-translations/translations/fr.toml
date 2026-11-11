@@ -111,6 +111,7 @@ download_objects_to_fetch = "Objets à récupérer pour les builds cochés : %{c
 download_plan_failed = "Impossible de déterminer les éléments à récupérer"
 download_plan_no_cache_dir = "Aucun répertoire de cache des données de jeu n'est défini. Choisissez-en un dans les Paramètres, puis réessayez."
 refresh_persisted_data_message = "Analyse à nouveau chaque replay de votre répertoire de replays et réécrit ses données enregistrées. Les entrées enregistrées avec une correspondance de données de replay qui ne correspond pas à leur version du jeu sont laissées telles quelles, sauf le Personal Rating et le mode de jeu, recalculés pour chaque replay à partir des valeurs attendues actuelles. Cela peut prendre un certain temps."
+file_dialog_failed = "Impossible d'ouvrir la boîte de dialogue de fichiers : %{reason}"
 
 # -- Libellés --
 
@@ -1911,3 +1912,13 @@ indexing = "Indexation de %{dir}"
 indexing_in_background = "Ce répertoire est encore en cours d'indexation"
 search_while_indexing = "Ce répertoire est encore en cours d'indexation, les résultats ne sont donc pas encore complets. Relancez la recherche une fois l'indexation terminée."
 source_failed = "Les replays de ce répertoire ne peuvent pas être indexés : %{error}"
+restart_watch = "Relancer la surveillance"
+watch_stopped = "La surveillance de %{folder} s'est arrêtée : %{cause}."
+watch_restarting = "Relance dans %{seconds} s (tentative %{attempt} sur %{attempts})."
+watch_gave_up = "La relance a échoué %{attempts} fois et ne sera plus tentée."
+watch_restart_hint = "Cliquez sur le point rouge ou choisissez Relancer la surveillance dans le menu de l'onglet pour la relancer maintenant."
+watch_resumed = "La surveillance de %{folder} a repris."
+watch_cause_backend = "le système de fichiers a signalé une erreur : %{error}"
+watch_cause_gone = "le dossier a été déplacé ou supprimé"
+watch_cause_panicked = "erreur interne : %{error}"
+watch_cause_exited = "la surveillance s'est arrêtée de manière inattendue"

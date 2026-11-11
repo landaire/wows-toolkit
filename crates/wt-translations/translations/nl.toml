@@ -111,6 +111,7 @@ download_objects_to_fetch = "Op te halen objecten voor de aangevinkte builds: %{
 download_plan_failed = "Kan niet bepalen wat er opgehaald moet worden"
 download_plan_no_cache_dir = "Er is geen cachemap voor spelgegevens ingesteld. Kies er een in Instellingen en probeer het opnieuw."
 refresh_persisted_data_message = "Elke replay in uw replaymap opnieuw parsen en de opgeslagen gegevens herschrijven. Vermeldingen die zijn vastgelegd met een replaydatamapping die niet overeenkomt met hun spelbuild blijven ongewijzigd, behalve dat persoonlijke beoordeling en spelmodus voor elke replay opnieuw worden berekend op basis van de huidige verwachte waarden. Dit kan even duren."
+file_dialog_failed = "Het bestandsvenster kon niet worden geopend: %{reason}"
 
 # -- Labels --
 
@@ -1911,3 +1912,13 @@ indexing = "%{dir} indexeren"
 indexing_in_background = "Deze map wordt nog geïndexeerd"
 search_while_indexing = "Deze map wordt nog geïndexeerd, dus de resultaten zijn nog niet volledig. Zoek opnieuw zodra het klaar is."
 source_failed = "De replays in deze map kunnen niet worden geïndexeerd: %{error}"
+restart_watch = "Bewaking herstarten"
+watch_stopped = "De bewaking van %{folder} is gestopt: %{cause}."
+watch_restarting = "Herstart over %{seconds} s (poging %{attempt} van %{attempts})."
+watch_gave_up = "Herstarten is %{attempts} keer mislukt en wordt niet opnieuw geprobeerd."
+watch_restart_hint = "Klik op de rode stip of kies Bewaking herstarten in het tabbladmenu om haar nu te herstarten."
+watch_resumed = "De bewaking van %{folder} is hervat."
+watch_cause_backend = "het bestandssysteem meldde een fout: %{error}"
+watch_cause_gone = "de map is verplaatst of verwijderd"
+watch_cause_panicked = "interne fout: %{error}"
+watch_cause_exited = "de bewaking is onverwacht beëindigd"
