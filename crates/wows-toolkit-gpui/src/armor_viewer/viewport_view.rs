@@ -3906,13 +3906,8 @@ impl Render for ViewportView {
         // context menu below and gpui-component's managed tooltips use)
         // rather than hand-measuring the tooltip's size.
         let ring_overlay = self.hovered_ring.as_ref().map(|(label, cursor)| {
-            let theme = cx.theme();
             let anchor_pos = point(cursor.x + TOOLTIP_CURSOR_OFFSET, cursor.y + TOOLTIP_CURSOR_OFFSET);
-            let element = div()
-                .bg(theme.background)
-                .border_1()
-                .border_color(theme.border)
-                .rounded(theme.radius)
+            let element = crate::ui::overlay_surface(div(), cx)
                 .px_2()
                 .py_1()
                 .text_xs()
@@ -3996,7 +3991,7 @@ impl Render for ViewportView {
                         .border_1()
                         .border_color(border)
                         .rounded(radius)
-                        .shadow_md()
+                        .shadow(crate::theme::overlay_shadow())
                         .child(div().font_weight(FontWeight::BOLD).child(t!("ui.armor.export_model").to_string()))
                         .child(div().text_sm().child(format!(
                             "Export {display_name} to a glTF Binary (.glb) file. These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws."

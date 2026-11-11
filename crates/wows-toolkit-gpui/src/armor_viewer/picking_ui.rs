@@ -245,7 +245,7 @@ pub fn tooltip_element(
         .border_1()
         .border_color(border)
         .rounded(radius)
-        .shadow_md()
+        .shadow(crate::theme::overlay_shadow())
         .px_2()
         .py_1()
         .child(body)
