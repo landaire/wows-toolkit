@@ -18,6 +18,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui_kit::base::MotionReveal;
+use gpui_kit::base::MotionStatus;
+use gpui_kit::base::MotionValue;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
@@ -136,22 +139,26 @@ pub(super) fn text_width(text: SharedString, window: &mut Window, bold: bool) ->
 /// `PlayerTable::new` completes) -- so this one pass stays correct across
 /// that transition without needing a second recompute when the icons land.
 ///
-/// A row in `expanded` also folds `expanded::expanded_detail_width` into that
-/// row's per-column width alongside its collapsed content -- `table.rs`'s
-/// `render_column_cell` clamps an expanded row's detail (the Skills column's
-/// captain-skill grid and consumables table, in particular) to the column's
-/// measured width, so without this an expanded row's detail would clip at the
-/// collapsed-only width instead of growing the column to fit it.
+/// A row in `expanded` or `closing` also folds
+/// `expanded::expanded_detail_width` into that row's per-column width
+/// alongside its collapsed content -- `table.rs`'s `render_column_cell`
+/// clamps a row's detail (the Skills column's captain-skill grid and
+/// consumables table, in particular) to the column's measured width, so
+/// without this the detail would clip at the collapsed-only width instead of
+/// growing the column to fit it. A closing row counts until its detail has
+/// closed, so the columns do not narrow under the detail while it is drawn.
 ///
-/// Run once per data/column/debug/expanded-set change (`PlayerTable::new`,
-/// `set_columns`, `set_debug`, `toggle_expanded`), gated behind
-/// `PlayerTable::widths_dirty` in `render` -- never per frame.
+/// Run once per data/column/debug/detail-set change (`PlayerTable::new`,
+/// `set_columns`, `set_debug`, `toggle_expanded`, `finish_closing`), gated
+/// behind `PlayerTable::widths_dirty` in `render` -- never per frame.
 fn measure_column_widths(
     model: &ReplayReportModel,
     debug: bool,
     expanded: &HashSet<AccountId>,
+    closing: &HashSet<AccountId>,
     window: &mut Window,
 ) -> Vec<Pixels> {
+    let shows_detail = |id: &AccountId| expanded.contains(id) || closing.contains(id);
     let rem = window.rem_size().as_f32();
     let gap_1 = rem * 0.25;
     let gap_0p5 = rem * 0.125;
@@ -185,7 +192,7 @@ fn measure_column_widths(
                         + text_w
                         + ROW_ACTIONS_WIDTH
                         + status_count as f32 * (icon_default + gap_1);
-                    if expanded.contains(&row.db_id) {
+                    if shows_detail(&row.db_id) {
                         row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
@@ -205,7 +212,7 @@ fn measure_column_widths(
                     } else {
                         text_w
                     };
-                    if expanded.contains(&row.db_id) {
+                    if shows_detail(&row.db_id) {
                         row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
@@ -217,7 +224,7 @@ fn measure_column_widths(
                 for row in &model.rows {
                     let cell = cell_value(row, col, debug);
                     let mut row_w = text_width(cell.text.into(), window, false);
-                    if expanded.contains(&row.db_id) {
+                    if shows_detail(&row.db_id) {
                         row_w = row_w.max(expanded::expanded_detail_width(col, row, &model.rows, debug, window));
                     }
                     max_w = max_w.max(row_w);
@@ -364,6 +371,9 @@ pub struct PlayerTable {
     /// `is_row_expanded: BTreeMap<u64, bool>`, minus the closed/`false`
     /// entries it also keeps around (a `HashSet` has no use for them).
     expanded: HashSet<AccountId>,
+    /// Rows that have left `expanded` but whose detail is still closing.
+    /// They keep their share of the column widths until it has closed.
+    closing: HashSet<AccountId>,
     /// The row a ctrl+click picked out, if any. One at a time, as in the egui
     /// table.
     selected: Option<AccountId>,
@@ -494,6 +504,7 @@ impl PlayerTable {
             icons: IconCache::new(),
             debug,
             expanded: HashSet::new(),
+            closing: HashSet::new(),
             selected: None,
             alt_held: false,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
@@ -639,14 +650,6 @@ impl PlayerTable {
         cx.notify();
     }
 
-    /// Toggles row `ix`'s expanded state and remeasures just that row.
-    /// `remeasure_items` (unlike `sort_by`'s `reset`) preserves the list's
-    /// current scroll position, so expanding a row on-screen doesn't jump the
-    /// viewport. Mirrors the egui app's `is_row_expanded`/`row_heights`
-    /// toggle in `cell_content_ui`. Also marks `widths_dirty`: an expanding
-    /// row's Skills/Name/damage columns may need to grow to fit that row's
-    /// detail (`measure_column_widths`'s `expanded` argument), and a
-    /// collapsing row may let them shrink back.
     /// Ctrl+click picks a row out and clicking it again puts it back, which
     /// is how the egui table marks the one it is reading
     /// (`ui/replay_parser/mod.rs:2620`).
@@ -656,14 +659,35 @@ impl PlayerTable {
         cx.notify();
     }
 
+    /// Toggles row `ix`'s expanded state and remeasures just that row.
+    /// `remeasure_items` (unlike `sort_by`'s `reset`) preserves the list's
+    /// current scroll position, so expanding a row on-screen doesn't jump the
+    /// viewport. Mirrors the egui app's `is_row_expanded`/`row_heights`
+    /// toggle in `cell_content_ui`. An opening row marks `widths_dirty`, since
+    /// its Skills/Name/damage columns may need to grow to fit its detail; a
+    /// closing row moves to `closing` and keeps the widths it had until
+    /// `finish_closing`.
     fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
         let db_id = self.model.rows[ix].db_id;
-        if !self.expanded.remove(&db_id) {
+        if self.expanded.remove(&db_id) {
+            self.closing.insert(db_id);
+        } else {
             self.expanded.insert(db_id);
+            if !self.closing.remove(&db_id) {
+                self.widths_dirty = true;
+            }
         }
         self.list_state.remeasure_items(ix..ix + 1);
-        self.widths_dirty = true;
         cx.notify();
+    }
+
+    /// Lets a row whose detail has closed give up its share of the column
+    /// widths.
+    fn finish_closing(&mut self, db_id: AccountId, cx: &mut Context<Self>) {
+        if self.closing.remove(&db_id) {
+            self.widths_dirty = true;
+            cx.notify();
+        }
     }
 
     /// The width `col` is drawn at: what the reader dragged it to, or what
@@ -1669,7 +1693,7 @@ fn row_actions(
         .flex()
         .flex_col()
         .items_center()
-        .map(|el| if layout.is_expanded { el.justify_start().pt_0p5() } else { el.justify_center() })
+        .map(|el| if layout.detail.is_shown() { el.justify_start().pt_0p5() } else { el.justify_center() })
         .invisible()
         .group_hover(group, |this| this.visible())
         .child(menu_button)
@@ -1690,34 +1714,75 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     }
 }
 
-/// One column's full cell: the collapsed content and, when the row is
-/// expanded and this column has expanded detail, that detail stacked
-/// underneath -- so each column's expansion grows downward under its own
-/// header (`expanded::render_column_detail`). The cell is a fixed-width
-/// `v_flex` clamped to the column's content-fit width so the collapsed table
-/// stays aligned and the detail (text wraps to the column width; a dense
-/// build/consumable sub-table clips at the column edge) never bleeds into the
-/// neighbouring column, matching egui_table's per-cell clip with
-/// `AutoSizeMode::Never`. Row height comes from the tallest such cell (flex).
-/// Collapsed rows return the bare cell (no wrapping `v_flex`), keeping the
-/// non-expanded layout byte-for-byte what it was.
+/// One column's full cell: the collapsed content and, while the row's detail
+/// is shown (open, opening or closing) and this column has detail, that
+/// detail stacked underneath -- so each column's expansion grows downward
+/// under its own header (`expanded::render_column_detail`). The cell is a
+/// fixed-width `v_flex` clamped to the column's content-fit width so the
+/// collapsed table stays aligned and the detail (text wraps to the column
+/// width; a dense build/consumable sub-table clips at the column edge) never
+/// bleeds into the neighbouring column, matching egui_table's per-cell clip
+/// with `AutoSizeMode::Never`. Row height comes from the tallest such cell
+/// (flex). A row whose detail is hidden returns the bare cell.
 fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     let collapsed = render_cell(ix, col, row, layout);
-    if !layout.is_expanded {
+    let moving = match layout.detail {
+        RowDetail::Hidden => return collapsed,
+        RowDetail::Moving(progress) => Some(progress),
+        RowDetail::Open => None,
+    };
+    let Some(detail) =
+        expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held)
+    else {
         return collapsed;
+    };
+    // The gap above the detail is part of what is revealed, so the row grows
+    // from its first line in step with the progress.
+    let detail = v_flex().pt_1().child(detail);
+    // Only a moving detail is measured and clipped: the reveal lays out at
+    // the height it measured the frame before, which an open detail would
+    // lag behind on every column drag or alt press.
+    let detail = match moving {
+        Some(progress) => MotionReveal::new(
+            ("replay-expanded-reveal", row.db_id.raw().cast_unsigned()),
+            progress,
+            detail.opacity(progress).into_any_element(),
+        )
+        .into_any_element(),
+        None => detail.into_any_element(),
+    };
+    v_flex()
+        .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
+        .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
+        .w(layout.column_widths[col as usize])
+        .flex_none()
+        .overflow_hidden()
+        .child(collapsed)
+        .child(detail)
+        .into_any_element()
+}
+
+/// How much of a row's detail is drawn.
+#[derive(Clone, Copy)]
+enum RowDetail {
+    Hidden,
+    /// Opening or closing, at this progress from 0 closed to 1 open.
+    Moving(f32),
+    Open,
+}
+
+impl RowDetail {
+    /// Reads a row's reveal: settled, it is where `expanded` says.
+    fn from_reveal(reveal: MotionValue<f32>, expanded: bool) -> Self {
+        match reveal.status {
+            MotionStatus::Delayed | MotionStatus::Running => Self::Moving(reveal.value),
+            MotionStatus::Idle | MotionStatus::Finished if expanded => Self::Open,
+            MotionStatus::Idle | MotionStatus::Finished => Self::Hidden,
+        }
     }
-    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held) {
-        Some(detail) => v_flex()
-            .id(("replay-expanded-cell", ix * CELL_ID_STRIDE + col as usize))
-            .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, col))
-            .w(layout.column_widths[col as usize])
-            .flex_none()
-            .gap_1()
-            .overflow_hidden()
-            .child(collapsed)
-            .child(v_flex().opacity(layout.turn).child(detail))
-            .into_any_element(),
-        None => collapsed,
+
+    fn is_shown(self) -> bool {
+        !matches!(self, Self::Hidden)
     }
 }
 
@@ -1725,9 +1790,10 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
 /// the sticky/scrolling column split, the scrolling section's total width,
 /// the content-fit column widths (`PlayerTable::column_widths`, indexed by
 /// `ReplayColumn as usize`), the shared horizontal scroll handle, the icon
-/// cache, the debug flag, this row's expanded state and entity handle (for
-/// the caret/double-click toggle), and the full row list (for the expanded
-/// damage-interaction breakdowns, which look up other rows by `db_id`).
+/// cache, the debug flag, how much of this row's detail is drawn, the
+/// entity handle (for the caret/double-click toggle), and the full row list
+/// (for the expanded damage-interaction breakdowns, which look up other rows
+/// by `db_id`).
 /// Bundled into one struct so `render_row` stays under clippy's
 /// argument-count limit.
 struct RowLayout<'a> {
@@ -1743,8 +1809,8 @@ struct RowLayout<'a> {
     debug: bool,
     h_scroll: &'a ScrollHandle,
     entity: Entity<PlayerTable>,
-    is_expanded: bool,
-    /// How far the row's disclosure has turned; it also fades the detail in.
+    detail: RowDetail,
+    /// How far the row's disclosure has turned.
     turn: f32,
     selected: bool,
     alt_held: bool,
@@ -1756,18 +1822,21 @@ struct RowLayout<'a> {
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
 /// same handle the header's scrolling portion tracks, so both stay aligned.
 /// Mirrors the egui app's `num_sticky_cols(3)`. Each cell is a
-/// `render_column_cell`, so when `layout.is_expanded` every column's detail
-/// grows downward under its own column (achievements under Name, the build
-/// under Skills, the damage breakdowns under ActualDamage/ReceivedDamage);
-/// the row's `items_start` top-aligns the columns and its height is the
+/// `render_column_cell`, so while `layout.detail` is shown every column's
+/// detail grows downward under its own column (achievements under Name, the
+/// build under Skills, the damage breakdowns under
+/// ActualDamage/ReceivedDamage); the row's `items_start` top-aligns the
+/// columns and its height is the
 /// tallest column. A double-click anywhere on the row toggles expansion,
 /// mirroring the egui app's whole-row double-click handler in
 /// `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
     // A collapsed row is one line of cells and reads across, so its cells are
-    // centred on that line; an expanded row grows detail downward under each
+    // centred on that line; a row showing detail grows it downward under each
     // column, which only lines up if the columns start at the same top edge.
-    let align_top = layout.is_expanded;
+    // That holds while the detail moves too: centred, the cells without
+    // detail would drift down as the row grows and snap back up once open.
+    let align_top = layout.detail.is_shown();
     let mut sticky = h_flex()
         .min_w(px(0.))
         .max_w(relative(STICKY_MAX_FRACTION))
@@ -1862,7 +1931,7 @@ impl Render for PlayerTable {
             self.alt_held = false;
         }
         if self.widths_dirty {
-            self.column_widths = measure_column_widths(&self.model, self.debug, &self.expanded, window);
+            self.column_widths = measure_column_widths(&self.model, self.debug, &self.expanded, &self.closing, window);
             self.widths_dirty = false;
         }
 
@@ -1918,10 +1987,10 @@ impl Render for PlayerTable {
         let entity = cx.entity();
         let h_scroll = self.h_scroll.clone();
         let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
-            let (db_id, is_expanded) = {
+            let (db_id, is_expanded, is_closing) = {
                 let table = entity.read(cx);
                 let db_id = table.model.rows[ix].db_id;
-                (db_id, table.expanded.contains(&db_id))
+                (db_id, table.expanded.contains(&db_id), table.closing.contains(&db_id))
             };
             // Keyed by `db_id`: the row's own ids are list positions.
             let turn = crate::motion::disclosure_turn(
@@ -1930,6 +1999,21 @@ impl Render for PlayerTable {
                 window,
                 cx,
             );
+            let detail = RowDetail::from_reveal(
+                crate::motion::reveal_progress(
+                    ("replay-row-detail", db_id.raw().cast_unsigned()),
+                    is_expanded,
+                    window,
+                    cx,
+                ),
+                is_expanded,
+            );
+            // Deferred because the list is mid-render; the widths it frees
+            // apply from the next frame.
+            if is_closing && !detail.is_shown() {
+                let entity = entity.clone();
+                cx.defer(move |cx| entity.update(cx, |table, cx| table.finish_closing(db_id, cx)));
+            }
             let table = entity.read(cx);
             let row = &table.model.rows[ix];
             let selected = table.selected == Some(db_id);
@@ -1943,7 +2027,7 @@ impl Render for PlayerTable {
                 debug: table.debug,
                 h_scroll: &h_scroll,
                 entity: entity.clone(),
-                is_expanded,
+                detail,
                 turn,
                 selected,
                 alt_held: table.alt_held,
@@ -2226,6 +2310,8 @@ mod tests {
     #[gpui_kit::test]
     fn an_expanded_rows_dots_stay_on_its_first_line(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        // The layout of an open row is what is asserted, not its opening.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let window = cx.open_window(size(px(1400.), px(600.)), |_window, cx| {
             let mut model = two_row_model();
             // Damage events give the Name column detail several lines tall.

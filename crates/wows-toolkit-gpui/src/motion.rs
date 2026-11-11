@@ -12,6 +12,7 @@ use gpui_kit::IntoElement;
 use gpui_kit::RenderOnce;
 use gpui_kit::Styled;
 use gpui_kit::Window;
+use gpui_kit::base::MotionValue;
 use gpui_kit::base::Transition;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Icon;
@@ -30,6 +31,17 @@ pub fn disclosure_turn(id: impl Into<ElementId>, open: bool, window: &mut Window
     // The first draw adopts the state as it is, so a caret scrolled into
     // view or drawn already open does not turn.
     gpui_kit::base::transition((id.into(), "disclosure"), if open { 1.0_f32 } else { 0.0 }, policy, window, cx)
+}
+
+/// How far a block of content has opened, from 0 closed to 1 open, and
+/// whether it is still moving.
+///
+/// Slower than a caret turn: it moves everything below it. The id rule of
+/// [`disclosure_turn`] applies.
+pub fn reveal_progress(id: impl Into<ElementId>, open: bool, window: &mut Window, cx: &mut App) -> MotionValue<f32> {
+    let tokens = cx.theme().motion_tokens();
+    let policy = Transition::new(tokens.duration_normal).easing(tokens.easing_move.clone());
+    gpui_kit::base::transition_with_status((id.into(), "reveal"), if open { 1.0_f32 } else { 0.0 }, policy, window, cx)
 }
 
 /// A caret that points right at `turn` 0 and down at 1.
