@@ -95,19 +95,30 @@ pub fn slide_progress(id: impl Into<ElementId>, open: bool, window: &mut Window,
     gpui_kit::base::transition_with_status((id.into(), "slide"), if open { 1.0_f32 } else { 0.0 }, policy, window, cx)
 }
 
-/// A side panel part way open: its slot holds the full `width` for the whole
-/// move, and the content slides across it from the window's edge, clipped
-/// at the slot. Only the panel moves; what sits beside it is laid out once
-/// at the start of the move rather than reflowing on every frame, which in
-/// a table costs more than a frame.
+/// A side panel `width` wide at the `edge` of its positioned container,
+/// open to `progress`. It is drawn over what shares the container with it
+/// and moves whole, so it has to paint its own ground; the caller draws it
+/// after that content, and clips the container if the shut panel must not
+/// show past its edge.
+///
+/// Open and at rest it covers the strip [`slide_inset`] keeps clear beside
+/// it. While it moves that strip is not kept, so the content beside the
+/// panel is laid out once as a close starts and once as an open ends rather
+/// than on every frame, which in a table costs more than a frame.
 pub fn slide_frame(width: Pixels, progress: f32, edge: Edge, content: AnyElement) -> AnyElement {
     let hidden = width * (1.0 - progress.clamp(0.0, 1.0));
-    let inner = div().absolute().top_0().h_full().w(width).child(content);
-    let inner = match edge {
-        Edge::Left => inner.left(-hidden),
-        Edge::Right => inner.left(hidden),
+    let frame = div().absolute().top_0().bottom_0().w(width).child(content);
+    let frame = match edge {
+        Edge::Left => frame.left(-hidden),
+        Edge::Right => frame.right(-hidden),
     };
-    div().relative().flex_none().h_full().w(width).overflow_hidden().child(inner).into_any_element()
+    frame.into_any_element()
+}
+
+/// How much of its container a [`slide_frame`] panel takes from the content
+/// beside it: its `width` once it has come to rest open, nothing otherwise.
+pub fn slide_inset(width: Pixels, motion: MotionValue<f32>, open: bool) -> Pixels {
+    if open && settled(motion) { width } else { px(0.) }
 }
 
 /// Whether a slide or reveal has come to rest.

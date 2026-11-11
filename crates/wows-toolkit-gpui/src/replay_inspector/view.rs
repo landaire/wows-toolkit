@@ -37,9 +37,6 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::popover::PopoverState;
-use gpui_kit::component::resizable::ResizableState;
-use gpui_kit::component::resizable::h_resizable;
-use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -67,6 +64,8 @@ use super::panel::ReplayPanel;
 use crate::replay_index::SourceScope;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
+use crate::side_split::SideSplit;
+use crate::side_split::SideWidth;
 use crate::stats::directory::DirectoryStatsRequested;
 use folder_index::FolderIndex;
 use folder_index::Offer;
@@ -169,9 +168,8 @@ pub struct ReplayInspectorView {
     _install_root_check: Option<Task<()>>,
     /// The language the listings' figures are grouped in.
     locale: Option<String>,
-    /// The listing's split, held so its dragged width can be read while the
-    /// listing slides open or shut outside the split.
-    listing_split: Entity<ResizableState>,
+    /// How wide the listing is drawn, kept while it is shut.
+    listing_width: Entity<SideWidth>,
     /// The collaborative session, hosted or joined from this tab's header.
     collab: crate::collab::CollabState,
     /// The two fields the session popover writes into, held so a name typed
@@ -451,7 +449,7 @@ impl ReplayInspectorView {
             install_root: None,
             _install_root_check: None,
             locale: None,
-            listing_split: cx.new(|_| ResizableState::default()),
+            listing_width: cx.new(|_| SideWidth::new(BROWSER_WIDTH, BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)),
             collab: crate::collab::CollabState::default(),
             collab_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string())),
@@ -2304,8 +2302,6 @@ impl Render for ReplayInspectorView {
                 // children: this is the body, and the listing beside the
                 // replays is a full-height column rather than a toolbar item.
                 div().flex().flex_row().flex_1().min_h(px(0.)).child({
-                    let open = !self.replay_settings.listing_collapsed;
-                    let shown = crate::motion::slide_progress("replay-listing-slide", open, window, cx);
                     let folder_tabs = self.render_folder_tabs(cx);
                     let body = match self.render_folder_notice(cx) {
                         Some(missing) => missing,
@@ -2316,53 +2312,13 @@ impl Render for ReplayInspectorView {
                         .child(listing_header(entity.clone(), self, cx))
                         .child(folder_tabs)
                         .child(div().flex_1().min_h(px(0.)).child(body));
-                    if crate::motion::settled(shown) && !open {
-                        div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
-                    } else if crate::motion::settled(shown) {
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .child(
-                                h_resizable("replay-inspector-split")
-                                    .with_state(&self.listing_split)
-                                    .child(
-                                        resizable_panel()
-                                            .size(BROWSER_WIDTH)
-                                            .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
-                                            .flex_none()
-                                            .child(listing),
-                                    )
-                                    .child(resizable_panel().child(dock_content)),
-                            )
-                            .into_any_element()
-                    } else {
-                        // Before the split has ever been laid out it holds no
-                        // sizes, and the listing then opens at the width the
-                        // split would give it.
-                        let width = self
-                            .listing_split
-                            .read(cx)
-                            .sizes()
-                            .first()
-                            .copied()
-                            .unwrap_or(BROWSER_WIDTH)
-                            // The split stores a width the window has rescaled
-                            // and draws it clamped; the slide uses what shows.
-                            .clamp(BROWSER_MIN_WIDTH, BROWSER_MAX_WIDTH);
-                        h_flex()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .h_full()
-                            .items_start()
-                            .child(crate::motion::slide_frame(
-                                width,
-                                shown.value,
-                                crate::motion::Edge::Left,
-                                listing.into_any_element(),
-                            ))
-                            .child(div().flex_1().min_w(px(0.)).h_full().child(dock_content))
-                            .into_any_element()
-                    }
+                    SideSplit::new(
+                        "replay-listing",
+                        &self.listing_width,
+                        !self.replay_settings.listing_collapsed,
+                        listing,
+                        dock_content,
+                    )
                 }),
             )
     }

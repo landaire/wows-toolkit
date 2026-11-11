@@ -1450,6 +1450,7 @@ impl Render for ReplayPanel {
                         crate::motion::Edge::Right,
                         v_flex()
                             .size_full()
+                            .bg(cx.theme().background)
                             .border_l_1()
                             .border_color(border)
                             .child(header)
@@ -1497,11 +1498,16 @@ impl Render for ReplayPanel {
                     .child(context_line)
                     .child(figures);
 
+                let table_inset = side_slot
+                    .as_ref()
+                    .map_or(px(0.), |_| crate::motion::slide_inset(SIDE_PANEL_WIDTH, slid, side_panel_open));
                 let content = v_flex().size_full().child(header_band).child(
                     h_flex()
+                        .relative()
                         .flex_1()
                         .min_h(px(0.))
-                        .child(div().flex_1().min_w(px(0.)).h_full().child(table))
+                        .overflow_hidden()
+                        .child(div().flex_1().min_w(px(0.)).h_full().mr(table_inset).child(table))
                         .children(side_slot),
                 );
                 // Fades in where the outline was. The id holds while the
