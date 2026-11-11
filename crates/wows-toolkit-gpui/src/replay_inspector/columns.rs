@@ -411,8 +411,8 @@ fn player_tone(kind: PlayerColorKind, tones: &crate::theme::Semantic) -> u32 {
     }
 }
 
-/// The team/division-relative color of a row: the ship-class icon tint, the
-/// row's background tint and the actions menu heading. `pub(crate)` for the
+/// The team/division-relative color of a row: the ship-class icon tint and
+/// the actions menu heading. `pub(crate)` for the
 /// render layer (`table.rs`).
 pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_self_division_mate {
@@ -465,7 +465,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 parts.push(clan.clone());
             }
             parts.push(row.display_name.clone());
-            // The row's tint says the team; the name is marked only for abuse.
+            // The stripe and class icon say the team; the name is marked only for abuse.
             let text = parts.join(" ");
             if row.is_abuser {
                 CellValue::colored(text, ColorRole::Player(PlayerColorKind::Abuser))
@@ -644,7 +644,7 @@ mod tests {
         let cell = cell_value(&row, ReplayColumn::Name, false);
 
         assert_eq!(cell.text, "(A) [ABC] Steve");
-        assert_eq!(cell.color, None, "the row's tint says the team");
+        assert_eq!(cell.color, None, "the stripe and class icon say the team");
     }
 
     #[test]

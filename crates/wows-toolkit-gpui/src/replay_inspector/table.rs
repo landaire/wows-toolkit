@@ -1643,7 +1643,7 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, turn: f32) -> AnyElement
 /// egui app's `cell_content_ui` `ReplayColumn::Name` arm, which makes one
 /// separate `ui.add`/`ui.label` call per segment.
 fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
-    // The row's tint says the team; the name is marked only for abuse.
+    // The stripe and class icon say the team; the name is marked only for abuse.
     let name_color = row.is_abuser.then(|| resolve_color(ColorRole::Player(PlayerColorKind::Abuser)));
     let icon_tint = class_icon_tint(player_color_kind(row));
 
@@ -2730,18 +2730,6 @@ fn placed_cell(cell: AnyElement, col: ReplayColumn, layout: &RowLayout) -> AnyEl
         .into_any_element()
 }
 
-/// A faint wash of a row's side over its ground: allies green, enemies red,
-/// division mates gold. The replay owner's row keeps the plain ground. Faint
-/// enough that the figures, rating chips and damage bars read over it as
-/// they do over the plain stripe.
-fn row_tint(row: &PlayerRow) -> Option<Hsla> {
-    let strength = if crate::theme::is_dark_mode() { 0.10 } else { 0.12 };
-    match player_color_kind(row) {
-        PlayerColorKind::SelfPlayer => None,
-        kind => Some(Hsla::from(rgb(player_color_kind_rgb(kind))).opacity(strength)),
-    }
-}
-
 /// One row: `layout.sticky_columns` (Actions/Name/ShipName) render as fixed
 /// per-column cells outside the horizontal scroll; `layout.scroll_columns`
 /// render inside a nested scroll container tracking `layout.h_scroll`, the
@@ -2825,8 +2813,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, cx: &App) -> AnyEl
     });
 
     // Selection is what a ctrl+click leaves behind, over the stripe; the
-    // egui table paints the same two (`ui/replay_parser/mod.rs:3011`). Both,
-    // and the hover, carry the row's team tint.
+    // egui table paints the same two (`ui/replay_parser/mod.rs:3011`).
     let background = layout.fade_to;
     let hover_bg = layout.fade_to_hovered;
     let select_entity = layout.entity.clone();
@@ -3004,16 +2991,13 @@ impl Render for PlayerTable {
             let row = &table.model.rows[ix];
             let selected = table.selected == Some(db_id);
             // What the row is painted with, so a cut-off detail and the
-            // detail's well match it: the stripe or the selection, washed
-            // with the row's side.
-            let ground = if selected {
+            // detail's well match it: the stripe or the selection.
+            let fade_to = if selected {
                 cx.theme().selection
             } else {
                 crate::ui::stripe(ix, cx).unwrap_or(cx.theme().background)
             };
-            let tint = row_tint(row);
-            let fade_to = tint.map_or(ground, |tint| ground.blend(tint));
-            let fade_to_hovered = tint.map_or(hover_bg, |tint| hover_bg.blend(tint));
+            let fade_to_hovered = hover_bg;
             let layout = RowLayout {
                 sticky_cap,
                 sticky_columns: &sticky_columns,
@@ -4336,10 +4320,10 @@ mod tests {
         assert_eq!(copied, Some(super::connection_hover_text(&note)));
     }
 
-    /// The owner, an ally and an enemy each get their own row ground, and a
-    /// figure reads in the same colour on every side.
+    /// A figure reads in the same colour on every side: the team is the
+    /// row's stripe and class icon, not its numbers.
     #[test]
-    fn rows_carry_the_side_and_figures_do_not() {
+    fn figures_read_the_same_on_every_side() {
         let row = |id, relation, is_self| super::PlayerRow {
             base_xp_text: Some("1,200".to_string()),
             actual_damage_text: Some("50,000".to_string()),
@@ -4349,10 +4333,6 @@ mod tests {
         };
         let (owner, ally, enemy) = (row(1, 0, true), row(2, 1, false), row(3, 2, false));
 
-        let tints = [&owner, &ally, &enemy].map(super::row_tint);
-
-        assert_eq!(tints[0], None, "the owner's row keeps the plain ground");
-        assert!(tints[1].is_some() && tints[2].is_some() && tints[1] != tints[2], "{tints:?}");
         for col in [ReplayColumn::BaseXp, ReplayColumn::ActualDamage, ReplayColumn::ReceivedDamage, ReplayColumn::Hits]
         {
             let colors = [&owner, &ally, &enemy].map(|row| super::cell_value(row, col, false).color);
