@@ -15,17 +15,11 @@ use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
-/// Zoom factor applied when the `zoom_factor` setting has never been saved,
-/// matching the egui app's documented default.
-pub const DEFAULT_ZOOM: f32 = 1.15;
-
-/// Bounds for the zoom slider, mirroring the egui settings tab.
-pub const MIN_ZOOM: f32 = 0.5;
-pub const MAX_ZOOM: f32 = 2.0;
+use crate::zoom::ZoomFactor;
 
 /// Settings read from the shared config DB, applied once at startup.
 pub struct GpuiSettings {
-    pub zoom: f32,
+    pub zoom: ZoomFactor,
     /// Which palette to render in. The egui app writes the same setting, so
     /// the two open in the theme the user last chose in either.
     pub theme: ThemeChoice,
@@ -110,7 +104,9 @@ impl GpuiSettings {
     /// Load all leaf settings this tab displays. Each `get_setting` miss falls
     /// back to that field's documented default rather than a sentinel value.
     pub async fn load(pool: &SqlitePool) -> Self {
-        let zoom = queries::get_setting::<f32>(pool, keys::ZOOM_FACTOR).await.unwrap_or(DEFAULT_ZOOM);
+        // Clamped: the slider and the shortcuts only offer this range.
+        let zoom =
+            queries::get_setting::<f32>(pool, keys::ZOOM_FACTOR).await.map_or(ZoomFactor::DEFAULT, ZoomFactor::new);
         // Never chosen means follow the desktop, which is the egui default.
         let theme = queries::get_setting::<ThemeChoice>(pool, keys::THEME).await.unwrap_or_default();
         let twitch_token = queries::get_setting::<TwitchToken>(pool, twitch_keys::TOKEN).await;

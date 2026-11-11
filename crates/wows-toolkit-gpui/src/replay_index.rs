@@ -9,16 +9,17 @@
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
+use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::unindexable::Unindexable;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
@@ -28,6 +29,79 @@ use crate::replay_inspector::load::parse_replay;
 
 /// The extension the game records replays under.
 const REPLAY_EXTENSION: &str = "wowsreplay";
+
+/// The index source a listed replay is written under.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SourceScope {
+    /// The install's replays directory: the single Live source, which the
+    /// Player Tracker's clan list reads alone.
+    Live,
+    /// A directory the reader opened, under a source of its own, as the egui
+    /// app indexes each directory workspace.
+    Folder(PathBuf),
+}
+
+impl SourceScope {
+    /// The scope's source, created when absent. `live_root` roots the Live
+    /// source when this is the first write to it.
+    ///
+    /// A folder whose directory some other source already owns resolves to
+    /// that source, as a directory has one source whatever kind registered
+    /// it, unless that source is the Live one: a chosen folder never writes
+    /// into it.
+    pub async fn ensure(
+        &self,
+        pool: &SqlitePool,
+        live_root: &Path,
+        now: Timestamp,
+    ) -> Result<SourceId, ScopeSourceError> {
+        let Self::Folder(root) = self else {
+            return Ok(query::ensure_default_source(pool, live_root, now).await?);
+        };
+
+        let name = crate::replay_inspector::view::shortened_path(root);
+        let source = query::ensure_source(pool, &name, SourceKind::ImportedDir, root, now).await?;
+        if query::live_source_id(pool).await? == Some(source) {
+            return Err(ScopeSourceError::LiveRoot { root: root.clone() });
+        }
+
+        Ok(source)
+    }
+
+    /// The scope's source, or `None` while nothing has created it. Readers
+    /// call this rather than [`Self::ensure`]. A folder never reads the Live
+    /// source, for the reason [`Self::ensure`] never writes it.
+    pub async fn existing(&self, pool: &SqlitePool) -> Result<Option<SourceId>, IndexError> {
+        let Self::Folder(root) = self else {
+            return query::live_source_id(pool).await;
+        };
+
+        let sources = query::list_sources(pool).await?;
+        Ok(sources
+            .into_iter()
+            .find(|source| source.root_path.as_deref() == Some(root))
+            .filter(|source| source.kind != SourceKind::Live)
+            .map(|source| source.id))
+    }
+}
+
+/// Why a scope has no source to write under.
+#[derive(Debug, thiserror::Error)]
+pub enum ScopeSourceError {
+    #[error(transparent)]
+    Index(#[from] IndexError),
+    /// The directory is where the Live source is rooted, which a chosen
+    /// folder must not write into.
+    #[error("{} is indexed as the game's own replays directory", root.display())]
+    LiveRoot { root: PathBuf },
+}
+
+/// One replay and the source it is written under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedReplay {
+    pub path: PathBuf,
+    pub scope: SourceScope,
+}
 
 /// How far a build has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -106,6 +180,8 @@ pub enum IndexOneError {
     Parse(#[source] crate::replay_inspector::ReplayLoadError),
     #[error("the rows could not be stored")]
     Store(#[from] wows_toolkit_config::index::rows::IndexError),
+    #[error("the replay has no source to be stored under")]
+    Source(#[from] ScopeSourceError),
 }
 
 impl IndexOneError {
@@ -125,7 +201,8 @@ impl IndexOneError {
                 | ReplayLoadError::GameData(_)
                 | ReplayLoadError::AltRefused(_),
             )
-            | Self::Store(_) => false,
+            | Self::Store(_)
+            | Self::Source(_) => false,
         }
     }
 }
@@ -182,7 +259,8 @@ pub fn index_one(
     Ok(())
 }
 
-/// Walks `root` and indexes every replay under it, reporting as it goes.
+/// Walks `root` and indexes every replay under it into `source_id`,
+/// reporting as it goes.
 ///
 /// One replay's failure does not stop the pass: a directory of a few hundred
 /// replays reliably holds one the parser cannot read, and stopping there
@@ -190,18 +268,17 @@ pub fn index_one(
 ///
 /// `cancel` is checked between replays, so a build stops within one parse of
 /// being asked to.
+#[allow(clippy::too_many_arguments)]
 pub fn build_index(
     runtime: &tokio::runtime::Runtime,
     pool: &SqlitePool,
+    source_id: SourceId,
     root: &Path,
     game_data: &GameDataCache,
-    cancel: &Arc<AtomicBool>,
+    cancel: &AtomicBool,
     mode: IndexMode,
     report: impl Fn(IndexProgress),
-) -> Result<IndexProgress, wows_toolkit_config::index::rows::IndexError> {
-    let now = Timestamp::now();
-    let source_id = runtime.block_on(query::ensure_default_source(pool, root, now))?;
-
+) -> Result<IndexProgress, IndexError> {
     // What is already in, so a second run costs a directory listing rather than
     // a re-parse of every replay in it. The egui app skips on the same ledger
     // (`task/replays.rs:1434`).
@@ -255,37 +332,48 @@ pub fn build_index(
     Ok(progress)
 }
 
-/// Reads each of `paths` again and rewrites everything the index holds for
-/// it, whatever an earlier pass stored or recorded as unreadable.
+/// Reads each of `replays` and writes everything the index holds for it
+/// under its own scope's source, whatever an earlier pass recorded as
+/// unreadable.
 ///
-/// `root` is the install's replays directory, which the index's own source
-/// is rooted at if this pass is the first to create it; the replays need not
-/// be under it. `cancel` is checked between replays, as in [`build_index`].
+/// `live_root` roots the Live source if this pass is the first to create it;
+/// the replays need not be under it. Every scope's source is resolved before
+/// any replay is read. `cancel` is checked between replays, as in
+/// [`build_index`].
 #[allow(clippy::too_many_arguments)]
 pub fn reindex_replays(
     runtime: &tokio::runtime::Runtime,
     pool: &SqlitePool,
-    root: &Path,
-    paths: &[PathBuf],
+    live_root: &Path,
+    replays: &[ScopedReplay],
+    write_mode: IndexWriteMode,
     game_data: &GameDataCache,
     cancel: &AtomicBool,
     report: impl Fn(IndexProgress),
-) -> Result<IndexProgress, wows_toolkit_config::index::rows::IndexError> {
-    let mut progress = IndexProgress { total: paths.len() as u64, ..IndexProgress::default() };
-    if paths.is_empty() {
+) -> Result<IndexProgress, ScopeSourceError> {
+    let mut progress = IndexProgress { total: replays.len() as u64, ..IndexProgress::default() };
+    if replays.is_empty() {
         return Ok(progress);
     }
 
-    let source_id = runtime.block_on(query::ensure_default_source(pool, root, Timestamp::now()))?;
+    let mut sources: std::collections::HashMap<&SourceScope, SourceId> = std::collections::HashMap::new();
+    for replay in replays {
+        if !sources.contains_key(&replay.scope) {
+            let source = runtime.block_on(replay.scope.ensure(pool, live_root, Timestamp::now()))?;
+            sources.insert(&replay.scope, source);
+        }
+    }
     let mut unindexable = runtime.block_on(Unindexable::load(pool));
     let mut ledger_changed = false;
     report(progress);
 
-    for path in paths {
+    for replay in replays {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        match index_one(runtime, pool, path, game_data, source_id, Timestamp::now(), IndexWriteMode::Replace) {
+        let path = &replay.path;
+        let source_id = sources[&replay.scope];
+        match index_one(runtime, pool, path, game_data, source_id, Timestamp::now(), write_mode) {
             // A file that reads is no longer one for later passes to skip.
             Ok(()) => {
                 progress.indexed += 1;

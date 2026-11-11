@@ -46,13 +46,6 @@ pub fn pool(cx: &App) -> Option<SqlitePool> {
 /// is the only one that matters, and two writes committing out of order would
 /// otherwise leave the older value in the row.
 pub fn save<T: Serialize>(key: &'static str, value: &T, cx: &mut App) {
-    let Some(held) = cx.try_global::<SettingsPool>() else {
-        tracing::warn!("settings: {key} was not saved because the config database is not open");
-        return;
-    };
-    let pool = held.0.clone();
-    let writes = held.1.clone();
-
     let json = match serde_json::to_string(value) {
         Ok(json) => json,
         Err(err) => {
@@ -60,6 +53,15 @@ pub fn save<T: Serialize>(key: &'static str, value: &T, cx: &mut App) {
             return;
         }
     };
+    #[cfg(test)]
+    SAVED.with(|saved| saved.borrow_mut().push((key, json.clone())));
+
+    let Some(held) = cx.try_global::<SettingsPool>() else {
+        tracing::warn!("settings: {key} was not saved because the config database is not open");
+        return;
+    };
+    let pool = held.0.clone();
+    let writes = held.1.clone();
     let generation = writes.next(key);
 
     cx.spawn(async move |cx: &mut AsyncApp| {
@@ -100,4 +102,17 @@ impl Writes {
     fn is_latest(&self, key: &'static str, generation: u64) -> bool {
         self.latest.lock().expect("settings write order lock").get(key) == Some(&generation)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every save asked for on this thread, as its key and its JSON: a test
+    /// window has no database to read them back from.
+    static SAVED: std::cell::RefCell<Vec<(&'static str, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Every save asked for on this thread so far, oldest first.
+#[cfg(test)]
+pub(crate) fn saved_for_test() -> Vec<(&'static str, String)> {
+    SAVED.with(|saved| saved.borrow().clone())
 }

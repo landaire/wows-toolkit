@@ -9,6 +9,9 @@
 #[path = "folders.rs"]
 mod folders;
 
+#[path = "folder_index.rs"]
+mod folder_index;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,6 +36,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::popover::PopoverState;
 use gpui_kit::component::resizable::ResizableState;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
@@ -59,9 +63,12 @@ use super::panel::PanelSetup;
 use super::panel::RenderRequested;
 use super::panel::ReparseCause;
 use super::panel::ReplayPanel;
+use crate::replay_index::SourceScope;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
 use crate::stats::directory::DirectoryStatsRequested;
+use folder_index::FolderIndex;
+use folder_index::Offer;
 use folders::FolderHistory;
 use folders::FolderId;
 use folders::FolderSource;
@@ -233,7 +240,7 @@ pub struct ReplayInspectorView {
     /// row in step.
     replay_settings: ReplaySettings,
     /// What the reader agreed to share, which decides what a finished battle
-    /// contributes. Seeded from the row the Settings tab writes.
+    /// contributes. Seeded from the row the Settings drawer writes.
     data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
     /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
     /// the shared config DB in `apply_settings`, then flippable at runtime via
@@ -257,6 +264,9 @@ pub struct ReplayInspectorView {
     /// replay replaces, and so cancels, the older one, so a burst of writes
     /// is read once and an earlier read never overwrites a later one.
     auto_exports: HashMap<PathBuf, Task<()>>,
+    /// Whether the app's own index pass is running, which a second pass from
+    /// the listing header would race.
+    index_pass_running: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -275,7 +285,7 @@ pub struct InspectorSettings {
     pub auto_load_latest_replay: bool,
     /// The locale the listing's figures are grouped in.
     pub locale: Option<String>,
-    /// The name a session appears under, as the Settings tab stores it. The
+    /// The name a session appears under, as the Settings drawer stores it. The
     /// popover writes the same row back, so a name set in either holds in
     /// both.
     pub collab_display_name: String,
@@ -300,8 +310,17 @@ impl EventEmitter<CheckGameDataRequested> for ReplayInspectorView {}
 pub(crate) struct AutoloadChanged(pub bool);
 impl EventEmitter<AutoloadChanged> for ReplayInspectorView {}
 
-/// Requests a directory search in the shared Search tab.
-pub struct SearchDirectory(pub PathBuf);
+/// Requests a search over one folder's index source in the shared Search tab.
+pub struct SearchFolder(pub SourceScope);
+
+/// The reader asked for a folder's listed replays that its index source does
+/// not hold yet to be indexed.
+///
+/// Raised to the app, which owns the index pass.
+pub struct IndexFolderRequested {
+    pub scope: SourceScope,
+    pub candidates: Vec<crate::force_reindex::ReindexCandidate>,
+}
 
 /// The listing holds replays from builds nothing on this machine can read.
 ///
@@ -351,7 +370,8 @@ enum TabShown {
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
-impl EventEmitter<SearchDirectory> for ReplayInspectorView {}
+impl EventEmitter<SearchFolder> for ReplayInspectorView {}
+impl EventEmitter<IndexFolderRequested> for ReplayInspectorView {}
 impl EventEmitter<SessionShared> for ReplayInspectorView {}
 impl EventEmitter<TacticsBoardRequested> for ReplayInspectorView {}
 impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
@@ -456,6 +476,7 @@ impl ReplayInspectorView {
             contributing: None,
             next_batch: crate::status_bar::RunNumber(0),
             auto_exports: HashMap::new(),
+            index_pass_running: false,
             _subscriptions: vec![dock_subscription],
         }
     }
@@ -538,6 +559,7 @@ impl ReplayInspectorView {
             self.game_data_status = GameDataStatus::Failed(t!("ui.messages.wows_dir_not_set").into_owned());
             self.scan_install(wows_dir, cx);
             self.share_game_data(cx);
+            self.index_listed_folders(cx);
             return;
         }
 
@@ -572,6 +594,8 @@ impl ReplayInspectorView {
         // The listing's hover previews bake against whichever build a replay
         // was recorded on, which is what this cache loads.
         self.share_game_data(cx);
+        // The chosen directories' replays are read through this cache too.
+        self.index_listed_folders(cx);
 
         let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -654,7 +678,8 @@ impl ReplayInspectorView {
                 // every battle" means, and the egui app writes it from the
                 // background parser for the same reason.
                 self.auto_export_landed(path, window, cx);
-                self.index_landed(path, cx);
+                let scope = browser.read(cx).index_scope();
+                self.index_landed(path, scope, cx);
                 self.contribute_landed(path, cx);
                 // A battle the game has just finished opens and is announced
                 // whichever tab is shown, as the checkbox promises. Elsewhere,
@@ -878,10 +903,11 @@ impl ReplayInspectorView {
     }
 
     /// Every replay a palette command re-indexes, each once: the install's
-    /// directory and the pinned ones.
+    /// directory and the pinned ones, each replay under its own directory's
+    /// source.
     ///
-    /// A directory opened once is left out; it may hold other players'
-    /// replays, which do not belong in the reader's own index unasked.
+    /// A directory opened once is left out: a palette command covers the
+    /// directories the reader keeps.
     pub(crate) fn reindex_candidates(&self, cx: &App) -> Vec<crate::force_reindex::ReindexCandidate> {
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         let mut candidates = Vec::new();
@@ -1196,7 +1222,8 @@ impl ReplayInspectorView {
         .detach();
     }
 
-    /// Puts a battle that has just landed into the replay index.
+    /// Puts a battle that has just landed into the replay index, under the
+    /// source of the directory it landed in.
     ///
     /// The egui app indexes each replay as its background parser reads it
     /// (`task/replays.rs:540`), so an index fills as you play. Without this the
@@ -1205,23 +1232,19 @@ impl ReplayInspectorView {
     ///
     /// Its own parse, deliberately: this runs whether or not the replay is opened,
     /// and a tab that opens it will not be waiting on this.
-    fn index_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+    fn index_landed(&mut self, path: &std::path::Path, scope: SourceScope, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else { return };
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         let Some(runtime) = crate::runtime::runtime(cx) else { return };
-        let Some(root) = path.parent().map(std::path::Path::to_path_buf) else { return };
+        // Roots the Live source when this battle is the first thing it holds.
+        let Some(live_root) = path.parent().map(std::path::Path::to_path_buf) else { return };
         let path = path.to_path_buf();
 
         cx.spawn(async move |_this, cx| {
             let indexed = cx
                 .background_spawn(async move {
                     let now = jiff::Timestamp::now();
-                    let source =
-                        runtime.block_on(wows_toolkit_config::index::query::ensure_default_source(&pool, &root, now));
-                    let source = match source {
-                        Ok(source) => source,
-                        Err(err) => return Err(err.to_string()),
-                    };
+                    let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
                     crate::replay_index::index_one(
                         &runtime,
                         &pool,
@@ -1231,7 +1254,6 @@ impl ReplayInspectorView {
                         now,
                         wows_toolkit_config::index::rows::IndexWriteMode::Incremental,
                     )
-                    .map_err(|err| err.to_string())
                 })
                 .await;
             if let Err(err) = indexed {
@@ -1806,7 +1828,7 @@ impl ReplayInspectorView {
         cx.spawn(async move |this, cx| {
             let Some(file) = asked.await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
-                // What the Settings tab reports as the current replay: the one
+                // What the Settings drawer reports as the current replay: the one
                 // the reader named, which is what the egui app writes here too.
                 crate::settings_store::save(wows_toolkit_viewmodel::settings::keys::CURRENT_REPLAY_PATH, &file, cx);
                 this.open_replay(file, window, cx);
@@ -1869,7 +1891,7 @@ impl ReplayInspectorView {
     /// replay tab (mirroring `set_debug_mode`'s live-propagation pattern) so
     /// the table(s) update immediately rather than only on the next replay
     /// opened.
-    /// Replaces the whole settings blob, for an edit made on the Settings tab
+    /// Replaces the whole settings blob, for an edit made in the Settings drawer
     /// rather than through this header's own checkboxes.
     pub(crate) fn set_replay_settings(&mut self, settings: ReplaySettings, cx: &mut Context<Self>) {
         // Adopted, not announced: this came from the row, so saying it
@@ -1896,11 +1918,37 @@ impl ReplayInspectorView {
     }
 }
 
-/// The listing's own header: its caption, and the listing's options and open
-/// actions, which belong to the listing rather than to whichever replay is
-/// showing. The status bar shows and hides the listing.
+/// The listing's own header: its caption, the selected folder's search and
+/// index actions, and the listing's options and open actions, which belong to
+/// the listing rather than to whichever replay is showing. The status bar
+/// shows and hides the listing.
 fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorView, cx: &App) -> impl IntoElement {
+    let searching = entity.downgrade();
+    let search = header_action(
+        Button::new("replay-listing-search").icon(crate::icons::Glyph::Search),
+        view.search_offer(),
+        t!("ui.replay.search_these_replays").into_owned(),
+    )
+    .on_click(move |_event, window, cx| {
+        let _ = searching.update(cx, |view, cx| view.search_selected_folder(window, cx));
+    });
+    let indexing = entity.downgrade();
+    let index = header_action(
+        Button::new("replay-listing-index").icon(crate::icons::Glyph::Database),
+        view.index_offer(),
+        t!("ui.index_folder.tooltip").into_owned(),
+    )
+    .on_click(move |_event, _window, cx| {
+        let _ = indexing.update(cx, |view, cx| view.index_selected_folder(cx));
+    });
+    let details = FolderDetails {
+        path: view.selected_folder_path(),
+        game_data_ready: matches!(view.game_data_status, GameDataStatus::Ready(_)),
+    };
+
     h_flex()
+        .id("replay-listing-header")
+        .test_support()
         .flex_none()
         .gap_1()
         .items_center()
@@ -1917,12 +1965,36 @@ fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorVie
                 .font_weight(FontWeight::BOLD)
                 .child(t!("ui.replay.listing_caption").to_string()),
         )
-        .child(listing_options_popover(entity.clone(), view.replay_settings.clone(), view.auto_load_latest_replay))
+        .child(search)
+        .child(index)
+        .child(listing_options_popover(
+            entity.clone(),
+            view.replay_settings.clone(),
+            view.auto_load_latest_replay,
+            details,
+        ))
         .child(listing_open_menu(entity))
 }
 
+/// An icon action in the listing header, disabled with the reason as its
+/// tooltip when it is not offered.
+fn header_action(button: Button, offer: Offer, tooltip: String) -> Button {
+    let button = button.ghost().small();
+    match offer {
+        Offer::Enabled => button.tooltip(tooltip),
+        Offer::Disabled(reason) => button.disabled(true).tooltip(reason),
+    }
+}
+
+/// What the listing options say about the selected folder.
+struct FolderDetails {
+    /// The folder's whole path, once it is known.
+    path: Option<PathBuf>,
+    game_data_ready: bool,
+}
+
 /// The listing's open actions: one replay file, or a directory of replays
-/// opened as a tab of its own above the listing.
+/// opened as a tab of its own in the strip under this header.
 fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
     let opening = entity.downgrade();
     Button::new("replay-listing-open")
@@ -1967,10 +2039,12 @@ fn column_filter_checkbox(
     })
 }
 
-/// The listing's options: autoload, grouping and the column filters of the
+/// The listing's options: the selected folder's path and the actions on the
+/// folder as a whole, then autoload, grouping and the column filters of the
 /// egui app's `build_replay_header` (`ui/replay_parser/mod.rs:3657`).
-/// `settings` and `auto_load` are snapshots: the `.content()` closure is
-/// rebuilt on every render of this view, so it reflects the latest state.
+/// `settings`, `auto_load` and `details` are snapshots: the `.content()`
+/// closure is rebuilt on every render of this view, so it reflects the latest
+/// state.
 ///
 /// Grouping is a row of exclusive buttons rather than a combo: a combo's list
 /// is drawn outside the popover, and a click on it would dismiss the popover
@@ -1980,6 +2054,7 @@ fn listing_options_popover(
     entity: Entity<ReplayInspectorView>,
     settings: ReplaySettings,
     auto_load: bool,
+    details: FolderDetails,
 ) -> impl IntoElement {
     Popover::new("replay-listing-options-menu")
         .anchor(Anchor::TopRight)
@@ -1991,6 +2066,7 @@ fn listing_options_popover(
                 .tooltip(t!("ui.replay.listing_options").to_string()),
         )
         .content(move |_state, _window, cx| {
+            let popover = cx.entity();
             let autoload_entity = entity.clone();
             let grouping_buttons: Vec<_> = GROUPINGS
                 .into_iter()
@@ -2011,9 +2087,19 @@ fn listing_options_popover(
                 })
                 .collect();
 
+            // Where a long path wraps.
+            const WIDTH: Pixels = px(300.);
+
             v_flex()
+                .w(WIDTH)
                 .gap_1()
                 .p_1()
+                .when_some(details.path.as_deref(), |menu, path| menu.child(folder_path_line(path)))
+                .child(check_game_data_item(entity.clone(), popover.clone()))
+                .when_some(details.path.clone(), |menu, path| {
+                    menu.child(directory_stats_item(entity.clone(), path, details.game_data_ready, popover.clone()))
+                })
+                .child(crate::ui::rule_h(cx))
                 .child(
                     Checkbox::new("replay-listing-auto-load-latest")
                         .label(t!("ui.replay.autoload_latest").to_string())
@@ -2050,6 +2136,75 @@ fn listing_options_popover(
                     settings.show_heals,
                     |settings, value| settings.show_heals = value,
                 ))
+        })
+}
+
+/// The selected folder's whole path, selectable for copying. It wraps rather
+/// than truncating, and says itself again on hover.
+fn folder_path_line(path: &std::path::Path) -> impl IntoElement {
+    let shown = shown_path(path);
+    let hover = shown.clone();
+    h_flex()
+        .id("replay-listing-folder-path")
+        .test_support()
+        .aria_label(shown.clone())
+        .gap_1()
+        .items_start()
+        .text_xs()
+        .text_color(crate::theme::text_dim())
+        .child(crate::icons::icon(crate::icons::Glyph::Folder))
+        .child(div().flex_1().min_w_0().child(crate::ui::selectable_text("replay-listing-folder-path-text", shown)))
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+}
+
+/// Asks which of the listed replays' game data is missing, with what that
+/// does said under it.
+fn check_game_data_item(entity: Entity<ReplayInspectorView>, popover: Entity<PopoverState>) -> impl IntoElement {
+    v_flex()
+        .gap_0p5()
+        .child(
+            Button::new("directory-game-data")
+                .icon(crate::icons::Glyph::Download)
+                .label(t!("ui.replay.check_game_data").to_string())
+                .compact()
+                .w_full()
+                .on_click(move |_event, window, cx| {
+                    entity.update(cx, |view, cx| {
+                        let missing = view.browser().read(cx).missing_builds();
+                        cx.emit(CheckGameDataRequested(missing));
+                    });
+                    popover.update(cx, |state, cx| state.dismiss(window, cx));
+                }),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.check_game_data_tooltip").to_string()),
+        )
+}
+
+/// Opens the stats of every replay under `directory` in a tab of its own.
+fn directory_stats_item(
+    entity: Entity<ReplayInspectorView>,
+    directory: PathBuf,
+    game_data_ready: bool,
+    popover: Entity<PopoverState>,
+) -> impl IntoElement {
+    Button::new("directory-stats")
+        .icon(IconName::ChartPie)
+        .label(t!("ui.stats.open_directory_stats").to_string())
+        .compact()
+        .w_full()
+        .disabled(!game_data_ready)
+        .tooltip(if game_data_ready {
+            t!("ui.stats.open_directory_stats_tooltip").to_string()
+        } else {
+            t!("ui.stats.directory_stats_unavailable").to_string()
+        })
+        .on_click(move |_event, window, cx| {
+            entity.update(cx, |_view, cx| cx.emit(DirectoryStatsRequested(directory.clone())));
+            popover.update(cx, |state, cx| state.dismiss(window, cx));
         })
 }
 
@@ -2090,10 +2245,6 @@ impl Render for ReplayInspectorView {
 
         let entity = cx.entity();
 
-        // Header toolbar: the session popover and, for a directory workspace,
-        // which directory is listed and what can be done with it. The listing's
-        // own options and open actions are in the listing's header, and
-        // rendering a replay is in the opened replay's own Actions menu.
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
@@ -2110,63 +2261,9 @@ impl Render for ReplayInspectorView {
         }
         self.share_session_with_renderers(cx);
         cx.defer_in(window, Self::open_what_the_host_asked_for);
-        let chosen_directory = self.browser().read(cx).chosen_directory().map(std::path::Path::to_path_buf);
-        let game_data_ready = matches!(self.game_data_status, GameDataStatus::Ready(_));
-        // Only a directory the reader opened has anything to say above the
-        // listing: which directory it is, and the actions on it.
-        let directory_header = chosen_directory.map(|directory| {
-            let shown = shown_path(&directory);
-            crate::ui::toolbar(cx)
-                .flex_wrap()
-                // Which directory is being listed, when it is not the
-                // install's: the rows otherwise look like the game's own and
-                // are not.
-                .child(
-                    h_flex()
-                        .id("replay-header-directory")
-                        .test_support()
-                        .aria_label(shown.clone())
-                        .max_w(px(280.))
-                        .min_w_0()
-                        .gap_1()
-                        .items_center()
-                        .text_xs()
-                        .text_color(crate::theme::text_dim())
-                        .child(crate::icons::icon(crate::icons::Glyph::Folder))
-                        .child(div().min_w_0().truncate().child(shown.clone()))
-                        .tooltip(move |window, cx| Tooltip::new(shown.clone()).build(window, cx))
-                        .into_any_element(),
-                )
-                .child(
-                    Button::new("directory-game-data")
-                        .label(t!("ui.replay.check_game_data").to_string())
-                        .compact()
-                        .tooltip(t!("ui.replay.check_game_data_tooltip").to_string())
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            let missing = this.browser().read(cx).missing_builds();
-                            cx.emit(CheckGameDataRequested(missing));
-                        })),
-                )
-                .child(
-                    Button::new("directory-stats")
-                        .icon(IconName::ChartPie)
-                        .label(t!("ui.stats.open_directory_stats").to_string())
-                        .compact()
-                        .disabled(!game_data_ready)
-                        .tooltip(if game_data_ready {
-                            t!("ui.stats.open_directory_stats_tooltip").to_string()
-                        } else {
-                            t!("ui.stats.directory_stats_unavailable").to_string()
-                        })
-                        .on_click(cx.listener(move |_this, _event, _window, cx| {
-                            cx.emit(DirectoryStatsRequested(directory.clone()));
-                        })),
-                )
-        });
 
         v_flex()
             .size_full()
-            .children(directory_header)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(
                 // A plain flex row rather than `h_flex`, which centres its
@@ -2182,8 +2279,8 @@ impl Render for ReplayInspectorView {
                     };
                     let listing = v_flex()
                         .size_full()
-                        .child(folder_tabs)
                         .child(listing_header(entity.clone(), self, cx))
+                        .child(folder_tabs)
                         .child(div().flex_1().min_h(px(0.)).child(body));
                     if crate::motion::settled(shown) && !open {
                         div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
@@ -2337,6 +2434,8 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.try_find("replay-header-render").is_none(), "rendering is not a header control");
+            assert!(window.try_find("replay-listing-search").is_some());
+            assert!(window.try_find("replay-listing-index").is_some());
             assert!(window.try_find("replay-listing-options").is_some());
             assert!(window.try_find("replay-listing-open").is_some());
         })
@@ -2349,6 +2448,63 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.try_find("replay-listing-options").is_none(), "the listing header is away with it");
+        })
+        .expect("the window is open");
+    }
+
+    /// The "Replays" header comes first, the folder tabs directly under it,
+    /// then the listing.
+    #[gpui_kit::test]
+    fn the_listing_header_sits_above_the_folder_tabs(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let header = window.find("replay-listing-header").bounds();
+            let tabs = window.find("replay-folder-tabs").bounds();
+            let rows = window.find("replay-browser-rows").bounds();
+            assert!(header.bottom() <= tabs.top(), "the header {header:?} is above the tabs {tabs:?}");
+            assert!(tabs.bottom() <= rows.top(), "the tabs {tabs:?} are above the listing {rows:?}");
+        })
+        .expect("the window is open");
+    }
+
+    /// The selected folder's path and the actions on the folder as a whole
+    /// are in the listing options, and nothing above the listing repeats
+    /// them. Checking game data asks the app and closes the options.
+    #[gpui_kit::test]
+    fn the_listing_options_carry_the_folder_and_its_actions(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let root = std::fs::canonicalize(dir.path()).expect("the directory exists");
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| view.open_folder(root.clone(), window, cx));
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        let asked = std::rc::Rc::new(std::cell::Cell::new(false));
+        let heard = std::rc::Rc::clone(&asked);
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&view, move |_view, _event: &super::CheckGameDataRequested, _cx| heard.set(true))
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("directory-game-data").is_none(), "the actions live behind the cog");
+            window.click("replay-listing-options", cx);
+            window.render_frame(cx);
+            let shown = super::shown_path(&root);
+            assert_eq!(window.find("replay-listing-folder-path").label(), Some(shown.as_str()));
+            assert_eq!(window.find("directory-stats").disabled(), Some(true), "stats wait for the game data");
+            window.click("directory-game-data", cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+
+        assert!(asked.get(), "checking game data is asked of the app");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("directory-game-data").is_none(), "and the options close");
         })
         .expect("the window is open");
     }

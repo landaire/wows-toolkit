@@ -1,5 +1,6 @@
-//! The directories the replay listing shows, one tab each above it: the
-//! install's replays directory first, then the ones the reader opened.
+//! The directories the replay listing shows, one tab each under the listing's
+//! header: the install's replays directory first, then the ones the reader
+//! opened.
 //!
 //! The install's directory and pinned directories are watched; any other is
 //! read once when it is opened and again on Refresh. A watched directory that
@@ -71,6 +72,9 @@ pub(crate) struct ReplayFolder {
     browser: Entity<ReplayBrowser>,
     pinned: bool,
     state: FolderState,
+    /// A chosen directory's own index source. The install's directory writes
+    /// the Live source and leaves this unresolved.
+    index: FolderIndex,
 
     /// Replays added or changed since the reader last had this tab selected.
     unseen: HashSet<PathBuf>,
@@ -96,6 +100,14 @@ impl ReplayFolder {
 
     pub(crate) fn browser(&self) -> &Entity<ReplayBrowser> {
         &self.browser
+    }
+
+    pub(crate) fn index(&self) -> &FolderIndex {
+        &self.index
+    }
+
+    pub(super) fn index_mut(&mut self) -> &mut FolderIndex {
+        &mut self.index
     }
 
     /// How many replays the tab's badge counts: those noted that the listing
@@ -179,7 +191,7 @@ fn folder_key(root: PathBuf) -> PathBuf {
 }
 
 /// The tab's name: the directory's own name, or the whole path for a root.
-fn folder_name(root: &Path) -> String {
+pub(super) fn folder_name(root: &Path) -> String {
     match root.file_name() {
         Some(name) => name.to_string_lossy().into_owned(),
         None => shortened_path(root),
@@ -241,7 +253,15 @@ impl ReplayInspectorView {
         let browser = cx.new(ReplayBrowser::new);
         let events = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
-        ReplayFolder { source, browser, pinned, state, unseen: HashSet::new(), _events: events }
+        ReplayFolder {
+            source,
+            browser,
+            pinned,
+            state,
+            index: FolderIndex::new(),
+            unseen: HashSet::new(),
+            _events: events,
+        }
     }
 
     #[cfg(test)]
@@ -270,12 +290,20 @@ impl ReplayInspectorView {
         self.folders.iter().map(|folder| folder.browser.clone()).collect()
     }
 
-    fn folder(&self, id: FolderId) -> Option<&ReplayFolder> {
+    pub(super) fn folder(&self, id: FolderId) -> Option<&ReplayFolder> {
         self.folders.iter().find(|folder| folder.id() == id)
     }
 
-    fn folder_mut(&mut self, id: FolderId) -> Option<&mut ReplayFolder> {
+    pub(super) fn folder_mut(&mut self, id: FolderId) -> Option<&mut ReplayFolder> {
         self.folders.iter_mut().find(|folder| folder.id() == id)
+    }
+
+    /// The selected tab's directory, once it is known.
+    pub(super) fn selected_folder_path(&self) -> Option<PathBuf> {
+        match self.folder(self.selected_folder)?.source() {
+            FolderSource::Install => self.install_root.clone(),
+            FolderSource::Chosen(root) => Some(root.clone()),
+        }
     }
 
     /// The tab a listing belongs to.
@@ -382,7 +410,6 @@ impl ReplayInspectorView {
             browser.set_build_cache(cache);
             browser.set_game_data(&status, cx);
             browser.set_grouping(grouping, cx);
-            browser.load_summaries(cx);
             browser.set_watch(watch, cx);
         });
         self.folders.push(folder);
@@ -453,6 +480,11 @@ impl ReplayInspectorView {
             }
             self.rename_recent(&old, &key, cx);
         }
+        if present {
+            self.index_folder(id, cx);
+        } else {
+            self.stop_folder_pass(id, cx);
+        }
         cx.notify();
     }
 
@@ -473,6 +505,8 @@ impl ReplayInspectorView {
         if self.selected_folder == from {
             self.select_folder(into, cx);
         }
+        // A pass the merged tab was running stopped with it.
+        self.run_next_folder_pass(cx);
         cx.notify();
     }
 
@@ -601,6 +635,7 @@ impl ReplayInspectorView {
             self.selected_folder = self.folders[0].id();
             self.folders[0].unseen.clear();
         }
+        self.run_next_folder_pass(cx);
         cx.notify();
     }
 
@@ -739,8 +774,8 @@ impl ReplayInspectorView {
         }
     }
 
-    /// The tab strip above the listing. Scrolls sideways once the tabs are
-    /// wider than the listing.
+    /// The tab strip under the listing's header. Scrolls sideways once the
+    /// tabs are wider than the listing.
     pub(super) fn render_folder_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let tabs: Vec<AnyElement> = self.folders.iter().map(|folder| self.render_folder_tab(folder, cx)).collect();
 

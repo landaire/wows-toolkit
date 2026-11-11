@@ -294,7 +294,7 @@ impl LoadedGameData {
     /// Loads a build out of the game-data cache, for a replay recorded on one
     /// the install no longer has.
     ///
-    /// The cache is what the Settings tab downloads, validates and repairs, and
+    /// The cache is what the Settings drawer downloads, validates and repairs, and
     /// what the egui app writes as it loads builds. Without this the port can
     /// open only replays from the installed build, which is most of a week's
     /// worth and none of last year's.

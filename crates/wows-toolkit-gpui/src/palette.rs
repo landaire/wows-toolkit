@@ -61,6 +61,8 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteAction {
     GoTo(AppTab),
+    /// Open the Settings drawer.
+    OpenSettings,
     SetTheme(ThemeChoice),
     OpenReplayFile,
     /// Put a query in the Search tab's bar and run it.
@@ -703,6 +705,9 @@ pub fn entries() -> Vec<PaletteEntry> {
         });
     }
 
+    entries
+        .push(PaletteEntry { label: t!("ui.settings.panel.open").into_owned(), action: PaletteAction::OpenSettings });
+
     entries.push(PaletteEntry {
         label: t!("ui.palette.advanced_search").into_owned(),
         action: PaletteAction::GoTo(AppTab::Search),
@@ -860,10 +865,11 @@ mod tests {
     use super::mode_entries;
     use crate::app::AppTab;
 
-    /// Every tab is reachable by name: the palette is the keyboard route to
-    /// the tab strip, so a tab missing from it cannot be reached that way.
+    /// Every tab and the Settings drawer are reachable by name: the palette is
+    /// the keyboard route to the tab strip and the gear beside it, so one
+    /// missing from it cannot be reached that way.
     #[test]
-    fn every_tab_is_offered() {
+    fn every_tab_and_the_settings_are_offered() {
         let offered: Vec<AppTab> = entries()
             .iter()
             .filter_map(|entry| match entry.action {
@@ -874,6 +880,7 @@ mod tests {
         for tab in AppTab::ALL {
             assert!(offered.contains(&tab), "{tab:?} is not in the palette");
         }
+        assert!(entries().iter().any(|entry| entry.action == PaletteAction::OpenSettings), "the settings are not");
     }
 
     /// Every seeded search parses, and reads as what its label promises: the

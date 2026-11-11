@@ -2,6 +2,8 @@
 mod directory_stats;
 #[path = "force_reindex_flow.rs"]
 mod force_reindex_flow;
+#[path = "settings_drawer.rs"]
+mod settings_drawer;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -17,9 +19,6 @@ use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::command::Command;
 use gpui_kit::component::command::CommandState;
-use gpui_kit::component::form::Form;
-use gpui_kit::component::form::field;
-use gpui_kit::component::form::v_form;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -32,6 +31,7 @@ use gpui_kit::component::select::Select;
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::component::select::SelectState;
 use gpui_kit::component::slider::Slider;
+use gpui_kit::component::slider::SliderEvent;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::tab::Tab;
 use gpui_kit::component::tab::TabBar;
@@ -55,6 +55,15 @@ use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
+use crate::zoom::ResetZoom;
+use crate::zoom::ZoomFactor;
+use crate::zoom::ZoomIn;
+use crate::zoom::ZoomOut;
+
+pub(crate) use settings_drawer::Setting;
+
+#[cfg(test)]
+pub(crate) use settings_drawer::SettingsSection;
 
 /// Where the menu's links go, as the egui menu bar sends them.
 const ISSUES_URL: &str = "https://github.com/landaire/wows-toolkit/issues/new/choose";
@@ -362,10 +371,7 @@ const STUCK_TWITCH_TOKEN: &str = "twitch-token";
 use crate::runtime;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
-use crate::settings::DEFAULT_ZOOM;
 use crate::settings::GpuiSettings;
-use crate::settings::MAX_ZOOM;
-use crate::settings::MIN_ZOOM;
 use crate::settings_store;
 use crate::stats::load::SessionData;
 use crate::stats::view::StatsView;
@@ -411,17 +417,17 @@ pub enum AppTab {
     Search,
     ArmorViewer,
     Unpacker,
-    Settings,
     Launcher,
 }
 
 impl AppTab {
     /// Left-to-right order, following the egui app's own dock order
-    /// (`app.rs`'s `DockState::new`): replays first, settings last. The egui
-    /// dock opens the Launcher first; here it follows the Replay Inspector,
-    /// which the strip always leads with. `Tab::ModManager` is deliberately
-    /// absent: the egui app never adds it to its dock either.
-    pub const ALL: [AppTab; 8] = [
+    /// (`app.rs`'s `DockState::new`): replays first. The egui dock opens the
+    /// Launcher first; here it follows the Replay Inspector, which the strip
+    /// always leads with. `Tab::ModManager` is deliberately absent: the egui
+    /// app never adds it to its dock either. Settings are not a tab here but
+    /// the drawer the gear at the end of the strip opens.
+    pub const ALL: [AppTab; 7] = [
         AppTab::ReplayInspector,
         AppTab::Launcher,
         AppTab::Stats,
@@ -429,7 +435,6 @@ impl AppTab {
         AppTab::Search,
         AppTab::ArmorViewer,
         AppTab::Unpacker,
-        AppTab::Settings,
     ];
 
     pub const fn label_key(self) -> &'static str {
@@ -440,7 +445,6 @@ impl AppTab {
             AppTab::Search => "ui.tabs.search",
             AppTab::ArmorViewer => "ui.tabs.armor_viewer",
             AppTab::Unpacker => "ui.tabs.unpacker",
-            AppTab::Settings => "ui.tabs.settings",
             AppTab::Launcher => "ui.tabs.launcher",
         }
     }
@@ -454,30 +458,16 @@ impl AppTab {
     /// (`app.rs`'s `icon_t` pairs).
     pub fn glyph(self) -> crate::icons::Glyph {
         match self {
-            AppTab::ReplayInspector => crate::icons::Glyph::Search,
+            AppTab::ReplayInspector => crate::icons::Glyph::ClipboardList,
             AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::Glyph::ChartColumn,
             AppTab::PlayerTracker => crate::icons::Glyph::VenetianMask,
             AppTab::Search => crate::icons::Glyph::Search,
             AppTab::ArmorViewer => crate::icons::Glyph::Shield,
             AppTab::Unpacker => crate::icons::Glyph::Archive,
-            AppTab::Settings => crate::icons::Glyph::Settings,
             AppTab::Launcher => crate::icons::Glyph::Rocket,
         }
     }
 }
-
-/// The language combo, and the menu under it.
-const LANGUAGE_COMBO_WIDTH: Pixels = px(200.);
-
-/// The label column in the settings form. Wide enough for the longest label
-/// the tab draws without wrapping it.
-const SETTINGS_LABEL_WIDTH: Pixels = px(260.);
-
-/// The corner a settings card is drawn with.
-const SECTION_RADIUS: Pixels = px(6.);
-
-/// The monitored-channel field: a Twitch login, not a sentence.
-const TWITCH_CHANNEL_WIDTH: Pixels = px(240.);
 
 /// Where a credential with the permissions this needs is issued.
 ///
@@ -522,12 +512,12 @@ pub struct App {
     /// `status_bar::clear_modes`.
     modes_tab: AppTab,
     settings: SettingsState,
-    /// The zoom the slider shows. Seeded from `settings.zoom` once the DB
-    /// load completes, updated live as the slider moves, and written back so
-    /// it survives a restart the way the egui slider's does.
-    zoom: f32,
+    /// The applied zoom. Seeded from `settings.zoom` once the DB load
+    /// completes, and written back so it survives a restart the way the egui
+    /// slider's does.
+    zoom: ZoomFactor,
     /// The saved palette. Seeded from the shared setting, then
-    /// changed from the Settings tab; a zoom change re-applies the theme, so
+    /// changed from the Settings drawer; a zoom change re-applies the theme, so
     /// it has to be kept rather than re-read.
     theme: ThemeChoice,
     theme_preview: Option<ThemeChoice>,
@@ -537,7 +527,11 @@ pub struct App {
     twitch_channel_input: Entity<InputState>,
     /// The chat poll, owned so it stops with the app rather than outliving it.
     _twitch_poll: Option<Task<()>>,
+    /// Runs ahead of `zoom` while it is dragged: the zoom applies on release
+    /// (see `on_zoom_slider`).
     zoom_slider: Entity<SliderState>,
+    /// Between a press on the zoom slider and its release.
+    zoom_slider_held: bool,
     /// Replay Inspector tab: the file browser plus the per-replay dock.
     /// Starts its background directory scan once `apply_settings` knows the
     /// WoWs directory.
@@ -584,8 +578,8 @@ pub struct App {
     search: Entity<SearchView>,
     /// The Launcher tab: installs, sign-in, and fresh installs.
     launcher: Entity<crate::launcher::LauncherView>,
-    /// Settings tab text fields. Held so an edit can be read back and the
-    /// saved value can be shown when the tab first renders.
+    /// Settings drawer text fields. Held so an edit can be read back and the
+    /// saved value can be shown when the drawer first renders.
     wows_dir_input: Entity<InputState>,
     proxy_input: Entity<InputState>,
     /// Where the game-data cache is kept. Empty shows the default location as
@@ -639,19 +633,32 @@ pub struct App {
     /// without waiting for the whole directory.
     index_cancel: Option<Arc<AtomicBool>>,
     _index_build: Option<Task<()>>,
-    /// Backing state for the settings tab's language combo.
+    /// The newest Search request scoped to a folder, so an older lookup that
+    /// lands later does not replace it.
+    scoped_search: Option<Task<()>>,
+    /// Backing state for the settings drawer's language combo.
     language_select: Entity<SelectState<SearchableVec<LanguageItem>>>,
     /// Whether the directory in the field is one an install could be in. The
-    /// field says so, and the Settings tab itself carries the mark.
+    /// field says so, and the gear that opens the drawer carries the mark.
     wows_dir_invalid: bool,
-    settings_scroll: ScrollHandle,
+    settings_drawer: settings_drawer::SettingsDrawer,
     _subscriptions: Vec<Subscription>,
 }
 
 impl App {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let zoom_slider =
-            cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
+        let zoom_slider = cx.new(|_| {
+            SliderState::new()
+                .min(ZoomFactor::MIN.get())
+                .max(ZoomFactor::MAX.get())
+                .step(0.05)
+                .default_value(ZoomFactor::DEFAULT.get())
+        });
+        let zoom_dragged = cx.subscribe_in(&zoom_slider, window, Self::on_zoom_slider);
+        let zoom_set = cx.observe_in(&zoom_slider, window, Self::on_zoom_slider_set);
+        Self::listen_for_zoom_shortcut::<ZoomIn>(ZoomFactor::zoomed_in, window, cx);
+        Self::listen_for_zoom_shortcut::<ZoomOut>(ZoomFactor::zoomed_out, window, cx);
+        Self::listen_for_zoom_shortcut::<ResetZoom>(|_| ZoomFactor::ACTUAL_SIZE, window, cx);
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
         let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
         let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
@@ -729,7 +736,13 @@ impl App {
         // Rows the reader chose in the listing, to be read again.
         let force_reindex = cx.subscribe_in(&replay_inspector, window, |this, view, event, window, cx| {
             let crate::replay_inspector::view::ForceReindexRequested { candidates, confirm } = event;
-            this.prepare_force_reindex(candidates.clone(), *confirm, view, window, cx);
+            let purpose = crate::force_reindex::IndexPurpose::Refresh;
+            this.prepare_force_reindex(candidates.clone(), *confirm, purpose, view, window, cx);
+        });
+        // A folder's list, to have what the index lacks added to it.
+        let index_folder = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
+            let crate::replay_inspector::view::IndexFolderRequested { scope, candidates } = event;
+            this.prepare_folder_index(scope.clone(), candidates.clone(), window, cx);
         });
         // A mapping that does not fit means the commit this app last checked at
         // is no answer: forget it so the newest published one is fetched rather
@@ -738,11 +751,11 @@ impl App {
             cx.subscribe_in(&replay_inspector, window, |this, _view, _event: &ConstantsUnfit, window, cx| {
                 this.forget_constants_commit(window, cx);
             });
-        // A workspace tab asking for its own replays searched: the Search tab is
+        // A folder tab asking for its own replays searched: the Search tab is
         // this app's, so the query is run here.
-        let search_directory = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
-            let crate::replay_inspector::view::SearchDirectory(root) = event;
-            this.search_directory(root.clone(), window, cx);
+        let search_folder = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
+            let crate::replay_inspector::view::SearchFolder(scope) = event;
+            this.search_scope(scope.clone(), window, cx);
         });
         // A session starting or stopping reaches the tactics board too: a board
         // is one of the windows a session is on.
@@ -846,8 +859,9 @@ impl App {
             active_tab: AppTab::ReplayInspector,
             modes_tab: AppTab::ReplayInspector,
             settings: SettingsState::Loading,
-            zoom: DEFAULT_ZOOM,
+            zoom: ZoomFactor::DEFAULT,
             zoom_slider,
+            zoom_slider_held: false,
             replay_inspector,
             directory_stats: Vec::new(),
             debug_mode: false,
@@ -885,9 +899,10 @@ impl App {
             index_outcome: None,
             index_cancel: None,
             _index_build: None,
+            scoped_search: None,
             language_select,
             wows_dir_invalid: false,
-            settings_scroll: ScrollHandle::new(),
+            settings_drawer: settings_drawer::SettingsDrawer::new(window, cx),
             _subscriptions: vec![
                 subscription,
                 check_game_data,
@@ -899,8 +914,9 @@ impl App {
                 replay_settings_changed,
                 game_data_missing,
                 force_reindex,
+                index_folder,
                 constants_unfit,
-                search_directory,
+                search_folder,
                 session_shared,
                 board_requested,
                 wows_dir_edited,
@@ -915,6 +931,8 @@ impl App {
                 language_chosen,
                 activation,
                 modes_reported,
+                zoom_dragged,
+                zoom_set,
             ],
         }
     }
@@ -1071,12 +1089,13 @@ impl App {
             AppTab::DirectoryStats(id) => self.shown_stats(id).read(cx).panel_toggles(cx),
             AppTab::Unpacker => self.unpacker.read(cx).panel_toggles(cx),
             AppTab::PlayerTracker => self.player_tracker.read(cx).panel_toggles(cx),
-            AppTab::Search | AppTab::Settings | AppTab::Launcher => Vec::new(),
+            AppTab::Search | AppTab::Launcher => Vec::new(),
         };
         // A session belongs to the replay workspace it was started from.
         let session = inspector.map(|view| crate::collab_popover::render(&view, cx));
 
-        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, window, cx)
+        let settings = self.render_settings_button("status-settings-open", cx);
+        crate::status_bar::render(toggles, session.into_iter().collect(), jobs, settings, window, cx)
     }
 
     /// Notes the files now being dragged over the window.
@@ -1248,7 +1267,8 @@ impl App {
             return;
         }
         let Some(base) = self.cache_base() else {
-            crate::toast::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned(), window, cx);
+            let open = self.settings_action(Setting::CacheDirectory, cx);
+            crate::toast::warn_with_action(t!("ui.dialogs.download_plan_no_cache_dir").into_owned(), open, window, cx);
             return;
         };
 
@@ -1501,17 +1521,19 @@ impl App {
         cx.notify();
     }
 
-    /// Rewrites every placeholder this tab owns in the current language.
+    /// Rewrites every placeholder the settings drawer owns in the current
+    /// language.
     ///
     /// A placeholder is held by its `InputState`, not re-read per frame, so a
     /// language change has to push the new text in.
     fn refresh_placeholders(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let pairs: [(&Entity<InputState>, &str); 3] = [
+        let pairs: [(&Entity<InputState>, &str); 4] = [
             // The cache directory's placeholder is a path, not a phrase, so a
             // language change leaves it alone.
             (&self.wows_dir_input, "ui.settings.wows.directory_hint"),
             (&self.twitch_channel_input, "ui.settings.twitch.monitored_channel"),
             (&self.proxy_input, "ui.settings.app.proxy_url_hint"),
+            (self.settings_drawer.search(), "ui.settings.panel.search_placeholder"),
         ];
         for (input, key) in pairs {
             let text = t!(key).into_owned();
@@ -2089,6 +2111,10 @@ impl App {
 
     /// Does what a palette entry says.
     pub(crate) fn run_palette_action(&mut self, action: PaletteAction, window: &mut Window, cx: &mut Context<Self>) {
+        // Every other entry acts on the page, which the drawer would cover.
+        if action != PaletteAction::OpenSettings {
+            self.close_settings(window, cx);
+        }
         match action {
             PaletteAction::GoTo(tab) => {
                 self.active_tab = tab;
@@ -2097,6 +2123,7 @@ impl App {
                     self.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
                 }
             }
+            PaletteAction::OpenSettings => self.open_settings(None, window, cx),
             PaletteAction::SetTheme(choice) => self.set_theme(choice, window, cx),
             PaletteAction::OpenReplayFile => {
                 self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
@@ -2147,112 +2174,30 @@ impl App {
         cx.notify();
     }
 
-    /// Runs a search over the replays indexed under one directory.
+    /// Runs a search over the replays indexed under one source: the Live one
+    /// for the install's folder, a chosen folder's own otherwise.
     ///
-    /// The index keys a replay by the source it was read under, and a source is
-    /// a directory, so the query the reader wants is the one that names it. A
-    /// directory nothing has indexed yet has no source to name, which the reader
+    /// A source nothing has created yet has nothing indexed, which the reader
     /// is told rather than shown an empty result for.
-    fn search_directory(&mut self, root: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    fn search_scope(&mut self, scope: crate::replay_index::SourceScope, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pool) = settings_store::pool(cx) else { return };
-        let Some(runtime) = runtime::runtime(cx) else { return };
 
-        cx.spawn_in(window, async move |this, cx| {
-            let found = cx
-                .background_spawn(async move {
-                    runtime.handle().block_on(async move {
-                        let sources = wows_toolkit_config::index::query::list_sources(&pool).await.ok()?;
-                        sources
-                            .into_iter()
-                            .find(|source| source.root_path.as_deref() == Some(root.as_path()))
-                            .map(|source| source.id)
-                    })
-                })
-                .await;
+        self.scoped_search = Some(cx.spawn_in(window, async move |this, cx| {
+            let found = crate::runtime::block_on(cx, move || async move { scope.existing(&pool).await }).await;
 
             let _ = this.update_in(cx, |this, window, cx| match found {
-                Some(source) => {
+                Ok(Some(source)) => {
                     let query = wows_toolkit_viewmodel::query_bar::seed::source_scoped(source);
                     let text = wows_toolkit_config::index::query_text::print_query(&query);
                     this.run_search(text, window, cx);
                 }
-                None => crate::toast::warn(t!("ui.tabs.search_these_replays_unavailable").into_owned(), window, cx),
+                Ok(None) => crate::toast::warn(t!("ui.tabs.search_these_replays_unavailable").into_owned(), window, cx),
+                Err(err) => {
+                    tracing::warn!("search: the folder's index source could not be read: {err}");
+                    crate::toast::failed(t!("ui.index_folder.unreadable_index").into_owned(), window, cx);
+                }
             });
-        })
-        .detach();
-    }
-
-    /// The auto-export controls: whether to write a file per battle, in which
-    /// format, and where.
-    ///
-    /// The directory is shown rather than typed: a path typed into a field is
-    /// only checked when it loses focus, and one that does not exist reads as
-    /// working until the first battle fails to write.
-    fn render_auto_export_row(&self, replay: &ReplaySettings, cx: &mut Context<Self>) -> AnyElement {
-        let enabled = replay.auto_export_data;
-        let chosen = replay.auto_export_format;
-        let directory = replay.auto_export_path.clone();
-        // A directory that is not there cannot be written to, and the reader
-        // has no other way to find that out until a battle is lost.
-        let missing = !directory.is_empty() && !std::path::Path::new(&directory).is_dir();
-
-        v_flex()
-            .gap_2()
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_x_4()
-                    .gap_y_2()
-                    .items_center()
-                    .child(
-                        Checkbox::new("auto-export-data")
-                            .label(t!("ui.settings.replay.auto_export_data").to_string())
-                            .checked(enabled)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.auto_export_data = checked);
-                            })),
-                    )
-                    .child(h_flex().gap_2().children(EXPORT_FORMATS.map(|format| {
-                        selectable(
-                            ("auto-export-format", format as usize),
-                            chosen == format,
-                            Button::new(("auto-export-format-button", format as usize))
-                                .label(format.as_str().to_string())
-                                .compact()
-                                .selected(chosen == format)
-                                .disabled(!enabled)
-                                .on_click(cx.listener(move |this, _event, _window, cx| {
-                                    this.edit_replay_settings(cx, |replay| replay.auto_export_format = format);
-                                })),
-                        )
-                    }))),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        Button::new("auto-export-choose")
-                            .label(t!("ui.buttons.choose").to_string())
-                            .compact()
-                            .disabled(!enabled)
-                            .on_click(cx.listener(|this, _event, _window, cx| this.choose_export_directory(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("settings-auto-export-path")
-                            .test_support()
-                            .text_sm()
-                            .when(missing, |path| path.text_color(rgb(crate::theme::semantic().error)))
-                            .child(if directory.is_empty() {
-                                t!("ui.settings.not_set").into_owned()
-                            } else {
-                                directory
-                            }),
-                    ),
-            )
-            .into_any_element()
+        }));
     }
 
     /// Asks for the directory the per-battle exports are written to.
@@ -2274,7 +2219,14 @@ impl App {
     /// own schedule, and nothing else on screen would show it.
     fn twitch_refused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twitch_status = TwitchStatus::Refused;
-        crate::toast::stuck(STUCK_TWITCH_TOKEN, t!("ui.messages.twitch_token_invalid").to_string(), window, cx);
+        let open = self.settings_action(Setting::TwitchToken, cx);
+        crate::toast::stuck_with_action(
+            STUCK_TWITCH_TOKEN,
+            t!("ui.messages.twitch_token_invalid").to_string(),
+            open,
+            window,
+            cx,
+        );
         cx.notify();
     }
 
@@ -2337,11 +2289,10 @@ impl App {
         self.theme = settings.theme;
         let channel = settings.twitch_channel.clone();
         self.twitch_channel_input.update(cx, |state, cx| state.set_value(channel, window, cx));
-        self.zoom_slider =
-            cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
         let collab_name = settings.collab_display_name.clone();
         let collab_display_name = collab_name.clone();
         self.collab_name_input.update(cx, |state, cx| state.set_value(collab_name, window, cx));
+        self.zoom_slider.update(cx, |slider, cx| slider.set_value(settings.zoom.get(), window, cx));
         let cache_dir = settings.game_data_cache_dir.clone();
         let game_data_cache_dir = cache_dir.clone();
         let auto_dump_game_data = settings.auto_dump_game_data;
@@ -2422,71 +2373,122 @@ impl App {
     }
 }
 
-/// The formats a battle can be auto-exported in, in the order the egui
-/// combo lists them.
-const EXPORT_FORMATS: [ReplayExportFormat; 3] =
-    [ReplayExportFormat::Json, ReplayExportFormat::Csv, ReplayExportFormat::Cbor];
-
-/// One settings section: its glyph, name and purpose over a card holding the
-/// controls, which is the shape the egui tab draws with `section_header` and
-/// `ui.group`.
-fn settings_section(
-    glyph: crate::icons::Glyph,
-    title: String,
-    description: String,
-    border: Hsla,
-    body: impl IntoElement,
-) -> AnyElement {
-    v_flex()
-        .gap_2()
-        .child(
-            v_flex()
-                .gap_1()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(crate::icons::icon(glyph).text_color(crate::theme::icon_accent()))
-                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(title)),
-                )
-                .child(div().text_xs().text_color(crate::theme::text_dim()).child(description)),
-        )
-        .child(
-            div()
-                .w_full()
-                .rounded(SECTION_RADIUS)
-                .border_1()
-                .border_color(border)
-                .bg(crate::theme::surface())
-                .p_3()
-                .child(body),
-        )
-        .into_any_element()
-}
-
-/// The layout every section's controls share: one column, labels beside the
-/// control so the whole tab reads down a single edge.
-fn settings_form() -> Form {
-    v_form().label_layout(Axis::Horizontal).label_width(SETTINGS_LABEL_WIDTH).small()
-}
-
 impl App {
-    fn render_zoom_row(&self, cx: &Context<Self>) -> impl IntoElement {
+    /// The zoom slider, the value it shows and its reset.
+    pub(crate) fn render_zoom_row(&self, cx: &Context<Self>) -> impl IntoElement {
+        // The slider's own value rather than `zoom`: during a drag it is the
+        // one that moves.
+        let shown = self.zoom_slider.read(cx).value().end();
+
         h_flex()
             .gap_2()
             .items_center()
             .child(crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(&self.zoom_slider)))
-            .child(div().text_sm().w(px(40.)).child(format!("{:.2}", self.zoom)))
-            .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(cx.listener(
-                |this, _event: &ClickEvent, window, cx| {
-                    this.zoom = DEFAULT_ZOOM;
-                    theme::apply_egui_theme(this.theme, this.zoom, window, cx);
-                    settings_store::save(keys::ZOOM_FACTOR, &this.zoom, cx);
-                    this.zoom_slider.update(cx, |slider, slider_cx| {
-                        slider.set_value(DEFAULT_ZOOM, window, slider_cx);
-                    });
-                    cx.notify();
-                },
-            )))
+            .child(div().text_sm().w(px(40.)).child(format!("{shown:.2}")))
+            .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(
+                cx.listener(|this, _event: &ClickEvent, window, cx| this.set_zoom(ZoomFactor::DEFAULT, window, cx)),
+            ))
+    }
+
+    /// Applies `zoom`, saves it, and moves the slider to it.
+    fn set_zoom(&mut self, zoom: ZoomFactor, window: &mut Window, cx: &mut Context<Self>) {
+        self.zoom_slider.update(cx, |slider, cx| slider.set_value(zoom.get(), window, cx));
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            theme::apply_egui_theme(self.theme_preview.unwrap_or(self.theme), zoom, window, cx);
+            settings_store::save(keys::ZOOM_FACTOR, &zoom, cx);
+        }
+        cx.notify();
+    }
+
+    /// The zoom applies when a drag ends rather than as it moves. Applying it
+    /// rescales the whole window, this slider and the labels beside it
+    /// included, so the track moves under a pointer that has not; the value
+    /// read back then follows the rescaling instead of the pointer, and every
+    /// step reflows the page under it.
+    fn on_zoom_slider(
+        &mut self,
+        _slider: &Entity<SliderState>,
+        event: &SliderEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SliderEvent::Change(_) => {
+                self.zoom_slider_held = true;
+                // For the value shown beside the slider.
+                cx.notify();
+            }
+            SliderEvent::Release(_) => self.end_zoom_drag(window, cx),
+        }
+    }
+
+    /// Applies the value a drag of the zoom slider ended on. Called for the
+    /// slider's own release and for any left release in the window, whichever
+    /// comes first.
+    fn end_zoom_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.zoom_slider_held {
+            return;
+        }
+
+        self.zoom_slider_held = false;
+        let value = self.zoom_slider.read(cx).value().end();
+        self.set_zoom(ZoomFactor::new(value), window, cx);
+    }
+
+    /// A value set on the slider other than by the pointer, as an assistive
+    /// technology's increment does, applies at once: there is no drag to wait
+    /// out.
+    fn on_zoom_slider_set(&mut self, slider: Entity<SliderState>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.zoom_slider_held {
+            return;
+        }
+
+        let value = slider.read(cx).value().end();
+        if value != self.zoom.get() {
+            self.set_zoom(ZoomFactor::new(value), window, cx);
+        }
+    }
+
+    /// A zoom shortcut: the factor `next` gives from the current one, and a
+    /// note saying what it is, since the tab that shows the slider may not
+    /// be the one open.
+    fn step_zoom(&mut self, next: fn(ZoomFactor) -> ZoomFactor, window: &mut Window, cx: &mut Context<Self>) {
+        // The stored zoom replaces whatever is set before the settings are
+        // read, and nothing set now could be saved.
+        if matches!(self.settings, SettingsState::Loading) {
+            return;
+        }
+
+        let zoom = next(self.zoom);
+        self.set_zoom(zoom, window, cx);
+
+        let said = t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get())).into_owned();
+        crate::toast::replacing("zoom", crate::toast::Level::Info, said, window, cx);
+    }
+
+    /// Routes the shortcut bound to `A` to [`Self::step_zoom`].
+    ///
+    /// A global listener rather than one on this view's element: the palette
+    /// and the other dialogs `Root` hosts hold focus outside this view, where
+    /// an element's listener is not on the dispatch path.
+    fn listen_for_zoom_shortcut<A: Action>(
+        next: fn(ZoomFactor) -> ZoomFactor,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = cx.weak_entity();
+        let handle = window.window_handle();
+        let global: &mut gpui_kit::App = cx;
+        global.on_action(move |_: &A, cx| {
+            let app = app.clone();
+            // The window the key went to is being updated until its dispatch
+            // returns, and the zoom needs this one.
+            cx.defer(move |cx| {
+                // A closed window or a dropped view has nothing left to zoom.
+                let _ = handle.update(cx, |_, window, cx| app.update(cx, |app, cx| app.step_zoom(next, window, cx)));
+            });
+        });
     }
 
     /// Opens a search result in the Replay Inspector and shows that tab, so
@@ -2671,6 +2673,11 @@ impl App {
         if self.index_cancel.is_some() {
             return;
         }
+        if self.index_busy(cx) {
+            self.job_said.push(JobReport::warn(t!("ui.reindex.busy_index").into_owned()));
+            cx.notify();
+            return;
+        }
         let Some(settings) = self.settings() else { return };
         let wows_dir = settings.wows_dir.clone();
         if wows_dir.is_empty() {
@@ -2681,8 +2688,7 @@ impl App {
         let Some(game_data) = self.replay_inspector.read(cx).game_data() else { return };
 
         let root = std::path::Path::new(&wows_dir).join("replays");
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.index_cancel = Some(Arc::clone(&cancel));
+        let cancel = self.begin_index_pass(cx);
         self.index_outcome = None;
         self.index_progress = Some(crate::replay_index::IndexProgress::default());
         cx.notify();
@@ -2692,14 +2698,26 @@ impl App {
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let built = cx
                 .background_spawn(async move {
-                    crate::replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, mode, |step| {
-                        let _ = progress_tx.unbounded_send(step);
-                    })
+                    let live =
+                        wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
+                    let source = runtime.block_on(live)?;
+                    crate::replay_index::build_index(
+                        &runtime,
+                        &pool,
+                        source,
+                        &root,
+                        &game_data,
+                        &cancel,
+                        mode,
+                        |step| {
+                            let _ = progress_tx.unbounded_send(step);
+                        },
+                    )
                 })
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                this.index_cancel = None;
+                this.end_index_pass(cx);
                 this.index_progress = None;
                 let (said, report): (String, fn(String) -> JobReport) = match built {
                     Ok(progress) => {
@@ -2866,339 +2884,6 @@ impl App {
         settings_store::save(keys::GAME_DATA_REPO_COMMIT, &Some(tip), cx);
     }
 
-    /// The replay index: building it, and how far a build has got.
-    ///
-    /// Refused without a game directory, since the replays are under it.
-    fn render_index_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let has_dir = self.settings().is_some_and(|settings| !settings.wows_dir.is_empty());
-        let running = self.index_cancel.is_some();
-        let progress = self.index_progress;
-        let outcome = self.index_outcome.clone();
-
-        settings_section(
-            crate::icons::Glyph::Database,
-            t!("ui.settings.index.heading").into_owned(),
-            t!("ui.settings.index.description").into_owned(),
-            cx.theme().border,
-            settings_form().child(
-                field().label(String::new()).child(
-                    v_flex()
-                        .gap_2()
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    Button::new("index-build")
-                                        .label(t!("ui.settings.index.build").to_string())
-                                        .compact()
-                                        .disabled(!has_dir || running)
-                                        .on_click(cx.listener(|this, _event, _window, cx| {
-                                            this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx)
-                                        })),
-                                )
-                                // For rows an older parse decoded through
-                                // constants that did not fit: nothing else can
-                                // correct them (the egui app's Re-index All).
-                                .child(
-                                    Button::new("index-rebuild")
-                                        .label(t!("ui.settings.index.rebuild").to_string())
-                                        .compact()
-                                        .disabled(!has_dir || running)
-                                        .tooltip(t!("ui.settings.index.rebuild_hint").to_string())
-                                        .on_click(cx.listener(|this, _event, _window, cx| {
-                                            this.build_replay_index(crate::replay_index::IndexMode::RefreshAll, cx)
-                                        })),
-                                )
-                                .when(running, |this| {
-                                    this.child(Spinner::new()).child(
-                                        Button::new("index-stop")
-                                            .label(t!("ui.buttons.stop").to_string())
-                                            .compact()
-                                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                                if let Some(cancel) = &this.index_cancel {
-                                                    cancel.store(true, Ordering::Relaxed);
-                                                }
-                                                cx.notify();
-                                            })),
-                                    )
-                                }),
-                        )
-                        .children(progress.map(|step| {
-                            div()
-                                .text_xs()
-                                .text_color(crate::theme::text_dim())
-                                .child(if step.skipped > 0 {
-                                    t!(
-                                        "ui.settings.index.progress_skipped",
-                                        done = step.done,
-                                        total = step.total,
-                                        skipped = step.skipped,
-                                        failed = step.failed
-                                    )
-                                    .to_string()
-                                } else {
-                                    t!(
-                                        "ui.settings.index.progress",
-                                        done = step.done,
-                                        total = step.total,
-                                        failed = step.failed
-                                    )
-                                    .to_string()
-                                })
-                                .into_any_element()
-                        }))
-                        .children(outcome.map(|text| {
-                            div().text_xs().text_color(crate::theme::text_dim()).child(text).into_any_element()
-                        })),
-                ),
-            ),
-        )
-        .into_any_element()
-    }
-
-    /// The game-data cache: what it holds, and the maintenance that keeps it
-    /// matching the published repository.
-    ///
-    /// Everything below the directory needs a cache that is actually there,
-    /// so a directory holding no builds shows the toggle and the path and
-    /// stops. The measurement is taken once and kept until something changes
-    /// it, because it walks every stored object.
-    fn render_cache_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let auto_dump = self.settings().is_some_and(|settings| settings.auto_dump_game_data);
-        let border = cx.theme().border;
-
-        let mut form = settings_form()
-            .child(
-                field().label(String::new()).child(
-                    Checkbox::new("cache-auto-dump")
-                        .label(t!("ui.settings.wows.cache.auto_dump").to_string())
-                        .checked(auto_dump)
-                        .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
-                            let on = *checked;
-                            this.edit_setting(keys::AUTO_DUMP_GAME_DATA, cx, |settings| {
-                                settings.auto_dump_game_data = on;
-                                on
-                            });
-                        })),
-                ),
-            )
-            .child(
-                field().label(t!("ui.settings.wows.cache.directory_label").to_string()).child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().flex_1().child(Input::new(&self.cache_dir_input).id("cache-dir").small().w_full()))
-                        .child(
-                            Button::new("cache-dir-browse")
-                                .icon(IconName::FolderOpen)
-                                .label(t!("ui.settings.wows.cache.browse").to_string())
-                                .compact()
-                                .on_click(
-                                    cx.listener(|this, _event, window, cx| this.browse_for_cache_dir(window, cx)),
-                                ),
-                        ),
-                ),
-            );
-
-        let Some(base) = self.cache_base() else {
-            return settings_section(
-                crate::icons::Glyph::Archive,
-                t!("ui.settings.wows.cache.heading").into_owned(),
-                t!("ui.settings.wows.cache.description").into_owned(),
-                border,
-                form,
-            )
-            .into_any_element();
-        };
-
-        // Measured once per directory, off the UI thread; until it lands the
-        // section shows only what does not depend on it.
-        if let Some(generation) = self.cache.wants_measure() {
-            game_data_cache::measure(base.clone(), generation, cx, |this, measured, generation, cx| {
-                this.cache.measured(measured, generation);
-                cx.notify();
-            });
-        }
-        let stats = self.cache.stats;
-
-        if let Some(stats) = stats.filter(|stats| stats.version_count > 0) {
-            let body = self.render_cache_body(base, stats, cx);
-            form = form.child(field().label(String::new()).child(body));
-        }
-
-        settings_section(
-            crate::icons::Glyph::Archive,
-            t!("ui.settings.wows.cache.heading").into_owned(),
-            t!("ui.settings.wows.cache.description").into_owned(),
-            border,
-            form,
-        )
-        .into_any_element()
-    }
-
-    /// What a cache holding at least one build offers: its size, the jobs
-    /// that check it, and whatever those jobs found.
-    fn render_cache_body(
-        &mut self,
-        base: PathBuf,
-        stats: wows_data_mgr::dump::CacheStats,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let busy = self.cache.busy();
-        let running = self.cache.running.is_some();
-
-        let summary =
-            h_flex()
-                .gap_2()
-                .flex_wrap()
-                .items_center()
-                .child(
-                    div().text_sm().child(
-                        t!(
-                            "ui.settings.wows.cache.stats",
-                            size = humansize::format_size(stats.total_bytes, humansize::BINARY),
-                            count = stats.version_count,
-                        )
-                        .to_string(),
-                    ),
-                )
-                .child({
-                    let folder = base.clone();
-                    Button::new("cache-open-folder")
-                        .label(t!("ui.settings.wows.cache.open_folder").to_string())
-                        .compact()
-                        .on_click(move |_event, _window, _cx| open_directory(&folder))
-                        .into_any_element()
-                })
-                // Nothing to prune while there is one build: the newest is kept.
-                .when(stats.version_count > 1, |this| {
-                    let dir = base.clone();
-                    this.child(
-                        Button::new("cache-delete-old")
-                            .label(t!("ui.settings.wows.cache.delete_old").to_string())
-                            .compact()
-                            .disabled(busy)
-                            .on_click(cx.listener(move |this, _event, _window, cx| {
-                                this.delete_old_cache_versions(dir.clone(), cx)
-                            }))
-                            .into_any_element(),
-                    )
-                })
-                .into_any_element();
-
-        let jobs = h_flex()
-            .gap_2()
-            .items_center()
-            .child({
-                Button::new("cache-actions")
-                    .label(t!("ui.settings.wows.cache.actions").to_string())
-                    .compact()
-                    .disabled(busy)
-                    .tooltip(t!("ui.settings.wows.cache.actions_tooltip").to_string())
-                    .dropdown_menu({
-                        let app = cx.entity().downgrade();
-                        let check_dir = base.clone();
-                        let validate_dir = base.clone();
-                        move |menu, _window, _cx| {
-                            let app_for_check = app.clone();
-                            let app_for_validate = app.clone();
-                            let check_dir = check_dir.clone();
-                            let validate_dir = validate_dir.clone();
-                            menu.item(
-                                PopupMenuItem::new(t!("ui.settings.wows.cache.check_updates").into_owned()).on_click(
-                                    move |_event, _window, cx| {
-                                        if let Some(app) = app_for_check.upgrade() {
-                                            app.update(cx, |app, cx| {
-                                                app.check_cache_for_updates(check_dir.clone(), cx)
-                                            });
-                                        }
-                                    },
-                                ),
-                            )
-                            .item(
-                                PopupMenuItem::new(t!("ui.settings.wows.cache.validate").into_owned()).on_click(
-                                    move |_event, _window, cx| {
-                                        if let Some(app) = app_for_validate.upgrade() {
-                                            app.update(cx, |app, cx| app.validate_cache(validate_dir.clone(), cx));
-                                        }
-                                    },
-                                ),
-                            )
-                        }
-                    })
-                    .into_any_element()
-            })
-            .when(running, |this| this.child(Spinner::new()))
-            .into_any_element();
-
-        let progress = self.cache.progress.filter(|step| step.total > 0).map(|step| {
-            div()
-                .text_xs()
-                .text_color(crate::theme::text_dim())
-                .child(format!("{} / {}", step.done, step.total))
-                .into_any_element()
-        });
-
-        let updates = (!self.cache.updates.is_empty()).then(|| {
-            let count = self.cache.updates.len();
-            let dir = base.clone();
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(div().text_sm().child(t!("ui.settings.wows.cache.updates_available", count = count).to_string()))
-                .child(
-                    Button::new("cache-update-all")
-                        .label(t!("ui.settings.wows.cache.update_all").to_string())
-                        .compact()
-                        .disabled(busy)
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            let builds = this.cache.updates.clone();
-                            this.fetch_cache_builds(dir.clone(), builds, cx);
-                        })),
-                )
-                .into_any_element()
-        });
-
-        let repair = (!self.cache.repair.is_empty()).then(|| {
-            let count = self.cache.repair.len();
-            let dir = base.clone();
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(crate::theme::semantic().error))
-                        .child(t!("ui.settings.wows.cache.repair_needed", count = count).to_string()),
-                )
-                .child(
-                    Button::new("cache-repair")
-                        .label(t!("ui.settings.wows.cache.repair").to_string())
-                        .compact()
-                        .disabled(busy)
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            let builds = this.cache.repair.clone();
-                            this.fetch_cache_builds(dir.clone(), builds, cx);
-                        })),
-                )
-                .into_any_element()
-        });
-
-        let failure = self.cache.failure.clone().map(|reason| {
-            div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason).into_any_element()
-        });
-
-        v_flex()
-            .gap_2()
-            .child(summary)
-            .child(jobs)
-            .children(progress)
-            .children(updates)
-            .children(repair)
-            .children(failure)
-            .into_any_element()
-    }
-
     fn browse_for_cache_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder("Game data cache directory");
         cx.spawn(async move |this, cx| {
@@ -3294,59 +2979,6 @@ impl App {
         cx.notify();
     }
 
-    /// Whether unsigned code may load into this process, which is the one
-    /// mitigation with a compatibility cost worth a choice.
-    ///
-    /// Windows only: the policy does not exist elsewhere, and a control for one
-    /// that cannot be applied would be a control that does nothing. The change
-    /// lands at the next launch, because the policy cannot be lifted once a
-    /// process has started, which is what the label says.
-    #[cfg(windows)]
-    fn render_code_integrity_row(&self, cx: &mut Context<Self>) -> Option<gpui_kit::component::form::Field> {
-        use wows_toolkit_hardening::CodeIntegrityPreference;
-
-        let chosen = self.settings()?.code_integrity;
-        Some(
-            field().label(t!("ui.settings.app.code_integrity").to_string()).child(
-                v_flex()
-                    // The form's content cell must size from its column, not the help text.
-                    .w(px(0.))
-                    .min_w_full()
-                    .gap_1()
-                    .child(h_flex().flex_wrap().gap_2().children(CodeIntegrityPreference::ALL.map(|choice| {
-                        selectable(
-                            ("code-integrity", choice as usize),
-                            chosen == choice,
-                            Button::new(("code-integrity-button", choice as usize))
-                                .label(t!(choice.key()).to_string())
-                                .compact()
-                                .selected(chosen == choice)
-                                .on_click(cx.listener(move |this, _event, _window, cx| {
-                                    this.edit_setting(keys::CODE_INTEGRITY, cx, |settings| {
-                                        settings.code_integrity = choice;
-                                        choice
-                                    });
-                                })),
-                        )
-                    })))
-                    .child(
-                        div()
-                            .w_full()
-                            .whitespace_normal()
-                            .text_xs()
-                            .text_color(crate::theme::text_dim())
-                            .child(t!("ui.settings.app.code_integrity_tooltip").to_string()),
-                    ),
-            ),
-        )
-    }
-
-    /// Nothing, where the policy does not exist.
-    #[cfg(not(windows))]
-    fn render_code_integrity_row(&self, _cx: &mut Context<Self>) -> Option<gpui_kit::component::form::Field> {
-        None
-    }
-
     /// Adopts what may be shared: saved, and pushed into the replay inspector,
     /// which is what contributes a battle that lands.
     pub(crate) fn adopt_data_sharing(&mut self, mode: DataSharingMode, cx: &mut Context<Self>) {
@@ -3393,7 +3025,14 @@ impl App {
         // (`ui/settings_tab.rs`'s `wows_dir_invalid`).
         self.wows_dir_invalid = !path.is_empty() && !std::path::Path::new(&path).join("bin").is_dir();
         if self.wows_dir_invalid {
-            crate::toast::stuck(STUCK_WOWS_DIR, t!("ui.messages.wows_dir_invalid").to_string(), window, cx);
+            let open = self.settings_action(Setting::WowsDirectory, cx);
+            crate::toast::stuck_with_action(
+                STUCK_WOWS_DIR,
+                t!("ui.messages.wows_dir_invalid").to_string(),
+                open,
+                window,
+                cx,
+            );
             cx.notify();
             return;
         }
@@ -3451,519 +3090,6 @@ impl App {
         let replay_dir = std::path::PathBuf::from(wows_dir).join("replays");
         self.player_tracker.update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, proxy_url, cx));
     }
-
-    fn settings_language_field(&self) -> gpui_kit::component::form::Field {
-        field().label(t!("ui.settings.app.language").to_string()).child(
-            crate::ui::boxed(LANGUAGE_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                Select::new(&self.language_select)
-                    .id("settings-language")
-                    .accessibility_label(t!("ui.settings.app.language").to_string())
-                    .small()
-                    .w(LANGUAGE_COMBO_WIDTH)
-                    .menu_width(LANGUAGE_COMBO_WIDTH),
-            ),
-        )
-    }
-
-    fn settings_theme_field(
-        &self,
-        theme_choice: ThemeChoice,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::component::form::Field {
-        field().label(t!("ui.settings.app.theme").to_string()).child(h_flex().flex_wrap().gap_2().children(
-            ThemeChoice::ALL.map(|choice| {
-                let colors = theme::swatches(choice, cx);
-                let color_summary = colors.iter().map(|color| format!("#{color:06X}")).collect::<Vec<_>>().join(" ");
-                div()
-                    .id(("theme-choice-preview", choice as usize))
-                    .on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
-                        if *hovered {
-                            this.theme_preview = Some(choice);
-                        } else if this.theme_preview == Some(choice) {
-                            this.theme_preview = None;
-                        } else {
-                            return;
-                        }
-                        let preview = this.theme_preview.unwrap_or(this.theme);
-                        theme::apply_egui_theme(preview, this.zoom, window, cx);
-                    }))
-                    .child(selectable(
-                        ("theme-choice", choice as usize),
-                        theme_choice == choice,
-                        Button::new(("theme-choice-button", choice as usize))
-                            .accessibility_label(choice.label())
-                            .child(v_flex().gap_1().child(div().text_xs().child(choice.label())).child(
-                                h_flex().gap_1().children(
-                                    colors.map(|color| div().w(px(22.)).h(px(9.)).rounded(px(1.)).bg(rgb(color))),
-                                ),
-                            ))
-                            .w(px(142.))
-                            .compact()
-                            .h_10()
-                            .selected(theme_choice == choice)
-                            .tooltip(format!("{}  {}", choice.label(), color_summary))
-                            .on_click(cx.listener(move |this, _event, window, cx| {
-                                this.set_theme(choice, window, cx);
-                            })),
-                    ))
-            }),
-        ))
-    }
-
-    fn settings_zoom_field(&self, cx: &Context<Self>) -> gpui_kit::component::form::Field {
-        field().label(t!("ui.settings.app.zoom_factor").to_string()).child(self.render_zoom_row(cx))
-    }
-
-    fn settings_data_sharing_field(
-        &self,
-        data_sharing: DataSharingMode,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::component::form::Field {
-        field()
-            .label(t!("ui.settings.app.data_sharing_mode").to_string())
-            .description(data_sharing.description())
-            .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
-                selectable(
-                    ("data-sharing", mode as usize),
-                    data_sharing == mode,
-                    Button::new(("data-sharing-button", mode as usize))
-                        .label(mode.label())
-                        .compact()
-                        .selected(data_sharing == mode)
-                        .tooltip(mode.description())
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            this.adopt_data_sharing(mode, cx);
-                        })),
-                )
-            })))
-    }
-
-    fn settings_proxy_field(&self) -> gpui_kit::component::form::Field {
-        field()
-            .label(t!("ui.settings.app.proxy_url").to_string())
-            .description(t!("ui.settings.app.proxy_url_hint").to_string())
-            .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full())
-    }
-
-    fn settings_app_behavior_field(
-        &self,
-        check_for_updates: bool,
-        enable_logging: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::component::form::Field {
-        field().child(
-            v_flex()
-                .gap_2()
-                .child(
-                    Checkbox::new("check-for-updates")
-                        .label(t!("ui.settings.app.check_for_updates").to_string())
-                        .checked(check_for_updates)
-                        .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                            let checked = *checked;
-                            this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
-                                settings.check_for_updates = checked;
-                                checked
-                            });
-                        })),
-                )
-                .child(
-                    Checkbox::new("enable-logging")
-                        .label(t!("ui.settings.app.enable_logging").to_string())
-                        .checked(enable_logging)
-                        .tooltip(t!("ui.settings.app.enable_logging_tooltip").to_string())
-                        .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                            let checked = *checked;
-                            this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
-                                settings.enable_logging = checked;
-                                checked
-                            });
-                        })),
-                ),
-        )
-    }
-
-    fn settings_data_directory_field(&self) -> gpui_kit::component::form::Field {
-        field().child(
-            h_flex().child(
-                Button::new("open-data-dir")
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(crate::icons::icon(crate::icons::Glyph::FolderOpen))
-                            .child(t!("ui.settings.app.open_data_dir").to_string()),
-                    )
-                    .compact()
-                    .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
-                    .on_click(|_event, _window, _cx| open_data_directory()),
-            ),
-        )
-    }
-
-    fn render_application_settings_section(
-        &mut self,
-        check_for_updates: bool,
-        enable_logging: bool,
-        data_sharing: DataSharingMode,
-        theme_choice: ThemeChoice,
-        border: Hsla,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let form = settings_form()
-            .child(self.settings_language_field())
-            .child(self.settings_theme_field(theme_choice, cx))
-            .child(self.settings_zoom_field(cx))
-            .child(self.settings_data_sharing_field(data_sharing, cx))
-            .children(self.render_code_integrity_row(cx))
-            .child(self.settings_proxy_field())
-            .child(self.settings_app_behavior_field(check_for_updates, enable_logging, cx))
-            .child(self.settings_data_directory_field());
-
-        settings_section(
-            crate::icons::Glyph::Settings,
-            t!("ui.settings.app.heading").into_owned(),
-            t!("ui.settings.app.description").into_owned(),
-            border,
-            form,
-        )
-        .into_any_element()
-    }
-
-    fn render_settings_tab(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let settings = match &self.settings {
-            SettingsState::Loading => {
-                return crate::loading::Loading::new("settings-loading", t!("ui.settings.loading").into_owned())
-                    .top()
-                    .into_any_element();
-            }
-            SettingsState::Failed(reason) => {
-                return v_flex()
-                    .p_4()
-                    .gap_1()
-                    .child(
-                        div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.settings.load_failed").to_string()),
-                    )
-                    .child(div().text_sm().text_color(crate::theme::text_dim()).child(reason.clone()))
-                    .into_any_element();
-            }
-            SettingsState::Loaded(settings) => settings,
-        };
-
-        let check_for_updates = settings.check_for_updates;
-        let enable_logging = settings.enable_logging;
-        let data_sharing = settings.data_sharing;
-        let theme_choice = settings.theme;
-        let replay = settings.replay.clone();
-        let current_replay_path = settings.current_replay_path.display().to_string();
-        // Only the three flags are drawn, so the row itself does not have to
-        // outlive the borrow the listeners below need.
-        let armor_defaults = settings
-            .armor_defaults
-            .as_ref()
-            .map(|defaults| (defaults.show_plate_edges, defaults.show_waterline, defaults.hull_opaque));
-        let suppress_ip_warning = settings.suppress_p2p_ip_warning;
-        let disable_auto_open = settings.disable_auto_open_session_windows;
-        let border = cx.theme().border;
-
-        let application = self.render_application_settings_section(
-            check_for_updates,
-            enable_logging,
-            data_sharing,
-            theme_choice,
-            border,
-            cx,
-        );
-
-        let game = settings_section(
-            crate::icons::Glyph::FolderOpen,
-            t!("ui.settings.wows.heading").into_owned(),
-            t!("ui.settings.wows.description").into_owned(),
-            border,
-            settings_form().child(
-                field()
-                    .label(t!("ui.settings.wows.directory_hint").to_string())
-                    // The tab strip already flags it; the field says it too,
-                    // because that is where the path is read and corrected.
-                    // The line is always there, empty while the path is good,
-                    // so saying so does not move the controls below it.
-                    .description(if self.wows_dir_invalid {
-                        t!("ui.messages.wows_dir_invalid").into_owned()
-                    } else {
-                        String::new()
-                    })
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .when(self.wows_dir_invalid, |this| {
-                                        this.text_color(rgb(crate::theme::semantic().error))
-                                    })
-                                    .child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()),
-                            )
-                            .child(
-                                Button::new("wows-dir-browse")
-                                    .icon(IconName::FolderOpen)
-                                    .label(t!("ui.settings.wows.browse").to_string())
-                                    .compact()
-                                    .on_click(
-                                        cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx)),
-                                    ),
-                            ),
-                    ),
-            ),
-        )
-        .into_any_element();
-
-        let cache = self.render_cache_section(cx);
-        let index = self.render_index_section(cx);
-
-        let session = settings_section(
-            crate::icons::Glyph::Users,
-            t!("ui.settings.session.heading").into_owned(),
-            t!("ui.settings.session.description").into_owned(),
-            border,
-            settings_form()
-                .child(
-                    field()
-                        .label(t!("ui.settings.session.display_name").to_string())
-                        .child(Input::new(&self.collab_name_input).id("session-display-name").small().w_full()),
-                )
-                .child(
-                    field().label(String::new()).child(
-                        Checkbox::new("session-suppress-ip-warning")
-                            .label(t!("ui.settings.session.suppress_ip_warning").to_string())
-                            .checked(suppress_ip_warning)
-                            .tooltip(t!("ui.settings.session.ip_warning_tooltip").to_string())
-                            .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
-                                let on = *checked;
-                                this.edit_setting(keys::SUPPRESS_P2P_IP_WARNING, cx, |settings| {
-                                    settings.suppress_p2p_ip_warning = on;
-                                    on
-                                });
-                            })),
-                    ),
-                )
-                .child(
-                    field().label(String::new()).child(
-                        Checkbox::new("session-disable-auto-open")
-                            .label(t!("ui.settings.session.disable_auto_open").to_string())
-                            .checked(disable_auto_open)
-                            .tooltip(t!("ui.settings.session.auto_open_tooltip").to_string())
-                            .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
-                                let on = *checked;
-                                this.edit_setting(keys::DISABLE_AUTO_OPEN_SESSION_WINDOWS, cx, |settings| {
-                                    settings.disable_auto_open_session_windows = on;
-                                    on
-                                });
-                            })),
-                    ),
-                ),
-        )
-        .into_any_element();
-
-        let replay_section = settings_section(
-            crate::icons::Glyph::Table,
-            t!("ui.settings.replay.heading").into_owned(),
-            t!("ui.settings.replay.description").into_owned(),
-            border,
-            settings_form()
-                .child(field().label(t!("ui.settings.replay.current_path").to_string()).child(div().text_sm().child(
-                    crate::ui::selectable_text(
-                        "settings-current-replay-path",
-                        if current_replay_path.is_empty() {
-                            t!("ui.settings.not_set").into_owned()
-                        } else {
-                            current_replay_path
-                        },
-                    ),
-                )))
-                .child(
-                    field().child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_x_4()
-                            .gap_y_2()
-                            .child(
-                                Checkbox::new("show-raw-xp")
-                                    .label(t!("ui.settings.replay.show_raw_xp").to_string())
-                                    .checked(replay.show_raw_xp)
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("show-observed-damage")
-                                    .label(t!("ui.settings.replay.show_observed_damage").to_string())
-                                    .checked(replay.show_observed_damage)
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_replay_settings(cx, |replay| replay.show_observed_damage = checked);
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("show-entity-id")
-                                    .label(t!("ui.settings.replay.show_entity_id").to_string())
-                                    .checked(replay.show_entity_id)
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_replay_settings(cx, |replay| replay.show_entity_id = checked);
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("show-heals")
-                                    .label(t!("ui.settings.replay.show_heals").to_string())
-                                    .checked(replay.show_heals)
-                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                        let checked = *checked;
-                                        this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
-                                    })),
-                            ),
-                    ),
-                )
-                .child(
-                    field().description(t!("ui.settings.replay.enable_previews_tooltip").to_string()).child(
-                        Checkbox::new("enable-replay-previews")
-                            .label(t!("ui.settings.replay.enable_previews").to_string())
-                            .checked(replay.enable_replay_previews)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.enable_replay_previews = checked);
-                            })),
-                    ),
-                )
-                .child(
-                    field()
-                        .label(t!("ui.settings.replay.auto_export_data").to_string())
-                        .description(t!("ui.settings.replay.export_path_hint").to_string())
-                        .child(self.render_auto_export_row(&replay, cx)),
-                ),
-        )
-        .into_any_element();
-
-        let twitch = settings_section(
-            crate::icons::Glyph::Radio,
-            t!("ui.settings.twitch.heading").into_owned(),
-            t!("ui.settings.twitch.description").into_owned(),
-            border,
-            settings_form()
-                .child(
-                    field().child(
-                        h_flex().child(
-                            Button::new("twitch-get-token")
-                                .child(
-                                    h_flex()
-                                        .gap_1()
-                                        .child(crate::icons::icon(crate::icons::Glyph::AppWindow))
-                                        .child(t!("ui.settings.twitch.get_token").to_string()),
-                                )
-                                .compact()
-                                .tooltip(t!("ui.settings.twitch.get_token_tooltip").to_string())
-                                .on_click(|_event, _window, cx: &mut gpui_kit::App| cx.open_url(TWITCH_TOKEN_URL)),
-                        ),
-                    ),
-                )
-                .child(
-                    field()
-                        // Always there, empty until a credential has been
-                        // pasted, so reporting one does not move the button
-                        // that pasted it.
-                        .description(match self.twitch_paste.as_ref() {
-                            Some(Ok(who)) => t!("ui.settings.twitch.signed_in_as", who = who).into_owned(),
-                            Some(Err(why)) => why.clone(),
-                            None => String::new(),
-                        })
-                        .child(
-                            h_flex().child(
-                                Button::new("twitch-paste-token")
-                                    .child(
-                                        h_flex()
-                                            .gap_1()
-                                            .child(crate::icons::icon(crate::icons::Glyph::ClipboardList))
-                                            .child(t!(self.twitch_paste_label_key()).to_string())
-                                            .child(
-                                                div()
-                                                    .text_color(rgb(self.twitch_status_tone()))
-                                                    .child(crate::icons::icon(self.twitch_status_glyph())),
-                                            ),
-                                    )
-                                    .compact()
-                                    .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
-                                    .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
-                            ),
-                        ),
-                )
-                .child(
-                    field().label(t!("ui.settings.twitch.monitored_channel").to_string()).child(
-                        div()
-                            .w(TWITCH_CHANNEL_WIDTH)
-                            .child(Input::new(&self.twitch_channel_input).id("twitch-channel").small().w_full()),
-                    ),
-                ),
-        )
-        .into_any_element();
-
-        // The viewport writes these itself when a pane changes, so the tab
-        // reports them rather than offering a second way to set them.
-        let armor = settings_section(
-            crate::icons::Glyph::Shield,
-            t!("ui.settings.armor.heading").into_owned(),
-            t!("ui.settings.armor.description").into_owned(),
-            border,
-            settings_form().child(
-                field().child(match armor_defaults {
-                    Some((show_plate_edges, show_waterline, hull_opaque)) => h_flex()
-                        .gap_4()
-                        .child(
-                            Checkbox::new("armor-show-plate-edges")
-                                .label(t!("ui.armor.plate_edges").to_string())
-                                .checked(show_plate_edges)
-                                .disabled(true),
-                        )
-                        .child(
-                            Checkbox::new("armor-show-waterline")
-                                .label(t!("ui.armor.waterline").to_string())
-                                .checked(show_waterline)
-                                .disabled(true),
-                        )
-                        .child(
-                            Checkbox::new("armor-hull-opaque")
-                                .label(t!("ui.armor.opaque_hull").to_string())
-                                .checked(hull_opaque)
-                                .disabled(true),
-                        )
-                        .into_any_element(),
-                    None => div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child(t!("ui.settings.armor.no_defaults").to_string())
-                        .into_any_element(),
-                }),
-            ),
-        )
-        .into_any_element();
-
-        div()
-            .id("settings-scroll")
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.settings_scroll)
-            .child(
-                v_flex()
-                    .gap_6()
-                    .p_4()
-                    .child(application)
-                    .child(game)
-                    .child(cache)
-                    .child(index)
-                    .child(session)
-                    .child(replay_section)
-                    .child(twitch)
-                    .child(armor),
-            )
-            .into_any_element()
-    }
 }
 
 /// Shows the toolkit's storage directory in the system file manager.
@@ -3983,13 +3109,12 @@ fn open_data_directory() {
     open_directory(&dir);
 }
 
-/// One tab's glyph and name. `attention` marks a tab that needs looking at.
-fn tab_label(tab: AppTab, attention: bool, selected: bool, cx: &gpui_kit::App) -> AnyElement {
+/// One tab's glyph and name.
+fn tab_label(tab: AppTab, selected: bool, cx: &gpui_kit::App) -> AnyElement {
     h_flex()
         .gap_1()
         .items_center()
         .when(selected, |row| row.text_color(cx.theme().tab_active_foreground).font_weight(FontWeight::SEMIBOLD))
-        .when(attention, |row| row.text_color(cx.theme().danger))
         .child(crate::icons::icon(tab.glyph()))
         .child(tab.label())
         .into_any_element()
@@ -4019,17 +3144,9 @@ impl Render for App {
             self.modes_tab = self.active_tab;
             crate::status_bar::clear_modes(cx);
         }
-        // A tab can change without a pointer-leave event on the preview tile.
-        if self.active_tab != AppTab::Settings && self.theme_preview.take().is_some() {
+        // The drawer can shut without a pointer-leave event on the preview tile.
+        if !self.settings_drawer.is_open() && self.theme_preview.take().is_some() {
             theme::apply_egui_theme(self.theme, self.zoom, window, cx);
-        }
-        // Pick up drag changes made directly on the zoom slider (the reset
-        // button applies the theme itself, so this only fires for drags).
-        let slider_zoom = self.zoom_slider.read(cx).value().start();
-        if (slider_zoom - self.zoom).abs() > f32::EPSILON {
-            self.zoom = slider_zoom;
-            theme::apply_egui_theme(self.theme_preview.unwrap_or(self.theme), self.zoom, window, cx);
-            settings_store::save(keys::ZOOM_FACTOR, &self.zoom, cx);
         }
 
         if !self.cache.busy() && !self.download_offer_open && !self.pending_missing_builds.is_empty() {
@@ -4045,10 +3162,6 @@ impl Render for App {
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
             .children(tab_order.iter().map(|t| {
-                // A tab that needs looking at says so, which is how the egui
-                // strip reports an install it cannot read (`app.rs`'s
-                // `alert_tab_style`).
-                let attention = *t == AppTab::Settings && self.wows_dir_invalid;
                 let selected = *t == self.active_tab;
                 Tab::new()
                     .relative()
@@ -4066,12 +3179,15 @@ impl Render for App {
                     })
                     .child(match *t {
                         AppTab::DirectoryStats(id) => self.directory_stats_tab_label(id, selected, cx),
-                        _ => tab_label(*t, attention, selected, cx),
+                        _ => tab_label(*t, selected, cx),
                     })
             }))
             .on_click(cx.listener(move |this, ix: &usize, window, cx| {
                 let Some(tab) = tab_order.get(*ix).copied() else { return };
                 this.active_tab = tab;
+                // The strip is beside the drawer, and a click there is a click
+                // away from it.
+                this.close_settings(window, cx);
                 this.poll_armor_game_data(window, cx);
                 if this.active_tab == AppTab::PlayerTracker {
                     this.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
@@ -4121,6 +3237,7 @@ impl Render for App {
             .flex_none()
             .items_center()
             .child(div().flex_1().min_w(px(0.)).child(tabs))
+            .child(div().flex_none().pl_1().child(self.render_settings_button("settings-open", cx)))
             .child(div().flex_none().px_1().child(app_menu));
 
         // A replay dragged onto the window opens, which is what the egui app does
@@ -4144,8 +3261,8 @@ impl Render for App {
             cx.defer_in(window, move |_this, window, cx| report.say(window, cx));
         }
 
+        let settings_drawer = self.render_settings_drawer(window, cx);
         let body = match self.active_tab {
-            AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::Launcher => self.launcher.clone().into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
@@ -4201,6 +3318,7 @@ impl Render for App {
                 canvas(
                     |_bounds, _window, _cx| {},
                     move |_bounds, _state, window, _cx| {
+                        let released = watched.clone();
                         let watched = watched.clone();
                         window.on_mouse_event::<gpui_kit::FileDropEvent>(move |event, phase, _window, cx| {
                             if phase != gpui_kit::DispatchPhase::Bubble {
@@ -4211,6 +3329,16 @@ impl Render for App {
                             }
                             if let Some(app) = watched.upgrade() {
                                 app.update(cx, |this, cx| this.forget_hovering_files(cx));
+                            }
+                        });
+                        // The slider reports its own release, except when it
+                        // left the frame mid-drag, with the drawer shut by a key.
+                        window.on_mouse_event::<MouseUpEvent>(move |event, phase, window, cx| {
+                            if phase != gpui_kit::DispatchPhase::Bubble || event.button != MouseButton::Left {
+                                return;
+                            }
+                            if let Some(app) = released.upgrade() {
+                                app.update(cx, |this, cx| this.end_zoom_drag(window, cx));
                             }
                         });
                     },
@@ -4226,8 +3354,11 @@ impl Render for App {
                 cx.notify();
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.is_held || this.settings_key(event, window, cx) {
+                    return;
+                }
                 let modifiers = event.keystroke.modifiers;
-                if event.is_held || !modifiers.control {
+                if !modifiers.control {
                     return;
                 }
                 match (modifiers.shift, event.keystroke.key.as_str()) {
@@ -4246,7 +3377,11 @@ impl Render for App {
             // what separates the chrome from the page rather than two greys
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
-            .child(div().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)))
+            // The drawer covers the page below the strip, not the strip, so the
+            // tabs and the gear stay where they are while it is open.
+            .child(
+                div().relative().flex_1().min_h(px(0.)).child(crate::ui::workspace(body, cx)).children(settings_drawer),
+            )
             .child(self.status_strip(window, cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Over the rest of the view: a drag is about to become a drop, and

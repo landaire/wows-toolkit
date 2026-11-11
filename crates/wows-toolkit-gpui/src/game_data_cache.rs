@@ -1,4 +1,4 @@
-//! The game-data cache the Settings tab reports on and manages.
+//! The game-data cache the Settings drawer reports on and manages.
 //!
 //! The cache holds one dumped build per game version, so a replay recorded
 //! against a build the live install no longer has can still be opened. The
@@ -51,7 +51,7 @@ pub struct Progress {
     pub total: u64,
 }
 
-/// The cache as the Settings tab knows it.
+/// The cache as the Settings drawer knows it.
 #[derive(Debug, Default)]
 pub struct CacheState {
     /// What the cache occupies. `None` until it has been measured, which is

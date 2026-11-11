@@ -6,10 +6,14 @@
 //! the reader pressing a button and seeing nothing. `Root` holds the queue and
 //! draws the layer, so this is only the wording and the level.
 
+use std::rc::Rc;
+
 use gpui_kit::SharedString;
 use gpui_kit::Window;
 use gpui_kit::component::Root;
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
 
 /// Something the reader asked for happened.
@@ -35,6 +39,28 @@ pub fn info(message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui
 pub fn warn(message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
     let message = message.into();
     push(Notification::warning(message.clone()), &message, window, cx);
+}
+
+/// What pressing an [`Action`] does.
+type Run = dyn Fn(&mut Window, &mut gpui_kit::App);
+
+/// A button on a message that takes the reader to what the message is about.
+pub struct Action {
+    label: SharedString,
+    run: Rc<Run>,
+}
+
+impl Action {
+    pub fn new(label: impl Into<SharedString>, run: impl Fn(&mut Window, &mut gpui_kit::App) + 'static) -> Self {
+        Self { label: label.into(), run: Rc::new(run) }
+    }
+}
+
+/// As [`warn`], with a button. Pressing it takes the message down: it has
+/// done what it was for.
+pub fn warn_with_action(message: impl Into<SharedString>, action: Action, window: &mut Window, cx: &mut gpui_kit::App) {
+    let message = message.into();
+    push(with_action(Notification::warning(message.clone()), action, true), &message, window, cx);
 }
 
 /// How a [`replacing`] message reads.
@@ -77,6 +103,33 @@ struct Replacing;
 pub fn stuck(key: &'static str, message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
     let message = message.into();
     push(Notification::warning(message.clone()).autohide(false).id1::<Stuck>(key), &message, window, cx);
+}
+
+/// As [`stuck`], with a button. The message stays after it is pressed, until
+/// the state is [`resolved`].
+pub fn stuck_with_action(
+    key: &'static str,
+    message: impl Into<SharedString>,
+    action: Action,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) {
+    let message = message.into();
+    let notification = Notification::warning(message.clone()).autohide(false).id1::<Stuck>(key);
+    push(with_action(notification, action, false), &message, window, cx);
+}
+
+fn with_action(notification: Notification, action: Action, dismiss_on_press: bool) -> Notification {
+    notification.action(move |_notification, _window, cx| {
+        let run = Rc::clone(&action.run);
+        let shown = cx.entity();
+        Button::new("toast-action").label(action.label.clone()).small().on_click(move |_event, window, cx| {
+            run(window, cx);
+            if dismiss_on_press {
+                shown.update(cx, |notification, cx| notification.dismiss(window, cx));
+            }
+        })
+    })
 }
 
 /// The identity of a [`stuck`] message, so one per state is on screen at a time.

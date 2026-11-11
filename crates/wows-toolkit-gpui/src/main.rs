@@ -60,6 +60,7 @@ mod upload;
 mod viewport;
 mod watched_playback;
 mod window_shell;
+mod zoom;
 
 use app::App;
 use gpui_kit::component::Root;
@@ -141,6 +142,7 @@ fn main() {
     heap_profile::mark("app.run");
     app.run(move |cx| {
         gpui_kit::component::init(cx);
+        zoom::bind_keys(cx);
         if let Err(err) = runtime::init(cx) {
             tracing::error!("failed to start the tokio runtime: {err}");
         }
@@ -175,7 +177,7 @@ fn main() {
                     // Before the database is read: the desktop's own
                     // preference, which is what the stored default resolves to
                     // anyway.
-                    theme::apply_egui_theme(ThemeChoice::default(), settings::DEFAULT_ZOOM, window, cx);
+                    theme::apply_egui_theme(ThemeChoice::default(), zoom::ZoomFactor::DEFAULT, window, cx);
                     window_shell::remember(wows_toolkit_config::WindowKind::Main, window, cx);
                     let view = cx.new(|cx| App::new(window, cx));
                     app_entity = Some(view.clone());
@@ -203,7 +205,7 @@ fn main() {
                 Ok(Err(err)) => {
                     // DB open or settings load failed: keep the hardcoded
                     // default zoom/theme already applied above and let the
-                    // Settings tab report the failure instead of loading forever.
+                    // Settings drawer report the failure instead of loading forever.
                     tracing::error!("failed to load settings from the config DB: {err:#}");
                     app_entity.update(cx, |app, cx| {
                         app.mark_settings_failed(err.to_string());

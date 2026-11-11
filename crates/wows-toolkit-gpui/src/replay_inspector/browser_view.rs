@@ -76,6 +76,7 @@ use super::columns::ColorRole;
 use crate::force_reindex::Confirm;
 use crate::force_reindex::ReindexCandidate;
 use crate::preview_hover::PreviewHover;
+use crate::replay_index::SourceScope;
 
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
@@ -605,18 +606,19 @@ impl ReplayBrowser {
 
     /// Reads what the replay index knows about the listed files.
     ///
-    /// One query over the live source rather than one per row: a listing can
-    /// hold thousands of replays. A row with no summary reads as not indexed,
-    /// which is what the egui listing shows for the same file.
+    /// One query over the listing's own source rather than one per row: a
+    /// listing can hold thousands of replays. A row with no summary reads as
+    /// not indexed, which is what the egui listing shows for the same file.
     pub fn load_summaries(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         self.summaries_generation = self.summaries_generation.wrapping_add(1);
         let generation = self.summaries_generation;
+        let scope = self.index_scope();
         cx.spawn(async move |this, cx| {
             // Waited on from a GPUI background thread rather than awaited on a
             // tokio worker: the test scheduler refuses a wakeup from one.
             let loaded = crate::runtime::block_on(cx, move || async move {
-                let Some(source) = query::live_source_id(&pool).await? else {
+                let Some(source) = scope.existing(&pool).await? else {
                     return Ok(HashMap::new());
                 };
                 query::row_summaries_for_source(&pool, source).await
@@ -679,7 +681,12 @@ impl ReplayBrowser {
     pub fn scan_directory(&mut self, directory: PathBuf, cx: &mut Context<Self>) {
         self.scan_generation = self.scan_generation.wrapping_add(1);
         let generation = self.scan_generation;
+        let rescoped = self.chosen_directory.as_ref() != Some(&directory);
         self.chosen_directory = Some(directory.clone());
+        // The summaries are the source's, which follows the directory.
+        if rescoped {
+            self.load_summaries(cx);
+        }
         self.status = ScanStatus::Loading;
         self.scan_progress = Some(ScanProgress::default());
         cx.notify();
@@ -752,7 +759,8 @@ impl ReplayBrowser {
 
     /// Every listed replay as a forced re-index sees it, in listing order.
     pub fn reindex_candidates(&self) -> Vec<ReindexCandidate> {
-        self.files.iter().map(reindex_candidate).collect()
+        let scope = self.index_scope();
+        self.files.iter().map(|file| reindex_candidate(file, &scope)).collect()
     }
 
     /// Asks for `paths` to be read again and their index entries rewritten.
@@ -761,8 +769,13 @@ impl ReplayBrowser {
     /// which game data it needs.
     pub(crate) fn force_reindex(&mut self, paths: &[PathBuf], confirm: Confirm, cx: &mut Context<Self>) {
         let wanted: HashSet<&PathBuf> = paths.iter().collect();
-        let candidates: Vec<ReindexCandidate> =
-            self.files.iter().filter(|file| wanted.contains(&file.path)).map(reindex_candidate).collect();
+        let scope = self.index_scope();
+        let candidates: Vec<ReindexCandidate> = self
+            .files
+            .iter()
+            .filter(|file| wanted.contains(&file.path))
+            .map(|file| reindex_candidate(file, &scope))
+            .collect();
         if candidates.is_empty() {
             return;
         }
@@ -772,6 +785,14 @@ impl ReplayBrowser {
     /// The directory the listing is reading, when it is not the install's.
     pub fn chosen_directory(&self) -> Option<&Path> {
         self.chosen_directory.as_deref()
+    }
+
+    /// The index source the listed replays are written under and read from.
+    pub fn index_scope(&self) -> SourceScope {
+        match &self.chosen_directory {
+            Some(directory) => SourceScope::Folder(directory.clone()),
+            None => SourceScope::Live,
+        }
     }
 
     /// The directory the listing reads: the chosen one, or the install's
@@ -1961,8 +1982,8 @@ fn force_reindex_label(count: usize) -> String {
 }
 
 /// One listed replay as a forced re-index sees it.
-fn reindex_candidate(file: &RawReplay) -> ReindexCandidate {
-    ReindexCandidate::from_listing(file.path.clone(), file.version, &file.listed.date_time)
+fn reindex_candidate(file: &RawReplay, scope: &SourceScope) -> ReindexCandidate {
+    ReindexCandidate::from_listing(file.path.clone(), scope.clone(), file.version, &file.listed.date_time)
 }
 
 /// The listed builds nothing on this machine can read, with how many replays

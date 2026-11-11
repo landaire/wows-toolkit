@@ -15,6 +15,8 @@ use std::sync::atomic::Ordering;
 
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
+use crate::zoom::ZoomFactor;
+
 /// Named color schemes applied to the desktop's shared surface tokens.
 ///
 /// Each scheme keeps distinct surface tiers for window chrome, panels, cards,
@@ -352,7 +354,7 @@ pub fn system_is_dark(cx: &App) -> bool {
 /// Every surface token is mapped by hand. `ThemeTokens::from` fills the rest
 /// in from the colours set here, and anything left at a shadcn default would
 /// read as a different app in the middle of this one.
-pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx: &mut App) {
+pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Window, cx: &mut App) {
     let system_dark = system_is_dark(cx);
     let dark = choice.is_dark(system_dark);
     DARK_MODE.store(dark, std::sync::atomic::Ordering::Relaxed);
@@ -446,8 +448,11 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     theme.slider_bar = theme.primary;
     theme.slider_thumb = rgb(palette.text_bright).into();
     theme.progress_bar = theme.primary;
-    theme.switch = rgb(palette.widget).into();
-    theme.switch_thumb = rgb(palette.text_bright).into();
+    // One thumb colour serves both states, so it is the page colour: it reads
+    // against the accent track when on and the grey track when off, in light
+    // and dark palettes alike.
+    theme.switch = rgb(palette.border_bright).into();
+    theme.switch_thumb = rgb(palette.panel).into();
     theme.scrollbar = rgb(palette.surface).into();
     theme.scrollbar_thumb = rgb(palette.border_bright).into();
     theme.scrollbar_thumb_hover = rgb(palette.text_dim).into();
@@ -462,6 +467,7 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: f32, window: &mut Window, cx:
     theme.tokens = ThemeTokens::from(&theme.colors);
 
     // egui body text 12.5px, small rounding, scaled by zoom.
+    let zoom = zoom.get();
     theme.font_size = px(12.5 * zoom);
     theme.radius = px(2.0 * zoom);
 

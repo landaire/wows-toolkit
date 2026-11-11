@@ -34,13 +34,19 @@ use wows_toolkit_config::ReplayGrouping;
 
 use crate::app::App;
 use crate::app::AppTab;
-use crate::settings::DEFAULT_ZOOM;
+use crate::app::SettingsSection;
 use crate::settings::GpuiSettings;
 use crate::stats::load::SessionData;
+use crate::zoom::ZoomFactor;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
 /// by index, matching `AppTab::ALL`'s order.
 const TAB_BAR: &str = "app-tabs";
+
+/// The gear at the end of the tab strip, and the drawer it opens
+/// (`app::settings_drawer`).
+const SETTINGS_BUTTON: &str = "settings-open";
+const SETTINGS_DRAWER: &str = "settings-drawer";
 
 /// The debug-build strip shown at the bottom while debug mode is on.
 const DEBUG_NOTICE: &str = "app-debug-notice";
@@ -100,7 +106,7 @@ const SEARCH_QUERY: &str = "search-query";
 
 /// Points `storage_dir` at a temporary directory for the whole test process.
 ///
-/// Without it the Settings tab measures the game-data cache under the running
+/// Without it the Settings drawer measures the game-data cache under the running
 /// user's own app data, which against a real install is a walk of several
 /// gigabytes and hangs the suite. The directory is leaked deliberately: it has
 /// to outlive every test in the process, and it holds nothing but what a test
@@ -136,8 +142,8 @@ fn open_wide_app(cx: &mut TestAppContext) -> WindowHandle<App> {
 /// The same, tall enough that a whole scrolling tab is in one frame.
 ///
 /// The harness refuses to click what is below the fold, so a test that drives
-/// a control near the bottom of the settings tab opens the window this way
-/// rather than scrolling to it.
+/// a control near the bottom of a section of the Settings drawer opens the
+/// window this way rather than scrolling to it.
 fn open_tall_app(cx: &mut TestAppContext) -> WindowHandle<App> {
     use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
@@ -275,6 +281,24 @@ fn show_tab(window: &mut gpui_kit::Window, tab: AppTab, cx: &mut gpui_kit::App) 
     );
 }
 
+/// Opens the Settings drawer from the gear and jumps to `section`, so its
+/// controls are in the frame.
+///
+/// Motion is turned off first: a control is clicked where it comes to rest,
+/// not part way through the slide. The second frame is the one the jump is
+/// measured against.
+pub(crate) fn show_settings(window: &mut gpui_kit::Window, section: SettingsSection, cx: &mut gpui_kit::App) {
+    cx.set_reduce_motion(true);
+    window.render_frame(cx);
+    if window.try_find(SETTINGS_DRAWER).is_none() {
+        window.click(SETTINGS_BUTTON, cx);
+    }
+    window.render_frame(cx);
+    window.click(("settings-category", section as usize), cx);
+    window.render_frame(cx);
+    window.render_frame(cx);
+}
+
 #[gpui_kit::test]
 fn a_grouping_chosen_in_the_listing_options_reaches_the_browser(cx: &mut TestAppContext) {
     let window = open_app(cx);
@@ -370,13 +394,13 @@ fn the_listing_open_menu_asks_for_a_file_or_a_directory(cx: &mut TestAppContext)
 /// The WoWs directory is deliberately empty: `apply_settings` then takes its
 /// "directory is not set" branch and starts no directory scan or game-data
 /// load, which keeps these tests off the filesystem.
-fn test_settings() -> GpuiSettings {
+pub(crate) fn test_settings() -> GpuiSettings {
     GpuiSettings {
         locale: None,
         theme: Default::default(),
         twitch_token: None,
         twitch_channel: String::new(),
-        zoom: DEFAULT_ZOOM,
+        zoom: ZoomFactor::DEFAULT,
         wows_dir: String::new(),
         current_replay_path: PathBuf::new(),
         replay: ReplaySettings {
@@ -410,14 +434,14 @@ fn test_settings() -> GpuiSettings {
 }
 
 #[gpui_kit::test]
-fn the_settings_tab_shows_the_values_it_was_given(cx: &mut TestAppContext) {
+fn the_settings_drawer_shows_the_values_it_was_given(cx: &mut TestAppContext) {
     let window = open_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::Replays, cx);
         assert_eq!(window.find("show-raw-xp").checked(), Some(true));
         assert_eq!(window.find("show-observed-damage").checked(), Some(false));
     })
@@ -538,7 +562,7 @@ fn the_status_bar_holds_the_listing_toggle_and_the_session_on_replay_tabs(cx: &m
         window.render_frame(cx);
         assert!(window.try_find("replay-browser-rows").is_some(), "and brings it back");
 
-        show_tab(window, AppTab::Settings, cx);
+        show_tab(window, AppTab::Launcher, cx);
         window.render_frame(cx);
         assert!(window.try_find("collab-session-toggle").is_none(), "no session control away from the replays");
     })
@@ -1210,7 +1234,7 @@ fn building_the_replay_index_is_refused_without_a_game_directory(cx: &mut TestAp
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::ReplayIndex, cx);
         window.render_frame(cx);
 
         assert!(window.try_find("index-build").is_some(), "the control is there to explain what is missing");
@@ -1229,7 +1253,7 @@ fn the_cache_controls_appear_only_once_something_is_cached(cx: &mut TestAppConte
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::GameDataCache, cx);
     })
     .expect("the test window stays open");
     // The measurement runs off the UI thread; the controls follow it.
@@ -1281,7 +1305,7 @@ fn pruning_is_offered_once_a_second_build_is_cached(cx: &mut TestAppContext) {
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::GameDataCache, cx);
     })
     .expect("the test window stays open");
     cx.run_until_parked();
@@ -1294,18 +1318,18 @@ fn pruning_is_offered_once_a_second_build_is_cached(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_settings_checkboxes_apply_and_toggle_back(cx: &mut TestAppContext) {
+fn the_settings_switches_apply_and_toggle_back(cx: &mut TestAppContext) {
     let window = open_tall_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::Replays, cx);
 
-        // The tab is writable now, so a click moves the control rather than
-        // being refused.
-        let before = window.find("show-raw-xp").checked().expect("the checkbox reports a state");
+        // The drawer is writable now, so a click moves the control rather
+        // than being refused.
+        let before = window.find("show-raw-xp").checked().expect("the switch reports a state");
         window.click("show-raw-xp", cx);
         assert_eq!(window.find("show-raw-xp").checked(), Some(!before));
         window.click("show-raw-xp", cx);
@@ -1322,7 +1346,7 @@ fn the_data_sharing_mode_is_single_select(cx: &mut TestAppContext) {
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::General, cx);
 
         let off = ("data-sharing", 0usize);
         let builds = ("data-sharing", 1usize);
@@ -1349,7 +1373,7 @@ fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::Replays, cx);
         // test_settings starts with Raw XP on; turn it off here.
         assert_eq!(window.find("show-raw-xp").checked(), Some(true));
         window.click("show-raw-xp", cx);
@@ -1860,10 +1884,6 @@ fn the_parameter_dump_menu_is_refused_until_a_build_is_loaded(cx: &mut TestAppCo
 /// in whichever theme was last picked in either.
 ///
 /// The assertions read `Theme::global`, which is what the widgets draw from.
-/// A frame is rendered first so the zoom slider settles: the render path
-/// re-applies the theme when the slider and the stored zoom disagree, and
-/// that apply would otherwise stand in for the one the control is supposed to
-/// make.
 ///
 /// Not `theme::is_dark_mode`: that mirror is a process-global every test's own
 /// render writes, so reading it while the others run is a race.
@@ -1885,7 +1905,7 @@ fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
     let light = ("theme-choice", ThemeChoice::Light as usize);
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::Appearance, cx);
         window.render_frame(cx);
         window.render_frame(cx);
         assert_eq!(window.find(system).selected(), Some(true), "an unset theme follows the desktop");
@@ -1911,7 +1931,7 @@ fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
 }
 
 /// The Twitch credential is pasted, not obtained through a browser flow,
-/// which is what the egui app does. What the settings tab reports back is the
+/// which is what the egui app does. What the Settings drawer reports back is the
 /// account it belongs to, or which part of the paste was wrong.
 #[gpui_kit::test]
 fn a_pasted_twitch_credential_is_read_or_reported(cx: &mut TestAppContext) {
@@ -1921,7 +1941,7 @@ fn a_pasted_twitch_credential_is_read_or_reported(cx: &mut TestAppContext) {
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
+        show_settings(window, SettingsSection::Twitch, cx);
         window.render_frame(cx);
 
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("not a credential".to_string()));
@@ -3026,7 +3046,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 }
 
 /// Installs the background runtime and an empty index, as startup does.
-fn open_index(cx: &mut TestAppContext) -> sqlx::SqlitePool {
+pub(crate) fn open_index(cx: &mut TestAppContext) -> sqlx::SqlitePool {
     cx.update(|cx| crate::runtime::init(cx).expect("the runtime starts"));
     let runtime = cx.update(|cx| crate::runtime::runtime(cx)).expect("the runtime is installed");
     let pool = runtime.block_on(wows_toolkit_config::test_pool());

@@ -14,7 +14,11 @@ use jiff::civil::DateTime;
 use rust_i18n::t;
 use wows_data_mgr::download_repo::RemoteAvailability;
 use wows_data_mgr::download_repo::ResolvedBuild;
+use wows_toolkit_config::index::rows::IndexWriteMode;
 use wowsunpack::data::Version;
+
+use crate::replay_index::ScopedReplay;
+use crate::replay_index::SourceScope;
 
 /// The format replay headers record the battle time in.
 const HEADER_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
@@ -92,6 +96,8 @@ impl HeaderRelease {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReindexCandidate {
     pub path: PathBuf,
+    /// The source the listing that holds it writes under.
+    pub scope: SourceScope,
     pub release: HeaderRelease,
     /// When the battle was played. `None` when the header's time does not
     /// parse.
@@ -100,11 +106,66 @@ pub struct ReindexCandidate {
 
 impl ReindexCandidate {
     /// From what a listing reads out of a replay header.
-    pub fn from_listing(path: PathBuf, version: Option<Version>, date_time: &str) -> Self {
+    pub fn from_listing(path: PathBuf, scope: SourceScope, version: Option<Version>, date_time: &str) -> Self {
         let release = HeaderRelease::from_version(version);
         let played_at = DateTime::strptime(HEADER_DATE_FORMAT, date_time).ok();
 
-        Self { path, release, played_at }
+        Self { path, scope, release, played_at }
+    }
+}
+
+/// What a pass over chosen replays is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexPurpose {
+    /// Read the replays again and rewrite whatever the index holds for them.
+    Refresh,
+    /// Add replays the index does not hold yet to the source of `scope`.
+    Fill(SourceScope),
+}
+
+impl IndexPurpose {
+    pub fn write_mode(&self) -> IndexWriteMode {
+        match self {
+            Self::Refresh => IndexWriteMode::Replace,
+            Self::Fill(_) => IndexWriteMode::Incremental,
+        }
+    }
+
+    pub fn confirm_title(&self) -> String {
+        match self {
+            Self::Refresh => t!("ui.reindex.confirm_title"),
+            Self::Fill(_) => t!("ui.index_folder.confirm_title"),
+        }
+        .into_owned()
+    }
+
+    pub fn confirm_ok(&self) -> String {
+        match self {
+            Self::Refresh => t!("ui.reindex.confirm_ok"),
+            Self::Fill(_) => t!("ui.index_folder.confirm_ok"),
+        }
+        .into_owned()
+    }
+
+    fn count_line(&self, count: usize) -> String {
+        match self {
+            Self::Refresh => t!("ui.reindex.confirm_count", count = count),
+            Self::Fill(_) => t!("ui.index_folder.confirm_count", count = count),
+        }
+        .into_owned()
+    }
+
+    /// Where the replays a fill adds are read from afterwards.
+    fn note(&self) -> Option<String> {
+        let note = match self {
+            Self::Refresh => return None,
+            Self::Fill(SourceScope::Live) => t!("ui.index_folder.note_live"),
+            Self::Fill(SourceScope::Folder(root)) => {
+                t!("ui.index_folder.note_folder", dir = crate::replay_inspector::view::shown_path(root))
+            }
+        };
+
+        Some(note.into_owned())
     }
 }
 
@@ -257,7 +318,7 @@ pub struct PlayedRange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReindexSummary {
     /// The replays that will be read, with the release each needs.
-    pub replays: Vec<(PathBuf, Release)>,
+    pub replays: Vec<(ScopedReplay, Release)>,
     /// `None` when no included replay's time parses.
     pub played: Option<PlayedRange>,
     /// Included replays whose time does not parse, which `played` does not
@@ -295,23 +356,23 @@ impl ReindexSummary {
 
     /// The replays to read once the `failed` releases could not be
     /// downloaded, and how many that drops.
-    pub fn readable_after(&self, failed: &BTreeSet<Release>) -> (Vec<PathBuf>, usize) {
+    pub fn readable_after(&self, failed: &BTreeSet<Release>) -> (Vec<ScopedReplay>, usize) {
         let mut dropped = 0;
         let mut kept = Vec::with_capacity(self.replays.len());
-        for (path, release) in &self.replays {
+        for (replay, release) in &self.replays {
             if failed.contains(release) {
                 dropped += 1;
                 continue;
             }
-            kept.push(path.clone());
+            kept.push(replay.clone());
         }
 
         (kept, dropped)
     }
 
     /// What the confirmation says, one line each.
-    pub fn lines(&self) -> Vec<String> {
-        let mut lines = vec![t!("ui.reindex.confirm_count", count = self.replays.len()).into_owned()];
+    pub fn lines(&self, purpose: &IndexPurpose) -> Vec<String> {
+        let mut lines = vec![purpose.count_line(self.replays.len())];
 
         if let Some(played) = self.played {
             lines.push(
@@ -351,6 +412,8 @@ impl ReindexSummary {
             lines.push(t!("ui.reindex.confirm_no_version", count = self.no_version).into_owned());
         }
 
+        lines.extend(purpose.note());
+
         lines
     }
 }
@@ -382,7 +445,7 @@ pub fn summarize(candidates: &[ReindexCandidate], local: &BTreeSet<Release>, fet
             continue;
         }
 
-        replays.push((candidate.path.clone(), release));
+        replays.push((ScopedReplay { path: candidate.path.clone(), scope: candidate.scope.clone() }, release));
         let Some(at) = candidate.played_at else {
             undated += 1;
             continue;
@@ -431,7 +494,11 @@ mod tests {
     }
 
     fn candidate(name: &str, version: Option<Version>, date_time: &str) -> ReindexCandidate {
-        ReindexCandidate::from_listing(PathBuf::from(name), version, date_time)
+        ReindexCandidate::from_listing(PathBuf::from(name), SourceScope::Live, version, date_time)
+    }
+
+    fn paths(replays: &[ScopedReplay]) -> Vec<&str> {
+        replays.iter().map(|replay| replay.path.to_str().expect("ascii")).collect()
     }
 
     fn release(version: &str, build: u32) -> Release {
@@ -464,7 +531,7 @@ mod tests {
 
         let summary = summarize(&listing(), &local, &published(&[release("13.5.1", 200)]));
 
-        let read: Vec<&str> = summary.replays.iter().map(|(path, _)| path.to_str().expect("ascii")).collect();
+        let read: Vec<&str> = summary.replays.iter().map(|(replay, _)| replay.path.to_str().expect("ascii")).collect();
         assert_eq!(read, ["a.wowsreplay", "b.wowsreplay", "c.wowsreplay", "d.wowsreplay", "g.wowsreplay"]);
         assert_eq!(
             summary.played,
@@ -483,7 +550,7 @@ mod tests {
         assert!(!summary.is_plain());
 
         assert_eq!(
-            summary.lines(),
+            summary.lines(&IndexPurpose::Refresh),
             [
                 t!("ui.reindex.confirm_count", count = 5).into_owned(),
                 t!("ui.reindex.confirm_range", oldest = "2023-01-03 10:00", newest = "2025-04-02 18:00").into_owned(),
@@ -498,6 +565,50 @@ mod tests {
         );
     }
 
+    /// Adding what the index lacks says how many replays are added and where
+    /// they are read from afterwards, after what the pass leaves out.
+    #[test]
+    fn a_fill_counts_what_is_added_and_says_where_it_lands() {
+        let local: BTreeSet<Release> = [release("14.3.0", 300)].into();
+        let chosen: Vec<ReindexCandidate> = listing().into_iter().take(2).collect();
+        let summary = summarize(&chosen, &local, &published(&[]));
+        let root = PathBuf::from("D:/archive");
+
+        assert_eq!(
+            summary.lines(&IndexPurpose::Fill(SourceScope::Folder(root.clone()))),
+            [
+                t!("ui.index_folder.confirm_count", count = 2).into_owned(),
+                t!("ui.reindex.confirm_range", oldest = "2025-04-01 09:30", newest = "2025-04-02 18:00").into_owned(),
+                t!("ui.index_folder.note_folder", dir = crate::replay_inspector::view::shown_path(&root)).into_owned(),
+            ]
+        );
+        assert_eq!(
+            summary.lines(&IndexPurpose::Fill(SourceScope::Live)).last(),
+            Some(&t!("ui.index_folder.note_live").into_owned())
+        );
+    }
+
+    /// Each replay read keeps the source of the listing it came from.
+    #[test]
+    fn a_summary_keeps_each_replays_source() {
+        let local: BTreeSet<Release> = [release("14.3.0", 300)].into();
+        let folder = SourceScope::Folder(PathBuf::from("D:/archive"));
+        let chosen = vec![
+            candidate("live.wowsreplay", header("14.3.0", 300), "02.04.2025 18:00:00"),
+            ReindexCandidate::from_listing(
+                PathBuf::from("D:/archive/kept.wowsreplay"),
+                folder.clone(),
+                header("14.3.0", 300),
+                "01.04.2025 18:00:00",
+            ),
+        ];
+
+        let (kept, _) = summarize(&chosen, &local, &published(&[])).readable_after(&BTreeSet::new());
+
+        let scopes: Vec<&SourceScope> = kept.iter().map(|replay| &replay.scope).collect();
+        assert_eq!(scopes, [&SourceScope::Live, &folder]);
+    }
+
     /// With no cache directory nothing can be fetched, and the summary says
     /// that rather than that nothing is published.
     #[test]
@@ -509,7 +620,8 @@ mod tests {
         assert_eq!(summary.unobtainable_cause, UnobtainableCause::NoCacheDirectory);
         assert!(summary.downloads.is_empty());
         let unobtainable: usize = summary.unobtainable.iter().map(|need| need.replays).sum();
-        assert!(summary.lines().contains(&t!("ui.reindex.confirm_no_cache_dir", count = unobtainable).into_owned()));
+        let lines = summary.lines(&IndexPurpose::Refresh);
+        assert!(lines.contains(&t!("ui.reindex.confirm_no_cache_dir", count = unobtainable).into_owned()));
     }
 
     /// Build numbers are per server: the same number on another version is
@@ -525,7 +637,9 @@ mod tests {
 
         let summary = summarize(&chosen, &local, &published(&[]));
 
-        assert_eq!(summary.replays, [(PathBuf::from("eu.wowsreplay"), release("14.3.0", 300))]);
+        let read: Vec<(&str, Release)> =
+            summary.replays.iter().map(|(replay, release)| (replay.path.to_str().expect("ascii"), *release)).collect();
+        assert_eq!(read, [("eu.wowsreplay", release("14.3.0", 300))]);
         assert_eq!(summary.unobtainable, [BuildNeed { release: release("14.2.0", 300), replays: 1 }]);
     }
 
@@ -590,7 +704,7 @@ mod tests {
         let (kept, dropped) = summary.readable_after(&[release("12.0.0", 100)].into());
 
         assert_eq!(dropped, 2);
-        assert_eq!(kept, [PathBuf::from("a.wowsreplay"), PathBuf::from("b.wowsreplay"), PathBuf::from("c.wowsreplay")]);
+        assert_eq!(paths(&kept), ["a.wowsreplay", "b.wowsreplay", "c.wowsreplay"]);
     }
 
     #[test]
