@@ -4,6 +4,8 @@ mod directory_stats;
 mod force_reindex_flow;
 #[path = "settings_drawer.rs"]
 mod settings_drawer;
+#[path = "tab_underline.rs"]
+mod tab_underline;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -550,6 +552,8 @@ pub struct App {
     /// The tab the status bar's reported modes belong to; see
     /// `status_bar::clear_modes`.
     modes_tab: AppTab,
+    /// The line under the selected tab of the strip.
+    tab_underline: tab_underline::TabUnderline<AppTab>,
     settings: SettingsState,
     /// The applied zoom. Seeded from `settings.zoom` once the DB load
     /// completes, and written back so it survives a restart the way the egui
@@ -897,6 +901,7 @@ impl App {
             _twitch_poll: None,
             active_tab: AppTab::ReplayInspector,
             modes_tab: AppTab::ReplayInspector,
+            tab_underline: tab_underline::TabUnderline::default(),
             settings: SettingsState::Loading,
             zoom: ZoomFactor::DEFAULT,
             zoom_slider,
@@ -3230,26 +3235,12 @@ impl Render for App {
         let active_ix = tab_order.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
-            .children(tab_order.iter().map(|t| {
+            .children(tab_order.iter().enumerate().map(|(ix, t)| {
                 let selected = *t == self.active_tab;
-                Tab::new()
-                    .relative()
-                    .when(selected, |tab| {
-                        tab.child(
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .left_2()
-                                .right_2()
-                                .h(px(2.))
-                                .bg(theme::accent())
-                                .shadow(vec![theme::phosphor_glow()]),
-                        )
-                    })
-                    .child(match *t {
-                        AppTab::DirectoryStats(id) => self.directory_stats_tab_label(id, selected, cx),
-                        _ => tab_label(*t, selected, cx),
-                    })
+                Tab::new().relative().child(self.tab_underline.part(*t, ix == 0, selected)).child(match *t {
+                    AppTab::DirectoryStats(id) => self.directory_stats_tab_label(id, selected, cx),
+                    _ => tab_label(*t, selected, cx),
+                })
             }))
             .on_click(cx.listener(move |this, ix: &usize, window, cx| {
                 let Some(tab) = tab_order.get(*ix).copied() else { return };
