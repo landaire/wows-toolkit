@@ -129,10 +129,11 @@ pub fn rule_h(cx: &App) -> impl IntoElement {
 }
 
 /// The title over a group of rows: small, semibold and muted, so it names the
-/// group without competing with the rows. The text is drawn as translated;
-/// Inter has no small capitals and GPUI no letter spacing.
-pub fn section_label(text: impl Into<SharedString>) -> Div {
-    div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(crate::theme::text_dim()).child(text.into())
+/// group without competing with the rows. `content` is the translated text as
+/// drawn, or an element such as selectable text that carries it; Inter has no
+/// small capitals and GPUI no letter spacing.
+pub fn section_label(content: impl IntoElement) -> Div {
+    div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(crate::theme::text_dim()).child(content)
 }
 
 /// The card level: one surface step above the panel, edged by a 1px rule.
