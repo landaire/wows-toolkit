@@ -21,10 +21,11 @@ use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::unindexable::Unindexable;
-use wows_toolkit_replay_data::load::GameDataCache;
-use wows_toolkit_replay_data::load::parse_replay;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
+
+use crate::load::GameDataCache;
+use crate::load::parse_replay;
 
 /// The extension the game records replays under.
 const REPLAY_EXTENSION: &str = "wowsreplay";
@@ -58,7 +59,7 @@ impl SourceScope {
             return Ok(query::ensure_default_source(pool, live_root, now).await?);
         };
 
-        let name = crate::replay_inspector::view::shortened_path(root);
+        let name = crate::paths::shortened_path(root);
         let source = query::ensure_source(pool, &name, SourceKind::ImportedDir, root, now).await?;
         if query::live_source_id(pool).await? == Some(source) {
             return Err(ScopeSourceError::LiveRoot { root: root.clone() });
@@ -176,7 +177,7 @@ impl IndexMode {
 #[derive(Debug, thiserror::Error)]
 pub enum IndexOneError {
     #[error("the replay could not be read")]
-    Parse(#[source] wows_toolkit_replay_data::error::ReplayLoadError),
+    Parse(#[source] crate::error::ReplayLoadError),
     #[error("the rows could not be stored")]
     Store(#[from] wows_toolkit_config::index::rows::IndexError),
     #[error("the replay has no source to be stored under")]
@@ -191,7 +192,7 @@ impl IndexOneError {
     /// rows are this machine's state, not the file's: recording them would
     /// have later passes skip a good replay.
     pub fn is_unreadable_file(&self) -> bool {
-        use wows_toolkit_replay_data::error::ReplayLoadError;
+        use crate::error::ReplayLoadError;
 
         match self {
             Self::Parse(ReplayLoadError::Io(_) | ReplayLoadError::VersionParse | ReplayLoadError::Parse(_)) => true,
@@ -412,7 +413,7 @@ mod tests {
     /// without touching the file, so later passes must try it again.
     #[test]
     fn only_a_file_that_will_not_read_is_recorded_as_unreadable() {
-        use wows_toolkit_replay_data::error::ReplayLoadError;
+        use crate::error::ReplayLoadError;
 
         assert!(IndexOneError::Parse(ReplayLoadError::Parse("garbage".to_owned())).is_unreadable_file());
         assert!(IndexOneError::Parse(ReplayLoadError::Io("truncated".to_owned())).is_unreadable_file());

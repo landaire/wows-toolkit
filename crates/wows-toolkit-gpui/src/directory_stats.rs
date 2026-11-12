@@ -104,8 +104,8 @@ impl App {
             return AppTab::Stats.label().into_any_element();
         };
         let full_path = tab.root.display().to_string();
-        let label =
-            t!("ui.tabs.directory_stats", dir = crate::replay_inspector::view::shortened_path(&tab.root)).into_owned();
+        let label = t!("ui.tabs.directory_stats", dir = wows_toolkit_replay_data::paths::shortened_path(&tab.root))
+            .into_owned();
         let close = cx.entity();
 
         h_flex()

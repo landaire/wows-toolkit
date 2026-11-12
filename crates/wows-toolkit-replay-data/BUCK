@@ -22,7 +22,9 @@ REPLAY_DATA_COMMON_DEPS = [
     "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
     "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
     "//third-party/rust:tracing",
 ]
 
@@ -78,5 +80,8 @@ workspace_test(
     features = ["test-support"],
     buildscript = buildscript,
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
-    test_deps = ["//third-party/rust:tempfile"],
+    test_deps = [
+        "//third-party/rust:filetime",
+        "//third-party/rust:tempfile",
+    ],
 )

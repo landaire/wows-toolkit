@@ -41,6 +41,9 @@ use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::px;
 use rust_i18n::t;
+use wows_toolkit_replay_data::force_reindex::ReindexScope;
+use wows_toolkit_replay_data::force_reindex::VersionCount;
+use wows_toolkit_replay_data::paths::shown_path;
 use wowsunpack::game_params::types::Species;
 
 use crate::app::App;
@@ -49,10 +52,7 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::armor_viewer::ShipCatalog;
 use crate::armor_viewer::catalog::species_name;
 use crate::armor_viewer::catalog::tier_roman;
-use crate::force_reindex::ReindexScope;
-use crate::force_reindex::VersionCount;
 use crate::replay_inspector::ReplayInspectorView;
-use crate::replay_inspector::view::shown_path;
 use crate::runtime;
 use crate::settings_store;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -269,7 +269,7 @@ pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntr
 pub fn version_entries(rows: &[VersionCount], query: &str) -> Vec<PaletteEntry> {
     let needle = query.trim();
     rows.iter()
-        .map(|row| (crate::force_reindex::version_said(&row.version), row))
+        .map(|row| (wows_toolkit_replay_data::force_reindex::version_said(&row.version), row))
         .filter(|(said, _)| said.contains(needle))
         .map(|(said, row)| PaletteEntry {
             label: t!("ui.reindex.version_row", version = said, count = row.replays).into_owned(),
@@ -936,9 +936,10 @@ mod tests {
     /// layer keeps the newest-first order it is given while it filters.
     #[test]
     fn the_reindex_commands_are_offered_and_versions_filter_in_order() {
+        use wows_toolkit_replay_data::force_reindex::ReindexScope;
+        use wows_toolkit_replay_data::force_reindex::VersionCount;
+
         use super::version_entries;
-        use crate::force_reindex::ReindexScope;
-        use crate::force_reindex::VersionCount;
         use wowsunpack::data::Version;
 
         let offered: Vec<PaletteAction> = entries().into_iter().map(|entry| entry.action).collect();

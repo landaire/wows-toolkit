@@ -195,7 +195,7 @@ pub fn confirm_refresh_persisted_data(app: &Entity<Toolkit>, window: &mut Window
             .on_ok(move |_event, _window, cx| {
                 if let Some(app) = asked.upgrade() {
                     app.update(cx, |this, cx| {
-                        this.build_replay_index(crate::replay_index::IndexMode::RefreshAll, cx);
+                        this.build_replay_index(wows_toolkit_replay_data::replay_index::IndexMode::RefreshAll, cx);
                     });
                 }
                 true
