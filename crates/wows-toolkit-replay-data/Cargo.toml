@@ -1,0 +1,38 @@
+[package]
+name = "wows-toolkit-replay-data"
+description = "Game-data loading, replay parsing and the replay model shared by the desktop front ends"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_replay_data"
+path = "src/lib.rs"
+
+[features]
+# Row and battle-report fixtures, for the tests of crates that render the model.
+test-support = []
+
+[dependencies]
+# HTML entities in game chat, which the chat model decodes.
+escaper = "0.1.1"
+jiff = { workspace = true }
+# The column hovers are user-facing strings. `i18n!` generates its lookup per
+# crate; the catalog behind it is parsed once per process.
+rust-i18n = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The damage-mix kinds take the replay renderer's armament colours.
+wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
+wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
+wows-toolkit-config = { workspace = true }
+wows-toolkit-viewmodel = { workspace = true }
+wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
+wt-translations = { workspace = true }
+
+[dev-dependencies]
+wows-toolkit-config = { workspace = true, features = ["test-support"] }
+wows-toolkit-viewmodel = { workspace = true, features = ["test-support"] }

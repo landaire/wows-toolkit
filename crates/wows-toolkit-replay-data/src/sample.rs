@@ -24,12 +24,13 @@ use wowsunpack::game_params::types::SkillPointCost;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::ChargeCount;
 
-use super::columns::ReplayColumn;
-use super::model::ChatMessage;
-use super::model::MatchContext;
-use super::model::PlayerRow;
-use super::model::ReplayReportModel;
-use super::model::SkillWarning;
+use crate::columns::ReplayColumn;
+use crate::model::ChatMessage;
+use crate::model::ClanColor;
+use crate::model::MatchContext;
+use crate::model::PlayerRow;
+use crate::model::ReplayReportModel;
+use crate::model::SkillWarning;
 
 /// A `PlayerRow` with every field at its absent/zero default, mirroring the
 /// test-only `base_row` fixture so the sample rows below can override just the
@@ -529,7 +530,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Division,
             message: "focus the Yamato".to_string(),
             clan_tag: Some("WTK".to_string()),
-            clan_color_rgb: Some(0x3399ff),
+            clan_color: Some(ClanColor::League(0x3399ff)),
         },
         ChatMessage {
             clock: GameClock(45.0),
@@ -538,7 +539,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Team,
             message: "cap is contested".to_string(),
             clan_tag: None,
-            clan_color_rgb: None,
+            clan_color: None,
         },
         ChatMessage {
             clock: GameClock(90.0),
@@ -547,7 +548,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::Global,
             message: "gg well played".to_string(),
             clan_tag: Some("RED".to_string()),
-            clan_color_rgb: Some(0xff3333),
+            clan_color: Some(ClanColor::League(0xff3333)),
         },
         ChatMessage {
             clock: GameClock(150.0),
@@ -556,7 +557,7 @@ fn sample_chat_messages() -> Vec<ChatMessage> {
             channel: ChatChannel::System,
             message: "IDS_BATTLE_MESSAGE_REINFORCEMENT".to_string(),
             clan_tag: None,
-            clan_color_rgb: None,
+            clan_color: None,
         },
     ]
 }

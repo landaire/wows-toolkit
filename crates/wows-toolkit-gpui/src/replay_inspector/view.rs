@@ -44,13 +44,13 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
 use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
-use super::columns::default_columns;
 use super::empty_map::sample_map;
 use super::load::GameDataCache;
 use super::load::GameDataStatus;

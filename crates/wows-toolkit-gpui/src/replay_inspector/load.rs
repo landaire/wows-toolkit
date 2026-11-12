@@ -70,6 +70,7 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wows_replays::types::ArenaId;
 use wows_replays::types::GameParamId;
+use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -81,8 +82,6 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
-
-use super::model::ReplayReportModel;
 
 /// Reasons a replay could not become a [`ReplayReportModel`].
 #[derive(Debug, Clone, thiserror::Error)]
@@ -1434,10 +1433,10 @@ mod alt_perspective_tests {
 
 #[cfg(test)]
 mod session_stat_tests {
-    use super::super::test_support::fixture_normalized_battle_report;
     use wows_replay_insights::battle_report::AchievementResult;
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::GameParamId;
+    use wows_toolkit_replay_data::test_support::fixture_normalized_battle_report;
     use wows_toolkit_viewmodel::stats::PerGameStat;
 
     /// The game writes `DD.MM.YYYY HH:MM:SS`, which the stored row carries

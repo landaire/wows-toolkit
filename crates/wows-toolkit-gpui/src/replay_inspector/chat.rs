@@ -21,9 +21,10 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
+use wows_toolkit_replay_data::model::ChatMessage;
 
-use super::columns::relation_color_rgb;
-use super::model::ChatMessage;
+use crate::replay_inspector::player_colors::clan_color_rgb;
+use crate::replay_inspector::player_colors::relation_color_rgb;
 
 /// No resolvable team relation: the de-emphasised tone, which is what egui's
 /// `Color32::GRAY` fallback amounts to in `build_replay_chat_content`.
@@ -122,8 +123,8 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                 .child(
                     h_flex()
                         .gap_1()
-                        .when_some(message.clan_tag.as_ref().zip(message.clan_color_rgb), |this, (tag, color)| {
-                            let clan_color: Hsla = rgb(crate::theme::readable_on_rows(color)).into();
+                        .when_some(message.clan_tag.as_ref().zip(message.clan_color), |this, (tag, color)| {
+                            let clan_color: Hsla = rgb(crate::theme::readable_on_rows(clan_color_rgb(color))).into();
                             this.child(
                                 div()
                                     .text_color(clan_color)
@@ -259,6 +260,7 @@ mod tests {
     use wows_replays::analyzer::battle_controller::ChatChannel;
     use wows_replays::types::GameClock;
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::model::ClanColor;
 
     use super::ChatMessage;
     use super::ally_color;
@@ -279,7 +281,7 @@ mod tests {
             channel,
             message: "hello".to_string(),
             clan_tag: clan_tag.map(str::to_string),
-            clan_color_rgb: clan_tag.map(|_| 0x3399ff),
+            clan_color: clan_tag.map(|_| ClanColor::League(0x3399ff)),
         }
     }
 
