@@ -42,6 +42,8 @@ pub mod proxy;
 pub mod query_bar;
 pub mod replay_export;
 pub mod search;
+pub mod search_results;
+pub mod search_settings;
 pub mod settings;
 pub mod stats;
 pub mod tactics;
