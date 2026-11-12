@@ -207,7 +207,7 @@ pub fn SideSplit(
         SideEdge::Left => 1.0,
         SideEdge::Right => -1.0,
     };
-    let resize_to = move |requested: f32| width.set(PanelWidth(requested.clamp(range.min.0, widest_now())));
+    let resize_to = move |requested: f32| width.set(PanelWidth(requested.clamp(range.min.0, range.max.0)));
 
     let edge_semantics = A11yBinding::new(Role::Splitter)
         .label(resize_label)
