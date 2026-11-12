@@ -37,7 +37,7 @@ use wows_toolkit_config::ReplayGrouping;
 use crate::app::App;
 use crate::app::AppTab;
 use crate::app::SettingsSection;
-use crate::stats::load::SessionData;
+use wows_toolkit_services::stats::SessionData;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
 /// by index, matching `AppTab::ALL`'s order.
