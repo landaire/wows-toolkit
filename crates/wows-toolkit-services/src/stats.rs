@@ -35,18 +35,26 @@ impl SessionData {
     /// connection; the expected-values refresh is the one network call here.
     /// A future for the tokio runtime.
     pub async fn load(pool: &SqlitePool, agent: UserAgent, proxy_url: &str) -> Self {
-        let games = match queries::get_all_session_stats(pool).await {
-            Ok(rows) => rows.into_iter().map(PerGameStat::from_row).collect(),
-            Err(err) => {
-                tracing::warn!("stats: could not read the session rows: {err}");
-                Vec::new()
-            }
-        };
-
+        let (games, filters) = load_games_and_filters(pool).await;
         let personal_rating = crate::personal_rating::load_refreshed(agent, proxy_url).await.map(Arc::new);
 
-        Self { games, filters: load_filters(pool).await, personal_rating }
+        Self { games, filters, personal_rating }
     }
+}
+
+/// The session's games, oldest first, and the filter bar's saved state: the
+/// part of [`SessionData`] read from the database alone, for a front end
+/// that shows them before the expected-values refresh lands.
+pub async fn load_games_and_filters(pool: &SqlitePool) -> (Vec<PerGameStat>, StatsFilters) {
+    let games = match queries::get_all_session_stats(pool).await {
+        Ok(rows) => rows.into_iter().map(PerGameStat::from_row).collect(),
+        Err(err) => {
+            tracing::warn!("stats: could not read the session rows: {err}");
+            Vec::new()
+        }
+    };
+
+    (games, load_filters(pool).await)
 }
 
 /// Reads the filter bar's saved state. Each miss falls back to that control's
