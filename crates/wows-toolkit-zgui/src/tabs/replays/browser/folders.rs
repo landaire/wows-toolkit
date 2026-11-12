@@ -32,9 +32,9 @@ use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
-use zgui::reactive::Callable;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -367,7 +367,10 @@ impl BrowserControl {
         let effect = RenderEffect::new(move |_| {
             let Some(grouping) = services.settings.read(|settings| settings.replay.grouping) else { return };
             self.grouping.set(grouping);
-            if self.pins_saved.get_untracked() == SavedList::NotRead && services.settings.pool().is_some() {
+            // Tests share one settings database across threads, so they hand the stored lists in
+            // through `adopt_*` rather than reading each other's.
+            let restores = cfg!(not(test));
+            if restores && self.pins_saved.get_untracked() == SavedList::NotRead && services.settings.pool().is_some() {
                 self.restore_folders();
             }
         });
@@ -390,7 +393,8 @@ impl BrowserControl {
         self.spawn(async move {
             let read = services
                 .on_tokio(async move {
-                    let pins = wows_toolkit_config::queries::try_get_setting::<PinnedFolders>(&pool, PINNED_FOLDERS).await;
+                    let pins =
+                        wows_toolkit_config::queries::try_get_setting::<PinnedFolders>(&pool, PINNED_FOLDERS).await;
                     let history =
                         wows_toolkit_config::queries::try_get_setting::<FolderHistory>(&pool, FOLDER_HISTORY).await;
                     (pins.map_err(|err| err.to_string()), history.map_err(|err| err.to_string()))
@@ -438,7 +442,8 @@ impl BrowserControl {
         for root in &dropped {
             stored.forget(root);
         }
-        let changed_before = self.history.with_untracked(|history| !history.folders().is_empty()) || !dropped.is_empty();
+        let changed_before =
+            self.history.with_untracked(|history| !history.folders().is_empty()) || !dropped.is_empty();
         self.history.update(|history| history.merge_older(stored));
         if changed_before {
             self.save_folder_history();
@@ -447,10 +452,9 @@ impl BrowserControl {
 
     /// The pinned directories, in tab order.
     pub fn pinned_folders(self) -> PinnedFolders {
-        PinnedFolders(
-            self.folders
-                .with_untracked(|folders| folders.iter().filter(|tab| tab.pinned).filter_map(|tab| tab.root().map(Path::to_path_buf)).collect()),
-        )
+        PinnedFolders(self.folders.with_untracked(|folders| {
+            folders.iter().filter(|tab| tab.pinned).filter_map(|tab| tab.root().map(Path::to_path_buf)).collect()
+        }))
     }
 
     fn save_pinned_folders(self) {
@@ -510,7 +514,12 @@ impl BrowserControl {
         let id = FolderId(self.next_id.get_value());
         self.next_id.update_value(|next| *next += 1);
         self.folders.update(|folders| {
-            folders.push(FolderTab { id, source: FolderSource::Chosen(root.clone()), pinned, state: FolderState::Checking });
+            folders.push(FolderTab {
+                id,
+                source: FolderSource::Chosen(root.clone()),
+                pinned,
+                state: FolderState::Checking,
+            });
         });
         self.check_folder(id, root);
 
@@ -751,7 +760,9 @@ impl BrowserControl {
     pub fn unseen(self, id: FolderId) -> usize {
         let Some(listing) = self.listings.with(|listings| listings.get(&id).copied()) else { return 0 };
         self.unseen.with(|unseen| {
-            unseen.get(&id).map_or(0, |paths| listing.files.with(|files| files.iter().filter(|file| paths.contains(&file.path)).count()))
+            unseen.get(&id).map_or(0, |paths| {
+                listing.files.with(|files| files.iter().filter(|file| paths.contains(&file.path)).count())
+            })
         })
     }
 
@@ -817,7 +828,8 @@ impl BrowserControl {
             ListingEvent::WatchResumed => {
                 let folder = self.tab(id).map(|tab| tab.label()).unwrap_or_default();
                 self.shell.toasts().show(
-                    Notice::ok(t!("ui.replay_folders.watch_resumed", folder = folder).into_owned()).keyed(watch_toast_key(id)),
+                    Notice::ok(t!("ui.replay_folders.watch_resumed", folder = folder).into_owned())
+                        .keyed(watch_toast_key(id)),
                 );
             }
             ListingEvent::WatchWithdrawn => self.shell.toasts().withdraw(&watch_toast_key(id)),
@@ -844,13 +856,17 @@ impl BrowserControl {
 
     fn watch_stopped(self, id: FolderId) -> bool {
         let watched = self.tab(id).is_some_and(|tab| tab.watch() == ListingWatch::Watched);
-        watched && self.listing(id).is_some_and(|listing| matches!(listing.watch_state.get(), WatchState::Stopped { .. }))
+        watched
+            && self.listing(id).is_some_and(|listing| matches!(listing.watch_state.get(), WatchState::Stopped { .. }))
     }
 }
 
 /// Whether two paths name one directory, comparing canonical paths when both resolve.
 fn same_directory(left: &Path, right: &Path) -> bool {
-    left == right || std::fs::canonicalize(left).ok().is_some_and(|left| std::fs::canonicalize(right).is_ok_and(|right| left == right))
+    left == right
+        || std::fs::canonicalize(left)
+            .ok()
+            .is_some_and(|left| std::fs::canonicalize(right).is_ok_and(|right| left == right))
 }
 
 fn watch_toast_key(id: FolderId) -> ToastKey {
@@ -935,7 +951,9 @@ fn FolderPane(
 
     let shown = move || {
         control.selected.get() == id
-            && control.folders.with(|folders| folders.iter().any(|tab| tab.id == id && tab.state == FolderState::Listed))
+            && control
+                .folders
+                .with(|folders| folders.iter().any(|tab| tab.id == id && tab.state == FolderState::Listed))
     };
 
     view! {
@@ -963,13 +981,21 @@ fn folder_notice(control: BrowserControl) -> Option<AnyView> {
             }))
         }
         FolderState::Missing => {
-            let hint = tab.pinned.then(|| view! {
-                text(class = "wt-folder-notice__hint") {{t!("ui.replay_folders.missing_hint").into_owned()}}
+            let hint = tab.pinned.then(|| {
+                view! {
+                    text(class = "wt-folder-notice__hint") {{t!("ui.replay_folders.missing_hint").into_owned()}}
+                }
             });
             let (label, act) = if tab.pinned {
-                (t!("ui.replay_folders.unpin").into_owned(), UnsyncCallback::new(move |()| control.pin_folder(selected, false)))
+                (
+                    t!("ui.replay_folders.unpin").into_owned(),
+                    UnsyncCallback::new(move |()| control.pin_folder(selected, false)),
+                )
             } else {
-                (t!("ui.replay_folders.close").into_owned(), UnsyncCallback::new(move |()| control.close_folder(selected)))
+                (
+                    t!("ui.replay_folders.close").into_owned(),
+                    UnsyncCallback::new(move |()| control.close_folder(selected)),
+                )
             };
             Some(AnyView::new(view! {
                 column(class = "wt-folder-notice", attr:data-testid = "replay-folder-missing") {
@@ -1001,10 +1027,16 @@ fn FolderStrip(control: BrowserControl, motion: Signal<MotionPreference, LocalSt
 }
 
 #[component]
-fn FolderTabView(control: BrowserControl, id: FolderId, motion: Signal<MotionPreference, LocalStorage>) -> impl IntoView {
-    let tab = Signal::derive_local(move || control.folders.with(|folders| folders.iter().find(|tab| tab.id == id).cloned()));
+fn FolderTabView(
+    control: BrowserControl,
+    id: FolderId,
+    motion: Signal<MotionPreference, LocalStorage>,
+) -> impl IntoView {
+    let tab =
+        Signal::derive_local(move || control.folders.with(|folders| folders.iter().find(|tab| tab.id == id).cloned()));
     let selected = move || control.selected.get() == id;
-    let lifted = move || selected() && tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state != FolderState::Checking));
+    let lifted =
+        move || selected() && tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state != FolderState::Checking));
     let label = move || tab.with(|tab| tab.as_ref().map(FolderTab::label).unwrap_or_default());
     let glyph = move || match tab.with(|tab| tab.as_ref().map(|tab| tab.source == FolderSource::Install)) {
         Some(true) => Glyph::Monitor,

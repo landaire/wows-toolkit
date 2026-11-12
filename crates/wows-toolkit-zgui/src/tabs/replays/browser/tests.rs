@@ -75,7 +75,9 @@ fn tabs(control: BrowserControl) -> Vec<(FolderSource, bool, FolderState)> {
 fn folder_id(control: BrowserControl, root: &Path) -> FolderId {
     control
         .folders
-        .with_untracked(|folders| folders.iter().find(|tab| tab.source == FolderSource::Chosen(root.to_path_buf())).map(|tab| tab.id))
+        .with_untracked(|folders| {
+            folders.iter().find(|tab| tab.source == FolderSource::Chosen(root.to_path_buf())).map(|tab| tab.id)
+        })
         .expect("the directory has a tab")
 }
 
@@ -84,7 +86,8 @@ fn listing(control: BrowserControl, root: &Path) -> Listing {
 }
 
 fn listed(listing: Listing) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = listing.files.with_untracked(|files| files.iter().map(|file| file.path.clone()).collect());
+    let mut paths: Vec<PathBuf> =
+        listing.files.with_untracked(|files| files.iter().map(|file| file.path.clone()).collect());
     paths.sort();
 
     paths
@@ -119,7 +122,7 @@ fn opening_a_folder_adds_or_selects_one_tab_and_the_install_stays_first() {
     assert_eq!(shown[1], (FolderSource::Chosen(root.clone()), false, FolderState::Listed));
     assert_eq!(control.selected.get_untracked(), folder_id(control, &root), "the opened folder is selected");
     assert_eq!(listed(listing(control, &root)).len(), 2, "both replays are listed");
-    assert_eq!(control.history.with_untracked(|history| history.folders().to_vec()), [root.clone()]);
+    assert_eq!(control.history.with_untracked(|history| history.folders().to_vec()), std::slice::from_ref(&root));
 
     control.open_folder(root.clone());
     settle_in_real_time(&mut window);
@@ -179,7 +182,10 @@ fn a_new_arrival_is_tagged_until_opened_or_left() {
     assert!(shown.arrivals.with_untracked(|arrivals| arrivals.contains(&left)), "and only its own");
 
     control.select_folder(FolderId::INSTALL);
-    assert!(shown.arrivals.with_untracked(std::collections::HashSet::is_empty), "leaving the listing takes the rest off");
+    assert!(
+        shown.arrivals.with_untracked(std::collections::HashSet::is_empty),
+        "leaving the listing takes the rest off"
+    );
 }
 
 #[test]
@@ -312,7 +318,7 @@ fn a_rated_row_carries_its_rating_and_outcome() {
     });
 
     let rated = tree.leaf(&rated).expect("the replay is listed");
-    let rating = rated.personal_rating.expect("the index rated the battle");
+    let rating = rated.personal_rating.as_ref().expect("the index rated the battle");
     assert_eq!(format!("{:.0}", rating.pr), "1650");
     assert_eq!(rated.outcome, MatchOutcome::Win);
     let unrated = tree.leaf(&unrated).expect("the replay is listed");
@@ -324,7 +330,14 @@ fn a_rated_row_carries_its_rating_and_outcome() {
 fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
     let files = scanned(&FIXTURES);
     let summaries = HashMap::new();
-    let inputs = TreeInputs { files: &files, summaries: &summaries, cache: None, fallback: None, grouping: ReplayGrouping::Date, locale: None };
+    let inputs = TreeInputs {
+        files: &files,
+        summaries: &summaries,
+        cache: None,
+        fallback: None,
+        grouping: ReplayGrouping::Date,
+        locale: None,
+    };
     let tree = BrowserTree::build(&inputs);
 
     assert_eq!(tree.roots().len(), 3, "three battles on three days make three groups");

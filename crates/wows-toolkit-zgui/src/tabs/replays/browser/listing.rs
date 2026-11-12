@@ -60,8 +60,8 @@ use zgui::task::spawn_local;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
-use crate::services::Services;
 use crate::services::GameDataState;
+use crate::services::Services;
 use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::tabs::replays::browser::tree::TreeInputs;
@@ -160,7 +160,12 @@ struct Work {
 
 impl Listing {
     /// A listing of `source`, scanned at once. Called from a component's body.
-    pub fn new(source: ListingSource, watch: ListingWatch, grouping: ReplayGrouping, report: Rc<dyn Fn(ListingEvent)>) -> Self {
+    pub fn new(
+        source: ListingSource,
+        watch: ListingWatch,
+        grouping: ReplayGrouping,
+        report: Rc<dyn Fn(ListingEvent)>,
+    ) -> Self {
         let services = Services::current();
         let listing = Self {
             source: RwSignal::new_local(source),
@@ -241,7 +246,10 @@ impl Listing {
             });
 
             let fresh: Vec<NodeKey> = self.work.with_value(|work| {
-                tree.groups().map(|id| NodeKey::Group(id.clone())).filter(|key| !work.known_groups.contains(key)).collect()
+                tree.groups()
+                    .map(|id| NodeKey::Group(id.clone()))
+                    .filter(|key| !work.known_groups.contains(key))
+                    .collect()
             });
             if !fresh.is_empty() {
                 self.work.update_value(|work| work.known_groups.extend(fresh.iter().cloned()));
@@ -278,9 +286,9 @@ impl Listing {
 
     /// The selected replays, sorted. Groups in the selection add nothing.
     pub fn selected_paths(self) -> Vec<PathBuf> {
-        let mut paths: Vec<PathBuf> = self
-            .selection
-            .with_untracked(|selection| selection.iter().filter_map(|key| key.leaf_path().map(Path::to_path_buf)).collect());
+        let mut paths: Vec<PathBuf> = self.selection.with_untracked(|selection| {
+            selection.iter().filter_map(|key| key.leaf_path().map(Path::to_path_buf)).collect()
+        });
         paths.sort();
 
         paths
@@ -363,7 +371,8 @@ impl Listing {
         let Some(generation) = generation else { return };
 
         let source = self.source.get_untracked();
-        let wows_dir = self.work.with_value(|work| work.services.settings.read_untracked(|settings| settings.wows_dir.clone()));
+        let wows_dir =
+            self.work.with_value(|work| work.services.settings.read_untracked(|settings| settings.wows_dir.clone()));
         if source == ListingSource::Install && wows_dir.as_deref().is_none_or(str::is_empty) {
             self.end_watch();
             self.status.set(ScanStatus::NoInstall);
@@ -430,7 +439,9 @@ impl Listing {
             let read = services
                 .on_tokio(async move {
                     match scope.existing(&pool).await? {
-                        Some(source) => wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await,
+                        Some(source) => {
+                            wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await
+                        }
                         None => Ok(HashMap::new()),
                     }
                 })
