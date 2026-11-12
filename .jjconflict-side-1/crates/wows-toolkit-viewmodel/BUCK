@@ -1,0 +1,73 @@
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
+
+VIEWMODEL_DEPS = [
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-protocol:wt_collab_protocol",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ciborium",
+    "//third-party/rust:escaper",
+    "//third-party/rust:glob",
+    "//third-party/rust:jiff",
+    "//third-party/rust:language-tags",
+    "//third-party/rust:nalgebra",
+    "//third-party/rust:levenshtein",
+    "//third-party/rust:pickled",
+    "//third-party/rust:regex",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:semver",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:thousands",
+    "//third-party/rust:tracing",
+    "//third-party/rust:unidecode",
+]
+
+# The cfg(windows) dependency section of Cargo.toml: the Windows proxy
+# configuration `proxy::resolve_proxy` reads. Kept apart from VIEWMODEL_DEPS
+# because the test target filters that list, and a select cannot be iterated.
+VIEWMODEL_PLATFORM_DEPS = os_select(
+    macos = [],
+    linux = [],
+    windows = ["//third-party/rust:windows-registry"],
+)
+
+workspace_library(
+    name = "wows_toolkit_viewmodel",
+    crate = "wows_toolkit_viewmodel",
+    package = "wows-toolkit-viewmodel",
+    version = "0.1.0",
+    deps = VIEWMODEL_DEPS + VIEWMODEL_PLATFORM_DEPS,
+)
+
+# The date assertions read a fixed zone through ZoneGuard, which the config
+# crate only compiles under test-support.
+TEST_SUPPORT_DEPS = [d for d in VIEWMODEL_DEPS if d != "//crates/wows-toolkit-config:wows_toolkit_config"] + [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+]
+
+# The shipped rating table, for the tests of crates that rate battles.
+workspace_library(
+    name = "wows_toolkit_viewmodel_test_support",
+    crate = "wows_toolkit_viewmodel",
+    package = "wows-toolkit-viewmodel",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = TEST_SUPPORT_DEPS + VIEWMODEL_PLATFORM_DEPS,
+)
+
+workspace_test(
+    name = "wows_toolkit_viewmodel_test",
+    crate = "wows_toolkit_viewmodel",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-viewmodel",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = TEST_SUPPORT_DEPS + VIEWMODEL_PLATFORM_DEPS,
+    test_deps = ["//third-party/rust:tokio"],
+)

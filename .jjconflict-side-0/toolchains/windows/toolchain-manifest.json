@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "platform": "x86_64-pc-windows-msvc",
+  "archives": [
+    {
+      "name": "visual_studio_build_tools",
+      "url": "https://download.visualstudio.microsoft.com/download/pr/00d9d26c-2727-42c2-aa9e-eda63b03e1ee/15df9d3b4c2b2eaf44704d5e938c895341b9cd8ba40a9a18610f8d18cbe01b53/vs_BuildTools.exe",
+      "sha256": "15df9d3b4c2b2eaf44704d5e938c895341b9cd8ba40a9a18610f8d18cbe01b53",
+      "path": "archives/vs-layout/vs_BuildTools.exe",
+      "layout_path": "archives/vs-layout",
+      "version": "17.14.37531.7",
+      "install_path": "VisualStudio/BuildTools",
+      "component_ids": [
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+        "Microsoft.VisualStudio.Component.VC.CMake.Project",
+        "Microsoft.VisualStudio.Component.VC.Llvm.Clang"
+      ]
+    },
+    {
+      "name": "windows_sdk",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/26100.9457.260912-0409.ge_release_svc_im_WindowsSDK.iso",
+      "sha256": "a364f38f35a2ade85ca676361643276b87ec494b103988ae20d7cbbdf94523ad",
+      "path": "archives/windows-sdk-10.0.26100.9457.iso",
+      "version": "10.0.26100.9457",
+      "install_path": "WindowsKits/10"
+    },
+    {
+      "name": "rust_msvc",
+      "url": "https://static.rust-lang.org/dist/rust-1.98.1-x86_64-pc-windows-msvc.msi",
+      "sha256": "346bea0c3076a33e291624b3d7e71bb3cf661422fadaf643612de641b3e7599a",
+      "path": "archives/rust-1.98.1-x86_64-pc-windows-msvc.msi",
+      "version": "1.98.1",
+      "install_path": "Rust/1.98.1"
+    },
+    {
+      "name": "nasm",
+      "url": "https://www.nasm.us/pub/nasm/releasebuilds/3.01/win64/nasm-3.01-win64.zip",
+      "sha256": "e0ba5157007abc7b1a65118a96657a961ddf55f7e3f632ee035366dfce039ca4",
+      "path": "archives/nasm-3.01-win64.zip",
+      "version": "3.01",
+      "install_path": "NASM/3.01"
+    },
+    {
+      "name": "wix",
+      "url": "https://github.com/wixtoolset/wix/releases/download/v6.0.2/wix-cli-x64.msi",
+      "sha256": "a8a5cc7443353cef3ab900c60cd7a3a5ee601746319d104ac7b12ad0ced2345c",
+      "path": "archives/wix-cli-x64-6.0.2.msi",
+      "version": "6.0.2",
+      "install_path": "WiX/6.0.2"
+    },
+    {
+      "name": "python",
+      "comment": "The prelude's C++ internal tools are Python scripts; the embeddable build is a plain unzip with no installer.",
+      "url": "https://www.python.org/ftp/python/3.13.7/python-3.13.7-embed-amd64.zip",
+      "sha256": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
+      "path": "archives/python-3.13.7-embed-amd64.zip",
+      "version": "3.13.7",
+      "install_path": "Python/3.13.7"
+    },
+    {
+      "name": "zstd",
+      "comment": "Windows ships no zstd; the pinned Buck2 release asset is zstd-compressed.",
+      "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip",
+      "sha256": "acb4e8111511749dc7a3ebedca9b04190e37a17afeb73f55d4425dbf0b90fad9",
+      "path": "archives/zstd-v1.5.7-win64.zip",
+      "version": "1.5.7",
+      "install_path": "Zstd/1.5.7"
+    },
+    {
+      "name": "buck2",
+      "comment": "Must stay on the release the vendored prelude came from; see prelude/VENDORED_FROM.",
+      "url": "https://github.com/facebook/buck2/releases/download/2026-10-15/buck2-x86_64-pc-windows-msvc.exe.zst",
+      "sha256": "21aebf84920fbedee296509f9c253b2b28b5da5fc48912211b4d9506dff26625",
+      "path": "archives/buck2-2026-10-15-x86_64-pc-windows-msvc.exe.zst",
+      "version": "2026-10-15",
+      "install_path": "Buck2/2026-10-15"
+    },
+    {
+      "name": "wix_extensions",
+      "url": "https://github.com/wixtoolset/wix/releases/download/v6.0.2/artifacts.zip",
+      "sha256": "6171eb9e604f344aa7c4a6924e2d22eee49cc1217cc326b532eef29154f88cc1",
+      "path": "archives/wix-6.0.2-artifacts.zip",
+      "version": "6.0.2",
+      "install_path": "WiX/6.0.2/extensions"
+    }
+  ],
+  "tools": {
+    "cl": {
+      "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/cl.exe"
+    },
+    "link": {
+      "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/link.exe"
+    },
+    "lib": {
+      "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/lib.exe"
+    },
+    "ml64": {
+      "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/ml64.exe"
+    },
+    "clang": {
+      "path": "VisualStudio/BuildTools/VC/Tools/Llvm/x64/bin/clang.exe"
+    },
+    "llvm_ar": {
+      "path": "VisualStudio/BuildTools/VC/Tools/Llvm/x64/bin/llvm-ar.exe"
+    },
+    "rc": {
+      "path": "WindowsKits/10/bin/10.0.26100.0/x64/rc.exe",
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
+    },
+    "fxc": {
+      "path": "WindowsKits/10/bin/10.0.26100.0/x64/fxc.exe",
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
+    },
+    "midl": {
+      "path": "WindowsKits/10/bin/10.0.26100.0/x64/midl.exe",
+      "version": "10.0.26100.9457 (WinBuild.160101.0800)"
+    },
+    "rustc": {
+      "path": "Rust/1.98.1/Rust/bin/rustc.exe",
+      "version_output": "rustc 1.98.1"
+    },
+    "rustdoc": {
+      "path": "Rust/1.98.1/Rust/bin/rustdoc.exe",
+      "version_output": "rustdoc 1.98.1"
+    },
+    "clippy_driver": {
+      "path": "Rust/1.98.1/Rust/bin/clippy-driver.exe",
+      "version_output": "clippy 0.1.98"
+    },
+    "rustfmt": {
+      "path": "Rust/1.98.1/Rust/bin/rustfmt.exe",
+      "version_output": "rustfmt 1.9.0-stable"
+    },
+    "nasm": {
+      "path": "NASM/3.01/nasm-3.01/nasm.exe",
+      "version_output": "NASM version 3.01"
+    },
+    "buck2": {
+      "path": "Buck2/2026-10-15/buck2.exe"
+    },
+    "zstd": {
+      "path": "Zstd/1.5.7/zstd-v1.5.7-win64/zstd.exe",
+      "version_output": "v1.5.7"
+    },
+    "python": {
+      "path": "Python/3.13.7/python.exe",
+      "version_output": "Python 3.13.7"
+    },
+    "wix": {
+      "path": "WiX/6.0.2/PFiles64/WiX Toolset v6.0/bin/wix.exe",
+      "version_output": "6.0.2"
+    },
+    "wix_ui_extension": {
+      "path": "WiX/6.0.2/extensions/WixToolset.UI.wixext/wixext6/WixToolset.UI.wixext.dll"
+    },
+    "wix_util_extension": {
+      "path": "WiX/6.0.2/extensions/WixToolset.Util.wixext/wixext6/WixToolset.Util.wixext.dll"
+    }
+  },
+  "sdk": {
+    "include": "WindowsKits/10/Include/10.0.26100.0",
+    "lib": "WindowsKits/10/Lib/10.0.26100.0",
+    "ucrt_lib": "WindowsKits/10/Lib/10.0.26100.0/ucrt/x64",
+    "um_lib": "WindowsKits/10/Lib/10.0.26100.0/um/x64"
+  }
+}

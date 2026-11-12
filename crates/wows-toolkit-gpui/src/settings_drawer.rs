@@ -2118,7 +2118,7 @@ mod tests {
 
     fn zoom_to(zoom: f32, window: WindowHandle<Root>, app: &Entity<App>, cx: &mut TestAppContext) {
         cx.update_window(window.into(), |_, window, cx| {
-            app.update(cx, |app, cx| app.set_zoom(crate::zoom::ZoomFactor::new(zoom), window, cx));
+            app.update(cx, |app, cx| app.set_zoom(wows_toolkit_viewmodel::settings::ZoomFactor::new(zoom), window, cx));
             // The kit sets the rem size from the theme as the frame starts,
             // so the second frame is the first laid out at the new size.
             window.render_frame(cx);

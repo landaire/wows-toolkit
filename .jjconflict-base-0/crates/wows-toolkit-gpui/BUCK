@@ -1,0 +1,145 @@
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "gpui_build",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.0.5",
+    rustc_flags = ["--cfg=wows_buck_build"],
+)
+
+GPUI_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
+    "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//third-party/rust:sys-locale",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
+    "//crates/wows-toolkit-services:wows_toolkit_services",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-client:wt_collab_client",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ab_glyph",
+    "//third-party/rust:anyhow",
+    "//third-party/rust:arboard",
+    "//third-party/rust:bytemuck",
+    "//third-party/rust:ciborium",
+    "//third-party/rust:clap",
+    "//third-party/rust:windows-sys",
+    "//third-party/rust:csv",
+    "//third-party/rust:fontdb",
+    "//third-party/rust:futures",
+    "//third-party/rust:gettext",
+    "//third-party/rust:gpui-fast-wgpu",
+    "//third-party/rust:gpui-kit",
+    "//third-party/rust:humansize",
+    "//third-party/rust:image",
+    "//third-party/rust:jiff",
+    "//third-party/rust:nalgebra",
+    "//third-party/rust:notify",
+    "//third-party/rust:parking_lot",
+    "//third-party/rust:regex",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:rustls",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:tempfile",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tiny-skia",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+    "//third-party/rust:walkdir",
+    "//third-party/rust:web-time",
+]
+
+# The cfg(target_os) dependency sections of Cargo.toml: the file dialogs.
+GPUI_PLATFORM_DEPS = os_select(
+    macos = ["//third-party/rust:rfd"],
+    linux = [
+        "//third-party/rust:ashpd",
+        "//third-party/rust:url",
+    ],
+    windows = ["//third-party/rust:rfd"],
+)
+
+# Not wows_toolkit_gpui_bin: the target name is a path component of every
+# object file a release build writes, and the longest of those already sits
+# within a dozen characters of the 260 link.exe accepts.
+workspace_binary(
+    name = "gpui_bin",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.0.5",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    deps = GPUI_DEPS + GPUI_PLATFORM_DEPS,
+    # gpui embeds its application manifest from its own build script, which
+    # shells out to an rc.exe it discovers from host state. Buck compiles the
+    # same manifest with the pinned rc.exe and links the result here instead.
+    rustc_flags = os_select(
+        macos = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
+        windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
+    ),
+)
+
+# The shared crates' heap-sampling builds, which the dhat binary links instead.
+_DHAT_VARIANTS = {
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_dhat",
+}
+
+# The same binary with dhat's tracking allocator, for comparing this port's
+# live heap against the egui app's. Name kept short: it is a path component of
+# every object file, and the longest already sits near the 260 link.exe takes.
+workspace_binary(
+    name = "gpui_dhat",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.0.5",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    features = ["dhat-heap"],
+    deps = [_DHAT_VARIANTS.get(d, d) for d in GPUI_DEPS] + GPUI_PLATFORM_DEPS + ["//third-party/rust:dhat"],
+    rustc_flags = os_select(
+        macos = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
+        windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
+    ),
+)
+
+_TEST_SUPPORT_VARIANTS = {
+    "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+}
+
+# The transition builds the gpui crates with their test-support features (see
+# //build-support/buck/test-support), which the binaries above never get.
+workspace_test(
+    name = "gpui_test",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.0.5",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    # test-support lets the tests point `storage_dir` at a temporary directory.
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in GPUI_DEPS] + GPUI_PLATFORM_DEPS,
+    test_deps = ["//third-party/rust:filetime"],
+    incoming_transition = "//build-support/buck/test-support:transition",
+    # Each test opens a window and a graphics device. One thread per core
+    # wedges the run on a machine with many of them.
+    run_env = {"RUST_TEST_THREADS": "4"},
+)
