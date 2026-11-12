@@ -118,25 +118,25 @@ use wows_toolkit_viewmodel::armor::arc::ZoneShape;
 use wows_toolkit_viewmodel::armor::arc::describe_arc;
 use wows_toolkit_viewmodel::armor::arc::isolate;
 
-use crate::viewport::camera;
-use crate::viewport::camera::ArcballCamera;
-use crate::viewport::camera::Axis;
 use crate::viewport::device::SceneDevice;
 use crate::viewport::device::SharedSceneDevice;
-use crate::viewport::gizmo;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_OVERLAY;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::LightingSettings;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::TargetSize;
-use crate::viewport::types::Vec2;
-use crate::viewport::types::Vec3;
-use crate::viewport::types::ViewRect;
 use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::GameParamId;
 use wows_replays::types::ShotId;
+use wows_toolkit_armor::viewport::camera;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
+use wows_toolkit_armor::viewport::camera::Axis;
+use wows_toolkit_armor::viewport::gizmo;
+use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
+use wows_toolkit_armor::viewport::renderer::LAYER_OVERLAY;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::TargetSize;
+use wows_toolkit_armor::viewport::types::Vec2;
+use wows_toolkit_armor::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::ViewRect;
 use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
 use wows_toolkit_viewmodel::armor::arc::Strike;
 use wows_toolkit_viewmodel::armor::arc::compare_with_server;
@@ -1062,10 +1062,10 @@ pub struct ViewportView {
     perspective: PerspectiveSettings,
     /// The free camera as it was when the lock went on, put back when it comes
     /// off: a reader who was looking at a plate is looking at it again.
-    camera_before_lock: Option<crate::viewport::camera::ArcballCamera>,
+    camera_before_lock: Option<ArcballCamera>,
     /// The meshes marking where the locked camera is aimed, dropped and rebuilt
     /// as it moves.
-    aim_mesh_ids: Vec<crate::viewport::types::MeshId>,
+    aim_mesh_ids: Vec<MeshId>,
     /// Whether the openings in the armor are marked, and how many were
     /// found last time they were looked for. The count is what the rail
     /// reports, so it is kept rather than recomputed per frame.
@@ -5474,12 +5474,12 @@ mod tests {
     use super::vec2_to_point;
     use super::view_rect_from_bounds;
     use crate::armor_viewer::upload::DisplaySettings;
-    use crate::viewport::types::LightingSettings;
     use gpui_kit::Bounds;
     use gpui_kit::MouseButton;
     use gpui_kit::point;
     use gpui_kit::px;
     use gpui_kit::size;
+    use wows_toolkit_armor::viewport::types::LightingSettings;
     use wowsunpack::export::camo_textures::CamoSchemeId;
     use wowsunpack::export::camo_textures::CamoSchemeInfo;
     use wowsunpack::export::gltf_export::CamoOrigin;
@@ -5788,7 +5788,7 @@ mod hover_tests {
     use crate::armor_viewer::pane::ArmorViewerPane;
     use crate::armor_viewer::xray::XrayHighlight;
     use crate::armor_viewer::xray::XrayHighlightView;
-    use crate::viewport::renderer::HighlightDepth;
+    use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 
     const TOOLTIPS: [&str; 3] = ["armor-plate-tooltip", "armor-mesh-tooltip", "armor-ring-tooltip"];
 
@@ -5961,8 +5961,8 @@ mod real_model_tests {
     use crate::armor_viewer::load_model::ModelLoadRequest;
     use crate::armor_viewer::load_model::load_model_scene;
     use crate::armor_viewer::model_refs::HardpointTarget;
-    use crate::viewport::types::Vec3;
-    use crate::viewport::types::ViewRect;
+    use wows_toolkit_armor::viewport::types::Vec3;
+    use wows_toolkit_armor::viewport::types::ViewRect;
 
     /// Opens catalogued models from a real install, as the viewer opens them,
     /// and checks every vertex drawn is in view from several angles and each

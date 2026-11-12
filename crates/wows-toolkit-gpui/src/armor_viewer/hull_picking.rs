@@ -31,10 +31,10 @@ use wowsunpack::export::ship_parts::ShipPart;
 use wowsunpack::export::ship_parts::ShipPartKey;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vec3;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::load_ship::transform_normal;
 use super::picking_ui::HighlightOrigin;

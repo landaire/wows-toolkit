@@ -27,12 +27,12 @@ use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::thickness_to_color;
 
-use crate::viewport::renderer::LAYER_HIGHLIGHT;
-use crate::viewport::renderer::LAYER_OVERLAY;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::HitResult;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::renderer::LAYER_HIGHLIGHT;
+use wows_toolkit_armor::viewport::renderer::LAYER_OVERLAY;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::HitResult;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::legend::swatch_color;
 use super::load_ship::ArmorTriangleTooltip;
@@ -280,7 +280,7 @@ pub fn tooltip_element(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::viewport::types::Vec3;
+    use wows_toolkit_armor::viewport::types::Vec3;
     use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
     fn test_tooltip(zone: &str, material: &str, thickness_mm: f32, layers: Vec<f32>) -> ArmorTriangleTooltip {
@@ -304,8 +304,8 @@ mod tests {
 
     #[test]
     fn tooltip_for_hit_finds_the_matching_mesh_and_triangle() {
-        let mesh_a = MeshId(0);
-        let mesh_b = MeshId(1);
+        let mesh_a = MeshId::from_raw(0);
+        let mesh_b = MeshId::from_raw(1);
         let mesh_triangle_info = vec![
             (mesh_a, vec![test_tooltip("Bow", "Bow_Bottom", 16.0, vec![16.0])]),
             (
@@ -325,15 +325,17 @@ mod tests {
 
     #[test]
     fn tooltip_for_hit_returns_none_for_an_unknown_mesh() {
-        let mesh_triangle_info = vec![(MeshId(0), vec![test_tooltip("Bow", "Bow_Bottom", 16.0, vec![16.0])])];
-        let hit = HitResult { mesh_id: MeshId(9), triangle_index: 0, distance: 1.0, world_position: Vec3::zeros() };
+        let mesh_triangle_info = vec![(MeshId::from_raw(0), vec![test_tooltip("Bow", "Bow_Bottom", 16.0, vec![16.0])])];
+        let hit =
+            HitResult { mesh_id: MeshId::from_raw(9), triangle_index: 0, distance: 1.0, world_position: Vec3::zeros() };
         assert!(tooltip_for_hit(&hit, &mesh_triangle_info).is_none());
     }
 
     #[test]
     fn tooltip_for_hit_returns_none_for_an_out_of_range_triangle_index() {
-        let mesh_triangle_info = vec![(MeshId(0), vec![test_tooltip("Bow", "Bow_Bottom", 16.0, vec![16.0])])];
-        let hit = HitResult { mesh_id: MeshId(0), triangle_index: 5, distance: 1.0, world_position: Vec3::zeros() };
+        let mesh_triangle_info = vec![(MeshId::from_raw(0), vec![test_tooltip("Bow", "Bow_Bottom", 16.0, vec![16.0])])];
+        let hit =
+            HitResult { mesh_id: MeshId::from_raw(0), triangle_index: 5, distance: 1.0, world_position: Vec3::zeros() };
         assert!(tooltip_for_hit(&hit, &mesh_triangle_info).is_none());
     }
 }

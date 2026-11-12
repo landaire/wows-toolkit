@@ -18,7 +18,7 @@ use wowsunpack::export::armor_ray::transform_point;
 
 use super::load_ship::LoadedShipArmor;
 
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::upload::plate_is_visible;
 use super::visibility::VisibilityFilter;

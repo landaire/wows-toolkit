@@ -6,7 +6,7 @@ use rust_i18n::t;
 pub use wows_toolkit_viewmodel::settings::XrayHighlight;
 
 use crate::status_bar::ModifierKey;
-use crate::viewport::renderer::HighlightDepth;
+use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 
 /// The GPUI key and depth for an [`XrayHighlight`].
 pub trait XrayHighlightView: Copy {
@@ -39,8 +39,8 @@ impl XrayHighlightView for XrayHighlight {
 mod tests {
     use super::*;
     use crate::armor_viewer::picking_ui::HighlightOrigin;
-    use crate::viewport::renderer::DepthState;
-    use crate::viewport::renderer::layer_depth_state;
+    use wows_toolkit_armor::viewport::renderer::DepthState;
+    use wows_toolkit_armor::viewport::renderer::layer_depth_state;
 
     #[test]
     fn each_mode_chooses_its_highlight_depth() {
