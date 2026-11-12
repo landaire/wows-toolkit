@@ -478,9 +478,9 @@ impl RendererSession {
                 blocking(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
             match read {
                 Ok((read, shots)) => {
-                    let filter = self.events.with_untracked(|events| events.filter.clone());
+                    let filter = self.events.with_untracked(|events| events.filter().clone());
                     let mut events = BattleEvents::from_extraction(read, shots);
-                    events.filter = filter;
+                    events.set_filter(|kept| *kept = filter);
                     self.events.set(events);
                 }
                 // The viewport still plays; only the event controls are worse off.

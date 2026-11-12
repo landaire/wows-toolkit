@@ -677,14 +677,28 @@ fn the_timeline_filter_decides_what_the_list_shows() {
     // Every seeded event is an advantage change, so switching that kind off
     // empties the list without emptying the battle.
     let advantage = kind_index(&events.events()[0].kind);
-    events.filter.kinds[advantage] = false;
+    events.set_filter(|filter| filter.kinds[advantage] = false);
     assert!(events.visible().is_empty());
     assert!(!events.events().is_empty(), "which is 'nothing matches', not 'nothing happened'");
 
-    events.filter.kinds = [true; KIND_COUNT];
-    events.filter.search = "at 30".into();
+    events.set_filter(|filter| {
+        filter.kinds = [true; KIND_COUNT];
+        filter.search = "at 30".into();
+    });
     assert_eq!(events.visible().len(), 1, "the search looks through what a row says");
     assert_eq!(events.rows().len(), 1, "and the list has a row for it");
+
+    // Letters that each start a word, which a plain substring search does not find, marked
+    // where they matched.
+    events.set_filter(|filter| filter.search = "a30".into());
+    let rows = events.rows();
+    let kept: Vec<f32> = rows.iter().map(|row| row.at).collect();
+    assert_eq!(kept, [30.0]);
+    assert_eq!(rows[0].marks, [0..1, 3..5]);
+
+    events.set_filter(|filter| filter.search = "t".into());
+    let kept: Vec<f32> = events.visible().iter().map(|event| event.clock.seconds()).collect();
+    assert_eq!(kept, [10.0, 30.0, 60.0], "a timeline keeps the order things happened in");
 }
 
 /// Clicking a row moves playback to when it happened.

@@ -2,6 +2,7 @@
 //! timeline lists it.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use wows_replay_insights::timeline::EventTone;
 use wows_replay_insights::timeline::ShipShotTimeline;
@@ -9,9 +10,13 @@ use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
+use wows_replay_insights::timeline::kind_index;
 use wows_replay_insights::timeline::row_text;
 use wows_replay_insights::timeline::row_tone;
+use wows_replay_insights::timeline::searchable_text;
 use wows_replays::types::EntityId;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_types::TeamId;
 
 /// One row of the timeline, already worded and sided.
@@ -22,6 +27,9 @@ pub struct TimelineRow {
     pub label: String,
     pub hover: String,
     pub tone: EventTone,
+    /// Where the search matched `label`. A row found by a player name its label does not carry
+    /// is unmarked.
+    pub marks: Vec<Range<usize>>,
 }
 
 /// A battle's events and the hits each ship took, read by a second walk of
@@ -31,13 +39,17 @@ pub struct BattleEvents {
     /// instead of an empty list while it runs.
     read: bool,
     events: Vec<TimelineEvent>,
+    /// The texts the search reads of each of `events`, folded once when the events are read.
+    event_keys: Vec<[FilterKey; 2]>,
     /// Which side the reader was on, which is what makes a row friendly.
     viewer_team: Option<TeamId>,
     /// What each ship took, keyed by the entity the frame's own ship commands
     /// carry, so a ship the reader points at is looked up directly.
     shots: HashMap<EntityId, ShipShotTimeline>,
     /// Which of the events the timeline shows.
-    pub filter: TimelineFilter,
+    filter: TimelineFilter,
+    /// The filter's search, folded once each time it changes.
+    query: FilterQuery,
 }
 
 impl BattleEvents {
@@ -47,9 +59,11 @@ impl BattleEvents {
         Self {
             read: false,
             events: Vec::new(),
+            event_keys: Vec::new(),
             viewer_team: None,
             shots: HashMap::new(),
             filter: TimelineFilter::default(),
+            query: FilterQuery::default(),
         }
     }
 
@@ -59,7 +73,23 @@ impl BattleEvents {
         viewer_team: Option<TeamId>,
         shots: HashMap<EntityId, ShipShotTimeline>,
     ) -> Self {
-        Self { read: true, events, viewer_team, shots, filter: TimelineFilter::default() }
+        let event_keys = events
+            .iter()
+            .map(|event| {
+                let (first, second) = searchable_text(&event.kind);
+                [FilterKey::new(first), FilterKey::new(second)]
+            })
+            .collect();
+
+        Self {
+            read: true,
+            events,
+            event_keys,
+            viewer_team,
+            shots,
+            filter: TimelineFilter::default(),
+            query: FilterQuery::default(),
+        }
     }
 
     /// What [`crate::minimap_preview::extract_events`] returns.
@@ -84,18 +114,47 @@ impl BattleEvents {
         &self.shots
     }
 
-    /// The events the filter admits, newest last.
-    pub fn visible(&self) -> Vec<&TimelineEvent> {
-        self.events.iter().filter(|event| self.filter.matches(event)).collect()
+    /// Which of the events the timeline shows.
+    pub fn filter(&self) -> &TimelineFilter {
+        &self.filter
     }
 
-    /// The rows the timeline lists.
+    /// Changes which of the events the timeline shows.
+    pub fn set_filter(&mut self, apply: impl FnOnce(&mut TimelineFilter)) {
+        apply(&mut self.filter);
+        self.query = FilterQuery::new(&self.filter.search);
+    }
+
+    /// The events the filter admits, newest last. A timeline is read in the order things
+    /// happened, so the search only drops events and never reorders them.
+    pub fn visible(&self) -> Vec<&TimelineEvent> {
+        let searching = self.query.is_active();
+
+        self.events
+            .iter()
+            .zip(&self.event_keys)
+            .filter(|(event, keys)| {
+                self.filter.kinds[kind_index(&event.kind)] && (!searching || self.query.best(keys.iter()).is_some())
+            })
+            .map(|(event, _)| event)
+            .collect()
+    }
+
+    /// The rows the timeline lists, each marked where the search matched it.
     pub fn rows(&self) -> Vec<TimelineRow> {
         self.visible()
             .into_iter()
             .map(|event| {
                 let (label, hover) = row_text(&event.kind);
-                TimelineRow { at: event.clock.seconds(), label, hover, tone: row_tone(&event.kind, self.viewer_team) }
+                // A row kept by its player name alone has nothing in its label to mark.
+                let marks = self.query.ranges(&label).unwrap_or_default();
+                TimelineRow {
+                    at: event.clock.seconds(),
+                    label,
+                    hover,
+                    tone: row_tone(&event.kind, self.viewer_team),
+                    marks,
+                }
             })
             .collect()
     }
