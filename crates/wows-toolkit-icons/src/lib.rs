@@ -11,6 +11,7 @@ macro_rules! glyph_list {
         $callback! {
             AppWindow => "app-window",
             Archive => "archive",
+            Bell => "bell",
             Bomb => "bomb",
             Box => "box",
             Castle => "castle",
@@ -66,6 +67,7 @@ macro_rules! glyph_list {
             SkipForward => "skip-forward",
             Slash => "slash",
             Square => "square",
+            Star => "star",
             Sword => "sword",
             SquareArrowOutUpRight => "square-arrow-out-up-right",
             Table => "table",
