@@ -7,16 +7,9 @@
 //! [`wows_minimap_renderer::preview::PreviewRenderer`] -- the path the hover
 //! preview already uses -- and shows the resulting image.
 //!
-//! **What is kept, and why.** A whole battle's frames as images would be tens
-//! of gigabytes, so the bake keeps the draw commands and one frame is
-//! rasterised at a time. The commands themselves are bounded by
-//! [`TrackSink`]'s budget: a long battle is sampled more coarsely rather than
-//! costing more memory than a short one.
-//!
-//! **What it does not draw.** The panel commands (stats, rosters) and
-//! position trails are outside `bake_options`, for the reason that module
-//! documents. The egui renderer's annotation toolbar and video export are not
-//! here either; see `docs/gpui-port-parity.md`.
+//! The track, the transport, the view, the per-ship choices, drawing over the
+//! map and the export are [`wows_toolkit_replay_data::replay_render`]; this is
+//! the GPUI panel over them.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,8 +46,6 @@ use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use std::cell::Cell;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::rc::Rc;
 use wows_toolkit_armor::catalog::ShipEntry;
 use wows_toolkit_replay_data::frame::BgraFrame;
@@ -64,8 +55,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
-use wows_minimap_renderer::VideoCodec;
-use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
@@ -73,7 +62,6 @@ use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::EventTone;
 use wows_replay_insights::timeline::KIND_COUNT;
-use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
@@ -84,9 +72,74 @@ use wows_replay_insights::timeline::row_tone;
 use wows_replay_insights::timeline::searchable_text;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
-use wowsunpack::game_types::TeamId;
-use wt_collab_client::drawing::Drawn;
-use wt_collab_client::drawing::Stroke;
+use wows_toolkit_replay_data::replay_render::annotate;
+use wows_toolkit_replay_data::replay_render::annotate::ANNOTATION_ACTIONS;
+use wows_toolkit_replay_data::replay_render::annotate::Annotator;
+use wows_toolkit_replay_data::replay_render::annotate::Click;
+use wows_toolkit_replay_data::replay_render::annotate::ENEMY_TINT;
+use wows_toolkit_replay_data::replay_render::annotate::FRIENDLY_TINT;
+use wows_toolkit_replay_data::replay_render::annotate::HANDLE_RADIUS;
+use wows_toolkit_replay_data::replay_render::annotate::INKS;
+use wows_toolkit_replay_data::replay_render::annotate::MAX_NIB;
+use wows_toolkit_replay_data::replay_render::annotate::MIN_NIB;
+use wows_toolkit_replay_data::replay_render::annotate::PointerDown;
+use wows_toolkit_replay_data::replay_render::annotate::PointerMove;
+use wows_toolkit_replay_data::replay_render::annotate::PointerUp;
+use wows_toolkit_replay_data::replay_render::annotate::SPECIES;
+use wows_toolkit_replay_data::replay_render::annotate::TOOLS;
+use wows_toolkit_replay_data::replay_render::annotate::same_tool;
+use wows_toolkit_replay_data::replay_render::annotate::tool_for_key;
+use wows_toolkit_replay_data::replay_render::armor::ArmorFollow;
+use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
+use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
+use wows_toolkit_replay_data::replay_render::armor::has_armor_to_show;
+use wows_toolkit_replay_data::replay_render::collab::COLLAB_TICK;
+use wows_toolkit_replay_data::replay_render::collab::CursorReport;
+use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
+use wows_toolkit_replay_data::replay_render::collab::frame_broadcast;
+use wows_toolkit_replay_data::replay_render::collab::ping_ring;
+use wows_toolkit_replay_data::replay_render::collab::shared_replay;
+use wows_toolkit_replay_data::replay_render::export;
+use wows_toolkit_replay_data::replay_render::export::ExportProgress;
+use wows_toolkit_replay_data::replay_render::export::ExportSettings;
+use wows_toolkit_replay_data::replay_render::export::ExportStage;
+use wows_toolkit_replay_data::replay_render::export::ExportTarget;
+use wows_toolkit_replay_data::replay_render::export::encoder_status;
+use wows_toolkit_replay_data::replay_render::export::must_use_cpu;
+use wows_toolkit_replay_data::replay_render::hover;
+use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
+use wows_toolkit_replay_data::replay_render::options::TOGGLES;
+use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
+use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
+use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
+use wows_toolkit_replay_data::replay_render::playback::DEFAULT_SPEED;
+use wows_toolkit_replay_data::replay_render::playback::Playback;
+use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
+use wows_toolkit_replay_data::replay_render::playback::SPEEDS;
+use wows_toolkit_replay_data::replay_render::playback::Tick;
+use wows_toolkit_replay_data::replay_render::playback::mmss;
+use wows_toolkit_replay_data::replay_render::playback::speed_index;
+use wows_toolkit_replay_data::replay_render::playback::speed_label;
+use wows_toolkit_replay_data::replay_render::raster;
+use wows_toolkit_replay_data::replay_render::raster::LayoutChange;
+use wows_toolkit_replay_data::replay_render::ships;
+use wows_toolkit_replay_data::replay_render::ships::ALL_RANGES;
+use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
+use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
+use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
+use wows_toolkit_replay_data::replay_render::timeline::TimelineRow;
+use wows_toolkit_replay_data::replay_render::track::DEFAULT_MAP_ORIGIN;
+use wows_toolkit_replay_data::replay_render::track::FrameIndex;
+use wows_toolkit_replay_data::replay_render::track::Track;
+use wows_toolkit_replay_data::replay_render::track::bake;
+use wows_toolkit_replay_data::replay_render::view::ElementBounds;
+use wows_toolkit_replay_data::replay_render::view::FrameSize;
+use wows_toolkit_replay_data::replay_render::view::MapView;
+use wows_toolkit_replay_data::replay_render::view::Placement;
+use wows_toolkit_replay_data::replay_render::view::Wheel;
+use wows_toolkit_replay_data::replay_render::view::WindowPoint;
+use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::ReplayId;
 use wt_collab_client::drawing::Tool;
 
 use crate::tactics::ShipLookup;
@@ -97,95 +150,13 @@ use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
 use wows_toolkit_replay_data::load::GameDataCache;
 
-/// How many frames of a battle the track keeps.
-///
-/// Past this the sink halves what it holds and samples half as often, so a
-/// twenty-minute battle costs what a five-minute one does. Twelve hundred
-/// frames is two minutes of game time at the bake rate below, and a whole
-/// twenty-minute battle once the stride has doubled four times.
-const TRACK_BUDGET: usize = 1200;
-
-/// How much game time one baked frame covers.
-const BAKE_INTERVAL: f32 = 0.5;
-
-/// How often the viewport advances while playing, before the speed
-/// multiplier. One frame of game time per tick at 1x.
-const TICK: Duration = Duration::from_millis(500);
-
-/// The speeds the transport offers, which are the egui renderer's own
-/// (`PLAYBACK_SPEEDS`). A battle runs twenty minutes, so the useful range is
-/// well above real time.
-const SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
-
-/// The speed a viewport opens at, as the egui renderer opens at
-/// (`SharedRendererState::speed`). Real time is too slow to watch a battle
-/// through.
-const DEFAULT_SPEED: f32 = 20.0;
-
-/// How far the skip controls and the left and right keys move, in seconds of
-/// game time. The egui renderer's own step.
-const SEEK_STEP: f32 = 10.0;
-
 /// What the viewport is doing.
 enum State {
     /// Reading the replay and walking the battle.
     Baking,
-    Ready(Track),
+    /// Shared with the draw and the export running off the UI thread.
+    Ready(Arc<Track>),
     Failed(String),
-}
-
-/// A baked battle: the commands of every kept frame, and when each was drawn.
-struct Track {
-    frames: Vec<Vec<DrawCommand>>,
-    clocks: Vec<GameClock>,
-    /// When the battle proper began. Recording starts at the loading screen,
-    /// so the clock a frame carries runs ahead of the one the game showed by
-    /// this much.
-    battle_start: GameClock,
-    /// When the battle ended, if the replay ran that far.
-    battle_end: Option<GameClock>,
-    /// How wide the map is in the game's own world units, which is what
-    /// turns a ship's range in metres into a distance on the minimap.
-    space_size: f32,
-    /// The build this was recorded on, which some of a ship's ranges are
-    /// gated on.
-    version: wowsunpack::data::Version,
-    /// Where the map's top-left corner sits in these frames.
-    map_origin: (f32, f32),
-    /// The map's space name, which a peer watching this playback loads art by.
-    space: String,
-}
-
-impl Track {
-    fn len(&self) -> usize {
-        self.frames.len()
-    }
-
-    /// The game time `index` was drawn at, in seconds.
-    fn seconds_at(&self, index: usize) -> f32 {
-        self.clocks.get(index).map(|clock| clock.seconds()).unwrap_or(0.0)
-    }
-
-    /// How far into the battle `index` is, which is the clock the game showed.
-    fn elapsed_at(&self, index: usize) -> f32 {
-        self.seconds_at(index) - self.battle_start.seconds()
-    }
-
-    /// The last frame drawn at or before `seconds` of game time.
-    ///
-    /// Clocks ascend, so this is a partition point. A time before the first
-    /// frame lands on that frame rather than nowhere.
-    fn frame_at(&self, seconds: f32) -> usize {
-        self.clocks.partition_point(|clock| clock.seconds() <= seconds).saturating_sub(1)
-    }
-
-    /// Where a clock sits along the track, as a fraction of its length.
-    ///
-    /// `None` when the track is too short to have a length to sit along.
-    fn position_of(&self, clock: GameClock) -> Option<f32> {
-        let last = self.len().checked_sub(1).filter(|last| *last > 0)?;
-        Some((self.frame_at(clock.seconds()) as f32 / last as f32).clamp(0.0, 1.0))
-    }
 }
 
 /// A replay played back on its own minimap.
@@ -204,10 +175,8 @@ pub struct ReplayRendererPanel {
     /// The frame on screen. Stays put while the next one is drawn, so the
     /// viewport never blanks.
     frame: FrameTexture,
-    /// Which frame of the track that is, or is being drawn for.
-    at: usize,
-    playing: bool,
-    speed: f32,
+    /// Which frame is on screen, whether playback is running, and how fast.
+    playback: Playback,
     /// The speed control. A dropdown, as the egui renderer's is: six
     /// buttons take the width of the whole ladder to say one number.
     speed_select: Entity<SelectState<SearchableVec<SpeedItem>>>,
@@ -244,8 +213,12 @@ pub struct ReplayRendererPanel {
     /// [`RenderOptions`]: the egui viewer keeps it beside them for the same
     /// reason, since it gates a command rather than a layer.
     show_dead_ships: bool,
-    /// Which part of the map the viewport shows.
-    view: MapViewport,
+    /// Which part of the map the viewport shows, and a drag of it under way.
+    /// Where the frame was painted is read from `drawn` as it is needed.
+    map: MapView,
+    /// Where the map's corner sits on the canvas the frame is drawn on. Moves
+    /// when a gutter layer changes the canvas.
+    map_origin: (f32, f32),
     /// The zoom control beside the transport, which moves with the wheel.
     zoom: Entity<SliderState>,
     _zoom_subscription: Option<Subscription>,
@@ -258,32 +231,19 @@ pub struct ReplayRendererPanel {
     /// The consumable icon under the pointer, and where to anchor its
     /// reading.
     hovered_consumable: Option<(ConsumableHover, Point<Pixels>)>,
-    /// Where a drag of the map last was, in window coordinates.
-    dragging: Option<Point<Pixels>>,
-    /// The map point last reported to the session, so an unmoved pointer is
-    /// not sent again.
-    reported_cursor: Option<[f32; 2]>,
+    /// The map point last reported to the session.
+    cursor: CursorReport,
     /// This viewport's end of a collab session. Inert until one is running.
-    collab: wows_toolkit_services::collab::CollabLink,
+    collab: CollabLink,
     /// What this playback is called in a session, so a peer can ask to watch
     /// this one rather than another window.
-    replay_id: wows_toolkit_services::collab::ReplayId,
+    replay_id: ReplayId,
     /// Whether the session has been told this playback is open. Said once, and
     /// again if a session starts after it was opened.
     shared: bool,
-    /// The tool in hand and whatever it has drawn so far.
-    drawing: wt_collab_client::drawing::Drawing,
-    /// Where the pointer last was on the map, which is what a part-drawn
-    /// shape is previewed against.
-    pointer_at: Option<[f32; 2]>,
-    /// What the reader has picked out to move, with no tool in hand.
-    picked: wt_collab_client::drawing::Selection,
-    /// Where a move of the picked shapes began, in map space, and what they
-    /// looked like then. Kept so a move is one update at the end rather than
-    /// one per pixel of the drag.
-    moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
-    /// The shape being turned by its handle, and what it was before.
-    turning: Option<(usize, wt_collab_client::types::Annotation)>,
+    /// The tool in hand, what it has drawn so far, what is picked out, and
+    /// what this viewport can undo.
+    annotator: Annotator,
     /// The box a ship is looked up in, to give a placed one an identity.
     ship_search: Entity<InputState>,
     _ship_search: Option<Subscription>,
@@ -294,56 +254,32 @@ pub struct ReplayRendererPanel {
     matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
     /// Every ship the loaded build knows, built once when first asked for.
     ship_lookup: Option<ShipLookup>,
-    /// What the session held before each change this viewport made, newest
-    /// last. Bounded: a session left open all evening must not grow a
-    /// history of every stroke in it.
-    history: Vec<Vec<wt_collab_client::drawing::Held>>,
     /// The redraw a running session needs, held only while there is one.
     _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
     /// rosters need gutters the canvas it opened with does not have.
-    game_data: Option<GameDataCache>,
+    game_data: GameDataCache,
     /// The canvas the frame on screen was drawn on.
     layout: wows_minimap_renderer::drawing::SidePanelLayout,
     /// What an export is encoded with.
     export_settings: ExportSettings,
-    /// Ships whose trail the reader has hidden, by player name, which is what
-    /// a trail command carries.
-    trail_hidden: HashSet<String>,
-    /// Which ranges the reader wants for a ship, by player name. A ship with
-    /// no entry shows none, which is what keeps the map readable until they
-    /// ask for one.
-    ship_ranges: HashMap<String, ShipConfigFilter>,
+    /// Whose trails are hidden and whose ranges are drawn.
+    choices: ShipChoices,
     /// The ship a context menu is open for, and where it was opened.
     menu_for: Option<ShipMenu>,
-    /// Which of the battle's events the timeline shows.
-    event_filter: TimelineFilter,
+    /// What happened in the battle, once the second walk has read it, and
+    /// which kinds of it the timeline shows.
+    events: BattleEvents,
     /// The filter's search, folded once each time it changes.
     event_query: MarkedQuery,
     /// The timeline's search box.
     event_search: Entity<InputState>,
     _event_search: Option<Subscription>,
-    /// Which side the reader was on, which is what makes a row friendly. Read
-    /// with the events.
-    viewer_team: Option<TeamId>,
-    /// Whether the second walk has finished, which is what the timeline says
-    /// instead of an empty list while it runs.
-    events_read: bool,
-    /// What happened in the battle, once the second walk has read it. Empty
-    /// until then, which is what leaves the event controls refused.
-    events: Vec<TimelineEvent>,
-    /// The texts the search reads of each of `events`, folded once when the
-    /// events are read.
+    /// The texts the search reads of each of the events, folded once when
+    /// the events are read.
     event_keys: Vec<[FilterKey; 2]>,
-    /// What each ship took, from the same walk. Keyed by the entity the
-    /// frame's own ship commands carry, so a ship the reader points at is
-    /// looked up directly.
-    shots: HashMap<EntityId, wows_replay_insights::timeline::ShipShotTimeline>,
-    /// The ship an armor viewer was opened on, and what it had taken when it
-    /// was last told. Kept so playback only disturbs the viewer when the set
-    /// of hits actually changes: showing them again rebuilds the hull's
-    /// meshes, which is far too much work for every frame.
-    armor_following: Option<(EntityId, wows_toolkit_armor::realtime::RealtimeArmorFeed)>,
+    /// The ship an armor viewer was opened on, and what it was last told.
+    armor_following: Option<ArmorFollow>,
     _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
@@ -352,71 +288,7 @@ pub struct ReplayRendererPanel {
     focus_handle: FocusHandle,
 }
 
-/// What a hover over a roster's consumable icon reads, and whose it is.
-struct ConsumableHover {
-    player: String,
-    lines: wows_minimap_renderer::draw_command::ConsumableLines,
-}
-
-/// How far an export has got, in frames.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ExportProgress {
-    pub done: u64,
-    pub total: u64,
-    pub stage: ExportStage,
-}
-
-/// Which part of an export is running.
-///
-/// Muxing happens after the last frame and can take a noticeable while on a
-/// long battle, so saying so is the difference between a bar that has
-/// stopped and one that is nearly done.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExportStage {
-    Encoding,
-    Muxing,
-}
-
-impl ExportStage {
-    /// What the overlay calls it, worded as the egui renderer words it.
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Encoding => "ui.renderer.encoding",
-            Self::Muxing => "ui.renderer.muxing",
-        }
-    }
-}
-
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
-
-/// Who was firing at one ship, and with what.
-///
-/// Read off the battle rather than off the hits, because the filter has to be
-/// able to offer an attacker before any of their shells have landed.
-#[derive(Clone, Debug, Default)]
-pub struct IncomingContext {
-    /// Every enemy of the ship being looked at, named as the log lists them.
-    /// The keys are also what counts as incoming fire.
-    pub attackers: std::collections::BTreeMap<EntityId, String>,
-    /// Every hit that ship takes over the whole battle, which is what the log
-    /// lists: it is a reading of the battle rather than of where playback is.
-    pub taken: Vec<PreExtractedHit>,
-    /// That ship's health over the battle, as the strip beside the log draws
-    /// it. `None` for a ship nothing recorded the health of.
-    pub health: Option<wows_toolkit_viewmodel::armor::health_strip::HealthStrip>,
-    /// Where playback stood when the viewer was asked for, so the strip marks it
-    /// straight away rather than waiting for playback to move.
-    pub at: Option<wows_replays::types::GameClock>,
-    /// The main battery shells of every ship in the battle, so secondaries can
-    /// be told apart from them. Empty is not knowledge that none are main
-    /// battery, and the filter reads it that way.
-    pub main_battery: std::collections::HashSet<wows_replays::types::GameParamId>,
-    /// The shell each landed salvo was fired with, so the viewer can send that
-    /// shell through the hull itself and say whether it agrees with the server.
-    /// A salvo whose shell this build cannot name is left out rather than
-    /// simulated with a stand-in.
-    pub shells: std::collections::HashMap<wows_replays::types::GameParamId, wowsunpack::game_params::types::ShellInfo>,
-}
 
 /// What the viewport asks of whoever is hosting it.
 #[derive(Clone, Debug)]
@@ -429,26 +301,14 @@ pub enum RendererEvent {
     /// The viewport owns neither the armor viewer nor the tab it sits in, so
     /// it says which ship and hands over the hits rather than opening
     /// anything itself.
-    ShowArmor {
-        param_index: String,
-        display_name: String,
-        hits: Vec<PreExtractedHit>,
-        /// Who was shooting at that ship, so the viewer can say which salvo a
-        /// hit came from and offer one attacker at a time.
-        incoming: Box<IncomingContext>,
-    },
+    ShowArmor(ShowArmor),
     /// Playback moved, and the ship an armor viewer is already open on has
     /// taken different hits by this point.
     ///
     /// Separate from [`Self::ShowArmor`] because it must not pull the reader
     /// back to the armor tab: they asked for the viewer once, not on every
     /// frame.
-    ArmorFollowed {
-        hits: Vec<PreExtractedHit>,
-        health: Option<f32>,
-        /// Where playback has reached, which the health strip marks.
-        at: GameClock,
-    },
+    ArmorFollowed(ArmorFollowed),
 }
 
 impl EventEmitter<RendererEvent> for ReplayRendererPanel {}
@@ -463,7 +323,31 @@ impl ReplayRendererPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let seek = cx.new(|_| seek_slider(0));
+        let mut panel = Self::build(path.clone(), title, State::Baking, game_data.clone(), window, cx);
+        panel.alts = alts;
+        panel.start_bake(path.clone(), game_data.clone(), cx);
+        panel.start_event_scan(path, game_data, cx);
+        panel
+    }
+
+    /// A viewport in `state`, with its controls and nothing else started.
+    fn build(
+        path: PathBuf,
+        title: SharedString,
+        state: State,
+        game_data: GameDataCache,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let last = match &state {
+            State::Ready(track) => track.last().get(),
+            State::Baking | State::Failed(_) => 0,
+        };
+        let map_origin = match &state {
+            State::Ready(track) => track.map_origin,
+            State::Baking | State::Failed(_) => DEFAULT_MAP_ORIGIN,
+        };
+        let seek = cx.new(|_| seek_slider(last));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         let zoom = cx.new(|_| zoom_slider());
         let speed_select = cx.new(|cx| {
@@ -496,14 +380,14 @@ impl ReplayRendererPanel {
             }
         });
 
-        let mut panel = Self {
-            path: path.clone(),
+        Self {
+            path,
             title,
-            state: State::Baking,
+            state,
+            map_origin,
             renderer: None,
             frame: FrameTexture::new(),
-            at: 0,
-            playing: false,
+            playback: Playback::new(),
             export: None,
             export_failure: None,
             _export: None,
@@ -514,48 +398,36 @@ impl ReplayRendererPanel {
             // first is exactly what is in it.
             options: playback_options_hidden(),
             show_dead_ships: true,
-            view: MapViewport::default(),
+            map: MapView::new(),
             zoom,
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             regions: Vec::new(),
             hovered_consumable: None,
-            dragging: None,
-            reported_cursor: None,
-            collab: wows_toolkit_services::collab::CollabLink::default(),
-            replay_id: wows_toolkit_services::collab::ReplayId::fresh(),
+            cursor: CursorReport::new(),
+            collab: CollabLink::default(),
+            replay_id: ReplayId::fresh(),
             shared: false,
-            drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
-            pointer_at: None,
-            picked: wt_collab_client::drawing::Selection::default(),
-            moving: None,
-            turning: None,
+            annotator: Annotator::new(),
             ship_search,
             _ship_search: Some(ship_search_subscription),
             ship_query: MarkedQuery::default(),
             matched_ships: Vec::new(),
             ship_lookup: None,
-            history: Vec::new(),
             _collab_tick: None,
-            game_data: None,
+            game_data,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
             export_settings: ExportSettings::default(),
-            trail_hidden: HashSet::new(),
-            ship_ranges: HashMap::new(),
+            choices: ShipChoices::new(),
             menu_for: None,
-            event_filter: TimelineFilter::default(),
+            events: BattleEvents::new(),
             event_query: MarkedQuery::default(),
             event_search,
             _event_search: Some(event_search_subscription),
-            viewer_team: None,
-            events_read: false,
-            events: Vec::new(),
             event_keys: Vec::new(),
-            shots: HashMap::new(),
             armor_following: None,
             _events: None,
             redraw_wanted: false,
-            speed: DEFAULT_SPEED,
             speed_select,
             _speed_select: Some(speed_subscription),
             seek,
@@ -565,12 +437,7 @@ impl ReplayRendererPanel {
             _seek_subscription: Some(seek_subscription),
             _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
-        };
-        panel.game_data = Some(game_data.clone());
-        panel.alts = alts;
-        panel.start_bake(path.clone(), game_data.clone(), cx);
-        panel.start_event_scan(path, game_data, cx);
-        panel
+        }
     }
 
     /// Which other recordings this viewport was baked with.
@@ -581,10 +448,9 @@ impl ReplayRendererPanel {
     /// Bakes this battle again through another set of recordings, for a tab
     /// opened before one of them was added.
     pub(crate) fn rebake_with_alts(&mut self, alts: Vec<PathBuf>, cx: &mut Context<Self>) {
-        let Some(game_data) = self.game_data.clone() else { return };
         self.alts = alts;
         let path = self.path.clone();
-        self.start_bake(path, game_data, cx);
+        self.start_bake(path, self.game_data.clone(), cx);
     }
 
     /// A viewport already holding `clocks`' worth of empty frames, with no
@@ -595,119 +461,26 @@ impl ReplayRendererPanel {
     /// reads, where the bar sits -- none of which needs a drawn frame.
     #[cfg(test)]
     pub(crate) fn ready_for_test(clocks: Vec<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let seek = cx.new(|_| seek_slider(clocks.len().saturating_sub(1)));
-        let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
-        let zoom = cx.new(|_| zoom_slider());
-        let speed_select = cx.new(|cx| {
-            let ladder = SearchableVec::new((0..SPEEDS.len()).map(SpeedItem).collect::<Vec<_>>());
-            SelectState::new(ladder, Some(IndexPath::new(speed_index(DEFAULT_SPEED))), window, cx).searchable(false)
-        });
-        let speed_subscription = cx.subscribe_in(&speed_select, window, |this, _state, event, window, cx| {
-            // `Confirm(None)` is the cleared case, which this control cannot
-            // produce: it is not cleanable and always holds a speed.
-            let SelectEvent::Confirm(Some(index)) = event else { return };
-            let Some(speed) = SPEEDS.get(*index).copied() else { return };
-            this.set_speed(speed, window, cx);
-        });
-        let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
-        let event_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
-        let ship_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
-        let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.ship_query = MarkedQuery::new(&state.read(cx).value());
-                this.matched_ships = this.matching_ships();
-                cx.notify();
-            }
-        });
-        let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                let typed = state.read(cx).value().to_string();
-                this.set_event_filter(|filter| filter.search = typed, cx);
-            }
-        });
-        Self {
-            path: PathBuf::new(),
-            title: SharedString::from("test"),
-            state: State::Ready(Track {
-                frames: vec![Vec::new(); clocks.len()],
-                clocks: clocks.into_iter().map(GameClock).collect(),
-                battle_start: GameClock(0.0),
-                battle_end: None,
-                // A middling map, so a range in metres lands somewhere
-                // sensible on the minimap.
-                space_size: 1400.0,
-                version: wowsunpack::data::Version::base(99, 0, 0),
-                space: String::new(),
-                map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
-            }),
-            renderer: None,
-            frame: FrameTexture::new(),
-            at: 0,
-            playing: false,
-            export: None,
-            export_failure: None,
-            _export: None,
-            popped_out: false,
-            ctrl_held: false,
-            alts: Vec::new(),
-            // The options the track was baked under, so what is drawn at
-            // first is exactly what is in it.
-            options: playback_options_hidden(),
-            show_dead_ships: true,
-            view: MapViewport::default(),
-            zoom,
-            _zoom_subscription: Some(zoom_subscription),
-            drawn: Rc::new(Cell::new(None)),
-            regions: Vec::new(),
-            hovered_consumable: None,
-            dragging: None,
-            reported_cursor: None,
-            collab: wows_toolkit_services::collab::CollabLink::default(),
-            replay_id: wows_toolkit_services::collab::ReplayId::fresh(),
-            shared: false,
-            drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
-            pointer_at: None,
-            picked: wt_collab_client::drawing::Selection::default(),
-            moving: None,
-            turning: None,
-            ship_search,
-            _ship_search: Some(ship_search_subscription),
-            ship_query: MarkedQuery::default(),
-            matched_ships: Vec::new(),
-            ship_lookup: None,
-            history: Vec::new(),
-            _collab_tick: None,
-            game_data: None,
-            layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
-            export_settings: ExportSettings::default(),
-            trail_hidden: HashSet::new(),
-            ship_ranges: HashMap::new(),
-            menu_for: None,
-            event_filter: TimelineFilter::default(),
-            event_query: MarkedQuery::default(),
-            event_search,
-            _event_search: Some(event_search_subscription),
-            viewer_team: None,
-            events_read: false,
-            events: Vec::new(),
-            event_keys: Vec::new(),
-            shots: HashMap::new(),
-            armor_following: None,
-            _events: None,
-            redraw_wanted: false,
-            speed: DEFAULT_SPEED,
-            speed_select,
-            _speed_select: Some(speed_subscription),
-            seek,
-            cancel: Arc::new(AtomicBool::new(false)),
-            _bake: None,
-            _tick: None,
-            _seek_subscription: Some(seek_subscription),
-            _rebuilt_seek: None,
-            focus_handle: cx.focus_handle(),
-        }
+        let track = Track {
+            frames: vec![Vec::new(); clocks.len()],
+            clocks: clocks.into_iter().map(GameClock).collect(),
+            battle_start: GameClock(0.0),
+            battle_end: None,
+            // A middling map, so a range in metres lands somewhere
+            // sensible on the minimap.
+            space_size: 1400.0,
+            version: wowsunpack::data::Version::base(99, 0, 0),
+            space: String::new(),
+            map_origin: DEFAULT_MAP_ORIGIN,
+        };
+        Self::build(
+            PathBuf::new(),
+            SharedString::from("test"),
+            State::Ready(Arc::new(track)),
+            GameDataCache::without_install(),
+            window,
+            cx,
+        )
     }
 
     /// Replaces the frame on screen's commands.
@@ -715,10 +488,8 @@ impl ReplayRendererPanel {
     /// Test-only: a baked track carries these from the battle.
     #[cfg(test)]
     pub(crate) fn set_frame_commands_for_test(&mut self, commands: Vec<DrawCommand>) {
-        let at = self.at;
-        if let State::Ready(track) = &mut self.state
-            && let Some(frame) = track.frames.get_mut(at)
-        {
+        let at = self.playback.at().get();
+        if let Some(frame) = self.track_for_test().frames.get_mut(at) {
             *frame = commands;
         }
     }
@@ -728,9 +499,17 @@ impl ReplayRendererPanel {
     /// Test-only: a baked track carries this from the replay itself.
     #[cfg(test)]
     pub(crate) fn set_battle_window(&mut self, start: f32, end: Option<f32>) {
-        let State::Ready(track) = &mut self.state else { return };
+        let track = self.track_for_test();
         track.battle_start = GameClock(start);
         track.battle_end = end.map(GameClock);
+    }
+
+    /// The track a test viewport holds, to change. Nothing else holds it
+    /// while there is no renderer to draw or export through.
+    #[cfg(test)]
+    fn track_for_test(&mut self) -> &mut Track {
+        let State::Ready(track) = &mut self.state else { panic!("a test viewport is ready") };
+        Arc::get_mut(track).expect("nothing else holds a test track")
     }
 
     /// Reads what happened in the battle, which the event controls step
@@ -747,12 +526,7 @@ impl ReplayRendererPanel {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 match read {
-                    Ok((read, shots)) => {
-                        this.set_events(read.events);
-                        this.viewer_team = read.viewer_team;
-                        this.shots = shots;
-                        this.events_read = true;
-                    }
+                    Ok((read, shots)) => this.set_events(BattleEvents::from_extraction(read, shots)),
                     // The viewport still plays; only the event controls are
                     // worse off, and they stay refused.
                     Err(reason) => tracing::warn!("replay renderer: the battle's events could not be read: {reason}"),
@@ -764,15 +538,18 @@ impl ReplayRendererPanel {
 
     /// Takes the battle's events, with the texts the timeline search reads of
     /// each folded once here rather than on every keystroke.
-    fn set_events(&mut self, events: Vec<TimelineEvent>) {
+    fn set_events(&mut self, events: BattleEvents) {
         self.event_keys = events
+            .events()
             .iter()
             .map(|event| {
                 let (first, second) = searchable_text(&event.kind);
                 [FilterKey::new(first), FilterKey::new(second)]
             })
             .collect();
+        let filter = self.events.filter().clone();
         self.events = events;
+        self.events.set_filter(|kept| *kept = filter);
     }
 
     /// A viewport with `events` already read, at the elapsed clocks given.
@@ -780,24 +557,24 @@ impl ReplayRendererPanel {
     fn seed_events_for_test(&mut self, at: &[f32]) {
         use wows_replay_insights::timeline::TimelineEventKind;
         use wows_replays::types::ElapsedClock;
-        self.set_events(
-            at.iter()
-                .map(|seconds| TimelineEvent {
-                    clock: ElapsedClock(*seconds),
-                    kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
-                })
-                .collect(),
-        );
+        let events = at
+            .iter()
+            .map(|seconds| TimelineEvent {
+                clock: ElapsedClock(*seconds),
+                kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
+            })
+            .collect();
+        self.set_events(BattleEvents::from_read(events, None, std::collections::HashMap::new()));
     }
 
     /// Hands a viewport being built its end of the session.
-    pub fn seed_collab(&mut self, link: wows_toolkit_services::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn seed_collab(&mut self, link: CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
         self.follow_collab(cx);
     }
 
     /// Hands this viewport a session to talk to, or takes one away.
-    pub fn set_collab(&mut self, link: wows_toolkit_services::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: CollabLink, cx: &mut Context<Self>) {
         // What was drawn before stays on the map: a session starting under an
         // open viewport hears about it as though it had just been drawn, and one
         // ending leaves it where the reader can still see it.
@@ -889,53 +666,30 @@ impl ReplayRendererPanel {
             return;
         }
         let Some(track) = self.track() else { return };
-        let (space, version) = (track.space.clone(), track.version);
-        if space.is_empty() {
+        if track.space.is_empty() {
             return;
         }
+        let track = Arc::clone(track);
         self.shared = true;
         let replay_id = self.replay_id;
         let replay_name = self.title.to_string();
         let game_data = self.game_data.clone();
         let link = self.collab.clone();
         cx.background_spawn(async move {
-            let art_png = game_data
-                .as_ref()
-                .and_then(|data| data.newest_loaded())
-                .and_then(|loaded| wows_minimap_renderer::assets::load_map_image(&space, loaded.vfs()))
-                .and_then(|art| {
-                    let mut png = Vec::new();
-                    art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok().map(|()| png)
-                });
-            link.announce_replay(wows_toolkit_services::collab::SharedReplay {
-                replay_id,
-                replay_name,
-                map_label: wows_toolkit_viewmodel::tactics::naming::pretty_map_name(&space),
-                map_name: space,
-                game_version: version.to_path(),
-                art_png,
-            });
+            if let Some(shared) = shared_replay(replay_id, replay_name, &track, &game_data) {
+                link.announce_replay(shared);
+            }
         })
         .detach();
     }
 
     /// Puts this frame in front of the session, where this app is the one the
     /// rest of it watches.
-    ///
-    /// Draw commands rather than pixels, so each peer draws the battle with its
-    /// own art at its own size.
     fn broadcast_current(&self, commands: &[DrawCommand], track: &Track) {
         if !self.shared {
             return;
         }
-        self.collab.broadcast_frame(wt_collab_client::peer::FrameBroadcast {
-            replay_id: self.replay_id.raw(),
-            clock: track.seconds_at(self.at),
-            frame_index: self.at as u32,
-            total_frames: track.len() as u32,
-            game_duration: track.seconds_at(track.len().saturating_sub(1)),
-            commands: commands.to_vec(),
-        });
+        self.collab.broadcast_frame(frame_broadcast(self.replay_id, track, self.playback.at(), commands));
     }
 
     /// The handle a picked shape is turned by, drawn over the frame.
@@ -943,29 +697,24 @@ impl ReplayRendererPanel {
     /// An element rather than part of the frame: it is a control rather than
     /// something drawn on the map, so it keeps its size at every zoom and
     /// stays out of an exported video.
-    fn rotation_handle_overlay(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        let index = self.picked.single()?;
-        let annotation = self.collab.annotations().get(index)?.clone();
-        if !wt_collab_client::drawing::can_rotate(&annotation) {
-            return None;
-        }
-        let (handle, anchor) = self.rotation_handle(&annotation)?;
-        let _ = cx;
+    fn rotation_handle_overlay(&self) -> Option<AnyElement> {
+        let handle = self.annotator.rotation_handle(&self.collab, &self.map_view(), self.map_origin)?;
+        let radius = px(HANDLE_RADIUS);
         Some(
             div()
                 .absolute()
-                .left(handle.0 - HANDLE_RADIUS)
-                .top(handle.1 - HANDLE_RADIUS)
-                .child(div().size(HANDLE_RADIUS * 2.0).rounded_full().bg(gpui_kit::rgb(0xFFFF64)))
+                .left(px(handle.handle.x) - radius)
+                .top(px(handle.handle.y) - radius)
+                .child(div().size(radius * 2.0).rounded_full().bg(gpui_kit::rgb(0xFFFF64)))
                 // The stem back to the shape, so the handle reads as
                 // belonging to it rather than floating over the map.
                 .child(
                     div()
                         .absolute()
-                        .left(HANDLE_RADIUS)
-                        .top(HANDLE_RADIUS)
+                        .left(radius)
+                        .top(radius)
                         .w(px(1.))
-                        .h(anchor.1 - handle.1)
+                        .h(px(handle.anchor.y - handle.handle.y))
                         .bg(gpui_kit::rgb(0xFFFF64)),
                 )
                 .into_any_element(),
@@ -990,24 +739,23 @@ impl ReplayRendererPanel {
             .border_1()
             .border_color(theme.border);
 
-        let body = if progress.total == 0 {
+        let body = match progress.fraction() {
             // Nothing to measure against yet: the encoder is still starting.
-            body.child(
+            None => body.child(
                 h_flex()
                     .gap_2()
                     .items_center()
                     .child(Spinner::new())
                     .child(div().text_xs().child(t!("ui.renderer.preparing_export").into_owned())),
-            )
-        } else {
-            let done = progress.done.min(progress.total) as f32 / progress.total as f32;
-            body.child(div().text_xs().child(format!(
-                "{} ({}/{})",
-                t!(progress.stage.label()),
-                progress.done,
-                progress.total
-            )))
-            .child(Progress::new("replay-renderer-export-progress").value(done * 100.0))
+            ),
+            Some(done) => body
+                .child(div().text_xs().child(format!(
+                    "{} ({}/{})",
+                    t!(progress.stage.label_key()),
+                    progress.done,
+                    progress.total
+                )))
+                .child(Progress::new("replay-renderer-export-progress").value(done * 100.0)),
         };
 
         Some(
@@ -1030,17 +778,18 @@ impl ReplayRendererPanel {
     /// Drawn as elements over the frame rather than into it: they are not
     /// part of the battle, and they move between rasters.
     fn collab_overlay(&self) -> Vec<AnyElement> {
+        let map = self.map_view();
         let mut over: Vec<AnyElement> = Vec::new();
         for cursor in self.collab.peer_cursors() {
             let Some(pos) = cursor.pos else { continue };
-            let Some((left, top)) = self.element_point((pos[0], pos[1])) else { continue };
+            let Some(at) = map.element_point((pos[0], pos[1]), self.map_origin) else { continue };
             let color: gpui_kit::Hsla =
                 rgb(u32::from_be_bytes([0, cursor.color[0], cursor.color[1], cursor.color[2]])).into();
             over.push(
                 div()
                     .absolute()
-                    .left(left)
-                    .top(top)
+                    .left(px(at.x))
+                    .top(px(at.y))
                     .child(
                         h_flex()
                             .gap_1()
@@ -1052,127 +801,90 @@ impl ReplayRendererPanel {
             );
         }
         for ping in self.collab.peer_pings() {
-            let Some((left, top)) = self.element_point((ping.pos[0], ping.pos[1])) else { continue };
+            let Some(at) = map.element_point((ping.pos[0], ping.pos[1]), self.map_origin) else { continue };
+            let Some(ring) = ping_ring(ping.time.elapsed()) else { continue };
             let color: gpui_kit::Hsla =
                 rgb(u32::from_be_bytes([0, ping.color[0], ping.color[1], ping.color[2]])).into();
-            // A ping is a ring that grows and fades over its first second, as
-            // the egui renderer's ripple does.
-            let age = ping.time.elapsed().as_secs_f32();
-            if age > PING_SECONDS {
-                continue;
-            }
-            let grown = PING_RADIUS * (0.3 + age / PING_SECONDS);
             over.push(
                 div()
                     .absolute()
-                    .left(px(left.as_f32() - grown))
-                    .top(px(top.as_f32() - grown))
-                    .size(px(grown * 2.0))
+                    .left(px(at.x - ring.radius))
+                    .top(px(at.y - ring.radius))
+                    .size(px(ring.radius * 2.0))
                     .rounded_full()
                     .border_2()
-                    .border_color(color.opacity(1.0 - age / PING_SECONDS))
+                    .border_color(color.opacity(ring.opacity))
                     .into_any_element(),
             );
         }
         over
     }
 
-    /// Where a map point lands inside the viewport element.
-    ///
-    /// The inverse of [`Self::map_point`], which is what puts a peer's cursor
-    /// where they are pointing rather than where the pointer happens to be.
-    /// `None` before the frame has been painted once, and for a point the
-    /// viewport is not currently showing.
-    fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
-        let scale = self.drawn_scale()?;
-        let (left, top, _) = self.hud_strip()?;
-        let view = self.shaped_view();
-        let drawn = (view.x(at.0), view.y(at.1));
-        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
-        if drawn.0 < 0.0 || drawn.0 >= span || drawn.1 < 0.0 || drawn.1 >= span {
-            return None;
-        }
-        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
-        Some((px(left.as_f32() + (drawn.0 + origin.0) * scale), px(top.as_f32() + (drawn.1 + origin.1) * scale)))
+    /// Where the frame was last painted: the element it fills, and its own
+    /// size. `None` before it has been painted once.
+    fn placement(&self) -> Option<Placement> {
+        let bounds = self.drawn.get()?;
+        let size = self.frame.size()?;
+        Some(Placement {
+            bounds: ElementBounds {
+                origin: window_point(bounds.origin),
+                width: bounds.size.width.as_f32(),
+                height: bounds.size.height.as_f32(),
+            },
+            frame: FrameSize { width: size.width.0 as u32, height: size.height.0 as u32 },
+        })
     }
 
-    /// Where the frame's HUD strip lands inside the viewport element.
+    /// The map view, placed where the frame was last painted.
     ///
-    /// The frame is drawn to fit without stretching, so it is letterboxed:
-    /// the strip is not at the element's own top edge.
-    fn hud_strip(&self) -> Option<(Pixels, Pixels, Pixels)> {
-        let bounds = self.drawn.get()?;
-        let scale = self.drawn_scale()?;
-        let size = self.frame.size()?;
-        let drawn_width = size.width.0 as f32 * scale;
-        let drawn_height = size.height.0 as f32 * scale;
-        let left = (bounds.size.width.as_f32() - drawn_width) / 2.0;
-        let top = (bounds.size.height.as_f32() - drawn_height) / 2.0;
-        Some((px(left), px(top), px(HUD_STRIP_HEIGHT * scale)))
+    /// Read from the painter's record each time rather than kept: the frame
+    /// moves whenever the panel is laid out again, which nothing here hears.
+    fn map_view(&self) -> MapView {
+        let mut map = self.map.clone();
+        map.set_placement(self.placement());
+        map
+    }
+
+    /// Where a map point lands inside the viewport element. Test-only: the
+    /// overlays read the map view once for all they place.
+    #[cfg(test)]
+    fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
+        let at = self.map_view().element_point(at, self.map_origin)?;
+        Some((px(at.x), px(at.y)))
+    }
+
+    /// Where in the map a window position falls, in the map's own pixels.
+    fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        self.map_view().map_point(window_point(position), self.map_origin)
+    }
+
+    /// The commands of the frame on screen.
+    fn current_commands(&self) -> &[DrawCommand] {
+        self.track().and_then(|track| track.commands(self.playback.at())).unwrap_or_default()
     }
 
     /// What the advantage reads, for the frame on screen.
-    ///
-    /// The label itself is drawn into the frame by the renderer, so there is
-    /// no element of its own to rest a pointer on; the strip it sits in is
-    /// what the reader hovers instead.
     pub(crate) fn advantage_hover(&self) -> Option<Vec<String>> {
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        let breakdown = commands.iter().find_map(|command| match command {
-            DrawCommand::TeamAdvantage { level: Some(_), breakdown, .. } => Some(breakdown),
-            _ => None,
-        })?;
-
-        let mut lines = vec![t!("ui.renderer.advantage.breakdown").into_owned()];
-        match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
-            None => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
-            Some(rows) => {
-                for row in rows {
-                    lines.push(format!("{}  {}", t!(row.label_key), row.contribution));
-                }
-                if !breakdown.hp_data_reliable {
-                    lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
-                }
-            }
-        }
-        Some(lines)
+        hover::advantage_hover(self.current_commands())
     }
 
     /// Tells the session where this app's pointer is on the map.
-    ///
-    /// Sent only while a session is running, and only when it has moved to a
-    /// different map point: a pointer crossing a zoomed-in map would otherwise
-    /// send a message per pixel.
-    fn report_cursor(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        if !self.collab.is_active() {
-            return;
-        }
+    fn report_cursor(&mut self, position: Point<Pixels>) {
         let at = self.map_point(position).map(|(x, y)| [x, y]);
-        let moved = match (self.reported_cursor, at) {
-            (Some(was), Some(now)) => (was[0] - now[0]).abs() >= 1.0 || (was[1] - now[1]).abs() >= 1.0,
-            (None, None) => false,
-            _ => true,
-        };
-        if !moved {
-            return;
-        }
-        self.reported_cursor = at;
-        self.collab.report_cursor(at);
-        let _ = cx;
+        self.cursor.report(&self.collab, at);
     }
 
     /// Drops a ping where the pointer is, for everyone in the session.
-    fn on_ping(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_ping(&mut self, event: &MouseDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
         let Some((x, y)) = self.map_point(event.position) else { return };
         self.collab.send_ping([x, y]);
-        let _ = cx;
     }
 
     /// Opens the per-ship menu on whatever was right-clicked.
     fn on_right_click(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(at) = self.map_point(event.position) else { return };
-        self.menu_for = self.ship_at(at).map(|menu| ShipMenu { at: event.position, ..menu });
+        self.menu_for =
+            ships::ship_at(self.current_commands(), at).map(|ship| ShipMenu::open(ship, window_point(event.position)));
         cx.notify();
     }
 
@@ -1188,211 +900,64 @@ impl ReplayRendererPanel {
         self.menu_for.as_ref()
     }
 
-    /// The ship drawn nearest `at`, if one is close enough to have been meant.
-    ///
-    /// Reads the frame on screen rather than the whole track: a right-click
-    /// picks what the reader can see.
-    fn ship_at(&self, at: (f32, f32)) -> Option<ShipMenu> {
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        let mut best: Option<(f32, ShipMenu)> = None;
-        for command in commands {
-            let (pos, player_name, entity_id) = match command {
-                DrawCommand::Ship { pos, player_name, entity_id, .. }
-                | DrawCommand::DeadShip { pos, player_name, entity_id, .. } => (pos, player_name, entity_id),
-                _ => continue,
-            };
-            let Some(name) = player_name.clone() else { continue };
-            let away = ((pos.x - at.0).powi(2) + (pos.y - at.1).powi(2)).sqrt();
-            if away > PICK_RADIUS {
-                continue;
-            }
-            if best.as_ref().is_none_or(|(nearest, _)| away < *nearest) {
-                // The caller puts the menu where the pointer was; a pick has
-                // no position of its own.
-                best = Some((away, ShipMenu { entity_id: *entity_id, player_name: name, at: Point::default() }));
-            }
-        }
-        best.map(|(_, menu)| menu)
-    }
-
-    /// Which ship the menu's entity was in, and what it is called, when the
-    /// build knows.
-    ///
-    /// Read off the roster the frame already carries: a ship command says
-    /// who is in it but not which ship it is, and the roster says both.
-    fn armor_target(&self, entity_id: EntityId) -> Option<(String, String)> {
-        use wowsunpack::game_params::types::GameParamProvider as _;
-
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        let param_id = commands.iter().find_map(|command| {
-            let DrawCommand::TeamRoster { rows, .. } = command else { return None };
-            rows.iter().find(|row| row.entity_id == entity_id)?.ship_param_id
-        })?;
-        let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let param = loaded.provider().game_param_by_id(param_id)?;
-        Some((param.index().to_string(), param.name().to_string()))
-    }
-
-    /// What the menu's ship had taken by where playback is, for an armor
-    /// viewer to draw.
     /// Asks for an armor viewer on the ship the menu is open for, and
     /// follows it from then on.
     pub(crate) fn show_armor(&mut self, entity_id: EntityId, cx: &mut Context<Self>) {
-        let Some((param_index, display_name)) = self.armor_target(entity_id) else { return };
-        let Some(timeline) = self.shots.get(&entity_id).cloned() else { return };
-
-        let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(timeline);
-        feed.advance_to(GameClock(self.clock_of(self.at)));
-        let mut incoming = self.incoming_context(entity_id);
-        // The log reads the whole battle, not the part played so far: scrubbing
-        // back would otherwise take salvos out of a list nobody was scrubbing.
-        incoming.taken = feed.whole_battle().to_vec();
-        self.resolve_incoming_shells(&mut incoming);
-        incoming.health = feed.health_strip();
-        incoming.at = Some(GameClock(self.clock_of(self.at)));
-        cx.emit(RendererEvent::ShowArmor {
-            param_index,
-            display_name,
-            hits: feed.taken().to_vec(),
-            incoming: Box::new(incoming),
-        });
-        self.armor_following = Some((entity_id, feed));
-        self.close_ship_menu(cx);
-    }
-
-    /// Who was shooting at `victim`, and which shells are main battery ones.
-    ///
-    /// Read off the roster the frame already carries, which is the only place
-    /// that says which team a ship is on and what it is called at once.
-    fn incoming_context(&self, victim: EntityId) -> IncomingContext {
-        use wowsunpack::game_params::types::GameParamProvider as _;
-
-        let mut context = IncomingContext::default();
-        let Some(track) = self.track() else { return context };
-        let Some(commands) = track.frames.get(self.at) else { return context };
-        // One roster per team, so every one of them is read: the enemies are in
-        // the roster the victim is not in.
-        let rows: Vec<&wows_minimap_renderer::draw_command::RosterRow> = commands
-            .iter()
-            .filter_map(|command| {
-                let DrawCommand::TeamRoster { rows, .. } = command else { return None };
-                Some(rows.iter())
-            })
-            .flatten()
-            .collect();
-        let Some(victim_team) = rows.iter().find(|row| row.entity_id == victim).map(|row| row.team_id) else {
-            return context;
-        };
-
-        for row in rows.iter().filter(|row| row.team_id != victim_team) {
-            context.attackers.insert(row.entity_id, format!("{} ({})", row.player_name, row.ship_name));
-        }
-
-        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else { return context };
-        let provider = loaded.provider();
-        for row in &rows {
-            let Some(ship) = row.ship_param_id.and_then(|id| provider.game_param_by_id(id)) else { continue };
-            let Some(config) = ship.vehicle().and_then(|vehicle| vehicle.config_data()) else { continue };
-            for name in &config.main_battery_ammo {
-                if let Some(shell) = provider.game_param_by_name(name) {
-                    context.main_battery.insert(shell.id());
-                }
-            }
-        }
-        context
-    }
-
-    /// Names the shell behind each salvo that landed on the ship.
-    fn resolve_incoming_shells(&self, context: &mut IncomingContext) {
-        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
-            // Without game data no shell can be named, so no shell can be
-            // simulated and the log carries no verdicts at all.
-            tracing::warn!("armor viewer: no game data loaded, so the incoming shells cannot be named");
+        let clock = GameClock(self.clock_now());
+        let Some((following, shown)) =
+            ArmorFollow::start(entity_id, self.current_commands(), self.events.shots(), clock, &self.game_data)
+        else {
             return;
         };
-        let provider = loaded.provider();
-        for hit in &context.taken {
-            let Some(salvo) = hit.hit.salvo.as_ref() else { continue };
-            if context.shells.contains_key(&salvo.params_id) {
-                continue;
-            }
-            if let Some(shell) = provider.resolve_shell_from_param_id(salvo.params_id) {
-                context.shells.insert(salvo.params_id, shell);
-            }
-        }
+        cx.emit(RendererEvent::ShowArmor(shown));
+        self.armor_following = Some(following);
+        self.close_ship_menu(cx);
     }
 
     /// Tells a viewer that is already open what its ship has taken by where
     /// playback has reached.
-    ///
-    /// Only when the set of hits has changed: telling it again rebuilds the
-    /// hull's meshes, which is far more than a frame of playback is worth.
     fn follow_armor(&mut self, cx: &mut Context<Self>) {
-        let clock = GameClock(self.clock_of(self.at));
-        let Some((_, feed)) = self.armor_following.as_mut() else { return };
-        let moved = feed.advance_to(clock);
-        let changed = match moved {
-            wows_toolkit_armor::realtime::Advance::Rewound => true,
-            wows_toolkit_armor::realtime::Advance::Gained(gained) => !gained.is_empty(),
-        };
-        if !changed {
-            return;
+        let clock = GameClock(self.clock_now());
+        let Some(following) = self.armor_following.as_mut() else { return };
+        if let Some(followed) = following.follow(clock) {
+            cx.emit(RendererEvent::ArmorFollowed(followed));
         }
-        let (hits, health) = (feed.taken().to_vec(), feed.health());
-        cx.emit(RendererEvent::ArmorFollowed { hits, health, at: clock });
     }
 
-    /// The game clock frame `at` was drawn at.
-    fn clock_of(&self, at: usize) -> f32 {
-        self.track().map(|track| track.seconds_at(at)).unwrap_or_default()
+    /// The game clock of the frame on screen.
+    fn clock_now(&self) -> f32 {
+        self.track().map(|track| self.playback.seconds(track)).unwrap_or_default()
     }
 
     /// Whether the menu's ship has anything an armor viewer could show.
-    ///
-    /// Only a ship the battle recorded hits on, since the viewer's whole
-    /// point is where those landed.
     pub(crate) fn has_armor_to_show(&self, entity_id: EntityId) -> bool {
-        self.shots.get(&entity_id).is_some_and(|timeline| !timeline.hits.is_empty())
-            && self.armor_target(entity_id).is_some()
+        has_armor_to_show(self.events.shots(), self.current_commands(), entity_id, &self.game_data)
     }
 
     /// Whether `player` has a trail drawn.
     pub(crate) fn trail_shown(&self, player: &str) -> bool {
-        !self.trail_hidden.contains(player)
+        self.choices.trail_shown(player)
     }
 
     /// Shows or hides one ship's trail.
-    ///
-    /// Turning one on turns the trails on, since a reader who asked for this
-    /// ship's trail meant to see it; hiding the last one turns them off again
-    /// rather than leaving an empty layer switched on.
     pub(crate) fn set_trail_shown(&mut self, player: &str, shown: bool, cx: &mut Context<Self>) {
-        if shown {
-            self.trail_hidden.remove(player);
-            self.options.show_trails = true;
-        } else {
-            self.trail_hidden.insert(player.to_owned());
-            if self.drawn_ships().iter().all(|name| self.trail_hidden.contains(name)) {
-                self.options.show_trails = false;
-            }
-        }
+        let drawn = ships::drawn_ships(self.current_commands());
+        self.choices.set_trail_shown(player, shown, &drawn, &mut self.options);
         self.draw_current(cx);
         cx.notify();
     }
 
     /// Hides every trail but `player`'s.
     pub(crate) fn only_trail(&mut self, player: &str, cx: &mut Context<Self>) {
-        self.trail_hidden = self.drawn_ships().into_iter().filter(|name| name != player).collect();
-        self.options.show_trails = true;
+        let drawn = ships::drawn_ships(self.current_commands());
+        self.choices.only_trail(player, &drawn, &mut self.options);
         self.draw_current(cx);
         cx.notify();
     }
 
     /// Which ranges `player` has on.
     pub(crate) fn ranges_for(&self, player: &str) -> ShipConfigFilter {
-        self.ship_ranges.get(player).copied().unwrap_or(NO_RANGES)
+        self.choices.ranges_for(player)
     }
 
     /// Changes which ranges one ship shows.
@@ -1402,55 +967,31 @@ impl ReplayRendererPanel {
         apply: impl FnOnce(&mut ShipConfigFilter),
         cx: &mut Context<Self>,
     ) {
-        let mut filter = self.ranges_for(player);
-        apply(&mut filter);
-        self.ship_ranges.insert(player.to_owned(), filter);
-        // Ranges are drawn at all only while some ship has one.
-        self.options.show_ship_config = self.ship_ranges.values().any(|filter| *filter != NO_RANGES);
+        self.choices.set_ranges_for(player, apply, &mut self.options);
         self.draw_current(cx);
         cx.notify();
     }
 
     /// Leaves only `player`'s ranges on.
     pub(crate) fn only_ranges(&mut self, player: &str, cx: &mut Context<Self>) {
-        let keep = self.ranges_for(player);
-        let keep = if keep == NO_RANGES { ALL_RANGES } else { keep };
-        self.ship_ranges.clear();
-        self.ship_ranges.insert(player.to_owned(), keep);
-        self.options.show_ship_config = true;
+        self.choices.only_ranges(player, &mut self.options);
         self.draw_current(cx);
         cx.notify();
     }
 
     /// Turns all of one ship's ranges on, or all of them off.
-    ///
-    /// The six switches one at a time is six clicks to ask a question that
-    /// is usually all-or-nothing, which is why the egui menu offers both.
     pub(crate) fn set_every_range_for(&mut self, player: &str, on: bool, cx: &mut Context<Self>) {
-        self.set_ranges_for(player, |filter| *filter = if on { ALL_RANGES } else { NO_RANGES }, cx);
-    }
-
-    /// Turns every ship's ranges on.
-    pub(crate) fn all_ranges(&mut self, cx: &mut Context<Self>) {
-        self.ship_ranges = self.drawn_ships().into_iter().map(|name| (name, ALL_RANGES)).collect();
-        self.options.show_ship_config = true;
+        self.choices.set_every_range_for(player, on, &mut self.options);
         self.draw_current(cx);
         cx.notify();
     }
 
-    /// The ships drawn in the frame on screen, by player name.
-    fn drawn_ships(&self) -> Vec<String> {
-        let Some(track) = self.track() else { return Vec::new() };
-        let Some(commands) = track.frames.get(self.at) else { return Vec::new() };
-        commands
-            .iter()
-            .filter_map(|command| match command {
-                DrawCommand::Ship { player_name, .. } | DrawCommand::DeadShip { player_name, .. } => {
-                    player_name.clone()
-                }
-                _ => None,
-            })
-            .collect()
+    /// Turns every ship's ranges on.
+    pub(crate) fn all_ranges(&mut self, cx: &mut Context<Self>) {
+        let drawn = ships::drawn_ships(self.current_commands());
+        self.choices.all_ranges(&drawn, &mut self.options);
+        self.draw_current(cx);
+        cx.notify();
     }
 
     /// The events the filter admits, newest last. A timeline is read in the
@@ -1460,10 +1001,11 @@ impl ReplayRendererPanel {
         let searching = self.event_query.is_active();
 
         self.events
+            .events()
             .iter()
             .zip(&self.event_keys)
             .filter(|(event, keys)| {
-                self.event_filter.kinds[kind_index(&event.kind)]
+                self.events.filter().kinds[kind_index(&event.kind)]
                     && (!searching || self.event_query.best(keys.iter()).is_some())
             })
             .map(|(event, _)| event)
@@ -1472,65 +1014,53 @@ impl ReplayRendererPanel {
 
     /// Which of the battle's events the timeline shows.
     pub(crate) fn event_filter(&self) -> &TimelineFilter {
-        &self.event_filter
+        self.events.filter()
     }
 
     /// Changes which events the timeline shows.
     pub(crate) fn set_event_filter(&mut self, apply: impl FnOnce(&mut TimelineFilter), cx: &mut Context<Self>) {
-        apply(&mut self.event_filter);
-        self.event_query = MarkedQuery::new(&self.event_filter.search);
+        self.events.set_filter(apply);
+        self.event_query = MarkedQuery::new(&self.events.filter().search);
         cx.notify();
     }
 
     /// Whether the battle has been read yet, which is what the timeline says
     /// instead of an empty list while the second walk runs.
     pub(crate) fn events_are_read(&self) -> bool {
-        self.events_read
+        self.events.is_read()
     }
 
     /// The event before where playback is, if there is one.
-    ///
-    /// Half a second back, as the egui renderer looks: without it, landing on
-    /// an event and pressing back again would find the same one.
     fn previous_event(&self) -> Option<&TimelineEvent> {
-        let here = self.elapsed_now()?;
-        self.events.iter().rev().find(|event| event.clock.seconds() < here - 0.5)
+        self.events.previous(self.elapsed_now()?)
     }
 
     fn next_event(&self) -> Option<&TimelineEvent> {
-        let here = self.elapsed_now()?;
-        self.events.iter().find(|event| event.clock.seconds() > here)
+        self.events.next(self.elapsed_now()?)
     }
 
     /// How far into the battle playback is, which is what an event's clock is
     /// measured against.
     fn elapsed_now(&self) -> Option<f32> {
-        self.track().map(|track| track.elapsed_at(self.at))
+        self.track().map(|track| self.playback.elapsed(track))
     }
 
-    /// Moves playback to `event` and says what it was.
+    /// Moves playback to `at` seconds into the battle and says what is there.
     fn go_to_event(&mut self, at: f32, said: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(track) = self.track() else { return };
-        let frame = track.frame_at(at + track.battle_start.seconds());
-        self.go_to(frame, window, cx);
+        self.go_to_event_at(at, window, cx);
         crate::toast::info(said, window, cx);
     }
 
     /// Moves playback to `at` seconds into the battle.
     pub(crate) fn go_to_event_at(&mut self, at: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(track) = self.track() else { return };
-        let frame = track.frame_at(at + track.battle_start.seconds());
-        self.go_to(frame, window, cx);
+        self.change_playback(|playback, track| playback.go_to_elapsed(track, at), cx);
+        self.sync_seek(window, cx);
     }
 
     /// Moves playback to the frame `clock` falls in.
-    ///
-    /// The clock is the battle's own, as the replay's timeline states it, which
-    /// is what a salvo in the incoming-fire log is stamped with.
     pub(crate) fn go_to_clock(&mut self, clock: GameClock, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(track) = self.track() else { return };
-        let frame = track.frame_at(clock.seconds());
-        self.go_to(frame, window, cx);
+        self.change_playback(|playback, track| playback.go_to_clock(track, clock), cx);
+        self.sync_seek(window, cx);
     }
 
     /// Whether this viewport is the one feeding an armor viewer.
@@ -1559,7 +1089,8 @@ impl ReplayRendererPanel {
                 match baked {
                     Ok((track, renderer)) => {
                         this.renderer = Some(renderer);
-                        this.state = State::Ready(track);
+                        this.map_origin = track.map_origin;
+                        this.state = State::Ready(Arc::new(track));
                         this.rebuild_seek(cx);
                         // Draws the first frame as it applies them, so nothing
                         // else has to ask for one.
@@ -1588,55 +1119,21 @@ impl ReplayRendererPanel {
         cx.notify();
     }
 
-    /// The frames an export covers.
-    ///
-    /// A replay records the loading screen and the countdown before the battle
-    /// proper; unless the reader asked for them, an export starts where the
-    /// battle did.
-    fn frames_to_export<'a>(&self, track: &'a Track) -> &'a [Vec<DrawCommand>] {
-        if self.export_settings.include_pre_battle {
-            return &track.frames;
-        }
-        let from = track.frame_at(track.battle_start.seconds());
-        track.frames.get(from..).unwrap_or(&track.frames)
-    }
-
     /// Opens this viewport showing what the reader last saved as the defaults.
     ///
     /// Runs once the bake has landed, because the rosters are a wider canvas
     /// rather than a layer and there is nothing to widen before then.
     fn adopt_saved_defaults(&mut self, cx: &mut Context<Self>) {
         let saved = crate::render_defaults::defaults(cx);
-        let export = export_settings_of(&saved);
+        let export = export::export_settings_of(&saved);
         self.set_export_settings(|settings| *settings = export, cx);
-        self.set_options(
-            |options, show_dead| {
-                saved.apply_to(options);
-                *show_dead = saved.show_dead_ships;
-                // The stats panel's ship silhouettes are one of the loads a
-                // bake skips, so its gutter has nothing to draw in it and the
-                // viewport does not offer the layer at all.
-                options.show_stats_panel = false;
-            },
-            cx,
-        );
+        self.set_options(|options, show_dead| adopt_saved_defaults(&saved, options, show_dead), cx);
     }
 
     /// Writes what this viewport is showing back as what a viewport opens with.
-    ///
-    /// What this viewport has no control over is left as it was: the self
-    /// ranges, which are per-ship here rather than one saved filter, and the
-    /// stats panel, which a bake cannot fill and which this viewport therefore
-    /// holds off whatever the reader chose in the egui renderer.
     fn remember_defaults(&self, window: &mut Window, cx: &mut Context<Self>) {
         let stored = crate::render_defaults::defaults(cx);
-        let mut saved = stored.clone();
-        saved.read_from(&self.options);
-        saved.show_stats_panel = stored.show_stats_panel;
-        saved.show_dead_ships = self.show_dead_ships;
-        saved.prefer_cpu_encoder = self.export_settings.prefer_cpu;
-        saved.video_codec = self.export_settings.codec;
-        saved.include_pre_battle = self.export_settings.include_pre_battle;
+        let saved = defaults_to_save(&stored, &self.options, self.show_dead_ships, &self.export_settings);
 
         if crate::render_defaults::remember(saved, cx) {
             crate::toast::ok(t!("ui.renderer.settings.save_defaults_done").into_owned(), window, cx);
@@ -1661,45 +1158,22 @@ impl ReplayRendererPanel {
     /// while playback is paused.
     pub fn set_options(&mut self, apply: impl FnOnce(&mut RenderOptions, &mut bool), cx: &mut Context<Self>) {
         apply(&mut self.options, &mut self.show_dead_ships);
-        self.follow_layout(cx);
+        self.follow_layout();
         self.draw_current(cx);
         cx.notify();
     }
 
     /// Moves the viewport onto the canvas its layers now need.
-    ///
-    /// The rosters sit in gutters either side of the map, so turning them on
-    /// is not a layer but a wider canvas. The renderer for one is kept, so
-    /// switching back and forth costs nothing after the first time.
-    fn follow_layout(&mut self, cx: &mut Context<Self>) {
-        let wanted = wows_toolkit_replay_data::minimap_preview::layout_for(&self.options);
-        if wanted == self.layout {
-            return;
-        }
-        let Some(game_data) = self.game_data.clone() else {
-            // Nothing to build a canvas from, so the layer cannot be shown.
-            self.options.show_team_rosters = false;
-            self.options.show_stats_panel = false;
-            return;
-        };
-        match wows_toolkit_replay_data::minimap_preview::renderer_for_replay(&self.path, &game_data, wanted) {
-            Ok((renderer, origin)) => {
-                self.layout = wanted;
+    fn follow_layout(&mut self) {
+        match raster::follow_layout(&self.path, &self.game_data, &mut self.options, self.layout) {
+            LayoutChange::Unchanged | LayoutChange::Refused => {}
+            LayoutChange::Moved { layout, renderer, map_origin } => {
+                self.layout = layout;
                 self.renderer = Some(renderer);
-                if let State::Ready(track) = &mut self.state {
-                    track.map_origin = (origin.0 as f32, origin.1 as f32);
-                }
+                self.map_origin = map_origin;
                 // The frame on screen was drawn on the old canvas, so it is
                 // the wrong shape until the next one lands.
                 self.redraw_wanted = true;
-                let _ = cx;
-            }
-            Err(reason) => {
-                // The layer stays off rather than drawing on a canvas with no
-                // room for it.
-                tracing::warn!("replay renderer: the canvas for {wanted:?} could not be built: {reason}");
-                self.options.show_team_rosters = false;
-                self.options.show_stats_panel = false;
             }
         }
     }
@@ -1716,46 +1190,60 @@ impl ReplayRendererPanel {
         cx.notify();
     }
 
-    /// The number of frames in the baked track, or zero while it is baking.
-    fn frame_count(&self) -> usize {
-        self.track().map(Track::len).unwrap_or(0)
-    }
-
     /// The baked battle, once the bake has landed.
-    fn track(&self) -> Option<&Track> {
+    fn track(&self) -> Option<&Arc<Track>> {
         match &self.state {
             State::Ready(track) => Some(track),
-            _ => None,
+            State::Baking | State::Failed(_) => None,
         }
+    }
+
+    /// Changes where playback is, then follows it.
+    fn change_playback(&mut self, change: impl FnOnce(&mut Playback, &Track) -> bool, cx: &mut Context<Self>) {
+        let Some(track) = self.track().cloned() else { return };
+        let moved = change(&mut self.playback, &track);
+        self.follow_playback(moved, cx);
+    }
+
+    /// Follows a move of playback with the armor viewer and the frame on
+    /// screen.
+    ///
+    /// A viewport with no frame on screen yet draws one even when playback did
+    /// not move.
+    fn follow_playback(&mut self, moved: bool, cx: &mut Context<Self>) {
+        if !moved && self.frame.size().is_some() {
+            return;
+        }
+        self.follow_armor(cx);
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Moves playback to `at`, without moving the bar.
+    fn set_at(&mut self, at: FrameIndex, cx: &mut Context<Self>) {
+        self.change_playback(|playback, track| playback.go_to(track, at), cx);
     }
 
     /// Moves playback to `at` and takes the bar with it.
     ///
     /// The transport's own controls move both; only the bar itself moves one
     /// without the other, since it is already where it put itself.
-    fn go_to(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn go_to(&mut self, at: FrameIndex, window: &mut Window, cx: &mut Context<Self>) {
         self.set_at(at, cx);
         self.sync_seek(window, cx);
     }
 
     /// Moves playback `delta` seconds of game time from where it is.
     fn seek_by(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(track) = self.track() else { return };
-        let at = track.frame_at(track.seconds_at(self.at) + delta);
-        self.go_to(at, window, cx);
+        self.change_playback(|playback, track| playback.seek_by(track, delta), cx);
+        self.sync_seek(window, cx);
     }
 
     /// Moves one rung along the speed ladder, in the direction of `step`.
-    ///
-    /// Nothing happens at either end: the ladder is what the transport
-    /// offers, and there is no speed past its ends to move to.
     fn step_speed(&mut self, step: i32, window: &mut Window, cx: &mut Context<Self>) {
-        let here = SPEEDS.iter().position(|speed| (speed - self.speed).abs() < f32::EPSILON);
-        let Some(here) = here else { return };
-        let Some(next) = here.checked_add_signed(step as isize).and_then(|index| SPEEDS.get(index)) else {
-            return;
-        };
-        self.set_speed(*next, window, cx);
+        if self.playback.step_speed(step) {
+            self.speed_changed(window, cx);
+        }
     }
 
     /// The transport's keyboard, which is the egui renderer's own.
@@ -1813,54 +1301,27 @@ impl ReplayRendererPanel {
             self.redraw_wanted = true;
             return;
         };
-        let State::Ready(track) = &self.state else {
+        let Some(track) = self.track().cloned() else {
             self.renderer = Some(renderer);
             return;
         };
-        let trails = if self.options.show_trails {
-            wows_minimap_renderer::frame_track::trails_through(&track.frames[..=self.at.min(track.len() - 1)])
-        } else {
-            Vec::new()
-        };
-        let Some(commands) = track.frames.get(self.at).cloned() else {
+        let at = self.playback.at();
+        let Some(commands) = track.commands(at) else {
             self.renderer = Some(renderer);
             return;
         };
-        self.broadcast_current(&commands, track);
+        self.broadcast_current(commands, &track);
 
-        let options = self.options.clone();
-        let show_dead_ships = self.show_dead_ships;
-        let view = self.shaped_view();
-        let trail_hidden = self.trail_hidden.clone();
-        let ship_ranges = self.ship_ranges.clone();
-        // Drawn over the battle rather than by it, so they are not filtered
-        // with it and they go on last.
-        let mut drawn_on: Vec<DrawCommand> =
-            self.collab.annotations().iter().flat_map(wt_collab_client::geometry::annotation_commands).collect();
-        drawn_on.extend(self.placed_ship_ranges());
-        // The shape under the pointer is drawn the same way the finished one
-        // will be, so what a reader sees while dragging is what they get.
-        if let Some(at) = self.pointer_at
-            && let Some(part_drawn) = self.drawing.in_progress(at)
-        {
-            drawn_on.extend(wt_collab_client::geometry::annotation_commands(&part_drawn));
-        }
+        let drawn_on = self.annotator.overlay_commands(&self.collab, &track, &self.game_data);
+        let Some(shown) =
+            raster::raster_commands(&track, at, &self.options, self.show_dead_ships, &self.choices, drawn_on)
+        else {
+            self.renderer = Some(renderer);
+            return;
+        };
+        let view = self.map_view().shaped_view();
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
-                // Filtered here rather than at bake time: a toggle then costs
-                // one frame rather than another walk of the battle.
-                // Trails first, so they sit behind everything, as the egui
-                // renderer draws them.
-                let mut shown: Vec<DrawCommand> = trails
-                    .into_iter()
-                    .chain(commands)
-                    .filter(|command| should_draw_command(command, &options, show_dead_ships))
-                    .filter(|command| per_ship_allows(command, &trail_hidden, &ship_ranges))
-                    .collect();
-                // After the battle's own map layers, so a drawn line is not
-                // buried under a ship, and before the HUD, which the target
-                // puts on top of everything on the map.
-                shown.extend(drawn_on);
                 let (frame, regions) = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     let (frame, regions) = drawing.render_regions(view, &shown);
@@ -1914,8 +1375,8 @@ impl ReplayRendererPanel {
         if self.export.is_some() {
             return;
         }
-        let State::Ready(track) = &self.state else { return };
-        if track.frames.is_empty() {
+        let Some(track) = self.track().cloned() else { return };
+        if track.is_empty() {
             return;
         }
         // Held for the whole encode, which is why the transport is refused
@@ -1923,26 +1384,11 @@ impl ReplayRendererPanel {
         let Some(renderer) = self.renderer.take() else { return };
 
         let settings = self.export_settings;
-        // What is on screen, not what was baked: a layer the reader turned off
-        // should not come back in the file. The overlays drawn over a battle --
-        // trails, annotations, the ranges placed on the map -- are derived at
-        // draw time and are not written.
-        let frames: Vec<Vec<DrawCommand>> = self
-            .frames_to_export(track)
-            .iter()
-            .map(|frame| {
-                frame
-                    .iter()
-                    .filter(|command| should_draw_command(command, &self.options, self.show_dead_ships))
-                    .filter(|command| per_ship_allows(command, &self.trail_hidden, &self.ship_ranges))
-                    .cloned()
-                    .collect()
-            })
-            .collect();
+        let frames = export::export_frames(&track, &settings, &self.options, self.show_dead_ships, &self.choices);
         // What the video covers, which is not the whole track when the
         // pre-battle phase is left out.
-        let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
-        let suggested = format!("{}.mp4", self.title);
+        let duration = export::export_duration(frames.len());
+        let suggested = export::suggested_name(&self.title);
         // The clipboard needs a file, not a place to put one, so it is not
         // asked for.
         let asked: Option<_> = match target {
@@ -1956,7 +1402,7 @@ impl ReplayRendererPanel {
 
         self.export_failure = None;
         self.export = Some(ExportProgress { done: 0, total: frames.len() as u64, stage: ExportStage::Encoding });
-        self.playing = false;
+        self.playback.stop();
         cx.notify();
 
         let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<ExportProgress>();
@@ -1977,7 +1423,7 @@ impl ReplayRendererPanel {
                 Some(dialog) => crate::dialog::chosen(dialog, &this, cx).await,
                 // A temporary file that outlives this process, since the
                 // clipboard will point at it.
-                None => temporary_output(&suggested),
+                None => export::temporary_output(&suggested),
             };
             let Some(output) = chosen else {
                 // Dismissed at the dialog, the dialog failed and said so, or
@@ -1994,7 +1440,14 @@ impl ReplayRendererPanel {
             let written = output.clone();
             let (renderer, outcome) = cx
                 .background_spawn(async move {
-                    let outcome = encode_track(&renderer, &frames, duration, &written, settings, progress_tx);
+                    // Never set: an export runs to the end even when the
+                    // viewport that asked for it closes, since the file was
+                    // asked for.
+                    let cancel = AtomicBool::new(false);
+                    let outcome =
+                        export::encode_track(&renderer, &frames, duration, &written, settings, &cancel, |step| {
+                            let _ = progress_tx.unbounded_send(step);
+                        });
                     (renderer, outcome)
                 })
                 .await;
@@ -2011,33 +1464,21 @@ impl ReplayRendererPanel {
                         }
                     }
                     Ok(()) => {}
-                    Err(reason) => this.export_failure = Some(reason),
+                    Err(reason) => this.export_failure = Some(reason.to_string()),
                 }
                 cx.notify();
             });
         }));
     }
 
-    fn set_at(&mut self, at: usize, cx: &mut Context<Self>) {
-        let last = self.frame_count().saturating_sub(1);
-        let at = at.min(last);
-        if at == self.at && self.frame.size().is_some() {
-            return;
-        }
-        self.at = at;
-        self.follow_armor(cx);
-        self.draw_current(cx);
-        cx.notify();
-    }
-
     fn toggle_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.playing = !self.playing;
-        if self.playing {
-            // Playing from the end starts again at the beginning, which is
-            // what a transport with no stop button has to mean.
-            if self.at + 1 >= self.frame_count() {
-                self.set_at(0, cx);
-            }
+        let Some(track) = self.track().cloned() else { return };
+        // Playing from the end starts again at the beginning, which is what a
+        // transport with no stop button has to mean.
+        if self.playback.toggle_playing(&track) {
+            self.follow_playback(true, cx);
+        }
+        if self.playback.is_playing() {
             self.start_ticker(window, cx);
         } else {
             self._tick = None;
@@ -2046,26 +1487,27 @@ impl ReplayRendererPanel {
     }
 
     fn start_ticker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let interval = Duration::from_secs_f32(TICK.as_secs_f32() / self.speed.max(0.1));
+        let interval = self.playback.tick_interval();
         self._tick = Some(cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(interval).await;
                 let still_playing = this
                     .update_in(cx, |this, window, cx| {
-                        if !this.playing {
-                            return false;
+                        let Some(track) = this.track().cloned() else { return false };
+                        match this.playback.advance(&track) {
+                            Tick::Advanced => {
+                                this.follow_playback(true, cx);
+                                // The bar follows playback, so a reader can
+                                // see where in the battle they are.
+                                this.sync_seek(window, cx);
+                                true
+                            }
+                            Tick::Finished => {
+                                cx.notify();
+                                false
+                            }
+                            Tick::Idle => false,
                         }
-                        let next = this.at + 1;
-                        if next >= this.frame_count() {
-                            this.playing = false;
-                            cx.notify();
-                            return false;
-                        }
-                        this.set_at(next, cx);
-                        // The bar follows playback, so a reader can see
-                        // where in the battle they are.
-                        this.sync_seek(window, cx);
-                        true
                     })
                     .unwrap_or(false);
                 if !still_playing {
@@ -2076,17 +1518,20 @@ impl ReplayRendererPanel {
     }
 
     fn set_speed(&mut self, speed: f32, window: &mut Window, cx: &mut Context<Self>) {
-        if (self.speed - speed).abs() < f32::EPSILON {
-            return;
+        if self.playback.set_speed(speed) {
+            self.speed_changed(window, cx);
         }
-        self.speed = speed;
+    }
+
+    /// Follows a change of speed with the dropdown and the ticker.
+    fn speed_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The keys walk the ladder too, so the dropdown is told rather than
         // left showing the speed before last.
-        let index = speed_index(speed);
+        let index = speed_index(self.playback.speed());
         self.speed_select.update(cx, |state, cx| state.set_selected_value(&index, window, cx));
         // The ticker's interval is fixed when it starts, so a speed change
         // replaces it rather than waiting for the next tick.
-        if self.playing {
+        if self.playback.is_playing() {
             self.start_ticker(window, cx);
         }
         cx.notify();
@@ -2097,7 +1542,8 @@ impl ReplayRendererPanel {
     /// The slider reports the move back as a change, which would ask for the
     /// frame it is already on; `set_at` answers that with nothing to do.
     fn sync_seek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.seek.update(cx, |slider, cx| slider.set_value(self.at as f32, window, cx));
+        let at = self.playback.at().get() as f32;
+        self.seek.update(cx, |slider, cx| slider.set_value(at, window, cx));
     }
 
     /// Rebuilds the seek slider over the frames the bake produced.
@@ -2107,7 +1553,7 @@ impl ReplayRendererPanel {
     /// either end of it. This one steps a frame at a time over the track's
     /// real length, which is what the control is choosing.
     fn rebuild_seek(&mut self, cx: &mut Context<Self>) {
-        let last = self.frame_count().saturating_sub(1);
+        let last = self.track().map(|track| track.last().get()).unwrap_or_default();
         self.seek = cx.new(|_| seek_slider(last));
         // A rebuilt slider is a different entity, so the old subscription
         // reports nothing; without this the scrubber goes dead on the first
@@ -2132,251 +1578,82 @@ impl ReplayRendererPanel {
     /// A slider change is a frame to go to.
     fn on_seek_event(&mut self, event: &gpui_kit::component::slider::SliderEvent, cx: &mut Context<Self>) {
         let gpui_kit::component::slider::SliderEvent::Change(value) = event else { return };
-        self.set_at(value.start().round().max(0.) as usize, cx);
+        let value = value.start();
+        self.change_playback(|playback, track| playback.seek_to_slider(track, value), cx);
     }
 
     /// Shows a different part of the map, and redraws the frame on screen.
+    fn set_view(&mut self, view: MapViewport, window: &mut Window, cx: &mut Context<Self>) {
+        if self.map.set_view(view) {
+            self.view_changed(window, cx);
+        }
+    }
+
+    /// Follows a change of view with the zoom control and the frame on screen.
     ///
     /// Redrawn rather than left for the next tick: a zoom whose effect only
     /// arrived with playback would read as not having worked while paused.
-    fn set_view(&mut self, view: MapViewport, window: &mut Window, cx: &mut Context<Self>) {
-        if view == self.view {
-            return;
-        }
-        self.view = view;
-        self.zoom.update(cx, |slider, cx| slider.set_value(view.zoom(), window, cx));
+    fn view_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let zoom = self.map.view().zoom();
+        self.zoom.update(cx, |slider, cx| slider.set_value(zoom, window, cx));
         self.draw_current(cx);
         cx.notify();
     }
 
-    /// How many screen pixels one pixel of the drawn frame covers.
-    ///
-    /// `None` before the frame has been painted once, which is the only time
-    /// nothing knows where it is.
-    fn drawn_scale(&self) -> Option<f32> {
-        let bounds = self.drawn.get()?;
-        let size = self.frame.size()?;
-        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
-        if width <= 0.0 || height <= 0.0 {
-            return None;
-        }
-        // The frame is drawn to fit inside its element without being
-        // stretched, so one scale covers both directions.
-        Some((bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height))
-    }
-
-    /// Where in the map a window position falls, in the map's own pixels.
-    ///
-    /// Map space, not the drawn layer: this is what a ship's position and a
-    /// peer's cursor are both in, so it is what they can be compared against
-    /// at any zoom.
-    ///
-    /// `None` when the pointer is not over the map: on the HUD strip, or in
-    /// the margin beside a frame that does not fill its element.
-    fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        let (x, y) = self.drawn_point(position)?;
-        Some(self.shaped_view().to_map(x, y))
-    }
-
-    /// Where in the drawn map a window position falls, after the zoom and pan
-    /// have been applied.
-    ///
-    /// What a zoom about the pointer needs, since it re-anchors on a drawn
-    /// point rather than a map one.
-    fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        let (x, y) = self.canvas_point(position)?;
-        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
-        let (x, y) = (x - origin.0, y - origin.1);
-        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
-        (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
-    }
-
-    /// The window as it is drawn: stretched toward the shape of the
-    /// viewport it is drawn in.
-    ///
-    /// A wide viewport leaves the map with empty space either side. Zoomed
-    /// in there is map to put there, so the window takes it; at rest there is
-    /// not, and the frame stays square.
-    fn shaped_view(&self) -> MapViewport {
-        let Some(bounds) = self.drawn.get() else { return self.view };
-        let (width, height) = (bounds.size.width.as_f32(), bounds.size.height.as_f32());
-        if height <= 0.0 || width <= 0.0 {
-            return self.view;
-        }
-        // Measured against the whole canvas, HUD strip included, since that
-        // is what is fitted into the viewport.
-        let canvas = wows_minimap_renderer::CANVAS_HEIGHT as f32;
-        let wanted = width / height * canvas / wows_minimap_renderer::MINIMAP_SIZE as f32;
-        self.view.widened(wanted)
-    }
-
-    /// Where a pointer position lands on the whole rasterised canvas, which
-    /// is the map and whatever gutters are beside it.
-    ///
-    /// `None` before the frame has been painted once. Not clamped to the
-    /// canvas: a caller asks what is there, and the answer for a point off
-    /// the edge is nothing.
-    fn canvas_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        let bounds = self.drawn.get()?;
-        let scale = self.drawn_scale()?;
-        let size = self.frame.size()?;
-        let drawn_width = size.width.0 as f32 * scale;
-        let drawn_height = size.height.0 as f32 * scale;
-        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - drawn_width) / 2.0;
-        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - drawn_height) / 2.0;
-        Some(((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale))
+    /// The map view, placed where the frame was last painted, to change.
+    fn placed_map(&mut self) -> &mut MapView {
+        let placement = self.placement();
+        self.map.set_placement(placement);
+        &mut self.map
     }
 
     /// What the roster icon under the pointer reads as, if it is on one.
-    ///
-    /// The region says which row and which of its icons; the rest is read off
-    /// the roster command the frame already holds, so a reading cannot drift
-    /// from what was drawn.
     fn consumable_at(&self, position: Point<Pixels>) -> Option<ConsumableHover> {
-        use wows_minimap_renderer::drawing::RegionKind;
-
-        let at = self.canvas_point(position)?;
-        let region = self.regions.iter().find(|region| region.contains(at))?;
-        let RegionKind::RosterConsumable { entity_id, index } = region.kind;
-        let track = self.track()?;
-        let commands = track.frames.get(self.at)?;
-        for command in commands {
-            let DrawCommand::TeamRoster { rows, .. } = command else { continue };
-            let Some(row) = rows.iter().find(|row| row.entity_id == entity_id) else { continue };
-            let Some(consumable) = row.consumables.get(index) else { continue };
-            return Some(ConsumableHover {
-                player: row.player_name.clone(),
-                lines: wows_minimap_renderer::draw_command::consumable_lines(consumable),
-            });
-        }
-        None
+        let at = self.map_view().canvas_point(window_point(position))?;
+        hover::consumable_at(&self.regions, self.current_commands(), at)
     }
 
     /// Reads the roster icon under the pointer. Returns whether it changed.
     fn update_consumable_hover(&mut self, position: Point<Pixels>) -> bool {
         let found = self.consumable_at(position);
-        let changed = found.as_ref().map(|hover| (&hover.player, &hover.lines.name))
-            != self.hovered_consumable.as_ref().map(|(hover, _)| (&hover.player, &hover.lines.name));
+        let changed = hover::hover_changed(self.hovered_consumable.as_ref().map(|(hover, _)| hover), found.as_ref());
         self.hovered_consumable = found.map(|hover| (hover, position));
         changed
     }
 
     /// The wheel zooms about whatever is under the pointer.
     fn on_scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(at) = self.drawn_point(event.position) else { return };
         let delta = event.delta.pixel_delta(SCROLL_LINE).y.as_f32();
-        if delta == 0.0 {
-            return;
+        let map_origin = self.map_origin;
+        match self.placed_map().zoom_by_wheel(window_point(event.position), delta, map_origin) {
+            Wheel::Ignored => return,
+            Wheel::Unchanged => {}
+            Wheel::Zoomed => self.view_changed(window, cx),
         }
-        let zoom = self.view.zoom() * (1.0 + delta * ZOOM_PER_PIXEL);
-        self.set_view(self.shaped_view().zoomed_about(zoom, at), window, cx);
         cx.stop_propagation();
     }
 
-    /// A drag of the map moves it under the pointer.
-    ///
-    /// Only once there is somewhere to drag to: at the whole map, a drag
-    /// would do nothing and holding it would swallow the click.
+    /// A press on the map goes to the tool in hand, a rotation handle, or
+    /// what is picked out, and otherwise starts a drag of the map.
     fn on_drag_start(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(at) = self.map_point(event.position) else { return };
-        // A tool in hand takes the drag: a reader dragging to draw is not
-        // asking to pan the map under their line.
-        if self.has_tool() {
-            self.stroke(Stroke::Began { at: [at.0, at.1] }, cx);
-            return;
+        let position = window_point(event.position);
+        match self.annotator.pointer_down(&self.collab, &self.map_view(), self.map_origin, position) {
+            PointerDown::Stroked => {
+                self.draw_current(cx);
+                cx.notify();
+            }
+            PointerDown::Unclaimed => {
+                self.placed_map().start_pan(position);
+            }
+            PointerDown::OffMap | PointerDown::Turning | PointerDown::Moving => {}
         }
-        // The handle over a picked shape turns it rather than moving it.
-        if let Some((index, annotation)) = self.handle_under(event.position) {
-            // Snapshotted as the handle is taken hold of: a turn reaches the
-            // session as the pointer moves, so by the time it is let go the
-            // old bearing has already gone.
-            self.remember();
-            self.turning = Some((index, annotation));
-            return;
-        }
-        // Nor is one dragging something they have already picked out.
-        if !self.picked.is_empty() {
-            self.moving = Some(([at.0, at.1], self.collab.annotations()));
-            return;
-        }
-        if self.view.is_whole_map() {
-            return;
-        }
-        self.dragging = Some(event.position);
-    }
-
-    /// The shape whose rotation handle is under `position`, if the pointer
-    /// is on one.
-    ///
-    /// A handle belongs to a single picked shape that has a bearing at all:
-    /// turning several at once about their own middles is not what one
-    /// handle means, and a circle looks the same at every angle.
-    fn handle_under(&self, position: Point<Pixels>) -> Option<(usize, wt_collab_client::types::Annotation)> {
-        let index = self.picked.single()?;
-        let annotation = self.collab.annotations().get(index)?.clone();
-        if !wt_collab_client::drawing::can_rotate(&annotation) {
-            return None;
-        }
-        let (handle, _) = self.rotation_handle(&annotation)?;
-        let reach = HANDLE_RADIUS + px(8.);
-        let away = (position.x - handle.0).as_f32().hypot((position.y - handle.1).as_f32());
-        (away < reach.as_f32()).then_some((index, annotation))
-    }
-
-    /// Where a shape's rotation handle sits in the element, and where the
-    /// line to it starts.
-    ///
-    /// Above the shape by a fixed number of pixels rather than a map
-    /// distance, so the handle stays the same size and the same reach away
-    /// at every zoom, as the egui renderer's does.
-    fn rotation_handle(
-        &self,
-        annotation: &wt_collab_client::types::Annotation,
-    ) -> Option<((Pixels, Pixels), (Pixels, Pixels))> {
-        let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
-        let anchor = self.element_point(((left + right) / 2.0, top))?;
-        Some(((anchor.0, anchor.1 - HANDLE_DISTANCE), anchor))
-    }
-
-    /// The range circles every placed ship asks for.
-    ///
-    /// Resolved here rather than in the shared layer because a range is read
-    /// out of the ship's own game data, which only a front end has. Nothing
-    /// is drawn until a ship has been chosen for the annotation, since there
-    /// is no ship to read the ranges of.
-    fn placed_ship_ranges(&self) -> Vec<DrawCommand> {
-        use wowsunpack::data::ResourceLoader as _;
-
-        let Some(track) = self.track() else { return Vec::new() };
-        let (space_size, version) = (track.space_size, track.version);
-        let annotations = self.collab.annotations();
-        if annotations.is_empty() {
-            return Vec::new();
-        }
-        let Some(loaded) = self.game_data.as_ref().and_then(|cache| cache.newest_loaded()) else {
-            return Vec::new();
-        };
-        let provider = loaded.provider();
-
-        let mut circles = Vec::new();
-        for annotation in &annotations {
-            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else {
-                continue;
-            };
-            let Some(param) = provider.game_param_by_id(config.param_id) else { continue };
-            let Some(vehicle) = param.vehicle() else { continue };
-            let hull = config.hull_name.as_deref();
-            let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
-            circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
-        }
-        circles
     }
 
     /// Every ship the loaded build knows, built the first time one is
     /// looked up rather than when the viewport opens.
     fn ships(&mut self) -> Option<&ShipLookup> {
         if self.ship_lookup.is_none() {
-            let loaded = self.game_data.as_ref()?.newest_loaded()?;
+            let loaded = self.game_data.newest_loaded()?;
             let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(loaded.provider());
             self.ship_lookup = Some(ShipLookup::new(&catalog));
         }
@@ -2407,89 +1684,50 @@ impl ReplayRendererPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use wowsunpack::game_params::types::GameParamProvider as _;
-
-        let Some(index) = self.picked.single() else { return };
-        let annotations = self.collab.annotations();
-        let Some(wt_collab_client::types::Annotation::Ship { pos, yaw, friendly, .. }) = annotations.get(index) else {
-            return;
-        };
-        let Some(loaded) = self.game_data.as_ref().and_then(|cache| cache.newest_loaded()) else { return };
-        let provider = loaded.provider();
-        let Some(param) = provider.game_param_by_index(&ship.param_index) else { return };
-
-        self.remember();
-        self.collab.update_annotation(
-            index,
-            wt_collab_client::types::Annotation::Ship {
-                pos: *pos,
-                yaw: *yaw,
-                species: format!("{species:?}"),
-                friendly: *friendly,
-                // Stock hull and no modifiers until the reader says otherwise,
-                // which is where the egui chooser leaves it.
-                config: Some(wt_collab_client::types::AnnotationShipConfig::new(param.id(), ship.display_name.clone())),
-            },
+        let named = self.annotator.name_picked_ship(
+            &self.collab,
+            &self.game_data,
+            species,
+            &ship.param_index,
+            ship.display_name.clone(),
         );
+        if !named {
+            return;
+        }
         self.ship_query = MarkedQuery::default();
         self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
         self.draw_current(cx);
         cx.notify();
     }
 
-    /// Remembers what the session holds, before changing it.
-    fn remember(&mut self) {
-        if !self.collab.is_active() {
-            return;
-        }
-        self.history.push(self.collab.annotations_held());
-        if self.history.len() > HISTORY_DEPTH {
-            self.history.remove(0);
-        }
-    }
-
     /// Puts the session back the way it was before the last change this
     /// viewport made.
     fn undo(&mut self, cx: &mut Context<Self>) {
-        let Some(was) = self.history.pop() else { return };
-        self.collab.restore(&was);
-        // What was picked out may no longer be there.
-        self.picked.clear();
-        self.draw_current(cx);
-        cx.notify();
+        if self.annotator.undo(&self.collab) {
+            self.draw_current(cx);
+            cx.notify();
+        }
     }
 
     /// Widens or narrows the nib by `step`, within the range the egui board
     /// offers (`replay/renderer/mod.rs`'s own bracket keys).
     fn step_nib(&mut self, step: f32, cx: &mut Context<Self>) {
-        let width = (self.drawing.width() + step).clamp(MIN_NIB, MAX_NIB);
-        if (width - self.drawing.width()).abs() < f32::EPSILON {
-            return;
+        if self.annotator.step_nib(step) {
+            cx.notify();
         }
-        self.drawing.set_width(width);
-        cx.notify();
     }
 
     /// Erases whatever is picked out, if anything is.
     fn erase_picked(&mut self, cx: &mut Context<Self>) {
-        if self.picked.is_empty() {
-            return;
+        if self.annotator.erase_picked(&self.collab) {
+            self.draw_current(cx);
+            cx.notify();
         }
-        self.remember();
-        // Highest index first: erasing shifts what is after it.
-        let mut picked: Vec<usize> = self.picked.picked().to_vec();
-        picked.sort_unstable_by(|a, b| b.cmp(a));
-        for index in picked {
-            self.collab.erase_annotation(index);
-        }
-        self.picked.clear();
-        self.draw_current(cx);
-        cx.notify();
     }
 
     /// Takes up `tool`, dropping whatever was half-drawn.
     fn take_up(&mut self, tool: Tool, cx: &mut Context<Self>) {
-        self.drawing.set_tool(tool);
+        self.annotator.take_up(tool);
         self.draw_current(cx);
         cx.notify();
     }
@@ -2497,135 +1735,62 @@ impl ReplayRendererPanel {
     /// Whether a drawing tool is in hand, which is what decides who gets the
     /// pointer.
     fn has_tool(&self) -> bool {
-        *self.drawing.tool() != wt_collab_client::drawing::Tool::None
-    }
-
-    /// Hands a pointer event to the tool and does what it drew.
-    fn stroke(&mut self, stroke: Stroke, cx: &mut Context<Self>) {
-        let existing = self.collab.annotations();
-        match self.drawing.handle(stroke, &existing) {
-            Some(Drawn::Added(annotation)) => {
-                self.remember();
-                self.collab.add_annotation(annotation);
-            }
-            Some(Drawn::Erased(index)) => {
-                self.remember();
-                self.collab.erase_annotation(index);
-            }
-            None => {}
-        }
-        // The frame carries the part-drawn shape, so every stroke redraws.
-        self.draw_current(cx);
-        cx.notify();
+        self.annotator.has_tool()
     }
 
     fn on_drag_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.report_cursor(event.position, cx);
+        self.report_cursor(event.position);
         if self.update_consumable_hover(event.position) {
             cx.notify();
         }
-        self.pointer_at = self.map_point(event.position).map(|(x, y)| [x, y]);
 
-        // A handle being held turns the shape it belongs to.
-        if let Some((index, before)) = self.turning.clone()
-            && event.dragging()
-            && let Some(at) = self.pointer_at
-        {
-            let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
-            let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
-            let mut turned = before;
-            wt_collab_client::drawing::rotate_annotation(&mut turned, wt_collab_client::drawing::bearing(middle, at));
-            self.collab.update_annotation(index, turned);
-            self.draw_current(cx);
-            cx.notify();
-            return;
-        }
-
-        // A tool in hand builds its shape from the drag rather than panning.
-        if self.has_tool() {
-            if self.drawing.is_drawing()
-                && event.dragging()
-                && let Some(at) = self.pointer_at
-            {
-                self.stroke(Stroke::Moved { at, straight: event.modifiers.shift }, cx);
-            }
-            return;
-        }
-
-        let Some(from) = self.dragging else { return };
-        if !event.dragging() {
-            self.dragging = None;
-            return;
-        }
-        let Some(scale) = self.drawn_scale() else { return };
-        let delta = ((event.position.x - from.x).as_f32() / scale, (event.position.y - from.y).as_f32() / scale);
-        self.dragging = Some(event.position);
-        self.set_view(self.shaped_view().dragged(delta), window, cx);
-    }
-
-    fn on_drag_end(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        self.dragging = None;
-        if self.has_tool()
-            && self.drawing.is_drawing()
-            && let Some(at) = self.map_point(event.position)
-        {
-            self.stroke(Stroke::Ended { at: [at.0, at.1] }, cx);
-            return;
-        }
-        // A turn, like a move, is one update at the end.
-        if let Some((index, _)) = self.turning.take() {
-            if let Some(annotation) = self.collab.annotations().get(index) {
-                self.collab.update_annotation(index, annotation.clone());
-            }
-            cx.notify();
-            return;
-        }
-        // The session hears about a move once, when it is over, rather than
-        // per pixel of the drag.
-        if let Some((from, before)) = self.moving.take()
-            && let Some((x, y)) = self.map_point(event.position)
-        {
-            self.remember();
-            let delta = [x - from[0], y - from[1]];
-            for index in self.picked.picked() {
-                let Some(annotation) = before.get(*index) else { continue };
-                let mut moved = annotation.clone();
-                wt_collab_client::drawing::move_annotation(&mut moved, delta);
-                self.collab.update_annotation(*index, moved);
-            }
-            cx.notify();
-        }
-    }
-
-    /// A double-click puts the whole map back.
-    fn on_viewport_click(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // A tool that places rather than drags wants the click, and a
-        // double-click must not put the whole map back under a half-drawn
-        // shape.
-        if self.has_tool() {
-            if let Some(at) = self.map_point(event.position()) {
-                self.stroke(Stroke::Clicked { at: [at.0, at.1] }, cx);
-            }
-            return;
-        }
-        // With no tool, a click picks a drawn shape out to move. Only when
-        // there is something to pick: otherwise every click on the map would
-        // swallow the double-click that puts the whole map back.
-        if let Some((x, y)) = self.map_point(event.position()) {
-            let annotations = self.collab.annotations();
-            if !annotations.is_empty() {
-                self.picked.click(&annotations, [x, y], event.modifiers().secondary(cx));
-                self.picked.retain_within(&annotations);
+        let position = window_point(event.position);
+        let held = event.dragging();
+        let straight = event.modifiers.shift;
+        match self.annotator.pointer_move(&self.collab, &self.map_view(), self.map_origin, position, held, straight) {
+            PointerMove::Turned | PointerMove::Stroked => {
+                self.draw_current(cx);
                 cx.notify();
-                if !self.picked.is_empty() {
-                    return;
+            }
+            PointerMove::Held => {}
+            PointerMove::Unclaimed => {
+                if self.placed_map().pan_to(position, held) {
+                    self.view_changed(window, cx);
                 }
             }
         }
-        if event.click_count() < 2 {
-            return;
+    }
+
+    fn on_drag_end(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.map.end_pan();
+        let position = window_point(event.position);
+        match self.annotator.pointer_up(&self.collab, &self.map_view(), self.map_origin, position) {
+            PointerUp::Stroked => {
+                self.draw_current(cx);
+                cx.notify();
+            }
+            PointerUp::Turned | PointerUp::Moved => cx.notify(),
+            PointerUp::Nothing => {}
         }
-        self.set_view(MapViewport::default(), window, cx);
+    }
+
+    /// A click goes to the tool in hand or picks a drawn shape out; a
+    /// double-click on nothing puts the whole map back.
+    fn on_viewport_click(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let position = window_point(event.position());
+        let add = event.modifiers().secondary(cx);
+        let map = self.map_view();
+        match self.annotator.click(&self.collab, &map, self.map_origin, position, add, event.click_count()) {
+            Click::Stroked => {
+                self.draw_current(cx);
+                cx.notify();
+            }
+            Click::Picked | Click::Ignored => cx.notify(),
+            Click::ResetView => {
+                cx.notify();
+                self.set_view(MapViewport::default(), window, cx);
+            }
+        }
     }
 
     /// The zoom control moves about the middle of what is on screen, as the
@@ -2638,15 +1803,16 @@ impl ReplayRendererPanel {
         cx: &mut Context<Self>,
     ) {
         let gpui_kit::component::slider::SliderEvent::Change(value) = event else { return };
-        let middle = wows_minimap_renderer::MINIMAP_SIZE as f32 / 2.0;
-        self.set_view(self.view.zoomed_about(value.start(), (middle, middle)), window, cx);
+        if self.map.zoom_to(value.start()) {
+            self.view_changed(window, cx);
+        }
     }
 
     /// What the viewport shows of the map. Test-only: production code reaches
     /// the field.
     #[cfg(test)]
     pub(crate) fn view(&self) -> MapViewport {
-        self.view
+        self.map.view()
     }
 
     /// Where the frame was painted. Test-only: the painter fills this in, and
@@ -2685,48 +1851,41 @@ impl ReplayRendererPanel {
     /// replay never recorded has no mark.
     fn battle_ticks(&self) -> Vec<AnyElement> {
         let Some(track) = self.track() else { return Vec::new() };
-        [Some(track.battle_start), track.battle_end]
+        track
+            .battle_marks()
             .into_iter()
-            .flatten()
             .enumerate()
-            .filter_map(|(index, clock)| {
-                let position = track.position_of(clock)?;
-                Some(
-                    div()
-                        .id(("replay-renderer-battle-tick", index))
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(relative(position))
-                        .w(TICK_WIDTH)
-                        .bg(crate::theme::text_dim())
-                        .into_any_element(),
-                )
+            .map(|(index, position)| {
+                div()
+                    .id(("replay-renderer-battle-tick", index))
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(relative(position))
+                    .w(TICK_WIDTH)
+                    .bg(crate::theme::text_dim())
+                    .into_any_element()
             })
             .collect()
     }
 
-    /// Where playback has reached, as the clock the game showed.
-    ///
-    /// Elapsed rather than absolute: a replay records from the loading screen
-    /// on, so the raw clock opens at something like 0:40 on a battle that has
-    /// not started.
+    /// Where playback has reached, as the clock the game showed. Test-only:
+    /// the transport reads it with the length.
+    #[cfg(test)]
     fn clock_label(&self) -> String {
-        let Some(track) = self.track() else { return String::new() };
-        mmss(track.elapsed_at(self.at))
+        self.track().map(|track| self.playback.clock_label(track)).unwrap_or_default()
     }
 
     /// How long the battle runs for, as the clock would read at its end.
+    #[cfg(test)]
     fn length_label(&self) -> String {
-        let Some(track) = self.track() else { return String::new() };
-        mmss(track.elapsed_at(track.len().saturating_sub(1)))
+        self.track().map(|track| track.length_label()).unwrap_or_default()
     }
 
     /// Where playback has reached and how much there is, which is what says
     /// whether the end is near without reading the bar.
     fn clock_and_length(&self) -> String {
-        let Some(_) = self.track() else { return String::new() };
-        format!("{} / {}", self.clock_label(), self.length_label())
+        self.track().map(|track| self.playback.clock_and_length(track)).unwrap_or_default()
     }
 }
 
@@ -2745,27 +1904,6 @@ impl gpui_kit::component::searchable_list::SearchableListItem for SpeedItem {
     fn value(&self) -> &Self::Value {
         &self.0
     }
-}
-
-/// Where `speed` sits in the ladder.
-fn speed_index(speed: f32) -> usize {
-    SPEEDS.iter().position(|offered| (offered - speed).abs() < f32::EPSILON).unwrap_or_default()
-}
-
-/// A speed as the transport labels it: no trailing zero on a whole one.
-fn speed_label(speed: f32) -> String {
-    if (speed - speed.round()).abs() < f32::EPSILON {
-        format!("{}x", speed.round() as i32)
-    } else {
-        format!("{speed}x")
-    }
-}
-
-/// Seconds of game time as the clock the game shows, zero-padded as the egui
-/// renderer pads it.
-fn mmss(seconds: f32) -> String {
-    let seconds = seconds.max(0.0) as u32;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 impl Drop for ReplayRendererPanel {
@@ -2830,18 +1968,18 @@ impl ReplayRendererPanel {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .when(!self.view.is_whole_map(), |this| this.cursor_grab())
+                        .when(!self.map.view().is_whole_map(), |this| this.cursor_grab())
                         // Where the frame landed, which is the only way a
                         // pointer position can be turned into a map one.
                         .child(frame_view(&self.frame, Some(drawn)).size_full())
-                        .children(self.hud_strip().zip(self.advantage_hover()).map(|((left, top, height), lines)| {
+                        .children(self.map_view().hud_strip().zip(self.advantage_hover()).map(|(strip, lines)| {
                             div()
                                 .id("replay-renderer-advantage-hover")
                                 .absolute()
-                                .left(left)
-                                .top(top)
-                                .right(left)
-                                .h(height)
+                                .left(px(strip.left))
+                                .top(px(strip.top))
+                                .right(px(strip.left))
+                                .h(px(strip.height))
                                 .tooltip(hover_lines(
                                     lines
                                         .join(
@@ -2857,7 +1995,7 @@ impl ReplayRendererPanel {
                         // found.
                         .when(self.ctrl_held, |this| this.child(shortcut_sheet(cx)))
                         .children(self.collab_overlay())
-                        .children(self.rotation_handle_overlay(cx))
+                        .children(self.rotation_handle_overlay())
                         .children(self.consumable_reading(cx))
                         .on_modifiers_changed(cx.listener(
                             |this, event: &gpui_kit::ModifiersChangedEvent, _window, cx| {
@@ -2885,141 +2023,142 @@ impl ReplayRendererPanel {
     fn render_transport(&self, cx: &mut Context<Self>) -> AnyElement {
         let border = cx.theme().border;
         let ready = matches!(self.state, State::Ready(_));
-        let last_frame = self.frame_count().saturating_sub(1);
+        let last_frame = self.track().map(|track| track.last()).unwrap_or(FrameIndex::FIRST);
+        let playing = self.playback.is_playing();
         // Refused until the second walk has read the battle, and at whichever
         // end of it there is nothing further to step to.
         let has_previous = self.previous_event().is_some();
         let has_next = self.next_event().is_some();
-        let controls =
-            h_flex()
-                .flex_none()
-                .gap_2()
-                .items_center()
-                .px_2()
-                .pb_1()
-                .child(
-                    Button::new("replay-renderer-jump-to-start")
-                        .child(crate::icons::icon(crate::icons::Glyph::SkipBack))
-                        .compact()
-                        .disabled(!ready)
-                        .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| this.go_to(0, window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-previous-event")
-                        .child(crate::icons::icon(crate::icons::Glyph::Rewind))
-                        .compact()
-                        .disabled(!ready || !has_previous)
-                        .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| this.jump_to_previous_event(window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-back-10s")
-                        .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
-                        .compact()
-                        .disabled(!ready)
-                        .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| this.seek_by(-SEEK_STEP, window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-play")
-                        .icon(if self.playing { IconName::Pause } else { IconName::Play })
-                        .compact()
-                        .disabled(!ready)
-                        .tooltip(
-                            t!(if self.playing { "ui.replay.renderer.pause" } else { "ui.replay.renderer.play" })
-                                .into_owned(),
-                        )
-                        .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-forward-10s")
-                        .child(crate::icons::icon(crate::icons::Glyph::RotateCw))
-                        .compact()
-                        .disabled(!ready)
-                        .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-next-event")
-                        .child(crate::icons::icon(crate::icons::Glyph::FastForward))
-                        .compact()
-                        .disabled(!ready || !has_next)
-                        .tooltip(t!("ui.renderer.controls.next_event").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| this.jump_to_next_event(window, cx))),
-                )
-                .child(
-                    Button::new("replay-renderer-jump-to-end")
-                        .child(crate::icons::icon(crate::icons::Glyph::SkipForward))
-                        .compact()
-                        .disabled(!ready)
-                        .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
-                        .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .w(CLOCK_WIDTH)
-                        .text_xs()
-                        .text_color(crate::theme::text_dim())
-                        .child(self.clock_and_length()),
-                )
-                // Everything past here is not playback, so it sits at the far
-                // end rather than between the reader and the transport.
-                .child(div().flex_1().min_w(px(0.)))
-                .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::Glyph::Search)))
-                .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
-                .child(
-                    Button::new("replay-renderer-zoom-reset")
-                        .label(t!("ui.buttons.reset").into_owned())
-                        .compact()
-                        .disabled(!ready || self.view.is_whole_map())
-                        .on_click(
-                            cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
-                        ),
-                )
-                .child(crate::ui::rule_v(cx))
-                .child(
-                    crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                        Select::new(&self.speed_select)
-                            .id("replay-renderer-speed")
-                            .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
-                            .small(),
-                    ),
-                )
-                .child(crate::ui::rule_v(cx))
-                .child(
-                    Button::new("replay-renderer-export")
-                        .child(crate::icons::icon(crate::icons::Glyph::Download))
-                        .compact()
-                        .disabled(!ready || self.export.is_some())
-                        .tooltip(t!("ui.replay.renderer.export_video").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| {
-                            this.export_asking_first(ExportTarget::File, window, cx)
-                        })),
-                )
-                .child(tools_popover(&cx.entity(), self, cx))
-                .child(render_options_popover(&cx.entity(), self, ready, cx))
-                .child(timeline_popover(&cx.entity(), self, cx))
-                .when(!self.popped_out, |this| {
-                    this.child(
-                        Button::new("replay-renderer-pop-out")
-                            .child(crate::icons::icon(crate::icons::Glyph::SquareArrowOutUpRight))
-                            .compact()
-                            .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
-                            .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
+        let controls = h_flex()
+            .flex_none()
+            .gap_2()
+            .items_center()
+            .px_2()
+            .pb_1()
+            .child(
+                Button::new("replay-renderer-jump-to-start")
+                    .child(crate::icons::icon(crate::icons::Glyph::SkipBack))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.go_to(FrameIndex::FIRST, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-previous-event")
+                    .child(crate::icons::icon(crate::icons::Glyph::Rewind))
+                    .compact()
+                    .disabled(!ready || !has_previous)
+                    .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_previous_event(window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-back-10s")
+                    .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(-SEEK_STEP, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-play")
+                    .icon(if playing { IconName::Pause } else { IconName::Play })
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(
+                        t!(if playing { "ui.replay.renderer.pause" } else { "ui.replay.renderer.play" }).into_owned(),
                     )
-                })
-                .child(
-                    Button::new("replay-renderer-clipboard")
-                        .child(crate::icons::icon(crate::icons::Glyph::Clipboard))
+                    .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-forward-10s")
+                    .child(crate::icons::icon(crate::icons::Glyph::RotateCw))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-next-event")
+                    .child(crate::icons::icon(crate::icons::Glyph::FastForward))
+                    .compact()
+                    .disabled(!ready || !has_next)
+                    .tooltip(t!("ui.renderer.controls.next_event").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_next_event(window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-jump-to-end")
+                    .child(crate::icons::icon(crate::icons::Glyph::SkipForward))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
+                    .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(CLOCK_WIDTH)
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(self.clock_and_length()),
+            )
+            // Everything past here is not playback, so it sits at the far
+            // end rather than between the reader and the transport.
+            .child(div().flex_1().min_w(px(0.)))
+            .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::Glyph::Search)))
+            .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
+            .child(
+                Button::new("replay-renderer-zoom-reset")
+                    .label(t!("ui.buttons.reset").into_owned())
+                    .compact()
+                    .disabled(!ready || self.map.view().is_whole_map())
+                    .on_click(
+                        cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
+                    ),
+            )
+            .child(crate::ui::rule_v(cx))
+            .child(
+                crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                    Select::new(&self.speed_select)
+                        .id("replay-renderer-speed")
+                        .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
+                        .small(),
+                ),
+            )
+            .child(crate::ui::rule_v(cx))
+            .child(
+                Button::new("replay-renderer-export")
+                    .child(crate::icons::icon(crate::icons::Glyph::Download))
+                    .compact()
+                    .disabled(!ready || self.export.is_some())
+                    .tooltip(t!("ui.replay.renderer.export_video").into_owned())
+                    .on_click(
+                        cx.listener(|this, _event, window, cx| {
+                            this.export_asking_first(ExportTarget::File, window, cx)
+                        }),
+                    ),
+            )
+            .child(tools_popover(&cx.entity(), self, cx))
+            .child(render_options_popover(&cx.entity(), self, ready, cx))
+            .child(timeline_popover(&cx.entity(), self, cx))
+            .when(!self.popped_out, |this| {
+                this.child(
+                    Button::new("replay-renderer-pop-out")
+                        .child(crate::icons::icon(crate::icons::Glyph::SquareArrowOutUpRight))
                         .compact()
-                        .disabled(!ready || self.export.is_some())
-                        .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
-                        .on_click(cx.listener(|this, _event, window, cx| {
-                            this.export_asking_first(ExportTarget::Clipboard, window, cx)
-                        })),
-                );
+                        .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
+                        .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
+                )
+            })
+            .child(
+                Button::new("replay-renderer-clipboard")
+                    .child(crate::icons::icon(crate::icons::Glyph::Clipboard))
+                    .compact()
+                    .disabled(!ready || self.export.is_some())
+                    .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| {
+                        this.export_asking_first(ExportTarget::Clipboard, window, cx)
+                    })),
+            );
 
         // The scrubber has a row to itself, as a video player gives it: a
         // bar sharing a row with a dozen controls is both hard to aim at and
@@ -3238,7 +2377,7 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
             }),
     );
 
-    let at = menu.at;
+    let at = pixel_point(menu.at);
     Some(
         deferred(
             anchored().position(at).snap_to_window_with_margin(px(8.)).child(
@@ -3258,724 +2397,27 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
     )
 }
 
-/// Whether the reader has asked for this ship's trail or this range.
-///
-/// The global switches decide whether a layer is drawn at all; this decides
-/// whose, which is what the per-ship menu changes.
-fn per_ship_allows(
-    command: &DrawCommand,
-    trail_hidden: &HashSet<String>,
-    ship_ranges: &HashMap<String, ShipConfigFilter>,
-) -> bool {
-    match command {
-        DrawCommand::PositionTrail { player_name, .. } => {
-            player_name.as_ref().is_none_or(|name| !trail_hidden.contains(name))
-        }
-        DrawCommand::ShipConfigCircle { player_name, kind, .. } => {
-            ship_ranges.get(player_name).is_some_and(|filter| filter.is_enabled(kind))
-        }
-        _ => true,
-    }
-}
-
-/// How many changes back an undo can reach.
-const HISTORY_DEPTH: usize = 32;
-
-/// How big a rotation handle is drawn, and how far above the shape it sits.
-/// The egui renderer's own figures, in screen pixels at any zoom.
-const HANDLE_RADIUS: Pixels = px(5.);
-const HANDLE_DISTANCE: Pixels = px(25.);
-
-/// What a tool draws with until the reader says otherwise: the white and the
-/// width the egui toolbar opens on.
-const DEFAULT_INK: [u8; 4] = [255, 255, 255, 255];
-const DEFAULT_NIB: f32 = 2.0;
-
-/// What the bracket keys hold the nib between, as the egui board does.
-const MIN_NIB: f32 = 1.0;
-const MAX_NIB: f32 = 8.0;
-
-/// How long a ping stays on the map, in seconds.
-const PING_SECONDS: f32 = 1.0;
-
-/// How often a running session redraws, which is what moves a peer's cursor
-/// and carries a ping through its ripple.
-const COLLAB_TICK: Duration = Duration::from_millis(33);
-
-/// How wide a ping's ring grows, in element pixels.
-const PING_RADIUS: f32 = 26.0;
-
-/// The strip the renderer reserves above the map, which is where the score
-/// bar and the advantage label are drawn.
-const HUD_STRIP_HEIGHT: f32 = wows_minimap_renderer::HUD_HEIGHT as f32;
-
-/// How near a right-click has to land to have meant a ship, in map pixels.
-/// A ship icon is about this wide.
-const PICK_RADIUS: f32 = 14.0;
-
-/// A ship showing none of its ranges.
-const NO_RANGES: ShipConfigFilter = ShipConfigFilter {
-    detection: false,
-    main_battery: false,
-    secondary_battery: false,
-    torpedo: false,
-    radar: false,
-    hydro: false,
-};
-
-/// A ship showing all of them.
-const ALL_RANGES: ShipConfigFilter = ShipConfigFilter {
-    detection: true,
-    main_battery: true,
-    secondary_battery: true,
-    torpedo: true,
-    radar: true,
-    hydro: true,
-};
-
-/// The ship a context menu is open for.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ShipMenu {
-    pub entity_id: EntityId,
-    pub player_name: String,
-    /// Where the right-click landed, which is where the menu opens: a menu
-    /// about one ship belongs beside that ship, not in a corner.
-    pub at: Point<Pixels>,
-}
-
 /// Room for the zoom control. Narrow: the seek bar is what the transport is
 /// mostly for, and it takes whatever is left.
 const ZOOM_WIDTH: Pixels = px(90.);
-
-/// Where the map's corner sits before a track says otherwise.
-///
-/// The renderer reserves a strip above the map for the score bar and the
-/// timer; a side panel would also move the map right, which is why a baked
-/// track carries its own origin rather than every caller assuming this one.
-const DEFAULT_MAP_ORIGIN: (f32, f32) = (0.0, wows_minimap_renderer::HUD_HEIGHT as f32);
 
 /// How much one line of wheel travel is worth, for a wheel that reports lines
 /// rather than pixels.
 const SCROLL_LINE: Pixels = px(20.);
 
-/// How much of a zoom one pixel of wheel travel is. The egui renderer's own
-/// rate, so the wheel feels the same in both.
-const ZOOM_PER_PIXEL: f32 = 0.01;
-
-/// What a playback viewport draws when it opens.
-///
-/// Everything it baked except the layers that are asked for rather than
-/// assumed: the rosters take a gutter either side of the map, and the ranges
-/// would cover it.
-fn playback_options_hidden() -> RenderOptions {
-    RenderOptions { show_ship_config: false, show_team_rosters: false, ..playback_options() }
+/// Where a pointer is, as the shared map view reads it.
+fn window_point(position: Point<Pixels>) -> WindowPoint {
+    WindowPoint { x: position.x.as_f32(), y: position.y.as_f32() }
 }
 
-/// What a playback viewport bakes.
-///
-/// The hover preview's set plus every ship's range circles. They are per-frame
-/// and small, so keeping them costs little, and a viewport that did not bake
-/// them could not offer them at all. Trails are still left out: a trail
-/// command carries every point so far, so baking one per frame would cost the
-/// square of the track's length.
-fn playback_options() -> RenderOptions {
-    RenderOptions {
-        show_ship_config: true,
-        // The rosters' own commands carry fixed coordinates, so baking them
-        // costs a roster per frame and nothing else; the canvas they need is
-        // the target's business, not the bake's.
-        show_team_rosters: true,
-        // Every ship's, so the reader can choose whose to look at afterwards
-        // rather than re-baking to change their mind.
-        ship_config_visibility: wows_minimap_renderer::draw_command::ShipConfigVisibility::Filtered(
-            std::sync::Arc::new(|_entity| {
-                Some(wows_minimap_renderer::draw_command::ShipConfigFilter {
-                    detection: true,
-                    main_battery: true,
-                    secondary_battery: true,
-                    torpedo: true,
-                    radar: true,
-                    hydro: true,
-                })
-            }),
-        ),
-        ..wows_minimap_renderer::frame_track::bake_options()
-    }
-}
-
-/// Why a battle could not be played back.
-#[derive(Debug, thiserror::Error)]
-pub enum RenderError {
-    #[error(transparent)]
-    Preview(#[from] wows_toolkit_replay_data::minimap_preview::PreviewError),
-}
-
-/// Walks `path`'s battle once, keeping every frame's draw commands and the
-/// renderer they are drawn through.
-///
-/// `alts` are other recordings of the same battle, read alongside it: the map
-/// then shows what the primary's team could not see.
-fn bake(
-    path: &std::path::Path,
-    alts: &[PathBuf],
-    game_data: &GameDataCache,
-    cancel: &AtomicBool,
-) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked = wows_toolkit_replay_data::minimap_preview::bake_track(
-        path,
-        alts,
-        game_data,
-        cancel,
-        TRACK_BUDGET,
-        BAKE_INTERVAL,
-        playback_options(),
-    )?;
-    let track = Track {
-        frames: baked.frames,
-        clocks: baked.clocks,
-        battle_start: baked.battle_start,
-        battle_end: baked.battle_end,
-        space_size: baked.space_size,
-        version: baked.version,
-        map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
-        space: baked.map_name,
-    };
-    Ok((track, baked.renderer))
-}
-
-/// Renders each replay in `paths` to its own file under `out_dir`, without
-/// opening a viewport for any of them.
-///
-/// This is what the listing's "Render N Replays to Video" is for: the egui app
-/// runs one background batch into a chosen folder
-/// (`replay/renderer/video_export.rs:458`), where opening N viewports would bake
-/// N tracks that nobody watches and leave the reader to save each one.
-///
-/// Sequential, because each encode holds a GPU device and the machine has one:
-/// two at once would contend for it and finish no sooner. A replay that fails is
-/// reported and the rest still run, since one unreadable file in a marked set
-/// should not lose the other forty.
-///
-/// `defaults` is what the reader saved as what a renderer opens with, so a
-/// batch writes what a viewport would have shown rather than the built-in set.
-///
-/// `report` is told which replay the batch has reached before it is read, so the
-/// reader is not left watching a still line for forty files.
-///
-/// Returns the files written and the replays that failed.
-pub fn batch_export(
-    paths: Vec<PathBuf>,
-    game_data: GameDataCache,
-    out_dir: PathBuf,
-    defaults: wows_minimap_renderer::SavedRenderOptions,
-    report: futures::channel::mpsc::UnboundedSender<BatchStep>,
-    cx: &App,
-) -> Task<(Vec<PathBuf>, Vec<PathBuf>)> {
-    let settings = export_settings_of(&defaults);
-    let (options, show_dead_ships) = batch_options(&defaults);
-
-    cx.background_spawn(async move {
-        let mut written = Vec::new();
-        let mut failed = Vec::new();
-        let cancel = AtomicBool::new(false);
-        let total = paths.len();
-
-        for (index, path) in paths.into_iter().enumerate() {
-            let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
-            let _ = report.unbounded_send(BatchStep { done: index, total, replay: named });
-            let Some(stem) = path.file_stem() else {
-                failed.push(path);
-                continue;
-            };
-            let output = out_dir.join(stem).with_extension("mp4");
-
-            let baked = match bake(&path, &[], &game_data, &cancel) {
-                Ok(baked) => baked,
-                Err(err) => {
-                    tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");
-                    failed.push(path);
-                    continue;
-                }
-            };
-            let (track, renderer) = baked;
-            let covered: &[Vec<DrawCommand>] = if settings.include_pre_battle {
-                &track.frames
-            } else {
-                let from = track.frame_at(track.battle_start.seconds());
-                track.frames.get(from..).unwrap_or(&track.frames)
-            };
-            // The bake holds every layer it could; which of them are drawn is
-            // what the saved defaults decide, as they do in a viewport.
-            let frames: Vec<Vec<DrawCommand>> = covered
-                .iter()
-                .map(|frame| {
-                    frame
-                        .iter()
-                        .filter(|command| should_draw_command(command, &options, show_dead_ships))
-                        .cloned()
-                        .collect()
-                })
-                .collect();
-            if frames.is_empty() {
-                failed.push(path);
-                continue;
-            }
-            let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
-
-            // The progress channel is per encode; nothing reads it here, since
-            // the batch reports per replay rather than per frame.
-            let (progress, _ignored) = futures::channel::mpsc::unbounded();
-            match encode_track(&renderer, &frames, duration, &output, settings, progress) {
-                Ok(()) => written.push(output),
-                Err(reason) => {
-                    tracing::warn!(path = %path.display(), %reason, "batch render: the encode failed");
-                    failed.push(path);
-                }
-            }
-        }
-
-        (written, failed)
-    })
-}
-
-/// The tool a digit takes up, in the order the egui board numbers them
-/// (`replay/minimap_view/shapes.rs:88-104`): the two apps' readers learn one set
-/// of keys. `m` is the measurement, as it is there.
-fn tool_for_key(key: &str) -> Option<Tool> {
-    Some(match key {
-        "1" => Tool::Arrow,
-        "2" => Tool::Freehand,
-        "3" => Tool::Eraser,
-        "4" => Tool::Line,
-        "5" => Tool::Circle { filled: false },
-        "6" => Tool::Rectangle { filled: false },
-        "7" => Tool::Triangle { filled: false },
-        "m" => Tool::Measurement,
-        _ => return None,
-    })
-}
-
-/// Where a render goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExportTarget {
-    /// A file the reader chose.
-    File,
-    /// A temporary file, handed to the clipboard.
-    Clipboard,
-}
-
-/// A place to render to that outlives this process, for the clipboard.
-///
-/// `None` when no temporary directory could be made, which is the only way
-/// this fails.
-fn temporary_output(name: &str) -> Option<PathBuf> {
-    let dir = tempfile::Builder::new().prefix("wt-gpui-render-").tempdir().ok()?;
-    let path = dir.path().join(name);
-    // Kept: the clipboard will hold this path, and a directory removed on
-    // drop would leave it pointing at nothing.
-    let _ = dir.keep();
-    Some(path)
+/// A window position the shared map view gave back, as GPUI places things.
+fn pixel_point(position: WindowPoint) -> Point<Pixels> {
+    point(px(position.x), px(position.y))
 }
 
 /// The file an export writes.
 const MP4: wows_toolkit_services::dialog::Filter =
     wows_toolkit_services::dialog::Filter { label: "MP4", extensions: &["mp4"] };
-
-/// Rasterises a baked track and encodes it to `output`.
-///
-/// Runs on a background thread: it draws every frame and blocks on the
-/// encoder. The renderer is the viewport's own, which is why the caller hands
-/// it over for the duration rather than sharing it.
-/// What an export is encoded with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ExportSettings {
-    /// Encode in software even where the GPU could do it.
-    pub prefer_cpu: bool,
-    /// Start the video at the loading screen rather than at the battle.
-    pub include_pre_battle: bool,
-    /// The codec to encode with. `None` lets the encoder pick the best one it
-    /// can, which is what most readers want.
-    pub codec: Option<VideoCodec>,
-}
-
-/// What this machine can encode with, probed once.
-///
-/// The probe builds a GPU device to ask it, which costs long enough to notice,
-/// and the answer cannot change while the app runs.
-fn encoder_status() -> &'static wows_minimap_renderer::encoder::EncoderStatus {
-    static STATUS: std::sync::OnceLock<wows_minimap_renderer::encoder::EncoderStatus> = std::sync::OnceLock::new();
-    STATUS.get_or_init(wows_minimap_renderer::check_encoder)
-}
-
-/// Which replay of how many a batch has reached.
-///
-/// `done` counts the ones behind it, so the first report reads as none done of
-/// however many there are.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BatchStep {
-    pub done: usize,
-    pub total: usize,
-    /// The replay being read, by its file stem.
-    pub replay: String,
-}
-
-/// A directory a batch can write into that outlives this process, for the
-/// clipboard.
-///
-/// `None` when no temporary directory could be made, which is the only way this
-/// fails.
-pub fn temporary_batch_dir() -> Option<PathBuf> {
-    let dir = tempfile::Builder::new().prefix("wt-gpui-batch-").tempdir().ok()?;
-    let path = dir.path().to_path_buf();
-    // Kept: the clipboard will hold paths under it, and a directory removed on
-    // drop would leave them pointing at nothing.
-    let _ = dir.keep();
-    Some(path)
-}
-
-/// What a batch draws of what it baked, and whether dead ships are among it.
-///
-/// The reader's saved layers, less the two a viewport holds off for the same
-/// reasons: the stats panel's ship silhouettes are a load the bake skips, so its
-/// gutter would be empty and the kill feed and the chat that share it would go
-/// unfilmed; and which ships have their range circles drawn is a per-ship choice
-/// a batch is never given, so drawing every ship's would bury the map.
-fn batch_options(defaults: &wows_minimap_renderer::SavedRenderOptions) -> (RenderOptions, bool) {
-    let mut options = playback_options();
-    defaults.apply_to(&mut options);
-    options.show_stats_panel = false;
-    options.show_ship_config = false;
-    (options, defaults.show_dead_ships)
-}
-
-/// What an export is encoded with, as the reader last saved it.
-fn export_settings_of(saved: &wows_minimap_renderer::SavedRenderOptions) -> ExportSettings {
-    ExportSettings {
-        prefer_cpu: saved.prefer_cpu_encoder,
-        codec: saved.video_codec,
-        include_pre_battle: saved.include_pre_battle,
-    }
-}
-
-/// Whether an export has to be encoded in software.
-///
-/// A codec the GPU cannot encode falls back rather than failing: picking AV1
-/// is a choice of codec, not a demand for the GPU.
-fn must_use_cpu(settings: &ExportSettings, status: &wows_minimap_renderer::encoder::EncoderStatus) -> bool {
-    if settings.prefer_cpu || !status.gpu_available() {
-        return true;
-    }
-    match settings.codec {
-        Some(codec) => !status.supports(wows_minimap_renderer::EncoderKind::Gpu, codec),
-        None => false,
-    }
-}
-
-fn encode_track(
-    renderer: &SharedPreviewRenderer,
-    frames: &[Vec<DrawCommand>],
-    duration_seconds: f32,
-    output: &std::path::Path,
-    settings: ExportSettings,
-    progress: futures::channel::mpsc::UnboundedSender<ExportProgress>,
-) -> Result<(), String> {
-    let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (width, height) = drawing.canvas_size();
-
-    let Some(path) = output.to_str() else {
-        return Err(t!("ui.replay.renderer.export_path_unusable").into_owned());
-    };
-    let mut encoder =
-        wows_minimap_renderer::VideoEncoder::new(Some(path), None, false, duration_seconds, width, height);
-    encoder.set_prefer_cpu(must_use_cpu(&settings, encoder_status()));
-    encoder.set_codec(match settings.codec {
-        Some(codec) => wows_minimap_renderer::video::CodecChoice::Explicit(codec),
-        None => wows_minimap_renderer::video::CodecChoice::Auto,
-    });
-    encoder.init().map_err(|err| err.to_string())?;
-
-    let total = frames.len() as u64;
-    for (index, commands) in frames.iter().enumerate() {
-        let image = drawing.render(commands);
-        encoder.submit_frame(&image).map_err(|err| err.to_string())?;
-        let _ = progress.unbounded_send(ExportProgress { done: index as u64 + 1, total, stage: ExportStage::Encoding });
-    }
-    // Said before rather than after, because finishing is the part that
-    // takes a while with nothing else to show for it.
-    let _ = progress.unbounded_send(ExportProgress { done: total, total, stage: ExportStage::Muxing });
-    encoder.finish_submitted().map_err(|err| err.to_string())
-}
-
-/// One toggle in the settings popover: what it says, what it reads, and what
-/// it sets.
-struct Toggle {
-    id: &'static str,
-    label: &'static str,
-    read: fn(&RenderOptions, bool) -> bool,
-    write: fn(&mut RenderOptions, &mut bool, bool),
-}
-
-/// What the viewport can be told to draw.
-///
-/// Only the commands the track actually holds. A playback bake adds the team
-/// rosters and every ship's range circles to `bake_options`; the stats panel
-/// is still left out, because its silhouettes are one of the loads a bake
-/// skips to stay cheap, so a switch for it would draw an empty gutter and is
-/// not offered. Position trails are derived at raster time rather than baked.
-const TOGGLES: &[Toggle] = &[
-    Toggle {
-        id: "renderer-opt-hp-bars",
-        label: "ui.renderer.settings.hp_bars",
-        read: |o, _| o.show_hp_bars,
-        write: |o, _, v| o.show_hp_bars = v,
-    },
-    Toggle {
-        id: "renderer-opt-tracers",
-        label: "ui.renderer.settings.tracers",
-        read: |o, _| o.show_tracers,
-        write: |o, _, v| o.show_tracers = v,
-    },
-    Toggle {
-        id: "renderer-opt-torpedoes",
-        label: "ui.renderer.settings.torpedoes",
-        read: |o, _| o.show_torpedoes,
-        write: |o, _, v| o.show_torpedoes = v,
-    },
-    Toggle {
-        id: "renderer-opt-planes",
-        label: "ui.renderer.settings.planes",
-        read: |o, _| o.show_planes,
-        write: |o, _, v| o.show_planes = v,
-    },
-    Toggle {
-        id: "renderer-opt-smoke",
-        label: "ui.renderer.settings.smoke",
-        read: |o, _| o.show_smoke,
-        write: |o, _, v| o.show_smoke = v,
-    },
-    Toggle {
-        id: "renderer-opt-consumables",
-        label: "ui.renderer.settings.consumables",
-        read: |o, _| o.show_consumables,
-        write: |o, _, v| o.show_consumables = v,
-    },
-    Toggle {
-        id: "renderer-opt-capture-points",
-        label: "ui.renderer.settings.capture_points",
-        read: |o, _| o.show_capture_points,
-        write: |o, _, v| o.show_capture_points = v,
-    },
-    Toggle {
-        id: "renderer-opt-buildings",
-        label: "ui.renderer.settings.buildings",
-        read: |o, _| o.show_buildings,
-        write: |o, _, v| o.show_buildings = v,
-    },
-    Toggle {
-        id: "renderer-opt-player-names",
-        label: "ui.renderer.settings.player_names",
-        read: |o, _| o.show_player_names,
-        write: |o, _, v| o.show_player_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-ship-names",
-        label: "ui.renderer.settings.ship_names",
-        read: |o, _| o.show_ship_names,
-        write: |o, _, v| o.show_ship_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-dead-ships",
-        label: "ui.renderer.settings.dead_ships",
-        read: |_, dead| dead,
-        write: |_, dead, v| *dead = v,
-    },
-    Toggle {
-        id: "renderer-opt-dead-ship-names",
-        label: "ui.renderer.settings.dead_ship_names",
-        read: |o, _| o.show_dead_ship_names,
-        write: |o, _, v| o.show_dead_ship_names = v,
-    },
-    Toggle {
-        id: "renderer-opt-camera-direction",
-        label: "ui.renderer.settings.camera_direction",
-        read: |o, _| o.show_camera_direction,
-        write: |o, _, v| o.show_camera_direction = v,
-    },
-    Toggle {
-        id: "renderer-opt-armament",
-        label: "ui.renderer.settings.armament",
-        read: |o, _| o.show_armament,
-        write: |o, _, v| o.show_armament = v,
-    },
-    Toggle {
-        id: "renderer-opt-score",
-        label: "ui.renderer.settings.score_label",
-        read: |o, _| o.show_score,
-        write: |o, _, v| o.show_score = v,
-    },
-    Toggle {
-        id: "renderer-opt-timer",
-        label: "ui.renderer.settings.timer",
-        read: |o, _| o.show_timer,
-        write: |o, _, v| o.show_timer = v,
-    },
-    Toggle {
-        id: "renderer-opt-kill-feed",
-        label: "ui.renderer.settings.kill_feed",
-        read: |o, _| o.show_kill_feed,
-        write: |o, _, v| o.show_kill_feed = v,
-    },
-    Toggle {
-        id: "renderer-opt-chat",
-        label: "ui.renderer.settings.chat_label",
-        read: |o, _| o.show_chat,
-        write: |o, _, v| o.show_chat = v,
-    },
-    Toggle {
-        id: "renderer-opt-battle-result",
-        label: "ui.renderer.settings.battle_result",
-        read: |o, _| o.show_battle_result,
-        write: |o, _, v| o.show_battle_result = v,
-    },
-    Toggle {
-        id: "renderer-opt-buffs",
-        label: "ui.renderer.settings.buff_counters",
-        read: |o, _| o.show_buffs,
-        write: |o, _, v| o.show_buffs = v,
-    },
-    Toggle {
-        id: "renderer-opt-trails",
-        label: "ui.renderer.settings.heat_trail",
-        read: |o, _| o.show_trails,
-        write: |o, _, v| o.show_trails = v,
-    },
-    Toggle {
-        id: "renderer-opt-ship-ranges",
-        label: "ui.renderer.settings.ship_ranges",
-        read: |o, _| o.show_ship_config,
-        write: |o, _, v| o.show_ship_config = v,
-    },
-    Toggle {
-        id: "renderer-opt-advantage",
-        label: "ui.renderer.settings.team_advantage",
-        read: |o, _| o.show_advantage,
-        write: |o, _, v| o.show_advantage = v,
-    },
-    Toggle {
-        id: "renderer-opt-team-rosters",
-        label: "ui.renderer.settings.team_rosters",
-        read: |o, _| o.show_team_rosters,
-        // The rosters sit in gutters either side of the map, which the
-        // stats panel wants for itself, so turning one on clears the other
-        // as the egui checkboxes do.
-        write: |o, _, v| {
-            o.show_team_rosters = v;
-            if v {
-                o.show_stats_panel = false;
-            }
-        },
-    },
-];
-
-/// The tools the toolbar offers, in the order the egui toolbar offers them.
-///
-/// Selecting is `Tool::None`: nothing is being drawn, so the pointer goes to
-/// the map as it otherwise would.
-const TOOLS: &[ToolButton] = &[
-    ToolButton {
-        id: "replay-renderer-tool-select",
-        glyph: crate::icons::Glyph::MousePointer,
-        label: "ui.renderer.annotations.tool_select",
-        chord: None,
-        tool: || Tool::None,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-arrow",
-        glyph: crate::icons::Glyph::MoveUpRight,
-        label: "ui.renderer.annotations.tool_arrow",
-        chord: Some("Ctrl+1"),
-        tool: || Tool::Arrow,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-freehand",
-        glyph: crate::icons::Glyph::Paintbrush,
-        label: "ui.renderer.annotations.tool_freehand",
-        chord: Some("Ctrl+2"),
-        tool: || Tool::Freehand,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-eraser",
-        glyph: crate::icons::Glyph::Eraser,
-        label: "ui.renderer.annotations.tool_eraser",
-        chord: Some("Ctrl+3"),
-        tool: || Tool::Eraser,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-line",
-        glyph: crate::icons::Glyph::Slash,
-        label: "ui.renderer.annotations.tool_line",
-        chord: Some("Ctrl+4"),
-        tool: || Tool::Line,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-circle",
-        glyph: crate::icons::Glyph::Circle,
-        label: "ui.renderer.annotations.tool_circle",
-        chord: Some("Ctrl+5"),
-        tool: || Tool::Circle { filled: false },
-    },
-    ToolButton {
-        id: "replay-renderer-tool-rectangle",
-        glyph: crate::icons::Glyph::Square,
-        label: "ui.renderer.annotations.tool_rectangle",
-        chord: Some("Ctrl+6"),
-        tool: || Tool::Rectangle { filled: false },
-    },
-    ToolButton {
-        id: "replay-renderer-tool-triangle",
-        glyph: crate::icons::Glyph::Triangle,
-        label: "ui.renderer.annotations.tool_triangle",
-        chord: Some("Ctrl+7"),
-        tool: || Tool::Triangle { filled: false },
-    },
-    ToolButton {
-        id: "replay-renderer-tool-measure",
-        glyph: crate::icons::Glyph::Ruler,
-        label: "ui.renderer.annotations.tool_measurement",
-        chord: Some("Ctrl+M"),
-        tool: || Tool::Measurement,
-    },
-];
-
-/// One button on the toolbar: what it shows, what it is called, the chord that
-/// takes it up, and what it puts in hand.
-struct ToolButton {
-    id: &'static str,
-    glyph: crate::icons::Glyph,
-    label: &'static str,
-    /// `None` for the one tool that has no chord of its own: the selector, which
-    /// escape goes back to.
-    chord: Option<&'static str>,
-    tool: fn() -> Tool,
-}
-
-/// One line in the cheat sheet's actions: the chord, and what it does.
-const ANNOTATION_ACTIONS: &[(&str, &str)] = &[
-    ("Ctrl+Z", "ui.renderer.annotations.action_undo"),
-    ("Ctrl+Click", "ui.renderer.annotations.action_multi_select"),
-    ("[ / ]", "ui.renderer.annotations.action_stroke_width"),
-    ("Del", "ui.renderer.annotations.action_delete"),
-    ("Esc", "ui.renderer.annotations.action_cancel"),
-];
-
-/// The ships that can be placed on the map, as the egui toolbar offers
-/// them, short name first.
-const SPECIES: &[(&str, &str)] =
-    &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
-
-/// What a placed ship is tinted by which side it is on.
-const FRIENDLY_TINT: u32 = 0x4CE8AA;
-const ENEMY_TINT: u32 = 0xFE4D2A;
 
 /// A row of ships to place, for one side.
 fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: bool) -> AnyElement {
@@ -3985,10 +2427,7 @@ fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: boo
         .children(SPECIES.iter().map(|(short, species)| {
             let owner = panel.clone();
             let species = (*species).to_string();
-            let on = matches!(
-                chosen,
-                Tool::Ship { species: in_hand, friendly: side, .. } if in_hand == &species && *side == friendly
-            );
+            let on = annotate::places_ship(chosen, &species, friendly);
             let id = format!("replay-renderer-place-{}-{short}", if friendly { "friendly" } else { "enemy" });
             crate::ui::selectable(
                 gpui_kit::SharedString::from(id.clone()),
@@ -3999,26 +2438,12 @@ fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: boo
                     .selected(on)
                     .text_color(gpui_kit::rgb(tint))
                     .on_click(move |_event, _window, cx: &mut App| {
-                        let species = species.clone();
-                        owner.update(cx, |panel, cx| panel.take_up(Tool::Ship { species, friendly, yaw: 0.0 }, cx));
+                        owner.update(cx, |panel, cx| panel.take_up(annotate::ship_tool(&species, friendly), cx));
                     }),
             )
         }))
         .into_any_element()
 }
-
-/// What a tool draws with, as the egui toolbar offers it.
-const INKS: &[(&str, [u8; 4])] = &[
-    ("replay-renderer-ink-white", [255, 255, 255, 255]),
-    ("replay-renderer-ink-gray", [160, 160, 160, 255]),
-    ("replay-renderer-ink-red", [230, 50, 50, 255]),
-    ("replay-renderer-ink-orange", [240, 140, 30, 255]),
-    ("replay-renderer-ink-yellow", [240, 230, 50, 255]),
-    ("replay-renderer-ink-green", [50, 200, 50, 255]),
-    ("replay-renderer-ink-blue", [50, 120, 230, 255]),
-    ("replay-renderer-ink-purple", [180, 60, 230, 255]),
-    ("replay-renderer-ink-pink", [255, 130, 180, 255]),
-];
 
 /// The drawing tools, on the transport beside the gear.
 ///
@@ -4032,11 +2457,12 @@ fn tools_popover(
     let _ = cx;
     let owner = panel.clone();
     let in_session = view.collab.is_active();
-    let chosen = view.drawing.tool().clone();
-    let ink = view.drawing.color();
-    let nib = view.drawing.width();
-    let undoable = !view.history.is_empty();
-    let picked_ship = picked_ship(view);
+    let drawing = view.annotator.drawing();
+    let chosen = drawing.tool().clone();
+    let ink = drawing.color();
+    let nib = drawing.width();
+    let undoable = view.annotator.can_undo();
+    let picked_ship = view.annotator.picked_ship(&view.collab);
     let matches = view.matched_ships.clone();
     let ship_query = view.ship_query.clone();
     let search = view.ship_search.clone();
@@ -4061,14 +2487,14 @@ fn tools_popover(
                     let tool = button.tool;
                     let on = same_tool(&chosen, &tool());
                     let named = match button.chord {
-                        Some(chord) => format!("{} ({chord})", t!(button.label)),
-                        None => t!(button.label).into_owned(),
+                        Some(chord) => format!("{} ({chord})", t!(button.label_key)),
+                        None => t!(button.label_key).into_owned(),
                     };
                     crate::ui::selectable(
                         button.id,
                         on,
                         Button::new(button.id)
-                            .child(crate::icons::icon(button.glyph))
+                            .child(crate::icons::icon(button.glyph.into()))
                             .compact()
                             .selected(on)
                             .tooltip(named)
@@ -4112,7 +2538,7 @@ fn tools_popover(
                         .when(on, |this| this.border_2().border_color(gpui_kit::white()))
                         .on_click(move |_event, _window, cx: &mut App| {
                             owner.update(cx, |panel, cx| {
-                                panel.drawing.set_color(color);
+                                panel.annotator.set_ink(color);
                                 cx.notify();
                             });
                         })
@@ -4208,7 +2634,7 @@ fn shortcut_sheet(cx: &App) -> AnyElement {
                 .children(
                     TOOLS
                         .iter()
-                        .filter_map(|button| button.chord.map(|chord| row(chord, t!(button.label).into_owned()))),
+                        .filter_map(|button| button.chord.map(|chord| row(chord, t!(button.label_key).into_owned()))),
                 )
                 .child(heading(t!("ui.renderer.annotations.shortcuts_actions").into_owned()))
                 .children(ANNOTATION_ACTIONS.iter().map(|(chord, label)| row(chord, t!(*label).into_owned()))),
@@ -4255,25 +2681,6 @@ fn ship_chooser(
         .into_any_element()
 }
 
-/// Whether the picked shape is a ship, and what it is called if one has been
-/// chosen for it.
-fn picked_ship(view: &ReplayRendererPanel) -> Option<Option<String>> {
-    let index = view.picked.single()?;
-    let annotations = view.collab.annotations();
-    let wt_collab_client::types::Annotation::Ship { config, .. } = annotations.get(index)? else {
-        return None;
-    };
-    Some(config.as_ref().map(|config| config.ship_name.clone()).filter(|name| !name.is_empty()))
-}
-
-/// Whether two tools are the same one, ignoring whether a shape is filled.
-///
-/// A reader pressing the circle button while the circle tool is in hand is
-/// not choosing a different tool, so the button reads as already chosen.
-fn same_tool(chosen: &Tool, other: &Tool) -> bool {
-    std::mem::discriminant(chosen) == std::mem::discriminant(other)
-}
-
 /// The gear on the transport: what the viewport draws of what it baked.
 ///
 /// `view` rather than its entity, because this is built inside that view's
@@ -4317,7 +2724,7 @@ fn render_options_popover(
                     let on = (toggle.read)(&options, dead);
                     let write = toggle.write;
                     Checkbox::new(toggle.id)
-                        .label(t!(toggle.label).to_string())
+                        .label(t!(toggle.label_key).to_string())
                         .checked(on)
                         .on_click(move |checked, _window, cx: &mut App| {
                             let checked = *checked;
@@ -4454,10 +2861,10 @@ fn timeline_popover(
     let _ = cx;
     let owner = panel.clone();
     let read = view.events_are_read();
-    let any_events = !view.events.is_empty();
+    let any_events = !view.events.events().is_empty();
     let filter = view.event_filter().clone();
     let query = view.event_query.clone();
-    let viewer_team = view.viewer_team;
+    let viewer_team = view.events.viewer_team();
     let search = view.event_search.clone();
     // Cloned out because the content closure runs after this render returns,
     // when the panel cannot be read.
@@ -4466,7 +2873,8 @@ fn timeline_popover(
         .into_iter()
         .map(|event| {
             let (label, hover) = row_text(&event.kind);
-            TimelineRow { at: event.clock.seconds(), label, hover, tone: row_tone(&event.kind, viewer_team) }
+            // Marked by `query` when drawn.
+            TimelineRow { at: event.clock.seconds(), label, hover, tone: row_tone(&event.kind, viewer_team), marks: Vec::new() }
         })
         .collect();
     let copyable: String = view.visible_events().into_iter().map(format_timeline_event).collect::<Vec<_>>().join("\n");
@@ -4515,16 +2923,6 @@ fn timeline_popover(
                 .into_any_element()
         })
         .into_any_element()
-}
-
-/// One row of the timeline, already worded and sided.
-#[derive(Clone)]
-struct TimelineRow {
-    /// Where in the battle it happened, in seconds.
-    at: f32,
-    label: String,
-    hover: String,
-    tone: EventTone,
 }
 
 /// The kind switches and the search box.
@@ -4674,45 +3072,15 @@ fn zoom_slider() -> SliderState {
 
 #[cfg(test)]
 mod tests {
-    /// The drawing tools answer to the keys the egui board uses, so a reader who
-    /// learned them there does not learn them again.
-    #[test]
-    fn the_tool_shortcuts_are_the_egui_boards() {
-        use wt_collab_client::drawing::Tool;
-
-        assert_eq!(super::tool_for_key("1"), Some(Tool::Arrow));
-        assert_eq!(super::tool_for_key("2"), Some(Tool::Freehand));
-        assert_eq!(super::tool_for_key("3"), Some(Tool::Eraser));
-        assert_eq!(super::tool_for_key("4"), Some(Tool::Line));
-        assert_eq!(super::tool_for_key("5"), Some(Tool::Circle { filled: false }));
-        assert_eq!(super::tool_for_key("6"), Some(Tool::Rectangle { filled: false }));
-        assert_eq!(super::tool_for_key("7"), Some(Tool::Triangle { filled: false }));
-        assert_eq!(super::tool_for_key("m"), Some(Tool::Measurement));
-        assert_eq!(super::tool_for_key("8"), None, "a key that is not a tool takes nothing up");
-    }
-
     use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
     use gpui_kit::size;
     use gpui_kit::test::TestWindowExt;
 
+    use super::FrameIndex;
     use super::ReplayRendererPanel;
     use super::SPEEDS;
-    use super::mmss;
-
-    /// The transport reads in the clock the game shows, not in seconds.
-    #[test]
-    fn game_time_reads_as_minutes_and_seconds() {
-        assert_eq!(mmss(0.0), "00:00");
-        assert_eq!(mmss(9.4), "00:09");
-        assert_eq!(mmss(75.0), "01:15");
-        assert_eq!(mmss(1205.0), "20:05");
-        // The battle clock runs backwards from the loading screen, so a frame
-        // before the battle started reads as its beginning rather than as a
-        // minus sign.
-        assert_eq!(mmss(-3.0), "00:00");
-    }
 
     /// The transport opens at the speed the egui renderer opens at, over the
     /// ladder it offers. Real time is too slow to watch a battle through, so
@@ -4726,8 +3094,8 @@ mod tests {
 
         window
             .update(cx, |panel, _window, _cx| {
-                assert_eq!(panel.speed, 20.0);
-                assert!(SPEEDS.contains(&panel.speed), "and it is one of the offered speeds");
+                assert_eq!(panel.playback.speed(), 20.0);
+                assert!(SPEEDS.contains(&panel.playback.speed()), "and it is one of the offered speeds");
                 assert_eq!(SPEEDS, [1.0, 5.0, 10.0, 20.0, 40.0, 60.0], "the egui ladder");
             })
             .expect("the window is open");
@@ -4782,7 +3150,7 @@ mod tests {
                 assert_eq!(panel.clock_label(), "00:00", "the first frame is the loading screen, not minus 40s");
 
                 // Frame 10 is 50s of recording, which is 10s of battle.
-                panel.go_to(10, window, cx);
+                panel.go_to(FrameIndex::new(10), window, cx);
                 assert_eq!(panel.clock_label(), "00:10");
             })
             .expect("the window is open");
@@ -4804,19 +3172,19 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                panel.go_to(0, window, cx);
+                panel.go_to(FrameIndex::FIRST, window, cx);
                 panel.seek_by(10.0, window, cx);
-                assert_eq!(panel.at, 20, "twenty half-second frames");
+                assert_eq!(panel.playback.at().get(), 20, "twenty half-second frames");
 
                 panel.seek_by(-10.0, window, cx);
-                assert_eq!(panel.at, 0);
+                assert_eq!(panel.playback.at().get(), 0);
 
                 // Neither end runs off the track.
                 panel.seek_by(-10.0, window, cx);
-                assert_eq!(panel.at, 0);
-                panel.go_to(199, window, cx);
+                assert_eq!(panel.playback.at().get(), 0);
+                panel.go_to(FrameIndex::new(199), window, cx);
                 panel.seek_by(10.0, window, cx);
-                assert_eq!(panel.at, 199);
+                assert_eq!(panel.playback.at().get(), 199);
             })
             .expect("the window is open");
     }
@@ -4836,11 +3204,11 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                panel.go_to(39, window, cx);
-                assert_eq!(panel.at, 39);
+                panel.go_to(FrameIndex::new(39), window, cx);
+                assert_eq!(panel.playback.at().get(), 39);
                 assert_eq!(panel.seek.read(cx).value().start(), 39.0);
 
-                panel.go_to(0, window, cx);
+                panel.go_to(FrameIndex::FIRST, window, cx);
                 assert_eq!(panel.seek.read(cx).value().start(), 0.0);
             })
             .expect("the window is open");
@@ -4856,18 +3224,18 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                assert_eq!(panel.speed, 20.0);
+                assert_eq!(panel.playback.speed(), 20.0);
                 panel.step_speed(1, window, cx);
-                assert_eq!(panel.speed, 40.0);
+                assert_eq!(panel.playback.speed(), 40.0);
                 panel.step_speed(1, window, cx);
-                assert_eq!(panel.speed, 60.0);
+                assert_eq!(panel.playback.speed(), 60.0);
                 panel.step_speed(1, window, cx);
-                assert_eq!(panel.speed, 60.0, "there is no rung past the top of the ladder");
+                assert_eq!(panel.playback.speed(), 60.0, "there is no rung past the top of the ladder");
 
                 for _ in 0..5 {
                     panel.step_speed(-1, window, cx);
                 }
-                assert_eq!(panel.speed, 1.0, "nor below its bottom");
+                assert_eq!(panel.playback.speed(), 1.0, "nor below its bottom");
             })
             .expect("the window is open");
     }
@@ -4917,14 +3285,14 @@ mod tests {
         window
             .update(cx, |panel, _window, cx| {
                 panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(17.0)), cx);
-                assert_eq!(panel.at, 17, "the middle of the track is reachable");
+                assert_eq!(panel.playback.at().get(), 17, "the middle of the track is reachable");
 
                 panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(3.0)), cx);
-                assert_eq!(panel.at, 3);
+                assert_eq!(panel.playback.at().get(), 3);
 
                 // Past the end clamps rather than panicking on the index.
                 panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(999.0)), cx);
-                assert_eq!(panel.at, 39);
+                assert_eq!(panel.playback.at().get(), 39);
             })
             .expect("the window is open");
     }
@@ -4998,114 +3366,27 @@ mod tests {
 
         window
             .update(cx, |panel, _window, cx| {
-                let opened_at = panel.drawing.width();
+                let opened_at = panel.annotator.drawing().width();
 
                 panel.take_up(Tool::Freehand, cx);
                 panel.step_nib(1.0, cx);
-                assert!(panel.drawing.width() > opened_at, "] draws thicker");
+                assert!(panel.annotator.drawing().width() > opened_at, "] draws thicker");
 
                 for _ in 0..20 {
                     panel.step_nib(1.0, cx);
                 }
-                assert_eq!(panel.drawing.width(), super::MAX_NIB, "and stops at the thickest the board offers");
+                assert_eq!(
+                    panel.annotator.drawing().width(),
+                    super::MAX_NIB,
+                    "and stops at the thickest the board offers"
+                );
 
                 for _ in 0..20 {
                     panel.step_nib(-1.0, cx);
                 }
-                assert_eq!(panel.drawing.width(), super::MIN_NIB, "as it does at the thinnest");
+                assert_eq!(panel.annotator.drawing().width(), super::MIN_NIB, "as it does at the thinnest");
             })
             .expect("the window is open");
-    }
-
-    /// Every chord the cheat sheet lists is one the viewport answers to, so the
-    /// sheet cannot drift from the keys.
-    #[test]
-    fn the_cheat_sheet_lists_the_chords_that_work() {
-        for button in super::TOOLS {
-            let Some(chord) = button.chord else { continue };
-            let key = chord.strip_prefix("Ctrl+").expect("every tool chord is a ctrl one").to_ascii_lowercase();
-            assert_eq!(
-                super::tool_for_key(&key).map(|tool| std::mem::discriminant(&tool)),
-                Some(std::mem::discriminant(&(button.tool)())),
-                "{chord} is listed as {}",
-                button.label
-            );
-        }
-    }
-
-    /// A batch says which replay it has reached before it reads it, in order,
-    /// and a replay it cannot read is reported as failed rather than stopping
-    /// the rest.
-    #[gpui_kit::test]
-    async fn a_batch_says_which_replay_it_has_reached(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        let dir = tempfile::tempdir().expect("a temp directory");
-        // Not replays, so every one of them fails to bake: what is under test is
-        // the reporting and the walk, not what a battle looks like.
-        let paths: Vec<std::path::PathBuf> = ["first", "second"]
-            .into_iter()
-            .map(|stem| {
-                let path = dir.path().join(format!("{stem}.wowsreplay"));
-                std::fs::write(&path, b"not a replay").expect("the file is written");
-                path
-            })
-            .collect();
-
-        let (report, mut steps) = futures::channel::mpsc::unbounded();
-        let batch = cx.update(|cx| {
-            super::batch_export(
-                paths,
-                wows_toolkit_replay_data::load::GameDataCache::new(dir.path().to_path_buf()),
-                dir.path().to_path_buf(),
-                wows_minimap_renderer::SavedRenderOptions::default(),
-                report,
-                cx,
-            )
-        });
-        let (written, failed) = batch.await;
-
-        assert!(written.is_empty(), "nothing renders out of files that are not replays");
-        assert_eq!(failed.len(), 2, "and both are reported rather than the walk stopping at the first");
-
-        let mut reached = Vec::new();
-        while let Some(step) = futures::StreamExt::next(&mut steps).await {
-            reached.push(step);
-        }
-        assert_eq!(
-            reached,
-            vec![
-                super::BatchStep { done: 0, total: 2, replay: "first".to_owned() },
-                super::BatchStep { done: 1, total: 2, replay: "second".to_owned() },
-            ],
-            "each replay is named as the batch reaches it"
-        );
-    }
-
-    /// A batch draws the reader's saved layers, less the two that would leave
-    /// it worse off than the built-in set did.
-    #[test]
-    fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
-        use wows_minimap_renderer::SavedRenderOptions;
-        use wows_minimap_renderer::config::should_draw_command;
-
-        let saved = SavedRenderOptions {
-            show_torpedoes: false,
-            // On in the egui renderer, which has what it takes to fill them.
-            show_stats_panel: true,
-            show_ship_config: true,
-            show_dead_ships: false,
-            ..SavedRenderOptions::default()
-        };
-        let (options, show_dead_ships) = super::batch_options(&saved);
-
-        assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
-        assert!(!show_dead_ships);
-        assert!(!options.show_stats_panel, "the panel a bake cannot fill is left out");
-        assert!(!options.show_ship_config, "as are range circles nobody asked for per ship");
-        assert!(
-            should_draw_command(&super::DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
-            "so the kill feed, which shares the panel's gutter, is still filmed"
-        );
     }
 
     /// A toggle changes what the viewport draws without re-baking: the
@@ -5120,13 +3401,17 @@ mod tests {
 
         window
             .update(cx, |panel, _window, cx| {
-                let baked = panel.frame_count();
+                let baked = panel.track().expect("the track is ready").len();
                 assert!(panel.options().show_torpedoes, "the track was baked with them on");
 
                 panel.set_options(|options, _dead| options.show_torpedoes = false, cx);
 
                 assert!(!panel.options().show_torpedoes);
-                assert_eq!(panel.frame_count(), baked, "the track is untouched; only what is drawn of it moved");
+                assert_eq!(
+                    panel.track().expect("the track is ready").len(),
+                    baked,
+                    "the track is untouched; only what is drawn of it moved"
+                );
             })
             .expect("the window is open");
     }
@@ -5311,7 +3596,7 @@ mod tests {
                     first_mouse: false,
                 };
                 panel.on_drag_start(&press, window, cx);
-                assert!(panel.dragging.is_none(), "the whole map has nowhere to drag to");
+                assert!(!panel.map.is_panning(), "the whole map has nowhere to drag to");
             })
             .expect("the window is open");
     }
@@ -5364,7 +3649,7 @@ mod tests {
                 panel.jump_to_previous_event(window, cx);
                 assert_eq!(panel.clock_label(), "00:10");
 
-                panel.set_at(239, cx);
+                panel.set_at(FrameIndex::new(239), cx);
                 assert!(panel.next_event().is_none(), "nothing happened after the last one");
             });
         })
@@ -5383,80 +3668,16 @@ mod tests {
 
         cx.update_window(window.into(), |_, window, cx| {
             panel.update(cx, |panel, cx| {
-                panel.go_to(10, window, cx);
+                panel.go_to(FrameIndex::new(10), window, cx);
                 assert!(panel.previous_event().is_none());
                 assert!(panel.next_event().is_none());
 
                 panel.jump_to_next_event(window, cx);
                 panel.jump_to_previous_event(window, cx);
-                assert_eq!(panel.at, 10, "playback stayed where it was");
+                assert_eq!(panel.playback.at().get(), 10, "playback stayed where it was");
             });
         })
         .expect("the window is open");
-    }
-
-    /// An export starts at the battle unless the reader asked for what came
-    /// before it.
-    ///
-    /// A replay records the loading screen and the countdown; exporting those
-    /// by default would put most of a minute of a still map at the front of
-    /// every video.
-    #[gpui_kit::test]
-    fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        // Half-second frames: the battle starts forty seconds in, at frame 80.
-        let clocks: Vec<f32> = (0..200).map(|frame| frame as f32 * 0.5).collect();
-        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
-            ReplayRendererPanel::ready_for_test(clocks, window, cx)
-        });
-
-        window
-            .update(cx, |panel, _window, cx| {
-                panel.set_battle_window(40.0, Some(95.0));
-                let track = panel.track().expect("the track is ready");
-                assert_eq!(track.frames.len(), 200);
-
-                assert_eq!(panel.frames_to_export(track).len(), 120, "the eighty frames before the battle are cut");
-
-                panel.set_export_settings(|settings| settings.include_pre_battle = true, cx);
-                let track = panel.track().expect("the track is ready");
-                assert_eq!(panel.frames_to_export(track).len(), 200, "and kept when asked for");
-            })
-            .expect("the window is open");
-    }
-
-    /// A codec the GPU cannot encode falls back to software rather than
-    /// failing the export.
-    #[test]
-    fn a_codec_the_gpu_cannot_encode_falls_back_to_software() {
-        use wows_minimap_renderer::EncoderKind;
-        use wows_minimap_renderer::VideoCodec;
-        use wows_minimap_renderer::encoder::CodecSupport;
-        use wows_minimap_renderer::encoder::EncoderStatus;
-
-        let mut status = EncoderStatus {
-            gpu_adapter_name: Some("test".into()),
-            gpu_error: None,
-            gpu_codecs: Default::default(),
-            cpu_codecs: Default::default(),
-        };
-        status.gpu_codecs.insert(VideoCodec::H264, CodecSupport::Supported);
-        status.cpu_codecs.insert(VideoCodec::Av1, CodecSupport::Supported);
-        assert!(status.supports(EncoderKind::Gpu, VideoCodec::H264));
-
-        let settings = super::ExportSettings::default();
-        assert!(!super::must_use_cpu(&settings, &status), "the GPU handles the codec it would pick");
-
-        let asked_for_av1 = super::ExportSettings { codec: Some(VideoCodec::Av1), ..settings };
-        assert!(super::must_use_cpu(&asked_for_av1, &status), "AV1 has no GPU encoder here, so it falls back");
-
-        let asked_for_cpu = super::ExportSettings { prefer_cpu: true, ..settings };
-        assert!(super::must_use_cpu(&asked_for_cpu, &status));
-
-        // Availability is read off the codec table, not the adapter name.
-        let no_gpu = EncoderStatus { gpu_codecs: Default::default(), ..status };
-        assert!(!no_gpu.gpu_available());
-        assert!(super::must_use_cpu(&settings, &no_gpu), "with no GPU there is nothing to fall back from");
     }
 
     /// The timeline shows the events the filter admits, and says which of
@@ -5474,15 +3695,14 @@ mod tests {
                 assert!(!panel.events_are_read(), "the second walk has not landed yet");
 
                 panel.seed_events_for_test(&[10.0, 30.0, 60.0]);
-                panel.events_read = true;
                 assert_eq!(panel.visible_events().len(), 3);
 
                 // Every seeded event is an advantage change, so switching that
                 // kind off empties the list without emptying the battle.
-                let advantage = kind_index(&panel.events[0].kind);
+                let advantage = kind_index(&panel.events.events()[0].kind);
                 panel.set_event_filter(|filter| filter.kinds[advantage] = false, cx);
                 assert!(panel.visible_events().is_empty());
-                assert!(!panel.events.is_empty(), "which is 'nothing matches', not 'nothing happened'");
+                assert!(!panel.events.events().is_empty(), "which is 'nothing matches', not 'nothing happened'");
 
                 panel.set_event_filter(|filter| filter.kinds = [true; KIND_COUNT], cx);
                 panel.set_event_filter(|filter| filter.search = "at 30".into(), cx);
@@ -5511,7 +3731,6 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             panel.update(cx, |panel, cx| {
                 panel.seed_events_for_test(&[10.0, 30.0, 50.0]);
-                panel.events_read = true;
                 panel.set_event_filter(|filter| filter.search = "a30".into(), cx);
             });
             window.render_frame(cx);
@@ -5595,56 +3814,6 @@ mod tests {
         .expect("the window is open");
     }
 
-    /// A playback bake carries every ship's range circles, so the viewport can
-    /// offer them without walking the battle again.
-    ///
-    /// The bake reads a real replay against a real game install. Run with:
-    ///
-    /// ```text
-    /// WOWS_RENDERER_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay"     /// WOWS_RENDERER_TEST_GAME_DIR="E:\WoWs\World_of_Warships"     /// cargo test -p wows-toolkit-gpui -- --ignored a_playback_bake_carries_every_ships_ranges
-    /// ```
-    #[test]
-    #[ignore = "needs a local game install and a replay; see the doc comment for the run command"]
-    fn a_playback_bake_carries_every_ships_ranges() {
-        use std::collections::HashSet;
-        use std::path::PathBuf;
-        use std::sync::atomic::AtomicBool;
-
-        use super::DrawCommand;
-        use wows_toolkit_replay_data::load::GameDataCache;
-
-        let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
-        let game_dir =
-            std::env::var("WOWS_RENDERER_TEST_GAME_DIR").expect("set WOWS_RENDERER_TEST_GAME_DIR to a WoWs install");
-
-        let cache = GameDataCache::new(PathBuf::from(game_dir));
-        let cancel = AtomicBool::new(false);
-        let baked = wows_toolkit_replay_data::minimap_preview::bake_track(
-            std::path::Path::new(&replay),
-            &[],
-            &cache,
-            &cancel,
-            super::TRACK_BUDGET,
-            super::BAKE_INTERVAL,
-            super::playback_options(),
-        )
-        .expect("the replay bakes");
-
-        let mut ships: HashSet<String> = HashSet::new();
-        let mut kinds: HashSet<String> = HashSet::new();
-        for commands in &baked.frames {
-            for command in commands {
-                if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = command {
-                    ships.insert(player_name.clone());
-                    kinds.insert(format!("{kind:?}"));
-                }
-            }
-        }
-
-        assert!(ships.len() > 1, "every ship's ranges are baked, not just the replay owner's: got {ships:?}");
-        assert!(kinds.len() > 1, "and more than one kind of range: got {kinds:?}");
-    }
-
     /// Turning one ship's ranges on draws ranges; turning the last one off
     /// stops drawing them.
     ///
@@ -5661,7 +3830,7 @@ mod tests {
         window
             .update(cx, |panel, _window, cx| {
                 assert!(!panel.options().show_ship_config, "nothing is asked for yet");
-                assert_eq!(panel.ranges_for("gapedd"), super::NO_RANGES);
+                assert_eq!(panel.ranges_for("gapedd"), super::ships::NO_RANGES);
 
                 panel.set_ranges_for("gapedd", |filter| filter.detection = true, cx);
                 assert!(panel.options().show_ship_config);
@@ -5696,46 +3865,6 @@ mod tests {
                 assert!(!panel.options().show_trails);
             })
             .expect("the window is open");
-    }
-
-    /// The per-ship filters decide whose trail and whose ranges are drawn.
-    #[test]
-    fn the_per_ship_filters_decide_whose_layers_are_drawn() {
-        use std::collections::HashMap;
-        use std::collections::HashSet;
-
-        use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
-        use wows_minimap_renderer::map_data::MinimapPos;
-
-        use super::DrawCommand;
-
-        let mut hidden = HashSet::new();
-        hidden.insert("hidden_player".to_string());
-        let mut ranges = HashMap::new();
-        ranges.insert("ranged_player".to_string(), super::ALL_RANGES);
-
-        let trail = |name: &str| DrawCommand::PositionTrail {
-            entity_id: wows_replays::types::EntityId::from(1u32),
-            player_name: Some(name.to_string()),
-            points: Vec::new(),
-        };
-        let circle = |name: &str| DrawCommand::ShipConfigCircle {
-            entity_id: wows_replays::types::EntityId::from(1u32),
-            pos: MinimapPos { x: 0.0, y: 0.0 },
-            radius_px: 10.0,
-            color: [0, 0, 0],
-            alpha: 1.0,
-            dashed: false,
-            label: None,
-            kind: ShipConfigCircleKind::Detection,
-            player_name: name.to_string(),
-            is_self: false,
-        };
-
-        assert!(super::per_ship_allows(&trail("shown_player"), &hidden, &ranges));
-        assert!(!super::per_ship_allows(&trail("hidden_player"), &hidden, &ranges));
-        assert!(super::per_ship_allows(&circle("ranged_player"), &hidden, &ranges));
-        assert!(!super::per_ship_allows(&circle("unranged_player"), &hidden, &ranges), "a ship nobody asked for");
     }
 
     /// The advantage hover reads the breakdown out of the frame on screen.
@@ -5908,20 +4037,20 @@ mod tests {
             .update(cx, |panel, window, cx| {
                 assert_eq!(panel.clock_label(), "00:00", "it opens at the start of the battle");
                 panel.toggle_playing(window, cx);
-                assert!(panel.playing);
+                assert!(panel.playback.is_playing());
             })
             .expect("the window is open");
 
         // Two ticks reach the last frame; the third would run past it.
         for _ in 0..3 {
-            cx.executor().advance_clock(super::TICK * 2);
+            cx.executor().advance_clock(wows_toolkit_replay_data::replay_render::playback::TICK * 2);
             cx.run_until_parked();
         }
 
         window
             .update(cx, |panel, _window, _cx| {
-                assert_eq!(panel.at, 2, "playback reached the last frame");
-                assert!(!panel.playing, "and stopped there rather than running past it");
+                assert_eq!(panel.playback.at().get(), 2, "playback reached the last frame");
+                assert!(!panel.playback.is_playing(), "and stopped there rather than running past it");
                 assert_eq!(panel.clock_label(), "01:01");
             })
             .expect("the window is open");
@@ -5940,8 +4069,8 @@ mod tests {
             .update(cx, |panel, window, cx| {
                 assert_eq!(panel.clock_label(), "00:00");
                 panel.toggle_playing(window, cx);
-                panel.set_at(5, cx);
-                assert_eq!(panel.at, 0, "there is nowhere to seek to");
+                panel.set_at(FrameIndex::new(5), cx);
+                assert_eq!(panel.playback.at().get(), 0, "there is nowhere to seek to");
             })
             .expect("the window is open");
     }
@@ -6086,50 +4215,6 @@ mod tests {
             .expect("the window is open");
     }
 
-    /// The rosters and the stats panel compete for the same gutters, so
-    /// turning one on clears the other, as the egui checkboxes do.
-    #[test]
-    fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
-        let toggle = super::TOGGLES
-            .iter()
-            .find(|toggle| toggle.id == "renderer-opt-team-rosters")
-            .expect("the rosters have a switch");
-        let mut options = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..super::playback_options() };
-        let mut dead = true;
-
-        (toggle.write)(&mut options, &mut dead, true);
-        assert!(options.show_team_rosters);
-        assert!(!options.show_stats_panel, "the stats panel gives the gutter up");
-
-        (toggle.write)(&mut options, &mut dead, false);
-        assert!(!options.show_team_rosters);
-        assert!(!options.show_stats_panel, "and turning the rosters off does not bring it back");
-    }
-
-    /// Turning the rosters on is a wider canvas rather than another layer, so
-    /// the layout has to follow the switch.
-    #[test]
-    fn the_canvas_follows_the_gutter_layer_that_is_on() {
-        use wows_minimap_renderer::drawing::SidePanelLayout;
-
-        let plain = super::playback_options_hidden();
-        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&plain), SidePanelLayout::None);
-
-        let rosters = wows_minimap_renderer::RenderOptions { show_team_rosters: true, ..plain.clone() };
-        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&rosters), SidePanelLayout::TeamRosters);
-
-        let stats = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..plain };
-        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
-    }
-
-    /// A playback bake carries the rosters, or the switch would have nothing
-    /// to show.
-    #[test]
-    fn a_playback_bake_carries_the_rosters() {
-        assert!(super::playback_options().show_team_rosters);
-        assert!(!super::playback_options_hidden().show_team_rosters, "but a viewport opens without them");
-    }
-
     /// What a session has drawn reaches the frame, over the battle rather
     /// than filtered with it.
     #[gpui_kit::test]
@@ -6215,8 +4300,8 @@ mod tests {
                     first_mouse: false,
                 };
                 panel.on_drag_start(&press, window, cx);
-                assert!(panel.dragging.is_none(), "the drag went to the tool, not to a pan");
-                assert_eq!(panel.view, zoomed, "so the map did not move");
+                assert!(!panel.map.is_panning(), "the drag went to the tool, not to a pan");
+                assert_eq!(panel.map.view(), zoomed, "so the map did not move");
 
                 let release = MouseUpEvent {
                     button: MouseButton::Left,
@@ -6270,7 +4355,7 @@ mod tests {
                     first_mouse: false,
                 };
                 panel.on_drag_start(&press, window, cx);
-                assert!(panel.dragging.is_some());
+                assert!(panel.map.is_panning());
             })
             .expect("the window is open");
     }
@@ -6332,7 +4417,7 @@ mod tests {
                     },
                 });
                 panel.on_viewport_click(&click, window, cx);
-                assert_eq!(panel.picked.picked(), [0], "the click picked the circle out");
+                assert_eq!(panel.annotator.picked().picked(), [0], "the click picked the circle out");
 
                 let press = MouseDownEvent {
                     button: MouseButton::Left,
@@ -6342,7 +4427,7 @@ mod tests {
                     first_mouse: false,
                 };
                 panel.on_drag_start(&press, window, cx);
-                assert!(panel.dragging.is_none(), "the drag moves the shape rather than the map");
+                assert!(!panel.map.is_panning(), "the drag moves the shape rather than the map");
 
                 let to = panel.element_point((260.0, 230.0)).expect("and another");
                 let release = MouseUpEvent {
@@ -6418,8 +4503,9 @@ mod tests {
                     cx,
                 );
 
-                assert_eq!(panel.pointer_at.map(|at| at[0].round()), Some(240.0), "the pointer is followed");
-                let part_drawn = panel.drawing.in_progress(panel.pointer_at.expect("the pointer is on the map"));
+                let pointer_at = panel.annotator.pointer_at();
+                assert_eq!(pointer_at.map(|at| at[0].round()), Some(240.0), "the pointer is followed");
+                let part_drawn = panel.annotator.drawing().in_progress(pointer_at.expect("the pointer is on the map"));
                 let Some(wt_collab_client::types::Annotation::Circle { center, radius, .. }) = part_drawn else {
                     panic!("a circle is part-drawn, got {part_drawn:?}");
                 };
@@ -6446,8 +4532,8 @@ mod tests {
         window
             .update(cx, |panel, _window, cx| {
                 panel.take_up(Tool::Line, cx);
-                panel.stroke(DrawStroke::Began { at: [100.0, 100.0] }, cx);
-                panel.stroke(DrawStroke::Ended { at: [200.0, 100.0] }, cx);
+                panel.annotator.stroke(&panel.collab, DrawStroke::Began { at: [100.0, 100.0] });
+                panel.annotator.stroke(&panel.collab, DrawStroke::Ended { at: [200.0, 100.0] });
                 assert_eq!(panel.collab.annotations().len(), 1, "the line a reader drew with nobody connected");
             })
             .expect("the window is open");
@@ -6475,12 +4561,12 @@ mod tests {
 
         window
             .update(cx, |panel, _window, cx| {
-                assert!(panel.history.is_empty(), "nothing to undo before anything is drawn");
+                assert!(!panel.annotator.can_undo(), "nothing to undo before anything is drawn");
 
                 panel.take_up(Tool::Line, cx);
-                panel.stroke(DrawStroke::Began { at: [100.0, 100.0] }, cx);
-                panel.stroke(DrawStroke::Ended { at: [200.0, 100.0] }, cx);
-                assert_eq!(panel.history.len(), 1, "the list as it was before the line");
+                panel.annotator.stroke(&panel.collab, DrawStroke::Began { at: [100.0, 100.0] });
+                panel.annotator.stroke(&panel.collab, DrawStroke::Ended { at: [200.0, 100.0] });
+                assert_eq!(panel.annotator.undo_depth(), 1, "the list as it was before the line");
             })
             .expect("the window is open");
 
@@ -6500,7 +4586,7 @@ mod tests {
         window
             .update(cx, |panel, _window, cx| {
                 panel.undo(cx);
-                assert!(panel.history.is_empty(), "and there is nothing left to undo");
+                assert!(!panel.annotator.can_undo(), "and there is nothing left to undo");
             })
             .expect("the window is open");
 
@@ -6538,7 +4624,7 @@ mod tests {
         window
             .update(cx, |panel, _window, cx| {
                 panel.take_up(Tool::Ship { species: "Destroyer".to_string(), friendly: false, yaw: 0.75 }, cx);
-                panel.stroke(DrawStroke::Clicked { at: [150.0, 250.0] }, cx);
+                panel.annotator.stroke(&panel.collab, DrawStroke::Clicked { at: [150.0, 250.0] });
             })
             .expect("the window is open");
 
@@ -6596,9 +4682,9 @@ mod tests {
         window
             .update(cx, |panel, _window, _cx| {
                 // Nothing to choose a ship for until one is picked out.
-                assert!(super::picked_ship(panel).is_none());
-                panel.picked.click(&panel.collab.annotations(), [300.0, 400.0], false);
-                assert_eq!(super::picked_ship(panel), Some(None), "picked, and unnamed");
+                assert!(panel.annotator.picked_ship(&panel.collab).is_none());
+                panel.annotator.pick_at(&panel.collab, [300.0, 400.0], false);
+                assert_eq!(panel.annotator.picked_ship(&panel.collab), Some(None), "picked, and unnamed");
             })
             .expect("the window is open");
 
@@ -6634,6 +4720,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_armor_item_is_offered_only_for_a_ship_that_was_hit(cx: &mut TestAppContext) {
         use std::collections::BTreeMap;
+        use std::collections::HashMap;
         use wows_replay_insights::timeline::ShipShotTimeline;
 
         cx.update(gpui_kit::init);
@@ -6649,7 +4736,8 @@ mod tests {
                 assert!(!panel.has_armor_to_show(hit_ship), "before the battle has been read");
 
                 // A ship with a timeline but nothing in it was never hit.
-                panel.shots.insert(untouched, ShipShotTimeline { hits: Vec::new(), health_history: BTreeMap::new() });
+                let unhit = ShipShotTimeline { hits: Vec::new(), health_history: BTreeMap::new() };
+                panel.set_events(super::BattleEvents::from_read(Vec::new(), None, HashMap::from([(untouched, unhit)])));
                 assert!(!panel.has_armor_to_show(untouched), "a timeline with no hits is not an offer");
 
                 // Asking for one anyway is refused rather than opening an
@@ -6665,6 +4753,7 @@ mod tests {
     #[gpui_kit::test]
     fn an_open_armor_viewer_follows_playback_but_only_when_it_must(cx: &mut TestAppContext) {
         use std::collections::BTreeMap;
+        use std::collections::HashMap;
         use wows_replay_insights::timeline::HealthSnapshot;
         use wows_replay_insights::timeline::ShipShotTimeline;
         use wows_replays::types::GameClock;
@@ -6685,7 +4774,7 @@ mod tests {
         let panel = cx.update(|cx| window.root(cx).expect("the viewport is open"));
         let _subscription = cx.update(|cx| {
             cx.subscribe(&panel, move |_view, event, _cx| {
-                if matches!(event, super::RendererEvent::ArmorFollowed { .. }) {
+                if matches!(event, super::RendererEvent::ArmorFollowed(_)) {
                     counter.set(counter.get() + 1);
                 }
             })
@@ -6693,19 +4782,19 @@ mod tests {
 
         window
             .update(cx, |panel, _window, cx| {
-                panel.shots.insert(ship, ShipShotTimeline { hits: Vec::new(), health_history });
+                let timeline = ShipShotTimeline { hits: Vec::new(), health_history };
+                let shots = HashMap::from([(ship, timeline.clone())]);
+                panel.set_events(super::BattleEvents::from_read(Vec::new(), None, shots));
                 // Following starts without a viewer, which is what the
                 // menu's own guard is for; seeded here directly.
-                let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(
-                    panel.shots.get(&ship).expect("just inserted").clone(),
-                );
+                let mut feed = wows_toolkit_replay_data::replay_render::armor::RealtimeArmorFeed::new(timeline);
                 feed.advance_to(GameClock(0.0));
-                panel.armor_following = Some((ship, feed));
+                panel.armor_following = Some(super::ArmorFollow::new(ship, feed));
 
                 // This battle recorded no hits, so walking it never changes
                 // what the viewer shows.
                 for frame in 1..6 {
-                    panel.set_at(frame, cx);
+                    panel.set_at(FrameIndex::new(frame), cx);
                 }
             })
             .expect("the window is open");
@@ -6715,7 +4804,7 @@ mod tests {
         // Scrubbing back is the other case: what was drawn can no longer be
         // right, and a hull cannot be un-hit one shell at a time, so the
         // viewer is told to draw it again.
-        window.update(cx, |panel, _window, cx| panel.set_at(1, cx)).expect("the window is open");
+        window.update(cx, |panel, _window, cx| panel.set_at(FrameIndex::new(1), cx)).expect("the window is open");
         assert_eq!(told.get(), 1, "a step backwards asks for the hull again");
     }
 
@@ -6739,7 +4828,7 @@ mod tests {
                 assert_eq!(panel.length_label(), "00:19", "and the battle runs to the end of the track");
                 assert_eq!(panel.clock_and_length(), "00:00 / 00:19");
 
-                panel.set_at(100, cx);
+                panel.set_at(FrameIndex::new(100), cx);
                 assert_eq!(panel.clock_and_length(), "00:10 / 00:19", "the length does not move with playback");
             })
             .expect("the window is open");
@@ -6756,7 +4845,7 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                assert_eq!(panel.speed, super::DEFAULT_SPEED);
+                assert_eq!(panel.playback.speed(), super::DEFAULT_SPEED);
                 assert_eq!(
                     panel.speed_select.read(cx).selected_value().copied(),
                     Some(super::speed_index(super::DEFAULT_SPEED)),
@@ -6808,8 +4897,8 @@ mod tests {
         })
         .expect("the window is open");
 
-        assert_eq!(ExportStage::Encoding.label(), "ui.renderer.encoding");
-        assert_eq!(ExportStage::Muxing.label(), "ui.renderer.muxing", "and the wait after the last frame is named");
+        assert_eq!(ExportStage::Encoding.label_key(), "ui.renderer.encoding");
+        assert_eq!(ExportStage::Muxing.label_key(), "ui.renderer.muxing", "and the wait after the last frame is named");
     }
 
     /// A wide viewport fills its sides as the map is zoomed into, and stays
@@ -6832,34 +4921,18 @@ mod tests {
                     size: gpui_kit::size(px(w * 2.0), px(h)),
                 });
 
-                assert_eq!(panel.shaped_view().widen(), 1.0, "at rest there is no map to put beside it");
+                assert_eq!(panel.map_view().shaped_view().widen(), 1.0, "at rest there is no map to put beside it");
 
                 panel.set_view(super::MapViewport::new(1.2, (0.0, 0.0)), window, cx);
-                let creeping = panel.shaped_view().widen();
+                let creeping = panel.map_view().shaped_view().widen();
                 assert!(creeping > 1.0 && creeping <= 1.2, "it starts to fill, held to the zoom: {creeping}");
 
                 panel.set_view(super::MapViewport::new(6.0, (0.0, 0.0)), window, cx);
-                let filled = panel.shaped_view().widen();
+                let filled = panel.map_view().shaped_view().widen();
                 assert!(filled > creeping, "and fills further in: {filled} against {creeping}");
                 assert!(filled > 1.9 && filled < 2.1, "about the shape of the viewport: {filled}");
             })
             .expect("the window is open");
-    }
-
-    /// A ping is shed only once its ripple has run out.
-    #[test]
-    fn a_ping_outlives_its_own_frame() {
-        use std::time::Duration;
-
-        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        wows_toolkit_services::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
-        let (link, _sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
-
-        link.drop_stale_pings(Duration::from_secs_f32(super::PING_SECONDS));
-        assert_eq!(state.lock().pings.len(), 1, "a fifth of a second into a one-second ripple");
-
-        link.drop_stale_pings(Duration::from_millis(100));
-        assert!(state.lock().pings.is_empty(), "and it goes once it has run out");
     }
 }
 
@@ -6925,19 +4998,19 @@ mod controls {
 
             window.click("replay-renderer-jump-to-end", cx);
             window.render_frame(cx);
-            assert_eq!(panel.read(cx).at, 119, "the end of the track");
+            assert_eq!(panel.read(cx).playback.at().get(), 119, "the end of the track");
 
             window.click("replay-renderer-back-10s", cx);
             window.render_frame(cx);
-            assert_eq!(panel.read(cx).at, 99, "ten seconds is twenty half-second frames");
+            assert_eq!(panel.read(cx).playback.at().get(), 99, "ten seconds is twenty half-second frames");
 
             window.click("replay-renderer-jump-to-start", cx);
             window.render_frame(cx);
-            assert_eq!(panel.read(cx).at, 0);
+            assert_eq!(panel.read(cx).playback.at().get(), 0);
 
             window.click("replay-renderer-play", cx);
             window.render_frame(cx);
-            assert!(panel.read(cx).playing, "the play control starts playback");
+            assert!(panel.read(cx).playback.is_playing(), "the play control starts playback");
         })
         .expect("the window is open");
     }
@@ -6983,11 +5056,10 @@ mod controls {
 
             window.click("replay-renderer-next-event", cx);
             window.render_frame(cx);
-            assert_eq!(panel.read(cx).at, 0, "and clicking it moves nothing");
+            assert_eq!(panel.read(cx).playback.at().get(), 0, "and clicking it moves nothing");
 
             panel.update(cx, |panel, cx| {
                 panel.seed_events_for_test(&[10.0, 30.0]);
-                panel.events_read = true;
                 cx.notify();
             });
             window.render_frame(cx);
@@ -6998,7 +5070,7 @@ mod controls {
 
             window.click("replay-renderer-next-event", cx);
             window.render_frame(cx);
-            assert!(panel.read(cx).at > 0, "which steps to the first thing that happened");
+            assert!(panel.read(cx).playback.at().get() > 0, "which steps to the first thing that happened");
         })
         .expect("the window is open");
     }
@@ -7037,7 +5109,6 @@ mod controls {
             let view = cx.new(|cx| {
                 let mut panel = ReplayRendererPanel::ready_for_test(clocks, window, cx);
                 panel.seed_events_for_test(&[10.0, 30.0, 50.0]);
-                panel.events_read = true;
                 panel
             });
             let view: gpui_kit::AnyView = view.into();

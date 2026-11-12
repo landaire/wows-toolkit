@@ -1500,7 +1500,7 @@ impl ArmorViewerPane {
         param_index: String,
         display_name: String,
         hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
-        incoming: Box<crate::replay_renderer::IncomingContext>,
+        incoming: Box<wows_toolkit_replay_data::replay_render::armor::IncomingContext>,
         cx: &mut Context<Self>,
     ) {
         self.playback_at = incoming.at;
@@ -2380,7 +2380,7 @@ impl EventEmitter<SeekRequested> for ArmorViewerPane {}
 /// What was fired at the ship on screen.
 #[derive(Default)]
 pub(crate) struct IncomingFire {
-    pub(crate) context: crate::replay_renderer::IncomingContext,
+    pub(crate) context: wows_toolkit_replay_data::replay_render::armor::IncomingContext,
     pub(crate) filter: IncomingFilter,
     /// The ship the log is about. A comparison run against any other hull would
     /// be about plating those shells never met, which a compare split would

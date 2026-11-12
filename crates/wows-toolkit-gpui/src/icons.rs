@@ -56,6 +56,14 @@ macro_rules! glyphs {
                 }
             }
         }
+
+        impl From<wows_toolkit_icons::Glyph> for Glyph {
+            fn from(glyph: wows_toolkit_icons::Glyph) -> Self {
+                match glyph {
+                    $(wows_toolkit_icons::Glyph::$variant => Self::$variant,)*
+                }
+            }
+        }
     };
 }
 

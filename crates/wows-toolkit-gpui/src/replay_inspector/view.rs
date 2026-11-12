@@ -49,6 +49,8 @@ use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_replay_data::replay_index::SourceScope;
+use wows_toolkit_replay_data::replay_render::export::batch_export;
+use wows_toolkit_replay_data::replay_render::export::temporary_batch_dir;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
@@ -393,7 +395,7 @@ pub struct ShowArmorRequested {
     pub display_name: String,
     pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     /// Who was firing at that ship, for the incoming-fire log.
-    pub incoming: Box<crate::replay_renderer::IncomingContext>,
+    pub incoming: Box<wows_toolkit_replay_data::replay_render::armor::IncomingContext>,
 }
 
 impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
@@ -1004,7 +1006,7 @@ impl ReplayInspectorView {
                         None => return,
                     }
                 }
-                BatchTarget::Clipboard => match crate::replay_renderer::temporary_batch_dir() {
+                BatchTarget::Clipboard => match temporary_batch_dir() {
                     Some(temporary) => temporary,
                     None => {
                         let _ = cx.update(|window, cx| {
@@ -1029,7 +1031,11 @@ impl ReplayInspectorView {
                 // What a viewport would have shown, so a batch does not write a
                 // different video than the reader has been watching.
                 let defaults = crate::render_defaults::defaults(cx);
-                crate::replay_renderer::batch_export(paths, game_data, out_dir, defaults, report, cx)
+                cx.background_spawn(async move {
+                    batch_export(paths, &game_data, &out_dir, &defaults, |step| {
+                        let _ = report.unbounded_send(step);
+                    })
+                })
             });
             let Ok(batch) = batch else { return };
 
@@ -1062,7 +1068,8 @@ impl ReplayInspectorView {
                 }
             };
 
-            let ((written, failed), ()) = futures::future::join(batch, watch).await;
+            let (outcome, ()) = futures::future::join(batch, watch).await;
+            let (written, failed) = (outcome.written, outcome.failed);
 
             let _ = cx.update(|window, cx| {
                 crate::status_bar::finished(owner, job, cx);
@@ -1726,14 +1733,14 @@ impl ReplayInspectorView {
             RendererEvent::PopOut => self.pop_out_renderer(panel.clone(), window, cx),
             // Passed further up: the armor viewer is another tab, which this
             // view does not own either.
-            RendererEvent::ShowArmor { param_index, display_name, hits, incoming } => cx.emit(ShowArmorRequested {
-                param_index: param_index.clone(),
-                display_name: display_name.clone(),
-                hits: hits.clone(),
-                incoming: incoming.clone(),
+            RendererEvent::ShowArmor(shown) => cx.emit(ShowArmorRequested {
+                param_index: shown.target.param_index.clone(),
+                display_name: shown.target.display_name.clone(),
+                hits: shown.hits.clone(),
+                incoming: shown.incoming.clone(),
             }),
-            RendererEvent::ArmorFollowed { hits, health, at } => {
-                cx.emit(ArmorFollowed { at: *at, hits: hits.clone(), health: *health })
+            RendererEvent::ArmorFollowed(followed) => {
+                cx.emit(ArmorFollowed { at: followed.at, hits: followed.hits.clone(), health: followed.health })
             }
         }
     }
