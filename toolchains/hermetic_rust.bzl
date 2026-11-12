@@ -76,9 +76,9 @@ def _hermetic_tool(name):
 def native_buildscript_env():
     """Environment forced onto every vendored crate's build script.
 
-    Cargo build scripts otherwise resolve `cc`, `nasm`, and the build profile
-    from ambient state. Every one of them is pinned here instead, so a build
-    script cannot pick up a compiler that is merely on PATH.
+    Cargo build scripts otherwise resolve `cc`, `nasm`, `python3`, and the
+    build profile from ambient state. Every one of them is pinned here instead,
+    so a build script cannot pick up a tool that is merely on PATH.
     """
     env = {
         "DEBUG": select({_RELEASE: "false", "DEFAULT": "true"}),
@@ -86,7 +86,7 @@ def native_buildscript_env():
         "PROFILE": select({_RELEASE: "release", "DEFAULT": "debug"}),
     }
 
-    for var, key in [("AR", "ar"), ("CC", "cc"), ("CXX", "cxx"), ("NASM", "nasm")]:
+    for var, key in [("AR", "ar"), ("CC", "cc"), ("CXX", "cxx"), ("NASM", "nasm"), ("PYTHON3", "python")]:
         env[var] = _hermetic_tool(key)
 
     # gpui's Windows backend compiles its HLSL with fxc, which it otherwise

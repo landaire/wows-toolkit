@@ -7,8 +7,10 @@ VIEWMODEL_DEPS = [
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-protocol:wt_collab_protocol",
     "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ab_glyph",
     "//third-party/rust:ciborium",
     "//third-party/rust:escaper",
+    "//third-party/rust:fontdb",
     "//third-party/rust:glob",
     "//third-party/rust:jiff",
     "//third-party/rust:language-tags",
@@ -24,6 +26,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:sqlx",
     "//third-party/rust:thiserror",
     "//third-party/rust:thousands",
+    "//third-party/rust:tiny-skia",
     "//third-party/rust:tracing",
     "//third-party/rust:unidecode",
 ]

@@ -49,14 +49,22 @@ ZGUI_DEPS = [
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
-    "//third-party/rust:windows-sys",
     "//third-party/rust:zgui",
+    "//third-party/rust:zgui-css",
     "//third-party/rust:zgui-image",
     "//third-party/rust:zgui-ui",
     "//third-party/rust:zgui-ui-icons",
     "//third-party/rust:zgui-ui-primitives",
     "//third-party/rust:zgui-ui-tokens",
 ]
+
+# The cfg(windows) dependency section of Cargo.toml. Kept apart from ZGUI_DEPS because the test
+# target maps that list, and a select cannot be iterated.
+ZGUI_PLATFORM_DEPS = os_select(
+    macos = [],
+    linux = [],
+    windows = ["//third-party/rust:windows-sys"],
+)
 
 # Not wows_toolkit_zgui_bin: the target name is a path component of every object file a release
 # build writes, and the longest of those already sits near the 260 link.exe accepts.
@@ -67,7 +75,7 @@ workspace_binary(
     version = "1.0.5",
     crate_root = "src/main.rs",
     buildscript = buildscript,
-    deps = ZGUI_DEPS,
+    deps = ZGUI_DEPS + ZGUI_PLATFORM_DEPS,
     rustc_flags = os_select(
         macos = [],
         linux = LINUX_GUI_RUSTC_FLAGS,
@@ -82,6 +90,7 @@ _TEST_SUPPORT_VARIANTS = {
     "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher": "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
     "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 }
 
 workspace_test(
@@ -93,7 +102,7 @@ workspace_test(
     buildscript = buildscript,
     # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
     # headlessly.
-    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS],
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS] + ZGUI_PLATFORM_DEPS,
     test_deps = ["//third-party/rust:tempfile"],
     incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window. One thread per core wedges the run on a machine with many of them.

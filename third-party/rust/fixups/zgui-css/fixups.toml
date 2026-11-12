@@ -1,0 +1,4 @@
+# The build script reads the property list stylo's build script writes. Cargo
+# passes that directory through stylo's `links` metadata, which Buck does not.
+[buildscript.run]
+env = { DEP_SERVO_STYLE_CRATE_OUT_DIR = "$(location :stylo-0.19-build-script-run[out_dir])" }

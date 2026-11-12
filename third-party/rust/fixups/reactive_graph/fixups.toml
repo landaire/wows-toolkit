@@ -1,0 +1,3 @@
+# The build script only asks whether rustc is a nightly. The pinned toolchain
+# is stable, so it would emit nothing.
+buildscript.run = false
