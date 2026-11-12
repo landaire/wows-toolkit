@@ -18,6 +18,7 @@ ZGUI_DEPS = [
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-armor:wows_toolkit_armor",
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
     "//crates/wows-toolkit-icons:wows_toolkit_icons",
@@ -80,6 +81,7 @@ _TEST_SUPPORT_VARIANTS = {
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
     "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher": "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
+    "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
 }
 
 workspace_test(

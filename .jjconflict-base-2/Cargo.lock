@@ -16814,6 +16814,7 @@ dependencies = [
  "winresource",
  "wows-data-mgr",
  "wows-replay-insights",
+ "wows-toolkit-armor",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-icons",

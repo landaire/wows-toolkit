@@ -1,5 +1,7 @@
 //! The Armor Viewer tab.
 
+pub mod viewport;
+
 use zgui::component;
 use zgui::view;
 use zgui::view::IntoView;
