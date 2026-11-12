@@ -1,0 +1,48 @@
+---
+source: crates/landaire-ui/src/dock/saved.rs
+expression: sample().dump()
+---
+center:
+  open: true
+  root:
+    type: split
+    axis: vertical
+    parts:
+      - share: 50
+        node:
+          type: tabs
+          panels:
+            - id: overview
+              kind: summary
+              closable: false
+            - id: ships
+              kind: table
+              closable: true
+          active: overview
+      - share: 50
+        node:
+          type: tabs
+          panels:
+            - id: log
+              kind: log
+              closable: true
+          active: log
+left:
+  open: true
+  root: ~
+right:
+  open: true
+  root:
+    type: tabs
+    panels:
+      - id: chart-1
+        kind: chart
+        closable: true
+    active: chart-1
+bottom:
+  open: false
+  root: ~
+extents:
+  left: 20
+  right: 25
+  bottom: 30
