@@ -134,6 +134,7 @@ zgui-ui = { path = "../zgui-wows/crates/zgui-ui" }
 zgui-ui-icons = { path = "../zgui-wows/crates/zgui-ui-icons" }
 zgui-ui-primitives = { path = "../zgui-wows/crates/zgui-ui-primitives" }
 zgui-ui-tokens = { path = "../zgui-wows/crates/zgui-ui-tokens" }
+zgui-image = { path = "../zgui-wows/crates/zgui-image" }
 zgui-platform-headless = { path = "../zgui-wows/crates/zgui-platform-headless" }
 zgui-render-wgpu = { path = "../zgui-wows/crates/zgui-render-wgpu" }
 zgui-render-vector-vello = { path = "../zgui-wows/crates/zgui-render-vector-vello" }
