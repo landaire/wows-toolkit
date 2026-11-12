@@ -2,7 +2,7 @@
 //! first time the tab is shown, inside the tab's [`TabChrome`](crate::shell::tabs::TabChrome).
 //!
 //! Not yet ported, each an empty content area: `replays`, `stats`, `player_tracker`,
-//! `armor_viewer`, `unpacker`, `directory_stats`.
+//! `armor_viewer`, `directory_stats`.
 
 mod armor_viewer;
 mod directory_stats;
