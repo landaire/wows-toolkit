@@ -1,6 +1,7 @@
 //! The modes the root list leads into, ready to offer with
 //! [`PaletteControl::offer_mode`](crate::shell::palette::PaletteControl::offer_mode).
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -13,6 +14,7 @@ use wows_toolkit_replay_data::force_reindex::version_said;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::palette;
 use wows_toolkit_viewmodel::palette::IndexList;
+use wows_toolkit_viewmodel::palette::IndexLookup;
 use wows_toolkit_viewmodel::palette::SeededSearch;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
@@ -43,48 +45,74 @@ use crate::shell::palette::PaletteRun;
 use crate::shell::palette::ShipParamIndex;
 use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
+use crate::shell::palette::marks;
+use crate::shell::palette::marks_within;
 
-/// Players the replay index has seen whose name holds the query, most met first, each leading to
+/// Players the replay index has seen whose name matches the query, best first, each leading to
 /// the battles they were in.
 pub fn players(services: Services) -> ModeSpec {
     index_mode(services, IndexList::Players)
 }
 
-/// Ships the reader has played whose name holds the query, most played first, each leading to
-/// the reader's own battles in it.
+/// Ships the reader has played whose name matches the query, best first, each leading to the
+/// reader's own battles in it.
 pub fn my_ships(services: Services) -> ModeSpec {
     index_mode(services, IndexList::MyShips)
 }
 
+/// Reads the list once each time the mode is entered and ranks it for every query typed.
 fn index_mode(services: Services, list: IndexList) -> ModeSpec {
+    let read: Rc<RefCell<Option<Rc<IndexLookup>>>> = Rc::default();
+    let held = Rc::clone(&read);
     let fetch = move |needle: String| -> ModeQuery {
+        let held = Rc::clone(&held);
         Box::pin(async move {
-            let Some(pool) = services.settings.pool() else {
-                return failed("The replay index is not open");
+            let cached = held.borrow().clone();
+            let lookup = match cached {
+                Some(lookup) => lookup,
+                None => match load(services, list).await {
+                    Ok(lookup) => {
+                        let lookup = Rc::new(lookup);
+                        *held.borrow_mut() = Some(Rc::clone(&lookup));
+                        lookup
+                    }
+                    Err(unavailable) => return unavailable,
+                },
             };
-
-            let read = services.on_tokio(async move { list.load(&pool).await }).await;
             let query = FilterQuery::new(&needle);
-            let read = read.map(|loaded| loaded.map(|lookup| palette::seeded_searches(&lookup, &query)));
-            match read {
-                Ok(Ok(found)) => ModeRows::Ready(found.into_iter().map(seeded_row).collect()),
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "palette: mode query failed");
-                    failed(err)
-                }
-                Err(err) => {
-                    tracing::warn!(%err, "palette: mode query did not complete");
-                    failed(err)
-                }
-            }
+
+            ModeRows::Ready(palette::seeded_searches(&lookup, &query).into_iter().map(|found| seeded_row(found, &query)).collect())
         })
     };
+    let forget = move || drop(read.borrow_mut().take());
 
-    ModeSpec { source: ModeSource::Query(Rc::new(fetch)), on_enter: None }
+    ModeSpec { source: ModeSource::Query(Rc::new(fetch)), on_enter: Some(Rc::new(forget)) }
 }
 
-fn seeded_row(found: SeededSearch) -> ModeRow {
-    ModeRow::new(found.label, PaletteRun::Request(TabRequest::Search(found.query)))
+/// Reads `list` from the replay index, or says why it could not.
+async fn load(services: Services, list: IndexList) -> Result<IndexLookup, ModeRows> {
+    let Some(pool) = services.settings.pool() else {
+        return Err(failed("The replay index is not open"));
+    };
+
+    match services.on_tokio(async move { list.load(&pool).await }).await {
+        Ok(Ok(lookup)) => Ok(lookup),
+        Ok(Err(err)) => {
+            tracing::warn!(%err, "palette: mode query failed");
+            Err(failed(err))
+        }
+        Err(err) => {
+            tracing::warn!(%err, "palette: mode query did not complete");
+            Err(failed(err))
+        }
+    }
+}
+
+fn seeded_row(found: SeededSearch, query: &FilterQuery) -> ModeRow {
+    ModeRow {
+        marks: marks(query, &found.label),
+        ..ModeRow::new(found.label, PaletteRun::Request(TabRequest::Search(found.query)))
+    }
 }
 
 fn failed(reason: impl std::fmt::Display) -> ModeRows {
@@ -102,21 +130,23 @@ pub fn reindex_versions(
     ModeSpec { source: ModeSource::Local(Rc::new(filter)), on_enter: None }
 }
 
-/// Every version when the query is empty, else those whose `major.minor.patch` holds it, in the
-/// order given.
+/// Every version in the order given when the query is inactive, else those whose
+/// `major.minor.patch` matches it, best first.
 fn version_rows(rows: &[VersionCount], query: &str, reindex: &dyn Fn(ReindexScope) -> PaletteRun) -> ModeRows {
     if rows.is_empty() {
         return ModeRows::Unavailable(t!("ui.reindex.no_versions").into_owned());
     }
 
-    let needle = query.trim();
-    let listed = rows
-        .iter()
-        .map(|row| (version_said(&row.version), row))
-        .filter(|(said, _)| said.contains(needle))
-        .map(|(said, row)| {
+    let query = FilterQuery::new(query);
+    let keyed = rows.iter().map(|row| (FilterKey::new(&version_said(&row.version)), row));
+    let listed = query
+        .rank(keyed, |(key, _)| key)
+        .into_iter()
+        .map(|(_, row)| {
+            let said = version_said(&row.version);
             let label = t!("ui.reindex.version_row", version = said, count = row.replays).into_owned();
-            ModeRow::new(label, reindex(ReindexScope::Version(row.version)))
+            let run = reindex(ReindexScope::Version(row.version));
+            ModeRow { marks: marks_within(&query, &label, &said), ..ModeRow::new(label, run) }
         })
         .collect();
 
@@ -161,8 +191,8 @@ pub fn replay_folders(shell: Shell, history: Signal<Vec<PathBuf>, LocalStorage>)
     ModeSpec { source: ModeSource::Local(Rc::new(filter)), on_enter: Some(Rc::new(check)) }
 }
 
-/// "Browse..." first, then the directories whose path holds the query, ignoring case. `open`
-/// makes what choosing one directory does.
+/// "Browse..." first, then the directories: most recent first for an inactive query, else those
+/// whose shown path matches it, best first. `open` makes what choosing one directory does.
 fn folder_rows(
     paths: &[PathBuf],
     missing: &[PathBuf],
@@ -175,12 +205,23 @@ fn folder_rows(
         ..ModeRow::new(t!("ui.replay_folders.browse").into_owned(), browse.clone())
     };
 
-    let needle = query.trim().to_lowercase();
-    let recent = paths.iter().filter(|path| shown_path(path).to_lowercase().contains(&needle)).map(|path| ModeRow {
-        detail: Some(shown_path(path)),
-        glyph: Some(Glyph::Folder),
-        missing: missing.contains(path),
-        ..ModeRow::new(folder_label(path), open(path.clone()))
+    let query = FilterQuery::new(query);
+    let keyed = paths.iter().map(|path| {
+        let shown = shown_path(path);
+        (FilterKey::new(&shown), path)
+    });
+    let recent = query.rank(keyed, |(key, _)| key).into_iter().map(|(_, path)| {
+        let label = folder_label(path);
+        let shown = shown_path(path);
+        ModeRow {
+            // The row is kept by its path; the name is marked where it also matches.
+            marks: marks(&query, &label),
+            detail_marks: marks(&query, &shown),
+            detail: Some(shown),
+            glyph: Some(Glyph::Folder),
+            missing: missing.contains(path),
+            ..ModeRow::new(label, open(path.clone()))
+        }
     });
 
     ModeRows::Ready(std::iter::once(browse).chain(recent).collect())
@@ -251,7 +292,8 @@ fn ship_rows(list: &ShipList, query: &str) -> ModeRows {
             ModeRows::Unavailable(t!("ui.palette.ships_unavailable", reason = reason).into_owned())
         }
         ShipList::Ready(rows) => {
-            let listed = FilterQuery::new(query)
+            let query = FilterQuery::new(query);
+            let listed = query
                 .rank(rows.iter(), |row| &row.key)
                 .into_iter()
                 .map(|row| {
@@ -259,7 +301,10 @@ fn ship_rows(list: &ShipList, query: &str) -> ModeRows {
                         param_index: row.param_index.clone(),
                         display_name: row.display_name.clone(),
                     };
-                    ModeRow::new(row.label.clone(), PaletteRun::Request(request))
+                    ModeRow {
+                        marks: marks_within(&query, &row.label, &row.display_name),
+                        ..ModeRow::new(row.label.clone(), PaletteRun::Request(request))
+                    }
                 })
                 .collect();
 
@@ -290,10 +335,10 @@ mod tests {
         }
     }
 
-    /// The version list keeps the newest-first order it is given while it filters, and each row
+    /// Every version in order for an empty query, else the matches best first; each row
     /// re-indexes its own version.
     #[test]
-    fn versions_filter_in_order() {
+    fn versions_rank_by_their_number() {
         let rows = [
             VersionCount { version: Version::base(14, 3, 0), replays: 4 },
             VersionCount { version: Version::base(14, 2, 1), replays: 1 },
@@ -315,7 +360,9 @@ mod tests {
         let version = |major, minor, patch| ReindexScope::Version(Version::base(major, minor, patch));
 
         assert_eq!(chosen(""), [version(14, 3, 0), version(14, 2, 1), version(13, 4, 0)]);
-        assert_eq!(chosen(" 14."), [version(14, 3, 0), version(14, 2, 1)]);
+        assert_eq!(chosen("14.2"), [version(14, 2, 1)]);
+        // A "4" that starts a component ranks above one inside "14".
+        assert_eq!(chosen("4"), [version(13, 4, 0), version(14, 3, 0), version(14, 2, 1)]);
         assert!(chosen("15").is_empty());
     }
 
