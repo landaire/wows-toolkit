@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_render::annotate::Annotator;
@@ -52,6 +53,7 @@ use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
+use crate::text_marks::marks_within;
 use crate::windows::renderer::session::RendererSession;
 
 const SHEET: &str = "wt-renderer-tools";
@@ -338,14 +340,16 @@ fn ShipChooser(
                 let ship = ship.clone();
                 let test_id = format!("replay-renderer-ship-{}", ship.param_index);
                 let label = ship.label();
+                let marks = marks_within(&typed, &label, &ship.display_name);
                 AnyView::new(view! {
                     Button(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::Sm,
+                        a11y:label = label.clone(),
                         attr:data-testid = test_id,
                         on:click = move |_| choose(&ship)
                     ) {
-                        {label}
+                        MarkedText(text = label, ranges = marks)
                     }
                 })
             })

@@ -240,7 +240,7 @@ fn the_timeline_filter_decides_what_the_list_shows() {
     let advantage = kind_index(&TimelineEventKind::AdvantageChanged { label: String::new(), is_friendly: true });
     click(&mut window, &format!("replay-renderer-timeline-kind-{advantage}"));
     assert!(!shown(&window, "replay-renderer-timeline-list"));
-    assert!(!session.events.with_untracked(|events| events.filter.kinds[advantage]));
+    assert!(!session.events.with_untracked(|events| events.filter().kinds[advantage]));
 
     click(&mut window, "replay-renderer-timeline-all");
     assert!(shown(&window, "replay-renderer-timeline-row-2"), "every kind is back");
@@ -248,9 +248,11 @@ fn the_timeline_filter_decides_what_the_list_shows() {
     click(&mut window, "replay-renderer-timeline-search");
     window.type_text("at 30");
     settle(&mut window);
-    assert_eq!(session.events.with_untracked(|events| events.filter.search.clone()), "at 30");
+    assert_eq!(session.events.with_untracked(|events| events.filter().search.clone()), "at 30");
     assert!(shown(&window, "replay-renderer-timeline-row-0"));
     assert!(!shown(&window, "replay-renderer-timeline-row-1"), "the search keeps one row");
+    let marked = window.texts_by_class(landaire_ui::MARK_CLASS);
+    assert!(!marked.is_empty() && marked.iter().all(|piece| piece == "at 30"), "{marked:?}");
 }
 
 /// Clicking a row moves playback to when it happened, on the battle's own clock.

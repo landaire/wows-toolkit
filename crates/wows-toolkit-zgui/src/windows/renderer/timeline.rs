@@ -1,5 +1,6 @@
 //! The transport's event timeline: what happened, filtered, and clickable.
 
+use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_replay_insights::timeline::EventTone;
@@ -147,8 +148,9 @@ fn CopyButton(session: RendererSession) -> impl IntoView {
 /// The kind switches and the search box.
 #[component]
 fn FilterBar(session: RendererSession) -> impl IntoView {
-    let search = Signal::derive_local(move || session.events.with(|events| events.filter.search.clone()));
-    let set_every_kind = move |on: bool| session.events.update(|events| events.filter.kinds = [on; KIND_COUNT]);
+    let search = Signal::derive_local(move || session.events.with(|events| events.filter().search.clone()));
+    let set_every_kind =
+        move |on: bool| session.events.update(|events| events.set_filter(|filter| filter.kinds = [on; KIND_COUNT]));
 
     view! {
         column {
@@ -172,7 +174,7 @@ fn FilterBar(session: RendererSession) -> impl IntoView {
                 box(class = "wt-renderer-timeline__search") {
                     Input(
                         value = Binding::controlled(search, move |text: String| {
-                            session.events.update(|events| events.filter.search = text);
+                            session.events.update(|events| events.set_filter(|filter| filter.search = text));
                         }),
                         placeholder = t!("ui.replay.timeline_search_hint").into_owned(),
                         attr:data-testid = "replay-renderer-timeline-search"
@@ -184,9 +186,9 @@ fn FilterBar(session: RendererSession) -> impl IntoView {
                     CheckRow(
                         label = t!(kind_label_key(index)).into_owned(),
                         test_id = format!("replay-renderer-timeline-kind-{index}"),
-                        checked = Signal::derive_local(move || session.events.with(|events| events.filter.kinds[index])),
+                        checked = Signal::derive_local(move || session.events.with(|events| events.filter().kinds[index])),
                         on_change = UnsyncCallback::new(move |on: bool| {
-                            session.events.update(|events| events.filter.kinds[index] = on);
+                            session.events.update(|events| events.set_filter(|filter| filter.kinds[index] = on));
                         })
                     )
                 }
@@ -240,9 +242,9 @@ fn TimelineRows(session: RendererSession) -> impl IntoView {
         Listing::Rows => AnyView::new(view! {
             column(class = "wt-renderer-timeline__list", attr:data-testid = "replay-renderer-timeline-list") {
                 // Keyed by place and wording: the same place holds a different event once the
-                // filter moves.
+                // filter moves, and the same event is marked anew as the search changes.
                 for entry in move || session.events.with(BattleEvents::rows).into_iter().enumerate().collect::<Vec<_>>(),
-                    key = |entry: &(usize, TimelineRow)| (entry.0, entry.1.label.clone(), entry.1.at.to_bits()) {
+                    key = |entry: &(usize, TimelineRow)| (entry.0, entry.1.label.clone(), entry.1.at.to_bits(), entry.1.marks.clone()) {
                     TimelineEntry(session = session, index = entry.0, row = entry.1)
                 }
             }
@@ -253,7 +255,7 @@ fn TimelineRows(session: RendererSession) -> impl IntoView {
 /// One event: when, what, and on hover the detail; a click goes there.
 #[component]
 fn TimelineEntry(session: RendererSession, index: usize, row: TimelineRow) -> impl IntoView {
-    let TimelineRow { at, label, hover, tone } = row;
+    let TimelineRow { at, label, hover, tone, marks } = row;
     let tone = match tone {
         // The two colours this app already paints a friendly and an enemy team in.
         EventTone::Friendly => "friendly",
@@ -267,7 +269,7 @@ fn TimelineEntry(session: RendererSession, index: usize, row: TimelineRow) -> im
             on:click = move |_| session.go_to_elapsed(at)
         ) {
             text(class = "wt-renderer-timeline__at") {{mmss(at)}}
-            text(class = "wt-renderer-timeline__label", attr:data-tone = tone) {{label}}
+            MarkedText(class = "wt-renderer-timeline__label", attr:data-tone = tone, text = label, ranges = marks.into())
         }
     };
     if hover.is_empty() {
