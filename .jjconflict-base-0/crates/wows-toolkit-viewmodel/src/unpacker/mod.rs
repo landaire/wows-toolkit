@@ -2,6 +2,7 @@
 //! extraction queue, extraction itself, and content search.
 
 pub mod assets_bin;
+pub mod build;
 pub mod extract;
 pub mod game_params;
 pub mod listing;

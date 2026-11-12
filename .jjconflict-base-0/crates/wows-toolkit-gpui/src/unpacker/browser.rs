@@ -44,6 +44,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
 
+use wows_toolkit_viewmodel::unpacker::listing;
 use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
@@ -54,7 +55,9 @@ use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
 use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
 use wows_toolkit_viewmodel::unpacker::listing::filter_files;
+use wows_toolkit_viewmodel::unpacker::viewer::FileGlyph;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
+use wows_toolkit_viewmodel::unpacker::viewer::is_viewable;
 
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
@@ -792,14 +795,13 @@ fn queue_toggle(ix: usize, path: VfsPath, is_dir: bool, is_queued: bool, entity:
 /// The path bar above the listing: "res" and then one segment per directory,
 /// each navigating to that level. Mirrors the egui app's breadcrumb row.
 fn breadcrumbs(selected_dir: &str, entity: Entity<BrowserPanel>) -> impl IntoElement {
-    let mut crumbs: Vec<AnyElement> = vec![crumb("res", ROOT_PATH.to_string(), 0, entity.clone())];
-
-    let mut accumulated = String::new();
-    for (depth, part) in selected_dir.trim_matches('/').split('/').filter(|part| !part.is_empty()).enumerate() {
-        accumulated.push('/');
-        accumulated.push_str(part);
-        crumbs.push(div().flex_none().text_xs().text_color(crate::theme::text_faint()).child("/").into_any_element());
-        crumbs.push(crumb(part, accumulated.clone(), depth + 1, entity.clone()));
+    let mut crumbs: Vec<AnyElement> = Vec::new();
+    for (depth, segment) in listing::breadcrumbs(selected_dir).into_iter().enumerate() {
+        if depth > 0 {
+            crumbs
+                .push(div().flex_none().text_xs().text_color(crate::theme::text_faint()).child("/").into_any_element());
+        }
+        crumbs.push(crumb(&segment.label, segment.path, depth, entity.clone()));
     }
 
     h_flex().flex_none().gap_1().items_center().px_2().py_1().children(crumbs)
@@ -826,28 +828,17 @@ const INDENT: Pixels = px(16.);
 const QUEUE_COLUMN_WIDTH: Pixels = px(20.);
 const GLYPH_COLUMN_WIDTH: Pixels = px(16.);
 
-/// Whether the file viewer has anything to show for this name.
-///
-/// The same extensions the egui listing offers "View Contents" for; the
-/// viewer itself decides what it makes of the bytes.
-fn is_viewable(label: &str) -> bool {
-    let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-    matches!(extension.as_str(), "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg")
-}
-
 /// The glyph for a listing row: a directory, or the kind of file its name
-/// says it is, from the same four the egui listing tells apart
-/// (`ui/file_unpacker.rs`'s `file_icon_rich_text`).
+/// says it is (`ui/file_unpacker.rs`'s `file_icon_rich_text`).
 fn file_glyph(label: &str, is_dir: bool) -> impl IntoElement {
     if is_dir {
         return crate::icons::icon(crate::icons::Glyph::Folder).text_color(crate::theme::icon_accent());
     }
-    let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-    let glyph = match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => crate::icons::Glyph::Image,
-        "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => crate::icons::Glyph::FileText,
-        "wem" | "bnk" | "ogg" | "wav" | "mp3" => crate::icons::Glyph::Music,
-        _ => crate::icons::Glyph::File,
+    let glyph = match FileGlyph::of(label) {
+        FileGlyph::Image => crate::icons::Glyph::Image,
+        FileGlyph::Text => crate::icons::Glyph::FileText,
+        FileGlyph::Audio => crate::icons::Glyph::Music,
+        FileGlyph::Other => crate::icons::Glyph::File,
     };
     crate::icons::icon(glyph)
 }

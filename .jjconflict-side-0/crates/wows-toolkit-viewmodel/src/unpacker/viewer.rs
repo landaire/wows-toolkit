@@ -193,6 +193,40 @@ pub fn highlight_language(extension: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether the file viewer has anything to show for this name: the extensions the egui listing
+/// offers "View Contents" for. The viewer itself decides what it makes of the bytes.
+pub fn is_viewable(file_name: &str) -> bool {
+    matches!(
+        extension(file_name).as_str(),
+        "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg"
+    )
+}
+
+/// The kind of glyph a listing row draws for a file, from the four the egui listing tells apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileGlyph {
+    Image,
+    Text,
+    Audio,
+    Other,
+}
+
+impl FileGlyph {
+    pub fn of(file_name: &str) -> Self {
+        match extension(file_name).as_str() {
+            "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => Self::Image,
+            "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => Self::Text,
+            "wem" | "bnk" | "ogg" | "wav" | "mp3" => Self::Audio,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The lowercased text after the last dot, or the whole name when it has none.
+fn extension(file_name: &str) -> String {
+    file_name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod highlight_tests {
     use super::highlight_language;
