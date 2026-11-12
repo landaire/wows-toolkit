@@ -1904,6 +1904,40 @@ fn read_mount_param(mount: &pickled::Dict) -> Option<MountParam> {
     Some(MountParam::new(GameParamId::from(id), index, name))
 }
 
+/// Every `HP_` mount in any component of a building param, sorted by
+/// hardpoint.
+fn building_mounts(building_data: &pickled::Dict) -> Vec<MountPoint> {
+    let components: Vec<String> =
+        building_data.keys().filter_map(|key| key.string_ref().map(|key| key.inner().to_string())).collect();
+    let mut mounts: Vec<MountPoint> =
+        components.iter().flat_map(|component| extract_mounts(building_data, component)).collect();
+    mounts.sort_by(|a, b| (a.hp_name(), a.model_path()).cmp(&(b.hp_name(), b.model_path())));
+
+    mounts
+}
+
+/// The `deadMesh` of every `HP_` mount in any component of a building param,
+/// sorted and without duplicates.
+fn building_mount_dead_models(building_data: &pickled::Dict) -> Vec<String> {
+    let mut models = Vec::new();
+    for component in building_data.values() {
+        let Some(component) = component.dict_or_object_dict() else {
+            continue;
+        };
+        for (key, mount) in component.inner().iter() {
+            let is_mount = key.string_ref().is_some_and(|key| key.inner().starts_with(keys::HP_PREFIX));
+            let Some(mount) = mount.dict_or_object_dict().filter(|_| is_mount) else {
+                continue;
+            };
+            models.extend(read_string(&mount.inner(), "deadMesh").filter(|path| !path.is_empty()));
+        }
+    }
+    models.sort();
+    models.dedup();
+
+    models
+}
+
 /// Parse the trailing decimal digits of a hardpoint name.
 fn hardpoint_number(key: &str) -> Option<u32> {
     // ASCII digits are one byte each, so the count is a valid byte offset.
@@ -3259,7 +3293,25 @@ impl GameMetadataProvider {
                         .get(&pk("health"))
                         .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
                 });
-                Some(ParamData::Building(super::types::Building::builder().level(level).maybe_health(health).build()))
+                let hull_path = |key: &str| {
+                    hull.as_ref().and_then(|h| read_string(&h.inner(), key)).filter(|path| !path.is_empty())
+                };
+                let armor = hull.as_ref().and_then(|h| {
+                    h.inner()
+                        .get(&pk(keys::ARMOR))
+                        .and_then(|v| v.dict_or_object_dict())
+                        .map(|d| parse_armor_dict(&d.inner()))
+                });
+                let building = super::types::Building::builder()
+                    .level(level)
+                    .maybe_health(health)
+                    .maybe_model(hull_path(keys::MODEL))
+                    .maybe_dead_model(hull_path("deadModel"))
+                    .maybe_armor(armor)
+                    .mounts(building_mounts(&param_data))
+                    .mount_dead_models(building_mount_dead_models(&param_data))
+                    .build();
+                Some(ParamData::Building(building))
             }
             _ => {
                 // Some params (e.g. Drops) have typeinfo.type = "Other"
@@ -4539,6 +4591,33 @@ mod camera_tests {
             MountParam::new(GameParamId::from(4258916336u64), "PAGM034".to_owned(), "PAGM034_16in50_Mk7".to_owned());
         assert_eq!(mount("HP_AGM_1").param(), Some(&expected));
         assert_eq!(mount("HP_AGM_2").param(), None);
+    }
+
+    #[test]
+    fn buildings_list_their_mounts_across_components() {
+        let mount = |model: &str, dead: &str| dict(vec![(pk("model"), sv(model)), (pk("deadMesh"), sv(dead))]);
+        let building_data: pickled::Dict = vec![
+            (
+                pk("artillery"),
+                dict(vec![
+                    (pk("HP_CGM_2"), mount("content/gun.model", "")),
+                    (pk("HP_CGM_1"), mount("content/gun.model", "content/gun_dead.model")),
+                    (pk("sectors"), sv("not a mount")),
+                ]),
+            ),
+            (pk("airDefense"), dict(vec![(pk("HP_AIR_1"), mount("content/aa.model", "content/aa_dead.model"))])),
+            (pk("hull"), dict(vec![(pk("model"), sv("content/building.model"))])),
+        ]
+        .into_iter()
+        .collect();
+
+        let mounts = building_mounts(&building_data);
+        let mounts: Vec<(&str, &str)> = mounts.iter().map(|mount| (mount.hp_name(), mount.model_path())).collect();
+        assert_eq!(
+            mounts,
+            [("HP_AIR_1", "content/aa.model"), ("HP_CGM_1", "content/gun.model"), ("HP_CGM_2", "content/gun.model")]
+        );
+        assert_eq!(building_mount_dead_models(&building_data), ["content/aa_dead.model", "content/gun_dead.model"]);
     }
 
     /// Fixed tubes whose torpedoes turn after launch fire across the turn,

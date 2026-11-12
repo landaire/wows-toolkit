@@ -4140,6 +4140,24 @@ pub struct Building {
     level: u32,
     /// `None` when the param has no `hull.health`.
     health: Option<f32>,
+    /// `hull.model`. `None` when absent or empty, as for decoy airfields.
+    #[cfg_attr(feature = "serde", serde(default))]
+    model: Option<String>,
+    /// `hull.deadModel`. `None` when absent or empty.
+    #[cfg_attr(feature = "serde", serde(default))]
+    dead_model: Option<String>,
+    /// `hull.armor`, the thickness of the building's own plates. `None` when
+    /// the param has none.
+    #[cfg_attr(feature = "serde", serde(default))]
+    armor: Option<ArmorMap>,
+    /// Every `HP_` mount across the param's components, sorted by hardpoint.
+    #[builder(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    mounts: Vec<MountPoint>,
+    /// The `deadMesh` of every mount, sorted and without duplicates.
+    #[builder(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    mount_dead_models: Vec<String>,
 }
 
 impl Building {
@@ -4149,6 +4167,26 @@ impl Building {
 
     pub fn health(&self) -> Option<f32> {
         self.health
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    pub fn dead_model(&self) -> Option<&str> {
+        self.dead_model.as_deref()
+    }
+
+    pub fn armor(&self) -> Option<&ArmorMap> {
+        self.armor.as_ref()
+    }
+
+    pub fn mounts(&self) -> &[MountPoint] {
+        &self.mounts
+    }
+
+    pub fn mount_dead_models(&self) -> &[String] {
+        &self.mount_dead_models
     }
 }
 
