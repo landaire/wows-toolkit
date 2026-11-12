@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::MotionPreference;
 use landaire_ui::RevealProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::count_up;
@@ -28,14 +29,15 @@ struct Controls {
     open: RwSignal<bool, LocalStorage>,
     height: RwSignal<u32, LocalStorage>,
     count: RwSignal<u64, LocalStorage>,
+    motion: RwSignal<MotionPreference, LocalStorage>,
 }
 
 #[component]
 fn Revealed(controls: Controls) -> impl IntoView {
-    let Controls { open, height, count } = controls;
+    let Controls { open, height, count, motion } = controls;
 
     view! {
-        ThemeRoot {
+        ThemeRoot(motion = motion) {
             column {
                 Reveal(open = open) {
                     box(attr:data-testid = "content", style:height = move || Some(format!("{}px", height.get())))
@@ -68,6 +70,7 @@ fn open_revealed() -> (HeadlessWindow, Controls) {
             open: RwSignal::new_local(false),
             height: RwSignal::new_local(100),
             count: RwSignal::new_local(0),
+            motion: RwSignal::new_local(MotionPreference::Full),
         };
         sent.set(Some(controls));
         view! { Revealed(controls = controls) }
@@ -75,6 +78,13 @@ fn open_revealed() -> (HeadlessWindow, Controls) {
     .expect("opens");
 
     (window, handed.get().expect("the view was built"))
+}
+
+fn shown_count(window: &mut HeadlessWindow) -> u64 {
+    let count = window.by_test_id("count").expect("the count is built");
+    let label = window.a11y(count).and_then(|state| state.label).expect("the count is announced");
+
+    label.trim_start_matches("count ").parse().expect("the label ends in a figure")
 }
 
 fn revealed_height(window: &HeadlessWindow) -> f32 {
@@ -113,21 +123,35 @@ fn a_reveal_opens_to_its_content_follows_it_and_closes_to_nothing() {
 #[test]
 fn a_count_rises_to_each_new_figure_and_drops_at_once() {
     let (mut window, controls) = open_revealed();
-    let count = window.by_test_id("count").expect("the count is built");
-    let shown = |window: &mut HeadlessWindow| -> u64 {
-        let label = window.a11y(count).and_then(|state| state.label).expect("the count is announced");
-        label.trim_start_matches("count ").parse().expect("the label ends in a figure")
-    };
 
     controls.count.set(40);
     window.advance(Duration::from_millis(200));
-    let rising = shown(&mut window);
+    let rising = shown_count(&mut window);
     assert!(rising > 0 && rising < 40, "part way through, the count is between its figures at {rising}");
 
     window.advance(SETTLE);
-    assert_eq!(shown(&mut window), 40);
+    assert_eq!(shown_count(&mut window), 40);
 
     controls.count.set(3);
     window.advance(Duration::from_millis(17));
-    assert_eq!(shown(&mut window), 3, "a smaller figure is a new count, shown at once");
+    assert_eq!(shown_count(&mut window), 3, "a smaller figure is a new count, shown at once");
+}
+
+#[test]
+fn reducing_motion_ends_a_count_and_a_close_under_way() {
+    let (mut window, controls) = open_revealed();
+    controls.open.set(true);
+    window.advance(SETTLE);
+
+    controls.count.set(40);
+    controls.open.set(false);
+    window.advance(Duration::from_millis(100));
+    assert!(shown_count(&mut window) < 40, "the count is still rising");
+    assert!(revealed_height(&window) > 0.0, "the reveal is still closing");
+
+    controls.motion.set(MotionPreference::Reduced);
+    window.advance(Duration::from_millis(17));
+    assert_eq!(shown_count(&mut window), 40, "the count is at its figure");
+    assert_eq!(revealed_height(&window), 0.0, "the reveal is shut");
+    assert!(window.by_test_id("content").is_none(), "its content is dropped");
 }
