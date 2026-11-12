@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use wowsunpack::export::hardpoint::Hardpoint;
 use wowsunpack::export::hardpoint::HardpointKind;
 
-use crate::viewport::types::Vec3;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::load_ship::LoadedShipArmor;
 use super::model_refs::HardpointTarget;

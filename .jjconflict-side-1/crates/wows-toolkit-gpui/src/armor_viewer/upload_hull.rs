@@ -26,17 +26,17 @@ use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::material_alpha::AlphaMode;
 
-use crate::viewport::renderer::AlbedoUv;
-use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_HULL;
-use crate::viewport::renderer::MaterialBinding;
-use crate::viewport::renderer::TextureEncoding;
-use crate::viewport::renderer::TextureImage;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::tangents::vertex_tangents;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::renderer::AlbedoUv;
+use wows_toolkit_armor::viewport::renderer::GpuPipeline;
+use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
+use wows_toolkit_armor::viewport::renderer::LAYER_HULL;
+use wows_toolkit_armor::viewport::renderer::MaterialBinding;
+use wows_toolkit_armor::viewport::renderer::TextureEncoding;
+use wows_toolkit_armor::viewport::renderer::TextureImage;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::tangents::vertex_tangents;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::camo::RgbaTexture;
 use super::load_ship::LoadedShipArmor;

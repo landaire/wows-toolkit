@@ -1,0 +1,9132 @@
+{
+ "0.6.13_296659": {
+  "build": 296659, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.13"
+ }, 
+ "0.6.13_297724": {
+  "build": 297724, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.13"
+ }, 
+ "0.6.14_302523": {
+  "build": 302523, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.14"
+ }, 
+ "0.6.14_303746": {
+  "build": 303746, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.14"
+ }, 
+ "0.6.15_306965": {
+  "build": 306965, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.15"
+ }, 
+ "0.6.15_308625": {
+  "build": 308625, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.6.15"
+ }, 
+ "0.7.0_311910": {
+  "build": 311910, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.0"
+ }, 
+ "0.7.0_313919": {
+  "build": 313919, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.0"
+ }, 
+ "0.7.1_316925": {
+  "build": 316925, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.1"
+ }, 
+ "0.7.2_323551": {
+  "build": 323551, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.2"
+ }, 
+ "0.7.2_327674": {
+  "build": 327674, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.2"
+ }, 
+ "0.7.3_329111": {
+  "build": 329111, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.3"
+ }, 
+ "0.7.4_336247": {
+  "build": 336247, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.4"
+ }, 
+ "0.7.4_338496": {
+  "build": 338496, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.4"
+ }, 
+ "0.7.5_342524": {
+  "build": 342524, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.5"
+ }, 
+ "0.7.5_344738": {
+  "build": 344738, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.5"
+ }, 
+ "0.7.6_346043": {
+  "build": 346043, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "0.7.6"
+ }, 
+ "7.10.1_1130563": {
+  "build": 1130563, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.10.1"
+ }, 
+ "7.10.2_1150515": {
+  "build": 1150515, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.10.2"
+ }, 
+ "7.11.0_1167524": {
+  "build": 1167524, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.11.0"
+ }, 
+ "7.11.1_1194326": {
+  "build": 1194326, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.11.1"
+ }, 
+ "7.8.0_987447": {
+  "build": 987447, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.8.0"
+ }, 
+ "7.9.0_1037117": {
+  "build": 1037117, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "PlanePreparingModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "FighterEfficiencyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "OutOfAttackModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "PreparingOnboardShootersModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "ParkingDeckModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AdditionalPlanesInSquadModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "7.9.0"
+ }, 
+ "8.0.2_1325581": {
+  "build": 1325581, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.0.2"
+ }, 
+ "8.0.3_1350826": {
+  "build": 1350826, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.0.3"
+ }, 
+ "8.1.1_1374796": {
+  "build": 1374796, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.1.1"
+ }, 
+ "8.10.0_2030144": {
+  "build": 2030144, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.10.0"
+ }, 
+ "8.11.0_2118554": {
+  "build": 2118554, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.11.0"
+ }, 
+ "8.2.0_1427460": {
+  "build": 1427460, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.2.0"
+ }, 
+ "8.3.1_1491147": {
+  "build": 1491147, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.3.1"
+ }, 
+ "8.4.0_1549228": {
+  "build": 1549228, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.4.0"
+ }, 
+ "8.5.1_1631917": {
+  "build": 1631917, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.5.1"
+ }, 
+ "8.6.0_1690929": {
+  "build": 1690929, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.6.0"
+ }, 
+ "8.7.1_1818869": {
+  "build": 1818869, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.7.1"
+ }, 
+ "8.8.0_1860153": {
+  "build": 1860153, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.8.0"
+ }, 
+ "8.8.1_1874437": {
+  "build": 1874437, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.8.1"
+ }, 
+ "8.9.0_1942147": {
+  "build": 1942147, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.9.0"
+ }, 
+ "8.9.1_1991370": {
+  "build": 1991370, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "8.9.1"
+ }, 
+ "9.0.0_2171354": {
+  "build": 2171354, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.0.0"
+ }, 
+ "9.1.1_2270610": {
+  "build": 2270610, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.1.1"
+ }, 
+ "9.10.0_3052606": {
+  "build": 3052606, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.10.0"
+ }, 
+ "9.12.0_3245976": {
+  "build": 3245976, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.12.0"
+ }, 
+ "9.2.0_2316552": {
+  "build": 2316552, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.2.0"
+ }, 
+ "9.2.1_2380178": {
+  "build": 2380178, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.2.1"
+ }, 
+ "9.3.0_2404350": {
+  "build": 2404350, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.3.0"
+ }, 
+ "9.3.1_2466969": {
+  "build": 2466969, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.3.1"
+ }, 
+ "9.4.0_2506084": {
+  "build": 2506084, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.4.0"
+ }, 
+ "9.4.1_2571457": {
+  "build": 2571457, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.4.1"
+ }, 
+ "9.5.0_2591463": {
+  "build": 2591463, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.5.0"
+ }, 
+ "9.5.1_2643263": {
+  "build": 2643263, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.5.1"
+ }, 
+ "9.6.0_2666186": {
+  "build": 2666186, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.6.0"
+ }, 
+ "9.6.1_2697511": {
+  "build": 2697511, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.6.1"
+ }, 
+ "9.7.0_2744482": {
+  "build": 2744482, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.7.0"
+ }, 
+ "9.8.0_2832630": {
+  "build": 2832630, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.8.0"
+ }, 
+ "9.9.1_2979658": {
+  "build": 2979658, 
+  "grid": [
+   {
+    "column": 0, 
+    "skill": "PriorityTargetModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 1, 
+    "skill": "MeticulousPreventionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 2, 
+    "skill": "IntuitionModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 3, 
+    "skill": "AirSupremacyModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 4, 
+    "skill": "AimingFightersPointModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 5, 
+    "skill": "ForsageDurationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 6, 
+    "skill": "ArtilleryAlertModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 7, 
+    "skill": "ForsageRestorationModifier", 
+    "tier": 0
+   }, 
+   {
+    "column": 0, 
+    "skill": "EmergencyTeamCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 1, 
+    "skill": "AllSkillsCooldownModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 2, 
+    "skill": "MainGunsRotationModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 3, 
+    "skill": "TorpedoAcceleratorModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 4, 
+    "skill": "AdditionalSmokescreensModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 5, 
+    "skill": "FlightSpeedModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 6, 
+    "skill": "LastChanceModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 7, 
+    "skill": "LastEffortModifier", 
+    "tier": 1
+   }, 
+   {
+    "column": 0, 
+    "skill": "AutoRepairModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 1, 
+    "skill": "SurvivalModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 2, 
+    "skill": "TorpedoReloadModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 3, 
+    "skill": "NearAuraDamageTakenModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsEfficiencyModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 5, 
+    "skill": "SuperintendentModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 6, 
+    "skill": "FireProbabilityModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 7, 
+    "skill": "TorpedoAlertnessModifier", 
+    "tier": 2
+   }, 
+   {
+    "column": 0, 
+    "skill": "CentralATBAModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 1, 
+    "skill": "FireResistanceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 2, 
+    "skill": "LandmineExploderModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 3, 
+    "skill": "AccuracyIncreaseRateModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 4, 
+    "skill": "AIGunsRangeModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 5, 
+    "skill": "CentralAirDefenceModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 6, 
+    "skill": "NearEnemyIntuitionModifier", 
+    "tier": 3
+   }, 
+   {
+    "column": 7, 
+    "skill": "VisibilityModifier", 
+    "tier": 3
+   }
+  ], 
+  "version": "9.9.1"
+ }
+}

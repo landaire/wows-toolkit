@@ -1,0 +1,8 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1558
+expression: lines
+---
+- Erie > Chester > Sampson > Wickes > Clemson > Langley > Ranger > Independence > Yorktown > Essex
+- Hashidate > Chikuma > Umikaze > Wakatake > Isokaze > Minekaze > Hatsuharu > Shiratsuyu > Akizuki > Kitakaze > Harugumo
+- Erie > Chester > St. Louis > Phoenix > Omaha > Pensacola > New Orleans > Baltimore > Buffalo > Des Moines

@@ -36,11 +36,11 @@ use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
-use crate::viewport::camera::ArcballCamera;
-use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
+use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::load_ship::ArmorTriangleTooltip;
 use super::load_ship::LoadedShipArmor;
@@ -648,9 +648,9 @@ mod tests {
     #[test]
     #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]
     fn upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry() {
-        use crate::viewport::headless::HeadlessDevice;
-        use crate::viewport::headless::SRGB_TARGET;
-        use crate::viewport::types::TargetSize;
+        use wows_toolkit_armor::viewport::headless::HeadlessDevice;
+        use wows_toolkit_armor::viewport::headless::SRGB_TARGET;
+        use wows_toolkit_armor::viewport::types::TargetSize;
 
         let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
             .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");

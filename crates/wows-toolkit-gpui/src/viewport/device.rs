@@ -27,13 +27,12 @@ use gpui_wgpu::WgpuContext;
 use gpui_wgpu::WgpuContextGeneration;
 use gpui_wgpu::WgpuDynamicTexture;
 use gpui_wgpu::wgpu;
-
-use crate::viewport::renderer::GpuPipeline;
-use crate::viewport::renderer::MeshRelease;
-use crate::viewport::renderer::SceneAttachments;
-use crate::viewport::renderer::SceneColorTarget;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::TargetSize;
+use wows_toolkit_armor::viewport::device::ViewportDevice;
+use wows_toolkit_armor::viewport::renderer::GpuPipeline;
+use wows_toolkit_armor::viewport::renderer::SceneAttachments;
+use wows_toolkit_armor::viewport::renderer::SceneColorTarget;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::TargetSize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneDeviceError {
@@ -54,12 +53,10 @@ pub enum SceneDeviceError {
 /// weak ones, so dropping it there releases everything below.
 pub struct SceneDevice {
     context: WgpuContext,
-    generation: WgpuContextGeneration,
-    pipeline: GpuPipeline,
+    /// The pipeline, and the mesh buffers of the viewports drawing on it.
+    scene: ViewportDevice<WgpuContextGeneration>,
     /// Each viewport's render target.
     targets: RefCell<HashMap<EntityId, SceneTarget>>,
-    /// The mesh buffers of the viewports drawing on this device.
-    meshes: RefCell<Vec<MeshRelease>>,
 }
 
 /// A [`SceneDevice`] compiled on a background thread, before it takes on the
@@ -102,19 +99,24 @@ impl SceneDevice {
 
     fn new(compiled: Compiled) -> Self {
         let Compiled { context, generation, pipeline } = compiled;
-        Self { context, generation, pipeline, targets: RefCell::default(), meshes: RefCell::default() }
+        let scene = ViewportDevice::new((*context.device).clone(), (*context.queue).clone(), generation, pipeline);
+        Self { context, scene, targets: RefCell::default() }
     }
 
     pub fn device(&self) -> &wgpu::Device {
-        &self.context.device
+        self.scene.device()
     }
 
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.context.queue
+        self.scene.queue()
     }
 
     pub fn pipeline(&self) -> &GpuPipeline {
-        &self.pipeline
+        self.scene.pipeline()
+    }
+
+    fn generation(&self) -> WgpuContextGeneration {
+        self.scene.generation()
     }
 
     fn is_lost(&self) -> bool {
@@ -123,12 +125,12 @@ impl SceneDevice {
 
     /// Whether this is GPUI's current device and it is not lost.
     pub fn is_current(&self) -> bool {
-        !self.is_lost() && gpui_wgpu::app_context().is_some_and(|app| app.generation == self.generation)
+        !self.is_lost() && gpui_wgpu::app_context().is_some_and(|app| self.scene.is_generation(app.generation))
     }
 
     /// Releases `viewport`'s mesh buffers along with this device.
     pub fn track(&self, viewport: &Viewport3D) {
-        self.meshes.borrow_mut().push(viewport.mesh_release());
+        self.scene.track(viewport);
     }
 
     /// Paints `view`'s scene at `bounds`, `size` device pixels, drawing
@@ -177,17 +179,9 @@ impl SceneDevice {
             .context
             .create_dynamic_texture(texture_size)
             .map_err(|reason| SceneDeviceError::Texture { width: size.width(), height: size.height(), reason })?;
-        let attachments = SceneAttachments::new(self.device(), &self.pipeline, size);
+        let attachments = self.scene.attachments(size);
 
         Ok(SceneTarget { texture, attachments })
-    }
-}
-
-impl Drop for SceneDevice {
-    fn drop(&mut self) {
-        for meshes in self.meshes.get_mut() {
-            meshes.release();
-        }
     }
 }
 
@@ -207,7 +201,7 @@ impl SceneTarget {
     /// own, so the frame GPUI draws next samples it.
     fn render(&self, scene: &SceneDevice, viewport: &Viewport3D, window: &mut Window) -> Result<(), SceneDeviceError> {
         let draw = |resolve_target: &wgpu::TextureView| {
-            viewport.render(scene.device(), scene.queue(), scene.pipeline(), &self.attachments, resolve_target);
+            scene.scene.render(viewport, &self.attachments, resolve_target);
             Ok(())
         };
         let drawn = match scene.pipeline().color() {
@@ -261,7 +255,7 @@ fn retire(generation: WgpuContextGeneration) {
         // Busy only if GPUI reports the loss from inside a viewport's own
         // call, which then sees the device lost on its next render.
         let Ok(mut state) = pane.try_borrow_mut() else { continue };
-        if matches!(&*state, SharedState::Ready(scene) if scene.generation == generation) {
+        if matches!(&*state, SharedState::Ready(scene) if scene.generation() == generation) {
             *state = SharedState::Lost(generation);
         }
     }
@@ -302,7 +296,7 @@ impl SharedSceneDevice {
         let generation = app.as_ref().map(|app| app.generation);
         let mut state = self.0.borrow_mut();
         match &mut *state {
-            SharedState::Ready(scene) if Some(scene.generation) == generation && !scene.is_lost() => {
+            SharedState::Ready(scene) if Some(scene.generation()) == generation && !scene.is_lost() => {
                 return Ok(Some(Rc::clone(scene)));
             }
             SharedState::Building { generation: building, waiters } if Some(*building) == generation => {

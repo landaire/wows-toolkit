@@ -54,7 +54,7 @@ use wowsunpack::game_params::types::Species;
 
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
-use crate::viewport::types::LightingSettings;
+use wows_toolkit_armor::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;

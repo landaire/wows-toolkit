@@ -25,7 +25,7 @@ use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 
 use super::upload_hull::mfm_stem;
-use crate::viewport::renderer::MipChain;
+use wows_toolkit_armor::viewport::renderer::MipChain;
 
 /// Hermite smoothstep from 0 at `e0` to 1 at `e1`. Ports `common.rs:625-628`.
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
