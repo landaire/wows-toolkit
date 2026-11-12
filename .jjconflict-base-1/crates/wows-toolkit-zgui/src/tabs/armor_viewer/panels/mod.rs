@@ -10,4 +10,9 @@
 //! The tab owns one `PenetrationState` per pane and hands the panels the viewport's state.
 
 pub mod export;
+pub mod incoming;
 pub mod legend;
+pub mod pen;
+#[cfg(test)]
+mod tests;
+pub mod trajectory;
