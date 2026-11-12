@@ -1,7 +1,7 @@
 //! A dock drawn: the folding regions around the center, each region's splits, and each split's tab
 //! groups.
 //!
-//! Tab headers are zgui-ui tabs restyled with the `--lui-*` tokens.
+//! Each group's tabs are a [`TabStrip`](crate::TabStrip), as an application's own tabs are.
 
 use zgui::component;
 use zgui::css;
@@ -30,24 +30,18 @@ use zgui::view::Classes;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
-use zgui::vocab::Key;
-use zgui::vocab::NamedKey;
-use zgui::vocab::Role;
 use zgui_ui::PanelBound;
 use zgui_ui::ResizableContext;
 use zgui_ui::ResizableHandleProps;
 use zgui_ui::ResizablePanelGroupProps;
 use zgui_ui::ResizablePanelProps;
 use zgui_ui::TabsContentProps;
-use zgui_ui::TabsListProps;
-use zgui_ui::TabsProps;
-use zgui_ui::TabsTriggerProps;
-use zgui_ui_icons::IconProps;
-use zgui_ui_icons::IconSize;
-use zgui_ui_icons::set::mark::CROSS;
 use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Orientation;
 
+use crate::chrome::tab_strip::TabStripPanels;
+use crate::chrome::tab_strip::TabStripProps;
+use crate::chrome::tab_strip::TabStripTabProps;
 use crate::dock::layout::DockRegion;
 use crate::dock::layout::GroupId;
 use crate::dock::layout::Layout;
@@ -93,80 +87,24 @@ const CSS: &str = css!(
         background-color: var(--lui-color-panel);
         color: var(--lui-color-text);
     }
-    .lui-dock .lui-dock__group .lui-dock__tabs.lui-dock__tabs {
-        display: flex;
+    .lui-dock .lui-dock__group .lui-tab-strip__scroller {
         flex: none;
-        box-sizing: border-box;
-        width: auto;
-        height: 32px;
-        padding: 0;
-        gap: 0;
-        align-items: stretch;
-        justify-content: flex-start;
-        border-radius: 0;
         border-bottom: 1px solid var(--lui-color-border);
         background-color: var(--lui-color-surface);
-        overflow-x: auto;
-        overflow-y: hidden;
     }
-    .lui-dock__tabs-rest { flex: 1 1 auto; min-width: 64px; }
-    .lui-dock__tab {
-        display: flex;
-        flex: none;
-        flex-direction: row;
-        align-items: center;
-        padding: 0 12px;
-        border-left: 1px solid transparent;
-        border-right: 1px solid transparent;
-        color: var(--lui-color-text-dim);
-        font-size: var(--lui-font-size);
-        white-space: nowrap;
+    .lui-dock .lui-tab-strip__list .lui-tab-strip__tab.zui-tabs__trigger[data-state=\"active\"]:first-child {
+        border-left-color: transparent;
     }
-    .lui-dock__tab-closable { padding-right: 4px; }
-    .lui-dock__tab:hover { color: var(--lui-color-text-bright); }
-    .lui-dock__tab.lui-dock__tab-active {
-        border-left-color: var(--lui-color-border);
-        border-right-color: var(--lui-color-border);
-        background-color: var(--lui-color-panel);
-        color: var(--lui-color-text-bright);
-    }
-    .lui-dock__tab.lui-dock__tab-active:first-child { border-left-color: transparent; }
-    .lui-dock .lui-dock__tab .lui-dock__tab-label {
-        flex: none;
-        height: 100%;
-        padding: 0;
-        border: none;
-        border-radius: 0;
-        background-color: transparent;
-        box-shadow: none;
-        color: inherit;
-        font-size: inherit;
-        font-weight: normal;
-        line-height: 1.25;
-        transition: none;
-    }
-    .lui-dock__close {
-        display: flex;
-        flex: none;
-        align-items: center;
-        justify-content: center;
-        width: 20px;
-        height: 20px;
-        margin-left: 8px;
-        border-radius: var(--lui-radius);
-        color: var(--lui-color-text);
-    }
-    .lui-dock__close:hover { background-color: var(--lui-color-widget-hot); }
-    .lui-dock__close:active { background-color: color-mix(in srgb, var(--lui-color-widget-hot) 80%, var(--lui-color-text)); }
-    .lui-dock .lui-dock__group-single .lui-dock__tabs.lui-dock__tabs {
-        height: 30px;
+    .lui-dock .lui-dock__group-single .lui-tab-strip__scroller {
         border-bottom: none;
         background-color: transparent;
     }
-    .lui-dock__group-single .lui-dock__tab.lui-dock__tab {
+    .lui-dock .lui-dock__group-single .lui-tab-strip__underline { display: none; }
+    .lui-dock .lui-dock__group-single .lui-tab-strip__list .lui-tab-strip__tab.zui-tabs__trigger[data-state=\"active\"] {
         border-color: transparent;
         background-color: transparent;
         color: var(--lui-color-text);
+        font-weight: 400;
     }
     .lui-dock__body {
         display: flex;
@@ -212,9 +150,14 @@ const CSS: &str = css!(
     }"
 );
 
-/// The name a tab's close button is given before the panel's label.
+/// What the dock's tab strips say to a screen reader.
 #[derive(Clone)]
-struct CloseLabel(String);
+struct DockLabels {
+    /// Said before a panel's label to name its tab's close button.
+    close: String,
+    /// What each group's strip of tabs is called.
+    tabs: String,
+}
 
 /// The places in the dock's frame: three columns, and the center and bottom within the middle one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -386,11 +329,14 @@ pub fn Dock(
     /// Said before a panel's label to name its tab's close button.
     #[prop(into, default = "Close".to_owned())]
     close_label: String,
+    /// What each group's strip of tabs is called.
+    #[prop(into, default = "Panels".to_owned())]
+    tabs_label: String,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    provide_local_context(CloseLabel(close_label));
+    provide_local_context(DockLabels { close: close_label, tabs: tabs_label });
 
     view! {
         box(class = "lui-dock", {..attrs}, class = class) {
@@ -570,18 +516,18 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
         },
     );
     let single = move || panels.with(Vec::len) == 1;
+    let label = use_local_context::<DockLabels>().map(|labels| labels.tabs).unwrap_or_default();
 
     view! {
-        Tabs(value = shown, class = "lui-dock__group", class:lui-dock__group-single = single) {
-            TabsList(class = "lui-dock__tabs") {
-                for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
-                    DockTab(state = state, entry = entry, active = active)
-                }
-                box(class = "lui-dock__tabs-rest")
+        TabStrip(value = shown, label = label, class = "lui-dock__group", class:lui-dock__group-single = single) {
+            for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
+                DockTab(state = state, entry = entry)
             }
-            box(class = "lui-dock__body") {
-                for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
-                    DockContent(state = state, entry = entry)
+            TabStripPanels(slot) {
+                box(class = "lui-dock__body") {
+                    for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
+                        DockContent(state = state, entry = entry)
+                    }
                 }
             }
         }
@@ -589,64 +535,29 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
 }
 
 #[component]
-fn DockTab(state: DockState, entry: PanelEntry, active: Memo<Option<PanelId>>) -> impl IntoView {
+fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
     let factory = state.factory(&entry.kind);
     let label = factory.as_ref().map(|factory| factory.label(&entry.id)).unwrap_or_default();
     let title = factory.as_ref().map(|factory| factory.title(&entry.id));
-    let close_label = use_local_context::<CloseLabel>().map(|CloseLabel(text)| text);
+    let value = entry.id.as_str().to_owned();
 
-    let selected = {
-        let id = entry.id.clone();
-        move || active.with(|active| active.as_ref() == Some(&id))
-    };
-    let close = {
-        let id = entry.id.clone();
-        move || {
-            // The button is only drawn for a closable panel that is in the dock.
-            let _ = state.close(&id);
-        }
-    };
-    let close_button = entry.closable.then(|| {
-        let close = close.clone();
-        let name = match &close_label {
-            Some(text) => format!("{text} {label}"),
-            None => label.clone(),
-        };
-        AnyView::new(view! {
-            control(
-                class = "lui-dock__close",
-                a11y:role = Role::Button,
-                a11y:label = name,
-                on:click:stop = move |_| close()
-            ) {
-                Icon(icon = CROSS, size = IconSize::Sm)
-            }
-        })
-    });
-    let closable = entry.closable;
-
-    view! {
-        box(
-            class = "lui-dock__tab",
-            class:lui-dock__tab-active = selected,
-            class:lui-dock__tab-closable = closable
-        ) {
-            TabsTrigger(
-                value = entry.id.as_str(),
-                class = "lui-dock__tab-label",
-                a11y:label = label,
-                on:key_down = move |ev| {
-                    if closable && ev.key == Key::Named(NamedKey::Delete) {
-                        close();
-                        ev.prevent_default();
-                    }
-                }
-            ) {
-                {title}
-            }
-            {close_button}
-        }
+    if !entry.closable {
+        return AnyView::new(view! { TabStripTab(value = value, a11y:label = label) {{title}} });
     }
+
+    let close_label = match use_local_context::<DockLabels>() {
+        Some(labels) => format!("{} {label}", labels.close),
+        None => label.clone(),
+    };
+    let id = entry.id;
+    let on_close = UnsyncCallback::new(move |()| {
+        // A closable panel that is still in the dock always closes.
+        let _ = state.close(&id);
+    });
+
+    AnyView::new(view! {
+        TabStripTab(value = value, on_close = on_close, close_label = close_label, a11y:label = label) {{title}}
+    })
 }
 
 #[component]
