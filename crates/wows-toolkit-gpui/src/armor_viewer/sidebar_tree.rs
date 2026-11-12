@@ -39,6 +39,7 @@ use super::catalog::tier_roman;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
+use super::model_tree::BuildingRow;
 use super::model_tree::FolderName;
 use super::model_tree::FortificationRow;
 use super::model_tree::HullRow;
@@ -368,6 +369,12 @@ pub(super) fn building_row_id(id: GameParamId) -> SharedString {
     format!("armor-building-{id}").into()
 }
 
+/// A building's row under its hull model, apart from its row under
+/// Fortifications.
+pub(super) fn model_building_row_id(model: &ModelPath, id: GameParamId) -> SharedString {
+    format!("model-building-{model}-{id}").into()
+}
+
 pub(super) fn model_row_id(model: &ModelPath) -> SharedString {
     format!("model-{model}").into()
 }
@@ -684,6 +691,7 @@ impl Builder<'_, '_, '_, '_> {
             param_name: row.param_name.clone(),
         };
         self.note(&id, &row.search_key);
+        self.mark_geometry(&id, row.geometry);
 
         self.leaf(id, row.display_name.clone(), kind)
     }
@@ -818,15 +826,38 @@ impl Builder<'_, '_, '_, '_> {
             self.note(&id, &model.search_key);
         }
 
-        if model.variants.is_empty() {
+        if model.variants.is_empty() && model.buildings.is_empty() {
             return self.leaf(id, label, kind);
         }
 
         // A search that names only a variant opens the model to show it; one
-        // that names the model leaves its variants folded.
+        // that names the model leaves its variants folded. The buildings it
+        // is the body of come first, while the model itself is listed whole.
         let base_matches = found.is_none_or(|found| found == ModelMatch::Name);
         let wanted = self.opens_models() && !base_matches;
-        self.folder(id, label, kind, wanted, |b| b.variant_rows(&model.variants, base_matches))
+        self.folder(id, label, kind, wanted, |b| {
+            let mut items = Vec::new();
+            if base_matches {
+                items.extend(model.buildings.iter().map(|building| b.model_building_row(model, building)));
+            }
+            items.extend(b.variant_rows(&model.variants, base_matches));
+
+            items
+        })
+    }
+
+    /// A GameParams building under the model that is its body, which it
+    /// cannot be drawn without.
+    fn model_building_row(&mut self, model: &ModelRow, building: &BuildingRow) -> TreeItem {
+        let id = model_building_row_id(&model.path, building.id);
+        self.mark_geometry(&id, model.geometry);
+        let kind = RowKind::Building {
+            id: building.id,
+            display_name: building.display_name.clone(),
+            param_name: building.param_name.clone(),
+        };
+
+        self.leaf(id, building.display_name.clone(), kind)
     }
 
     /// `show_all` lists every variant, for a parent the search names itself.
@@ -936,7 +967,9 @@ pub(super) mod fixture {
     use super::super::catalog::ShipCatalog;
     use super::super::catalog::ShipEntry;
     use super::super::model_refs::VehicleParamIndex;
+    use super::super::model_tree::BuildingRow;
     use super::super::model_tree::FortificationRow;
+    use super::super::model_tree::ModelBuildings;
     use super::super::model_tree::ModelReferences;
     use super::super::model_tree::PartKeys;
     use super::super::model_tree::ShipPartRows;
@@ -1062,23 +1095,38 @@ pub(super) mod fixture {
         ModelCatalog::from_paths(paths.map(path), &CatalogLinks::new(skins, vec![fort])).with_geometry(geometry)
     }
 
-    /// A fort the game names and a coastal battery it does not.
+    pub const FORT_OF_THE_ISLES: u64 = 4229999600;
+    pub const COASTAL_BATTERY: u64 = 4229999601;
+
+    /// A fort the game names, armored in its hull.
     pub fn fortifications() -> Vec<FortificationRow> {
-        let row = |id: u64, kind: BuildingKind, kind_name: Option<&str>, display_name: &str, param_name: &str| {
-            FortificationRow {
-                id: GameParamId::from(id),
-                kind,
-                kind_name: kind_name.map(str::to_string),
-                display_name: display_name.to_string(),
-                param_name: param_name.to_string(),
-                search_key: key(&[display_name, param_name, &id.to_string()]),
-            }
+        let (display_name, param_name) = ("Fort of the Isles", "PCBX001");
+
+        vec![FortificationRow {
+            id: GameParamId::from(FORT_OF_THE_ISLES),
+            kind: BuildingKind::Complex,
+            kind_name: Some("Fort".to_string()),
+            display_name: display_name.to_string(),
+            param_name: param_name.to_string(),
+            search_key: key(&[display_name, param_name, &FORT_OF_THE_ISLES.to_string()]),
+            // Its hull is not installed.
+            geometry: Some(GeometryAvailability::Absent),
+        }]
+    }
+
+    /// The fort and a coastal battery the game does not name, both on the
+    /// fort model.
+    pub fn model_buildings() -> ModelBuildings {
+        let row = |id: u64, display_name: &str, param_name: &str| BuildingRow {
+            id: GameParamId::from(id),
+            display_name: display_name.to_string(),
+            param_name: param_name.to_string(),
         };
 
-        vec![
-            row(4229999600, BuildingKind::Complex, Some("Fort"), "Fort of the Isles", "PCBX001"),
-            row(4229999601, BuildingKind::CoastalArtillery, None, "PCBC002", "PCBC002"),
-        ]
+        ModelBuildings::new(HashMap::from([(
+            path(FORT),
+            vec![row(FORT_OF_THE_ISLES, "Fort of the Isles", "PCBX001"), row(COASTAL_BATTERY, "PCBC002", "PCBC002")],
+        )]))
     }
 
     /// A provider without params or translations: names the game would give
@@ -1129,6 +1177,7 @@ mod tests {
     use wowsunpack::export::model_catalog::CatalogLinks;
     use wowsunpack::export::model_catalog::ModelCatalog;
 
+    use super::super::model_tree::ModelBuildings;
     use super::*;
 
     struct Data {
@@ -1144,7 +1193,8 @@ mod tests {
         let ships = fixture::ships();
         let catalog = fixture::catalog();
         let references = fixture::references(&ships);
-        let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
+        let index =
+            ModelTreeIndex::build(&catalog, &ships, &references, fixture::model_buildings(), &fixture::metadata());
         let parts = fixture::ship_parts(&catalog, &references);
 
         Data { ships, index, parts, fortifications: Vec::new(), hidden: HashMap::new() }
@@ -1164,7 +1214,8 @@ mod tests {
         });
         let catalog = ModelCatalog::from_paths(guns, &CatalogLinks::default());
         let references = super::super::model_tree::ModelReferences::new();
-        let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
+        let index =
+            ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
 
         Data { ships, index, parts: HashMap::new(), fortifications: Vec::new(), hidden: HashMap::new() }
     }
@@ -1210,13 +1261,30 @@ mod tests {
                 param_name: "PCBX001".to_string(),
             })
         );
+        assert_eq!(
+            built.unavailable.get(&building_row_id(GameParamId::from(fixture::FORT_OF_THE_ISLES))),
+            Some(&GeometryAvailability::Absent),
+            "a building whose hull the install lacks is marked"
+        );
 
         assert_eq!(
             search(&data, "pcbx001"),
-            ["Fortifications (1)", "  Fort (1)", "    Fort of the Isles", "Models"],
+            [
+                "Fortifications (1)",
+                "  Fort (1)",
+                "    Fort of the Isles",
+                "Models",
+                "Buildings (1)",
+                "  Complex (1)",
+                "    LGB001_Fort +"
+            ],
             "a building is found by its GameParams name"
         );
-        assert_eq!(search(&data, "pcbc002"), ["Fortifications (1)", "  CoastalArtillery (1)", "    PCBC002", "Models"]);
+        assert_eq!(
+            search(&data, "pcbc002")[..2],
+            ["Models", "Buildings (1)"],
+            "a building armored only through its guns is not a fortification"
+        );
 
         let built = build_in_tiers(&data, "", TierRange::new(1, 5), &mut set, false);
         assert_eq!(
@@ -1402,8 +1470,44 @@ mod tests {
 
         let built = build(&data, "pcbx022", &mut HashSet::new(), true);
 
-        assert_eq!(outline(&built.items), ["Models", "Buildings (1)", "  Complex (1)", "    LGB001_Fort"]);
+        assert_eq!(outline(&built.items), ["Models", "Buildings (1)", "  Complex (1)", "    LGB001_Fort +"]);
         assert_eq!(built.notes.get(&fort).map(|note| note.to_string()).as_deref(), Some("PCBX022_PCGM002"));
+    }
+
+    #[test]
+    fn a_building_model_lists_its_buildings_which_share_its_geometry_and_are_found_by_name_and_id() {
+        let fort = fixture::path(fixture::FORT);
+        let catalog = fixture::catalog().with_geometry(HashMap::from([(fort.clone(), GeometryAvailability::Absent)]));
+        let ships = fixture::ships();
+        let references = fixture::references(&ships);
+        let buildings = fixture::model_buildings();
+        let index = ModelTreeIndex::build(&catalog, &ships, &references, buildings, &fixture::metadata());
+        let data = Data { index, ..data() };
+        let battery = GameParamId::from(fixture::COASTAL_BATTERY);
+        let battery_row = model_building_row_id(&fort, battery);
+
+        let built = expand_all(&data);
+        let lines = outline(&built.items);
+        let at = lines.iter().position(|line| line.trim() == "LGB001_Fort").expect("the fort model is listed");
+        assert_eq!(
+            lines[at + 1..at + 3].iter().map(|line| line.trim()).collect::<Vec<_>>(),
+            ["Fort of the Isles", "PCBC002"]
+        );
+        assert_eq!(
+            built.rows.get(&battery_row),
+            Some(&RowKind::Building {
+                id: battery,
+                display_name: "PCBC002".to_string(),
+                param_name: "PCBC002".to_string()
+            })
+        );
+        assert_eq!(built.unavailable.get(&battery_row), Some(&GeometryAvailability::Absent), "the hull is missing");
+        assert_eq!(data.index.building_hulls.get(&battery), Some(&fort), "an open building finds its row");
+
+        for query in ["fort of the isles", "4229999601"] {
+            let built = build(&data, query, &mut HashSet::from([model_row_id(&fort)]), true);
+            assert!(built.rows.contains_key(&battery_row), "{query} lists the buildings under the model");
+        }
     }
 
     #[test]
@@ -1472,6 +1576,8 @@ mod tests {
             "Buildings",
             "  Complex",
             "    LGB001_Fort",
+            "      Fort of the Isles",
+            "      PCBC002",
             "Locations",
             "  building",
             "    city",
@@ -1771,7 +1877,21 @@ mod tests {
         eprintln!("[measured] model references in {:?}", started.elapsed());
 
         let started = Instant::now();
-        let index = ModelTreeIndex::build(library.catalog(), &ships, &references, &metadata);
+        let buildings = wowsunpack::export::building_armor::BuildingArmorIndex::build(&metadata, &library);
+        let fortifications = super::super::model_tree::list_fortifications(&buildings, library.catalog(), &metadata);
+        let model_buildings = super::super::model_tree::list_model_buildings(&buildings, &metadata);
+        eprintln!(
+            "[measured] {} buildings, {} fortifications in {:?}",
+            buildings.buildings().len(),
+            fortifications.len(),
+            started.elapsed()
+        );
+        for row in fortifications.iter().take(4) {
+            eprintln!("  {:?} {:?} {} ({})", row.kind, row.kind_name, row.display_name, row.param_name);
+        }
+
+        let started = Instant::now();
+        let index = ModelTreeIndex::build(library.catalog(), &ships, &references, model_buildings, &metadata);
         eprintln!("[measured] index of {} models in {:?}", index.model_count(), started.elapsed());
         assert_eq!(index.model_count(), library.catalog().listed_entries().count());
 
@@ -1798,13 +1918,19 @@ mod tests {
             assert!(flagged, "{directory} has a flag");
         }
 
-        let started = Instant::now();
-        let buildings = wowsunpack::export::building_armor::BuildingArmorIndex::build(&metadata, &library);
-        let fortifications = super::super::model_tree::list_fortifications(&buildings, &metadata);
-        eprintln!("[measured] {} fortifications in {:?}", fortifications.len(), started.elapsed());
-        for row in fortifications.iter().take(4) {
-            eprintln!("  {:?} {:?} {} ({})", row.kind, row.kind_name, row.display_name, row.param_name);
+        let mut folders: Vec<&ModelFolder> = index.folders.iter().collect();
+        let mut under_models = Vec::new();
+        while let Some(folder) = folders.pop() {
+            folders.extend(folder.folders.iter());
+            under_models.extend(folder.models.iter().flat_map(|model| model.buildings.iter().map(move |b| (model, b))));
         }
+        eprintln!("[measured] {} buildings under their models", under_models.len());
+        for (model, building) in under_models.iter().take(4) {
+            eprintln!("  {} > {} ({}, {})", model.path, building.display_name, building.param_name, building.id);
+        }
+        assert!(!under_models.is_empty(), "building models list their GameParams buildings");
+        let hulls = buildings.buildings().iter().filter(|building| building.model().is_some()).count();
+        assert_eq!(index.building_hulls.len(), hulls, "every building with a hull model is listed under it");
 
         let data = Data { ships, index, parts, fortifications, hidden: HashMap::new() };
         let queries =

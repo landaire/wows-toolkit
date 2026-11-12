@@ -45,6 +45,8 @@ pub struct ModelTreeIndex {
     /// What each skin model replaces, for its row's tooltip. Shared, as a
     /// row hands it to its tooltip on every frame.
     pub skins: HashMap<ModelPath, Arc<[SkinUse]>>,
+    /// The hull model each listed building stands under.
+    pub building_hulls: HashMap<GameParamId, ModelPath>,
 }
 
 /// A folder of the model listing.
@@ -88,6 +90,9 @@ pub struct ModelRow {
     pub variants: Vec<VariantRow>,
     /// Whether the install ships its geometry; `None` when unknown.
     pub geometry: Option<GeometryAvailability>,
+    /// The GameParams buildings this model is the body of, which open with
+    /// their guns in place.
+    pub buildings: Vec<BuildingRow>,
 }
 
 pub struct VariantRow {
@@ -422,12 +427,15 @@ impl ModelTreeIndex {
         catalog: &ModelCatalog,
         ships: &ShipCatalog,
         references: &ModelReferences,
+        mut buildings: ModelBuildings,
         metadata: &GameMetadataProvider,
     ) -> Self {
         let mut nations: Vec<ModelFolder> = Vec::new();
         let mut groups: Vec<ModelFolder> = Vec::new();
+        let mut building_hulls = HashMap::new();
         for entry in catalog.listed_entries() {
-            let row = model_row(entry, catalog, references);
+            let row = model_row(entry, catalog, references, &mut buildings);
+            building_hulls.extend(row.buildings.iter().map(|building| (building.id, row.path.clone())));
             let path = folder_path(entry.group(), ships, metadata);
             let (top, rest) = path.split_first().expect("a folder path names its top folder");
             let siblings = if entry.group().kind() == ModelGroupKind::Gameplay { &mut nations } else { &mut groups };
@@ -450,7 +458,7 @@ impl ModelTreeIndex {
 
         let skins = references.skins.iter().map(|(skin, uses)| (skin.clone(), Arc::from(uses.as_slice()))).collect();
 
-        Self { folders: nations, skins }
+        Self { folders: nations, skins, building_hulls }
     }
 
     pub fn model_count(&self) -> usize {
@@ -493,7 +501,55 @@ fn folder_order(name: &FolderName) -> FolderOrder {
     }
 }
 
-/// An armored building, which the Ships section lists under Fortifications.
+/// A GameParams `Building` a building model is the body of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildingRow {
+    pub id: GameParamId,
+    /// The game's name for the building, or its GameParams name.
+    pub display_name: String,
+    /// The GameParams name, e.g. `PCBX001`.
+    pub param_name: String,
+}
+
+/// The buildings the viewer can open, by the hull model that is their body.
+#[derive(Debug, Default)]
+pub struct ModelBuildings(HashMap<ModelPath, Vec<BuildingRow>>);
+
+impl ModelBuildings {
+    pub fn new(by_model: HashMap<ModelPath, Vec<BuildingRow>>) -> Self {
+        Self(by_model)
+    }
+
+    /// Moves out the buildings `model` is the body of.
+    fn take(&mut self, model: &ModelPath) -> Vec<BuildingRow> {
+        self.0.remove(model).unwrap_or_default()
+    }
+}
+
+/// Every building in `index`, which holds those with armor in their hull or
+/// their gun mounts, by its hull model.
+pub fn list_model_buildings(index: &BuildingArmorIndex, metadata: &GameMetadataProvider) -> ModelBuildings {
+    let mut by_model: HashMap<ModelPath, Vec<BuildingRow>> = HashMap::new();
+    for building in index.buildings() {
+        let Some(model) = building.model() else {
+            continue;
+        };
+        let param_name = building.param().name().to_string();
+        let display_name = building_display_name(&param_name, metadata);
+        by_model.entry(model.clone()).or_default().push(BuildingRow { id: building.id(), display_name, param_name });
+    }
+
+    ModelBuildings(by_model)
+}
+
+/// The game's name for a building, or its GameParams name.
+fn building_display_name(param_name: &str, metadata: &GameMetadataProvider) -> String {
+    let key = wowsunpack::data::TranslationKey::new(format!("IDS_{}", param_name.to_uppercase()));
+    metadata.localized_name_from_id(&key).unwrap_or_else(|| param_name.to_string())
+}
+
+/// A building armored in its own hull, which the Ships section lists under
+/// Fortifications.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FortificationRow {
     pub id: GameParamId,
@@ -506,24 +562,38 @@ pub struct FortificationRow {
     pub param_name: String,
     /// The name, GameParams name and id.
     pub search_key: SearchKey,
+    /// Whether the install ships the hull's geometry; `None` when unknown.
+    pub geometry: Option<GeometryAvailability>,
 }
 
-/// Every armored building, by kind then name as `index` lists them.
-pub fn list_fortifications(index: &BuildingArmorIndex, metadata: &GameMetadataProvider) -> Vec<FortificationRow> {
+/// Every building armored in its own hull, by kind then name as `index`
+/// lists them. One armored only through its gun mounts is listed under
+/// Models > Buildings alone.
+pub fn list_fortifications(
+    index: &BuildingArmorIndex,
+    catalog: &ModelCatalog,
+    metadata: &GameMetadataProvider,
+) -> Vec<FortificationRow> {
     index
         .buildings()
         .iter()
+        .filter(|building| building.hull_has_armor())
         .map(|building| {
             let param = building.param();
             let kind = param.kind().clone();
             let kind_name = kind.translation_key().and_then(|key| metadata.localized_name_from_id(&key));
-            let name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}", param.name().to_uppercase()));
-            let display_name = metadata.localized_name_from_id(&name_key).unwrap_or_else(|| param.name().to_string());
+            let display_name = building_display_name(param.name(), metadata);
 
             let mut search_key = SearchKey::new();
             search_key.push(display_name.clone());
             search_key.push(param.name());
             search_key.push(building.id().to_string());
+
+            // A building without a hull model has nothing to draw.
+            let geometry = match building.model() {
+                Some(model) => catalog.geometry(model),
+                None => Some(GeometryAvailability::Absent),
+            };
 
             FortificationRow {
                 id: building.id(),
@@ -532,6 +602,7 @@ pub fn list_fortifications(index: &BuildingArmorIndex, metadata: &GameMetadataPr
                 display_name,
                 param_name: param.name().to_string(),
                 search_key,
+                geometry,
             }
         })
         .collect()
@@ -670,7 +741,12 @@ fn child_folder<'a>(siblings: &'a mut Vec<ModelFolder>, (key, name): &(String, F
     &mut siblings[idx]
 }
 
-fn model_row(entry: &ModelEntry, catalog: &ModelCatalog, references: &ModelReferences) -> ModelRow {
+fn model_row(
+    entry: &ModelEntry,
+    catalog: &ModelCatalog,
+    references: &ModelReferences,
+    buildings: &mut ModelBuildings,
+) -> ModelRow {
     let variants = entry
         .variants()
         .iter()
@@ -691,13 +767,20 @@ fn model_row(entry: &ModelEntry, catalog: &ModelCatalog, references: &ModelRefer
         })
         .collect();
 
-    // A building model is also found by the `Building` params using it.
+    // A building model is also found by the `Building` params using it, and
+    // by the names and ids of the buildings listed under it.
     let mut search_key = references.model_key(entry.path());
     for building in entry.building_params() {
         search_key.push(building.name());
     }
+    let buildings = buildings.take(entry.path());
+    for building in &buildings {
+        search_key.push(building.display_name.clone());
+        search_key.push(building.param_name.clone());
+        search_key.push(building.id.to_string());
+    }
 
-    ModelRow { path: entry.path().clone(), search_key, variants, geometry: catalog.geometry(entry.path()) }
+    ModelRow { path: entry.path().clone(), search_key, variants, geometry: catalog.geometry(entry.path()), buildings }
 }
 
 fn variant_row(

@@ -72,6 +72,7 @@ use super::model_tree::ShipPartRows;
 use super::model_tree::SkinUse;
 use super::model_tree::list_all_ship_parts;
 use super::model_tree::list_fortifications;
+use super::model_tree::list_model_buildings;
 use super::search_key::fold;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
@@ -79,6 +80,7 @@ use super::sidebar_tree::RowKind;
 use super::sidebar_tree::SearchMatches;
 use super::sidebar_tree::TreeSources;
 use super::sidebar_tree::build_tree;
+use super::sidebar_tree::model_building_row_id;
 use super::sidebar_tree::open_row_id;
 use super::viewport_view::OpeningLayer;
 
@@ -133,7 +135,8 @@ pub struct ModelSelected {
     pub from_ship: Option<ShipPartRef>,
 }
 
-/// Emitted when the user opens an armored building under Fortifications.
+/// Emitted when the user opens a building, under Fortifications or under
+/// its hull model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildingSelected {
     pub building: GameParamId,
@@ -598,30 +601,30 @@ impl Sidebar {
                 (Arc::clone(&bundle), Arc::clone(&library), Arc::clone(&references));
             let index = cx.background_spawn(async move {
                 let metadata = index_bundle.assets.metadata();
-                ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog, &index_references, metadata)
+                let buildings = BuildingArmorIndex::build(metadata, &index_library);
+                let catalog = index_library.catalog();
+                let fortifications = list_fortifications(&buildings, catalog, metadata);
+                let model_buildings = list_model_buildings(&buildings, metadata);
+                let index =
+                    ModelTreeIndex::build(catalog, &index_bundle.catalog, &index_references, model_buildings, metadata);
+                (index, fortifications)
             });
-            let (fortifications_bundle, fortifications_library) = (Arc::clone(&bundle), Arc::clone(&library));
             let parts = cx.background_spawn(async move {
                 list_all_ship_parts(&all_ships, bundle.assets.metadata(), &library, &references)
             });
-            let fortifications = cx.background_spawn(async move {
-                let metadata = fortifications_bundle.assets.metadata();
-                list_fortifications(&BuildingArmorIndex::build(metadata, &fortifications_library), metadata)
-            });
 
-            let index = index.await;
+            let (index, fortifications) = index.await;
             // An error is the sidebar having been dropped.
-            if this.update(cx, |this, cx| this.adopt_model_index(index, cx)).is_err() {
+            let adopted = this.update(cx, |this, cx| {
+                this.fortifications = Arc::new(fortifications);
+                this.adopt_model_index(index, cx);
+            });
+            if adopted.is_err() {
                 return;
             }
 
             let parts = parts.await;
-            if this.update(cx, |this, cx| this.adopt_ship_parts(parts, cx)).is_err() {
-                return;
-            }
-
-            let fortifications = fortifications.await;
-            let _ = this.update(cx, |this, cx| this.adopt_fortifications(fortifications, cx));
+            let _ = this.update(cx, |this, cx| this.adopt_ship_parts(parts, cx));
         }));
     }
 
@@ -635,12 +638,6 @@ impl Sidebar {
         self.ship_parts = Arc::new(parts);
         // A search names parts as well as ships. Folders the user closed
         // meanwhile stay closed.
-        self.rebuild_tree(Rebuild::Rematch, cx);
-        cx.notify();
-    }
-
-    fn adopt_fortifications(&mut self, fortifications: Vec<FortificationRow>, cx: &mut Context<Self>) {
-        self.fortifications = Arc::new(fortifications);
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
@@ -687,13 +684,13 @@ impl Sidebar {
         self.apply_pending_query(cx);
 
         // The open model's row is highlighted for the pane, not chosen.
-        let open = self.open_model.as_ref().map(open_row_id);
+        let open = self.open_row_ids();
         let highlighted = self
             .tree_state
             .read(cx)
             .selected_item()
             .map(|item| item.id.clone())
-            .filter(|id| Some(id) != open.as_ref() && self.row_info.get(id).is_some_and(opens_on_its_own));
+            .filter(|id| !open.contains(id) && self.row_info.get(id).is_some_and(opens_on_its_own));
         if let Some(id) = highlighted.or_else(|| self.first_openable_row(cx)) {
             self.open_row(&id, cx);
         }
@@ -872,13 +869,30 @@ impl Sidebar {
 
     /// Selects the open model's row, or nothing when it is not listed.
     fn highlight_open_row(&mut self, cx: &mut Context<Self>) {
-        let id = self.open_model.as_ref().map(open_row_id);
+        let ids = self.open_row_ids();
         self.tree_state.update(cx, |state, cx| {
-            let ix = id.and_then(|id| state.index_of(&id));
+            let ix = ids.iter().find_map(|id| state.index_of(id));
             if state.selected_index() != ix {
                 state.set_selected_index(ix, cx);
             }
         });
+    }
+
+    /// The rows that stand for the open target, the first listed of which is
+    /// highlighted. A building stands under Fortifications when its hull is
+    /// armored, and under its hull model.
+    fn open_row_ids(&self) -> Vec<SharedString> {
+        let Some(open) = &self.open_model else {
+            return Vec::new();
+        };
+        let mut ids = vec![open_row_id(open)];
+        if let (OpenTarget::Building(building), ModelsState::Ready(index)) = (open, &self.models)
+            && let Some(hull) = index.building_hulls.get(building)
+        {
+            ids.push(model_building_row_id(hull, *building));
+        }
+
+        ids
     }
 }
 
@@ -1272,6 +1286,7 @@ mod tests {
     use super::super::model_refs::ShipPartKey;
     use super::super::model_refs::ShipPartRef;
     use super::super::model_refs::VehicleParamIndex;
+    use super::super::model_tree::ModelBuildings;
     use super::super::model_tree::ModelTreeIndex;
     use super::super::sidebar_tree::ModelSection;
     use super::super::sidebar_tree::RowKind;
@@ -1279,6 +1294,7 @@ mod tests {
     use super::super::sidebar_tree::TreeSources;
     use super::super::sidebar_tree::building_row_id;
     use super::super::sidebar_tree::fixture;
+    use super::super::sidebar_tree::model_building_row_id;
     use super::super::sidebar_tree::model_row_id;
     use super::super::sidebar_tree::part_row_id;
     use super::super::sidebar_tree::ship_row_id;
@@ -1310,7 +1326,13 @@ mod tests {
                 let catalog = fixture::catalog();
                 let ships = fixture::ships();
                 let references = fixture::references(&ships);
-                let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
+                let index = ModelTreeIndex::build(
+                    &catalog,
+                    &ships,
+                    &references,
+                    ModelBuildings::default(),
+                    &fixture::metadata(),
+                );
                 sidebar.adopt_model_index(index, cx);
                 sidebar.adopt_ship_parts(fixture::ship_parts(&catalog, &references), cx);
             })
@@ -1445,7 +1467,9 @@ mod tests {
         rust_i18n::set_locale("en");
         let catalog = fixture::catalog();
         let ships = fixture::ships();
-        let index = ModelTreeIndex::build(&catalog, &ships, &fixture::references(&ships), &fixture::metadata());
+        let references = fixture::references(&ships);
+        let index =
+            ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
         let skin = fixture::path(fixture::IOWA_SKIN);
         let uses = index.skins.get(&skin).expect("the skin's exteriors are known");
 
@@ -1655,13 +1679,73 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_building_under_its_model_opens_the_building_and_the_model_row_the_model(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let buildings = record::<BuildingSelected>(&window, cx);
+        let models = record::<ModelSelected>(&window, cx);
+        let battery = GameParamId::from(fixture::COASTAL_BATTERY);
+        let fort_model = fixture::path(fixture::FORT);
+        window
+            .update(cx, |sidebar, _window, cx| {
+                let catalog = fixture::catalog();
+                let ships = fixture::ships();
+                let buildings = fixture::model_buildings();
+                let references = fixture::references(&ships);
+                let index = ModelTreeIndex::build(&catalog, &ships, &references, buildings, &fixture::metadata());
+                sidebar.browse_expanded.extend(
+                    ["model-folder/Building", "model-folder/Building/Complex", &model_row_id(&fort_model)]
+                        .map(SharedString::from),
+                );
+                sidebar.adopt_model_index(index, cx);
+            })
+            .expect("the window is open");
+        let row = row_index(&window, &model_building_row_id(&fort_model, battery), cx)
+            .expect("the building is listed under its model");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("armor-sidebar-row", row), cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        press_on_row(window, row, "enter", cx);
+
+        let opened = [BuildingSelected { building: battery }, BuildingSelected { building: battery }];
+        assert_eq!(*buildings.borrow(), opened);
+        assert!(models.borrow().is_empty(), "the building row does not open the bare model");
+
+        window
+            .update(cx, |sidebar, _window, cx| sidebar.set_open_model(Some(OpenTarget::Building(battery)), cx))
+            .expect("the window is open");
+        assert_eq!(selected_row(&window, cx), Some(row), "the open building's row is highlighted");
+
+        let fort = GameParamId::from(fixture::FORT_OF_THE_ISLES);
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.browse_expanded.extend(["armor-fortifications".into(), "armor-fortifications/Complex".into()]);
+                sidebar.fortifications = Arc::new(fixture::fortifications());
+                sidebar.rebuild_tree(Rebuild::Rematch, cx);
+                sidebar.set_open_model(Some(OpenTarget::Building(fort)), cx);
+            })
+            .expect("the window is open");
+        let fortification = row_index(&window, &building_row_id(fort), cx).expect("the fort is a fortification");
+        assert!(row_index(&window, &model_building_row_id(&fort_model, fort), cx).is_some(), "and under its hull");
+        assert_eq!(selected_row(&window, cx), Some(fortification), "the Fortifications row is highlighted first");
+
+        let model_row = row_index(&window, &model_row_id(&fort_model), cx).expect("the model is listed");
+        press_on_row(window, model_row, "enter", cx);
+        assert_eq!(*models.borrow(), [ModelSelected { model: fort_model, from_ship: None }], "the model row opens it");
+    }
+
+    #[gpui_kit::test]
     fn a_fortification_row_opens_its_building_by_click_and_by_enter(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
         let buildings = record::<BuildingSelected>(&window, cx);
         window
             .update(cx, |sidebar, _window, cx| {
                 sidebar.browse_expanded.extend(["armor-fortifications".into(), "armor-fortifications/Complex".into()]);
-                sidebar.adopt_fortifications(fixture::fortifications(), cx);
+                sidebar.fortifications = Arc::new(fixture::fortifications());
+                sidebar.rebuild_tree(Rebuild::Rematch, cx);
             })
             .expect("the window is open");
         let fort = GameParamId::from(4229999600u64);
