@@ -107,6 +107,7 @@ const CSS: &str = css!(
         padding: 0 4px;
         overflow-x: auto;
         overflow-y: hidden;
+        --zgui-scrollbar-width: none;
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-folder-tab {
