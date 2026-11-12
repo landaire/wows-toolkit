@@ -12,6 +12,8 @@
 //! loaded battle with a [`PanelTable`]: the model (a signal, replaced when the recording player's
 //! figures are hidden or a rating table arrives), the debug flag, the [`PlayerDetail`] that draws
 //! a row's expanded content, and the callback that shows a row's raw metadata in the side panel.
+//! [`player_table_slot`](crate::tabs::replays::player_table_slot) is the slot that draws the
+//! replay's [`PlayerTable`](crate::tabs::replays::table::PlayerTable).
 
 pub mod chat;
 pub mod controls;
@@ -92,11 +94,12 @@ use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::replays::panel::chat::ChatPanelProps;
 use crate::tabs::replays::panel::expanded::ExpandedRowProps;
-use crate::tabs::replays::panel::expanded::Rows;
 use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
 use crate::tabs::replays::panel::raw_json::RawJsonPanelProps;
+use crate::tabs::replays::table::PlayerDetail;
+use crate::tabs::replays::table::PlayerDetailCx;
 
 const SHEET: &str = "wt-replay-panel";
 
@@ -386,9 +389,6 @@ pub struct ConstantsMismatched {
     pub build: u32,
     pub version: Option<String>,
 }
-
-/// Draws one row's expanded content for the table.
-pub type PlayerDetail = Rc<dyn Fn(Arc<PlayerRow>, Rows, Rc<[ReplayColumn]>) -> AnyView>;
 
 /// What the table slot is built with.
 #[derive(Clone)]
@@ -694,7 +694,8 @@ pub fn ReplayPanel(
                 let loaded = loaded.get()?;
                 let model: Signal<Rc<ReplayReportModel>, LocalStorage> = loaded.model.into();
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
-                let detail: PlayerDetail = Rc::new(move |row, rows, columns| {
+                let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
+                    let PlayerDetailCx { row, rows, columns } = cx;
                     AnyView::new(view! {
                         ExpandedRow(columns = columns, row = row, rows = rows, debug = debug, alt_held = alt_held)
                     })
