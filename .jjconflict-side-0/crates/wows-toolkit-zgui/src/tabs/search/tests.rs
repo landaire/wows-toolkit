@@ -243,12 +243,38 @@ fn hovering_a_row_previews_that_battle() {
     let cell = window.by_attribute("data-outcome", "loss").expect("the second row is drawn");
     window.hover(cell).expect("the row can be hovered");
     settle(&mut window);
-    assert!(window.by_test_id("hover-preview").is_some(), "the card is up beside the row");
+    let card = window.by_test_id("hover-preview").expect("the card is up beside the row");
+    let placed = window.bounds(card).expect("the card has a box");
+    let row = window.bounds(cell).expect("the cell has a box");
+    let clear = placed.origin.y.0 >= row.origin.y.0 + row.size.height.0
+        || placed.origin.y.0 + placed.size.height.0 <= row.origin.y.0;
+    assert!(clear, "the card leaves its row uncovered: card {placed:?}, row {row:?}");
+
+    let dots = window.by_test_id("search-row-actions-1").expect("the row carries its dots");
+    window.hover(dots).expect("the dots can be hovered");
+    settle(&mut window);
+    let card = window.by_test_id("hover-preview").expect("the card stays up along the row");
+    assert_eq!(window.bounds(card).map(|moved| moved.origin), Some(placed.origin), "the card holds still");
 
     let bar = window.by_test_id("search-bar").expect("the bar is drawn");
     window.hover(bar).expect("the bar can be hovered");
     settle(&mut window);
     assert!(window.by_test_id("hover-preview").is_none(), "leaving the results ends the preview");
+}
+
+/// Moving from a row to the header leaves the results' rows, and the preview with them.
+#[test]
+fn moving_from_a_row_to_the_header_ends_the_preview() {
+    let (mut window, _search) = open_with_hits(HeadlessOptions::new(REVIEW_SIZE), sample_hits());
+    let cell = window.by_attribute("data-outcome", "loss").expect("the second row is drawn");
+    window.hover(cell).expect("the row can be hovered");
+    settle(&mut window);
+    assert!(window.by_test_id("hover-preview").is_some(), "the card is up for the row");
+
+    let header = window.by_label("Map").expect("the Map header is drawn");
+    window.hover(header).expect("the header can be hovered");
+    settle(&mut window);
+    assert!(window.by_test_id("hover-preview").is_none(), "the card went with the row");
 }
 
 #[test]

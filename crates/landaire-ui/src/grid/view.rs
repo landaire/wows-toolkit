@@ -52,6 +52,7 @@ use crate::grid::state::GridCx;
 use crate::grid::state::GridStrings;
 use crate::grid::state::MenuTarget;
 use crate::grid::state::Pins;
+use crate::grid::state::RowHover;
 use crate::grid::state::RowMenu;
 use crate::grid::state::RowMenuHandle;
 use crate::grid::style;
@@ -108,6 +109,9 @@ pub fn Grid<T, K, F>(
     /// opens or closes the detail.
     #[prop(optional)]
     on_activate: Option<UnsyncCallback<K>>,
+    /// Told when the pointer comes onto a row and when it leaves it.
+    #[prop(optional)]
+    on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
     /// The items of the menu a row opens, for that row.
     #[prop(optional)]
     row_menu: Option<RowMenu<K>>,
@@ -222,6 +226,7 @@ where
         fixed,
         window,
         on_activate,
+        on_row_hover,
         row_menu,
         menu_target: RwSignal::new_local(None),
         menu_claimed: Cell::new(false),

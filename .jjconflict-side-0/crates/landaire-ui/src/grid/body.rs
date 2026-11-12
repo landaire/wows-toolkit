@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
@@ -44,6 +45,7 @@ use crate::grid::mode::RowGroups;
 use crate::grid::selection::GridSelectionMode;
 use crate::grid::state::GridCx;
 use crate::grid::state::MenuTarget;
+use crate::grid::state::RowHover;
 use crate::grid::state::Step;
 use crate::motion::Movement;
 use crate::surface::RowIndex;
@@ -192,6 +194,24 @@ where
             }
         }
     };
+    let on_pointer_enter = {
+        let cx = Rc::clone(&cx);
+        let key = key.clone();
+        move |_: &mut EventCx<'_, events::PointerEnter>| {
+            if let Some(on_row_hover) = &cx.on_row_hover {
+                on_row_hover.run(RowHover::Entered { key: key.clone(), anchor });
+            }
+        }
+    };
+    let on_pointer_leave = {
+        let cx = Rc::clone(&cx);
+        let key = key.clone();
+        move |_: &mut EventCx<'_, events::PointerLeave>| {
+            if let Some(on_row_hover) = &cx.on_row_hover {
+                on_row_hover.run(RowHover::Left { key: key.clone() });
+            }
+        }
+    };
 
     let ids = cx.drawn_ids;
     let detail =
@@ -203,6 +223,8 @@ where
             on:pointer_down = on_pointer_down,
             on:context_menu = on_context_menu,
             on:double_click = on_double_click,
+            on:pointer_enter = on_pointer_enter,
+            on:pointer_leave = on_pointer_leave,
             {..own}
         ) {
             {heading}
