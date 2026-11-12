@@ -837,16 +837,14 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
 
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
 /// current state (same lazy-`.content()` rationale as
-/// `render_popover_content`'s doc). Between the header and the hull tree,
-/// adds -- in the same order as egui's `draw_hull_visibility_popover`
-/// (`tab.rs:3135-3317`) -- the Milestone 4 Task 8c selectors: hull upgrade
-/// (`render_hull_upgrade_row`, when the ship has more than one), module
+/// `render_popover_content`'s doc). After the header come the hull upgrade
+/// (`render_hull_upgrade_row`, when the ship has more than one), the module
 /// alternatives (`render_module_alternative_row`, one row per component type
-/// with more than one option), the camo picker (Milestone 4 Task 8b,
-/// `render_camo_picker`, when `armor.camo_scheme_infos` is non-empty), and
-/// LOD (`render_lod_row`, when the ship has more than one) -- the selectors
+/// with more than one option), the hull part tree, the camo picker
+/// (`render_camo_picker`, when `armor.camo_scheme_infos` is non-empty), and
+/// LOD (`render_lod_row`, when the ship has more than one). The selectors
 /// each select a new value on `ViewportView` and trigger a background reload
-/// (`ViewportView::reload_ship`), the camo picker changes the active camo
+/// (`ViewportView::reload_ship`); the camo picker changes the active camo
 /// directly (`ViewportView::select_camo`).
 ///
 /// Hovering a group or mesh row highlights its meshes in the viewport
@@ -976,9 +974,12 @@ pub(crate) fn render_hull_popover_content(
         }
     }
 
-    // Matches egui's `draw_hull_visibility_popover` order (`tab.rs:3135-
-    // 3317`): header, hull upgrade, module alternatives, camo, LOD, then the
-    // hull tree.
+    // The part tree comes before the camo and LOD pickers: it is what the
+    // reader turns to most, and the camo list can run long. It has no scroll
+    // of its own, so a wheel over it moves only the rail.
+    let tree = v_flex().id("armor-hull-visibility-tree").test_support().gap_1().children(groups);
+    col = col.child(div().h(px(1.)).bg(border)).child(tree);
+
     if !armor.camo_scheme_infos.is_empty() {
         col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
             entity,
@@ -991,12 +992,6 @@ pub(crate) fn render_hull_popover_content(
     if armor.hull_lod_count > 1 {
         col = col.child(render_lod_row(entity, &armor, hull_lod));
     }
-
-    let tree = v_flex().gap_1().children(groups);
-
-    col = col
-        .child(div().h(px(1.)).bg(border))
-        .child(div().id("armor-hull-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().child(tree));
 
     Some(col.into_any_element())
 }
@@ -1122,6 +1117,8 @@ fn render_camo_picker(
     expanded_camo_groups: &HashSet<String>,
 ) -> AnyElement {
     let mut col = v_flex()
+        .id("armor-camo-picker")
+        .test_support()
         .gap_1()
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.camouflage").to_string()));
 

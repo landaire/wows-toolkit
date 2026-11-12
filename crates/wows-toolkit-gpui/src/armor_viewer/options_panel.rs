@@ -254,6 +254,7 @@ fn section(
 // `gpui_kit::*` re-export of GPUI's own `test` macro.
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use gpui_kit::AppContext as _;
@@ -266,6 +267,9 @@ mod tests {
     use gpui_kit::size;
     use gpui_kit::test::TestWindowExt as _;
 
+    use wowsunpack::export::camo_textures::CamoSchemeId;
+    use wowsunpack::export::camo_textures::CamoSchemeInfo;
+    use wowsunpack::export::gltf_export::CamoOrigin;
     use wowsunpack::export::model_catalog::ModelPath;
 
     use crate::armor_viewer::load_model::fixtures;
@@ -385,6 +389,43 @@ mod tests {
             }
             assert!(window.try_find("armor-show-hidden-button").is_some(), "plate tools stay");
             assert!(window.try_find("armor-splash-button").is_none(), "splash boxes are a ship's");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// In the Hull section the part tree comes before the camouflage picker,
+    /// and the camouflage picker before the LOD row.
+    #[gpui_kit::test]
+    fn the_hull_part_tree_comes_before_the_camo_and_lod_pickers(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+        let mut scene = fixtures::hull_scene(turret(), vec![fixtures::hull_mesh()], 2);
+        scene.camo_scheme_infos = vec![CamoSchemeInfo {
+            id: CamoSchemeId(0),
+            display_name: "Default".to_string(),
+            raw_name: "default".to_string(),
+            origin: CamoOrigin::ShipSpecific,
+            use_color_scheme: false,
+            uv_transforms: HashMap::new(),
+        }];
+        // The test window has no GPU, so a shown scene would wait for one; the
+        // rail reads only the scene itself.
+        window
+            .update(cx, |pane, _window, cx| {
+                pane.active_viewport(cx).update(cx, |view, cx| {
+                    view.current_armor = Some(Arc::new(scene));
+                    cx.notify();
+                });
+                pane.open_option_section(OptionSection::Hull, cx);
+            })
+            .expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            let tree = window.find("armor-hull-visibility-tree").bounds();
+            let camo = window.find("armor-camo-picker").bounds();
+            let lod = window.find("armor-hull-lod-0").bounds();
+            assert!(tree.bottom() <= camo.top(), "the tree at {tree:?} is above the camo picker at {camo:?}");
+            assert!(camo.bottom() <= lod.top(), "the camo picker at {camo:?} is above the LOD row at {lod:?}");
         })
         .expect("the test window stays open");
     }
