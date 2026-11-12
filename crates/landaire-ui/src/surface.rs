@@ -3,8 +3,13 @@
 
 use zgui::component;
 use zgui::css;
-use zgui::prelude::*;
 use zgui::view;
+use zgui::view::AnyView;
+use zgui::view::Attrs;
+use zgui::view::Children;
+use zgui::view::Classes;
+use zgui::view::IntoView;
+use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
