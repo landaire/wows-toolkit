@@ -90,7 +90,31 @@ fn fort_hull_plates_take_their_thickness_from_the_fort() {
         assert!(keys.contains(&(77, 1)), "OCit_Belt layer 1 is on the hull");
         let belt = hull.triangle_info.iter().find(|info| (info.material_id, info.model_index) == (77, 1)).unwrap();
         assert_eq!(belt.thickness_mm, belt_mm);
+
+        // The plates sit in the hull's own space: inside the box of its
+        // render meshes once those are placed on their nodes.
+        let (mesh_min, mesh_max) = bounds(loaded.meshes().iter().flat_map(|mesh| {
+            mesh.positions.iter().map(move |&position| mesh.transform.map_or(position, |m| transform(&m, position)))
+        }));
+        let (plate_min, plate_max) = bounds(hull.positions.iter().copied());
+        eprintln!("{name}: meshes {mesh_min:?}..{mesh_max:?}, plates {plate_min:?}..{plate_max:?}");
+        for axis in 0..3 {
+            assert!(plate_min[axis] >= mesh_min[axis] - 0.1 && plate_max[axis] <= mesh_max[axis] + 0.1, "axis {axis}");
+        }
     }
+}
+
+fn bounds(points: impl Iterator<Item = [f32; 3]>) -> ([f32; 3], [f32; 3]) {
+    points.fold(([f32::MAX; 3], [f32::MIN; 3]), |(min, max), point| {
+        (std::array::from_fn(|axis| min[axis].min(point[axis])), std::array::from_fn(|axis| max[axis].max(point[axis])))
+    })
+}
+
+/// `matrix` (column-major) applied to `point`.
+fn transform(matrix: &[f32; 16], point: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|row| {
+        matrix[row] * point[0] + matrix[4 + row] * point[1] + matrix[8 + row] * point[2] + matrix[12 + row]
+    })
 }
 
 /// Every hull plate of every shipped building model has a thickness in the

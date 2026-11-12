@@ -325,12 +325,12 @@ pub(crate) fn thickness_known(
     thickness_ref(&models.mount_armor, metadata, request).is_some()
 }
 
-/// Whether a building's mounts carry armor plates, `None` for a request that
-/// is not a building. Its hull carries none.
+/// Whether a building's hull or mounts carry armor plates, `None` for a
+/// request that is not a building.
 pub(crate) fn building_has_armor(models: &ModelAssets, request: &ModelLoadRequest) -> Option<bool> {
     let building = models.buildings.building(request.from_building?)?;
 
-    Some(building.mounts().iter().any(|mount| mount.has_armor()))
+    Some(building.hull_has_armor() || building.mounts().iter().any(|mount| mount.has_armor()))
 }
 
 /// Loads `request` from `models`, resolving armor thickness from `metadata`.
@@ -932,10 +932,10 @@ mod tests {
         assert!(texture.pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc keeps its alpha");
     }
 
-    /// A fort opens as its hull with each gun mount placed on its node, the
-    /// mounts' plates thick from the fort's own entries; a fort whose hull
-    /// the install does not ship says so (build 13533378 lacks LYB015, the
-    /// hull of PCBX001).
+    /// A fort opens as its hull with each gun mount placed on its node: the
+    /// hull's plates thick from the fort's `hull.armor`, the mounts' from the
+    /// fort's own mount entries. A fort whose hull the install does not ship
+    /// says so (build 13533378 lacks LYB015, the hull of PCBX001).
     #[test]
     #[ignore = "needs a local game install in WOWS_DIR"]
     fn a_fort_opens_with_its_armored_mounts() {
@@ -958,9 +958,13 @@ mod tests {
         let model = scene.model().expect("a model scene");
         assert!(model.from_building.is_some());
         assert!(matches!(model.thickness, ArmorThickness::Building { .. }));
-        assert!(scene.meshes.iter().any(|plate| plate.transform.is_some()), "the mounts' plates are placed on them");
-        let thickest = scene
-            .meshes
+        let hull_plates = scene.meshes.iter().find(|plate| plate.name == "hit_locations").expect("the hull's plates");
+        assert!(hull_plates.transform.is_none(), "the hull's plates are in its own space");
+        let belt = hull_plates.triangle_info.iter().find(|info| (info.material_id, info.model_index) == (77, 1));
+        assert_eq!(belt.map(|info| info.thickness_mm), Some(200.0), "OCit_Belt layer 1 from PCBX006's hull.armor");
+        let mount_plates: Vec<_> = scene.meshes.iter().filter(|plate| plate.transform.is_some()).collect();
+        assert!(!mount_plates.is_empty(), "the mounts' plates are placed on them");
+        let thickest = mount_plates
             .iter()
             .flat_map(|plate| &plate.triangle_info)
             .map(|info| info.thickness_mm)
@@ -995,7 +999,25 @@ mod tests {
 
         let size = |path: &std::path::Path| std::fs::metadata(path).expect("the file was written").len();
         assert!(size(&fort_path) > size(&hull_path), "the fort writes its mounts too");
-        assert!(super::building_has_armor(&models, &fort) == Some(true), "its mounts are armored");
+        assert!(super::building_has_armor(&models, &fort) == Some(true), "its hull and mounts are armored");
+    }
+
+    /// A building whose only plates are its hull's still offers armor.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_building_armored_only_on_its_hull_offers_armor() {
+        let Some((models, _metadata)) = real_models() else { return };
+        let building = models
+            .buildings
+            .buildings()
+            .iter()
+            .find(|building| building.hull_has_armor() && !building.mounts().iter().any(|mount| mount.has_armor()))
+            .expect("a building armored only on its hull");
+        let hull = building.model().expect("the building names a hull").clone();
+
+        let request = ModelLoadRequest::for_building(hull, building.id());
+
+        assert_eq!(super::building_has_armor(&models, &request), Some(true), "{}", building.param().name());
     }
 }
 
