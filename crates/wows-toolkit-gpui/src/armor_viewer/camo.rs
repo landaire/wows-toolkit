@@ -19,6 +19,7 @@
 //!   the UV entry so the GPU tiles it directly.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
@@ -133,23 +134,33 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 ///
 /// A struct rather than a `(u32, u32, Vec<u8>)`, because a width and a height
 /// are the same type and nothing but the field name says which is which.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct RgbaTexture {
     pub(crate) width: u32,
     pub(crate) height: u32,
     /// Four bytes per pixel, row-major.
     pub(crate) pixels: Vec<u8>,
-    /// Built with the texture, off the UI thread, for the upload to use.
-    pub(crate) mips: MipChain,
+    /// Built with the texture, off the UI thread, and given up to the first
+    /// upload so the levels are not held in memory beside the GPU's copy.
+    mips: Mutex<Option<MipChain>>,
 }
 
 impl RgbaTexture {
     /// Builds the mip chain too: run it where the texture is decoded, not on
     /// the UI thread.
     pub(crate) fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
-        let mips = MipChain::build(width, height, &pixels);
+        let mips = Mutex::new(Some(MipChain::build(width, height, &pixels)));
 
         Self { width, height, pixels, mips }
+    }
+
+    /// The lower mip levels, for one upload. The first upload takes those
+    /// built with the texture; a later one, onto a new device, builds them
+    /// again.
+    pub(crate) fn take_mips(&self) -> MipChain {
+        let held = self.mips.lock().ok().and_then(|mut held| held.take());
+
+        held.unwrap_or_else(|| MipChain::build(self.width, self.height, &self.pixels))
     }
 }
 
@@ -307,6 +318,17 @@ mod tests {
     #[test]
     fn smoothstep_is_half_at_the_midpoint() {
         assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-6);
+    }
+
+    /// The upload takes the levels built with the texture, so none are held
+    /// after it, and a second upload still gets the same levels.
+    #[test]
+    fn the_first_upload_takes_the_mip_chain() {
+        let texture = solid_rgba([10, 20, 30, 255], 8, 4);
+
+        let first = texture.take_mips();
+        assert!(texture.mips.lock().expect("not poisoned").is_none(), "nothing is held after the upload");
+        assert_eq!(texture.take_mips(), first, "a later upload builds the same levels");
     }
 
     #[test]

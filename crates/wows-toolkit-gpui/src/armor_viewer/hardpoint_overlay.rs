@@ -23,15 +23,24 @@ pub(crate) struct HardpointMarkers {
 
 impl HardpointMarkers {
     /// The markers `targets` ask for on `scene`. A target for another model
-    /// or ship draws nothing here.
-    pub(crate) fn for_scene(scene: &LoadedShipArmor, targets: &HashSet<HardpointTarget>) -> Self {
+    /// or ship draws nothing here. `world_per_pixel` is how much of the scene
+    /// one pixel spans where the camera looks, which sets the smallest size
+    /// a marker is drawn at.
+    pub(crate) fn for_scene(scene: &LoadedShipArmor, targets: &HashSet<HardpointTarget>, world_per_pixel: f32) -> Self {
         let mut markers = Self::default();
-        let size = marker_size(scene.bounds);
+        let size = MarkerSize::new(scene.bounds, world_per_pixel);
 
-        if let Some(model) = scene.model()
-            && targets.contains(&HardpointTarget::Model(model.path.clone()))
-        {
-            markers.add(&model.hardpoints, size);
+        // A part opened from its ship is marked by the part's own checkbox.
+        if let Some(model) = scene.model() {
+            let as_part = model.from_ship.as_ref().map(|from| HardpointTarget::ShipPart {
+                vehicle_param_index: from.vehicle_param_index.clone(),
+                part: from.part.clone(),
+            });
+            if targets.contains(&HardpointTarget::Model(model.path.clone()))
+                || as_part.is_some_and(|target| targets.contains(&target))
+            {
+                markers.add(&model.hardpoints, size);
+            }
         }
         // A ship part's hardpoints are already in ship space.
         if let Some(ship) = scene.ship() {
@@ -49,26 +58,20 @@ impl HardpointMarkers {
         markers
     }
 
-    /// Adds a marker and a label for each of `hardpoints`, `size` long.
-    fn add(&mut self, hardpoints: &[Hardpoint], size: f32) {
+    /// Adds a marker and a label for each of `hardpoints`.
+    fn add(&mut self, hardpoints: &[Hardpoint], size: MarkerSize) {
         for hardpoint in hardpoints {
             let matrix = &hardpoint.transform;
             let origin = [matrix[12], matrix[13], matrix[14]];
 
-            push_diamond(
-                origin,
-                size * DIAMOND_SCALE,
-                kind_color(hardpoint.kind),
-                &mut self.vertices,
-                &mut self.indices,
-            );
+            push_diamond(origin, size.diamond, kind_color(hardpoint.kind), &mut self.vertices, &mut self.indices);
             for (axis, color) in AXIS_COLORS.iter().enumerate() {
                 let column = [matrix[axis * 4], matrix[axis * 4 + 1], matrix[axis * 4 + 2]];
                 push_needle(
                     origin,
                     normalized(column),
-                    size,
-                    size * NEEDLE_WIDTH,
+                    size.needle,
+                    size.needle_half_width,
                     *color,
                     &mut self.vertices,
                     &mut self.indices,
@@ -88,23 +91,43 @@ pub(crate) struct HardpointLabel {
     pub(crate) position: [f32; 3],
 }
 
-/// The diamond's half-height, as a share of an axis needle's length.
-const DIAMOND_SCALE: f32 = 0.18;
+/// How large each piece of a marker is drawn, in scene units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MarkerSize {
+    /// The diamond's half-height.
+    diamond: f32,
+    /// An axis needle's length.
+    needle: f32,
+    needle_half_width: f32,
+}
 
-/// A needle's half-width, as a share of its length.
-const NEEDLE_WIDTH: f32 = 0.03;
+impl MarkerSize {
+    /// A small share of the scene's bounding radius, so a marker reads as a
+    /// point on the model rather than covering it, held to a few pixels so
+    /// it stays visible on a scene drawn small.
+    fn new(bounds: (Vec3, Vec3), world_per_pixel: f32) -> Self {
+        const DIAMOND_SHARE: f32 = 0.012;
+        const NEEDLE_SHARE: f32 = 0.05;
+        const WIDTH_SHARE: f32 = 0.012;
+        const DIAMOND_PIXELS: f32 = 3.0;
+        const NEEDLE_PIXELS: f32 = 14.0;
+        const HALF_WIDTH_PIXELS: f32 = 0.6;
+
+        let (min, max) = bounds;
+        let radius = (max - min).norm() * 0.5;
+        let pixel = world_per_pixel.max(0.0);
+        let needle = (radius * NEEDLE_SHARE).max(NEEDLE_PIXELS * pixel);
+
+        Self {
+            diamond: (radius * DIAMOND_SHARE).max(DIAMOND_PIXELS * pixel),
+            needle,
+            needle_half_width: (needle * WIDTH_SHARE).max(HALF_WIDTH_PIXELS * pixel),
+        }
+    }
+}
 
 /// Local X, Y and Z, in the gizmo's colours.
 const AXIS_COLORS: [[f32; 4]; 3] = [[0.95, 0.25, 0.25, 1.0], [0.3, 0.9, 0.3, 1.0], [0.3, 0.5, 1.0, 1.0]];
-
-/// How long an axis needle is: a small share of the scene, held to a size
-/// that stays visible on a gun and does not swamp a ship.
-fn marker_size(bounds: (Vec3, Vec3)) -> f32 {
-    let (min, max) = bounds;
-    let extent = (max[0] - min[0]).max(max[1] - min[1]).max(max[2] - min[2]);
-
-    (extent * 0.03).clamp(0.15, 2.5)
-}
 
 fn kind_color(kind: HardpointKind) -> [f32; 4] {
     match kind {
@@ -191,9 +214,13 @@ fn normalized(v: [f32; 3]) -> [f32; 3] {
 mod tests {
     use wowsunpack::export::hardpoint::HardpointName;
     use wowsunpack::export::model_catalog::ModelPath;
+    use wowsunpack::export::ship_parts::ShipPartKey;
 
     use super::*;
     use crate::armor_viewer::load_model::fixtures;
+    use crate::armor_viewer::load_ship::SceneSubject;
+    use crate::armor_viewer::model_refs::ShipPartRef;
+    use crate::armor_viewer::model_refs::VehicleParamIndex;
 
     fn hardpoint(name: &str, at: [f32; 3]) -> Hardpoint {
         let mut transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -211,7 +238,7 @@ mod tests {
             fixtures::model_scene(turret(), vec![hardpoint("HP_A", [1.0, 2.0, 3.0]), hardpoint("HP_B", [0.0; 3])]);
         let targets = HashSet::from([HardpointTarget::Model(turret())]);
 
-        let markers = HardpointMarkers::for_scene(&scene, &targets);
+        let markers = HardpointMarkers::for_scene(&scene, &targets, 0.0);
 
         assert_eq!(markers.vertices.len(), 2 * (6 + 3 * 8));
         assert_eq!(markers.indices.len(), 2 * (8 * 3 + 3 * 24));
@@ -231,8 +258,49 @@ mod tests {
         let other = ModelPath::parse("content/gameplay/usa/gun/main/AGM035/AGM035.model").expect("a model path");
 
         for targets in [HashSet::new(), HashSet::from([HardpointTarget::Model(other)])] {
-            let markers = HardpointMarkers::for_scene(&scene, &targets);
+            let markers = HardpointMarkers::for_scene(&scene, &targets, 0.0);
             assert!(markers.indices.is_empty() && markers.labels.is_empty());
         }
+    }
+
+    #[test]
+    fn a_part_opened_from_its_ship_is_marked_by_the_parts_checkbox() {
+        let mut scene = fixtures::model_scene(turret(), vec![hardpoint("HP_A", [1.0, 2.0, 3.0])]);
+        let vehicle_param_index = VehicleParamIndex::new("PASC001".to_string());
+        let part = ShipPartKey::Mount(HardpointName::new("HP_AGM_1"));
+        if let SceneSubject::Model(model) = &mut scene.subject {
+            model.from_ship =
+                Some(ShipPartRef { vehicle_param_index: vehicle_param_index.clone(), part: part.clone() });
+        }
+        let targets = HashSet::from([HardpointTarget::ShipPart { vehicle_param_index, part }]);
+
+        let markers = HardpointMarkers::for_scene(&scene, &targets, 0.0);
+
+        assert_eq!(markers.labels.len(), 1);
+    }
+
+    /// A marker is a few percent of the scene across, whatever its size, so
+    /// it neither covers a small model nor vanishes on a large one.
+    #[test]
+    fn markers_scale_with_the_scene() {
+        for radius in [0.5, 5.0, 150.0] {
+            let bounds = (Vec3::new(-radius, 0.0, 0.0), Vec3::new(radius, 0.0, 0.0));
+            let size = MarkerSize::new(bounds, 0.0);
+
+            assert!(size.diamond > 0.0 && size.diamond <= radius * 0.03, "diamond {size:?} at radius {radius}");
+            assert!(size.needle <= radius * 0.1, "needle {size:?} at radius {radius}");
+            assert!(size.needle_half_width <= size.needle * 0.02, "needle {size:?} is thin");
+        }
+    }
+
+    /// On a scene drawn small, a marker is held to a few pixels.
+    #[test]
+    fn markers_keep_a_least_size_on_screen() {
+        let bounds = (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let world_per_pixel = 0.1;
+        let size = MarkerSize::new(bounds, world_per_pixel);
+
+        assert!(size.diamond >= 2.0 * world_per_pixel, "{size:?}");
+        assert!(size.needle >= 10.0 * world_per_pixel, "{size:?}");
     }
 }

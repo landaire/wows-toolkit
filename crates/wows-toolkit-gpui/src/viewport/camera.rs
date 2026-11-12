@@ -93,6 +93,30 @@ impl ArcballCamera {
         }
     }
 
+    /// Create a camera that keeps the whole of the given bounding box in a
+    /// view `aspect` wide per unit of height, from any orbit angle.
+    ///
+    /// Fits the box's bounding sphere, with a margin, inside the narrower of
+    /// the vertical and horizontal fields of view.
+    pub fn framing(min: Vec3, max: Vec3, aspect: f32) -> Self {
+        const MARGIN: f32 = 1.15;
+        const SMALLEST_RADIUS: f32 = 1e-3;
+
+        let radius = ((max - min).norm() * 0.5).max(SMALLEST_RADIUS);
+        let fov = std::f32::consts::FRAC_PI_4;
+        let half_vertical = fov * 0.5;
+        let half_horizontal = (half_vertical.tan() * aspect.max(f32::EPSILON)).atan();
+        let distance = radius * MARGIN / half_vertical.min(half_horizontal).sin();
+
+        Self { distance, near: distance * 0.01, far: distance * 100.0, ..Self::from_bounds(min, max) }
+    }
+
+    /// How much of the scene one pixel spans at the target's depth, in a
+    /// view `view_height` pixels tall.
+    pub fn world_per_pixel(&self, view_height: f32) -> f32 {
+        2.0 * self.distance * (self.fov * 0.5).tan() / view_height.max(1.0)
+    }
+
     /// Reset camera to frame the given bounding box.
     pub fn reset(&mut self, min: Vec3, max: Vec3) {
         *self = Self::from_bounds(min, max);
@@ -434,6 +458,35 @@ mod tests {
         let moved = c.target - target;
         assert!(moved.norm() > 1e-4);
         assert!((moved.normalize() - up).norm() < 1e-4, "moved {moved:?} up {up:?}");
+    }
+
+    /// Every corner of the framed box projects inside the view, from the
+    /// opening angle and from other angles around it.
+    #[test]
+    fn framing_keeps_every_corner_in_view() {
+        let (min, max) = (Vec3::new(-1.0, -0.5, -4.0), Vec3::new(3.0, 2.5, 4.0));
+        let rect = ViewRect::new(0.0, 0.0, 400.0, 800.0);
+        let mut camera = ArcballCamera::framing(min, max, 0.5);
+
+        for (azimuth, elevation) in [(camera.azimuth, camera.elevation), (0.0, 0.0), (1.2, 0.9)] {
+            camera.azimuth = azimuth;
+            camera.elevation = elevation;
+            for corner in 0..8 {
+                let pick = |bit: usize, low: f32, high: f32| if corner & bit == 0 { low } else { high };
+                let point = Vec3::new(pick(1, min.x, max.x), pick(2, min.y, max.y), pick(4, min.z, max.z));
+                let at = camera.project_to_screen(point, rect).expect("in front of the camera");
+                assert!(rect.contains(at), "corner {point:?} at {at:?} is outside {rect:?}");
+            }
+        }
+    }
+
+    /// `from_bounds` fits only the largest side, which lets a box's near
+    /// corners overflow; framing stands further off.
+    #[test]
+    fn framing_stands_further_off_than_the_largest_side() {
+        let (min, max) = (Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+
+        assert!(ArcballCamera::framing(min, max, 1.0).distance > ArcballCamera::from_bounds(min, max).distance);
     }
 }
 

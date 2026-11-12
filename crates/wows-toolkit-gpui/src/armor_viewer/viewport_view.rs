@@ -70,11 +70,11 @@ use crate::armor_viewer::load_ship;
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
 use crate::armor_viewer::load_ship::PlateKey;
+use crate::armor_viewer::load_ship::SceneSubject;
 use crate::armor_viewer::load_ship::ShipLoadError;
 use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
 use crate::armor_viewer::model_refs::HardpointTarget;
 use crate::armor_viewer::model_refs::OpenTarget;
-use crate::armor_viewer::model_refs::VehicleParamIndex;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
@@ -367,10 +367,11 @@ impl OpeningLayer {
         self == Self::Armor
     }
 
-    /// What `scene` opens on. A scene with no armor opens on its meshes
-    /// whatever the setting, or it would open on nothing.
+    /// What `scene` opens on. A scene with no armor, or with armor of unknown
+    /// thickness, opens on its meshes whatever the setting: there is nothing,
+    /// or only uniform grey plates, to look at otherwise.
     pub fn for_scene(self, scene: &LoadedShipArmor) -> Self {
-        if scene.has_armor() { self } else { Self::Mesh }
+        if scene.has_armor() && !scene.thickness_unknown() { self } else { Self::Mesh }
     }
 }
 
@@ -412,6 +413,34 @@ impl OpeningVisibility {
         }
         opening
     }
+}
+
+/// Which of a scene's layers are drawn when it opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ShownLayers {
+    armor: bool,
+    hull: bool,
+}
+
+/// Where the camera starts on `armor`, in a view `aspect` wide per unit of
+/// height.
+///
+/// A ship is framed as the egui app frames it. A model is framed on the
+/// layers drawn, so a hidden layer that reaches further does not push the
+/// model shown into the distance.
+fn opening_camera(armor: &LoadedShipArmor, shown: ShownLayers, aspect: f32) -> ArcballCamera {
+    if armor.is_ship() {
+        let (min, max) = armor.bounds;
+        return ArcballCamera::from_bounds(min, max);
+    }
+
+    let plates: &[_] = if shown.armor { &armor.meshes } else { &[] };
+    let hull: &[_] = if shown.hull { &armor.hull_meshes } else { &[] };
+    let (min, max) = load_ship::scene_bounds(plates, hull);
+    // Nothing drawn has any extent, so the whole scene stands in for it.
+    let (min, max) = if min.x <= max.x { (min, max) } else { armor.bounds };
+
+    ArcballCamera::framing(min, max, aspect)
 }
 
 /// Which visibility maps still hold the `OpeningLayer::Mesh` seed, untouched
@@ -696,16 +725,6 @@ impl SceneSource {
             Self::Model { .. } => None,
         }
     }
-
-    /// What the sidebar highlights for this scene.
-    pub(crate) fn open_target(&self) -> OpenTarget {
-        match self {
-            Self::Ship { param_index, .. } => OpenTarget::Ship(VehicleParamIndex::new(param_index.clone())),
-            Self::Model { request, .. } => {
-                OpenTarget::Model { model: request.path.clone(), from_ship: request.from_ship.clone() }
-            }
-        }
-    }
 }
 
 /// What one pane hands another while "sync options" is on: everything
@@ -738,8 +757,14 @@ pub struct ViewportView {
     /// GPUI's device as this pane's viewports share it.
     scene_devices: SharedSceneDevice,
     gpu: GpuState,
-    /// World-space bounding box used to frame the camera on reset/double-click.
+    /// World-space bounding box of the scene.
     model_bounds: Option<(Vec3, Vec3)>,
+    /// The camera the scene opened with, which a double-click returns to.
+    home_camera: Option<ArcballCamera>,
+    /// Whether a standalone model's meshes are drawn opaque. Kept apart from
+    /// `display_settings.hull_opaque`, the saved setting for ships, because a
+    /// lone model has nothing inside it to see through to.
+    model_hull_opaque: bool,
     /// The container's window-space bounds as of the last paint. `None` until
     /// the first layout pass; every screen-space projection (gizmo hit test,
     /// picking) waits on it.
@@ -890,6 +915,8 @@ pub struct ViewportView {
     hardpoint_labels: Vec<hardpoint_overlay::HardpointLabel>,
     /// The overlay mesh drawing the markers of `hardpoint_labels`.
     hardpoint_mesh: Option<MeshId>,
+    /// The scene units per pixel `hardpoint_mesh` was sized for.
+    hardpoint_world_per_pixel: f32,
     /// The marker under the pointer, by its index in `hardpoint_labels`.
     hovered_hardpoint: Option<usize>,
     /// Undo/redo history over `{part_visibility, plate_visibility}`. Every
@@ -1099,6 +1126,8 @@ impl ViewportView {
             gpu,
             scene_devices,
             model_bounds: None,
+            home_camera: None,
+            model_hull_opaque: true,
             last_bounds: None,
             drag: None,
             gizmo_hover: None,
@@ -1152,6 +1181,7 @@ impl ViewportView {
             hardpoint_targets: HashSet::new(),
             hardpoint_labels: Vec::new(),
             hardpoint_mesh: None,
+            hardpoint_world_per_pixel: 0.0,
             hovered_hardpoint: None,
             undo_stack: VisibilityUndoStack::default(),
             expanded_zones: HashSet::new(),
@@ -1441,10 +1471,21 @@ impl ViewportView {
         self.current_armor.clone()
     }
 
-    /// The scene handed to this pane: the one on screen, or the one waiting
-    /// for GPUI's device.
+    /// The scene last handed to this pane: the one waiting for GPUI's device,
+    /// which is newer than the one on screen, or else the one on screen.
     pub(crate) fn shown(&self) -> Option<&Arc<LoadedShipArmor>> {
-        self.current_armor.as_ref().or(self.pending_armor.as_ref().map(|(armor, _)| armor))
+        self.pending_armor.as_ref().map(|(armor, _)| armor).or(self.current_armor.as_ref())
+    }
+
+    /// Which of `armor`'s layers the visibility maps draw any of. An absent
+    /// part is drawn and an absent hull mesh is not (see the field docs).
+    fn shown_layers(&self, armor: &LoadedShipArmor) -> ShownLayers {
+        let armor_shown = armor.zone_parts.iter().any(|(zone, parts)| {
+            parts.iter().any(|part| self.part_visibility.get(&(zone.clone(), part.clone())) != Some(&false))
+        });
+        let hull_shown = armor.hull_meshes.iter().any(|mesh| self.hull_visibility.get(&mesh.name) == Some(&true));
+
+        ShownLayers { armor: armor_shown, hull: hull_shown }
     }
 
     /// What the scene handed to this pane has for the option rail to act on.
@@ -1475,8 +1516,14 @@ impl ViewportView {
     /// The model or ship shown, for the sidebar to highlight. `None` while
     /// nothing has been handed to this pane.
     pub(crate) fn open_target(&self) -> Option<OpenTarget> {
-        self.shown()?;
-        self.scene_source.as_ref().map(SceneSource::open_target)
+        let target = match &self.shown()?.subject {
+            SceneSubject::Ship(ship) => OpenTarget::Ship(ship.vehicle_param_index.clone()),
+            SceneSubject::Model(model) => {
+                OpenTarget::Model { model: model.path.clone(), from_ship: model.from_ship.clone() }
+            }
+        };
+
+        Some(target)
     }
 
     /// A clone of the current camera, for `pane.rs` to read when broadcasting
@@ -1631,8 +1678,10 @@ impl ViewportView {
         // they mark nothing.
         self.arcs.clear();
         self.selected_arc = None;
-        let (min, max) = armor.bounds;
-        self.viewport.camera = ArcballCamera::from_bounds(min, max);
+        let shown = self.shown_layers(&armor);
+        let (width, height) = self.viewport_size();
+        self.viewport.camera = opening_camera(&armor, shown, width / height.max(1.0));
+        self.home_camera = Some(self.viewport.camera.clone());
         // The camera the lock puts back is the one framed on the ship now
         // showing, not the one framed on the ship before it. A ship that names
         // no orbit has nothing to lock onto, and its control is not drawn, so
@@ -1667,17 +1716,28 @@ impl ViewportView {
     /// shown, and keeps their names for the labels. The names are kept
     /// without a device too, so they always say what is marked.
     fn upload_hardpoints(&mut self) {
+        self.hovered_hardpoint = None;
+        // Before the first paint the view's height is unknown, so no
+        // on-screen floor is applied until it is painted.
+        let world_per_pixel =
+            self.last_bounds.map_or(0.0, |bounds| self.viewport.camera.world_per_pixel(bounds.size.height.as_f32()));
+        self.build_hardpoints(world_per_pixel);
+    }
+
+    /// [`Self::upload_hardpoints`] with markers held to a least size of
+    /// `world_per_pixel` per pixel.
+    fn build_hardpoints(&mut self, world_per_pixel: f32) {
         if let Some(id) = self.hardpoint_mesh.take() {
             self.viewport.remove_mesh(id);
         }
-        self.hovered_hardpoint = None;
         let Some(shown) = self.shown().cloned() else {
             self.hardpoint_labels.clear();
             return;
         };
 
-        let markers = HardpointMarkers::for_scene(&shown, &self.hardpoint_targets);
+        let markers = HardpointMarkers::for_scene(&shown, &self.hardpoint_targets, world_per_pixel);
         self.hardpoint_labels = markers.labels;
+        self.hardpoint_world_per_pixel = world_per_pixel;
         let Some(scene) = self.scene() else { return };
         if !markers.indices.is_empty() {
             self.hardpoint_mesh =
@@ -2417,10 +2477,32 @@ impl ViewportView {
         self.load_generation == generation
     }
 
+    /// Supersedes the load in flight, if any, so its result is dropped.
+    /// Whether one was in flight.
+    pub(crate) fn cancel_load(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.ship_loading.is_none() {
+            return false;
+        }
+
+        self.load_generation = LoadGeneration(self.load_generation.0 + 1);
+        self.set_ship_loading(None, cx);
+
+        true
+    }
+
     /// Paints the scene at `bounds`, drawing it again first if it changed or
     /// the target no longer matches the painted size in device pixels. Runs
     /// during paint, so the frame being drawn samples the new contents.
     fn paint_scene(&mut self, bounds: Bounds<Pixels>, window: &mut Window) {
+        // The markers' least on-screen size is held in scene units, so a zoom
+        // or resize that moves it far enough builds them again.
+        if self.hardpoint_mesh.is_some() {
+            let world_per_pixel = self.viewport.camera.world_per_pixel(bounds.size.height.as_f32());
+            let ratio = world_per_pixel / self.hardpoint_world_per_pixel.max(f32::MIN_POSITIVE);
+            if !(0.8..=1.25).contains(&ratio) {
+                self.build_hardpoints(world_per_pixel);
+            }
+        }
         let Some(scene) = self.scene() else { return };
         let scale = window.scale_factor();
         let Some(size) = TargetSize::new(
@@ -2516,8 +2598,8 @@ impl ViewportView {
                 let in_gizmo = self.gizmo_rect().is_some_and(|r| r.contains(pointer));
                 self.gizmo_press_in_box = in_gizmo;
                 if !in_gizmo && event.click_count >= 2 && !self.perspective.enabled {
-                    if let Some((min, max)) = self.model_bounds {
-                        self.viewport.camera.reset(min, max);
+                    if let Some(home) = self.home_camera.clone() {
+                        self.viewport.camera = home;
                         self.viewport.mark_dirty();
                         cx.emit(ViewportChange::Camera);
                         cx.notify();
@@ -3493,6 +3575,7 @@ impl ViewportView {
         // is done, keeping the two upload paths decoupled (a hull-only change
         // never lands here, see `reupload_hull`) while staying in sync with
         // whatever `Viewport3D::clear` just destroyed.
+        let hull_opaque = self.hull_opaque();
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
             device,
@@ -3501,7 +3584,7 @@ impl ViewportView {
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
-            self.display_settings.hull_opaque,
+            hull_opaque,
             &self.active_camo_textures,
             &self.active_camo_uvs,
             &mut self.hull_textures,
@@ -3615,7 +3698,7 @@ impl ViewportView {
     }
 
     /// Re-uploads only the hull meshes (`upload_hull::upload_hull_meshes`),
-    /// honoring the current `hull_visibility`/`display_settings.hull_opaque`.
+    /// honoring the current `hull_visibility`/[`Self::hull_opaque`].
     /// Never touches armor meshes, visibility overrides, or the camera, and
     /// never calls `Viewport3D::clear()` itself -- a hull-only change stays
     /// cheap even on a ship with a large armor mesh set. A no-op if the GPU
@@ -3623,6 +3706,7 @@ impl ViewportView {
     fn reupload_hull(&mut self) {
         let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
+        let hull_opaque = self.hull_opaque();
         upload_hull::upload_hull_meshes(
             &mut self.viewport,
             scene.device(),
@@ -3631,7 +3715,7 @@ impl ViewportView {
             &armor,
             &mut self.hull_mesh_ids,
             &self.hull_visibility,
-            self.display_settings.hull_opaque,
+            hull_opaque,
             &self.active_camo_textures,
             &self.active_camo_uvs,
             &mut self.hull_textures,
@@ -3655,16 +3739,30 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Sets `display_settings.hull_opaque` and re-uploads only the hull (its
-    /// alpha and depth-write layer both depend on this flag, see
+    /// Whether the hull meshes on screen are drawn opaque: the saved setting
+    /// for a ship, this pane's own choice for a standalone model.
+    pub(crate) fn hull_opaque(&self) -> bool {
+        if self.shown().is_some_and(|armor| !armor.is_ship()) {
+            self.model_hull_opaque
+        } else {
+            self.display_settings.hull_opaque
+        }
+    }
+
+    /// Sets [`Self::hull_opaque`] and re-uploads only the hull (its alpha and
+    /// depth-write layer both depend on this flag, see
     /// `upload_hull::upload_hull_meshes`'s doc). Kept separate from
     /// `mutate_display_settings` so toggling hull opacity -- a hull-only
     /// change -- never rebuilds the armor mesh set.
     pub(crate) fn set_hull_opaque(&mut self, opaque: bool, cx: &mut Context<Self>) {
-        if self.display_settings.hull_opaque == opaque {
+        if self.hull_opaque() == opaque {
             return;
         }
-        self.display_settings.hull_opaque = opaque;
+        if self.shown().is_some_and(|armor| !armor.is_ship()) {
+            self.model_hull_opaque = opaque;
+        } else {
+            self.display_settings.hull_opaque = opaque;
+        }
         self.reupload_hull();
         cx.emit(ViewportChange::Settings);
         cx.notify();
@@ -3680,11 +3778,8 @@ impl ViewportView {
     /// failure, or a selected id with no matching `camo_scheme_infos` entry,
     /// is logged via `tracing::warn!` and treated as stock (empty active-camo
     /// maps) rather than left half-applied. The decode/composite step itself
-    /// is [`decode_active_camo`], run on a background thread here;
-    /// `apply_reload_result` runs it inline ([`recompute_active_camo`]) to
-    /// re-apply the same `selected_camo` against a freshly reloaded armor's
-    /// hull textures, because that pass is re-uploading the hull anyway and
-    /// deferring would show the ship stock first.
+    /// is [`decode_active_camo`], run on a background thread here and by a
+    /// reload ([`reload_camo`]).
     pub(crate) fn select_camo(&mut self, id: Option<CamoSchemeId>, cx: &mut Context<Self>) {
         if self.selected_camo == id {
             return;
@@ -3815,11 +3910,26 @@ impl ViewportView {
             }
         };
 
+        // The scheme is carried by name across the reload and recomposited
+        // with it, off the UI thread, so the reloaded hull is never shown
+        // stock first.
+        let camo = self.selected_camo.map(|id| {
+            let infos = self.current_armor.as_ref().map(|armor| armor.camo_scheme_infos.clone()).unwrap_or_default();
+            (id, infos)
+        });
+        let task = cx.background_spawn(async move {
+            let armor = task.await?;
+            let camo = camo.map(|(was, infos)| reload_camo(was, &infos, &armor));
+
+            Ok(ReloadedScene { armor, camo })
+        });
+
         self.reload_generation += 1;
         let generation = self.reload_generation;
+        let camo_generation = self.camo_generation;
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            let _ = this.update(cx, |this, cx| this.apply_reload_result(generation, result, cx));
+            let _ = this.update(cx, |this, cx| this.apply_reload_result(generation, camo_generation, result, cx));
         })
         .detach();
     }
@@ -3939,15 +4049,15 @@ impl ViewportView {
     /// Applies a completed `reload_ship` result. Discards it if a newer
     /// reload superseded this one (`generation` guard, mirroring
     /// `ArmorViewerPane::apply_ship_load_result`'s identical pattern for ship
-    /// selection). Otherwise: resolves the selected camo across the reload by
-    /// name (`remap_camo_selection`) and clears `camo_texture_cache`, since
+    /// selection). Otherwise: adopts the selected camo as the reload found
+    /// it by name ([`reload_camo`]) and clears `camo_texture_cache`, since
     /// `CamoSchemeId` is only a stable index within a single load's
     /// `camo_scheme_infos` list -- see that type's own doc -- and this reload
     /// rebuilds the list from scratch; retains whatever `hull_visibility`/
     /// `part_visibility`/`plate_visibility` entries still apply to the new
     /// armor (`visibility::retain_*`; a hull/LOD/module change can add or
-    /// drop parts/plates/hull meshes); re-applies the (now-resolved) active
-    /// camo against the new armor's hull textures (`recompute_active_camo`);
+    /// drop parts/plates/hull meshes); adopts the camo composited against
+    /// the new armor's hull textures in the background;
     /// replaces `current_armor`; and re-uploads armor + hull WITHOUT
     /// reframing the camera (`upload::reupload_armor_plates`, not
     /// `upload_armor_to_viewport`) -- the user is mid-view when they change a
@@ -3958,37 +4068,48 @@ impl ViewportView {
     fn apply_reload_result(
         &mut self,
         generation: u64,
-        result: Result<LoadedShipArmor, SceneLoadError>,
+        camo_generation: u64,
+        result: Result<ReloadedScene, SceneLoadError>,
         cx: &mut Context<Self>,
     ) {
         if generation != self.reload_generation {
             return;
         }
-        let armor = match result {
-            Ok(armor) => Arc::new(armor),
+        let ReloadedScene { armor, camo } = match result {
+            Ok(reloaded) => reloaded,
             Err(e) => {
                 tracing::error!("armor viewer: failed to reload: {e}");
                 return;
             }
         };
+        let armor = Arc::new(armor);
 
-        // Resolve the selected camo by name while `self.current_armor` is
-        // still the OLD armor (both old and new `camo_scheme_infos` are
-        // reachable here) and before it is replaced below.
-        if let Some(old_id) = self.selected_camo {
+        // A scheme picked while the reload ran replaces the one it carried,
+        // and is found by name in the reloaded scene once that is shown.
+        let picked_since = (camo_generation != self.camo_generation).then(|| {
             let old_infos: &[CamoSchemeInfo] =
-                self.current_armor.as_ref().map(|a| a.camo_scheme_infos.as_slice()).unwrap_or(&[]);
-            self.selected_camo = remap_camo_selection(old_infos, &armor.camo_scheme_infos, old_id);
-            if self.selected_camo.is_none() {
-                tracing::warn!(
-                    "armor viewer: selected camo scheme {old_id:?} did not survive the reload (name not found in the reloaded ship's scheme list); reverting to stock"
-                );
-            }
-        }
+                self.current_armor.as_ref().map(|old| old.camo_scheme_infos.as_slice()).unwrap_or(&[]);
+            self.selected_camo.and_then(|id| remap_camo_selection(old_infos, &armor.camo_scheme_infos, id))
+        });
         // Keyed by the pre-reload ids, which are no longer valid indices
         // into the new `camo_scheme_infos` list -- a stale-keyed hit here
         // would skip decode and apply a different scheme's textures.
         self.camo_texture_cache.clear();
+        let (selected, textures, uvs) = match camo.filter(|_| picked_since.is_none()) {
+            None => (None, HashMap::new(), HashMap::new()),
+            Some(ReloadedCamo { was, now, decode }) => {
+                if now.is_none() {
+                    tracing::warn!(
+                        "armor viewer: selected camo scheme {was:?} did not survive the reload (name not found in the reloaded ship's scheme list); reverting to stock"
+                    );
+                }
+                if let (Some(id), Some(decoded)) = (now, decode.decoded) {
+                    self.camo_texture_cache.insert(id, decoded);
+                }
+                (now, decode.textures, decode.uvs)
+            }
+        };
+        self.selected_camo = selected;
         self.camo_generation = self.camo_generation.wrapping_add(1);
         // A reload can change the hull, and with it which modes are named.
         if !armor.camera_trajectories.iter().any(|(name, _)| Some(name) == self.camera_rings.mode.as_ref()) {
@@ -4006,14 +4127,17 @@ impl ViewportView {
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
 
-        let (active_camo_textures, active_camo_uvs) =
-            recompute_active_camo(self.selected_camo, &mut self.camo_texture_cache, &armor);
-        self.active_camo_textures = active_camo_textures;
-        self.active_camo_uvs = active_camo_uvs;
+        self.active_camo_textures = textures;
+        self.active_camo_uvs = uvs;
         self.model_bounds = Some(armor.bounds);
+        let (width, height) = self.viewport_size();
+        self.home_camera = Some(opening_camera(&armor, self.shown_layers(&armor), width / height.max(1.0)));
         self.hull_textures.clear();
         self.current_armor = Some(armor);
         self.reupload_current_armor(cx);
+        if let Some(picked) = picked_since {
+            self.select_camo(picked, cx);
+        }
     }
 
     /// Toggles a camo-origin group header's expanded/collapsed state in the
@@ -4434,23 +4558,31 @@ fn remap_camo_selection(
     new_infos.iter().find(|i| &i.display_name == name).map(|i| i.id)
 }
 
-/// [`decode_active_camo`] against a cache, for callers already on the UI
-/// thread. A free function (not a `&mut Self` method) so a caller can run it
-/// mid-way through a re-upload without a whole-self mutable-borrow conflict;
-/// only `camo_texture_cache` needs `&mut`, passed in directly rather than
-/// through `&mut self`.
-fn recompute_active_camo(
-    selected_camo: Option<CamoSchemeId>,
-    camo_texture_cache: &mut CamoTextureCache,
-    armor: &LoadedShipArmor,
-) -> (CamoTextures, HashMap<String, UvTransform>) {
-    let Some(id) = selected_camo else { return (HashMap::new(), HashMap::new()) };
-    let cached = camo_texture_cache.get(id);
-    let decode = decode_active_camo(id, cached, armor);
-    if let Some(textures) = decode.decoded {
-        camo_texture_cache.insert(id, textures);
-    }
-    (decode.textures, decode.uvs)
+/// A reloaded scene, with the camo that was selected composited onto it.
+struct ReloadedScene {
+    armor: LoadedShipArmor,
+    /// `None` when no scheme was selected.
+    camo: Option<ReloadedCamo>,
+}
+
+/// The scheme selected before a reload, found again in the reloaded scene.
+struct ReloadedCamo {
+    was: CamoSchemeId,
+    /// `None` when the reloaded scene has no scheme of that name.
+    now: Option<CamoSchemeId>,
+    decode: CamoDecode,
+}
+
+/// Finds `was` in `armor` by its name in `old_infos`, and composites it.
+/// Decodes and composites full-size textures, so it runs off the UI thread.
+fn reload_camo(was: CamoSchemeId, old_infos: &[CamoSchemeInfo], armor: &LoadedShipArmor) -> ReloadedCamo {
+    let now = remap_camo_selection(old_infos, &armor.camo_scheme_infos, was);
+    let decode = match now {
+        Some(id) => decode_active_camo(id, None, armor),
+        None => CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() },
+    };
+
+    ReloadedCamo { was, now, decode }
 }
 
 /// How many schemes' decoded textures are kept. One scheme is several
@@ -4510,10 +4642,8 @@ struct CamoDecode {
 /// id with no matching `camo_scheme_infos` entry, is logged via
 /// `tracing::warn!` and treated as stock rather than left half-applied.
 ///
-/// Takes no `&mut` state, so it can run on a background thread
-/// ([`ViewportView::select_camo`]) as well as inline
-/// ([`recompute_active_camo`], which the reload path uses because it is
-/// already re-uploading the hull in the same pass).
+/// Takes no `&mut` state, so it runs on a background thread
+/// ([`ViewportView::select_camo`], [`reload_camo`]).
 fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
     let (textures, decoded) = match cached {
         Some(t) => (t, None),
@@ -4984,6 +5114,24 @@ mod tests {
         assert_eq!(remap_camo_selection(&old, &new, CamoSchemeId(5)), None);
     }
 
+    /// The reload finds the selected scheme by name in the reloaded scene,
+    /// on the thread that loaded it.
+    #[test]
+    fn a_reload_carries_the_selected_camo_by_name() {
+        let old = vec![scheme(0, "Camo A", CamoOrigin::ShipSpecific), scheme(1, "Camo B", CamoOrigin::Universal)];
+        let path =
+            wowsunpack::export::model_catalog::ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model")
+                .expect("a model path");
+        let mut armor = crate::armor_viewer::load_model::fixtures::model_scene(path, Vec::new());
+        armor.camo_scheme_infos =
+            vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)];
+
+        let reloaded = super::reload_camo(CamoSchemeId(0), &old, &armor);
+
+        assert_eq!((reloaded.was, reloaded.now), (CamoSchemeId(0), Some(CamoSchemeId(1))));
+        assert!(super::reload_camo(CamoSchemeId(5), &old, &armor).now.is_none(), "an unknown scheme reverts to stock");
+    }
+
     fn sample_synced_settings() -> SyncedSettings {
         let mut part_visibility = HashMap::new();
         part_visibility.insert(("Citadel".to_string(), "Belt".to_string()), false);
@@ -5060,10 +5208,25 @@ mod opening_visibility_tests {
 
     #[test]
     fn an_armored_model_opens_on_the_chosen_layer() {
-        let scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+        let mut scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+        if let crate::armor_viewer::load_ship::SceneSubject::Model(model) = &mut scene.subject {
+            model.thickness =
+                crate::armor_viewer::load_ship::ArmorThickness::Ship(crate::armor_viewer::load_ship::ThicknessSource {
+                    vehicle_param_index: crate::armor_viewer::model_refs::VehicleParamIndex::new("PASC001".to_string()),
+                    display_name: "Iowa".to_string(),
+                    hp: wowsunpack::export::hardpoint::HardpointName::new("HP_AGM_1"),
+                });
+        }
 
         assert_eq!(OpeningLayer::Armor.for_scene(&scene), OpeningLayer::Armor);
         assert_eq!(OpeningLayer::Mesh.for_scene(&scene), OpeningLayer::Mesh);
+    }
+
+    #[test]
+    fn a_model_with_armor_of_unknown_thickness_opens_on_its_meshes() {
+        let scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+
+        assert_eq!(OpeningLayer::Armor.for_scene(&scene), OpeningLayer::Mesh);
     }
 
     #[test]
@@ -5087,5 +5250,26 @@ mod opening_visibility_tests {
         .collect();
         let hull: HashMap<_, _> = [("Hull_A".to_string(), true), ("Hull_B".to_string(), true)].into_iter().collect();
         assert_eq!(opening, OpeningVisibility { parts, hull });
+    }
+
+    /// A model's camera stands far enough off that the whole of what is
+    /// drawn fits the view, and a hidden layer reaching further is ignored.
+    #[test]
+    fn a_model_is_framed_on_the_layers_drawn() {
+        let mut scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+        for position in &mut scene.meshes[0].positions {
+            *position = position.map(|axis| axis * 100.0);
+        }
+        let shown = super::ShownLayers { armor: false, hull: true };
+
+        let camera = super::opening_camera(&scene, shown, 0.5);
+
+        let target = [camera.target.x, camera.target.y, camera.target.z];
+        assert_eq!(target, [2.0, 1.0, 3.0], "centred on the hull mesh");
+        // Half the diagonal of the 4 x 2 x 6 box the mesh spans.
+        let radius = 56.0_f32.sqrt() * 0.5;
+        let half_width = ((camera.fov * 0.5).tan() * 0.5).atan();
+        assert!(camera.distance * half_width.sin() >= radius, "{} is too close", camera.distance);
+        assert!(camera.distance * half_width.sin() <= radius * 1.5, "{} is too far", camera.distance);
     }
 }

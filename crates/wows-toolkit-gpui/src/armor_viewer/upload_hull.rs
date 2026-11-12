@@ -190,7 +190,7 @@ pub fn upload_hull_meshes(
                         &texture.pixels,
                         texture.width,
                         texture.height,
-                        &texture.mips,
+                        &texture.take_mips(),
                     );
                     (bind_group, tex_brightness(&texture.pixels))
                 })

@@ -182,9 +182,9 @@ pub struct ArmorViewerPane {
     /// gating the legend overlay exactly like the egui app's `any_ship_loaded`
     /// check (`ui/tab.rs`'s `tab.loaded_armor.is_some()`).
     ship_loaded: bool,
-    /// Hits a replay viewport asked for, waiting for the ship they belong on
-    /// to finish loading.
-    pending_hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// Hits a replay viewport asked for, waiting for the ship load that will
+    /// show them.
+    pending_hits: Option<PendingHits>,
     /// What was fired at the ship on screen, for the log beside it. Empty for a
     /// ship opened from the catalogue rather than from a battle.
     incoming: IncomingFire,
@@ -389,7 +389,7 @@ impl ArmorViewerPane {
             _export_dialog_subscription: None,
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
-            pending_hits: Vec::new(),
+            pending_hits: None,
             incoming: IncomingFire::default(),
             playback_at: None,
             legend: LegendState::default(),
@@ -992,15 +992,34 @@ impl ArmorViewerPane {
     }
 
     /// Opens one catalogued model in the active pane. A re-click on the model
-    /// already shown there is ignored, as a ship's is.
+    /// already shown there keeps it, cancelling any load started since.
     pub(crate) fn open_model(&mut self, model: ModelPath, from_ship: Option<ShipPartRef>, cx: &mut Context<Self>) {
         let active = self.dock.read(cx).active_viewport();
         let wanted = super::model_refs::OpenTarget::Model { model: model.clone(), from_ship: from_ship.clone() };
         if active.read(cx).open_target().as_ref() == Some(&wanted) {
+            // The cancelled load may have been a replay's, whose log is not
+            // about the scene that stays.
+            if self.cancel_load(&active, cx) {
+                self.forget_incoming();
+            }
             return;
         }
         self.forget_incoming();
         self.start_model_load(ModelLoadRequest::new(model, from_ship), cx);
+    }
+
+    /// Drops a load in flight into `viewport`, so the scene it shows stays.
+    /// Whether one was in flight.
+    fn cancel_load(&mut self, viewport: &Entity<ViewportView>, cx: &mut Context<Self>) -> bool {
+        if !viewport.update(cx, |view, cx| view.cancel_load(cx)) {
+            return false;
+        }
+
+        self.ship_load = ShipLoadState::Idle;
+        self.push_open_target(cx);
+        cx.notify();
+
+        true
     }
 
     fn start_model_load(&mut self, request: ModelLoadRequest, cx: &mut Context<Self>) {
@@ -1114,6 +1133,9 @@ impl ArmorViewerPane {
         let active = self.dock.read(cx).active_viewport();
         let loaded = active.read(cx).loaded_param_index();
         if is_ship_already_loaded(loaded, &param_index) {
+            if self.cancel_load(&active, cx) {
+                self.forget_incoming();
+            }
             return;
         }
         self.forget_incoming();
@@ -1319,6 +1341,7 @@ impl ArmorViewerPane {
     /// at, so the log about that one is no longer about anything on screen.
     fn forget_incoming(&mut self) {
         self.incoming = IncomingFire::default();
+        self.pending_hits = None;
     }
 
     /// Shows `param_index`'s armor with the hits it had taken, for a replay
@@ -1334,14 +1357,14 @@ impl ArmorViewerPane {
         incoming: Box<crate::replay_renderer::IncomingContext>,
         cx: &mut Context<Self>,
     ) {
-        self.pending_hits = hits;
         self.playback_at = incoming.at;
         self.incoming =
             IncomingFire { context: *incoming, filter: IncomingFilter::default(), victim: Some(param_index.clone()) };
         let active = self.dock.read(cx).active_viewport();
         if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
+            self.pending_hits = None;
+            self.cancel_load(&active, cx);
             // Already showing it, so only what it has taken has changed.
-            let hits = std::mem::take(&mut self.pending_hits);
             active.update(cx, |view, cx| {
                 view.show_hits(hits, cx);
                 let incoming = &self.incoming.context;
@@ -1349,7 +1372,11 @@ impl ArmorViewerPane {
             });
             return;
         }
-        self.start_ship_load(param_index, display_name, cx);
+        self.pending_hits = self.start_ship_load(param_index.clone(), display_name, cx).map(|load| PendingHits {
+            param_index,
+            load,
+            hits,
+        });
     }
 
     /// Updates what the open viewer shows as playback moves.
@@ -1376,10 +1403,17 @@ impl ArmorViewerPane {
         });
     }
 
-    fn start_ship_load(&mut self, param_index: String, display_name: String, cx: &mut Context<Self>) {
+    /// Starts loading `param_index` into the active pane. `None` when the ship
+    /// assets are not ready, so nothing was started.
+    fn start_ship_load(
+        &mut self,
+        param_index: String,
+        display_name: String,
+        cx: &mut Context<Self>,
+    ) -> Option<StartedLoad> {
         let BundleState::Ready(bundle) = &self.bundle else {
             tracing::warn!("armor viewer: ship selected before ship assets finished loading");
-            return;
+            return None;
         };
         let bundle = Arc::clone(bundle);
         // Captured now (the dock's *current* active pane), not re-read when
@@ -1397,6 +1431,7 @@ impl ArmorViewerPane {
         cx.notify();
 
         let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
+        let started = StartedLoad { viewport: target_viewport.entity_id(), generation };
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -1404,6 +1439,8 @@ impl ArmorViewerPane {
             });
         })
         .detach();
+
+        Some(started)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1427,6 +1464,8 @@ impl ArmorViewerPane {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
                 let comparing = self.incoming.is_about(&param_index);
+                let load = StartedLoad { viewport: target_viewport.entity_id(), generation };
+                let hits = take_pending_hits(&mut self.pending_hits, &param_index, load);
                 target_viewport.update(cx, |viewport, cx| {
                     viewport.set_ship_loading(None, cx);
                     // Set before `show_armor`: a reload (Milestone 4 Task 8c)
@@ -1442,8 +1481,7 @@ impl ArmorViewerPane {
                     viewport.show_armor(Arc::new(armor), self.opening_layer, cx);
                     // After the armor, because showing it starts the ship
                     // again and would drop them.
-                    let hits = std::mem::take(&mut self.pending_hits);
-                    if !hits.is_empty() {
+                    if let Some(hits) = hits {
                         viewport.show_hits(hits, cx);
                     }
                     if comparing {
@@ -1691,6 +1729,34 @@ fn is_ship_already_loaded(loaded_param_index: Option<&str>, requested_param_inde
     loaded_param_index == Some(requested_param_index)
 }
 
+/// A ship load started into one viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StartedLoad {
+    viewport: gpui_kit::EntityId,
+    generation: LoadGeneration,
+}
+
+/// Hits a replay asked to see, held for the one load that will show them.
+struct PendingHits {
+    param_index: String,
+    load: StartedLoad,
+    hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+}
+
+/// The hits held for `load` of `param_index`, if they are for it. Hits held
+/// for any other load stay held.
+fn take_pending_hits(
+    pending: &mut Option<PendingHits>,
+    param_index: &str,
+    load: StartedLoad,
+) -> Option<Vec<wows_replay_insights::timeline::PreExtractedHit>> {
+    if !pending.as_ref().is_some_and(|held| held.param_index == param_index && held.load == load) {
+        return None;
+    }
+
+    pending.take().map(|held| held.hits)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1705,10 +1771,103 @@ mod tests {
     use wowsunpack::export::model_catalog::ModelPath;
 
     use super::ArmorViewerPane;
+    use super::LoadGeneration;
+    use super::PendingHits;
+    use super::StartedLoad;
     use super::is_ship_already_loaded;
     use super::other_pane_indices;
+    use super::take_pending_hits;
     use crate::armor_viewer::load_model::fixtures;
     use crate::armor_viewer::model_refs::HardpointTarget;
+
+    /// Clicking the model on screen while another loads keeps it on screen:
+    /// the other load is dropped rather than replacing it when it lands.
+    #[gpui_kit::test]
+    fn a_click_on_the_shown_model_cancels_a_load_in_flight(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let scene = Arc::new(fixtures::model_scene(turret.clone(), Vec::new()));
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                let viewport = pane.active_viewport(cx);
+                viewport.update(cx, |view, cx| view.show_armor(scene, layer, cx));
+                let other = viewport.update(cx, |view, cx| view.begin_load("AGM058".into(), cx));
+                let load = StartedLoad { viewport: viewport.entity_id(), generation: other };
+                pane.pending_hits = Some(PendingHits { param_index: "PASC001".into(), load, hits: Vec::new() });
+
+                pane.open_model(turret, None, cx);
+
+                assert!(pane.pending_hits.is_none(), "the cancelled load's replay hits are put away");
+
+                assert!(!viewport.read(cx).is_current_load(other), "the other load no longer lands");
+                assert!(!viewport.update(cx, |view, cx| view.cancel_load(cx)), "nothing is loading");
+            })
+            .expect("the test window stays open");
+    }
+
+    /// Opening a model puts away hits a replay asked to show on a ship.
+    #[gpui_kit::test]
+    fn opening_a_model_drops_held_replay_hits(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let viewport = pane.active_viewport(cx).entity_id();
+                let load = StartedLoad { viewport, generation: LoadGeneration::default() };
+                pane.pending_hits = Some(PendingHits { param_index: "PASC001".into(), load, hits: Vec::new() });
+
+                pane.open_model(turret, None, cx);
+
+                assert!(pane.pending_hits.is_none());
+            })
+            .expect("the test window stays open");
+    }
+
+    /// A standalone model opens opaque, and its Opaque toggle leaves the
+    /// saved setting for ships alone.
+    #[gpui_kit::test]
+    fn a_model_opens_opaque_apart_from_the_ship_setting(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let scene = Arc::new(fixtures::model_scene(turret, Vec::new()));
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                let viewport = pane.active_viewport(cx);
+                viewport.update(cx, |view, cx| view.show_armor(scene, layer, cx));
+                assert!(!viewport.read(cx).display_settings.hull_opaque, "ships are see-through by default");
+                assert!(viewport.read(cx).hull_opaque(), "the model is opaque");
+
+                viewport.update(cx, |view, cx| view.set_hull_opaque(false, cx));
+                assert!(!viewport.read(cx).hull_opaque(), "the toggle is honoured");
+                viewport.update(cx, |view, cx| view.set_hull_opaque(true, cx));
+                assert!(!viewport.read(cx).display_settings.hull_opaque, "the ship setting is untouched");
+            })
+            .expect("the test window stays open");
+    }
+
+    #[gpui_kit::test]
+    fn held_hits_go_only_to_the_load_they_were_held_for(cx: &mut TestAppContext) {
+        let first = cx.new(|_| ()).entity_id();
+        let second = cx.new(|_| ()).entity_id();
+        let load = StartedLoad { viewport: first, generation: LoadGeneration::default() };
+        let mut pending = Some(PendingHits { param_index: "PASC001".into(), load, hits: Vec::new() });
+
+        let elsewhere = StartedLoad { viewport: second, ..load };
+        assert!(take_pending_hits(&mut pending, "PASC001", elsewhere).is_none(), "another pane");
+        assert!(take_pending_hits(&mut pending, "PASC002", load).is_none(), "another ship");
+        assert!(pending.is_some(), "still held for its own load");
+
+        assert!(take_pending_hits(&mut pending, "PASC001", load).is_some());
+        assert!(pending.is_none());
+    }
 
     /// Ticking a model's hardpoints in the sidebar marks them in the pane
     /// showing it, and unticking takes the markers away again.
