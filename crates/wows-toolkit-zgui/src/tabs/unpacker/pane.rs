@@ -10,6 +10,7 @@ use landaire_ui::PanelWidth;
 use landaire_ui::TreeHandle;
 use landaire_ui::TreeModel;
 use rust_i18n::t;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
@@ -164,6 +165,7 @@ pub enum Rows {
     Directory(Rc<Vec<ListingEntry>>),
     Filtered {
         files: Arc<FileList>,
+        filter: Rc<PathFilter>,
         matches: Rc<Vec<FileIndex>>,
     },
 }
@@ -188,7 +190,7 @@ impl Rows {
     pub fn row(&self, at: usize) -> Option<ListingEntry> {
         match self {
             Self::Directory(rows) => rows.get(at).cloned(),
-            Self::Filtered { files, matches } => files.row(*matches.get(at)?),
+            Self::Filtered { files, matches, .. } => files.row(*matches.get(at)?),
         }
     }
 
@@ -197,6 +199,18 @@ impl Rows {
         match self {
             Self::Directory(rows) => rows.as_ref().clone(),
             Self::Filtered { .. } => (0..self.len()).filter_map(|at| self.row(at)).collect(),
+        }
+    }
+
+    /// The typed text a filter result matched, which its label is marked by. A glob marks
+    /// nothing.
+    pub fn query(&self) -> Option<&FilterQuery> {
+        match self {
+            Self::Filtered { filter, .. } => match filter.as_ref() {
+                PathFilter::Text(query) => Some(query),
+                PathFilter::Glob(_) => None,
+            },
+            Self::Directory(_) => None,
         }
     }
 }
@@ -288,6 +302,7 @@ impl Pane {
                 (PaneState::Ready(loaded), Some(filter)) => Rows::Filtered {
                     files: loaded.files.clone(),
                     matches: Rc::new(filter_files(&loaded.files, &filter)),
+                    filter: Rc::new(filter),
                 },
                 (PaneState::Ready(loaded), None) => Rows::Directory(Rc::new(directory_entries(&loaded.vfs, &dir))),
                 _ => Rows::empty(),

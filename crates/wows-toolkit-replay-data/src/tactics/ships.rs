@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -17,8 +19,8 @@ pub struct ShipChoice {
     /// The param the ship is looked up by.
     pub param_index: String,
     pub display_name: String,
-    /// Lowercased, ASCII-folded display name, which is what a search is matched against.
-    search_name: String,
+    /// The display name folded, which is what a search is matched against.
+    key: FilterKey,
     pub tier: u32,
 }
 
@@ -72,14 +74,14 @@ impl ShipList {
                     .unwrap_or_else(|| nation.clone())
             });
             let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
-            let search_name = unidecode::unidecode(&display_name).to_lowercase();
+            let key = FilterKey::new(&display_name);
             ships.push((
                 nation,
                 ShipChoice {
                     species,
                     param_index: param.index().to_string(),
                     display_name,
-                    search_name,
+                    key,
                     tier: vehicle.level(),
                 },
             ));
@@ -95,15 +97,15 @@ impl ShipList {
         Self { ships: ships.into_iter().map(|(_, ship)| ship).collect() }
     }
 
-    /// The first [`SHIP_MATCHES`] ships whose names contain what has been typed.
+    /// The ships whose names match `query`, best first and at most [`SHIP_MATCHES`] of them.
     ///
     /// Empty until something is typed: every ship at once is not a choice.
-    pub fn matching(&self, typed: &str) -> Vec<ShipChoice> {
-        let query = unidecode::unidecode(typed.trim()).to_lowercase();
-        if query.is_empty() {
+    pub fn matching(&self, query: &FilterQuery) -> Vec<ShipChoice> {
+        if !query.is_active() {
             return Vec::new();
         }
-        self.ships.iter().filter(|ship| ship.search_name.contains(&query)).take(SHIP_MATCHES).cloned().collect()
+
+        query.rank(&self.ships, |ship| &ship.key).into_iter().take(SHIP_MATCHES).cloned().collect()
     }
 }
 

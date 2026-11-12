@@ -25,6 +25,7 @@ use wows_toolkit_services::collab::SessionBoard;
 use wows_toolkit_services::collab::UserId;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::GameParamProvider as _;
 use wowsunpack::game_params::types::Species;
@@ -1339,13 +1340,14 @@ impl Board {
         self.changed();
     }
 
-    /// The ships whose names match what has been typed.
-    pub fn matching_ships(&mut self, typed: &str) -> Vec<ShipChoice> {
-        if typed.trim().is_empty() {
+    /// The ships whose names match `query`, best first.
+    pub fn matching_ships(&mut self, query: &FilterQuery) -> Vec<ShipChoice> {
+        if !query.is_active() {
             return Vec::new();
         }
         let Some(ships) = self.ship_list() else { return Vec::new() };
-        ships.matching(typed)
+
+        ships.matching(query)
     }
 
     /// Every ship the build knows, built the first time one is looked up.

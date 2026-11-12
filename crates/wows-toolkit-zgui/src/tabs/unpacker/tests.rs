@@ -212,6 +212,7 @@ fn a_filter_lists_matching_files_from_the_whole_tree() {
     pane.filter.set("gameplay".to_string());
     tab.settle();
     assert_eq!(pane.rows.with_untracked(|rows| rows.len()), 1, "the filter narrows to the nested file");
+    assert_eq!(tab.window.texts_by_class(landaire_ui::MARK_CLASS), ["gameplay"], "the row marks what matched");
 
     pane.filter.set(String::new());
     tab.settle();

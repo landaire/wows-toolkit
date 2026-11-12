@@ -85,6 +85,8 @@ pub struct TrackerModel {
     pub sort: RwSignal<Sort, LocalStorage>,
     pub clan_sort: RwSignal<ClanSort, LocalStorage>,
     pub filter: RwSignal<String, LocalStorage>,
+    /// `filter`, folded once for every row it is tried on.
+    pub query: Memo<FilterQuery>,
     /// Everyone the index returned for the period, unfiltered.
     pub players: RwSignal<Vec<PlayerFacet>, LocalStorage>,
     /// Notes and encounters kept against the players met, shared with the other front ends.
@@ -123,6 +125,7 @@ impl TrackerModel {
         let sort = RwSignal::new_local(Sort::default());
         let clan_sort = RwSignal::new_local(ClanSort::default());
         let filter = RwSignal::new_local(String::new());
+        let query = Memo::new(move |_| FilterQuery::new(&filter.get()));
         let players = RwSignal::new_local(Vec::new());
         let tracked = RwSignal::new_local(HashMap::new());
         let clan_latest = RwSignal::new_local(HashMap::new());
@@ -135,9 +138,8 @@ impl TrackerModel {
                 let since = period.get().earliest(Timestamp::now());
                 players.with(|players| {
                     tracked.with(|tracked| {
-                        filter.with(|filter| {
-                            let query = FilterQuery::new(filter);
-                            visible_player_rows(players, tracked, &query, since, show_division_mates.get(), sort.get())
+                        query.with(|query| {
+                            visible_player_rows(players, tracked, query, since, show_division_mates.get(), sort.get())
                         })
                     })
                 })
@@ -154,7 +156,7 @@ impl TrackerModel {
                         })
                     })
                 });
-                filter.with(|filter| visible_clans(rows, &FilterQuery::new(filter), clan_sort.get()))
+                query.with(|query| visible_clans(rows, query, clan_sort.get()))
             },
             always_changed,
         );
@@ -183,6 +185,7 @@ impl TrackerModel {
             sort,
             clan_sort,
             filter,
+            query,
             players,
             tracked,
             clan_latest,

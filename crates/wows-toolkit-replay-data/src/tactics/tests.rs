@@ -4,6 +4,7 @@ use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::cap_layout::CapPointLayout;
 use wows_replays::types::TeamId;
 use wows_toolkit_services::collab::CapPointId;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_types::WorldPos2D;
 
 use crate::tactics::BoardCapPoint;
@@ -15,6 +16,7 @@ use crate::tactics::ElementSize;
 use crate::tactics::FRIENDLY_COLOR;
 use crate::tactics::Letterbox;
 use crate::tactics::MapChoice;
+use crate::tactics::MapEntry;
 use crate::tactics::NEUTRAL_COLOR;
 use crate::tactics::NEW_CAP_RADIUS;
 use crate::tactics::RESIZE_BAND_PX;
@@ -210,10 +212,17 @@ fn maps_that_read_alike_are_named_apart() {
         MapChoice { map_id: None, space: "spaces/99_hotspot".into(), label: "Hotspot".into() },
         MapChoice { map_id: Some(4), space: "spaces/04_Archipelago".into(), label: "Archipelago".into() },
     ];
-    let titles: Vec<String> = map_entries(&maps).into_iter().map(|entry| entry.title).collect();
+    let entries = map_entries(&maps);
+    let titles: Vec<&str> = entries.iter().map(|entry| entry.title.as_str()).collect();
     assert_eq!(titles, ["Hotspot (16)", "Hotspot (spaces/99_hotspot)", "Archipelago"]);
-    assert!(map_entries(&maps)[0].matches("bees"), "found by its space");
-    assert!(map_entries(&maps)[0].matches("16"), "and by its id");
+
+    let found = |typed: &str| -> Vec<String> {
+        MapEntry::rank(&entries, &FilterQuery::new(typed)).into_iter().map(|entry| entry.title.clone()).collect()
+    };
+    assert_eq!(found("bees"), ["Hotspot (16)"], "found by its space");
+    assert_eq!(found("16"), ["Hotspot (16)"], "and by its id");
+    assert_eq!(found("").len(), 3, "an empty search lists every map in order");
+    assert_eq!(found("a")[0], "Archipelago", "a title start outranks a letter inside a word");
 }
 
 /// A space listed once names its map; one listed twice names none.

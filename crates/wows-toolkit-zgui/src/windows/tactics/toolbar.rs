@@ -1,6 +1,7 @@
 //! The board's two toolbar rows: what it is set on, the ship picker, the range circles, the presets
 //! and the scan above; the capture point and drawing tools below.
 
+use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::tactics::BoardTool;
@@ -20,6 +21,7 @@ use wows_toolkit_replay_data::tactics::ships::ShipChoice;
 use wows_toolkit_replay_data::tactics::ships::tier_roman;
 use wows_toolkit_replay_data::tactics::shortcut_modifier_name;
 use wows_toolkit_replay_data::tactics::team_color;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -63,6 +65,8 @@ use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
 use crate::services::Services;
+use crate::text_marks::marks;
+use crate::text_marks::marks_within;
 use crate::windows::tactics::model::BoardModel;
 
 const SHEET: &str = "wt-tactics-toolbar";
@@ -286,9 +290,11 @@ fn MapPicker(model: BoardModel) -> impl IntoView {
         })
     };
     let trigger = move || chosen().unwrap_or_else(|| t!("ui.tactics.map_hint").into_owned());
+    let query = Memo::new(move |_| FilterQuery::new(&typed.get()));
     let found = Memo::new(move |_| {
-        let typed = typed.get();
-        entries.with(|entries| entries.iter().filter(|entry| entry.matches(&typed)).cloned().collect::<Vec<_>>())
+        query.with(|query| {
+            entries.with(|entries| MapEntry::rank(entries, query).into_iter().cloned().collect::<Vec<_>>())
+        })
     });
     let choose = move |entry: MapEntry| {
         open.set(false);
@@ -330,7 +336,7 @@ fn MapPicker(model: BoardModel) -> impl IntoView {
                 }
                 column(class = "wt-tactics-toolbar__matches") {
                     for entry in move || found.get(), key = |entry: &MapEntry| entry.choice.key() {
-                        {map_match(entry, choose)}
+                        {map_match(entry, query, choose)}
                     }
                 }
             }
@@ -339,11 +345,14 @@ fn MapPicker(model: BoardModel) -> impl IntoView {
 }
 
 /// One map the search found, which a press sets the board on.
-fn map_match(entry: MapEntry, choose: impl Fn(MapEntry) + Copy + 'static) -> AnyView {
+fn map_match(entry: MapEntry, query: Memo<FilterQuery>, choose: impl Fn(MapEntry) + Copy + 'static) -> AnyView {
     let label = entry.title.clone();
     AnyView::new(view! {
-        Button(variant = ButtonVariant::Ghost, size = ButtonSize::Xs, on:click = move |_| choose(entry.clone())) {
-            {label}
+        Button(variant = ButtonVariant::Ghost, size = ButtonSize::Xs, a11y:label = label.clone(), on:click = move |_| choose(entry.clone())) {
+            {move || {
+                let ranges = query.with(|query| marks(query, &label));
+                view! { MarkedText(text = label.clone(), ranges = ranges) }
+            }}
         }
     })
 }
@@ -399,11 +408,13 @@ fn ModePicker(model: BoardModel) -> impl IntoView {
 fn ShipPicker(model: BoardModel) -> impl IntoView {
     let locked = Signal::derive_local(move || model.with(|board| board.annotations_locked()));
     let typed = RwSignal::new_local(String::new());
+    let query = Memo::new(move |_| FilterQuery::new(&typed.get()));
     let matched: RwSignal<Vec<ShipChoice>, LocalStorage> = RwSignal::new_local(Vec::new());
     let placing =
         Memo::new(move |_| model.with(|board| board.placing().map(|placed| (placed.name.clone(), placed.friendly))));
     let on_change = UnsyncCallback::new(move |text: String| {
-        matched.set(model.change(|board| board.matching_ships(&text)).unwrap_or_default());
+        let query = FilterQuery::new(&text);
+        matched.set(model.change(|board| board.matching_ships(&query)).unwrap_or_default());
     });
     let pick = move |ship: ShipChoice| {
         model.update(|board| board.pick_ship(&ship));
@@ -445,7 +456,7 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
             if move || !matched.with(Vec::is_empty) {
                 column(class = "wt-tactics-toolbar__matches", attr:data-testid = "tactics-ship-matches") {
                     for ship in move || matched.get(), key = |ship: &ShipChoice| ship.param_index.clone() {
-                        {ship_match(ship, locked, pick)}
+                        {ship_match(ship, query, locked, pick)}
                     }
                 }
             } else {}
@@ -456,18 +467,24 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
 /// One ship the search found, which a press takes up for placing.
 fn ship_match(
     ship: ShipChoice,
+    query: Memo<FilterQuery>,
     locked: Signal<bool, LocalStorage>,
     pick: impl Fn(ShipChoice) + Copy + 'static,
 ) -> AnyView {
     let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
+    let name = ship.display_name.clone();
     AnyView::new(view! {
         Button(
             variant = ButtonVariant::Ghost,
             size = ButtonSize::Xs,
             disabled = locked,
+            a11y:label = label.clone(),
             on:click = move |_| pick(ship.clone())
         ) {
-            {label}
+            {move || {
+                let ranges = query.with(|query| marks_within(query, &label, &name));
+                view! { MarkedText(text = label.clone(), ranges = ranges) }
+            }}
         }
     })
 }
