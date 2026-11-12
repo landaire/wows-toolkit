@@ -98,6 +98,7 @@ fn the_root_list_offers_every_tab_and_the_shells_commands() {
         "games-i-won",
         "open-replay-file",
         "index-all-replays",
+        "refresh-persisted-data",
         "copy-latest-log",
         "copy-bug-report-info",
         "set-theme-system",
