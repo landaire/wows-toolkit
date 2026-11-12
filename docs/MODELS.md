@@ -454,7 +454,7 @@ No gaps or overlaps; every byte is accounted for.
 
 Reverse-engineered from `WorldOfWarships64.exe` using Binary Ninja.
 
-ModelPrototype wraps a VisualPrototype, adding skeleton extensions, animations,
+ModelPrototype wraps a VisualPrototype, adding skeleton extensions, animation
 and dye/tint data. The `.model` file in BigWorld traditionally references a
 `.visual` -- this is how that reference is stored in `assets.bin`.
 
@@ -471,11 +471,11 @@ Offset  Size  Type   Field
 0x00    8     u64    visualResourceId     # selfId (path hash) of the .visual in pathsStorage
 0x08    1     u8     skelExtResIdCount    # number of skeleton extension resource IDs
 0x09    1     u8     miscType             # purpose unknown (seen as 0 or small values)
-0x0A    1     u8     animationsCount      # number of animation entries
+0x0A    1     u8     animationsCount      # number of animation resource IDs
 0x0B    1     u8     dyesCount            # number of dye entries
 0x0C    4     ---    (padding/reserved)
 0x10    8     i64    skelExtResIdsPtr     # relptr -> u64[] (skeleton extension resource IDs)
-0x18    8     i64    animationsPtr        # relptr -> AnimationEntry[] (0x28 bytes each)
+0x18    8     i64    animationsPtr        # relptr -> u64[] (animation resource IDs)
 0x20    8     i64    dyesPtr              # relptr -> DyeEntry[] (0x20 bytes each)
 ```
 
@@ -485,11 +485,11 @@ Offset  Size  Type   Field
 `pathsStorage` section of `assets.bin` to find the corresponding `.visual` file path.
 This is more reliable than string-replacing `.model` with `.visual` in the file path.
 
-### AnimationEntry (0x28 bytes each)
+### Animation resource IDs
 
-Same layout as a ModelPrototype record -- contains its own `visualResourceId`,
-skeleton extensions, animations (recursive), and dyes. Used for animation
-overlays.
+Each entry is a `selfId` of an `.ssm` animation state machine in `pathsStorage`,
+8 bytes each, not a nested ModelPrototype. Animated models such as propellers,
+radars and characters carry them.
 
 ### DyeEntry (0x20 bytes)
 
