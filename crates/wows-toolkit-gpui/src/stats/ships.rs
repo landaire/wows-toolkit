@@ -6,7 +6,6 @@
 //! come from `wows_toolkit_viewmodel::stats::table`, so both front ends show
 //! and copy the same figures.
 
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -77,8 +76,6 @@ struct ShipSection {
     rating: Option<PrStats>,
     rows: Vec<stats_table::StatRow>,
     horizontal_scroll: ScrollHandle,
-    /// `sort_key` of this ship's most recent game, which orders the list.
-    last_played: String,
     markdown: SharedString,
     csv: SharedString,
 }
@@ -194,64 +191,26 @@ impl StatsShipsPanel {
     }
 
     fn rebuild(&mut self) {
-        // Grouped by id, not by name: two ships can carry one display name,
-        // and a rating is scored against a single ship's expected values.
-        let mut by_ship: BTreeMap<u64, Vec<&PerGameStat>> = BTreeMap::new();
-        for game in &self.games {
-            by_ship.entry(game.ship_id.raw()).or_default().push(game);
-        }
+        let games: Vec<&PerGameStat> = self.games.iter().collect();
+        // Grouped the way the reader's language groups digits, as the egui table does.
+        let locale = wows_toolkit_viewmodel::locale();
+        let summaries = stats_table::ship_summaries(&games, self.personal_rating.as_deref(), Some(&locale));
 
-        let mut sections: Vec<ShipSection> = by_ship
+        self.sections = summaries
             .into_iter()
-            .map(|(ship_id, games)| {
-                let ship_id = GameParamId::from(ship_id);
-                let info = PerformanceInfo::from_games(&games);
-                // A group exists only because a game created it, so there is
-                // always a win rate and always a name to read.
-                let win_rate = info.win_rate().unwrap_or_default();
-                let ship = games.first().map(|game| game.ship_name.as_str()).unwrap_or_default();
-                let rating = self.personal_rating.as_ref().and_then(|table| PrStats::from_games(&games, table));
-
-                let record = if info.draws() > 0 {
-                    format!("{}W/{}L/{}D", info.wins(), info.losses(), info.draws())
-                } else {
-                    format!("{}W/{}L", info.wins(), info.losses())
-                };
-                let header = SharedString::from(match rating.as_ref() {
-                    Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average.pr),
-                    None => format!("{ship} {record} ({win_rate:.0}%)"),
-                });
-                // Grouped the way the reader's language groups digits, as
-                // the egui table does.
-                let locale = wows_toolkit_viewmodel::locale();
-                let rows = stats_table::ship_rows(&info, rating.as_ref(), Some(&locale));
-
-                ShipSection {
-                    ship_id,
-                    ship: SharedString::from(ship.to_string()),
-                    ship_key: FilterKey::new(ship),
-                    markdown: SharedString::from(stats_table::to_markdown(
-                        &header,
-                        &rows,
-                        column_heading,
-                        stat_heading,
-                    )),
-                    csv: SharedString::from(stats_table::to_csv(&rows, column_heading, stat_heading)),
-                    header,
-                    rows,
-                    horizontal_scroll: ScrollHandle::new(),
-                    last_played: info.last_played().to_string(),
-                    performance: info,
-                    rating,
-                }
+            .map(|summary| ShipSection {
+                ship_id: summary.ship_id,
+                ship: SharedString::from(summary.ship.clone()),
+                ship_key: FilterKey::new(&summary.ship),
+                markdown: SharedString::from(summary.markdown(column_heading, stat_heading)),
+                csv: SharedString::from(summary.csv(column_heading, stat_heading)),
+                header: SharedString::from(summary.header),
+                rows: summary.rows,
+                horizontal_scroll: ScrollHandle::new(),
+                performance: summary.performance,
+                rating: summary.rating,
             })
             .collect();
-
-        // Most recently played first, which is the order the egui list opens
-        // in, with the id breaking a tie so the order is total.
-        sections.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.ship_id.raw().cmp(&b.ship_id.raw())));
-
-        self.sections = sections;
     }
 
     pub fn set_game_data(&mut self, vfs: &VfsPath, provider: Arc<GameMetadataProvider>, cx: &mut Context<Self>) {
