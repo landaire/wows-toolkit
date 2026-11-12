@@ -4,7 +4,6 @@
 //! The three sections are panels of one dock, so they can be split and docked; the status bar
 //! shows and hides the dock's side regions once a section has been moved into one.
 
-mod class_icon;
 mod live;
 mod model;
 mod roster;
