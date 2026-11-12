@@ -25,6 +25,7 @@ pub use crate::grid::layout::ColumnState;
 pub use crate::grid::layout::Placement;
 pub use crate::grid::layout::Section;
 pub use crate::grid::mode::RowDetail;
+pub use crate::grid::mode::RowGroups;
 pub use crate::grid::mode::RowMode;
 pub use crate::grid::selection::GridSelectionMode;
 pub use crate::grid::selection::Selection;

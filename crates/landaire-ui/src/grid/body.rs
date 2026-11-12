@@ -6,9 +6,11 @@ use std::time::Duration;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
@@ -16,6 +18,7 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::A11yBinding;
 use zgui::view::AnyView;
@@ -37,6 +40,7 @@ use zgui::vocab::Role;
 use crate::grid::column::ColumnId;
 use crate::grid::header;
 use crate::grid::mode::RowDetail;
+use crate::grid::mode::RowGroups;
 use crate::grid::selection::GridSelectionMode;
 use crate::grid::state::GridCx;
 use crate::grid::state::MenuTarget;
@@ -195,6 +199,7 @@ where
     let ids = cx.drawn_ids;
     let detail =
         cx.detail.clone().map(|detail| AnyView::new(detail_region(Rc::clone(&cx), key.clone(), value, detail)));
+    let heading = cx.groups.clone().map(|groups| AnyView::new(group_heading(&cx, index, value, groups)));
 
     view! {
         box(
@@ -203,6 +208,7 @@ where
             on:double_click = on_double_click,
             {..own}
         ) {
+            {heading}
             for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
                 {body_cell(Rc::clone(&cx), id, value)}
             }
@@ -261,6 +267,52 @@ where
             {move || value.with(|row| row.as_ref().map(|row| column.cell_view(row)))}
         }
     })
+}
+
+/// The heading over a row that opens a run of its group, spanning the grid and held in view while
+/// the columns scroll. Built from the row's own value, so it follows the row through a sort.
+fn group_heading<T, K>(
+    cx: &GridCx<T, K>,
+    index: Signal<Option<usize>, LocalStorage>,
+    value: RwSignal<Option<T>, LocalStorage>,
+    groups: RowGroups<T>,
+) -> impl IntoView
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    // The positions are written after every change to the rows, so the rows are read untracked.
+    let rows = cx.rows;
+    let groups = StoredValue::new_local(groups);
+    let starts = Memo::new(move |_| {
+        let Some(index) = index.get() else {
+            return false;
+        };
+        rows.with_untracked(|rows| {
+            let previous = index.checked_sub(1).and_then(|previous| rows.get(previous));
+            rows.get(index).is_some_and(|row| groups.with_value(|groups| groups.starts(previous, row)))
+        })
+    });
+    let view_width = cx.view_width;
+    // A press on the heading is not a press on the row it heads.
+    let keep = |ev: &mut EventCx<'_, events::PointerDown>| ev.stop_propagation();
+    let keep_double = |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation();
+    let heading = move || value.with(|row| row.as_ref().map(|row| groups.with_value(|groups| groups.heading(row))));
+
+    view! {
+        if move || starts.get() {
+            box(
+                class = "lui-grid__group",
+                on:pointer_down = keep,
+                on:double_click = keep_double,
+                a11y:role = Role::RowHeader
+            ) {
+                box(class = "lui-grid__group-body", var:--lui-grid-view = move || view_width.get()) {
+                    {heading}
+                }
+            }
+        } else {}
+    }
 }
 
 /// The region under a row: built while the row is expanded and while it closes, and revealed by

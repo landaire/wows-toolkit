@@ -16,6 +16,7 @@ use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
 use landaire_ui::MotionPreference;
+use landaire_ui::RowGroups;
 use landaire_ui::RowHeight;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
@@ -369,6 +370,42 @@ fn an_expanded_row_grows_into_its_detail_and_pushes_the_rows_below_down() {
     window.advance(Duration::from_millis(400));
     assert_eq!(top(&window, cell(&window, "name-2")), below, "the row below moved back");
     assert!(window.by_test_id("detail-1").is_none(), "a closed detail is taken down");
+}
+
+#[test]
+fn a_group_heading_opens_each_run_and_follows_a_reorder() {
+    let rows = RwSignal::new_local(items(5));
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let mode = RowMode::natural().grouped(RowGroups::new(
+            |item: &Item| Some(item.id / 2),
+            |item: &Item| view! { text(attr:data-testid = format!("group-{}", item.id / 2)) {"group"} },
+        ));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = rows,
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        mode = mode,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+
+    assert_eq!(window.by_role(Role::RowHeader).len(), 3, "one heading per run");
+    let heading = top(&window, cell(&window, "group-1"));
+    assert!(heading < top(&window, cell(&window, "name-2")), "the heading sits over its run");
+    assert!(heading > top(&window, cell(&window, "name-1")), "the heading sits under the run before");
+
+    rows.set(vec![items(5)[0].clone(), items(5)[2].clone(), items(5)[1].clone()]);
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.by_role(Role::RowHeader).len(), 3, "a split run opens again under a heading");
+    let headed = top(&window, cell(&window, "group-0"));
+    assert!(headed < top(&window, cell(&window, "name-0")));
 }
 
 #[test]

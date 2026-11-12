@@ -135,6 +135,23 @@ pub(crate) const CSS: &str = css!(
         background-color: var(--lui-color-panel);
         transition: height var(--lui-motion-reveal) var(--lui-motion-ease);
     }
+    .lui-grid__group {
+        grid-column: 1 / -1;
+        border-bottom: 1px solid var(--lui-color-border);
+        background-color: var(--lui-color-panel);
+    }
+    .lui-grid__group-body {
+        position: sticky;
+        left: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        box-sizing: border-box;
+        width: var(--lui-grid-view, auto);
+        padding: 4px 8px;
+        font-weight: 600;
+        color: var(--lui-color-text-bright);
+    }
     .lui-grid__detail[data-state=\"open\"] { height: var(--lui-grid-detail-height, auto); }
     .lui-grid__detail-body {
         position: sticky;
