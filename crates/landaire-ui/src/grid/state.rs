@@ -44,6 +44,7 @@ use crate::grid::selection::GridSelectionMode;
 use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
 use crate::motion::CubicBezier;
+use crate::motion::MotionPreference;
 use crate::motion::Movement;
 use crate::surface::RowHeight;
 
@@ -163,6 +164,8 @@ where
     pub(crate) instant: RwSignal<bool, LocalStorage>,
     pub(crate) slide: Rc<RefCell<Option<Slide>>>,
     pub(crate) settle: Rc<RefCell<Option<FrameHandle>>>,
+    /// Under reduced motion the columns take their new places at once.
+    pub(crate) motion: Signal<MotionPreference, LocalStorage>,
 
     pub(crate) sort: Signal<Option<ColumnSort>, LocalStorage>,
     pub(crate) on_sort: Option<UnsyncCallback<Option<ColumnSort>>>,
@@ -329,6 +332,16 @@ where
         Some(view * PINNED_SHARE - others)
     }
 
+    /// `width` as `id` may be resized to: no narrower than its minimum and, while it is pinned, no
+    /// wider than [`pinned_room`](Self::pinned_room) leaves it.
+    pub(crate) fn resized_width(&self, id: &ColumnId, width: f32) -> Option<ColumnWidth> {
+        let column = self.column(id)?;
+        let pinned = self.layout.with_untracked(|layout| layout.is_pinned(id));
+        let room = if pinned { self.pinned_room(id) } else { None };
+
+        Some(column.clamp(room.map_or(width, |room| width.min(room))))
+    }
+
     /// Commits `next` as the reader's layout, sliding the columns from where they are drawn.
     pub(crate) fn rearrange(&self, next: ColumnLayout) {
         let drawn = self.drawn.get_untracked();
@@ -340,8 +353,21 @@ where
     }
 
     /// Starts every column whose place differs between `from` and `to` sliding from where it is
-    /// drawn, including how far along a slide still under way it is, to its place in `to`.
+    /// drawn, including how far along a slide still under way it is, to its place in `to`. Under
+    /// reduced motion every column is drawn at its place in `to` at once.
     pub(crate) fn slide(&self, from: &ColumnLayout, to: &ColumnLayout) {
+        if self.motion.get_untracked() == MotionPreference::Reduced {
+            self.settle.replace(None);
+            self.slide.replace(None);
+            if self.instant.get_untracked() {
+                self.instant.set(false);
+            }
+            if self.shifts.with_untracked(|shifts| !shifts.is_empty()) {
+                self.shifts.set(HashMap::new());
+            }
+            return;
+        }
+
         let scroll = self.scroll_x();
         let width = |id: &ColumnId| self.width_of(id);
         let moving = self.slide.borrow().as_ref().map(Slide::offsets).unwrap_or_default();

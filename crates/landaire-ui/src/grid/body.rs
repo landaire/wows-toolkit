@@ -3,6 +3,8 @@ use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -371,9 +373,8 @@ where
     let modifiers = ev.modifiers;
     let cursor = cx.cursor.get_untracked();
     if header::opens_menu(&ev.key, modifiers) {
-        let anchor = cursor.as_ref().and_then(|key| cx.row_cells.borrow().get(key).copied());
-        if let (Some(key), Some(anchor), Some(_)) = (cursor, anchor, cx.row_menu.as_ref()) {
-            header::open_menu_at(anchor, MenuTarget::Row(key), cx);
+        if let (Some(key), Some(_)) = (cursor, cx.row_menu.as_ref()) {
+            open_row_menu(cx, key);
         }
         ev.prevent_default();
         return;
@@ -419,4 +420,20 @@ where
 
     ev.prevent_default();
     ev.stop_propagation();
+}
+
+/// Opens the row menu for `key` under its row, at the leading edge of the view.
+fn open_row_menu<T, K>(cx: &GridCx<T, K>, key: K)
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    // The filler cell spans the row's height but sits after the last column.
+    let filler = cx.row_cells.borrow().get(&key).copied();
+    let Some((row, view)) = filler.and_then(|filler| filler.window_bounds()).zip(cx.port.window_bounds()) else {
+        return;
+    };
+
+    let corner = Point::new(view.origin.x, DevicePx(row.origin.y.0 + row.size.height.0));
+    header::open_menu(corner, MenuTarget::Row(key), cx);
 }

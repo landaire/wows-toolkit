@@ -2,6 +2,10 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use zgui::elements::Focus;
+use zgui::geom::CssPx;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
@@ -338,10 +342,9 @@ where
             ev.prevent_default();
             ev.capture_pointer();
             let start = bounds.size.width.0 / cx.scale();
-            let Some(column) = cx.column(&id) else {
+            let Some(width) = cx.resized_width(&id, start) else {
                 return;
             };
-            let width = column.clamp(start);
             cx.resize.set(Some(Resize { column: id.clone(), from: ev.position.x.0, start, width }));
         }
     };
@@ -351,11 +354,10 @@ where
             let Some(resize) = cx.resize.get_untracked() else {
                 return;
             };
-            let Some(column) = cx.column(&resize.column) else {
+            let Some(width) = cx.resized_width(&resize.column, resize.start + ev.position.x.0 - resize.from) else {
                 return;
             };
 
-            let width = column.clamp(resize.start + ev.position.x.0 - resize.from);
             if width != resize.width {
                 cx.resize.set(Some(Resize { width, ..resize }));
             }
@@ -403,11 +405,10 @@ where
             };
             ev.prevent_default();
             ev.stop_propagation();
-            let Some(column) = cx.column(&id) else {
+            let Some(width) = cx.resized_width(&id, cx.width_of(&id) + by) else {
                 return;
             };
 
-            let width = column.clamp(cx.width_of(&id) + by);
             cx.layout.update(|layout| layout.set_width(&id, Some(width)));
         }
     };
@@ -488,16 +489,27 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    let Some((place, bounds)) = cx.menu_place.get().zip(anchor.window_bounds()) else {
+    let Some(bounds) = anchor.window_bounds() else {
+        return;
+    };
+
+    let corner = Point::new(bounds.origin.x, DevicePx(bounds.origin.y.0 + bounds.size.height.0));
+    open_menu(corner, target, cx);
+}
+
+/// Opens the grid's menu for `target` with its top-left corner at `corner` in the window.
+pub(crate) fn open_menu<T, K>(corner: Point<DevicePx, Device>, target: MenuTarget<K>, cx: &GridCx<T, K>)
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let Some(place) = cx.menu_place.get() else {
         return;
     };
 
     let scale = cx.scale();
     cx.menu_target.set(Some(target));
-    place.open_at(zgui::geom::Point::new(
-        zgui::geom::CssPx(bounds.origin.x.0 / scale),
-        zgui::geom::CssPx((bounds.origin.y.0 + bounds.size.height.0) / scale),
-    ));
+    place.open_at(Point::new(CssPx(corner.x.0 / scale), CssPx(corner.y.0 / scale)));
 }
 
 /// The items of the menu a header opens.
