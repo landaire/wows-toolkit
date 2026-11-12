@@ -32,9 +32,9 @@ use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
-use zgui::reactive::Callable;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -50,6 +50,7 @@ use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
@@ -57,6 +58,7 @@ use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
+use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PointerButton;
@@ -100,8 +102,10 @@ const CSS: &str = css!(
         display: flex;
         flex: none;
         gap: 2px;
+        min-width: 0;
         padding: 0 4px;
         overflow-x: auto;
+        overflow-y: hidden;
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-folder-tab {
@@ -289,6 +293,17 @@ impl FolderTab {
     }
 }
 
+/// The replays landed in a tab whose count waits for the ring the latest of them sent.
+pub(super) struct PendingLanding {
+    pub(super) paths: HashSet<PathBuf>,
+    /// Dropped to cancel the wait, when another landing restarts it or the tab goes.
+    _timer: TimeoutHandle,
+}
+
+/// One look for a chosen directory, so only a tab's latest is taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CheckId(u64);
+
 /// The directory tabs and their listings, as a `Copy` handle the replays tab makes in its body
 /// and hands to [`super::ReplayBrowser`].
 #[derive(Clone, Copy)]
@@ -309,8 +324,13 @@ pub struct BrowserControl {
     pub(super) grouping: RwSignal<ReplayGrouping, LocalStorage>,
     next_id: StoredValue<u64, LocalStorage>,
     timers: StoredValue<Option<Timers>, LocalStorage>,
-    /// The waits after which landed replays count, each dropped as it fires.
-    counting: StoredValue<Vec<zgui::view::TimeoutHandle>, LocalStorage>,
+    /// The landed replays each tab counts once its ring has spread, one wait per tab.
+    pub(super) pending_landings: StoredValue<HashMap<FolderId, PendingLanding>, LocalStorage>,
+    /// The install's replays directory by its canonical path, once resolved off the UI thread.
+    install_key: StoredValue<Option<PathBuf>, LocalStorage>,
+    next_check: StoredValue<u64, LocalStorage>,
+    /// The look under way for each chosen tab's directory.
+    checks: StoredValue<HashMap<FolderId, CheckId>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
     shell: Shell,
 }
@@ -338,7 +358,10 @@ impl BrowserControl {
             grouping: RwSignal::new_local(ReplayGrouping::default()),
             next_id: StoredValue::new_local(1),
             timers: StoredValue::new_local(Timers::current()),
-            counting: StoredValue::new_local(Vec::new()),
+            pending_landings: StoredValue::new_local(HashMap::new()),
+            install_key: StoredValue::new_local(None),
+            next_check: StoredValue::new_local(0),
+            checks: StoredValue::new_local(HashMap::new()),
             owner: StoredValue::new_local(Owner::current().expect("the control is made inside a component")),
             shell,
         };
@@ -354,6 +377,10 @@ impl BrowserControl {
         self.shell.services()
     }
 
+    pub(super) fn shell(self) -> Shell {
+        self.shell
+    }
+
     fn spawn(self, future: impl Future<Output = ()> + 'static) {
         let owner = self.owner.get_value();
         owner.with(|| {
@@ -367,7 +394,10 @@ impl BrowserControl {
         let effect = RenderEffect::new(move |_| {
             let Some(grouping) = services.settings.read(|settings| settings.replay.grouping) else { return };
             self.grouping.set(grouping);
-            if self.pins_saved.get_untracked() == SavedList::NotRead && services.settings.pool().is_some() {
+            // Tests share one settings database across threads, so they hand the stored lists in
+            // through `adopt_*` rather than reading each other's.
+            let restores = cfg!(not(test));
+            if restores && self.pins_saved.get_untracked() == SavedList::NotRead && services.settings.pool().is_some() {
                 self.restore_folders();
             }
         });
@@ -390,7 +420,8 @@ impl BrowserControl {
         self.spawn(async move {
             let read = services
                 .on_tokio(async move {
-                    let pins = wows_toolkit_config::queries::try_get_setting::<PinnedFolders>(&pool, PINNED_FOLDERS).await;
+                    let pins =
+                        wows_toolkit_config::queries::try_get_setting::<PinnedFolders>(&pool, PINNED_FOLDERS).await;
                     let history =
                         wows_toolkit_config::queries::try_get_setting::<FolderHistory>(&pool, FOLDER_HISTORY).await;
                     (pins.map_err(|err| err.to_string()), history.map_err(|err| err.to_string()))
@@ -438,7 +469,8 @@ impl BrowserControl {
         for root in &dropped {
             stored.forget(root);
         }
-        let changed_before = self.history.with_untracked(|history| !history.folders().is_empty()) || !dropped.is_empty();
+        let changed_before =
+            self.history.with_untracked(|history| !history.folders().is_empty()) || !dropped.is_empty();
         self.history.update(|history| history.merge_older(stored));
         if changed_before {
             self.save_folder_history();
@@ -447,10 +479,9 @@ impl BrowserControl {
 
     /// The pinned directories, in tab order.
     pub fn pinned_folders(self) -> PinnedFolders {
-        PinnedFolders(
-            self.folders
-                .with_untracked(|folders| folders.iter().filter(|tab| tab.pinned).filter_map(|tab| tab.root().map(Path::to_path_buf)).collect()),
-        )
+        PinnedFolders(self.folders.with_untracked(|folders| {
+            folders.iter().filter(|tab| tab.pinned).filter_map(|tab| tab.root().map(Path::to_path_buf)).collect()
+        }))
     }
 
     fn save_pinned_folders(self) {
@@ -488,10 +519,12 @@ impl BrowserControl {
         self.folders.with_untracked(|folders| folders.iter().filter_map(|tab| self.listing(tab.id)).collect())
     }
 
-    /// The tab already showing `root`: the install's when it is the install's directory.
+    /// The tab already showing `root`: the install's when it is the install's directory. Chosen
+    /// tabs are keyed by canonical path once checked, so no path is resolved here.
     fn folder_for(self, root: &Path) -> Option<FolderId> {
         let install = self.install_listing().and_then(|listing| listing.directory.get_untracked());
-        if install.as_deref().is_some_and(|install| same_directory(install, root)) {
+        let install_key = self.install_key.get_value();
+        if install.as_deref() == Some(root) || install_key.as_deref() == Some(root) {
             return Some(FolderId::INSTALL);
         }
 
@@ -510,24 +543,45 @@ impl BrowserControl {
         let id = FolderId(self.next_id.get_value());
         self.next_id.update_value(|next| *next += 1);
         self.folders.update(|folders| {
-            folders.push(FolderTab { id, source: FolderSource::Chosen(root.clone()), pinned, state: FolderState::Checking });
+            folders.push(FolderTab {
+                id,
+                source: FolderSource::Chosen(root.clone()),
+                pinned,
+                state: FolderState::Checking,
+            });
         });
         self.check_folder(id, root);
 
         id
     }
 
-    /// Looks for the tab's directory off the UI thread, under its canonical path.
+    /// Looks for the tab's directory off the UI thread, under its canonical path. A later check
+    /// of the same tab supersedes this one.
     fn check_folder(self, id: FolderId, root: PathBuf) {
+        let check = CheckId(self.next_check.get_value());
+        self.next_check.update_value(|next| *next += 1);
+        self.checks.update_value(|checks| {
+            checks.insert(id, check);
+        });
         self.update_tab(id, |tab| tab.state = FolderState::Checking);
         self.spawn(async move {
             let (key, present) = blocking(move || {
+                // A path that does not resolve is kept as named; it is then reported missing.
                 let key = std::fs::canonicalize(&root).unwrap_or(root);
                 let present = key.is_dir();
                 (key, present)
             })
             .await;
-            self.folder_checked(id, key, present);
+            let current = self.checks.try_update_value(|checks| {
+                let current = checks.get(&id) == Some(&check);
+                if current {
+                    checks.remove(&id);
+                }
+                current
+            });
+            if current == Some(true) {
+                self.folder_checked(id, key, present);
+            }
         });
     }
 
@@ -537,13 +591,24 @@ impl BrowserControl {
 
         // The same directory under another path: the tab already showing it stays.
         if let Some(into) = self.folder_for(&key).filter(|into| *into != id) {
-            if tab.pinned {
-                self.set_pinned(into, true);
-            }
             if self.selected.get_untracked() == id {
                 self.select_folder(into);
             }
             self.remove_tab(id);
+            if into == FolderId::INSTALL {
+                // The install's tab always shows its directory, so the alias is neither pinned
+                // nor recent.
+                if tab.pinned {
+                    self.save_pinned_folders();
+                }
+                if let Some(old) = old {
+                    self.forget_recent(&old);
+                }
+                return;
+            }
+            if tab.pinned {
+                self.set_pinned(into, true);
+            }
             if let Some(old) = old {
                 self.rename_recent(&old, &key);
             }
@@ -562,7 +627,7 @@ impl BrowserControl {
         }
         if let Some(listing) = self.listing(id) {
             listing.set_source(ListingSource::Chosen(key.clone()));
-            if present && old.as_deref() == Some(key.as_path()) {
+            if present {
                 listing.relist();
             }
             listing.set_watch(self.tab(id).map_or(ListingWatch::Unwatched, |tab| tab.watch()));
@@ -588,11 +653,28 @@ impl BrowserControl {
         });
     }
 
+    /// Resolves the install's replays directory off the UI thread, then folds the chosen tabs on
+    /// it into the install's.
+    fn install_listed(self, directory: PathBuf) {
+        self.install_key.set_value(None);
+        self.spawn(async move {
+            let resolving = directory.clone();
+            // A directory that does not resolve is compared by the path it was named by.
+            let key = blocking(move || std::fs::canonicalize(&resolving).unwrap_or(resolving)).await;
+            let current = self.install_listing().and_then(|listing| listing.directory.get_untracked());
+            if current.as_ref() != Some(&directory) {
+                return;
+            }
+            self.install_key.set_value(Some(key.clone()));
+            self.fold_install_into_tabs(&key);
+        });
+    }
+
     /// A chosen tab on the install's replays directory gives way to the install's own tab, and
     /// the directory leaves the recent list, since the install's tab always shows it.
     fn fold_install_into_tabs(self, install: &Path) {
         let folded: Vec<FolderTab> = self.folders.with_untracked(|folders| {
-            folders.iter().filter(|tab| tab.root().is_some_and(|root| same_directory(root, install))).cloned().collect()
+            folders.iter().filter(|tab| tab.root() == Some(install)).cloned().collect()
         });
         for tab in folded {
             if self.selected.get_untracked() == tab.id {
@@ -608,11 +690,24 @@ impl BrowserControl {
         }
     }
 
+    /// Takes a tab out with what it holds: its unseen count, its pending landings, its pending
+    /// check, its watch message and its index work.
     fn remove_tab(self, id: FolderId) {
         self.folders.update(|folders| folders.retain(|tab| tab.id != id));
         self.unseen.update(|unseen| {
             unseen.remove(&id);
         });
+        self.landings.update(|landings| {
+            landings.remove(&id);
+        });
+        self.pending_landings.update_value(|pending| {
+            pending.remove(&id);
+        });
+        self.checks.update_value(|checks| {
+            checks.remove(&id);
+        });
+        self.shell.toasts().withdraw(&watch_toast_key(id));
+        actions::folder_closed(self, id);
     }
 
     fn rename_recent(self, old: &Path, new: &Path) {
@@ -678,6 +773,9 @@ impl BrowserControl {
         self.unseen.update(|unseen| {
             unseen.remove(&id);
         });
+        self.pending_landings.update_value(|pending| {
+            pending.remove(&id);
+        });
     }
 
     /// Pins or unpins a chosen directory's tab. Unpinning a tab whose directory is gone closes it.
@@ -717,7 +815,6 @@ impl BrowserControl {
         if tab.source == FolderSource::Install {
             return;
         }
-        self.shell.toasts().withdraw(&watch_toast_key(id));
         if self.selected.get_untracked() == id {
             self.select_folder(FolderId::INSTALL);
         }
@@ -751,36 +848,50 @@ impl BrowserControl {
     pub fn unseen(self, id: FolderId) -> usize {
         let Some(listing) = self.listings.with(|listings| listings.get(&id).copied()) else { return 0 };
         self.unseen.with(|unseen| {
-            unseen.get(&id).map_or(0, |paths| listing.files.with(|files| files.iter().filter(|file| paths.contains(&file.path)).count()))
+            unseen.get(&id).map_or(0, |paths| {
+                listing.files.with(|files| files.iter().filter(|file| paths.contains(&file.path)).count())
+            })
         })
     }
 
     /// Notes a replay that landed or changed in a tab the reader is not looking at. A landed one
-    /// sends a ring from the tab's dot and counts once the ring has spread.
+    /// sends a ring from the tab's dot and counts once the ring has spread; a later landing in
+    /// the same tab restarts the wait, so each tab holds one.
     fn note_unseen(self, id: FolderId, path: PathBuf, landed: bool, motion: MotionPreference) {
         if self.selected.get_untracked() == id {
             return;
         }
-        let noted = self.unseen.with_untracked(|unseen| unseen.get(&id).is_some_and(|paths| paths.contains(&path)));
+        let noted = self.unseen.with_untracked(|unseen| unseen.get(&id).is_some_and(|paths| paths.contains(&path)))
+            || self.pending_landings.with_value(|pending| pending.get(&id).is_some_and(|landing| landing.paths.contains(&path)));
         if noted {
             return;
         }
 
-        let count = move || {
-            if self.selected.get_untracked() != id {
-                self.unseen.update(|unseen| {
-                    unseen.entry(id).or_default().insert(path);
-                });
-            }
-        };
-        if !landed || motion == MotionPreference::Reduced {
-            count();
+        let timers = self.timers.get_value().filter(|_| landed && motion == MotionPreference::Full);
+        let Some(timers) = timers else {
+            self.count_unseen(id, std::iter::once(path));
             return;
-        }
+        };
         self.landings.update(|landings| *landings.entry(id).or_insert(0) += 1);
-        let timer = self.timers.get_value().map(|timers| timers.set_timeout(LANDING_PULSE, count));
-        if let Some(timer) = timer {
-            self.counting.update_value(|counting| counting.push(timer));
+        let timer = timers.set_timeout(LANDING_PULSE, move || self.count_landed(id));
+        self.pending_landings.update_value(|pending| {
+            let mut paths = pending.remove(&id).map(|landing| landing.paths).unwrap_or_default();
+            paths.insert(path);
+            pending.insert(id, PendingLanding { paths, _timer: timer });
+        });
+    }
+
+    /// The tab's ring has spread: what landed in it counts.
+    fn count_landed(self, id: FolderId) {
+        let landing = self.pending_landings.try_update_value(|pending| pending.remove(&id)).flatten();
+        if let Some(landing) = landing {
+            self.count_unseen(id, landing.paths);
+        }
+    }
+
+    fn count_unseen(self, id: FolderId, paths: impl IntoIterator<Item = PathBuf>) {
+        if self.selected.get_untracked() != id {
+            self.unseen.update(|unseen| unseen.entry(id).or_default().extend(paths));
         }
     }
 
@@ -817,7 +928,8 @@ impl BrowserControl {
             ListingEvent::WatchResumed => {
                 let folder = self.tab(id).map(|tab| tab.label()).unwrap_or_default();
                 self.shell.toasts().show(
-                    Notice::ok(t!("ui.replay_folders.watch_resumed", folder = folder).into_owned()).keyed(watch_toast_key(id)),
+                    Notice::ok(t!("ui.replay_folders.watch_resumed", folder = folder).into_owned())
+                        .keyed(watch_toast_key(id)),
                 );
             }
             ListingEvent::WatchWithdrawn => self.shell.toasts().withdraw(&watch_toast_key(id)),
@@ -844,13 +956,9 @@ impl BrowserControl {
 
     fn watch_stopped(self, id: FolderId) -> bool {
         let watched = self.tab(id).is_some_and(|tab| tab.watch() == ListingWatch::Watched);
-        watched && self.listing(id).is_some_and(|listing| matches!(listing.watch_state.get(), WatchState::Stopped { .. }))
+        watched
+            && self.listing(id).is_some_and(|listing| matches!(listing.watch_state.get(), WatchState::Stopped { .. }))
     }
-}
-
-/// Whether two paths name one directory, comparing canonical paths when both resolve.
-fn same_directory(left: &Path, right: &Path) -> bool {
-    left == right || std::fs::canonicalize(left).ok().is_some_and(|left| std::fs::canonicalize(right).is_ok_and(|right| left == right))
 }
 
 fn watch_toast_key(id: FolderId) -> ToastKey {
@@ -910,7 +1018,8 @@ fn FolderPane(
         FolderSource::Install => ListingSource::Install,
         FolderSource::Chosen(root) => ListingSource::Chosen(root.clone()),
     };
-    // A chosen directory is listed once it has been found.
+    // A chosen directory is scanned once it has been found: here when the check already landed,
+    // otherwise when it lands.
     let watch = tab.watch();
     let reported = events.clone();
     let report: Rc<dyn Fn(ListingEvent)> =
@@ -922,20 +1031,24 @@ fn FolderPane(
     on_cleanup_local(move || {
         control.listings.try_update(|listings| listings.remove(&id));
     });
+    if matches!(tab.source, FolderSource::Chosen(_)) && tab.state == FolderState::Listed {
+        listing.relist();
+    }
     let grouping = RenderEffect::new(move |_| listing.set_grouping(control.grouping.get()));
     on_cleanup_local(move || drop(grouping));
     if id == FolderId::INSTALL {
-        let folding = RenderEffect::new(move |_| {
-            if let Some(install) = listing.directory.get() {
-                control.fold_install_into_tabs(&install);
-            }
+        let folding = RenderEffect::new(move |_| match listing.directory.get() {
+            Some(install) => control.install_listed(install),
+            None => control.install_key.set_value(None),
         });
         on_cleanup_local(move || drop(folding));
     }
 
     let shown = move || {
         control.selected.get() == id
-            && control.folders.with(|folders| folders.iter().any(|tab| tab.id == id && tab.state == FolderState::Listed))
+            && control
+                .folders
+                .with(|folders| folders.iter().any(|tab| tab.id == id && tab.state == FolderState::Listed))
     };
 
     view! {
@@ -963,13 +1076,21 @@ fn folder_notice(control: BrowserControl) -> Option<AnyView> {
             }))
         }
         FolderState::Missing => {
-            let hint = tab.pinned.then(|| view! {
-                text(class = "wt-folder-notice__hint") {{t!("ui.replay_folders.missing_hint").into_owned()}}
+            let hint = tab.pinned.then(|| {
+                view! {
+                    text(class = "wt-folder-notice__hint") {{t!("ui.replay_folders.missing_hint").into_owned()}}
+                }
             });
             let (label, act) = if tab.pinned {
-                (t!("ui.replay_folders.unpin").into_owned(), UnsyncCallback::new(move |()| control.pin_folder(selected, false)))
+                (
+                    t!("ui.replay_folders.unpin").into_owned(),
+                    UnsyncCallback::new(move |()| control.pin_folder(selected, false)),
+                )
             } else {
-                (t!("ui.replay_folders.close").into_owned(), UnsyncCallback::new(move |()| control.close_folder(selected)))
+                (
+                    t!("ui.replay_folders.close").into_owned(),
+                    UnsyncCallback::new(move |()| control.close_folder(selected)),
+                )
             };
             Some(AnyView::new(view! {
                 column(class = "wt-folder-notice", attr:data-testid = "replay-folder-missing") {
@@ -1001,10 +1122,16 @@ fn FolderStrip(control: BrowserControl, motion: Signal<MotionPreference, LocalSt
 }
 
 #[component]
-fn FolderTabView(control: BrowserControl, id: FolderId, motion: Signal<MotionPreference, LocalStorage>) -> impl IntoView {
-    let tab = Signal::derive_local(move || control.folders.with(|folders| folders.iter().find(|tab| tab.id == id).cloned()));
+fn FolderTabView(
+    control: BrowserControl,
+    id: FolderId,
+    motion: Signal<MotionPreference, LocalStorage>,
+) -> impl IntoView {
+    let tab =
+        Signal::derive_local(move || control.folders.with(|folders| folders.iter().find(|tab| tab.id == id).cloned()));
     let selected = move || control.selected.get() == id;
-    let lifted = move || selected() && tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state != FolderState::Checking));
+    let lifted =
+        move || selected() && tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state != FolderState::Checking));
     let label = move || tab.with(|tab| tab.as_ref().map(FolderTab::label).unwrap_or_default());
     let glyph = move || match tab.with(|tab| tab.as_ref().map(|tab| tab.source == FolderSource::Install)) {
         Some(true) => Glyph::Monitor,
