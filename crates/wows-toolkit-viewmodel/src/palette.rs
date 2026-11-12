@@ -74,6 +74,16 @@ impl ShipSearchKey {
         Self(unidecode::unidecode(name.trim()).to_lowercase())
     }
 
+    /// Whether nothing is left to search for, which every name matches.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether this name holds `query` as one run of characters.
+    pub fn contains(&self, query: &Self) -> bool {
+        self.0.contains(query.as_str())
+    }
+
     fn as_str(&self) -> &str {
         &self.0
     }

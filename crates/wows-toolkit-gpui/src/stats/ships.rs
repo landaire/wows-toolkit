@@ -36,6 +36,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use wows_toolkit_viewmodel::palette::ShipSearchKey;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -325,12 +326,12 @@ impl Render for StatsShipsPanel {
         let border = cx.theme().border;
         let entity = cx.entity();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
+        let normalized_query = ShipSearchKey::new(&ship_query);
         let visible_sections: Vec<_> = self
             .sections
             .iter()
             .filter(|section| {
-                normalized_query.is_empty() || super::normalize_ship_search(&section.ship).contains(&normalized_query)
+                normalized_query.is_empty() || ShipSearchKey::new(&section.ship).contains(&normalized_query)
             })
             .collect();
         let visible_count = visible_sections.len();

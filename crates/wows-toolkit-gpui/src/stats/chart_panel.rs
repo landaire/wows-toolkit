@@ -28,6 +28,7 @@ use rust_i18n::t;
 use std::sync::Arc;
 
 use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::palette::ShipSearchKey;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -722,7 +723,7 @@ impl StatsChartPanel {
         let played = self.played.clone();
         let ship_search = self.ship_search.clone();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
+        let normalized_query = ShipSearchKey::new(&ship_query);
         let selected = self.selected_ships.clone();
         let selected_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
         let total_count = played.len();
@@ -742,7 +743,7 @@ impl StatsChartPanel {
             let visible: Vec<_> = played
                 .iter()
                 .filter(|(_, name)| {
-                    normalized_query.is_empty() || super::normalize_ship_search(name).contains(&normalized_query)
+                    normalized_query.is_empty() || ShipSearchKey::new(name).contains(&normalized_query)
                 })
                 .cloned()
                 .collect();
