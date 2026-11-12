@@ -5273,3 +5273,106 @@ mod opening_visibility_tests {
         assert!(camera.distance * half_width.sin() <= radius * 1.5, "{} is too far", camera.distance);
     }
 }
+
+#[cfg(test)]
+mod real_model_tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use wowsunpack::export::mount_armor::MountArmorIndex;
+    use wowsunpack::export::ship::ShipAssets;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+
+    use super::ShownLayers;
+    use super::opening_camera;
+    use crate::armor_viewer::assets::ModelAssets;
+    use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
+    use crate::armor_viewer::load_model::ModelLoadRequest;
+    use crate::armor_viewer::load_model::load_model_scene;
+    use crate::armor_viewer::model_refs::HardpointTarget;
+    use crate::viewport::types::Vec3;
+    use crate::viewport::types::ViewRect;
+
+    /// Opens catalogued models from a real install, as the viewer opens them,
+    /// and checks every vertex drawn is in view from several angles and each
+    /// hardpoint marker is small beside the model. Run with `WOWS_DIR` set to
+    /// an install; without one it returns at once.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn real_models_open_framed_whole_with_small_markers() {
+        let Ok(wows_dir) = std::env::var("WOWS_DIR") else { return };
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+        let builds = wowsunpack::game_data::list_available_builds(&wows_dir).expect("installed builds");
+        let build = *builds.last().expect("at least one build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("the game VFS");
+        let metadata = Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("GameParams"));
+        let assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
+        let library = assets.model_library().expect("the model library");
+        let mount_armor = MountArmorIndex::build(&metadata, library.catalog());
+        let models = ModelAssets { library: Arc::new(library), mount_armor };
+        let entries = models.library.catalog().entries();
+        let turrets = entries.iter().filter(|entry| entry.name() == "AGM034_16in50_Mk7");
+        let directors = entries.iter().filter(|entry| entry.name().contains("Director")).take(3);
+        let paths: Vec<_> = turrets.chain(directors).map(|entry| entry.path().clone()).collect();
+        assert_eq!(paths.len(), 4, "the turret and three directors are catalogued");
+
+        let mut marked = 0;
+        for path in paths {
+            let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(path.clone(), None))
+                .expect("the model loads");
+            let shown = ShownLayers { armor: true, hull: true };
+            let rect = ViewRect::new(0.0, 0.0, 1200.0, 700.0);
+            let mut camera = opening_camera(&scene, shown, 1200.0 / 700.0);
+            let plates =
+                scene.meshes.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), *p)));
+            let hull =
+                scene.hull_meshes.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), *p)));
+            let points: Vec<Vec3> = plates
+                .chain(hull)
+                .map(|(transform, p)| {
+                    Vec3::from(transform.map_or(p, |t| wowsunpack::export::armor_ray::transform_point(t, p)))
+                })
+                .collect();
+            for (azimuth, elevation) in [(camera.azimuth, camera.elevation), (0.0, 0.0), (2.0, -0.6), (4.0, 1.2)] {
+                camera.azimuth = azimuth;
+                camera.elevation = elevation;
+                for point in &points {
+                    let at = camera.project_to_screen(*point, rect).expect("in front of the camera");
+                    assert!(rect.contains(at), "{path}: {point:?} at {at:?} is out of view");
+                }
+            }
+
+            let (min, max) = scene.bounds;
+            let radius = (max - min).norm() * 0.5;
+            let targets = HashSet::from([HardpointTarget::Model(path.clone())]);
+            let world_per_pixel = camera.world_per_pixel(rect.height());
+            let markers = HardpointMarkers::for_scene(&scene, &targets, world_per_pixel);
+            let hardpoints = scene.model().map_or(0, |model| model.hardpoints.len());
+            assert_eq!(markers.labels.len(), hardpoints, "{path}: every hardpoint is marked");
+            marked += hardpoints;
+            let reach = markers
+                .labels
+                .iter()
+                .enumerate()
+                .flat_map(|(index, label)| {
+                    let first = index * (6 + 3 * 8);
+                    markers.vertices[first..first + 6 + 3 * 8]
+                        .iter()
+                        .map(move |vertex| (Vec3::from(vertex.position) - Vec3::from(label.position)).norm())
+                })
+                .fold(0.0_f32, f32::max);
+            eprintln!(
+                "{path}: radius {radius:.2}, camera {:.2} off, {} markers reaching {reach:.3}",
+                camera.distance,
+                markers.labels.len()
+            );
+            assert!(reach <= radius * 0.1, "{path}: a marker reaches {reach} on a model {radius} across");
+        }
+        assert!(marked > 0, "some marker was measured");
+    }
+}
