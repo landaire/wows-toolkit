@@ -30,6 +30,7 @@ pub use crate::motion::EASE_PROPERTY;
 pub use crate::motion::MotionPreference;
 pub use crate::motion::Movement;
 pub use crate::motion::REDUCED_MOTION_ATTRIBUTE;
+pub use crate::motion::motion_preference;
 pub use crate::palette::Appearance;
 pub use crate::palette::Palette;
 pub use crate::palette::Tier;
