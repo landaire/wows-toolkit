@@ -12,6 +12,8 @@ mod display;
 mod download;
 pub mod proton;
 mod settings;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 
 use std::collections::HashMap;
 use std::path::Path;
