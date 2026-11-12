@@ -3,6 +3,7 @@
 //! [`ThemeRoot`] applies a [`ThemeChoice`] to a window as design tokens: the `--zui-*` set that
 //! zgui-ui components read, and the `--lui-*` set this crate's surfaces read.
 
+mod chrome;
 mod color;
 mod contrast;
 mod error;
@@ -16,6 +17,43 @@ pub mod test_support;
 mod tokens;
 mod tone;
 
+pub use crate::chrome::drawer::Drawer;
+pub use crate::chrome::drawer::DrawerProps;
+pub use crate::chrome::reveal::FADE_IN_CLASS;
+pub use crate::chrome::reveal::FadeIn;
+pub use crate::chrome::reveal::FadeInProps;
+pub use crate::chrome::reveal::Reveal;
+pub use crate::chrome::reveal::RevealProps;
+pub use crate::chrome::side_split::SidePanel;
+pub use crate::chrome::side_split::SideSplit;
+pub use crate::chrome::side_split::SideSplitProps;
+pub use crate::chrome::side_split::WidthRange;
+pub use crate::chrome::slide::PanelWidth;
+pub use crate::chrome::slide::SideEdge;
+pub use crate::chrome::status_bar::CountUp;
+pub use crate::chrome::status_bar::CountUpProps;
+pub use crate::chrome::status_bar::Fraction;
+pub use crate::chrome::status_bar::RunningBar;
+pub use crate::chrome::status_bar::RunningBarProps;
+pub use crate::chrome::status_bar::StatusBar;
+pub use crate::chrome::status_bar::StatusBarEnd;
+pub use crate::chrome::status_bar::StatusBarProps;
+pub use crate::chrome::status_bar::StatusBarStart;
+pub use crate::chrome::status_bar::StatusToggle;
+pub use crate::chrome::status_bar::StatusToggleProps;
+pub use crate::chrome::status_bar::count_up;
+pub use crate::chrome::tab_strip::TabStrip;
+pub use crate::chrome::tab_strip::TabStripProps;
+pub use crate::chrome::tab_strip::TabStripTab;
+pub use crate::chrome::tab_strip::TabStripTabProps;
+pub use crate::chrome::toasts::Notice;
+pub use crate::chrome::toasts::ToastHost;
+pub use crate::chrome::toasts::ToastHostProps;
+pub use crate::chrome::toasts::ToastKey;
+pub use crate::chrome::toasts::ToastStay;
+pub use crate::chrome::toasts::ToastTone;
+pub use crate::chrome::toasts::Toasts;
+pub use crate::chrome::toasts::withdraw_everywhere;
 pub use crate::color::Opacity;
 pub use crate::color::Rgb;
 pub use crate::contrast::ContrastRatio;

@@ -147,6 +147,8 @@ pub fn lui_declarations(palette: &Palette) -> Declarations {
     }
     declarations.push("--lui-color-accent-foreground", &palette.accent_foreground().to_string());
     declarations.push("--lui-color-text-faint", &tones.text_faint.to_string());
+    // The dimming behind a drawer, the same black on either appearance.
+    declarations.push("--lui-color-scrim", &Rgb::BLACK.with_opacity(Opacity(0.25)).to_string());
 
     declarations.push("--lui-radius", RADIUS);
     declarations.push("--lui-radius-lg", RADIUS_LARGE);
