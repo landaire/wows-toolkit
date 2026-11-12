@@ -60,5 +60,23 @@ workspace_integration_tests(
     deps = [
         "//third-party/rust:zgui",
         "//third-party/rust:zgui-ui",
+        "//third-party/rust:zgui-ui-tokens",
+    ],
+)
+
+# The gallery example's own tests, which Cargo runs because the example sets `test = true`.
+workspace_test(
+    name = "gallery_test",
+    crate = "gallery",
+    crate_root = "examples/gallery.rs",
+    package = "landaire-ui",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = [
+        ":landaire_ui_test_support",
+        "//third-party/rust:zgui",
+        "//third-party/rust:zgui-ui",
+        "//third-party/rust:zgui-ui-icons",
+        "//third-party/rust:zgui-ui-tokens",
     ],
 )

@@ -26,14 +26,23 @@ workspace_library(
     deps = ARMOR_DEPS,
 )
 
-# The headless test device, for the tests of crates that host the viewport.
+# The headless test device, for the tests of crates that host the viewport. Built against the
+# test-support config and viewmodel so such a test links one copy of each.
+ARMOR_TEST_SUPPORT_DEPS = [d for d in ARMOR_DEPS if d not in [
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+]] + [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+]
+
 workspace_library(
     name = "wows_toolkit_armor_test_support",
     crate = "wows_toolkit_armor",
     package = "wows-toolkit-armor",
     version = "0.1.0",
     features = ["test-support"],
-    deps = ARMOR_DEPS + ["//third-party/rust:pollster"],
+    deps = ARMOR_TEST_SUPPORT_DEPS + ["//third-party/rust:pollster"],
 )
 
 workspace_test(
@@ -43,5 +52,5 @@ workspace_test(
     package = "wows-toolkit-armor",
     version = "0.1.0",
     deps = ARMOR_DEPS,
-    test_deps = ["//third-party/rust:pollster", "//third-party/rust:serde_json"],
+    test_deps = ["//third-party/rust:gettext", "//third-party/rust:pollster", "//third-party/rust:serde_json"],
 )
