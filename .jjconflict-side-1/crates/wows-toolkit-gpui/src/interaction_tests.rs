@@ -368,12 +368,14 @@ fn the_listing_options_toggle_only_the_column_clicked(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_listing_open_menu_asks_for_a_file_or_a_directory(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    crate::dialog::take_asked();
+    wows_toolkit_services::dialog::take_asked();
 
     cx.update_window(window.into(), |_, window, cx| show_tab(window, AppTab::ReplayInspector, cx))
         .expect("the test window stays open");
 
-    for (row, expected) in [(0u64, crate::dialog::Asked::File), (1u64, crate::dialog::Asked::Folder)] {
+    for (row, expected) in
+        [(0u64, wows_toolkit_services::dialog::Asked::File), (1u64, wows_toolkit_services::dialog::Asked::Folder)]
+    {
         cx.update_window(window.into(), |_, window, cx| {
             window.click(LISTING_OPEN, cx);
             window.render_frame(cx);
@@ -385,7 +387,7 @@ fn the_listing_open_menu_asks_for_a_file_or_a_directory(cx: &mut TestAppContext)
         // The menu dismisses itself through a deferred effect, which has to
         // land before its trigger opens it again.
         cx.run_until_parked();
-        assert_eq!(crate::dialog::take_asked(), vec![expected], "row {row} asked for its dialog");
+        assert_eq!(wows_toolkit_services::dialog::take_asked(), vec![expected], "row {row} asked for its dialog");
     }
 }
 
@@ -399,12 +401,16 @@ fn a_directory_dialog_that_cannot_open_says_why(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| show_tab(window, AppTab::ReplayInspector, cx))
         .expect("the test window stays open");
     let failed =
-        rust_i18n::t!("ui.dialogs.file_dialog_failed", reason = crate::dialog::DialogError::Refused).into_owned();
-    assert!(failed.contains(&crate::dialog::DialogError::Refused.to_string()), "the message names the reason");
+        rust_i18n::t!("ui.dialogs.file_dialog_failed", reason = wows_toolkit_services::dialog::DialogError::Refused)
+            .into_owned();
+    assert!(
+        failed.contains(&wows_toolkit_services::dialog::DialogError::Refused.to_string()),
+        "the message names the reason"
+    );
 
     for refused in [false, true] {
         if refused {
-            crate::dialog::refuse_next();
+            wows_toolkit_services::dialog::refuse_next();
         }
         let before = crate::toast::said_for_test().len();
         cx.update_window(window.into(), |_, window, cx| {

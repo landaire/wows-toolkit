@@ -11,6 +11,11 @@ publish = false
 name = "wows_toolkit_services"
 path = "src/lib.rs"
 
+[features]
+# Records file dialogs and answers them as dismissed instead of opening them,
+# for headless tests.
+test-support = []
+
 [dependencies]
 # The update download reports its progress over a channel.
 futures = "0.3"
@@ -36,3 +41,12 @@ wows-toolkit-hardening = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 # The release archive the update is read out of.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+# File dialogs. Linux asks the desktop portal directly, which reports why a
+# dialog could not open; rfd only answers with a path or nothing.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
+url = "2"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "0.17"

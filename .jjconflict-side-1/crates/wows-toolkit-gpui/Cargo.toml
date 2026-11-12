@@ -147,15 +147,6 @@ windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1.31"
 
-# File dialogs. Linux asks the desktop portal directly, which reports why a
-# dialog could not open; rfd only answers with a path or nothing.
-[target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
-url = "2"
-
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-rfd = "0.17"
-
 # `wows_buck_build` is set by the Buck build, which compiles the Windows
 # resources with its own pinned rc.exe instead of the build script's.
 [lints.rust]
@@ -173,6 +164,8 @@ jiff = "0.2"
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
 # Row and battle-report fixtures.
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
+# File dialogs are recorded and answered as dismissed instead of opened.
+wows-toolkit-services = { workspace = true, features = ["test-support"] }
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"

@@ -188,7 +188,7 @@ impl ChatPanel {
     /// Asks where to write the log and writes it there.
     fn save_to_file(&self, window: &mut Window, cx: &mut Context<Self>) {
         let transcript = self.transcript();
-        let asked = crate::dialog::save_file(
+        let asked = wows_toolkit_services::dialog::save_file(
             Some(t!("ui.replay.chat_save_title").as_ref()),
             &format!("{} - Game Chat.txt", self.title),
             None,

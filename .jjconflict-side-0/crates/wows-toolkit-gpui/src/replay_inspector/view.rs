@@ -884,9 +884,9 @@ impl ReplayInspectorView {
             crate::toast::warn(t!("ui.replay.constants_no_build").into_owned(), window, cx);
             return;
         };
-        let asked = crate::dialog::pick_file(
+        let asked = wows_toolkit_services::dialog::pick_file(
             Some(&t!("ui.replay.constants_import_title")),
-            Some(crate::dialog::Filter { label: "JSON", extensions: &["json"] }),
+            Some(wows_toolkit_services::dialog::Filter { label: "JSON", extensions: &["json"] }),
         );
 
         cx.spawn_in(window, async move |this, cx| {
@@ -991,7 +991,7 @@ impl ReplayInspectorView {
             let out_dir = match target {
                 // Dismissed at the dialog, or the dialog failed and said so.
                 BatchTarget::Directory => {
-                    let asked = crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
+                    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
                     match crate::dialog::chosen(asked, &this, cx).await {
                         Some(picked) => picked,
                         None => return,
@@ -1908,7 +1908,7 @@ impl ReplayInspectorView {
     /// (`open_replay`) rather than the egui app's `parse_replay_from_path`
     /// background task. A cancelled dialog is a no-op.
     pub(crate) fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_file(None, Some(crate::dialog::REPLAYS));
+        let asked = wows_toolkit_services::dialog::pick_file(None, Some(wows_toolkit_services::dialog::REPLAYS));
         cx.spawn(async move |this, cx| {
             let Some(file) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {

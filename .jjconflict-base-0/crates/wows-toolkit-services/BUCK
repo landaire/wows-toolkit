@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
 
 SERVICES_COMMON_DEPS = [
     "//crates/wows-data-mgr:wows_data_mgr",
@@ -18,9 +18,26 @@ SERVICES_COMMON_DEPS = [
     "//third-party/rust:zip",
 ]
 
+# The cfg(target_os) dependency sections of Cargo.toml: the file dialogs.
+SERVICES_PLATFORM_DEPS = os_select(
+    macos = ["//third-party/rust:rfd"],
+    linux = [
+        "//third-party/rust:ashpd",
+        "//third-party/rust:url",
+    ],
+    windows = ["//third-party/rust:rfd"],
+)
+
 SERVICES_DEPS = SERVICES_COMMON_DEPS + [
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+]
+
+# The test-support builds of the shared crates, so a target that links them
+# does not also link the shipping builds.
+SERVICES_TEST_SUPPORT_DEPS = SERVICES_COMMON_DEPS + [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 ]
 
 workspace_library(
@@ -28,7 +45,17 @@ workspace_library(
     crate = "wows_toolkit_services",
     package = "wows-toolkit-services",
     version = "0.1.0",
-    deps = SERVICES_DEPS,
+    deps = SERVICES_DEPS + SERVICES_PLATFORM_DEPS,
+)
+
+# File dialogs recorded and answered as dismissed, for headless front-end tests.
+workspace_library(
+    name = "wows_toolkit_services_test_support",
+    crate = "wows_toolkit_services",
+    package = "wows-toolkit-services",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = SERVICES_TEST_SUPPORT_DEPS + SERVICES_PLATFORM_DEPS,
 )
 
 workspace_test(
@@ -37,5 +64,5 @@ workspace_test(
     crate_root = "src/lib.rs",
     package = "wows-toolkit-services",
     version = "0.1.0",
-    deps = SERVICES_DEPS,
+    deps = SERVICES_DEPS + SERVICES_PLATFORM_DEPS,
 )
