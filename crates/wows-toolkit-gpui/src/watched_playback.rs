@@ -182,14 +182,16 @@ impl WatchedPlayback {
                 .background_spawn(async move {
                     let view = wows_minimap_renderer::viewport::MapViewport::default();
                     match art {
-                        Some(art) => crate::minimap_preview::render_map_art(
+                        Some(art) => wows_toolkit_replay_data::minimap_preview::render_map_art(
                             &format!("watched-{}", replay_id.raw()),
                             &art,
                             &game_data,
                             view,
                             &commands,
                         ),
-                        None => crate::minimap_preview::render_map(&space, &game_data, view, &commands),
+                        None => {
+                            wows_toolkit_replay_data::minimap_preview::render_map(&space, &game_data, view, &commands)
+                        }
                     }
                 })
                 .await;
