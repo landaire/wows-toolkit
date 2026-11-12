@@ -541,12 +541,18 @@ fn render_sidebar_item(
         return crate::ui::tree_row(ListItem::new(ix).child(heading), cx);
     }
 
+    // The tree's scrollbar is drawn over the rows' right edge, so the row
+    // ends short of it and the checkbox there stays clickable. The kit's
+    // scrollbar takes this much: its thumb plus padding either side.
+    const SCROLLBAR_GUTTER: Pixels = px(16.);
+
     let mut row = h_flex()
         .id(("armor-sidebar-row", ix))
         .test_support()
         .w_full()
         .gap_1()
         .items_center()
+        .pr(SCROLLBAR_GUTTER)
         .child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if entry.is_folder() {
         let turn = crate::motion::disclosure_turn(item.id.clone(), entry.is_expanded(), window, cx);
