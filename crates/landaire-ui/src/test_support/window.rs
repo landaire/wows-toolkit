@@ -263,12 +263,24 @@ impl HeadlessWindow {
 
     /// Presses and releases the primary button over the middle of `element`.
     pub fn click(&mut self, element: Element) -> Result<(), HeadlessError> {
-        self.press_on(element, PointerButton::Primary)
+        self.click_with(element, Modifiers::NONE)
+    }
+
+    /// Presses and releases the primary button over the middle of `element` with `modifiers` held.
+    pub fn click_with(&mut self, element: Element, modifiers: Modifiers) -> Result<(), HeadlessError> {
+        self.press_on(element, PointerButton::Primary, modifiers)
+    }
+
+    /// Clicks the primary button twice over the middle of `element`, close enough together to
+    /// count as a double click.
+    pub fn double_click(&mut self, element: Element) -> Result<(), HeadlessError> {
+        self.click(element)?;
+        self.click(element)
     }
 
     /// Presses and releases the secondary button over the middle of `element`.
     pub fn right_click(&mut self, element: Element) -> Result<(), HeadlessError> {
-        self.press_on(element, PointerButton::Secondary)
+        self.press_on(element, PointerButton::Secondary, Modifiers::NONE)
     }
 
     /// Presses the primary button over the middle of `element`, moves the pointer to `to` in
@@ -435,11 +447,11 @@ impl HeadlessWindow {
         Point::new(CssPx(at.x.0 / scale), CssPx(at.y.0 / scale))
     }
 
-    fn press_on(&mut self, element: Element, button: PointerButton) -> Result<(), HeadlessError> {
+    fn press_on(&mut self, element: Element, button: PointerButton, modifiers: Modifiers) -> Result<(), HeadlessError> {
         let at = self.centre(element)?;
         self.move_pointer(at);
-        self.pointer_event(PointerAction::Pressed, at, Some(button));
-        self.pointer_event(PointerAction::Released, at, Some(button));
+        self.pointer_event_with(PointerAction::Pressed, at, Some(button), modifiers);
+        self.pointer_event_with(PointerAction::Released, at, Some(button), modifiers);
 
         Ok(())
     }
@@ -453,12 +465,22 @@ impl HeadlessWindow {
     }
 
     fn pointer_event(&mut self, action: PointerAction, at: Point<CssPx, Css>, button: Option<PointerButton>) {
+        self.pointer_event_with(action, at, button, Modifiers::NONE);
+    }
+
+    fn pointer_event_with(
+        &mut self,
+        action: PointerAction,
+        at: Point<CssPx, Css>,
+        button: Option<PointerButton>,
+        modifiers: Modifiers,
+    ) {
         let mut event = PointerEvent::mouse(at);
         if let Some(button) = button {
             event = event.with_button(button);
         }
 
-        self.deliver(SurfaceEvent::Pointer { action, event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
+        self.deliver(SurfaceEvent::Pointer { action, event, modifiers, timestamp: Timestamp::ORIGIN });
     }
 
     fn key(&mut self, event: KeyEvent, modifiers: Modifiers) {

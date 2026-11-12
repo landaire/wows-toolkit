@@ -118,6 +118,10 @@ pub struct TreeDepth(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct IndentWidth(pub f32);
 
+/// How tall one row is, in CSS pixels.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct RowHeight(pub f32);
+
 /// The edge of the window a collapsible side panel is docked against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PanelSide {
