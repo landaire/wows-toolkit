@@ -30,6 +30,8 @@ wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "
 # The game's GUI assets: ship-class icons and nation flags, and the Unpacker tab's file system.
 wowsunpack = { workspace = true }
 wows-toolkit-services = { workspace = true }
+# The Armor Viewer's scene logic and the wgpu engine its viewport draws with.
+wows-toolkit-armor = { workspace = true }
 # The match export formats.
 ciborium = "0.2"
 csv = "1"
@@ -105,4 +107,6 @@ wows-toolkit-services = { workspace = true, features = ["test-support"] }
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 # The launcher's state is set by its events rather than by the network, the keyring or a scan.
 wows-toolkit-launcher = { workspace = true, features = ["test-support"] }
+# A device of the tests' own for the armor viewport's headless renders.
+wows-toolkit-armor = { workspace = true, features = ["test-support"] }
 tempfile = "3"
