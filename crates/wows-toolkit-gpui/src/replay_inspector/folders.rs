@@ -15,25 +15,20 @@ use std::time::Instant;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
-use serde::Deserialize;
-use serde::Serialize;
 use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::paths::folder_name;
 use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::RestartPolicy;
+use wows_toolkit_viewmodel::replay_folders::FOLDER_HISTORY;
+use wows_toolkit_viewmodel::replay_folders::FolderHistory;
+use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
+use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 
 use super::*;
 use crate::toast::Level;
 use crate::toast::Stay;
 use wows_toolkit_replay_data::replay_dir::WatchState;
 use wows_toolkit_replay_data::replay_dir::WatchStopCause;
-
-/// The settings row the pinned directories are kept in, in tab order.
-pub(crate) const PINNED_FOLDERS: &str = "gpui.pinned_replay_directories";
-
-/// The settings row the recently opened directories are kept in, most recent
-/// first.
-pub(crate) const FOLDER_HISTORY: &str = "gpui.replay_folder_history";
 
 /// One directory tab, named by the listing that reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -187,62 +182,6 @@ impl ReplayFolder {
     fn watch_stopped(&self, cx: &App) -> bool {
         self.watch() == ListingWatch::Watched
             && matches!(self.browser.read(cx).watch_state(), WatchState::Stopped { .. })
-    }
-}
-
-/// The pinned directories in tab order, as kept in the settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct PinnedFolders(pub Vec<PathBuf>);
-
-/// The directories most recently opened, most recent first, as kept in the
-/// settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct FolderHistory(Vec<PathBuf>);
-
-impl FolderHistory {
-    const LIMIT: usize = 10;
-
-    pub(crate) fn folders(&self) -> &[PathBuf] {
-        &self.0
-    }
-
-    /// Puts `root` first, once.
-    pub(crate) fn record(&mut self, root: PathBuf) {
-        self.0.retain(|held| *held != root);
-        self.0.insert(0, root);
-        self.0.truncate(Self::LIMIT);
-    }
-
-    /// Drops `root`, saying whether it was there.
-    pub(crate) fn forget(&mut self, root: &Path) -> bool {
-        let before = self.0.len();
-        self.0.retain(|held| held != root);
-
-        self.0.len() != before
-    }
-
-    /// Puts `new` where `old` was, once. Says whether `old` was there.
-    fn replace(&mut self, old: &Path, new: &Path) -> bool {
-        let Some(at) = self.0.iter().position(|held| held == old) else { return false };
-
-        self.0[at] = new.to_path_buf();
-        let mut kept = false;
-        self.0.retain(|held| held != new || !std::mem::replace(&mut kept, true));
-
-        true
-    }
-
-    /// Puts `older` after what was recorded here, as a stored list read after
-    /// some directories were already opened this session.
-    fn merge_older(&mut self, older: FolderHistory) {
-        for root in older.0 {
-            if !self.0.contains(&root) {
-                self.0.push(root);
-            }
-        }
-        self.0.truncate(Self::LIMIT);
     }
 }
 
@@ -816,7 +755,7 @@ impl ReplayInspectorView {
         for root in &dropped {
             stored.forget(root);
         }
-        let changed_before = !self.folder_history.0.is_empty() || !dropped.is_empty();
+        let changed_before = !self.folder_history.folders().is_empty() || !dropped.is_empty();
         self.folder_history.merge_older(stored);
         if changed_before {
             self.save_folder_history(cx);
