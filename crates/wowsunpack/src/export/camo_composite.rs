@@ -142,6 +142,7 @@ fn recolor_tile_over_base(camo: &image::RgbaImage, srgba: &[u8], sw: u32, sh: u3
 
 /// Decoded RGBA8 image data. Width and height travel with the pixels because a
 /// camo and the base it covers are routinely different sizes.
+#[derive(Clone)]
 pub struct RgbaImageData {
     pub width: u32,
     pub height: u32,

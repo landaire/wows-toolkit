@@ -54,6 +54,10 @@ use super::gltf_export;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
+use super::hardpoint::mat4_mul;
+use super::hardpoint::mesh_to_node_space;
+use super::model_library::ModelLibrary;
+use super::model_library::ModelLibraryError;
 use super::part_group::PartGroup;
 use super::size_estimate;
 use super::texture;
@@ -259,6 +263,12 @@ impl ShipAssets {
     /// Access the underlying VFS root.
     pub fn vfs(&self) -> &VfsPath {
         &self.vfs
+    }
+
+    /// Build the model catalogue and loader over these assets, sharing the
+    /// `assets.bin` blob. Parses `assets.bin` once; build it once and keep it.
+    pub fn model_library(&self) -> Result<ModelLibrary, Report<ModelLibraryError>> {
+        ModelLibrary::new(self.vfs.clone(), Arc::clone(&self.assets_bin_bytes), &self.metadata)
     }
 
     /// Find a ship by name (fuzzy display-name match or exact model dir).
@@ -1011,7 +1021,7 @@ impl ShipAssets {
                 let parent_name = db.strings.get_string_by_id(parent_id);
                 let local =
                     compose_misc_transform(parent_name, &local_matrix, std::slice::from_ref(turret), &db.strings);
-                let transform = mat4_mul_col_major(&mount.armor_transform, &local);
+                let transform = mat4_mul(&mount.armor_transform, &local);
                 placements.push(ResolvedMisc {
                     node_name: format!("{node_name} [{}]", mount.hp_name),
                     misc_model_index: model_idx,
@@ -1112,7 +1122,7 @@ impl ShipAssets {
             };
             let hp_transform = match child_hp_transform {
                 None => hull_transform,
-                Some(child_xform) => mat4_mul_col_major(&hull_transform, &child_xform),
+                Some(child_xform) => mat4_mul(&hull_transform, &child_xform),
             };
 
             // The turret model's Rotate_Y_BlendBone encodes its rest-pose
@@ -1123,11 +1133,8 @@ impl ShipAssets {
             // the raw transform without rotation correction.
             let armor_transform = hp_transform;
             let turret_visual = &turret_models[model_idx].visual;
-            let yaw_correction = turret_visual
-                .find_node_local_matrix("Rotate_Y_BlendBone", &db.strings)
-                .map(|bone_local| mat4_rotation_inverse(&bone_local));
-            let base_transform = match yaw_correction {
-                Some(inv) => mat4_mul_col_major(&hp_transform, &inv),
+            let base_transform = match mesh_to_node_space(turret_visual, &db.strings) {
+                Some(correction) => mat4_mul(&hp_transform, &correction),
                 None => hp_transform,
             };
 
@@ -2150,7 +2157,7 @@ fn compose_misc_transform(
     if let Some(pname) = parent_name {
         for part in hull_parts {
             if let Some(parent_world) = part.visual.find_hardpoint_transform(pname, strings) {
-                return mat4_mul_col_major(&parent_world, local);
+                return mat4_mul(&parent_world, local);
             }
         }
     }
@@ -2400,34 +2407,6 @@ fn build_barrel_pitch(
     let pitch_matrix = super::gltf_export::negate_z_transform(pitch_matrix);
 
     Some(super::gltf_export::BarrelPitch { pitch_matrix, barrel_bone_indices })
-}
-
-fn mat4_mul_col_major(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
-    let mut out = [0.0f32; 16];
-    for col in 0..4 {
-        for row in 0..4 {
-            out[col * 4 + row] = (0..4).map(|k| a[k * 4 + row] * b[col * 4 + k]).sum();
-        }
-    }
-    out
-}
-
-/// Extract the rotation part of a column-major 4x4 matrix and return its
-/// inverse (transpose) as a full 4x4 matrix with zero translation.
-///
-/// Valid for rigid-body transforms (orthonormal rotation + translation).
-/// The inverse of the rotation part is simply its transpose.
-fn mat4_rotation_inverse(m: &[f32; 16]) -> [f32; 16] {
-    // Column-major layout:
-    //   col0 = m[0..4], col1 = m[4..8], col2 = m[8..12], col3 = m[12..16]
-    // 3x3 rotation at (row, col) -> m[col*4 + row]
-    // Transpose: swap (row, col) -> (col, row)
-    [
-        m[0], m[4], m[8], 0.0, // col 0 = original row 0
-        m[1], m[5], m[9], 0.0, // col 1 = original row 1
-        m[2], m[6], m[10], 0.0, // col 2 = original row 2
-        0.0, 0.0, 0.0, 1.0, // no translation
-    ]
 }
 
 // ---------------------------------------------------------------------------

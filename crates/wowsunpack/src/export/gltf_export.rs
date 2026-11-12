@@ -2977,6 +2977,20 @@ pub fn collect_hull_meshes(
     damaged: bool,
     barrel_pitch: Option<&BarrelPitch>,
 ) -> Result<Vec<InteractiveHullMesh>, Report<ExportError>> {
+    collect_hull_meshes_indexed(visual, geometry, db, &db.build_self_id_index(), lod, damaged, barrel_pitch)
+}
+
+/// [`collect_hull_meshes`] over a `self_id_index` the caller already built,
+/// for callers that collect several visuals from one database.
+pub(crate) fn collect_hull_meshes_indexed(
+    visual: &VisualPrototype,
+    geometry: &MergedGeometry,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    lod: usize,
+    damaged: bool,
+    barrel_pitch: Option<&BarrelPitch>,
+) -> Result<Vec<InteractiveHullMesh>, Report<ExportError>> {
     let mut result = Vec::new();
 
     if visual.lods.is_empty() || lod >= visual.lods.len() {
@@ -2985,8 +2999,6 @@ pub fn collect_hull_meshes(
     let lod_entry = &visual.lods[lod];
 
     let exclude = if damaged { DAMAGED_EXCLUDE } else { INTACT_EXCLUDE };
-
-    let self_id_index = db.build_self_id_index();
 
     for &rs_name_id in &lod_entry.render_set_names {
         let rs = visual
@@ -3090,7 +3102,7 @@ pub fn collect_hull_meshes(
 
         // Resolve full MFM path for texture lookup.
         let mfm_path = if rs.material_mfm_path_id != 0 {
-            self_id_index.get(&rs.material_mfm_path_id).map(|&idx| db.reconstruct_path(idx, &self_id_index))
+            self_id_index.get(&rs.material_mfm_path_id).map(|&idx| db.reconstruct_path(idx, self_id_index))
         } else {
             None
         };

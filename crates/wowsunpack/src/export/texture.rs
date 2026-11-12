@@ -120,7 +120,7 @@ fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
     (!data.is_empty()).then_some(data)
 }
 
-fn vfs_file_exists(vfs: &vfs::VfsPath, path: &str) -> bool {
+pub(crate) fn vfs_file_exists(vfs: &vfs::VfsPath, path: &str) -> bool {
     vfs.join(path).and_then(|p| p.exists()).unwrap_or(false)
 }
 
@@ -274,7 +274,7 @@ fn best_mip(dds: &image_dds::ddsfile::Dds, lod: TextureLod) -> u32 {
 ///
 /// Prefers a stored mip over box filtering, so a texture whose own chain can
 /// serve the request never pays for a full-size decode.
-fn decode_dds(dds_bytes: &[u8], lod: TextureLod) -> Result<RgbaImage, Report<TextureError>> {
+pub(crate) fn decode_dds(dds_bytes: &[u8], lod: TextureLod) -> Result<RgbaImage, Report<TextureError>> {
     let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes))
         .map_err(|e| Report::new(TextureError::DdsParse(e.to_string())))?;
 
@@ -732,6 +732,17 @@ pub fn bake_tiledland_albedo(
     self_id_index: &HashMap<u64, usize>,
     lod: TextureLod,
 ) -> Option<Vec<u8>> {
+    encode_png(&bake_tiledland_image(mat, vfs, db, self_id_index, lod)?).ok()
+}
+
+/// [`bake_tiledland_albedo`] before PNG encoding, for callers that want pixels.
+pub(crate) fn bake_tiledland_image(
+    mat: &MaterialPrototype,
+    vfs: &vfs::VfsPath,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    lod: TextureLod,
+) -> Option<RgbaImage> {
     // Extract material properties.
     let ah_hash = mat.get_texture_hash("AHArray")?;
     let blend_hash = mat.get_texture_hash("blendMap")?;
@@ -842,12 +853,10 @@ pub fn bake_tiledland_albedo(
     }
 
     // The bake writes opaque pixels throughout, so averaging alpha keeps it at 255.
-    let final_image = match lod.budget() {
+    Some(match lod.budget() {
         Some(edge) if !edge.fits(out_w, out_h) => downsample(&output, edge),
         _ => output,
-    };
-
-    encode_png(&final_image).ok()
+    })
 }
 
 /// Try to load a texture for a model mesh, with TILEDLAND baking support.
