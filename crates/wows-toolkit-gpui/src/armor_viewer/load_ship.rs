@@ -41,6 +41,7 @@ use wowsunpack::game_params::types::HitLocation;
 use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::Task;
+use rootcause::Report;
 use rust_i18n::t;
 
 use wowsunpack::export::armor_ray::transform_point;
@@ -51,6 +52,7 @@ use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::hardpoint::Hardpoint;
 use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::model_catalog::ModelPath;
+use wowsunpack::export::model_library::ModelExportError;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
@@ -129,17 +131,21 @@ pub enum ShipLoadError {
     CamoSource(String),
 }
 
-/// Reasons a GLB model export ([`export_ship_glb`]) failed.
+/// Reasons a GLB export failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportGlbError {
     #[error("no vehicle found for param index {0}")]
     NoVehicle(String),
-    #[error("failed to export ship model: {0}")]
-    ShipExport(String),
+    #[error("failed to export ship model: {report}")]
+    ShipExport { report: Report },
     #[error("failed to create output file {path}: {source}")]
     CreateFile { path: std::path::PathBuf, source: std::io::Error },
-    #[error("failed to write glb: {0}")]
-    WriteGlb(String),
+    #[error("failed to write ship glb {path}: {report}")]
+    WriteShip { path: std::path::PathBuf, report: Report },
+    #[error("failed to write model glb {path}: {report}")]
+    WriteModel { path: std::path::PathBuf, report: Report<ModelExportError> },
+    #[error("failed to write glb {path}: {source}")]
+    Flush { path: std::path::PathBuf, source: std::io::Error },
 }
 
 /// Options for [`load_ship_armor`]. Built by [`default_load_options`] for a
@@ -694,10 +700,10 @@ pub(crate) fn export_ship_glb(
     })?;
     let ctx = ship_assets
         .load_ship_from_vehicle(&vehicle, options)
-        .map_err(|e| ExportGlbError::ShipExport(format!("{e:?}")))?;
+        .map_err(|report| ExportGlbError::ShipExport { report })?;
     let mut file = std::fs::File::create(path)
         .map_err(|source| ExportGlbError::CreateFile { path: path.to_path_buf(), source })?;
-    ctx.export_glb(&mut file).map_err(|e| ExportGlbError::WriteGlb(format!("{e:?}")))?;
+    ctx.export_glb(&mut file).map_err(|report| ExportGlbError::WriteShip { path: path.to_path_buf(), report })?;
     Ok(())
 }
 

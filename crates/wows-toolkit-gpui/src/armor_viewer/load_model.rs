@@ -10,12 +10,14 @@ use std::sync::Arc;
 use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::Task;
+use rootcause::Report;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelArmorMaps;
 use wowsunpack::export::model_library::ModelExportOptions;
+use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::model_library::ModelLoadOptions;
 use wowsunpack::export::model_library::TextureDecode;
 use wowsunpack::export::mount_armor::MountArmorIndex;
@@ -52,14 +54,14 @@ const DISPLAY_TEXTURE_EDGE: u32 = 2048;
 const UNKNOWN_THICKNESS_COLOR: [f32; 4] = [0.55, 0.55, 0.58, 1.0];
 
 /// Why a model could not be shown.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ModelSceneError {
-    #[error("failed to load model {path}: {reason}")]
-    Load { path: ModelPath, reason: String },
+    #[error("failed to load model {path}: {report}")]
+    Load { path: ModelPath, report: Report<ModelLoadError> },
 }
 
 /// Why a ship or a model could not be shown.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum SceneLoadError {
     #[error(transparent)]
     Ship(#[from] super::load_ship::ShipLoadError),
@@ -239,7 +241,7 @@ pub(crate) fn load_model_scene(
     let model = models
         .library
         .load_model(&request.path, &options)
-        .map_err(|report| ModelSceneError::Load { path: request.path.clone(), reason: format!("{report:?}") })?;
+        .map_err(|report| ModelSceneError::Load { path: request.path.clone(), report })?;
 
     let (meshes, thickness, thickness_choices) = match thickness_ref(&models.mount_armor, metadata, request) {
         Some(source) => {
@@ -372,9 +374,9 @@ pub(crate) fn export_model_glb(
     models
         .library
         .export_glb(&request.path, &export_options, armor, &mut writer)
-        .map_err(|report| ExportGlbError::WriteGlb(format!("{report:?}")))?;
+        .map_err(|report| ExportGlbError::WriteModel { path: path.to_path_buf(), report })?;
 
-    writer.flush().map_err(|e| ExportGlbError::WriteGlb(e.to_string()))
+    writer.flush().map_err(|source| ExportGlbError::Flush { path: path.to_path_buf(), source })
 }
 
 #[cfg(test)]

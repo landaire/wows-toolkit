@@ -27,7 +27,9 @@ use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::SvgRenderer;
 use gpui_kit::Task;
+use rootcause::Report;
 use wowsunpack::export::model_library::ModelLibrary;
+use wowsunpack::export::model_library::ModelLibraryError;
 use wowsunpack::export::mount_armor::MountArmorIndex;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_assets::GuiAsset;
@@ -61,10 +63,10 @@ pub enum ArmorAssetsError {
 }
 
 /// Why the model library could not be built from a loaded bundle.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ModelLibraryLoadError {
-    #[error("failed to build the model library: {0}")]
-    Build(String),
+    #[error("failed to build the model library: {report}")]
+    Build { report: Report<ModelLibraryError> },
 }
 
 /// One loaded build's Armor Viewer data: the shared ship-export assets, the
@@ -166,8 +168,7 @@ pub fn spawn_build_model_library(
     cx: &App,
 ) -> Task<Result<ModelAssets, ModelLibraryLoadError>> {
     cx.background_spawn(async move {
-        let library =
-            bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build(format!("{report:?}")))?;
+        let library = bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build { report })?;
         let mount_armor = MountArmorIndex::build(bundle.assets.metadata(), library.catalog());
 
         Ok(ModelAssets { library: Arc::new(library), mount_armor })
