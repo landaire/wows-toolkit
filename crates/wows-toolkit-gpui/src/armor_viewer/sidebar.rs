@@ -525,6 +525,11 @@ impl Sidebar {
         // Coalesces typing so a 15000-model search runs once per pause.
         const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 
+        if let InputEvent::PressEnter { .. } = event {
+            self.open_from_search(cx);
+            return;
+        }
+
         let InputEvent::Change = event else { return };
         let text = self.search_state.read(cx).value().to_string();
         let query = fold(text.trim());
@@ -543,6 +548,117 @@ impl Sidebar {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             let _ = this.update(cx, |this, cx| this.apply_query(query, cx));
         }));
+    }
+
+    /// Enter in the search field: applies a search still waiting out its
+    /// pause, then opens the row the reader highlighted, or the first one
+    /// that opens.
+    fn open_from_search(&mut self, cx: &mut Context<Self>) {
+        self.apply_pending_query(cx);
+
+        // The open model's row is highlighted for the pane, not chosen.
+        let open = self.open_model.as_ref().map(open_row_id);
+        let highlighted = self
+            .tree_state
+            .read(cx)
+            .selected_item()
+            .map(|item| item.id.clone())
+            .filter(|id| Some(id) != open.as_ref() && self.row_info.get(id).is_some_and(opens_on_its_own));
+        if let Some(id) = highlighted.or_else(|| self.first_openable_row(cx)) {
+            self.open_row(&id, cx);
+        }
+    }
+
+    /// Applies the search field's text now if it is still waiting out its
+    /// pause.
+    fn apply_pending_query(&mut self, cx: &mut Context<Self>) {
+        let text = self.search_state.read(cx).value().to_string();
+        let query = fold(text.trim());
+        if query != self.query {
+            self._search_debounce = None;
+            self.apply_query(query, cx);
+        }
+    }
+
+    /// The first listed ship, model or part row.
+    fn first_openable_row(&self, cx: &App) -> Option<SharedString> {
+        let state = self.tree_state.read(cx);
+        (0..)
+            .map_while(|ix| state.entry(ix))
+            .map(|entry| &entry.item().id)
+            .find(|id| self.row_info.get(*id).is_some_and(opens_on_its_own))
+            .cloned()
+    }
+
+    /// Does what a click on row `id` does: a ship or model row opens, a
+    /// folder opens or closes.
+    fn open_row(&mut self, id: &SharedString, cx: &mut Context<Self>) {
+        let Some(kind) = self.row_info.get(id).cloned() else {
+            return;
+        };
+
+        match &kind {
+            RowKind::Ship { param_index, display_name } => {
+                cx.emit(ShipSelected { param_index: param_index.clone(), display_name: display_name.clone() })
+            }
+            RowKind::Model(_) | RowKind::ShipPart { .. } => {
+                if let Some(selection) = model_selection(&kind) {
+                    cx.emit(selection);
+                }
+            }
+            RowKind::Nation(_)
+            | RowKind::Class(_)
+            | RowKind::PartFolder
+            | RowKind::ModelNation { .. }
+            | RowKind::ModelGroup => self.toggle_folder(id, cx),
+            // A heading and a status line do nothing.
+            RowKind::Separator | RowKind::ModelsStatus => {}
+        }
+    }
+
+    fn toggle_folder(&mut self, id: &SharedString, cx: &mut Context<Self>) {
+        let state = self.tree_state.read(cx);
+        let expanded = state.index_of(id).and_then(|ix| state.entry(ix)).map(TreeEntry::is_expanded);
+        let event = match expanded {
+            Some(true) => TreeEvent::Collapsed(id.clone()),
+            Some(false) => TreeEvent::Expanded(id.clone()),
+            None => return,
+        };
+
+        let tree_state = self.tree_state.clone();
+        self.on_tree_event(tree_state, &event, cx);
+    }
+
+    /// Enter on the highlighted row of the list opens it.
+    fn on_tree_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key != "enter" || event.keystroke.modifiers.modified() || event.is_held {
+            return;
+        }
+        let Some(id) = self.tree_state.read(cx).selected_item().map(|item| item.id.clone()) else {
+            return;
+        };
+
+        cx.stop_propagation();
+        self.open_row(&id, cx);
+    }
+
+    /// Down in the search field moves into the list, onto the first row that
+    /// opens.
+    fn on_search_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key != "down" || event.keystroke.modifiers.modified() {
+            return;
+        }
+        self.apply_pending_query(cx);
+        let Some(id) = self.first_openable_row(cx) else {
+            return;
+        };
+
+        cx.stop_propagation();
+        self.tree_state.update(cx, |state, cx| {
+            let ix = state.index_of(&id);
+            state.set_selected_index(ix, cx);
+            state.focus(window, cx);
+        });
     }
 
     fn apply_query(&mut self, query: String, cx: &mut Context<Self>) {
@@ -598,10 +714,20 @@ impl Sidebar {
         let mut expansion = Expansion { set, closed: &self.search_collapsed, auto };
         let built = build_tree(&sources, self.search.as_ref(), &mut expansion);
 
+        // A folder opened or closed keeps the row the reader is on.
+        let kept = match rebuild {
+            Rebuild::Keep => self.tree_state.read(cx).selected_item().map(|item| item.id.clone()),
+            Rebuild::Rematch => None,
+        };
+
         self.row_info = Rc::new(built.rows);
         self.row_notes = Rc::new(built.notes);
         self.tree_state.update(cx, |state, cx| state.set_items(built.items, cx));
-        self.highlight_open_row(cx);
+        let kept_ix = kept.and_then(|id| self.tree_state.read(cx).index_of(&id));
+        match kept_ix {
+            Some(ix) => self.tree_state.update(cx, |state, cx| state.set_selected_index(Some(ix), cx)),
+            None => self.highlight_open_row(cx),
+        }
     }
 
     /// Selects the open model's row, or nothing when it is not listed.
@@ -658,6 +784,11 @@ fn model_selection(kind: &RowKind) -> Option<ModelSelected> {
         }),
         _ => None,
     }
+}
+
+/// Whether a row opens a ship or model, rather than being a folder or heading.
+fn opens_on_its_own(kind: &RowKind) -> bool {
+    matches!(kind, RowKind::Ship { .. } | RowKind::Model(_) | RowKind::ShipPart { .. })
 }
 
 /// What a row's tooltip says: its whole name, which the row may cut short,
@@ -762,7 +893,7 @@ fn render_sidebar_item(
     };
     row = row.child(label);
     // The text is built on hover; a row only clones what it shows.
-    let hover = kind.filter(|kind| matches!(kind, RowKind::Ship { .. } | RowKind::Model(_) | RowKind::ShipPart { .. }));
+    let hover = kind.filter(|kind| opens_on_its_own(kind));
     if let Some(kind) = hover.cloned() {
         row = row.tooltip(move |window, cx| Tooltip::new(row_tooltip(&kind).unwrap_or_default()).build(window, cx));
     }
@@ -878,6 +1009,7 @@ impl Render for Sidebar {
             .child(self.common_menu(cx));
 
         let search_row = h_flex()
+            .capture_key_down(cx.listener(Self::on_search_key_down))
             .flex_none()
             .gap_1()
             .items_center()
@@ -911,7 +1043,9 @@ impl Render for Sidebar {
             }
         };
 
-        v_flex().size_full().child(header).child(search_row).child(div().flex_1().min_h(px(0.)).child(body))
+        let list = div().flex_1().min_h(px(0.)).on_key_down(cx.listener(Self::on_tree_key_down)).child(body);
+
+        v_flex().size_full().child(header).child(search_row).child(list)
     }
 }
 
@@ -1223,6 +1357,98 @@ mod tests {
         assert_eq!(super::tiers_from_slider(SliderValue::Range(3.2, 8.6)), TierRange::new(3, 9));
         assert_eq!(super::tiers_from_slider(SliderValue::Range(8., 3.)), TierRange::new(3, 8), "crossed handles");
         assert_eq!(super::tiers_from_slider(SliderValue::Range(0., 30.)), TierRange::ALL);
+    }
+
+    /// Highlights row `row` with the list focused, as arrowing to it does,
+    /// and presses `keys`.
+    fn press_on_row(window: WindowHandle<Sidebar>, row: usize, keys: &str, cx: &mut TestAppContext) {
+        window
+            .update(cx, |sidebar, window, cx| {
+                sidebar.tree_state.update(cx, |state, cx| {
+                    state.set_selected_index(Some(row), cx);
+                    state.focus(window, cx);
+                });
+            })
+            .expect("the window is open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        cx.simulate_keystrokes(window.into(), keys);
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn enter_on_the_highlighted_row_opens_it_or_its_folder(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let ships = record::<ShipSelected>(&window, cx);
+        let models = record::<ModelSelected>(&window, cx);
+        let usa = "model-folder/nation-usa";
+        window
+            .update(cx, |sidebar, _window, cx| {
+                let folders = ["armor-nation-USA".to_string(), "armor-class-USA-Battleship".to_string()];
+                let model_folders = [usa.to_string(), format!("{usa}/Gun"), format!("{usa}/Gun/MainBattery")];
+                sidebar.browse_expanded.extend(folders.into_iter().chain(model_folders).map(SharedString::from));
+                sidebar.rebuild_tree(Rebuild::Keep, cx);
+            })
+            .expect("the window is open");
+        let turret = fixture::path(fixture::IOWA_TURRET);
+
+        let row = row_index(&window, &model_row_id(&turret), cx).expect("the turret is listed");
+        press_on_row(window, row, "enter", cx);
+        assert_eq!(*models.borrow(), [ModelSelected { model: turret, from_ship: None }]);
+
+        let row = row_index(&window, &ship_row_id(fixture::IOWA_INDEX), cx).expect("Iowa is listed");
+        press_on_row(window, row, "enter", cx);
+        assert_eq!(
+            *ships.borrow(),
+            [ShipSelected { param_index: fixture::IOWA_INDEX.to_string(), display_name: "Iowa".to_string() }]
+        );
+
+        let japan: SharedString = "model-folder/nation-japan".into();
+        let row = row_index(&window, &japan, cx).expect("Japan's models are listed");
+        press_on_row(window, row, "enter", cx);
+        assert!(row_index(&window, &"model-folder/nation-japan/Ship".into(), cx).is_some(), "the folder opened");
+        assert_eq!(selected_row(&window, cx), row_index(&window, &japan, cx), "and stays highlighted");
+    }
+
+    #[gpui_kit::test]
+    fn enter_in_the_search_field_opens_the_first_match_and_down_moves_into_the_list(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let ships = record::<ShipSelected>(&window, cx);
+        let models = record::<ModelSelected>(&window, cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("armor-sidebar-search", cx);
+            window.input("yamato", cx);
+        })
+        .expect("the window is open");
+        cx.simulate_keystrokes(window.into(), "enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            *ships.borrow(),
+            [ShipSelected { param_index: "PJSB018".to_string(), display_name: "Yamato".to_string() }],
+            "the search applies at once and its first row opens"
+        );
+
+        // A search naming only a model, typed and still waiting out its
+        // pause when Down is pressed.
+        window
+            .update(cx, |sidebar, window, cx| {
+                sidebar.search_state.update(cx, |state, cx| state.set_value("lazarus", window, cx));
+            })
+            .expect("the window is open");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("armor-sidebar-search", cx);
+        })
+        .expect("the window is open");
+        cx.simulate_keystrokes(window.into(), "down enter");
+        cx.run_until_parked();
+
+        let lazarus =
+            fixture::path("content/gameplay/events/director/XD006_Lazarus_Director/XD006_Lazarus_Director.model");
+        assert_eq!(*models.borrow(), [ModelSelected { model: lazarus, from_ship: None }], "down moved into the list");
+        assert_eq!(ships.borrow().len(), 1);
     }
 
     #[gpui_kit::test]
