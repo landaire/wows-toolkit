@@ -11,6 +11,7 @@ use landaire_ui::PanelKind;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_replays::types::AccountId;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -31,7 +32,9 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::shell::ReplayRequest;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
+use crate::tabs::replays::panel::expanded::SHARE_MODE;
 use crate::windows::renderer::session::RenderRequest;
+use crate::windows::renderer::view::SHORTCUTS_MODE;
 
 const WINDOW: WindowSize = WindowSize { width: 1200.0, height: 800.0 };
 /// How long the listing takes to slide shut.
@@ -346,6 +349,37 @@ fn the_status_bar_holds_the_listing_toggle_on_the_replays_tab() {
     workspace.shell.select(TabKey::App(AppTab::Search));
     window.advance(Duration::from_millis(64));
     assert!(window.by_test_id("replay-listing-toggle").is_none(), "and away from it on another tab");
+}
+
+/// The status bar names the mode of the panel on screen. A replay or a viewport behind another tab
+/// says nothing, however its rows are open.
+#[test]
+fn only_the_panel_on_screen_names_its_mode() {
+    let (mut window, workspace) = open();
+    let behind = PathBuf::from("behind.wowsreplay");
+    let front = PathBuf::from("front.wowsreplay");
+    let mode = || workspace.shell.selected_chrome().and_then(|chrome| chrome.mode());
+
+    workspace.open(behind.clone(), OpenTarget::ShowingTab);
+    workspace.open(front.clone(), OpenTarget::NewTab);
+    window.advance(Duration::from_millis(32));
+    workspace.control_for_test(&behind).expect("the replay is open").note_shares_for_test(AccountId(1));
+    window.advance(Duration::from_millis(32));
+    assert_eq!(mode(), None, "the replay showing lists no damage shares");
+
+    workspace.dock.activate(&Docked::Replay(behind.clone()).panel_id()).expect("the replay is docked");
+    window.advance(Duration::from_millis(32));
+    assert_eq!(mode(), Some(SHARE_MODE), "brought forward, its shares are named");
+
+    let viewport = PathBuf::from("viewport.wowsreplay");
+    workspace.render(RenderRequest { path: viewport.clone(), alts: Vec::new() });
+    window.advance(Duration::from_millis(32));
+    assert_eq!(mode(), Some(SHORTCUTS_MODE), "the viewport in front names its shortcuts");
+
+    workspace.dock.activate(&Docked::Replay(behind).panel_id()).expect("the replay is docked");
+    window.advance(Duration::from_millis(32));
+    assert_eq!(mode(), Some(SHARE_MODE), "the viewport behind it does not overwrite the replay's");
+    workspace.remove(&Docked::Renderer(viewport));
 }
 
 /// A collapsed listing is stored with the replay settings.

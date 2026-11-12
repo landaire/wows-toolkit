@@ -94,8 +94,11 @@ use crate::icons::AppIconProps;
 use crate::services::Job;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::tabs::ModeHint;
 use crate::tabs::replays::panel::chat::ChatPanelProps;
 use crate::tabs::replays::panel::expanded::ExpandedRowProps;
+use crate::tabs::replays::panel::expanded::SHARE_MODE;
+use crate::tabs::replays::panel::expanded::ShareRows;
 use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
@@ -353,6 +356,8 @@ pub struct PanelControl {
     counted: StoredValue<bool>,
     /// Why a read cut short with its view was asked for, owed by the next view.
     owed: StoredValue<Option<ReparseCause>>,
+    /// The open rows that list damage shares, which Alt flips.
+    share_rows: ShareRows,
 }
 
 impl PanelControl {
@@ -364,6 +369,7 @@ impl PanelControl {
             alt_on_trial: StoredValue::new(None),
             counted: StoredValue::new(false),
             owed: StoredValue::new(None),
+            share_rows: ShareRows::new(),
         }
     }
 
@@ -409,6 +415,17 @@ impl PanelControl {
             LoadState::Loaded(loaded) => PanelTitle::Read { title: loaded.title.clone(), ship: loaded.ship.clone() },
             LoadState::Failed(_) => PanelTitle::Failed,
         })
+    }
+
+    /// The held-key mode the panel's open rows offer. Reactive.
+    pub fn mode(self) -> Option<ModeHint> {
+        self.share_rows.any().then_some(SHARE_MODE)
+    }
+
+    /// Marks `player`'s open row as listing damage shares, as its detail does once drawn.
+    #[cfg(test)]
+    pub fn note_shares_for_test(self, player: wows_replays::types::AccountId) {
+        self.share_rows.mark(player, true);
     }
 }
 
@@ -783,7 +800,14 @@ pub fn ReplayPanel(
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
                     let PlayerDetailCx { row, rows, columns } = cx;
                     AnyView::new(view! {
-                        ExpandedRow(columns = columns, row = row, rows = rows, debug = debug, alt_held = alt_held)
+                        ExpandedRow(
+                            columns = columns,
+                            row = row,
+                            rows = rows,
+                            debug = debug,
+                            alt_held = alt_held,
+                            share_rows = control.share_rows
+                        )
                     })
                 });
                 Some(table.with_value(|table| table(PanelTable { model, debug, detail, on_view_raw_json })))

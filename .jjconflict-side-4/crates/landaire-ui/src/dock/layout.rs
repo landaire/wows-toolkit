@@ -479,6 +479,19 @@ impl Layout {
             .collect()
     }
 
+    /// The panel each group shows, in the open regions, in [`DockRegion::ALL`] order.
+    pub(crate) fn shown_panels(&self) -> Vec<PanelId> {
+        DockRegion::ALL
+            .into_iter()
+            .map(|region| self.region(region))
+            .filter(|region| region.open)
+            .filter_map(|region| region.root.as_ref())
+            .flat_map(|root| {
+                root.fold(|group| vec![group.active.clone()], |_, children| children.into_iter().flatten().collect())
+            })
+            .collect()
+    }
+
     pub(crate) fn add_panel(&mut self, target: DockTarget, entry: PanelEntry) -> Result<GroupId, DockError> {
         if self.locate_panel(&entry.id).is_some() {
             return Err(DockError::DuplicatePanel { id: entry.id });
@@ -906,5 +919,21 @@ mod tests {
 
         layout.activate(&PanelId::new("log")).expect("log is in the dock");
         assert!(layout.shows(DockRegion::Bottom));
+    }
+
+    #[test]
+    fn each_group_shows_its_active_panel_and_a_closed_region_shows_none() {
+        let mut layout = Layout::new();
+        let left = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        layout.add_panel(DockTarget::Group(left), entry("b")).expect("adds");
+        layout.add_panel(DockTarget::Beside { group: left, edge: Edge::Right }, entry("c")).expect("splits");
+        layout.add_panel(DockTarget::Region(DockRegion::Bottom), entry("log")).expect("adds");
+        let shown = |layout: &Layout| layout.shown_panels().into_iter().map(|id| id.0).collect::<Vec<_>>();
+
+        assert_eq!(shown(&layout), ["b", "c", "log"]);
+
+        layout.activate(&PanelId::new("a")).expect("a is in the dock");
+        layout.set_open(DockRegion::Bottom, false);
+        assert_eq!(shown(&layout), ["a", "c"]);
     }
 }

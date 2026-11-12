@@ -212,6 +212,11 @@ impl DockState {
         self.layout.with(|layout| layout.group(group).map(|group| group.active.clone()))
     }
 
+    /// The panels on screen: the one each group shows, in the open regions. Reactive.
+    pub fn shown_panels(self) -> Vec<PanelId> {
+        self.layout.with(Layout::shown_panels)
+    }
+
     pub fn dump(self) -> SavedLayout {
         self.layout.with(Layout::dump)
     }

@@ -55,7 +55,6 @@ use crate::frames::FrameViewProps;
 use crate::icons::AppIconProps;
 use crate::shell::tabs::ModeHint;
 use crate::shell::tabs::ModifierKey;
-use crate::shell::tabs::TabChrome;
 use crate::windows::renderer::export::ExportNoticeProps;
 use crate::windows::renderer::export::export_asking_first;
 use crate::windows::renderer::hover::HoverReadingsProps;
@@ -149,23 +148,17 @@ const CSS: &str = css!(
 /// How much one line of wheel travel is worth, for a wheel that reports lines rather than pixels.
 const SCROLL_LINE: f32 = 20.0;
 
+/// What a docked renderer names on the status bar: the shortcut sheet its key shows while held.
+pub const SHORTCUTS_MODE: ModeHint =
+    ModeHint { key: ModifierKey::Primary, name_key: "ui.renderer.annotations.shortcuts_title" };
+
 /// A replay played back on its minimap, with its transport. `slot_tools` and the other slots are
 /// the transport's popovers, placed before the pop-out control.
 #[component]
 pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    let chrome = TabChrome::current();
     let map = NodeRef::new();
     let root = NodeRef::new();
-
-    // The status bar names the shortcut sheet while the key that shows it is held.
-    if let Some(chrome) = chrome {
-        chrome.set_mode(Some(ModeHint {
-            key: ModifierKey::Primary,
-            name_key: "ui.renderer.annotations.shortcuts_title",
-        }));
-        on_cleanup_local(move || chrome.set_mode(None));
-    }
 
     // The frame's placement follows the element's size and the frame's. Observed once: each call
     // makes another observer.
