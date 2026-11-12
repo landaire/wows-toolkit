@@ -1196,6 +1196,10 @@ pub struct Exterior {
     #[cfg_attr(feature = "serde", serde(default))]
     #[builder(default)]
     hidden: bool,
+    /// Models the exterior swaps in (`peculiarityModels`), sorted by stock path.
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[builder(default)]
+    peculiarity_models: Vec<PeculiarityModel>,
 }
 
 impl Exterior {
@@ -1222,6 +1226,20 @@ impl Exterior {
     pub fn hidden(&self) -> bool {
         self.hidden
     }
+
+    pub fn peculiarity_models(&self) -> &[PeculiarityModel] {
+        &self.peculiarity_models
+    }
+}
+
+/// One `peculiarityModels` entry: a stock model and the model an exterior
+/// shows in its place. Both are VFS `.model` paths.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct PeculiarityModel {
+    pub stock: String,
+    pub replacement: String,
 }
 
 /// All range data associated with a specific hull upgrade.

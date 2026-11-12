@@ -306,6 +306,7 @@ pub const TITLE: &str = "title";
 pub const IS_TILEFLAGE: &str = "isTileflage";
 pub const HIDDEN: &str = "hidden";
 pub const UNPECULIAR_CAMOUFLAGE: &str = "unpeculiarCamouflage";
+pub const PECULIARITY_MODELS: &str = "peculiarityModels";
 
 // HP_ mount prefix
 pub const HP_PREFIX: &str = "HP_";

@@ -1,0 +1,14 @@
+---
+source: crates/wowsunpack/src/game_params/provider.rs
+expression: "param.exterior().expect(\"exterior data\").peculiarity_models()"
+---
+[
+    PeculiarityModel {
+        stock: "content/gameplay/germany/gun/main/GGM058_280mm54_5_C34/GGM058_280mm54_5_C34.model",
+        replacement: "content/gameplay/germany/gun/main/GGM546_280mm54_5_C34_Black/GGM546_280mm54_5_C34_Black.model",
+    },
+    PeculiarityModel {
+        stock: "content/gameplay/germany/gun/main/GGM058_280mm54_5_C34/GGM058_280mm54_5_C34_dead.model",
+        replacement: "content/gameplay/germany/gun/main/GGM546_280mm54_5_C34_Black/GGM546_280mm54_5_C34_Black_dead.model",
+    },
+]

@@ -1403,6 +1403,22 @@ fn parse_custom_miscs(dict: &pickled::Dict) -> HashMap<String, Vec<String>> {
         .collect()
 }
 
+/// Parse a `peculiarityModels` dict (stock model path -> replacement model path),
+/// sorted so the result does not depend on dict order.
+fn parse_peculiarity_models(dict: &pickled::Dict) -> Vec<PeculiarityModel> {
+    let mut models: Vec<PeculiarityModel> = dict
+        .iter()
+        .filter_map(|(k, v)| {
+            let stock = k.string_ref()?.inner().clone();
+            let replacement = v.string_ref()?.inner().clone();
+            (!stock.is_empty() && !replacement.is_empty()).then_some(PeculiarityModel { stock, replacement })
+        })
+        .collect();
+    models.sort();
+
+    models
+}
+
 fn value_f32(v: &Value) -> Option<f32> {
     v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
 }
@@ -2960,6 +2976,12 @@ impl GameMetadataProvider {
                     .map(|s| s.inner().to_string())
                     .filter(|s| !s.is_empty());
                 let hidden = game_param_to_type!(param_data, keys::HIDDEN, Option<bool>).unwrap_or_default();
+                // Absent `peculiarityModels` means the exterior swaps no models.
+                let peculiarity_models = param_data
+                    .get(&pk(keys::PECULIARITY_MODELS))
+                    .and_then(|v| v.dict_or_object_dict())
+                    .map(|d| parse_peculiarity_models(&d.inner()))
+                    .unwrap_or_default();
                 Some(ParamData::Exterior(
                     Exterior::builder()
                         .maybe_camouflage(camouflage)
@@ -2968,6 +2990,7 @@ impl GameMetadataProvider {
                         .is_tileflage(is_tileflage)
                         .maybe_unpeculiar_camouflage(unpeculiar_camouflage)
                         .hidden(hidden)
+                        .peculiarity_models(peculiarity_models)
                         .build(),
                 ))
             }
@@ -3455,6 +3478,44 @@ mod camera_tests {
         assert_eq!(projectile.torpedo_type(), None);
         assert_eq!(projectile.distance_of_damage(), None);
         assert_eq!(projectile.ignore_classes(), None);
+    }
+
+    #[test]
+    fn parse_single_param_reads_exterior_peculiarity_models() {
+        // Two of the real PAEM001_BlackFriday_Sims entries, given out of order.
+        let gun = "content/gameplay/germany/gun/main/GGM058_280mm54_5_C34/GGM058_280mm54_5_C34";
+        let skin = "content/gameplay/germany/gun/main/GGM546_280mm54_5_C34_Black/GGM546_280mm54_5_C34_Black";
+        let exterior = dict(vec![
+            (pk("id"), iv(4243)),
+            (pk("index"), sv("PAEM001")),
+            (pk("name"), sv("PAEM001_BlackFriday_Sims")),
+            (pk("typeinfo"), typeinfo("USA", "MSkin", "Exterior")),
+            (
+                pk("peculiarityModels"),
+                dict(vec![
+                    (pk(&format!("{gun}_dead.model")), sv(&format!("{skin}_dead.model"))),
+                    (pk(&format!("{gun}.model")), sv(&format!("{skin}.model"))),
+                ]),
+            ),
+        ]);
+        let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
+        let param = GameMetadataProvider::parse_single_param(&exterior, &params_dict, None).expect("param parsed");
+
+        insta::assert_debug_snapshot!(param.exterior().expect("exterior data").peculiarity_models());
+    }
+
+    #[test]
+    fn exterior_without_peculiarity_models_swaps_nothing() {
+        let exterior = dict(vec![
+            (pk("id"), iv(4244)),
+            (pk("index"), sv("PCEC001")),
+            (pk("name"), sv("PCEC001_Camo")),
+            (pk("typeinfo"), typeinfo("Common", "Camouflage", "Exterior")),
+        ]);
+        let params_dict: Shared<pickled::Dict> = Shared::new(pickled::Dict::new());
+        let param = GameMetadataProvider::parse_single_param(&exterior, &params_dict, None).expect("param parsed");
+
+        assert!(param.exterior().expect("exterior data").peculiarity_models().is_empty());
     }
 
     #[test]
