@@ -1955,6 +1955,7 @@ skin_replaces = "%{exterior} 장착 시 %{model}을(를) 대체합니다"
 geometry_absent = "게임 파일에 없음"
 geometry_none = "이 모델에는 지오메트리가 없습니다"
 hardpoints_tooltip = "부착 지점 표시"
+common = "공용 모델"
 
 [ui.models.group]
 gameplay = "게임플레이"

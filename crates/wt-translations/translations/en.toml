@@ -1979,6 +1979,7 @@ skin_replaces = "Replaces %{model} when %{exterior} is equipped"
 geometry_absent = "Not in your game files"
 geometry_none = "This model has no geometry"
 hardpoints_tooltip = "Show attachment points"
+common = "Common models"
 
 [ui.models.group]
 gameplay = "Gameplay"

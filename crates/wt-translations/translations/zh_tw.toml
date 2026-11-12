@@ -1955,6 +1955,7 @@ skin_replaces = "裝備 %{exterior} 時替換 %{model}"
 geometry_absent = "不在遊戲檔案中"
 geometry_none = "此模型沒有幾何體"
 hardpoints_tooltip = "顯示掛載點"
+common = "通用模型"
 
 [ui.models.group]
 gameplay = "遊戲"

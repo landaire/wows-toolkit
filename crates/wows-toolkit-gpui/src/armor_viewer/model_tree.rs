@@ -71,6 +71,9 @@ pub enum FolderName {
         /// Its translated name, or the directory name.
         display_name: String,
     },
+    /// The `common` directory: models no one nation owns. The game names no
+    /// such nation.
+    Common,
     Group(ModelGroupKind),
     Kind(ModelKind),
     SubKind(ModelSubKind),
@@ -485,6 +488,8 @@ enum FolderOrder {
     Building(BuildingKind),
     /// Nations and directories, by name.
     Name(String),
+    /// The common directory, after the nations.
+    Common,
 }
 
 fn folder_order(name: &FolderName) -> FolderOrder {
@@ -492,6 +497,7 @@ fn folder_order(name: &FolderName) -> FolderOrder {
     let rank = |position: Option<usize>| FolderOrder::Rank(position.unwrap_or(usize::MAX));
     match name {
         FolderName::Nation { display_name, .. } => FolderOrder::Name(display_name.to_lowercase()),
+        FolderName::Common => FolderOrder::Common,
         FolderName::Directory(directory) => FolderOrder::Name(directory.to_lowercase()),
         FolderName::Group(group) => rank(ModelGroupKind::ALL.iter().position(|each| each == group)),
         FolderName::Kind(kind) => rank(ModelKind::ALL.iter().position(|each| each == kind)),
@@ -714,15 +720,23 @@ fn folder_path(group: &ModelGroup, ships: &ShipCatalog, metadata: &GameMetadataP
 }
 
 /// The folder for model directory `nation`, named and flagged after the
-/// GameParams nation of the same name where there is one.
+/// GameParams nation of the same name where there is one. The common
+/// directory is not a nation and is named as [`FolderName::Common`].
 fn nation_folder(nation: &ModelNation, ships: &ShipCatalog) -> (String, FolderName) {
+    const COMMON: &str = "common";
+
+    let key = format!("nation-{nation}");
+    if nation.as_str() == COMMON {
+        return (key, FolderName::Common);
+    }
+
     let ship_nation = ships.nations.iter().find(|group| same_nation(nation.as_str(), &group.nation));
     let name = FolderName::Nation {
         flag: ship_nation.map(|group| group.nation.clone()),
         display_name: ship_nation.map_or_else(|| nation.as_str().to_string(), |group| group.display_name.clone()),
     };
 
-    (format!("nation-{nation}"), name)
+    (key, name)
 }
 
 /// The folder of `siblings` keyed `key`, added when absent.

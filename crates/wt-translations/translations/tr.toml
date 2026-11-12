@@ -1909,6 +1909,7 @@ skin_replaces = "%{exterior} takılıyken %{model} yerine geçer"
 geometry_absent = "Oyun dosyalarınızda yok"
 geometry_none = "Bu modelin geometrisi yok"
 hardpoints_tooltip = "Bağlantı noktalarını göster"
+common = "Ortak modeller"
 
 [ui.models.group]
 gameplay = "Oyun"

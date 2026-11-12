@@ -1909,6 +1909,7 @@ skin_replaces = "Заменяет %{model}, когда установлен %{ex
 geometry_absent = "Нет в файлах игры"
 geometry_none = "У этой модели нет геометрии"
 hardpoints_tooltip = "Показать точки крепления"
+common = "Общие модели"
 
 [ui.models.group]
 gameplay = "Игровые"

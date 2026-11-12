@@ -541,6 +541,7 @@ fn building_kind_label(kind: &BuildingKind) -> String {
 fn folder_label(name: &FolderName) -> String {
     match name {
         FolderName::Nation { display_name, .. } => display_name.clone(),
+        FolderName::Common => t!("ui.models.common").into_owned(),
         FolderName::Group(group) => model_group_label(*group),
         FolderName::Kind(kind) => model_kind_label(*kind),
         FolderName::SubKind(sub_kind) => model_sub_kind_label(sub_kind),
@@ -1865,6 +1866,26 @@ mod tests {
             ["Models", "Japan (3000) +", "U.S.A. (3000)", "  Guns (3000) +"],
             "opening a folder lists only its own children"
         );
+    }
+
+    /// The models no nation owns are listed after the nations, under a name
+    /// of their own rather than their directory's.
+    #[test]
+    fn the_common_models_follow_the_nations_under_their_own_name() {
+        rust_i18n::set_locale("en");
+        let ships = fixture::ships();
+        let guns = ["common", "usa", "japan"]
+            .into_iter()
+            .map(|nation| fixture::path(&format!("content/gameplay/{nation}/gun/main/AGM0001_Gun/AGM0001_Gun.model")));
+        let catalog = ModelCatalog::from_paths(guns, &CatalogLinks::default());
+        let references = super::super::model_tree::ModelReferences::new();
+        let index =
+            ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
+        let data = Data { ships, index, parts: HashMap::new(), fortifications: Vec::new(), hidden: HashMap::new() };
+
+        let built = build(&data, "gun", &mut HashSet::new(), false);
+
+        assert_eq!(outline(&built.items), ["Models", "Japan (1) +", "U.S.A. (1) +", "Common models (1) +"]);
     }
 
     #[test]

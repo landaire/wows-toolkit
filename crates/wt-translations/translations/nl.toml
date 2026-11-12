@@ -1955,6 +1955,7 @@ skin_replaces = "Vervangt %{model} als %{exterior} is uitgerust"
 geometry_absent = "Niet in je spelbestanden"
 geometry_none = "Dit model heeft geen geometrie"
 hardpoints_tooltip = "Bevestigingspunten tonen"
+common = "Gemeenschappelijke modellen"
 
 [ui.models.group]
 gameplay = "Spel"

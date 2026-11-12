@@ -1955,6 +1955,7 @@ skin_replaces = "แทนที่ %{model} เมื่อติดตั้�
 geometry_absent = "ไม่มีในไฟล์เกมของคุณ"
 geometry_none = "โมเดลนี้ไม่มีรูปทรง"
 hardpoints_tooltip = "แสดงจุดยึด"
+common = "โมเดลทั่วไป"
 
 [ui.models.group]
 gameplay = "เกมเพลย์"

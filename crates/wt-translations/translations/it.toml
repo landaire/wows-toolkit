@@ -1955,6 +1955,7 @@ skin_replaces = "Sostituisce %{model} quando è equipaggiato %{exterior}"
 geometry_absent = "Non presente nei file di gioco"
 geometry_none = "Questo modello non ha geometria"
 hardpoints_tooltip = "Mostra punti di aggancio"
+common = "Modelli comuni"
 
 [ui.models.group]
 gameplay = "Gioco"

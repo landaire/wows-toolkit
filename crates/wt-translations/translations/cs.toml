@@ -1909,6 +1909,7 @@ skin_replaces = "Nahrazuje %{model}, když je nasazeno %{exterior}"
 geometry_absent = "Není v souborech hry"
 geometry_none = "Tento model nemá geometrii"
 hardpoints_tooltip = "Zobrazit upevňovací body"
+common = "Společné modely"
 
 [ui.models.group]
 gameplay = "Hra"

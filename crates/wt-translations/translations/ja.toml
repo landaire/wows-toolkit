@@ -1955,6 +1955,7 @@ skin_replaces = "%{exterior} の装備時に %{model} の代わりに使用さ�
 geometry_absent = "ゲームファイルにありません"
 geometry_none = "このモデルにはジオメトリがありません"
 hardpoints_tooltip = "取り付け位置を表示"
+common = "共通モデル"
 
 [ui.models.group]
 gameplay = "ゲームプレイ"

@@ -1909,6 +1909,7 @@ skin_replaces = "Reemplaza a %{model} cuando %{exterior} está equipado"
 geometry_absent = "No está en tus archivos del juego"
 geometry_none = "Este modelo no tiene geometría"
 hardpoints_tooltip = "Mostrar puntos de anclaje"
+common = "Modelos comunes"
 
 [ui.models.group]
 gameplay = "Juego"
