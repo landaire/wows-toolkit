@@ -6,8 +6,9 @@
 //! `catalog` builds the ship selector's nation/class/ship listing from the
 //! loaded `GameMetadataProvider`; `assets` loads the shared `ShipAssets`
 //! (ship-export data) plus the catalog and its nation-flag/class-icon cache
-//! on the background executor. `sidebar` presents the catalog as a
-//! nation/class/ship tree with a search filter and emits a selection event;
+//! on the background executor. `sidebar` lists the ships, their parts and
+//! every catalogue model in one searchable tree (`sidebar_tree` builds it from
+//! `model_tree`'s grouped listing) and emits selection events;
 //! `load_ship` loads one ship's armor model on the background executor;
 //! `upload` uploads a loaded ship's armor meshes into a `Viewport3D`. `pane`
 //! ties all of the above into the single-pane tab `app.rs` mounts: sidebar on
@@ -50,6 +51,8 @@ mod gaps;
 mod hits;
 pub mod legend;
 mod load_ship;
+pub mod model_refs;
+mod model_tree;
 mod options_filter;
 pub mod options_panel;
 pub mod pane;
@@ -57,6 +60,7 @@ pub mod picking_ui;
 pub mod popover;
 pub mod realtime;
 pub mod sidebar;
+mod sidebar_tree;
 pub mod splash;
 pub mod trajectory;
 mod trajectory_panel;
