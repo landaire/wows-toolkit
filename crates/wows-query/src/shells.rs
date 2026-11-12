@@ -16,9 +16,11 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::is_overmatch;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::CrewSkillModifier;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Projectile;
+use wowsunpack::game_params::types::Species;
 
 use crate::builds::BuildAlternative;
 use crate::builds::BuildStat;
@@ -214,6 +216,21 @@ impl IfheCoefficients {
     }
 }
 
+fn ifhe_coefficients_from(modifiers: &[CrewSkillModifier], species: &Species) -> IfheCoefficients {
+    let coefficient = |name: &str| {
+        modifiers
+            .iter()
+            .find(|modifier| modifier.name() == name)
+            .map_or(1.0, |modifier| modifier.get_for_species(species))
+    };
+    let historical = coefficient("penetrationCoeffHE");
+
+    IfheCoefficients {
+        main: historical * coefficient("GMPenetrationCoeffHE"),
+        secondary: historical * coefficient("GSPenetrationCoeffHE"),
+    }
+}
+
 /// Inertia Fuse for HE Shells in one class tree.
 struct IfheBuild {
     name: String,
@@ -352,18 +369,7 @@ impl GameData {
         let modifiers = skill.modifiers()?;
         let species = class.species();
 
-        // An absent coefficient leaves penetration unchanged, as in the client.
-        let coefficient = |name: &str| {
-            modifiers
-                .iter()
-                .find(|modifier| modifier.name() == name)
-                .map_or(1.0, |modifier| modifier.get_for_species(&species))
-        };
-
-        Some(IfheCoefficients {
-            main: coefficient("GMPenetrationCoeffHE"),
-            secondary: coefficient("GSPenetrationCoeffHE"),
-        })
+        Some(ifhe_coefficients_from(modifiers, &species))
     }
 
     /// Inertia Fuse for HE Shells when the class tree has it.
@@ -557,6 +563,26 @@ pub(crate) fn thickest_overmatched_plate(caliber: Millimeters) -> Option<Millime
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn modifier(name: &str, value: f32) -> CrewSkillModifier {
+        CrewSkillModifier::builder()
+            .name(name.to_owned())
+            .aircraft_carrier(1.0)
+            .auxiliary(1.0)
+            .battleship(value)
+            .cruiser(1.0)
+            .destroyer(1.0)
+            .submarine(1.0)
+            .excluded_consumables(Vec::new())
+            .build()
+    }
+
+    #[test]
+    fn historical_ifhe_coefficient_applies_to_both_batteries() {
+        let coefficients = ifhe_coefficients_from(&[modifier("penetrationCoeffHE", 1.25)], &Species::Battleship);
+
+        assert_eq!(coefficients, IfheCoefficients { main: 1.25, secondary: 1.25 });
+    }
 
     #[test]
     fn thickest_overmatched_plate_is_the_last_whole_mm_overmatch() {

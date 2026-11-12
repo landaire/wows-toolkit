@@ -84,16 +84,18 @@ impl std::error::Error for ModifierError {}
 /// the burn-chance factors `burnChanceFactorHighLevel`, `burnChanceGMGSMultiplier` and
 /// `burnChanceMultiplier` (ModifiersApply.py:44/48/57, each used as `initialBurnProb *=`).
 /// The remaining names are captain-skill coefficients whose GameParams values carry the
-/// 1.0 multiplicative identity: `reloadFactor` (0.9/0.925), `engineForwardForsagePower` /
-/// `engineBackwardForsagePower` (1.0..1.3), `hydrophoneWaveSpeedCoeff` (1.0) and
-/// `planeEmptyReturnSpeed` (0.5/1.0/1.2). Without this allowlist `classify` would reject
-/// the unknown name even though it is a coefficient with the 1.0 identity.
+/// 1.0 multiplicative identity: `reloadFactor` (0.9/0.925), the historical IFHE
+/// `penetrationCoeffHE`, `engineForwardForsagePower` / `engineBackwardForsagePower`
+/// (1.0..1.3), `hydrophoneWaveSpeedCoeff` (1.0) and `planeEmptyReturnSpeed`
+/// (0.5/1.0/1.2). Without this allowlist `classify` would reject the unknown name
+/// even though it is a coefficient with the 1.0 identity.
 const KNOWN_MULTIPLICATIVE: &[&str] = &[
     "uwCoeffMultiplier",
     "burnChanceFactorHighLevel",
     "burnChanceGMGSMultiplier",
     "burnChanceMultiplier",
     "reloadFactor",
+    "penetrationCoeffHE",
     "engineForwardForsagePower",
     "engineBackwardForsagePower",
     "hydrophoneWaveSpeedCoeff",
@@ -423,6 +425,7 @@ mod tests {
     fn captain_skill_table_gaps_classify() {
         let mods = [
             modifier("reloadFactor", 0.9),
+            modifier("penetrationCoeffHE", 1.25),
             modifier("engineForwardForsagePower", 1.2),
             modifier("hydrophoneWaveSpeedCoeff", 1.0),
             modifier("planeEmptyReturnSpeed", 0.5),
@@ -431,6 +434,7 @@ mod tests {
         let bundle = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION)
             .expect("captain-skill table-gap modifiers must classify, not error");
         assert!((bundle.coef("reloadFactor") - 0.9).abs() < 1e-6);
+        assert!((bundle.coef("penetrationCoeffHE") - 1.25).abs() < 1e-6);
         assert!((bundle.coef("engineForwardForsagePower") - 1.2).abs() < 1e-6);
         assert!((bundle.coef("planeEmptyReturnSpeed") - 0.5).abs() < 1e-6);
         assert!((bundle.bonus("healthRegenPercent") - 0.05).abs() < 1e-6);

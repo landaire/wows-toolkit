@@ -845,12 +845,15 @@ pub fn shell_stats<R: Recorder>(
         _ => None,
     };
 
-    // piercing: HE floor(alphaPiercingHE * penetrationCoeffHE) (FactoryArtillery.py:182);
-    // the coef is GMPenetrationCoeffHE for main, GSPenetrationCoeffHE for ATBA
-    // (FactoryArtillery.py:175/180). CS floor(alphaPiercingCS) (line 185); AP is a
-    // ballistic sim (no closed form) -> None.
-    let he_pen_coef =
+    // piercing: HE floor(alphaPiercingHE * penetrationCoeffHE) (FactoryArtillery.py:182).
+    // Current builds use GMPenetrationCoeffHE for main and GSPenetrationCoeffHE for
+    // ATBA (FactoryArtillery.py:175/180). Older builds use penetrationCoeffHE for
+    // both, so multiply it with the battery-specific coefficient; either absent
+    // coefficient has the multiplicative identity. CS floor(alphaPiercingCS) (line
+    // 185); AP is a ballistic sim (no closed form) -> None.
+    let battery_he_pen_coef =
         if is_atba { modifiers.coef("GSPenetrationCoeffHE") } else { modifiers.coef("GMPenetrationCoeffHE") };
+    let he_pen_coef = modifiers.coef("penetrationCoeffHE") * battery_he_pen_coef;
     let penetration = match weapon {
         StatWeaponType::MainHe | StatWeaponType::AtbaHe => {
             projectile.alpha_piercing_he().map(|p| {
@@ -861,7 +864,8 @@ pub fn shell_stats<R: Recorder>(
                     let pre_floor = p * he_pen_coef;
                     let pen_coef_name = if is_atba { "GSPenetrationCoeffHE" } else { "GMPenetrationCoeffHE" };
                     rec.record(stat.penetration, Some(qualifier), p, arty_src(), pre_floor, |b| {
-                        b.coef(sources, pen_coef_name)
+                        b.coef(sources, "penetrationCoeffHE");
+                        b.coef(sources, pen_coef_name);
                     });
                 }
                 Millimeters::from(floored)
@@ -3019,6 +3023,28 @@ mod tests {
         assert_eq!(s105.penetration, Some(Millimeters::from(26.0)));
         assert_eq!(s105.burn_chance, Some(Percent::from(5.0)));
         assert_eq!(s105.caliber, Some(Millimeters::from(105.0)));
+    }
+
+    #[test]
+    fn historical_ifhe_penetration_coefficient_applies() {
+        let provider = bismarck_secondary_provider();
+        let modifiers = [modifier("penetrationCoeffHE", 1.25)];
+        let bundle = ModifierBundle::from_modifiers(&modifiers, Species::Battleship, VERSION)
+            .expect("historical IFHE coefficient classifies");
+        let battery = secondaries(
+            &bismarck_secondaries(),
+            "HULL",
+            &bundle,
+            &ModifierSources::default(),
+            None,
+            8,
+            &provider,
+            &mut Off,
+        )
+        .expect("secondaries computed");
+
+        let shell = &battery.mounts.iter().find(|mount| mount.label == "150 mm").unwrap().shell;
+        assert_eq!(shell.penetration, Some(Millimeters::from(47.0)));
     }
 
     #[test]
