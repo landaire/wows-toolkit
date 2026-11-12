@@ -1,12 +1,5 @@
-//! Warnings that stand in front of something, and the ones a reader may switch
-//! off.
-//!
-//! The egui app puts the same two questions: hosting or joining a session
-//! reveals this machine's address (`app.rs`'s `show_ip_warning_dialog`), and an
-//! export with no GPU encoder behind it will encode in software
-//! (`replay/renderer/mod.rs`'s `GpuEncoderWarning`). Both are suppressible, in
-//! the rows the egui app writes, so a reader who switched one off there does not
-//! meet it here.
+//! Puts the warnings of `wows_toolkit_viewmodel::notices` in front of the work
+//! they guard, and shows errors worth reading in full.
 
 use std::rc::Rc;
 
@@ -28,11 +21,8 @@ use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::px;
 use rust_i18n::t;
-use wows_toolkit_viewmodel::settings::keys;
-
-/// Where the networking note lives, which the warning links as the egui dialog
-/// does.
-const NETWORKING_URL: &str = "https://landaire.github.io/wows-toolkit/networking";
+use wows_toolkit_viewmodel::notices::Notice;
+use wows_toolkit_viewmodel::notices::Suppressed;
 
 /// What to do once the reader has read the warning and carried on.
 ///
@@ -40,91 +30,53 @@ const NETWORKING_URL: &str = "https://landaire.github.io/wows-toolkit/networking
 /// action has to outlive each build of it.
 type GoAhead = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// Which warnings the reader has switched off.
+/// Which warnings the reader has switched off, for this run.
 #[derive(Clone, Copy, Default)]
-struct Suppressed {
-    address: bool,
-    software_encode: bool,
-}
+struct HeldSuppressed(Suppressed);
 
-impl Global for Suppressed {}
+impl Global for HeldSuppressed {}
 
 /// Adopts what the settings say. Called once, when the startup read lands.
 pub fn adopt(address: bool, software_encode: bool, cx: &mut App) {
-    cx.set_global(Suppressed { address, software_encode });
+    cx.set_global(HeldSuppressed(Suppressed { address, software_encode }));
 }
 
-/// One of the two warnings.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Warning {
-    Address,
-    SoftwareEncode,
+fn suppressed(notice: Notice, cx: &App) -> bool {
+    cx.try_global::<HeldSuppressed>().is_some_and(|held| held.0.is_suppressed(notice))
 }
 
-impl Warning {
-    fn suppressed(self, cx: &App) -> bool {
-        let held = cx.try_global::<Suppressed>().copied().unwrap_or_default();
-        match self {
-            Self::Address => held.address,
-            Self::SoftwareEncode => held.software_encode,
-        }
-    }
+/// Records the reader's choice, for this session and the next.
+fn suppress(notice: Notice, suppressed: bool, cx: &mut App) {
+    let mut held = cx.try_global::<HeldSuppressed>().copied().unwrap_or_default();
+    held.0.set(notice, suppressed);
+    crate::settings_store::save(notice.setting_key(), &suppressed, cx);
+    cx.set_global(held);
+}
 
-    /// Records the reader's choice, for this session and the next.
-    fn suppress(self, suppressed: bool, cx: &mut App) {
-        let mut held = cx.try_global::<Suppressed>().copied().unwrap_or_default();
-        match self {
-            Self::Address => {
-                held.address = suppressed;
-                crate::settings_store::save(keys::SUPPRESS_P2P_IP_WARNING, &suppressed, cx);
-            }
-            Self::SoftwareEncode => {
-                held.software_encode = suppressed;
-                crate::settings_store::save(keys::SUPPRESS_GPU_ENCODER_WARNING, &suppressed, cx);
-            }
-        }
-        cx.set_global(held);
-    }
-
-    fn title(self) -> String {
-        match self {
-            Self::Address => t!("ui.windows.network_warning").into_owned(),
-            Self::SoftwareEncode => t!("ui.windows.software_encode").into_owned(),
-        }
-    }
-
-    fn message(self) -> String {
-        match self {
-            Self::Address => t!("ui.dialogs.p2p_warning").into_owned(),
-            Self::SoftwareEncode => t!("ui.dialogs.software_encode_message").into_owned(),
-        }
-    }
-
-    fn id(self) -> &'static str {
-        match self {
-            Self::Address => "notice-address",
-            Self::SoftwareEncode => "notice-software-encode",
-        }
+fn element_id(notice: Notice) -> &'static str {
+    match notice {
+        Notice::Address => "notice-address",
+        Notice::SoftwareEncode => "notice-software-encode",
     }
 }
 
 /// Asks before hosting or joining a session, which tells the other peers where
 /// this machine is.
 pub fn before_revealing_address(window: &mut Window, cx: &mut App, go: impl Fn(&mut Window, &mut App) + 'static) {
-    ask(Warning::Address, window, cx, go);
+    ask(Notice::Address, window, cx, go);
 }
 
 /// Asks before an export that has no GPU encoder to use, which takes far longer.
 pub fn before_software_encode(window: &mut Window, cx: &mut App, go: impl Fn(&mut Window, &mut App) + 'static) {
-    ask(Warning::SoftwareEncode, window, cx, go);
+    ask(Notice::SoftwareEncode, window, cx, go);
 }
 
 /// Puts `warning`, and runs `go` if the reader carries on.
 ///
 /// A suppressed warning is not put at all: the reader has already answered it,
 /// and the point of switching it off is that the work just happens.
-fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Window, &mut App) + 'static) {
-    if warning.suppressed(cx) {
+fn ask(notice: Notice, window: &mut Window, cx: &mut App, go: impl Fn(&mut Window, &mut App) + 'static) {
+    if suppressed(notice, cx) {
         window.defer(cx, move |window, cx| go(window, cx));
         return;
     }
@@ -132,23 +84,23 @@ fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Win
     let go: GoAhead = Rc::new(go);
     window.open_dialog(cx, move |dialog, _window, cx| {
         let go = Rc::clone(&go);
-        let suppressed = warning.suppressed(cx);
+        let is_suppressed = suppressed(notice, cx);
         dialog
-            .title(warning.title())
+            .title(notice.title())
             .close_button(false)
             .child(
                 v_flex()
-                    .id(warning.id())
+                    .id(element_id(notice))
                     .gap_2()
                     .max_w(px(480.))
-                    .child(div().text_sm().child(warning.message()))
-                    .when(warning == Warning::Address, |this| {
+                    .child(div().text_sm().child(notice.message()))
+                    .when_some(notice.more_info_url(), |this, url| {
                         this.child(
                             Button::new("notice-more-info")
                                 .ghost()
                                 .small()
                                 .label(t!("ui.labels.more_info").into_owned())
-                                .on_click(|_event, _window, cx: &mut App| cx.open_url(NETWORKING_URL)),
+                                .on_click(move |_event, _window, cx: &mut App| cx.open_url(url)),
                         )
                     })
                     .child(
@@ -157,8 +109,8 @@ fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Win
                         // warning in both apps.
                         Checkbox::new("notice-suppress")
                             .label(t!("ui.labels.suppress_warning").to_string())
-                            .checked(suppressed)
-                            .on_click(move |checked, _window, cx: &mut App| warning.suppress(*checked, cx)),
+                            .checked(is_suppressed)
+                            .on_click(move |checked, _window, cx: &mut App| suppress(notice, *checked, cx)),
                     ),
             )
             .footer(
