@@ -25,7 +25,7 @@ const SIZE: WindowSize = WindowSize { width: 240.0, height: 160.0 };
 /// A button that counts its clicks and a count that runs up to a figure set from outside.
 #[component]
 fn Counter(clicks: RwSignal<u64, LocalStorage>, target: RwSignal<u64, LocalStorage>) -> impl IntoView {
-    let shown = count_up(target.into());
+    let shown = count_up::<u64>(target.into());
 
     view! {
         ThemeRoot {

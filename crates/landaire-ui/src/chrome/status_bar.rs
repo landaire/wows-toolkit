@@ -11,8 +11,6 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
-use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::slot;
 use zgui::view;
@@ -20,14 +18,12 @@ use zgui::view::A11yBinding;
 use zgui::view::Attrs;
 use zgui::view::Children;
 use zgui::view::Classes;
-use zgui::view::FrameHandle;
 use zgui::view::IntervalHandle;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::Timers;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Role;
-use zgui::vocab::Timestamp;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui::TooltipContentProps;
@@ -39,7 +35,6 @@ use zgui_ui_icons::IconSize;
 
 use crate::motion::MotionPreference;
 use crate::motion::motion_preference;
-use crate::surface::TABULAR_CLASS;
 
 const SHEET: &str = "landaire-ui-status-bar";
 
@@ -158,15 +153,6 @@ impl Fraction {
     }
 }
 
-/// One count in progress.
-#[derive(Clone, Copy, Debug)]
-struct Counting {
-    from: u64,
-    to: u64,
-    /// The frame the count began on; `None` until its first frame.
-    started: Option<Timestamp>,
-}
-
 /// The strip along the bottom of a window: a group of controls at each end and whatever is
 /// between them, truncated rather than wrapped when it runs out of room.
 #[component(slot_aware)]
@@ -277,84 +263,6 @@ pub fn RunningBar(
             }
         }
     }
-}
-
-/// A whole number that counts up to each new value over a short time rather than jumping to it.
-/// A smaller value is shown at once: it is a new count, not progress on the old one.
-#[component]
-pub fn CountUp(
-    #[prop(into)] value: Signal<u64, LocalStorage>,
-    #[prop(into, optional)] class: Classes,
-    #[prop(attrs)] attrs: Attrs,
-) -> impl IntoView {
-    install_stylesheet(SHEET, CSS);
-
-    let shown = count_up(value);
-
-    view! {
-        text(class = TABULAR_CLASS, {..attrs}, class = class) {{move || shown.get().to_string()}}
-    }
-}
-
-/// `value` as [`CountUp`] shows it, for a caller that draws the count itself or derives
-/// something else from it. Called from a component's body. A count under way when motion is
-/// reduced ends at its figure.
-pub fn count_up(value: Signal<u64, LocalStorage>) -> Signal<u64, LocalStorage> {
-    let preference = motion_preference();
-    let timers = Timers::current();
-    let shown = RwSignal::new_local(value.get_untracked());
-    let frame: Rc<RefCell<Option<FrameHandle>>> = Rc::new(RefCell::new(None));
-
-    let following = {
-        let frame = Rc::clone(&frame);
-        RenderEffect::new(move |_| {
-            let to = value.get();
-            let from = shown.get_untracked();
-            frame.borrow_mut().take();
-
-            let animate = to > from && preference.get() == MotionPreference::Full;
-            match timers.as_ref() {
-                Some(timers) if animate => {
-                    count_frame(timers.clone(), Rc::clone(&frame), shown, Counting { from, to, started: None });
-                }
-                _ => shown.set(to),
-            }
-        })
-    };
-    on_cleanup_local(move || {
-        drop(following);
-        frame.borrow_mut().take();
-    });
-
-    shown.into()
-}
-
-/// Shows the count's next figure on the next frame, and asks for the frame after until it ends.
-fn count_frame(
-    timers: Timers,
-    frame: Rc<RefCell<Option<FrameHandle>>>,
-    shown: RwSignal<u64, LocalStorage>,
-    counting: Counting,
-) {
-    const LENGTH: Duration = Duration::from_millis(400);
-
-    let next = Rc::clone(&frame);
-    let requesting = timers.clone();
-    let handle = requesting.request_frame(move |now| {
-        let started = counting.started.unwrap_or(now);
-        let elapsed = now.saturating_since(started);
-        if elapsed >= LENGTH {
-            shown.set(counting.to);
-            return;
-        }
-
-        // Floored, so a figure is not shown before it is reached.
-        let share = elapsed.as_secs_f64() / LENGTH.as_secs_f64();
-        let figure = counting.from + ((counting.to - counting.from) as f64 * share).floor() as u64;
-        shown.set(figure.min(counting.to));
-        count_frame(timers, next, shown, Counting { started: Some(started), ..counting });
-    });
-    *frame.borrow_mut() = Some(handle);
 }
 
 /// Where the sheen's left edge is, as a percentage of the filled part, `elapsed` into its loop.

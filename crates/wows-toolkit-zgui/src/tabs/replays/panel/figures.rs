@@ -1,34 +1,19 @@
 //! The match header's figures: the recording player's stat tiles, counted up once per tab, and the
 //! team damage split.
 
-use std::time::Duration;
-
+use landaire_ui::CountFormat;
+use landaire_ui::CountUpProps;
 use rust_i18n::t;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use zgui::component;
-use zgui::reactive::LocalStorage;
-use zgui::reactive::RwSignal;
-use zgui::reactive::Signal;
-use zgui::reactive::StoredValue;
-use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
-use zgui::reactive::prelude::GetValue;
-use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::SetValue;
 use zgui::view;
 use zgui::view::AnyView;
-use zgui::view::FrameHandle;
 use zgui::view::IntoView;
-use zgui::view::request_frame;
-use zgui::vocab::Timestamp;
 
 use crate::theme::rating_band_name;
-
-/// How long the figures take to count up.
-pub const COUNT_UP: Duration = Duration::from_millis(400);
 
 /// The PR tile's test id.
 pub const PR_TILE_ID: &str = "replay-personal-rating-badge";
@@ -81,71 +66,16 @@ pub fn team_damage(rows: &[PlayerRow]) -> (u64, u64) {
     })
 }
 
-/// `target` as far as a count at `progress` has reached.
-pub fn counted(target: i128, progress: f32) -> i128 {
-    if progress >= 1.0 {
-        return target;
-    }
-    (target as f64 * f64::from(progress.max(0.0))).round() as i128
-}
-
-/// How far a count `elapsed` in has got, eased out from 0 to 1.
-pub fn eased(elapsed: Duration) -> f32 {
-    if elapsed >= COUNT_UP {
-        return 1.0;
-    }
-    let linear = elapsed.as_secs_f32() / COUNT_UP.as_secs_f32();
-    1.0 - (1.0 - linear).powi(3)
-}
-
-/// The progress of a count that starts now, advanced once per frame until it ends. Starts at 1
-/// when `run` is false or motion is reduced. Called from a component's body.
-pub fn count_up(run: bool) -> Signal<f32, LocalStorage> {
-    let run = run && landaire_ui::motion_preference().get_untracked() == landaire_ui::MotionPreference::Full;
-    let progress = RwSignal::new_local(if run { 0.0 } else { 1.0 });
-    if run {
-        let started: StoredValue<Option<Timestamp>> = StoredValue::new(None);
-        let frame: StoredValue<Option<FrameHandle>, LocalStorage> = StoredValue::new_local(None);
-        schedule(progress, started, frame);
-    }
-    progress.into()
-}
-
-fn schedule(
-    progress: RwSignal<f32, LocalStorage>,
-    started: StoredValue<Option<Timestamp>>,
-    frame: StoredValue<Option<FrameHandle>, LocalStorage>,
-) {
-    let handle = request_frame(move |now| {
-        let start = match started.get_value() {
-            Some(start) => start,
-            None => {
-                started.set_value(Some(now));
-                now
-            }
-        };
-        let value = eased(now - start);
-        progress.set(value);
-        if value < 1.0 {
-            schedule(progress, started, frame);
-        }
-    });
-    frame.set_value(Some(handle));
-}
-
 /// The CSS colour a PR band's text is drawn in: the theme's `--wt-pr-<band>-text`.
 fn tier_color(category: PersonalRatingCategory) -> String {
     format!("var(--wt-pr-{}-text)", rating_band_name(category))
 }
 
-/// The recording player's figures and Personal Rating as tiles, counted up to `progress`. A
-/// figure the replay does not carry has no tile.
+/// The recording player's figures and Personal Rating as tiles, counted up from nothing when
+/// `counting`. A figure the replay does not carry has no tile.
 #[component]
-pub fn StatTiles(
-    own: Option<OwnFigures>,
-    rating: Option<PersonalRatingResult>,
-    #[prop(into)] progress: Signal<f32, LocalStorage>,
-) -> impl IntoView {
+pub fn StatTiles(own: Option<OwnFigures>, rating: Option<PersonalRatingResult>, counting: bool) -> impl IntoView {
+    let from = counting.then_some(0.0);
     let mut tiles: Vec<AnyView> = Vec::new();
     let figures = own.map(|own| {
         [
@@ -158,10 +88,12 @@ pub fn StatTiles(
         let Some(value) = value else { continue };
         let label = label.into_owned();
         let said = separate_number(value);
+        // Floored, so the count reaches the figure only as it ends.
+        let format = CountFormat::new(|figure| separate_number(figure.floor() as i128));
         tiles.push(AnyView::new(view! {
             column(class = "wt-rp-tile", attr:data-testid = id, a11y:label = said) {
                 text(class = "wt-rp-tile__label") {{label}}
-                text(class = "wt-rp-tile__value") {{move || separate_number(counted(value, progress.get()))}}
+                CountUp(value = value as f64, from = from, format = format, class = "wt-rp-tile__value")
             }
         }));
     }
@@ -170,13 +102,16 @@ pub fn StatTiles(
         let label = format!("{} - {}", t!("ui.replay.column.personal_rating"), rating.category.name());
         let said = personal_rating_label(&rating);
         let color = tier_color(rating.category);
-        let pr = rating.pr;
         tiles.push(AnyView::new(view! {
             column(class = "wt-rp-tile", attr:data-testid = PR_TILE_ID, a11y:label = said) {
                 text(class = "wt-rp-tile__label") {{label}}
-                text(class = "wt-rp-tile__value", style:color = color) {{
-                    move || format!("{:.0}", pr * f64::from(progress.get().clamp(0.0, 1.0)))
-                }}
+                CountUp(
+                    value = rating.pr,
+                    from = from,
+                    format = CountFormat::decimal(0),
+                    class = "wt-rp-tile__value",
+                    style:color = color
+                )
             }
         }));
     }
@@ -209,12 +144,7 @@ pub fn DamageSplit(allies: u64, enemies: u64) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use super::COUNT_UP;
     use super::DamageShares;
-    use super::counted;
-    use super::eased;
 
     /// Allies come first, and the two shares fill the bar between them.
     #[test]
@@ -227,22 +157,5 @@ mod tests {
         assert_eq!(shares.allies, 0.0, "allies who dealt nothing have no segment");
 
         assert_eq!(DamageShares::new(0, 0), None, "no damage has no proportion");
-    }
-
-    /// The count starts at nothing and ends on the figure itself.
-    #[test]
-    fn a_count_ends_on_its_figure() {
-        assert_eq!(counted(123_456, 0.0), 0);
-        assert_eq!(counted(123_456, 1.0), 123_456);
-        assert_eq!(counted(-40, 1.0), -40);
-        assert!(counted(1_000, 0.5) < 1_000);
-    }
-
-    /// The count eases out: it covers more than half the way in the first half of the time.
-    #[test]
-    fn a_count_eases_out_and_ends_on_time() {
-        assert_eq!(eased(Duration::ZERO), 0.0);
-        assert!(eased(COUNT_UP / 2) > 0.5);
-        assert_eq!(eased(COUNT_UP), 1.0);
     }
 }
