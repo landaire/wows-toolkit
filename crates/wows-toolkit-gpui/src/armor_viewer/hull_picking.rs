@@ -8,9 +8,11 @@ use std::collections::HashMap;
 use gpui_kit::AnyElement;
 use gpui_kit::App;
 use gpui_kit::FontWeight;
+use gpui_kit::InteractiveElement;
 use gpui_kit::IntoElement;
 use gpui_kit::ParentElement;
 use gpui_kit::Styled;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::v_flex;
 use gpui_kit::div;
@@ -484,7 +486,11 @@ impl MeshTooltip {
             .children(model.map(|model| div().text_xs().text_color(muted).child(model)))
             .children(hardpoint.map(|hardpoint| div().text_xs().text_color(muted).child(hardpoint)));
 
-        crate::ui::overlay_surface(div(), cx).px_2().py_1().child(body).into_any_element()
+        crate::ui::overlay_surface(div().id("armor-mesh-tooltip").test_support(), cx)
+            .px_2()
+            .py_1()
+            .child(body)
+            .into_any_element()
     }
 }
 

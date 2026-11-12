@@ -12,10 +12,12 @@
 use gpui_kit::AnyElement;
 use gpui_kit::FontWeight;
 use gpui_kit::Hsla;
+use gpui_kit::InteractiveElement;
 use gpui_kit::IntoElement;
 use gpui_kit::ParentElement;
 use gpui_kit::Pixels;
 use gpui_kit::Styled;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::div;
@@ -241,6 +243,8 @@ pub fn tooltip_element(
     body = body.child(div().text_xs().text_color(muted).child(labels.hint.to_string()));
 
     div()
+        .id("armor-plate-tooltip")
+        .test_support()
         .bg(background)
         .border_1()
         .border_color(border)

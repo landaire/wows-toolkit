@@ -2863,10 +2863,7 @@ impl ViewportView {
             return;
         }
         self.last_pointer = Some(event.position);
-        let pointer = point_to_vec2(event.position);
-        let hover = self.gizmo_rect().and_then(|r| gizmo::hit_test(r, &self.viewport.camera, pointer));
-        let hover_changed = hover != self.gizmo_hover;
-        self.gizmo_hover = hover;
+        let hover_changed = self.update_gizmo_hover(event.position);
 
         let mut camera_changed = false;
         if let Some(drag) = self.drag {
@@ -2899,26 +2896,79 @@ impl ViewportView {
             cx.emit(ViewportChange::Camera);
         }
 
-        // Plate picking only runs while not dragging the camera/gizmo, so it
-        // doesn't fight with (or waste CPU during) an orbit/pan; any hover
-        // from before the drag started is cleared so the tooltip/highlight
-        // don't sit stale over a moving model. It is off entirely while the
-        // camera is locked, which is a view rather than a place to edit from,
-        // as the egui viewer suppresses it (`ui/tab.rs`).
-        let plate_hover_changed = if self.drag.is_none() && self.camera_is_free() {
-            let ring_changed = self.update_ring_hover(event.position);
-            let hardpoint_changed = self.update_hardpoint_hover(event.position);
-            self.update_plate_hover(event.position) || ring_changed || hardpoint_changed
-        } else {
-            let ring_changed = self.clear_ring_hover();
-            let hardpoint_changed = self.hovered_hardpoint.take().is_some();
-            let plate_changed = self.clear_plate_hover();
-            self.clear_mesh_hover() || plate_changed || ring_changed || hardpoint_changed
-        };
+        let plate_hover_changed = self.pick_hovers(event.position);
 
         if camera_changed || hover_changed || plate_hover_changed {
             cx.notify();
         }
+    }
+
+    /// Drops every hover when the pointer leaves the view or an overlay
+    /// covers it, neither of which sends a move to clear them by, and picks
+    /// again when it is back. A drag carries on: its release outside is
+    /// handled by `handle_mouse_up_out`.
+    fn handle_hover(&mut self, hovered: &bool, window: &mut Window, cx: &mut Context<Self>) {
+        let changed = if *hovered {
+            if !self.is_gpu_ready() {
+                return;
+            }
+
+            // An overlay over a still pointer can close without a move.
+            let at = window.mouse_position();
+            self.last_pointer = Some(at);
+            let gizmo_changed = self.update_gizmo_hover(at);
+            self.pick_hovers(at) || gizmo_changed
+        } else {
+            // A picking index landing now has no pointer over the view to
+            // pick at.
+            self.last_pointer = None;
+            let gizmo_changed = self.gizmo_hover.take().is_some();
+            self.clear_pointer_hovers() || gizmo_changed
+        };
+
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Reads the gizmo axis under `position`. Returns whether it changed.
+    fn update_gizmo_hover(&mut self, position: Point<Pixels>) -> bool {
+        let pointer = point_to_vec2(position);
+        let hover = self.gizmo_rect().and_then(|r| gizmo::hit_test(r, &self.viewport.camera, pointer));
+        let changed = hover != self.gizmo_hover;
+        self.gizmo_hover = hover;
+
+        changed
+    }
+
+    /// Picks the orbit, hardpoint, plate or mesh under `position`. Returns
+    /// whether any hover changed.
+    ///
+    /// Picking only runs while not dragging the camera/gizmo, so it doesn't
+    /// fight with (or waste CPU during) an orbit/pan; any hover from before
+    /// the drag started is cleared so the tooltip/highlight don't sit stale
+    /// over a moving model. It is off entirely while the camera is locked,
+    /// which is a view rather than a place to edit from, as the egui viewer
+    /// suppresses it (`ui/tab.rs`).
+    fn pick_hovers(&mut self, position: Point<Pixels>) -> bool {
+        if self.drag.is_some() || !self.camera_is_free() {
+            return self.clear_pointer_hovers();
+        }
+
+        let ring_changed = self.update_ring_hover(position);
+        let hardpoint_changed = self.update_hardpoint_hover(position);
+
+        self.update_plate_hover(position) || ring_changed || hardpoint_changed
+    }
+
+    /// Clears the plate, mesh, orbit and hardpoint hovers. Returns whether
+    /// any was set.
+    fn clear_pointer_hovers(&mut self) -> bool {
+        let ring_changed = self.clear_ring_hover();
+        let hardpoint_changed = self.hovered_hardpoint.take().is_some();
+        let plate_changed = self.clear_plate_hover();
+
+        self.clear_mesh_hover() || plate_changed || ring_changed || hardpoint_changed
     }
 
     fn handle_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -4704,7 +4754,7 @@ impl Render for ViewportView {
         // rather than hand-measuring the tooltip's size.
         let ring_overlay = self.hovered_ring.as_ref().map(|(label, cursor)| {
             let anchor_pos = point(cursor.x + TOOLTIP_CURSOR_OFFSET, cursor.y + TOOLTIP_CURSOR_OFFSET);
-            let element = crate::ui::overlay_surface(div(), cx)
+            let element = crate::ui::overlay_surface(div().id("armor-ring-tooltip").test_support(), cx)
                 .px_2()
                 .py_1()
                 .text_xs()
@@ -4823,6 +4873,7 @@ impl Render for ViewportView {
 
         div()
             .id("armor-viewport")
+            .test_support()
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
@@ -4833,6 +4884,10 @@ impl Render for ViewportView {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::handle_mouse_up_out))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::handle_mouse_up_out))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
+            .on_hover(cx.listener(Self::handle_hover))
+            // Keys act on what the pointer is over: Shift casts at it, the
+            // arrows move the camera under it.
+            .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_scroll(cx.listener(Self::handle_scroll_wheel))
             .on_key_down(cx.listener(Self::handle_key_down))
             .on_key_up(cx.listener(Self::handle_key_up))
@@ -5676,6 +5731,156 @@ mod opening_visibility_tests {
         let half_width = ((camera.fov * 0.5).tan() * 0.5).atan();
         assert!(camera.distance * half_width.sin() >= radius, "{} is too close", camera.distance);
         assert!(camera.distance * half_width.sin() <= radius * 1.5, "{} is too far", camera.distance);
+    }
+}
+
+#[cfg(test)]
+mod hover_tests {
+    use gpui_kit::AppContext as _;
+    use gpui_kit::Entity;
+    use gpui_kit::InputEvent as _;
+    use gpui_kit::Modifiers;
+    use gpui_kit::MouseButton;
+    use gpui_kit::MouseUpEvent;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::WindowHandle;
+    use gpui_kit::point;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt as _;
+    use wowsunpack::export::part_group::PartGroup;
+    use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
+
+    use super::ArmorTriangleTooltip;
+    use super::Axis;
+    use super::DragKind;
+    use super::DragState;
+    use super::HoverInfo;
+    use super::HullMeshIndex;
+    use super::MeshHover;
+    use super::MeshTooltip;
+    use super::PlateKey;
+    use super::ViewportView;
+    use crate::armor_viewer::pane::ArmorViewerPane;
+
+    const TOOLTIPS: [&str; 3] = ["armor-plate-tooltip", "armor-mesh-tooltip", "armor-ring-tooltip"];
+
+    fn open(cx: &mut TestAppContext) -> (WindowHandle<ArmorViewerPane>, Entity<ViewportView>) {
+        rust_i18n::set_locale("en");
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1600.), px(1000.)), ArmorViewerPane::new);
+        let viewport =
+            window.update(cx, |pane, _window, cx| pane.active_viewport(cx)).expect("the test window stays open");
+
+        (window, viewport)
+    }
+
+    /// Moves the pointer onto the element `id`, then draws the next frame.
+    fn hover(window: WindowHandle<ArmorViewerPane>, id: &'static str, cx: &mut TestAppContext) {
+        cx.update_window(window.into(), |_, window, cx| window.hover(id, cx)).expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    fn shown_tooltips(window: WindowHandle<ArmorViewerPane>, cx: &mut TestAppContext) -> Vec<&'static str> {
+        cx.update_window(window.into(), |_, window, _cx| {
+            TOOLTIPS.into_iter().filter(|id| window.try_find(*id).is_some()).collect()
+        })
+        .expect("the test window stays open")
+    }
+
+    /// The hovers a pointer resting on a model leaves behind. No GPU runs
+    /// under test, so a move over the view picks nothing that replaces them.
+    fn seed_hovers(view: &mut ViewportView, ring: bool) {
+        let cursor = point(px(400.), px(300.));
+        let tooltip = ArmorTriangleTooltip {
+            material: ArmorMaterial::parse("Cit_Belt").expect("a table key"),
+            zone: "Citadel".to_string(),
+            thickness_mm: 32.0,
+            layers: vec![32.0],
+            color: [0.5, 0.5, 0.5, 1.0],
+        };
+        let key =
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 };
+        view.hovered = Some(HoverInfo { key, tooltip, cursor });
+        let tooltip =
+            MeshTooltip { name: "hull".to_string(), group: PartGroup::Hull, misc: None, model: None, hardpoint: None };
+        view.hovered_mesh = Some(MeshHover { mesh: HullMeshIndex::new(0), tooltip, cursor });
+        view.hovered_hardpoint = Some(0);
+        view.gizmo_hover = Some((Axis::X, true));
+        view.last_pointer = Some(cursor);
+        if ring {
+            view.hovered_ring = Some(("orbit".into(), cursor));
+        }
+    }
+
+    fn assert_no_hover(view: &ViewportView) {
+        assert!(view.hovered.is_none(), "no plate is hovered");
+        assert!(view.hover_highlight.is_none(), "no plate is highlighted");
+        assert!(view.hovered_mesh.is_none(), "no mesh is hovered");
+        assert!(view.mesh_highlight.is_none(), "no mesh is highlighted");
+        assert!(view.hovered_ring.is_none(), "no orbit is hovered");
+        assert!(view.hovered_hardpoint.is_none(), "no hardpoint is hovered");
+        assert!(view.gizmo_hover.is_none(), "no gizmo axis is hovered");
+        assert!(view.last_pointer.is_none(), "nothing is left to pick again");
+    }
+
+    /// A pointer that moves off the view onto the rail leaves no hover or
+    /// tooltip behind: the view hears no further moves to clear them by.
+    #[gpui_kit::test]
+    fn leaving_the_view_clears_every_hover_and_tooltip(cx: &mut TestAppContext) {
+        let (window, viewport) = open(cx);
+
+        for (ring, expected) in
+            [(false, vec!["armor-plate-tooltip", "armor-mesh-tooltip"]), (true, vec!["armor-ring-tooltip"])]
+        {
+            viewport.update(cx, |view, _cx| seed_hovers(view, ring));
+            hover(window, "armor-viewport", cx);
+            assert_eq!(shown_tooltips(window, cx), expected, "the tooltips stay while the pointer is over the view");
+
+            hover(window, "armor-options-panel", cx);
+            viewport.read_with(cx, |view, _cx| assert_no_hover(view));
+            assert_eq!(shown_tooltips(window, cx), Vec::<&str>::new(), "no tooltip is left over the rail");
+        }
+    }
+
+    /// A key pressed over the view keeps the tooltip of what the pointer
+    /// rests on.
+    #[gpui_kit::test]
+    fn a_key_press_keeps_the_hover(cx: &mut TestAppContext) {
+        let (window, viewport) = open(cx);
+        viewport.update(cx, |view, _cx| seed_hovers(view, false));
+        hover(window, "armor-viewport", cx);
+
+        cx.update_window(window.into(), |_, window, cx| window.press("x", cx)).expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+
+        assert!(viewport.read_with(cx, |view, _cx| view.hovered.is_some()), "the plate stays hovered");
+        assert_eq!(shown_tooltips(window, cx), ["armor-plate-tooltip", "armor-mesh-tooltip"]);
+    }
+
+    /// An orbit dragged off the view keeps going until the button is let go,
+    /// wherever that is.
+    #[gpui_kit::test]
+    fn a_drag_carried_off_the_view_ends_at_its_release(cx: &mut TestAppContext) {
+        let (window, viewport) = open(cx);
+        let start = point(px(400.), px(300.));
+        viewport.update(cx, |view, _cx| {
+            view.drag =
+                Some(DragState { kind: DragKind::Orbit, last_position: start, start_position: start, moved: true });
+        });
+
+        hover(window, "armor-viewport", cx);
+        hover(window, "armor-options-panel", cx);
+        assert!(viewport.read_with(cx, |view, _cx| view.drag.is_some()), "the drag outlives the pointer leaving");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let position = window.find("armor-options-panel").bounds().center();
+            let release =
+                MouseUpEvent { button: MouseButton::Left, position, modifiers: Modifiers::default(), click_count: 1 };
+            window.dispatch_event(release.to_platform_input(), cx);
+        })
+        .expect("the test window stays open");
+        assert!(viewport.read_with(cx, |view, _cx| view.drag.is_none()), "the release outside ends the drag");
     }
 }
 
