@@ -161,7 +161,7 @@ impl IndexPurpose {
             Self::Refresh => return None,
             Self::Fill(SourceScope::Live) => t!("ui.index_folder.note_live"),
             Self::Fill(SourceScope::Folder(root)) => {
-                t!("ui.index_folder.note_folder", dir = crate::replay_inspector::view::shown_path(root))
+                t!("ui.index_folder.note_folder", dir = crate::paths::shown_path(root))
             }
         };
 
@@ -579,7 +579,7 @@ mod tests {
             [
                 t!("ui.index_folder.confirm_count", count = 2).into_owned(),
                 t!("ui.reindex.confirm_range", oldest = "2025-04-01 09:30", newest = "2025-04-02 18:00").into_owned(),
-                t!("ui.index_folder.note_folder", dir = crate::replay_inspector::view::shown_path(&root)).into_owned(),
+                t!("ui.index_folder.note_folder", dir = crate::paths::shown_path(&root)).into_owned(),
             ]
         );
         assert_eq!(

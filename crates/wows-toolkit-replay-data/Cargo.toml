@@ -30,7 +30,11 @@ jiff = { workspace = true }
 rust-i18n = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The replay index store.
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 thiserror = { workspace = true }
+# The index pass runs its store writes on the runtime the front end owns.
+tokio = { version = "1", features = ["rt"] }
 tracing = { workspace = true }
 wows-battle-world = { workspace = true }
 # Builds the game-data cache holds, and the auto-dump that writes them.
@@ -45,6 +49,9 @@ wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv
 wt-translations = { workspace = true }
 
 [dev-dependencies]
+# Setting an mtime explicitly, so a test can order two files written in the
+# same moment.
+filetime = "0.2"
 tempfile = "3"
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 wows-toolkit-viewmodel = { workspace = true, features = ["test-support"] }

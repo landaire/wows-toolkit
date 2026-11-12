@@ -1,18 +1,18 @@
 use std::collections::BTreeSet;
 
+use wows_toolkit_replay_data::force_reindex::Confirm;
+use wows_toolkit_replay_data::force_reindex::Fetchable;
+use wows_toolkit_replay_data::force_reindex::IndexPurpose;
+use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
+use wows_toolkit_replay_data::force_reindex::ReindexScope;
+use wows_toolkit_replay_data::force_reindex::ReindexSummary;
+use wows_toolkit_replay_data::force_reindex::Release;
 use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::replay_index::IndexProgress;
+use wows_toolkit_replay_data::replay_index::ScopedReplay;
+use wows_toolkit_replay_data::replay_index::SourceScope;
 
 use super::*;
-use crate::force_reindex::Confirm;
-use crate::force_reindex::Fetchable;
-use crate::force_reindex::IndexPurpose;
-use crate::force_reindex::ReindexCandidate;
-use crate::force_reindex::ReindexScope;
-use crate::force_reindex::ReindexSummary;
-use crate::force_reindex::Release;
-use crate::replay_index::IndexProgress;
-use crate::replay_index::ScopedReplay;
-use crate::replay_index::SourceScope;
 
 /// A run's downloads, fetched one release at a time so Stop takes effect
 /// between them.
@@ -174,7 +174,7 @@ impl App {
         // A directory listing and an index file read per release, so off the
         // UI thread. A release whose build number is already loaded counts as
         // readable whatever its version: the loaded builds are kept by number.
-        let builds = crate::force_reindex::builds(&candidates);
+        let builds = wows_toolkit_replay_data::force_reindex::builds(&candidates);
         let reading = game_data.clone();
         cx.spawn_in(window, async move |this, cx| {
             let local: BTreeSet<Release> = cx
@@ -206,7 +206,7 @@ impl App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let missing: Vec<Release> = crate::force_reindex::builds(&candidates)
+        let missing: Vec<Release> = wows_toolkit_replay_data::force_reindex::builds(&candidates)
             .into_iter()
             .map(|need| need.release)
             .filter(|release| !local.contains(release))
@@ -215,12 +215,17 @@ impl App {
         // Nothing to fetch, or nowhere to fetch it to: what cannot be read
         // locally is left out, and the summary says why.
         if missing.is_empty() {
-            let summary = crate::force_reindex::summarize(&candidates, &local, &Fetchable::Releases(BTreeSet::new()));
+            let summary = wows_toolkit_replay_data::force_reindex::summarize(
+                &candidates,
+                &local,
+                &Fetchable::Releases(BTreeSet::new()),
+            );
             self.confirm_force_reindex(summary, confirm, purpose, game_data, window, cx);
             return;
         }
         let Some(base) = self.cache_base() else {
-            let summary = crate::force_reindex::summarize(&candidates, &local, &Fetchable::NoCacheDirectory);
+            let summary =
+                wows_toolkit_replay_data::force_reindex::summarize(&candidates, &local, &Fetchable::NoCacheDirectory);
             self.confirm_force_reindex(summary, confirm, purpose, game_data, window, cx);
             return;
         };
@@ -254,18 +259,23 @@ impl App {
                         return;
                     }
                 };
-                let fetchable = match crate::force_reindex::fetchable_from_plan(&missing, &plan.resolved) {
-                    Ok(fetchable) => fetchable,
-                    // What could not be asked about is not known to be absent,
-                    // so the run stops rather than skipping those replays.
-                    Err(unreachable) => {
-                        tracing::warn!("force re-index: {unreachable}");
-                        this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
-                        cx.notify();
-                        return;
-                    }
-                };
-                let summary = crate::force_reindex::summarize(&candidates, &local, &Fetchable::Releases(fetchable));
+                let fetchable =
+                    match wows_toolkit_replay_data::force_reindex::fetchable_from_plan(&missing, &plan.resolved) {
+                        Ok(fetchable) => fetchable,
+                        // What could not be asked about is not known to be absent,
+                        // so the run stops rather than skipping those replays.
+                        Err(unreachable) => {
+                            tracing::warn!("force re-index: {unreachable}");
+                            this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
+                            cx.notify();
+                            return;
+                        }
+                    };
+                let summary = wows_toolkit_replay_data::force_reindex::summarize(
+                    &candidates,
+                    &local,
+                    &Fetchable::Releases(fetchable),
+                );
 
                 // The plan lands with the app leased and no window in hand, so
                 // the question is put once both are free.
@@ -498,7 +508,7 @@ impl App {
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let ran = cx
                 .background_spawn(async move {
-                    crate::replay_index::reindex_replays(
+                    wows_toolkit_replay_data::replay_index::reindex_replays(
                         &runtime,
                         &pool,
                         &live_root,
@@ -587,11 +597,11 @@ mod tests {
     // Named rather than globbed: the parent's glob brings in `gpui_kit::test`,
     // which would shadow the standard `#[test]`.
     use rust_i18n::t;
+    use wows_toolkit_replay_data::force_reindex::IndexPurpose;
+    use wows_toolkit_replay_data::replay_index::IndexProgress;
+    use wows_toolkit_replay_data::replay_index::SourceScope;
 
     use super::reindex_report;
-    use crate::force_reindex::IndexPurpose;
-    use crate::replay_index::IndexProgress;
-    use crate::replay_index::SourceScope;
 
     #[test]
     fn a_stopped_pass_counts_what_it_did_not_reach_as_skipped() {

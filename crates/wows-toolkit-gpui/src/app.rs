@@ -667,7 +667,7 @@ pub struct App {
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
     /// How far an index build has got, while one is running.
-    index_progress: Option<crate::replay_index::IndexProgress>,
+    index_progress: Option<wows_toolkit_replay_data::replay_index::IndexProgress>,
     /// What an index build reported when it stopped. Cleared when the next
     /// one starts.
     index_outcome: Option<String>,
@@ -778,7 +778,7 @@ impl App {
         // Rows the reader chose in the listing, to be read again.
         let force_reindex = cx.subscribe_in(&replay_inspector, window, |this, view, event, window, cx| {
             let crate::replay_inspector::view::ForceReindexRequested { candidates, confirm } = event;
-            let purpose = crate::force_reindex::IndexPurpose::Refresh;
+            let purpose = wows_toolkit_replay_data::force_reindex::IndexPurpose::Refresh;
             this.prepare_force_reindex(candidates.clone(), *confirm, purpose, view, window, cx);
         });
         // A folder's list, to have what the index lacks added to it.
@@ -1658,8 +1658,9 @@ impl App {
                 .await;
             match stale {
                 Ok(true) => {
-                    let _ = this
-                        .update(cx, |this, cx| this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx));
+                    let _ = this.update(cx, |this, cx| {
+                        this.build_replay_index(wows_toolkit_replay_data::replay_index::IndexMode::FillGaps, cx)
+                    });
                 }
                 Ok(false) => {}
                 Err(error) => tracing::warn!(%error, "replay index revision could not be checked"),
@@ -2099,7 +2100,9 @@ impl App {
             }
             crate::palette::PaletteMode::ReindexVersions => {
                 let candidates = self.listed_reindex_candidates(cx);
-                crate::palette::ModeSource::Versions(crate::force_reindex::versions(&candidates).into())
+                crate::palette::ModeSource::Versions(
+                    wows_toolkit_replay_data::force_reindex::versions(&candidates).into(),
+                )
             }
             crate::palette::PaletteMode::ReplayFolders => {
                 let history = self.replay_inspector.read(cx).folder_history();
@@ -2243,7 +2246,9 @@ impl App {
             PaletteAction::RefreshPersistedData => {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
-            PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
+            PaletteAction::IndexAllReplays => {
+                self.build_replay_index(wows_toolkit_replay_data::replay_index::IndexMode::FillGaps, cx)
+            }
             PaletteAction::ForceReindex(scope) => self.force_reindex_scope(scope, window, cx),
             PaletteAction::ImportConstants => {
                 self.active_tab = AppTab::ReplayInspector;
@@ -2277,7 +2282,12 @@ impl App {
     ///
     /// A source nothing has created yet has nothing indexed, which the reader
     /// is told rather than shown an empty result for.
-    fn search_scope(&mut self, scope: crate::replay_index::SourceScope, window: &mut Window, cx: &mut Context<Self>) {
+    fn search_scope(
+        &mut self,
+        scope: wows_toolkit_replay_data::replay_index::SourceScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(pool) = settings_store::pool(cx) else { return };
 
         self.scoped_search = Some(cx.spawn_in(window, async move |this, cx| {
@@ -2789,7 +2799,11 @@ impl App {
     /// The whole directory rather than what changed: this is the control for
     /// building an index that is not there, or rebuilding one whose rows an
     /// older parse got wrong.
-    pub(crate) fn build_replay_index(&mut self, mode: crate::replay_index::IndexMode, cx: &mut Context<Self>) {
+    pub(crate) fn build_replay_index(
+        &mut self,
+        mode: wows_toolkit_replay_data::replay_index::IndexMode,
+        cx: &mut Context<Self>,
+    ) {
         if self.index_cancel.is_some() {
             return;
         }
@@ -2812,7 +2826,7 @@ impl App {
         let root = std::path::Path::new(&wows_dir).join("replays");
         let cancel = self.begin_index_pass(cx);
         self.index_outcome = None;
-        self.index_progress = Some(crate::replay_index::IndexProgress::default());
+        self.index_progress = Some(wows_toolkit_replay_data::replay_index::IndexProgress::default());
         cx.notify();
 
         let progress_tx = self.follow_index_progress(cx);
@@ -2823,7 +2837,7 @@ impl App {
                     let live =
                         wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
                     let source = runtime.block_on(live)?;
-                    crate::replay_index::build_index(
+                    wows_toolkit_replay_data::replay_index::build_index(
                         &runtime,
                         &pool,
                         source,
@@ -2881,7 +2895,7 @@ impl App {
     fn follow_index_progress(
         &self,
         cx: &mut Context<Self>,
-    ) -> futures::channel::mpsc::UnboundedSender<crate::replay_index::IndexProgress> {
+    ) -> futures::channel::mpsc::UnboundedSender<wows_toolkit_replay_data::replay_index::IndexProgress> {
         let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded();
         cx.spawn(async move |this, cx| {
             use futures::StreamExt as _;

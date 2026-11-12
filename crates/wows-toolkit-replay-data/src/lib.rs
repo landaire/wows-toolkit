@@ -16,11 +16,14 @@ pub mod browser_tree;
 pub mod columns;
 pub mod damage_mix;
 pub mod error;
+pub mod force_reindex;
 pub mod heap_profile;
 pub mod install;
 pub mod links;
 pub mod load;
 pub mod model;
+pub mod paths;
+pub mod replay_index;
 #[cfg(any(test, feature = "test-support"))]
 pub mod sample;
 pub mod shareable;

@@ -1558,7 +1558,7 @@ impl App {
                     .compact()
                     .disabled(!has_dir || running)
                     .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx)
+                        this.build_replay_index(wows_toolkit_replay_data::replay_index::IndexMode::FillGaps, cx)
                     })),
             )
             // For rows an older parse decoded through constants that did not
@@ -1570,7 +1570,7 @@ impl App {
                     .disabled(!has_dir || running)
                     .tooltip(t!("ui.settings.index.rebuild_hint").to_string())
                     .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.build_replay_index(crate::replay_index::IndexMode::RefreshAll, cx)
+                        this.build_replay_index(wows_toolkit_replay_data::replay_index::IndexMode::RefreshAll, cx)
                     })),
             )
             .when(running, |this| {

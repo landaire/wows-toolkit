@@ -47,6 +47,8 @@ use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_replay_data::paths::shown_path;
+use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
@@ -61,7 +63,6 @@ use super::panel::PanelSetup;
 use super::panel::RenderRequested;
 use super::panel::ReparseCause;
 use super::panel::ReplayPanel;
-use crate::replay_index::SourceScope;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
 use crate::side_split::SideSplit;
@@ -77,9 +78,6 @@ use folders::ReplayFolder;
 use folders::SavedList;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
-
-pub(crate) use folders::shortened_path;
-pub(crate) use folders::shown_path;
 
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.
@@ -330,7 +328,7 @@ pub struct SearchFolder(pub SourceScope);
 /// Raised to the app, which owns the index pass.
 pub struct IndexFolderRequested {
     pub scope: SourceScope,
-    pub candidates: Vec<crate::force_reindex::ReindexCandidate>,
+    pub candidates: Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate>,
 }
 
 /// The listing holds replays from builds nothing on this machine can read.
@@ -352,8 +350,8 @@ pub struct ConstantsUnfit;
 /// Raised to the app, which owns the index pass and the game-data cache a
 /// pass may have to fetch into first.
 pub struct ForceReindexRequested {
-    pub candidates: Vec<crate::force_reindex::ReindexCandidate>,
-    pub confirm: crate::force_reindex::Confirm,
+    pub candidates: Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate>,
+    pub confirm: wows_toolkit_replay_data::force_reindex::Confirm,
 }
 
 /// A replay tab that is the one showing in its dock group.
@@ -926,7 +924,10 @@ impl ReplayInspectorView {
     ///
     /// A directory opened once is left out: a palette command covers the
     /// directories the reader keeps.
-    pub(crate) fn reindex_candidates(&self, cx: &App) -> Vec<crate::force_reindex::ReindexCandidate> {
+    pub(crate) fn reindex_candidates(
+        &self,
+        cx: &App,
+    ) -> Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate> {
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         let mut candidates = Vec::new();
         let kept = self.folders.iter().filter(|folder| folder.source() == &FolderSource::Install || folder.is_pinned());
@@ -1266,7 +1267,7 @@ impl ReplayInspectorView {
                 .background_spawn(async move {
                     let now = jiff::Timestamp::now();
                     let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
-                    crate::replay_index::index_one(
+                    wows_toolkit_replay_data::replay_index::index_one(
                         &runtime,
                         &pool,
                         &path,
@@ -1851,7 +1852,7 @@ impl ReplayInspectorView {
             // Waited on from a GPUI background thread rather than awaited on a
             // tokio worker: the test scheduler refuses a wakeup from one.
             let repaired = crate::runtime::block_on(cx, move || async move {
-                crate::replay_index::repair_missing_pr(&pool, &table).await
+                wows_toolkit_replay_data::replay_index::repair_missing_pr(&pool, &table).await
             })
             .await;
 
@@ -2567,7 +2568,7 @@ mod tests {
             assert!(window.try_find("directory-game-data").is_none(), "the actions live behind the cog");
             window.click("replay-listing-options", cx);
             window.render_frame(cx);
-            let shown = super::shown_path(&root);
+            let shown = wows_toolkit_replay_data::paths::shown_path(&root);
             assert_eq!(window.find("replay-listing-folder-path").label(), Some(shown.as_str()));
             assert_eq!(window.find("directory-stats").disabled(), Some(true), "stats wait for the game data");
             window.click("directory-game-data", cx);

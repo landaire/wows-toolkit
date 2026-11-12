@@ -10,13 +10,13 @@ use std::sync::atomic::Ordering;
 use futures::StreamExt as _;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::SourceId;
+use wows_toolkit_replay_data::paths::folder_name;
+use wows_toolkit_replay_data::replay_index::IndexMode;
+use wows_toolkit_replay_data::replay_index::IndexProgress;
+use wows_toolkit_replay_data::replay_index::ScopeSourceError;
+use wows_toolkit_replay_data::replay_index::SourceScope;
 
-use super::folders::folder_name;
 use super::*;
-use crate::replay_index::IndexMode;
-use crate::replay_index::IndexProgress;
-use crate::replay_index::ScopeSourceError;
-use crate::replay_index::SourceScope;
 
 /// Where a chosen directory's own source stands.
 pub(crate) enum FolderSourceState {
@@ -204,7 +204,7 @@ impl ReplayInspectorView {
         let task = cx.spawn(async move |this, cx| {
             let (report, mut steps) = futures::channel::mpsc::unbounded::<IndexProgress>();
             let walking = cx.background_spawn(async move {
-                let built = crate::replay_index::build_index(
+                let built = wows_toolkit_replay_data::replay_index::build_index(
                     &runtime,
                     &pool,
                     source,
@@ -391,6 +391,8 @@ mod tests {
     use wows_toolkit_config::index::rows::SourceId;
     use wows_toolkit_config::index::rows::SourceKind;
     use wows_toolkit_config::index::unindexable::Unindexable;
+    use wows_toolkit_replay_data::replay_index::ScopeSourceError;
+    use wows_toolkit_replay_data::replay_index::SourceScope;
     use wows_toolkit_viewmodel::listing_row::ListedReplay;
 
     use super::super::SearchFolder;
@@ -399,8 +401,6 @@ mod tests {
     use crate::app::App;
     use crate::interaction_tests::open_app_in_root;
     use crate::interaction_tests::open_index;
-    use crate::replay_index::ScopeSourceError;
-    use crate::replay_index::SourceScope;
     use crate::replay_inspector::ReplayInspectorView;
     use crate::replay_inspector::browser_view::DirChange;
     use crate::replay_inspector::simulated_watch;
@@ -782,7 +782,7 @@ mod tests {
         let expected = [
             t!("ui.index_folder.confirm_count", count = 2).into_owned(),
             t!("ui.reindex.confirm_range", oldest = "2026-01-02 10:00", newest = "2026-01-03 10:00").into_owned(),
-            t!("ui.index_folder.note_folder", dir = crate::replay_inspector::view::shown_path(&root)).into_owned(),
+            t!("ui.index_folder.note_folder", dir = wows_toolkit_replay_data::paths::shown_path(&root)).into_owned(),
         ]
         .join("\n");
         cx.update_window(window.into(), |_, window, cx| {

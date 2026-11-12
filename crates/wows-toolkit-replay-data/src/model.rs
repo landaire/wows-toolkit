@@ -193,8 +193,7 @@ pub struct PlayerRow {
     /// loaded at report-construction time, so the egui app computes PR in a
     /// separate step (`UiReport::populate_personal_ratings`) once that data
     /// is available. Call `ReplayReportModel::populate_personal_ratings`
-    /// after loading PR data (a later milestone wires that load into the
-    /// gpui_kit app) to fill this in.
+    /// after loading PR data to fill this in.
     pub personal_rating: Option<PersonalRatingResult>,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
@@ -204,8 +203,8 @@ pub struct PlayerRow {
     /// carries); filled in by `ReplayReportModel::populate_action_links`,
     /// which `None`s it back out whenever the build can't be resolved (no
     /// observed vehicle entity, unrecognized ship, etc.) rather than leaving
-    /// a stale value. `table.rs::actions_cell` hides the menu item entirely
-    /// when this is `None`.
+    /// a stale value. A front end hides the menu item entirely when this is
+    /// `None`.
     pub ship_config_url: Option<String>,
     /// The Actions column's "Copy short link" menu item's target URL, ported
     /// from `util::build_short_ship_config_url`. Same `None`-until-populated
@@ -224,8 +223,8 @@ pub struct PlayerRow {
     /// `serde_json::to_string_pretty`s the same type). `None` until
     /// `populate_action_links` runs, and also when serialization fails (never
     /// observed in practice; `Player`'s `Serialize` impl does not fail on any
-    /// data it accepts). `table.rs::actions_cell` gates the debug menu item
-    /// on both this and `PlayerTable::debug`.
+    /// data it accepts). A front end shows the debug menu item only when
+    /// this is set and debug mode is on.
     pub raw_metadata_json: Option<String>,
 
     /// The account hides its own statistics.
@@ -1129,7 +1128,7 @@ mod tests {
     /// ```text
     /// WOWS_REPLAY_INSPECTOR_TEST_GAME_DIR=G:\wows_builds\13.11.0 \
     /// WOWS_REPLAY_INSPECTOR_TEST_VERSION="13, 11, 0, 12668706" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored from_normalized_resolves_species_text_from_a_real_provider
+    /// cargo test -p wows-toolkit-replay-data -- --ignored from_normalized_resolves_species_text_from_a_real_provider
     /// ```
     ///
     /// See `reference_test_replays_and_builds.md` for the build-directory
