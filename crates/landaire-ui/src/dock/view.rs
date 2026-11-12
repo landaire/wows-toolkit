@@ -13,7 +13,6 @@ use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
@@ -42,12 +41,16 @@ use zgui_ui_primitives::Orientation;
 use crate::chrome::tab_strip::TabStripPanels;
 use crate::chrome::tab_strip::TabStripProps;
 use crate::chrome::tab_strip::TabStripTabProps;
+use crate::dock::layout::CssLength;
 use crate::dock::layout::DockRegion;
+use crate::dock::layout::FoldingLimits;
+use crate::dock::layout::FoldingRegion;
 use crate::dock::layout::GroupId;
 use crate::dock::layout::Layout;
 use crate::dock::layout::NodeShape;
 use crate::dock::layout::PanelEntry;
 use crate::dock::layout::PanelId;
+use crate::dock::layout::RegionExtent;
 use crate::dock::layout::Share;
 use crate::dock::layout::SplitAxis;
 use crate::dock::layout::SplitId;
@@ -170,24 +173,23 @@ enum Slot {
 }
 
 impl Slot {
-    /// The room the slot is given while it shows, or `None` for the slot that takes what is left.
-    fn extent(self, layout: &Layout) -> Option<Share> {
+    /// The folding region the slot holds, or `None` for a slot that takes what is left.
+    fn folding(self) -> Option<FoldingRegion> {
         match self {
-            Self::Left => Some(layout.extents.left),
-            Self::Right => Some(layout.extents.right),
-            Self::Bottom => Some(layout.extents.bottom),
+            Self::Left => Some(FoldingRegion::Left),
+            Self::Right => Some(FoldingRegion::Right),
+            Self::Bottom => Some(FoldingRegion::Bottom),
             Self::Middle | Self::Center => None,
         }
     }
-
-    /// How small and large the user may drag the slot while it shows.
-    fn bound(self) -> PanelBound {
-        match self {
-            Self::Left | Self::Right | Self::Bottom => PanelBound::new(5.0, 100.0),
-            Self::Middle | Self::Center => PanelBound::new(0.0, 100.0),
-        }
-    }
 }
+
+/// The slots of the frame's row, and of the column in its middle.
+const ROW: [Slot; 3] = [Slot::Left, Slot::Middle, Slot::Right];
+const COLUMN: [Slot; 2] = [Slot::Center, Slot::Bottom];
+
+/// The least share a folding region keeps while it shows.
+const FLOOR: f64 = 5.0;
 
 /// Which slots of the frame take room.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,23 +226,60 @@ impl Showing {
     }
 }
 
+/// The length of a resizable group along its axis, in CSS pixels. Unknown until it is laid out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GroupLength(Option<f64>);
+
+impl GroupLength {
+    /// The share of the group `length` takes.
+    fn share_of(self, length: CssLength) -> Option<f64> {
+        let group = self.0.filter(|group| *group > 0.0)?;
+
+        Some(length.pixels() / group * 100.0)
+    }
+}
+
+/// How small and large the user may drag `slot` while it shows.
+fn bound(layout: &Layout, slot: Slot, length: GroupLength) -> PanelBound {
+    let Some(region) = slot.folding() else {
+        return PanelBound::new(0.0, 100.0);
+    };
+    let limits = layout.limits.get(region);
+    let min = limits.min.and_then(|min| length.share_of(min)).map_or(FLOOR, |min| min.max(FLOOR)).min(100.0);
+    let max = limits.max.and_then(|max| length.share_of(max)).map_or(100.0, |max| max.min(100.0));
+
+    PanelBound::new(min, max.max(min))
+}
+
+/// The share `slot` asks for while it shows, or `None` for the slot that takes what is left.
+fn extent(layout: &Layout, slot: Slot, length: GroupLength) -> Option<f64> {
+    let region = slot.folding()?;
+    let share = match layout.extents.get(region) {
+        RegionExtent::Share(share) => share.percent(),
+        // Until the frame is laid out a length is shown at the region's default share.
+        RegionExtent::Length(pixels) => length.share_of(pixels).unwrap_or(region.default_share().percent()),
+    };
+
+    Some(share)
+}
+
 /// The share each of `slots` takes, adding up to 100: a showing slot its extent inside its bound,
 /// the slot without one what the others leave, and a hidden slot nothing. Extents that add up to
 /// more than the whole, or that fill it with no slot left to take the rest, are scaled to fit.
-fn targets(layout: &Layout, showing: Showing, slots: &[Slot]) -> Vec<f64> {
+fn targets(layout: &Layout, showing: Showing, slots: &[Slot], length: GroupLength) -> Vec<f64> {
     let mut sizes: Vec<Option<f64>> = slots
         .iter()
-        .map(|slot| match slot.extent(layout) {
+        .map(|slot| match extent(layout, *slot, length) {
             Some(extent) if showing.slot(*slot) => {
-                let bound = slot.bound();
-                Some(extent.percent().clamp(bound.min, bound.max))
+                let bound = bound(layout, *slot, length);
+                Some(extent.clamp(bound.min, bound.max))
             }
             Some(_) => Some(0.0),
             None => None,
         })
         .collect();
     let fixed: f64 = sizes.iter().flatten().sum();
-    let rest_shows = slots.iter().any(|slot| slot.extent(layout).is_none() && showing.slot(*slot));
+    let rest_shows = slots.iter().any(|slot| slot.folding().is_none() && showing.slot(*slot));
 
     if fixed > 100.0 || (!rest_shows && fixed > 0.0) {
         for size in sizes.iter_mut().flatten() {
@@ -254,65 +293,116 @@ fn targets(layout: &Layout, showing: Showing, slots: &[Slot]) -> Vec<f64> {
     sizes.into_iter().map(|size| size.unwrap_or(rest)).collect()
 }
 
-/// The panels of one resizable group of the frame, as they registered, and whether their sizes
-/// are being set by the frame rather than by the user.
+/// The bound each of `slots` is held to: its own while it shows, and zero while it does not.
+fn bounds(layout: &Layout, showing: Showing, slots: &[Slot], length: GroupLength) -> Vec<PanelBound> {
+    slots
+        .iter()
+        .map(|slot| if showing.slot(*slot) { bound(layout, *slot, length) } else { PanelBound::new(0.0, 0.0) })
+        .collect()
+}
+
+/// Where the frame puts the panels of one group, and how far each may be dragged.
+#[derive(Clone, Debug, PartialEq)]
+struct Placement {
+    targets: Vec<f64>,
+    bounds: Vec<PanelBound>,
+}
+
+impl Placement {
+    fn of(layout: &Layout, showing: Showing, slots: &[Slot], length: GroupLength) -> Self {
+        Self { targets: targets(layout, showing, slots, length), bounds: bounds(layout, showing, slots, length) }
+    }
+}
+
+/// What the frame sizes a group for. A change to any of it places the group's panels again.
+#[derive(Clone, Debug, PartialEq)]
+struct Sizing {
+    showing: Showing,
+    length: GroupLength,
+    limits: FoldingLimits,
+    extents: Vec<RegionExtent>,
+}
+
+/// The panels of one resizable group of the frame, as they registered, whether their sizes are
+/// being set by the frame rather than by the user, the group's last measured length, and the
+/// extents a drag last wrote.
 #[derive(Clone, Copy)]
 struct FrameGroup {
+    slots: &'static [Slot],
     members: StoredValue<Vec<(Slot, u64)>, LocalStorage>,
     applying: StoredValue<bool, LocalStorage>,
+    length: StoredValue<GroupLength, LocalStorage>,
+    recorded: StoredValue<Option<Vec<RegionExtent>>, LocalStorage>,
 }
 
 impl FrameGroup {
-    fn new() -> Self {
-        Self { members: StoredValue::new_local(Vec::new()), applying: StoredValue::new_local(false) }
+    fn new(slots: &'static [Slot]) -> Self {
+        Self {
+            slots,
+            members: StoredValue::new_local(Vec::new()),
+            applying: StoredValue::new_local(false),
+            length: StoredValue::new_local(GroupLength(None)),
+            recorded: StoredValue::new_local(None),
+        }
     }
 
-    /// Moves every panel to its target and leaves each with its bound: pinned at zero when hidden.
+    /// The extents of the group's folding slots, in slot order.
+    fn extents(self, layout: &Layout) -> Vec<RegionExtent> {
+        self.slots.iter().filter_map(|slot| slot.folding()).map(|region| layout.extents.get(region)).collect()
+    }
+
+    /// Moves every panel to its target and leaves each with its bound.
     ///
     /// Each panel is pinned at its target in turn while the ones after it are free, so the group's
     /// own arithmetic gives the difference to the free ones and the last lands where it should.
-    fn apply(self, context: ResizableContext, showing: Showing, targets: &[f64]) {
+    fn apply(self, context: ResizableContext, placement: &Placement) {
         self.applying.set_value(true);
 
         let members = self.members.get_value();
         for (_, id) in &members {
             context.set_bound(*id, PanelBound::new(0.0, 100.0));
         }
-        for ((_, id), target) in members.iter().zip(targets) {
+        for ((_, id), target) in members.iter().zip(&placement.targets) {
             context.set_bound(*id, PanelBound::new(*target, *target));
         }
-        for (slot, id) in &members {
-            let bound = if showing.slot(*slot) { slot.bound() } else { PanelBound::new(0.0, 0.0) };
-            context.set_bound(*id, bound);
+        for ((_, id), bound) in members.iter().zip(&placement.bounds) {
+            context.set_bound(*id, *bound);
         }
 
         self.applying.set_value(false);
     }
 
-    /// Writes the sizes the user dragged the folding slots to back into the layout.
+    /// Writes the sizes the user dragged the folding slots to back into the layout, each in the
+    /// form its extent was given in.
     fn record(self, state: DockState, sizes: &[f64]) {
         if self.applying.get_value() {
             return;
         }
 
         let members = self.members.get_value();
+        let length = self.length.get_value();
         state.layout.update(|layout| {
             let showing = Showing::of(layout);
             for ((slot, _), size) in members.iter().zip(sizes) {
-                // A side's share is only its own while the middle beside it shows.
-                let Ok(share) = Share::new(size.clamp(0.0, 100.0)) else {
+                let Some(region) = slot.folding() else {
                     continue;
                 };
+                // A side's share is only its own while the middle beside it shows.
                 if !showing.slot(*slot) || !showing.middle || (*slot == Slot::Bottom && !showing.center) {
                     continue;
                 }
-                match slot {
-                    Slot::Left => layout.extents.left = share,
-                    Slot::Right => layout.extents.right = share,
-                    Slot::Bottom => layout.extents.bottom = share,
-                    Slot::Middle | Slot::Center => {}
+                let size = size.clamp(0.0, 100.0);
+                let extent = match layout.extents.get(region) {
+                    RegionExtent::Share(_) => Share::new(size).ok().map(RegionExtent::Share),
+                    RegionExtent::Length(_) => {
+                        length.0.and_then(|group| CssLength::new(size * group / 100.0).ok()).map(RegionExtent::Length)
+                    }
+                };
+                if let Some(extent) = extent {
+                    layout.extents.set(region, extent);
                 }
             }
+            self.recorded.set_value(Some(self.extents(layout)));
         });
     }
 }
@@ -350,15 +440,21 @@ pub fn Dock(
 #[component]
 fn DockFrame(state: DockState) -> impl IntoView {
     let showing = Memo::new(move |_| state.layout.with(Showing::of));
-    let row = FrameGroup::new();
-    let column = FrameGroup::new();
-    let (row_targets, column_targets) = state.layout.with_untracked(|layout| {
+    let row = FrameGroup::new(&ROW);
+    let column = FrameGroup::new(&COLUMN);
+    let (row_start, column_start) = state.layout.with_untracked(|layout| {
         let now = Showing::of(layout);
         (
-            targets(layout, now, &[Slot::Left, Slot::Middle, Slot::Right]),
-            targets(layout, now, &[Slot::Center, Slot::Bottom]),
+            Placement::of(layout, now, row.slots, GroupLength(None)),
+            Placement::of(layout, now, column.slots, GroupLength(None)),
         )
     });
+    let start = |placement: &Placement, index: usize| (placement.targets[index], placement.bounds[index]);
+    let (left_share, left_bound) = start(&row_start, 0);
+    let (middle_share, middle_bound) = start(&row_start, 1);
+    let (right_share, right_bound) = start(&row_start, 2);
+    let (center_share, center_bound) = start(&column_start, 0);
+    let (bottom_share, bottom_bound) = start(&column_start, 1);
 
     let hidden_left = move || !showing.with(|showing| showing.left && showing.middle);
     let hidden_right = move || !showing.with(|showing| showing.right && showing.middle);
@@ -369,30 +465,30 @@ fn DockFrame(state: DockState) -> impl IntoView {
             direction = Orientation::Horizontal,
             on_change = UnsyncCallback::new(move |sizes: Vec<f64>| row.record(state, &sizes))
         ) {
-            FrameSlot(place = Slot::Left, group = row, showing = showing, share = row_targets[0]) {
+            FrameSlot(place = Slot::Left, group = row, showing = showing, share = left_share, bound = left_bound) {
                 RegionView(state = state, region = DockRegion::Left)
             }
             ResizableHandle(class:lui-dock__handle-hidden = hidden_left)
-            FrameSlot(place = Slot::Middle, group = row, showing = showing, share = row_targets[1]) {
+            FrameSlot(place = Slot::Middle, group = row, showing = showing, share = middle_share, bound = middle_bound) {
                 ResizablePanelGroup(
                     direction = Orientation::Vertical,
                     on_change = UnsyncCallback::new(move |sizes: Vec<f64>| column.record(state, &sizes))
                 ) {
-                    FrameSlot(place = Slot::Center, group = column, showing = showing, share = column_targets[0]) {
+                    FrameSlot(place = Slot::Center, group = column, showing = showing, share = center_share, bound = center_bound) {
                         RegionView(state = state, region = DockRegion::Center)
                     }
                     ResizableHandle(class:lui-dock__handle-hidden = hidden_bottom)
-                    FrameSlot(place = Slot::Bottom, group = column, showing = showing, share = column_targets[1]) {
+                    FrameSlot(place = Slot::Bottom, group = column, showing = showing, share = bottom_share, bound = bottom_bound) {
                         RegionView(state = state, region = DockRegion::Bottom)
                     }
-                    FrameSizer(state = state, group = column, showing = showing, slots = vec![Slot::Center, Slot::Bottom])
+                    FrameSizer(state = state, group = column, showing = showing)
                 }
             }
             ResizableHandle(class:lui-dock__handle-hidden = hidden_right)
-            FrameSlot(place = Slot::Right, group = row, showing = showing, share = row_targets[2]) {
+            FrameSlot(place = Slot::Right, group = row, showing = showing, share = right_share, bound = right_bound) {
                 RegionView(state = state, region = DockRegion::Right)
             }
-            FrameSizer(state = state, group = row, showing = showing, slots = vec![Slot::Left, Slot::Middle, Slot::Right])
+            FrameSizer(state = state, group = row, showing = showing)
         }
     }
 }
@@ -400,10 +496,15 @@ fn DockFrame(state: DockState) -> impl IntoView {
 /// One panel of the frame's resizable groups. It registers with the group itself rather than
 /// through `ResizablePanel`, so the frame can pin it while a region folds or unfolds.
 #[component]
-fn FrameSlot(place: Slot, group: FrameGroup, showing: Memo<Showing>, share: f64, children: Children) -> impl IntoView {
+fn FrameSlot(
+    place: Slot,
+    group: FrameGroup,
+    showing: Memo<Showing>,
+    share: f64,
+    bound: PanelBound,
+    children: Children,
+) -> impl IntoView {
     let context = ResizableContext::current();
-    let shown = showing.get_untracked().slot(place);
-    let bound = if shown { place.bound() } else { PanelBound::new(0.0, 0.0) };
     let id = context.map(|context| context.register_panel(bound, share));
     if let Some(id) = id {
         group.members.update_value(|members| members.push((place, id)));
@@ -427,19 +528,50 @@ fn FrameSlot(place: Slot, group: FrameGroup, showing: Memo<Showing>, share: f64,
     }
 }
 
-/// Moves the frame's panels to their targets whenever a region starts or stops showing. Placed
-/// after the panels so every one of them has registered when it first runs.
+/// Places the frame's panels again whenever a region starts or stops showing, the group is laid
+/// out at a new length, or a region's limits change. Placed after the panels so every one of them
+/// has registered when it first runs.
 #[component]
-fn FrameSizer(state: DockState, group: FrameGroup, showing: Memo<Showing>, slots: Vec<Slot>) -> impl IntoView {
+fn FrameSizer(state: DockState, group: FrameGroup, showing: Memo<Showing>) -> impl IntoView {
     let context = ResizableContext::current();
-    let sizing = RenderEffect::new(move |previous: Option<Showing>| {
-        let now = showing.get();
-        // The first run is the build, which registered every panel at its target already.
-        if previous.is_some_and(|previous| previous != now)
-            && let Some(context) = context
-        {
-            let shares = state.layout.with_untracked(|layout| targets(layout, now, &slots));
-            group.apply(context, now, &shares);
+    let node = context.map(ResizableContext::group);
+    let size = node.map(|node| node.observe_border_size());
+    let vertical = context.is_some_and(|context| matches!(context.direction(), Orientation::Vertical));
+    let length = move || {
+        let (node, size) = (node?, size?.get()?);
+        let along = if vertical { size.height.0 } else { size.width.0 };
+        let scale = node.scale();
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+
+        Some(f64::from(along / scale))
+    };
+    let limits = Memo::new(move |_| state.layout.with(|layout| layout.limits));
+    let extents = Memo::new(move |_| state.layout.with(|layout| group.extents(layout)));
+
+    let sizing = RenderEffect::new(move |previous: Option<Sizing>| {
+        let now = Sizing {
+            showing: showing.get(),
+            length: GroupLength(length()),
+            limits: limits.get(),
+            extents: extents.get(),
+        };
+        group.length.set_value(now.length);
+        // Extents a drag wrote are where the panels already stand.
+        let dragged = group.recorded.try_update_value(Option::take).flatten().as_ref() == Some(&now.extents);
+        let changed = match &previous {
+            Some(previous) => {
+                previous.showing != now.showing
+                    || previous.length != now.length
+                    || previous.limits != now.limits
+                    || (previous.extents != now.extents && !dragged)
+            }
+            // The build registered every panel at its target for a frame not yet laid out.
+            None => now.length.0.is_some(),
+        };
+        if changed && let Some(context) = context {
+            let placement =
+                state.layout.with_untracked(|layout| Placement::of(layout, now.showing, group.slots, now.length));
+            group.apply(context, &placement);
         }
 
         now
@@ -589,11 +721,19 @@ fn DockContent(state: DockState, entry: PanelEntry) -> impl IntoView {
 mod tests {
     use super::*;
     use crate::dock::layout::RegionExtents;
+    use crate::dock::layout::RegionLimits;
 
-    const ROW: [Slot; 3] = [Slot::Left, Slot::Middle, Slot::Right];
+    const UNMEASURED: GroupLength = GroupLength(None);
+
+    fn share(percent: f64) -> RegionExtent {
+        RegionExtent::Share(Share::new(percent).expect("in range"))
+    }
+
+    fn length(pixels: f64) -> CssLength {
+        CssLength::new(pixels).expect("a length")
+    }
 
     fn with_extents(left: f64, right: f64, bottom: f64) -> Layout {
-        let share = |percent| Share::new(percent).expect("in range");
         let mut layout = Layout::new();
         layout.extents = RegionExtents { left: share(left), right: share(right), bottom: share(bottom) };
 
@@ -608,21 +748,50 @@ mod tests {
     fn sides_that_ask_for_more_than_the_whole_are_scaled_to_fit_it() {
         let layout = with_extents(80.0, 80.0, 30.0);
 
-        assert_eq!(targets(&layout, showing(true, true, true), &ROW), [50.0, 0.0, 50.0]);
+        assert_eq!(targets(&layout, showing(true, true, true), &ROW, UNMEASURED), [50.0, 0.0, 50.0]);
     }
 
     #[test]
     fn a_side_below_its_floor_is_raised_to_it_and_the_center_gives_way() {
         let layout = with_extents(2.0, 0.0, 30.0);
 
-        assert_eq!(targets(&layout, showing(true, true, false), &ROW), [5.0, 95.0, 0.0]);
+        assert_eq!(targets(&layout, showing(true, true, false), &ROW, UNMEASURED), [5.0, 95.0, 0.0]);
     }
 
     #[test]
     fn with_the_center_hidden_the_sides_share_the_whole() {
         let layout = with_extents(20.0, 30.0, 30.0);
 
-        assert_eq!(targets(&layout, showing(true, false, true), &ROW), [40.0, 0.0, 60.0]);
-        assert_eq!(targets(&layout, showing(false, false, false), &ROW), [0.0, 100.0, 0.0]);
+        assert_eq!(targets(&layout, showing(true, false, true), &ROW, UNMEASURED), [40.0, 0.0, 60.0]);
+        assert_eq!(targets(&layout, showing(false, false, false), &ROW, UNMEASURED), [0.0, 100.0, 0.0]);
+    }
+
+    #[test]
+    fn a_length_takes_its_share_of_the_measured_group_and_its_default_share_before() {
+        let mut layout = with_extents(20.0, 25.0, 30.0);
+        layout.extents.right = RegionExtent::Length(length(500.0));
+
+        assert_eq!(targets(&layout, showing(false, true, true), &ROW, GroupLength(Some(1000.0))), [0.0, 50.0, 50.0]);
+        assert_eq!(targets(&layout, showing(false, true, true), &ROW, UNMEASURED), [0.0, 75.0, 25.0]);
+    }
+
+    #[test]
+    fn pixel_limits_bound_a_side_once_the_group_is_measured() {
+        let mut layout = with_extents(20.0, 10.0, 30.0);
+        layout.limits.set(FoldingRegion::Right, RegionLimits { min: Some(length(200.0)), max: Some(length(400.0)) });
+        let measured = GroupLength(Some(800.0));
+
+        assert_eq!(targets(&layout, showing(false, true, true), &ROW, measured), [0.0, 75.0, 25.0]);
+        assert_eq!(bound(&layout, Slot::Right, measured), PanelBound::new(25.0, 50.0));
+        assert_eq!(bound(&layout, Slot::Right, UNMEASURED), PanelBound::new(FLOOR, 100.0));
+    }
+
+    #[test]
+    fn a_least_above_the_most_or_the_group_wins() {
+        let mut layout = Layout::new();
+        layout.limits.set(FoldingRegion::Left, RegionLimits { min: Some(length(600.0)), max: Some(length(300.0)) });
+
+        assert_eq!(bound(&layout, Slot::Left, GroupLength(Some(1000.0))), PanelBound::new(60.0, 60.0));
+        assert_eq!(bound(&layout, Slot::Left, GroupLength(Some(400.0))), PanelBound::new(100.0, 100.0));
     }
 }

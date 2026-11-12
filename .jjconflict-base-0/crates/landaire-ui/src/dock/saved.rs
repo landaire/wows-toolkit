@@ -88,11 +88,13 @@ pub struct RestoreReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dock::layout::CssLength;
     use crate::dock::layout::DockRegion;
     use crate::dock::layout::DockTarget;
     use crate::dock::layout::Edge;
     use crate::dock::layout::Layout;
     use crate::dock::layout::PanelKind;
+    use crate::dock::layout::RegionExtent;
     use crate::dock::layout::SkipReason;
 
     fn entry(id: &str, kind: &str) -> PanelEntry {
@@ -114,6 +116,7 @@ mod tests {
         layout.activate(&PanelId::new("overview")).expect("overview is in the dock");
         layout.add_panel(DockTarget::Region(DockRegion::Right), entry("chart-1", "chart")).expect("adds");
         layout.set_open(DockRegion::Bottom, false);
+        layout.extents.right = RegionExtent::Length(CssLength::new(500.0).expect("a length"));
 
         layout
     }

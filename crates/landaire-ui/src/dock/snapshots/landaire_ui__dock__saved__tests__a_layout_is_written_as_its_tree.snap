@@ -43,6 +43,9 @@ bottom:
   open: false
   root: ~
 extents:
-  left: 20
-  right: 25
-  bottom: 30
+  left:
+    share: 20
+  right:
+    length: 500
+  bottom:
+    share: 30
