@@ -15,10 +15,12 @@ mod ships;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use landaire_ui::CssLength;
 use landaire_ui::DockProps;
 use landaire_ui::DockRegion;
 use landaire_ui::DockState;
 use landaire_ui::DockTarget;
+use landaire_ui::FoldingRegion;
 use landaire_ui::NumberInputProps;
 use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
@@ -28,6 +30,8 @@ use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
 use landaire_ui::PanelSide;
+use landaire_ui::RegionExtent;
+use landaire_ui::RegionLimits;
 use landaire_ui::SavedLayout;
 use landaire_ui::SavedNode;
 use rust_i18n::t;
@@ -349,6 +353,7 @@ pub fn StatsBody(
     let charts = RwSignal::new_local(Vec::<ChartSlot>::new());
     let next_chart_id = StoredValue::new(0_usize);
     let dock = DockState::new(PanelRegistry::new());
+    size_regions(dock);
     register_panels(
         dock,
         PanelSources { charts, games, filtered, per_ship, filters, personal_rating, session, clear_error, services },
@@ -671,6 +676,14 @@ fn chart_slot(charts: RwSignal<Vec<ChartSlot>, LocalStorage>, id: ChartId, setti
     let slot = ChartSlot { id, settings: RwSignal::new(ChartSettings { id: Some(id), ..settings }) };
     charts.update(|charts| charts.push(slot));
     slot
+}
+
+/// A 500px right region for charts, with floors that keep a chart readable.
+fn size_regions(dock: DockState) {
+    let px = |pixels| CssLength::new(pixels).expect("a finite, non-negative length");
+    dock.set_region_extent(FoldingRegion::Right, RegionExtent::Length(px(500.0)));
+    dock.set_region_limits(FoldingRegion::Right, RegionLimits { min: Some(px(280.0)), max: None });
+    dock.set_region_limits(FoldingRegion::Bottom, RegionLimits { min: Some(px(200.0)), max: None });
 }
 
 fn chart_entry(id: ChartId) -> PanelEntry {
