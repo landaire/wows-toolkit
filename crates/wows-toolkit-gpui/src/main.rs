@@ -193,7 +193,8 @@ fn main() {
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;
                 let settings = StartupSettings::load(&pool).await;
-                let session = stats::load::SessionData::load(&pool, &settings.proxy_url).await;
+                let session =
+                    wows_toolkit_services::stats::SessionData::load(&pool, http::USER_AGENT, &settings.proxy_url).await;
                 // The pool comes back so settings edits have somewhere to go;
                 // the startup read would otherwise close it.
                 Ok::<_, anyhow::Error>((settings, session, pool))
