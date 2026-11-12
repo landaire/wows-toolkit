@@ -116,6 +116,20 @@ impl<K: Clone + 'static> Default for RowMenuHandle<K> {
     }
 }
 
+/// The pointer coming onto a grid row or leaving it.
+#[derive(Clone, PartialEq)]
+pub enum RowHover<K> {
+    /// The pointer came onto the row. `anchor` is a box as tall as the row at its trailing end,
+    /// for placing something such as a hover card beside the row.
+    Entered {
+        key: K,
+        anchor: NodeRef,
+    },
+    Left {
+        key: K,
+    },
+}
+
 /// The words a grid shows of its own, in its header menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GridStrings {
@@ -246,6 +260,7 @@ where
     /// The rows a fixed-height grid builds, and where each row sits.
     pub(crate) window: Option<Signal<VirtualWindow, LocalStorage>>,
     pub(crate) on_activate: Option<UnsyncCallback<K>>,
+    pub(crate) on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
 
     pub(crate) row_menu: Option<RowMenu<K>>,
     pub(crate) menu_target: RwSignal<Option<MenuTarget<K>>, LocalStorage>,

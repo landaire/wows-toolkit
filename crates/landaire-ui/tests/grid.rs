@@ -18,6 +18,7 @@ use landaire_ui::GridSelectionMode;
 use landaire_ui::MotionPreference;
 use landaire_ui::RowGroups;
 use landaire_ui::RowHeight;
+use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMenuHandle;
 use landaire_ui::RowMode;
@@ -325,6 +326,57 @@ fn a_row_menu_handle_ignores_a_missing_row_and_closes_when_its_row_goes() {
     rows.set(items(4).into_iter().filter(|item| item.id != 2).collect());
     window.advance(Duration::from_millis(300));
     assert_eq!(handle.open_row(), None, "the menu closes with its row");
+}
+
+#[test]
+fn the_pointer_entering_and_leaving_a_row_is_told_once_per_row_with_an_anchor_beside_it() {
+    #[derive(Default)]
+    struct Told {
+        events: RefCell<Vec<String>>,
+        anchor: Cell<Option<NodeRef>>,
+    }
+
+    let told = Rc::new(Told::default());
+    let given = Rc::clone(&told);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let given = Rc::clone(&given);
+        let on_row_hover = UnsyncCallback::new(move |hover: RowHover<u32>| match hover {
+            RowHover::Entered { key, anchor } => {
+                given.events.borrow_mut().push(format!("entered {key}"));
+                given.anchor.set(Some(anchor));
+            }
+            RowHover::Left { key } => given.events.borrow_mut().push(format!("left {key}")),
+        });
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(4)),
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        on_row_hover = on_row_hover,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+
+    window.hover(cell(&window, "name-1")).expect("the cell has a box");
+    window.hover(cell(&window, "size-1")).expect("the cell has a box");
+    assert_eq!(*told.events.borrow(), ["entered 1"], "moving along a row stays on it");
+
+    let text = window.bounds(cell(&window, "name-1")).expect("the cell has a box");
+    let next = window.bounds(cell(&window, "name-2")).expect("the cell has a box");
+    let anchor = told.anchor.get().and_then(|anchor| anchor.window_bounds()).expect("the anchor has a box");
+    let bottom = anchor.origin.y.0 + anchor.size.height.0;
+    let spans = anchor.origin.y.0 <= text.origin.y.0 && text.origin.y.0 + text.size.height.0 <= bottom;
+    assert!(spans, "the anchor spans the row");
+    assert!(bottom <= next.origin.y.0, "and not the next");
+
+    window.hover(cell(&window, "name-2")).expect("the cell has a box");
+    assert_eq!(*told.events.borrow(), ["entered 1", "left 1", "entered 2"]);
 }
 
 #[test]

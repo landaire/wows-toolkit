@@ -20,6 +20,7 @@ use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
 use landaire_ui::RowHeight;
+use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
 use rust_i18n::t;
@@ -73,6 +74,9 @@ use zgui_ui::MenuSeparatorProps;
 use zgui_ui::SpinnerProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::ui::ELLIPSIS;
+use zgui_ui_primitives::Align;
+use zgui_ui_primitives::Placement;
+use zgui_ui_primitives::Side;
 
 use crate::preview::HoverPreview;
 use crate::preview::PreviewTarget;
@@ -439,8 +443,8 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
     });
     let row_at = move |position: usize| rows.with_untracked(|rows| rows.get(position).cloned());
 
-    // The card goes up beside the cell the pointer came to rest on and stays there while the
-    // pointer travels along the same row, rather than chasing it from cell to cell.
+    // The card goes up for the row the pointer came onto and stays where it is while the pointer
+    // travels along that row.
     let hover = move |position: usize, anchor: NodeRef| {
         let Some(row) = row_at(position) else { return };
         if preview.watched_untracked().as_deref() == Some(row.hit.replay_path.as_path()) {
@@ -460,7 +464,6 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
         .into_iter()
         .map(|column| {
             GridColumn::new(column_id(column), column.label(), move |row: &ResultRow| {
-                let position = row.position;
                 let (text, outcome, rating) = match column {
                     ResultColumn::Sortable(sortable) => (
                         cell_text(&row.hit, sortable),
@@ -471,14 +474,11 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                     ),
                     ResultColumn::Ship => (row.ship.clone(), None, None),
                 };
-                let anchor = NodeRef::new();
                 view! {
                     text(
                         class = "wt-search-cell",
-                        node_ref = anchor,
                         attr:data-outcome = outcome.map(str::to_owned),
-                        style:color = rating.map(|band| format!("var(--wt-pr-{band}-text)")),
-                        on:pointer_enter = move |_| hover(position, anchor)
+                        style:color = rating.map(|band| format!("var(--wt-pr-{band}-text)"))
                     ) {{text}}
                 }
             })
@@ -495,11 +495,10 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
     columns.push(
         GridColumn::new(ACTIONS_COLUMN, "", move |row: &ResultRow| {
             let position = row.position;
-            let anchor = NodeRef::new();
             let path = row.hit.replay_path.clone();
             let exists = row.exists;
             view! {
-                row(class = "wt-search-actions", node_ref = anchor, on:pointer_enter = move |_| hover(position, anchor)) {
+                row(class = "wt-search-actions") {
                     DropdownMenu {
                         DropdownMenuTrigger(
                             variant = ButtonVariant::Ghost,
@@ -570,10 +569,24 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                 }),
                 selection_mode = GridSelectionMode::Single,
                 on_activate = UnsyncCallback::new(open),
+                on_row_hover = UnsyncCallback::new(move |hovered: RowHover<usize>| match hovered {
+                    RowHover::Entered { key, anchor } => hover(key, anchor),
+                    RowHover::Left { key } => {
+                        let Some(row) = row_at(key) else { return };
+                        // Moving onto the next row enters it in the same pointer move, so the
+                        // leave waits for the move and ends only a preview still on this row.
+                        spawn_local(async move {
+                            if preview.watched_untracked().as_deref() == Some(row.hit.replay_path.as_path()) {
+                                preview.leave();
+                            }
+                        });
+                    }
+                }),
                 row_menu = menu,
                 label = t!("ui.tabs.search").into_owned()
             )
-            HoverPreviewCard(preview = preview) {
+            // The rows fill the tab's width, so the card goes under its row rather than over it.
+            HoverPreviewCard(preview = preview, placement = Placement::new(Side::Bottom, Align::End)) {
                 {facts}
             }
         }

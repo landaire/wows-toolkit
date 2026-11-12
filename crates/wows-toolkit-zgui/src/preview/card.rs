@@ -82,15 +82,22 @@ const CSS: &str = css!(
 ///
 /// Up for as long as a row is watched. Escape takes it down and ends the preview.
 #[component]
-pub fn HoverPreviewCard(preview: HoverPreview, children: ChildrenFn) -> impl IntoView {
+pub fn HoverPreviewCard(
+    preview: HoverPreview,
+    /// Where the card goes against the row's anchor. A card must not cover the row it is for:
+    /// the pointer would leave the row for the card and take the card down.
+    #[prop(default = Placement::new(Side::Right, Align::Start))]
+    placement: Placement,
+    children: ChildrenFn,
+) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    let placement = Memo::new(move |_| preview.placement());
+    let shown = Memo::new(move |_| preview.placement());
     let facts = StoredValue::new_local(children);
 
     move || {
-        placement.get().map(|(anchor, replaced)| {
+        shown.get().map(|(anchor, replaced)| {
             view! {
-                PreviewCard(preview = preview, anchor = anchor, replaced = replaced) {
+                PreviewCard(preview = preview, anchor = anchor, replaced = replaced, placement = placement) {
                     {facts.get_value().view()}
                 }
             }
@@ -101,7 +108,13 @@ pub fn HoverPreviewCard(preview: HoverPreview, children: ChildrenFn) -> impl Int
 
 /// One row's card. Built again for each row, since a popper is placed against one anchor.
 #[component]
-fn PreviewCard(preview: HoverPreview, anchor: NodeRef, replaced: bool, children: ChildrenFn) -> impl IntoView {
+fn PreviewCard(
+    preview: HoverPreview,
+    anchor: NodeRef,
+    replaced: bool,
+    placement: Placement,
+    children: ChildrenFn,
+) -> impl IntoView {
     let state = OverlayState::uncontrolled(
         true,
         Some(UnsyncCallback::new(move |open: bool| {
@@ -112,7 +125,7 @@ fn PreviewCard(preview: HoverPreview, anchor: NodeRef, replaced: bool, children:
     )
     .anchored_to(anchor);
     let class = if replaced { "wt-preview-card wt-preview-card--instant" } else { "wt-preview-card" };
-    let placement: Signal<Placement, LocalStorage> = Signal::stored_local(Placement::new(Side::Right, Align::Start));
+    let placement: Signal<Placement, LocalStorage> = Signal::stored_local(placement);
     let facts = StoredValue::new_local(children);
 
     view! {
