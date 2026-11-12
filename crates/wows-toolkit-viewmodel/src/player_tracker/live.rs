@@ -541,6 +541,41 @@ impl<L> StatsLookupGate<L> {
     }
 }
 
+/// Where the stats lookup for the battle in progress has got to.
+///
+/// The service's budget is small, so each battle is asked about once and the
+/// answer held for its duration; a failure is reported rather than retried.
+#[derive(Debug, Clone, Default)]
+pub enum StatsState {
+    /// No battle, or one whose roster has not been read yet.
+    #[default]
+    Idle,
+    /// Waiting for the game to flush the packet that names the roster.
+    Scanning,
+    /// The roster is read; the lookup waits for the Current Match section to
+    /// be shown.
+    Held,
+    Fetching,
+    Ready(HashMap<AccountId, PlayerStatsOut>),
+    /// Why there are no figures, in the words the roster shows.
+    Failed(String),
+}
+
+impl StatsState {
+    /// The service's answer keyed by account, which is how a row looks its
+    /// own statistics up.
+    pub fn ready(players: Vec<PlayerStatsOut>) -> Self {
+        Self::Ready(players.into_iter().map(|player| (player.account_id, player)).collect())
+    }
+
+    pub fn players(&self) -> Option<&HashMap<AccountId, PlayerStatsOut>> {
+        match self {
+            Self::Ready(players) => Some(players),
+            Self::Idle | Self::Scanning | Self::Held | Self::Fetching | Self::Failed(_) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
