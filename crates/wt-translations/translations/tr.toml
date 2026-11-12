@@ -1897,6 +1897,8 @@ export = "Modeli Dışa Aktar"
 copy_path = "Model yolunu kopyala"
 path_copied = "%{path} kopyalandı"
 skin_replaces = "%{exterior} takılıyken %{model} yerine geçer"
+geometry_absent = "Oyun dosyalarınızda yok"
+geometry_none = "Bu modelin geometrisi yok"
 hardpoints_tooltip = "Bağlantı noktalarını göster"
 
 [ui.models.group]

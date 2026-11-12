@@ -1943,6 +1943,8 @@ export = "ส่งออกโมเดล"
 copy_path = "คัดลอกพาธโมเดล"
 path_copied = "คัดลอก %{path} แล้ว"
 skin_replaces = "แทนที่ %{model} เมื่อติดตั้ง %{exterior}"
+geometry_absent = "ไม่มีในไฟล์เกมของคุณ"
+geometry_none = "โมเดลนี้ไม่มีรูปทรง"
 hardpoints_tooltip = "แสดงจุดยึด"
 
 [ui.models.group]

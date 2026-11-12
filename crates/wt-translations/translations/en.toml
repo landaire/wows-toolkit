@@ -1969,6 +1969,8 @@ export = "Export Model"
 copy_path = "Copy model path"
 path_copied = "Copied %{path}"
 skin_replaces = "Replaces %{model} when %{exterior} is equipped"
+geometry_absent = "Not in your game files"
+geometry_none = "This model has no geometry"
 hardpoints_tooltip = "Show attachment points"
 
 [ui.models.group]

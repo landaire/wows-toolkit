@@ -1943,6 +1943,8 @@ export = "Esporta modello"
 copy_path = "Copia percorso del modello"
 path_copied = "Copiato %{path}"
 skin_replaces = "Sostituisce %{model} quando è equipaggiato %{exterior}"
+geometry_absent = "Non presente nei file di gioco"
+geometry_none = "Questo modello non ha geometria"
 hardpoints_tooltip = "Mostra punti di aggancio"
 
 [ui.models.group]

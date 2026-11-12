@@ -1897,6 +1897,8 @@ export = "Экспортировать модель"
 copy_path = "Копировать путь к модели"
 path_copied = "Скопировано: %{path}"
 skin_replaces = "Заменяет %{model}, когда установлен %{exterior}"
+geometry_absent = "Нет в файлах игры"
+geometry_none = "У этой модели нет геометрии"
 hardpoints_tooltip = "Показать точки крепления"
 
 [ui.models.group]

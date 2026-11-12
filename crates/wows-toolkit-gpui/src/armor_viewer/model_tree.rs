@@ -11,6 +11,7 @@ use std::sync::Arc;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::building_armor::BuildingArmorIndex;
 use wowsunpack::export::model_catalog::BuildingKind;
+use wowsunpack::export::model_catalog::GeometryAvailability;
 use wowsunpack::export::model_catalog::MiscCategory;
 use wowsunpack::export::model_catalog::ModelCatalog;
 use wowsunpack::export::model_catalog::ModelEntry;
@@ -85,6 +86,8 @@ pub struct ModelRow {
     /// query would match.
     pub search_key: SearchKey,
     pub variants: Vec<VariantRow>,
+    /// Whether the install ships its geometry; `None` when unknown.
+    pub geometry: Option<GeometryAvailability>,
 }
 
 pub struct VariantRow {
@@ -94,6 +97,8 @@ pub struct VariantRow {
     pub search_key: String,
     /// A skin's own dead and section variants; empty for the other kinds.
     pub variants: Vec<VariantRow>,
+    /// As [`ModelRow::geometry`].
+    pub geometry: Option<GeometryAvailability>,
 }
 
 /// How a search names one catalogue model.
@@ -331,6 +336,8 @@ pub struct HullRow {
     pub model: ModelPath,
     /// As [`ModelRow::search_key`].
     pub search_key: Arc<SearchKey>,
+    /// As [`ModelRow::geometry`].
+    pub geometry: Option<GeometryAvailability>,
 }
 
 /// One mount or misc part.
@@ -342,6 +349,8 @@ pub struct PartRow {
     pub model: ModelPath,
     /// As [`ModelRow::search_key`].
     pub search_key: Arc<SearchKey>,
+    /// As [`ModelRow::geometry`].
+    pub geometry: Option<GeometryAvailability>,
 }
 
 impl ShipPartRows {
@@ -355,6 +364,7 @@ impl ShipPartRows {
                 node: mount.hp.to_string(),
                 model: mount.model.clone(),
                 search_key: keys.key(&mount.model),
+                geometry: catalog.geometry(&mount.model),
             });
         }
 
@@ -366,13 +376,18 @@ impl ShipPartRows {
                 node: misc_label(misc, listing.hull_sections.first()),
                 model: misc.model.clone(),
                 search_key: keys.key(&misc.model),
+                geometry: catalog.geometry(&misc.model),
             })
             .collect();
 
         let hull: Vec<HullRow> = listing
             .hull_sections
             .iter()
-            .map(|model| HullRow { model: model.clone(), search_key: keys.key(model) })
+            .map(|model| HullRow {
+                model: model.clone(),
+                search_key: keys.key(model),
+                geometry: catalog.geometry(model),
+            })
             .collect();
 
         let mounts: Vec<MountGroupRows> =
@@ -668,11 +683,11 @@ fn model_row(entry: &ModelEntry, catalog: &ModelCatalog, references: &ModelRefer
                     .into_iter()
                     .flat_map(ModelEntry::variants)
                     .filter(|nested| nested.kind != ModelVariantKind::Skin)
-                    .map(|nested| variant_row(&nested.kind, &nested.path, Vec::new()))
+                    .map(|nested| variant_row(&nested.kind, &nested.path, Vec::new(), catalog))
                     .collect(),
                 ModelVariantKind::Dead | ModelVariantKind::Section(_) => Vec::new(),
             };
-            variant_row(&variant.kind, &variant.path, variants)
+            variant_row(&variant.kind, &variant.path, variants, catalog)
         })
         .collect();
 
@@ -682,11 +697,22 @@ fn model_row(entry: &ModelEntry, catalog: &ModelCatalog, references: &ModelRefer
         search_key.push(building.name());
     }
 
-    ModelRow { path: entry.path().clone(), search_key, variants }
+    ModelRow { path: entry.path().clone(), search_key, variants, geometry: catalog.geometry(entry.path()) }
 }
 
-fn variant_row(kind: &ModelVariantKind, path: &ModelPath, variants: Vec<VariantRow>) -> VariantRow {
-    VariantRow { kind: kind.clone(), path: path.clone(), search_key: path.stem().to_lowercase(), variants }
+fn variant_row(
+    kind: &ModelVariantKind,
+    path: &ModelPath,
+    variants: Vec<VariantRow>,
+    catalog: &ModelCatalog,
+) -> VariantRow {
+    VariantRow {
+        kind: kind.clone(),
+        path: path.clone(),
+        search_key: path.stem().to_lowercase(),
+        variants,
+        geometry: catalog.geometry(path),
+    }
 }
 
 /// Whether model directory `directory` (`usa`, `uk`, `panasia`) names

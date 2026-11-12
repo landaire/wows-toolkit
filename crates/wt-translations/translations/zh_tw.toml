@@ -1943,6 +1943,8 @@ export = "匯出模型"
 copy_path = "複製模型路徑"
 path_copied = "已複製 %{path}"
 skin_replaces = "裝備 %{exterior} 時替換 %{model}"
+geometry_absent = "不在遊戲檔案中"
+geometry_none = "此模型沒有幾何體"
 hardpoints_tooltip = "顯示掛載點"
 
 [ui.models.group]

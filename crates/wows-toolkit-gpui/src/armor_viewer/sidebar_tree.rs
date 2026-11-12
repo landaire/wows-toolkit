@@ -18,6 +18,7 @@ use gpui_kit::component::tree::TreeItem;
 use rust_i18n::t;
 
 use wowsunpack::export::model_catalog::BuildingKind;
+use wowsunpack::export::model_catalog::GeometryAvailability;
 use wowsunpack::export::model_catalog::MiscCategory;
 use wowsunpack::export::model_catalog::ModelGroupKind;
 use wowsunpack::export::model_catalog::ModelKind;
@@ -132,6 +133,8 @@ pub(super) struct BuiltTree {
     /// Dim text drawn after a row's name: during a search, the field the row
     /// was found by where it is not the row's own name; on a skin, that it is.
     pub notes: HashMap<SharedString, SharedString>,
+    /// Model rows the install cannot draw, drawn dimmed.
+    pub unavailable: HashMap<SharedString, GeometryAvailability>,
 }
 
 /// What a search names, worked out once per query and per change to the
@@ -300,7 +303,14 @@ pub(super) fn build_tree(
     search: Option<&SearchMatches>,
     expansion: &mut Expansion<'_>,
 ) -> BuiltTree {
-    let mut builder = Builder { search, rows: HashMap::new(), notes: HashMap::new(), expansion, sources };
+    let mut builder = Builder {
+        search,
+        rows: HashMap::new(),
+        notes: HashMap::new(),
+        unavailable: HashMap::new(),
+        expansion,
+        sources,
+    };
     let mut items = Vec::new();
 
     let ship_matches = search.map(|search| &search.ships);
@@ -333,7 +343,7 @@ pub(super) fn build_tree(
         }
     }
 
-    BuiltTree { items, rows: builder.rows, notes: builder.notes }
+    BuiltTree { items, rows: builder.rows, notes: builder.notes, unavailable: builder.unavailable }
 }
 
 /// The row id `open` is drawn on.
@@ -525,6 +535,7 @@ struct Builder<'q, 'e, 's, 'd> {
     search: Option<&'q SearchMatches>,
     rows: HashMap<SharedString, RowKind>,
     notes: HashMap<SharedString, SharedString>,
+    unavailable: HashMap<SharedString, GeometryAvailability>,
     expansion: &'e mut Expansion<'s>,
     sources: &'q TreeSources<'d>,
 }
@@ -588,6 +599,18 @@ impl Builder<'_, '_, '_, '_> {
         }
 
         self.notes.insert(id.clone(), field.to_string().into());
+    }
+
+    /// Records row `id` as one the install cannot draw. An unknown
+    /// availability is taken as present.
+    fn mark_geometry(&mut self, id: &SharedString, geometry: Option<GeometryAvailability>) {
+        match geometry {
+            Some(missing @ (GeometryAvailability::Absent | GeometryAvailability::NoGeometry)) => {
+                self.unavailable.insert(id.clone(), missing);
+            }
+            // Drawn as usual.
+            Some(GeometryAvailability::Present) | None => {}
+        }
     }
 
     fn ship_nation(&mut self, nation: &NationGroup, matches: Option<&MatchGroup<MatchGroup<ShipMatch>>>) -> TreeItem {
@@ -719,6 +742,7 @@ impl Builder<'_, '_, '_, '_> {
         let id = part_row_id(ship, &part);
         let kind = RowKind::ShipPart { ship: ship.clone(), part, model: row.model.clone(), node: None };
         self.note(&id, &row.search_key);
+        self.mark_geometry(&id, row.geometry);
 
         self.leaf(id, row.model.stem().to_string(), kind)
     }
@@ -732,6 +756,7 @@ impl Builder<'_, '_, '_, '_> {
             node: Some(part.node.as_str().to_string().into()),
         };
         self.note(&id, &part.search_key);
+        self.mark_geometry(&id, part.geometry);
 
         self.leaf(id, format!("{} {}", part.node, part.model.stem()), kind)
     }
@@ -770,6 +795,7 @@ impl Builder<'_, '_, '_, '_> {
         let id = model_row_id(&model.path);
         let label = model.path.stem().to_string();
         let kind = RowKind::Model(model.path.clone());
+        self.mark_geometry(&id, model.geometry);
         if found == Some(ModelMatch::Name) {
             self.note(&id, &model.search_key);
         }
@@ -800,6 +826,7 @@ impl Builder<'_, '_, '_, '_> {
             let id = model_row_id(&variant.path);
             let label = variant_label(&variant.kind, &variant.path);
             let kind = RowKind::Model(variant.path.clone());
+            self.mark_geometry(&id, variant.geometry);
             if variant.kind == ModelVariantKind::Skin {
                 self.notes.insert(id.clone(), t!("ui.models.variant.skin").into_owned().into());
             }
@@ -871,6 +898,7 @@ pub(super) mod fixture {
     use wowsunpack::export::model_catalog::BuildingModels;
     use wowsunpack::export::model_catalog::BuildingParamRef;
     use wowsunpack::export::model_catalog::CatalogLinks;
+    use wowsunpack::export::model_catalog::GeometryAvailability;
     use wowsunpack::export::model_catalog::ModelCatalog;
     use wowsunpack::export::model_catalog::ModelPath;
     use wowsunpack::export::part_group::PartGroup;
@@ -899,10 +927,13 @@ pub(super) mod fixture {
     pub const IOWA_TURRET: &str = "content/gameplay/usa/gun/main/AGM034_16in50_Mk7/AGM034_16in50_Mk7.model";
     pub const IOWA_SKIN: &str =
         "content/gameplay/usa/ship/battleship/ASB128_Iowa_Halloween/ASB128_Iowa_Halloween.model";
-    const SECONDARY: &str = "content/gameplay/usa/gun/secondary/AGS010_5in38_Mk32_Mod12/AGS010_5in38_Mk32_Mod12.model";
+    pub const SECONDARY: &str =
+        "content/gameplay/usa/gun/secondary/AGS010_5in38_Mk32_Mod12/AGS010_5in38_Mk32_Mod12.model";
     const DIRECTOR: &str = "content/gameplay/usa/director/AD001_Director_Mk37/AD001_Director_Mk37.model";
     const BOLLARD: &str = "content/gameplay/usa/misc/AM2061/AM2061.model";
     const YAMATO: &str = "content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model";
+    pub const YAMATO_TURRET: &str =
+        "content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model";
     pub const FORT: &str = "content/location/gameplay/building/LGB001_Fort/LGB001_Fort.model";
 
     pub fn path(raw: &str) -> ModelPath {
@@ -977,7 +1008,7 @@ pub(super) mod fixture {
             DIRECTOR,
             BOLLARD,
             YAMATO,
-            "content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model",
+            YAMATO_TURRET,
             "content/gameplay/events/director/XD006_Lazarus_Director/XD006_Lazarus_Director.model",
             "content/gameplay/usa/misc/AM116_Boat_Winch_2/AM116_Boat_Winch_2.model",
             FORT,
@@ -992,7 +1023,14 @@ pub(super) mod fixture {
             mount_models: Vec::new(),
         };
 
-        ModelCatalog::from_paths(paths.map(path), &CatalogLinks::new(skins, vec![fort]))
+        // The Japanese turret's geometry is not installed, nor the secondary
+        // gun's that Iowa mounts; nothing else is known.
+        let geometry = HashMap::from([
+            (path(YAMATO_TURRET), GeometryAvailability::Absent),
+            (path(SECONDARY), GeometryAvailability::NoGeometry),
+        ]);
+
+        ModelCatalog::from_paths(paths.map(path), &CatalogLinks::new(skins, vec![fort])).with_geometry(geometry)
     }
 
     /// A fort the game names and a coastal battery it does not.
@@ -1274,6 +1312,27 @@ mod tests {
             ]
         );
         assert_eq!(built.rows.get(SEPARATOR_ID), Some(&RowKind::Separator));
+    }
+
+    #[test]
+    fn a_model_the_install_lacks_stays_listed_and_is_marked_wherever_it_is_listed() {
+        let data = data();
+        let turret = model_row_id(&fixture::path(fixture::YAMATO_TURRET));
+        let secondary = model_row_id(&fixture::path(fixture::SECONDARY));
+        let mount = part_row_id(
+            &VehicleParamIndex::new(fixture::IOWA_INDEX),
+            &ShipPartKey::Mount(wowsunpack::export::hardpoint::HardpointName::new("HP_AGS_1")),
+        );
+
+        let built = expand_all(&data);
+
+        assert!(built.rows.contains_key(&turret), "the row is listed");
+        let expected = HashMap::from([
+            (turret, GeometryAvailability::Absent),
+            (secondary, GeometryAvailability::NoGeometry),
+            (mount, GeometryAvailability::NoGeometry),
+        ]);
+        assert_eq!(built.unavailable, expected, "the model, and the ship part showing it, are marked");
     }
 
     #[test]

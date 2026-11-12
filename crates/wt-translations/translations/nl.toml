@@ -1943,6 +1943,8 @@ export = "Model exporteren"
 copy_path = "Modelpad kopiëren"
 path_copied = "%{path} gekopieerd"
 skin_replaces = "Vervangt %{model} als %{exterior} is uitgerust"
+geometry_absent = "Niet in je spelbestanden"
+geometry_none = "Dit model heeft geen geometrie"
 hardpoints_tooltip = "Bevestigingspunten tonen"
 
 [ui.models.group]

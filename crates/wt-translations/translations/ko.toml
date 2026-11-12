@@ -1943,6 +1943,8 @@ export = "모델 내보내기"
 copy_path = "모델 경로 복사"
 path_copied = "%{path} 복사됨"
 skin_replaces = "%{exterior} 장착 시 %{model}을(를) 대체합니다"
+geometry_absent = "게임 파일에 없음"
+geometry_none = "이 모델에는 지오메트리가 없습니다"
 hardpoints_tooltip = "부착 지점 표시"
 
 [ui.models.group]

@@ -50,6 +50,7 @@ use rust_i18n::t;
 
 use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::building_armor::BuildingArmorIndex;
+use wowsunpack::export::model_catalog::GeometryAvailability;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelLibrary;
 use wowsunpack::game_types::GameParamId;
@@ -174,6 +175,16 @@ enum Rebuild {
     Keep,
 }
 
+/// What the row renderer reads, gathered once per sidebar render.
+struct RowContext {
+    bundle: Arc<ArmorAssetsBundle>,
+    row_info: Rc<HashMap<SharedString, RowKind>>,
+    notes: Rc<HashMap<SharedString, SharedString>>,
+    unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
+    index: Option<Arc<ModelTreeIndex>>,
+    hardpoints: Rc<HashSet<HardpointTarget>>,
+}
+
 pub struct Sidebar {
     bundle: Option<Arc<ArmorAssetsBundle>>,
     search_state: Entity<InputState>,
@@ -184,8 +195,10 @@ pub struct Sidebar {
     tree_state: Entity<TreeState>,
     /// Rebuilt with the tree, never per render.
     row_info: Rc<HashMap<SharedString, RowKind>>,
-    /// The field each row was found by, drawn after its name.
+    /// Dim text drawn after each row's name.
     row_notes: Rc<HashMap<SharedString, SharedString>>,
+    /// The model rows the install cannot draw, drawn dimmed.
+    row_unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
     /// What the comparison panes share. Owned by `ArmorViewerPane`; kept here
     /// so the header can draw it beside the button that opens a pane.
     common: CommonPaneSettings,
@@ -247,6 +260,7 @@ impl Sidebar {
             tree_state,
             row_info: Rc::new(HashMap::new()),
             row_notes: Rc::new(HashMap::new()),
+            row_unavailable: Rc::new(HashMap::new()),
             common: CommonPaneSettings::default(),
             model_library: None,
             models: ModelsState::Loading,
@@ -727,6 +741,7 @@ impl Sidebar {
         let Some(bundle) = self.bundle.clone() else {
             self.row_info = Rc::new(HashMap::new());
             self.row_notes = Rc::new(HashMap::new());
+            self.row_unavailable = Rc::new(HashMap::new());
             self.tree_state.update(cx, |state, cx| state.set_items(Vec::new(), cx));
             return;
         };
@@ -760,6 +775,7 @@ impl Sidebar {
 
         self.row_info = Rc::new(built.rows);
         self.row_notes = Rc::new(built.notes);
+        self.row_unavailable = Rc::new(built.unavailable);
         self.tree_state.update(cx, |state, cx| state.set_items(built.items, cx));
         let kept_ix = kept.and_then(|id| self.tree_state.read(cx).index_of(&id));
         match kept_ix {
@@ -831,8 +847,9 @@ fn opens_on_its_own(kind: &RowKind) -> bool {
 
 /// What a row's tooltip says: its whole name, which the row may cut short,
 /// and the model path or GameParams index behind it. A skin row also says
-/// what it replaces, from `skin_uses`.
-fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse]) -> Option<String> {
+/// what it replaces, from `skin_uses`, and a row the install cannot draw,
+/// why.
+fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse], missing: Option<GeometryAvailability>) -> Option<String> {
     let mut text = match kind {
         RowKind::Ship { param_index, display_name } => format!("{display_name}\n{param_index}"),
         RowKind::Building { display_name, param_name, .. } => format!("{display_name}\n{param_name}"),
@@ -856,24 +873,31 @@ fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse]) -> Option<String> {
         }
     }
 
+    let missing = match missing {
+        Some(GeometryAvailability::Absent) => Some(t!("ui.models.geometry_absent")),
+        Some(GeometryAvailability::NoGeometry) => Some(t!("ui.models.geometry_none")),
+        Some(GeometryAvailability::Present) | None => None,
+    };
+    if let Some(missing) = missing {
+        text.push('\n');
+        text.push_str(&missing);
+    }
+
     Some(text)
 }
 
 /// Renders one row: indent guides, a chevron or spacer, the nation flag or
 /// class icon, the label, and the hardpoint checkbox on model rows.
-#[allow(clippy::too_many_arguments)]
 fn render_sidebar_item(
     sidebar: Entity<Sidebar>,
     ix: usize,
     entry: &TreeEntry,
-    bundle: &ArmorAssetsBundle,
-    row_info: &HashMap<SharedString, RowKind>,
-    notes: &HashMap<SharedString, SharedString>,
-    index: Option<&ModelTreeIndex>,
-    hardpoints: &HashSet<HardpointTarget>,
+    context: &RowContext,
     window: &mut Window,
     cx: &mut App,
 ) -> ListItem {
+    let RowContext { bundle, row_info, notes, unavailable, index, hardpoints } = context;
+    let index = index.as_deref();
     let item = entry.item();
     let kind = row_info.get(&item.id);
 
@@ -941,6 +965,11 @@ fn render_sidebar_item(
         Some(note) => label.child(text().text_color(cx.theme().muted_foreground).child(note.clone())),
         None => label,
     };
+    let missing = unavailable.get(&item.id).copied();
+    let label = match missing {
+        Some(_) => label.text_color(cx.theme().muted_foreground),
+        None => label,
+    };
     row = row.child(label);
     // The text is built on hover; a row only clones what it shows.
     let hover = kind.filter(|kind| opens_on_its_own(kind));
@@ -951,7 +980,7 @@ fn render_sidebar_item(
         };
         row = row.tooltip(move |window, cx| {
             let skin_uses = skin_uses.as_deref().unwrap_or_default();
-            Tooltip::new(row_tooltip(&kind, skin_uses).unwrap_or_default()).build(window, cx)
+            Tooltip::new(row_tooltip(&kind, skin_uses, missing).unwrap_or_default()).build(window, cx)
         });
     }
 
@@ -1089,30 +1118,21 @@ impl Render for Sidebar {
                 .into_any_element(),
             Some(bundle) => {
                 let entity = cx.entity();
-                let bundle = Arc::clone(bundle);
-                let row_info = Rc::clone(&self.row_info);
-                let notes = Rc::clone(&self.row_notes);
-                let index = match &self.models {
-                    ModelsState::Ready(index) => Some(Arc::clone(index)),
-                    ModelsState::Loading | ModelsState::Unavailable => None,
+                let context = RowContext {
+                    bundle: Arc::clone(bundle),
+                    row_info: Rc::clone(&self.row_info),
+                    notes: Rc::clone(&self.row_notes),
+                    unavailable: Rc::clone(&self.row_unavailable),
+                    index: match &self.models {
+                        ModelsState::Ready(index) => Some(Arc::clone(index)),
+                        ModelsState::Loading | ModelsState::Unavailable => None,
+                    },
+                    hardpoints: Rc::clone(&self.hardpoint_visibility),
                 };
-                let hardpoints = Rc::clone(&self.hardpoint_visibility);
                 let menu_entity = entity.clone();
                 let menu_row_info = Rc::clone(&self.row_info);
                 tree(&self.tree_state, move |ix, entry, _selected, window, cx| {
-                    let index = index.as_deref();
-                    render_sidebar_item(
-                        entity.clone(),
-                        ix,
-                        entry,
-                        &bundle,
-                        &row_info,
-                        &notes,
-                        index,
-                        &hardpoints,
-                        window,
-                        cx,
-                    )
+                    render_sidebar_item(entity.clone(), ix, entry, &context, window, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     row_context_menu(&menu_entity, menu_row_info.get(&entry.item().id), menu)
@@ -1150,6 +1170,7 @@ mod tests {
     use gpui_kit::test::TestWindowExt;
     use wows_toolkit_viewmodel::settings::keys;
     use wowsunpack::export::hardpoint::HardpointName;
+    use wowsunpack::export::model_catalog::GeometryAvailability;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::game_types::GameParamId;
@@ -1314,16 +1335,23 @@ mod tests {
             node: Some("HP_AGM_1".into()),
         };
 
-        assert_eq!(super::row_tooltip(&ship, &[]).as_deref(), Some("Iowa\nPASB018"));
+        assert_eq!(super::row_tooltip(&ship, &[], None).as_deref(), Some("Iowa\nPASB018"));
         assert_eq!(
-            super::row_tooltip(&RowKind::Model(turret), &[]).as_deref(),
+            super::row_tooltip(&RowKind::Model(turret.clone()), &[], None).as_deref(),
             Some(format!("AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
         );
         assert_eq!(
-            super::row_tooltip(&part, &[]).as_deref(),
+            super::row_tooltip(&part, &[], None).as_deref(),
             Some(format!("HP_AGM_1 AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
         );
-        assert_eq!(super::row_tooltip(&RowKind::PartFolder, &[]), None, "a folder shows its whole name already");
+        assert_eq!(super::row_tooltip(&RowKind::PartFolder, &[], None), None, "a folder shows its whole name already");
+
+        rust_i18n::set_locale("en");
+        assert_eq!(
+            super::row_tooltip(&RowKind::Model(turret), &[], Some(GeometryAvailability::Absent)).as_deref(),
+            Some(format!("AGM034_16in50_Mk7\n{}\nNot in your game files", fixture::IOWA_TURRET).as_str()),
+            "a model the install lacks says so"
+        );
     }
 
     #[test]
@@ -1335,7 +1363,7 @@ mod tests {
         let skin = fixture::path(fixture::IOWA_SKIN);
         let uses = index.skins.get(&skin).expect("the skin's exteriors are known");
 
-        let tooltip = super::row_tooltip(&RowKind::Model(skin.clone()), uses);
+        let tooltip = super::row_tooltip(&RowKind::Model(skin.clone()), uses, None);
 
         let expected = format!(
             "ASB128_Iowa_Halloween\n{}\nReplaces ASB028_Iowa_1945 when Halloween is equipped\nReplaces ASB028_Iowa_1945 when Spooky is equipped",
