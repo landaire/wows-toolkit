@@ -43,10 +43,17 @@ pub enum ReplayBrowserEvent {
     RenderManyToVideo(Vec<PathBuf>),
     RenderManyToClipboard(Vec<PathBuf>),
     /// Makes the replays the session's stats, or adds them to it.
-    SessionStats { paths: Vec<PathBuf>, replace: bool },
+    SessionStats {
+        paths: Vec<PathBuf>,
+        replace: bool,
+    },
     /// A watched directory gained a replay. `battle` is its "Ship - Map"; `install` says whether
     /// it landed in the install's directory, which is what autoloading follows.
-    ReplayAppeared { path: PathBuf, battle: String, install: bool },
+    ReplayAppeared {
+        path: PathBuf,
+        battle: String,
+        install: bool,
+    },
     /// A listed replay was written again.
     ReplayChanged(PathBuf),
     ReplayRemoved(PathBuf),

@@ -60,8 +60,8 @@ use zgui::task::spawn_local;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
-use crate::services::Services;
 use crate::services::GameDataState;
+use crate::services::Services;
 use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::tabs::replays::browser::tree::TreeInputs;
@@ -159,8 +159,15 @@ struct Work {
 }
 
 impl Listing {
-    /// A listing of `source`, scanned at once. Called from a component's body.
-    pub fn new(source: ListingSource, watch: ListingWatch, grouping: ReplayGrouping, report: Rc<dyn Fn(ListingEvent)>) -> Self {
+    /// A listing of `source`. The install's is scanned at once and whenever the game directory
+    /// changes; a chosen directory's when [`Listing::relist`] is called, once the directory has
+    /// been found. Called from a component's body.
+    pub fn new(
+        source: ListingSource,
+        watch: ListingWatch,
+        grouping: ReplayGrouping,
+        report: Rc<dyn Fn(ListingEvent)>,
+    ) -> Self {
         let services = Services::current();
         let listing = Self {
             source: RwSignal::new_local(source),
@@ -206,7 +213,12 @@ impl Listing {
         let relisting = RenderEffect::new(move |previous: Option<Option<String>>| {
             let wows_dir = services.settings.read(|settings| settings.wows_dir.clone());
             let follows = listing.source.with_untracked(|source| *source == ListingSource::Install);
-            if previous.as_ref() != Some(&wows_dir) && (follows || previous.is_none()) {
+            if follows && previous.as_ref() != Some(&wows_dir) {
+                // The last install's directory is no longer this listing's, even while the new
+                // one is being resolved.
+                if listing.directory.get_untracked().is_some() {
+                    listing.directory.set(None);
+                }
                 listing.relist();
             }
             wows_dir
@@ -241,7 +253,10 @@ impl Listing {
             });
 
             let fresh: Vec<NodeKey> = self.work.with_value(|work| {
-                tree.groups().map(|id| NodeKey::Group(id.clone())).filter(|key| !work.known_groups.contains(key)).collect()
+                tree.groups()
+                    .map(|id| NodeKey::Group(id.clone()))
+                    .filter(|key| !work.known_groups.contains(key))
+                    .collect()
             });
             if !fresh.is_empty() {
                 self.work.update_value(|work| work.known_groups.extend(fresh.iter().cloned()));
@@ -278,9 +293,9 @@ impl Listing {
 
     /// The selected replays, sorted. Groups in the selection add nothing.
     pub fn selected_paths(self) -> Vec<PathBuf> {
-        let mut paths: Vec<PathBuf> = self
-            .selection
-            .with_untracked(|selection| selection.iter().filter_map(|key| key.leaf_path().map(Path::to_path_buf)).collect());
+        let mut paths: Vec<PathBuf> = self.selection.with_untracked(|selection| {
+            selection.iter().filter_map(|key| key.leaf_path().map(Path::to_path_buf)).collect()
+        });
         paths.sort();
 
         paths
@@ -313,11 +328,11 @@ impl Listing {
         }
     }
 
-    /// Lists another directory, as when a chosen directory turns out to be another path.
+    /// Names another directory, as when a chosen directory turns out to be another path. The
+    /// caller relists once the directory is known to be there.
     pub fn set_source(self, source: ListingSource) {
         if self.source.get_untracked() != source {
             self.source.set(source);
-            self.relist();
         }
     }
 
@@ -363,7 +378,8 @@ impl Listing {
         let Some(generation) = generation else { return };
 
         let source = self.source.get_untracked();
-        let wows_dir = self.work.with_value(|work| work.services.settings.read_untracked(|settings| settings.wows_dir.clone()));
+        let wows_dir =
+            self.work.with_value(|work| work.services.settings.read_untracked(|settings| settings.wows_dir.clone()));
         if source == ListingSource::Install && wows_dir.as_deref().is_none_or(str::is_empty) {
             self.end_watch();
             self.status.set(ScanStatus::NoInstall);
@@ -392,7 +408,7 @@ impl Listing {
             let scan = blocking(move || scan_replay_files(&scanned_dir, &reports));
             let shown = self.spawn(async move {
                 while let Some(report) = progress.next().await {
-                    self.progress.set(Some(report));
+                    self.show_scan_progress(generation, report);
                 }
             });
             let scanned = scan.await;
@@ -430,7 +446,9 @@ impl Listing {
             let read = services
                 .on_tokio(async move {
                     match scope.existing(&pool).await? {
-                        Some(source) => wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await,
+                        Some(source) => {
+                            wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await
+                        }
                         None => Ok(HashMap::new()),
                     }
                 })
@@ -458,6 +476,18 @@ impl Listing {
             });
         }
         self.mark_opened(path);
+    }
+
+    /// Shows how far scan `generation` has got, unless a later scan has started since.
+    pub(super) fn show_scan_progress(self, generation: u64, report: ScanProgress) {
+        if self.is_current_scan(generation) {
+            self.progress.set(Some(report));
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn scan_generation(self) -> u64 {
+        self.work.with_value(|work| work.scan_generation)
     }
 
     fn is_current_scan(self, generation: u64) -> bool {
