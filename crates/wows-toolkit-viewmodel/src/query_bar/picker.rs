@@ -5,6 +5,8 @@
 //! The bar draws these; deciding them here keeps the front ends' bars from disagreeing about what
 //! a query may be changed to.
 
+use std::ops::Range;
+
 use wows_toolkit_config::index::query_ast::Expr;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::MatchField;
@@ -19,7 +21,10 @@ use crate::query_bar::select::Selection;
 use crate::query_bar::suggest;
 use crate::query_bar::suggest::SuggestionKind;
 use crate::query_bar::suggest::TermField;
+use crate::query_bar::suggest::ValueOption;
+use crate::query_bar::suggest::ValueRequest;
 use crate::query_bar::tokens::NodePath;
+use crate::text_filter::FilterQuery;
 
 /// How many completions the dropdown offers at once. The egui bar shows the same number before
 /// it scrolls.
@@ -262,6 +267,8 @@ pub struct Completion {
     pub context: String,
     /// The query text this completion produces when taken.
     pub replacement: String,
+    /// Where the typed text matched `label`, as byte ranges.
+    pub marks: Vec<Range<usize>>,
 }
 
 /// The completions for the fragment the caret sits in, best first.
@@ -271,6 +278,7 @@ pub struct Completion {
 /// opens its dropdown on a fresh query.
 pub fn completions(query: &str) -> Vec<Completion> {
     let fragment = suggest::active_fragment(query);
+    let typed = FilterQuery::new(fragment);
     let all = suggest::static_suggestions();
     // The bar keeps no record of which operator a field was last given, so a field is offered with
     // the leading one it allows.
@@ -297,21 +305,36 @@ pub fn completions(query: &str) -> Vec<Completion> {
                 label: suggestion.label.clone(),
                 context: category_label(suggestion.context),
                 replacement: suggest::replace_active_fragment(query, &taken),
+                marks: label_marks(&typed, &suggestion.label),
             })
         })
         .collect()
 }
 
-/// The values the index answered for the caret's field, as completions of `text`.
-pub fn value_completions(text: &str, options: &[suggest::ValueOption]) -> Vec<Completion> {
+/// The values the index answered for `request`, the caret's field, as completions of `text`.
+pub fn value_completions(text: &str, request: Option<&ValueRequest>, options: &[ValueOption]) -> Vec<Completion> {
+    // A player or ship lookup is narrowed by the typed value; a catalogue is offered entire, so
+    // nothing in it is marked.
+    let typed = match request {
+        Some(ValueRequest::Players { needle } | ValueRequest::Ships { needle }) => FilterQuery::new(needle),
+        Some(ValueRequest::Sources | ValueRequest::Maps) | None => FilterQuery::default(),
+    };
+
     options
         .iter()
         .map(|option| Completion {
             label: option.label.clone(),
             context: "value".to_string(),
             replacement: suggest::replace_active_value(text, &option.token),
+            marks: label_marks(&typed, &option.label),
         })
         .collect()
+}
+
+/// Where `typed` matched `label`. A label it does not match, kept by a text other than the label,
+/// is left unmarked.
+fn label_marks(typed: &FilterQuery, label: &str) -> Vec<Range<usize>> {
+    typed.ranges(label).unwrap_or_default()
 }
 
 /// The breadcrumb text for a suggestion's category.
@@ -336,11 +359,14 @@ mod tests {
     use super::choices;
     use super::completions;
     use super::operator_choices;
+    use super::value_completions;
     use super::with_operator;
     use crate::query_bar::label::NameCache;
     use crate::query_bar::select;
     use crate::query_bar::select::Selection;
     use crate::query_bar::suggest;
+    use crate::query_bar::suggest::ValueOption;
+    use crate::query_bar::suggest::ValueRequest;
     use crate::query_bar::tokens;
 
     fn first_pill(expr: &wows_toolkit_config::index::query_ast::MatchExpr) -> Vec<usize> {
@@ -448,5 +474,33 @@ mod tests {
         assert_ne!(printed, query_text::print_query(&expr), "negating changes the query");
         let twice = apply_structural_edit(negated, &paths[1], StructuralEdit::Negate, &Selection::default());
         assert_eq!(query_text::print_query(&twice), query_text::print_query(&expr), "and negating again undoes it");
+    }
+
+    /// Each completion marks the letters of its label the fragment matched; an empty fragment
+    /// marks nothing.
+    #[test]
+    fn a_completion_marks_what_the_fragment_matched() {
+        let offered = completions("tier>5 dam");
+        assert!(!offered.is_empty(), "damage fields are offered");
+        for completion in &offered {
+            let marked: String = completion.marks.iter().map(|range| &completion.label[range.clone()]).collect();
+            assert_eq!(marked.to_lowercase(), "dam", "{}", completion.label);
+        }
+
+        assert!(completions("").iter().all(|completion| completion.marks.is_empty()));
+    }
+
+    /// A player value marks what its typed value matched, accents folded; a map catalogue is
+    /// offered entire and marks nothing.
+    #[test]
+    fn a_value_completion_marks_the_typed_value() {
+        let options = [ValueOption { label: "Sm\u{e5}land_fan".to_string(), token: "1234".to_string() }];
+
+        let players = ValueRequest::Players { needle: "smaland".to_string() };
+        let offered = value_completions("player:smaland", Some(&players), &options);
+        assert_eq!(offered[0].marks, std::iter::once(0..8).collect::<Vec<_>>());
+
+        let offered = value_completions("map:", Some(&ValueRequest::Maps), &options);
+        assert!(offered[0].marks.is_empty());
     }
 }

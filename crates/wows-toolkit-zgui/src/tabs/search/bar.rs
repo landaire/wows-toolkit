@@ -1,6 +1,7 @@
 //! The query bar: the committed query drawn as pills, the box the next term is typed in, and the
 //! completions or calendar hanging under it.
 
+use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
@@ -601,7 +602,11 @@ fn CompletionRows(search: Search) -> impl IntoView {
                         a11y:label = completion.label.clone(),
                         on:click = move |_| search.take_completion(replacement.clone(), Offer::WhatFollows)
                     ) {
-                        text(class = "wt-search-completion__label") {{completion.label}}
+                        MarkedText(
+                            class = "wt-search-completion__label",
+                            text = completion.label,
+                            ranges = completion.marks.into()
+                        )
                         text(class = "wt-search-completion__context") {{completion.context}}
                     }
                 })

@@ -13,7 +13,6 @@ use crate::formatting::separate_number;
 use crate::name_lookup::PlayerLookup;
 use crate::name_lookup::ShipLookup;
 use crate::query_bar::suggest::ValueOption;
-use crate::query_bar::suggest::ValueRequest;
 use crate::text_filter::FilterQuery;
 
 /// Results asked for per run, rather than pulling an unbounded set into memory.
@@ -175,25 +174,6 @@ pub async fn look_up_sources(pool: &sqlx::SqlitePool) -> Vec<ValueOption> {
             .collect(),
         Err(err) => {
             tracing::warn!("search: the source lookup failed: {err}");
-            Vec::new()
-        }
-    }
-}
-
-/// The values `request` asks the index for, reading a player or ship field's names afresh. A
-/// failed lookup offers nothing and is logged: the bar still works without completions.
-pub async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<ValueOption> {
-    let (list, needle) = match request {
-        ValueRequest::Players { needle } => (NameList::Players, needle),
-        ValueRequest::Ships { needle } => (NameList::Ships, needle),
-        ValueRequest::Maps => return look_up_maps(pool).await,
-        ValueRequest::Sources => return look_up_sources(pool).await,
-    };
-
-    match list.load(pool).await {
-        Ok(names) => names.options(needle),
-        Err(err) => {
-            tracing::warn!(?list, "search: the name lookup failed: {err}");
             Vec::new()
         }
     }

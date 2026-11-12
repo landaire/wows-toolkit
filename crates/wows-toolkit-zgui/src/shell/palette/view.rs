@@ -77,11 +77,11 @@ use crate::shell::palette::ModeRow;
 use crate::shell::palette::ModeRows;
 use crate::shell::palette::ModeSource;
 use crate::shell::palette::ModeSpec;
-use crate::shell::palette::Marks;
 use crate::shell::palette::Opening;
 use crate::shell::palette::RootRow;
 use crate::shell::palette::builtin;
 use crate::shell::palette::mode_name;
+use crate::text_marks::Marks;
 
 const SHEET: &str = "wt-palette";
 

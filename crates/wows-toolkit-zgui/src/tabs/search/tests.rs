@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
+use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use wows_toolkit_config::index::query::SortColumn;
@@ -191,6 +192,19 @@ fn a_completion_is_taken_with_the_keyboard() {
     window.press_key(NamedKey::Escape, Modifiers::NONE);
     settle(&mut window);
     assert!(!search.completions_open.get_untracked(), "Escape closes the dropdown");
+}
+
+/// Each completion row marks the letters of its label the typed fragment matched.
+#[test]
+fn a_completion_marks_what_was_typed() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    click(&mut window, "search-query");
+    window.type_text("dam");
+    settle(&mut window);
+
+    let marked = window.texts_by_class(MARK_CLASS);
+    assert!(!marked.is_empty(), "the damage fields are marked");
+    assert!(marked.iter().any(|piece| piece.eq_ignore_ascii_case("dam")), "a run is marked whole: {marked:?}");
 }
 
 /// The palette's "Games I won" puts its query in the bar and shows the tab.

@@ -45,8 +45,8 @@ use crate::shell::palette::PaletteRun;
 use crate::shell::palette::ShipParamIndex;
 use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
-use crate::shell::palette::marks;
-use crate::shell::palette::marks_within;
+use crate::text_marks::marks;
+use crate::text_marks::marks_within;
 
 /// Players the replay index has seen whose name matches the query, best first, each leading to
 /// the battles they were in.
@@ -81,7 +81,9 @@ fn index_mode(services: Services, list: IndexList) -> ModeSpec {
             };
             let query = FilterQuery::new(&needle);
 
-            ModeRows::Ready(palette::seeded_searches(&lookup, &query).into_iter().map(|found| seeded_row(found, &query)).collect())
+            ModeRows::Ready(
+                palette::seeded_searches(&lookup, &query).into_iter().map(|found| seeded_row(found, &query)).collect(),
+            )
         })
     };
     let forget = move || drop(read.borrow_mut().take());
