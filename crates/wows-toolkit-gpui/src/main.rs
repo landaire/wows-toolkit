@@ -12,7 +12,6 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 mod app;
 mod armor_viewer;
 mod cap_layout_store;
-mod child_process;
 mod cli;
 mod collab;
 mod collab_popover;
@@ -28,7 +27,6 @@ mod icons;
 mod interaction_tests;
 mod launcher;
 mod loading;
-mod logging;
 mod minimap_preview;
 mod motion;
 mod notices;
@@ -48,12 +46,10 @@ mod side_split;
 mod slider_field;
 mod stats;
 mod status_bar;
-mod supervision;
 mod tactics;
 mod text_filter;
 mod theme;
 mod toast;
-mod twitch;
 mod ui;
 mod unpacker;
 mod update;
@@ -86,7 +82,7 @@ fn main() {
     // deletable once the process that spawned this one has exited, and it has.
     let invocation = cli::parse();
     if let cli::Invocation::FinalizeUpdate(replaced) = &invocation {
-        update::finalize(replaced);
+        wows_toolkit_services::update::finalize(replaced);
     }
     if let cli::Invocation::ListGpus = &invocation {
         let title = format!("{} display adapters", wows_toolkit_config::APP_NAME);
@@ -119,8 +115,8 @@ fn main() {
         wows_toolkit_config::load_startup_setting::<bool>(wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING)
             .unwrap_or(None)
             .unwrap_or(true);
-    let _log_guard = logging::init(to_file);
-    logging::install_panic_hook();
+    let _log_guard = wows_toolkit_services::logging::init(to_file, "wows_toolkit_gpui");
+    wows_toolkit_services::logging::install_panic_hook();
 
     // Before any window exists, which is the only moment these are worth
     // applying: extension points attach as a window is created and overlays hook

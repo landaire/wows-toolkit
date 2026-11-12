@@ -12,9 +12,11 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// The crates whose events are kept, at the levels the egui app keeps them.
-fn targets() -> tracing_subscriber::filter::Targets {
+/// `front_end` is the crate name of the running front end, whose own events
+/// are kept at debug.
+fn targets(front_end: &'static str) -> tracing_subscriber::filter::Targets {
     tracing_subscriber::filter::Targets::new()
-        .with_target("wows_toolkit_gpui", tracing::Level::DEBUG)
+        .with_target(front_end, tracing::Level::DEBUG)
         .with_target("wows_replay_insights", tracing::Level::DEBUG)
         .with_target("wows_replays", tracing::Level::INFO)
         .with_target(wows_data_mgr::LOG_TARGET, tracing::Level::INFO)
@@ -34,7 +36,8 @@ pub fn log_dir() -> PathBuf {
 /// The returned guard flushes the file on drop and has to be held for the life of
 /// the process; without it the last events written are lost. `RUST_LOG` still
 /// overrides what reaches stderr, which is how a session is asked for more.
-pub fn init(to_file: bool) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+/// `front_end` is the running front end's crate name (see [`targets`]).
+pub fn init(to_file: bool, front_end: &'static str) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -68,7 +71,7 @@ pub fn init(to_file: bool) -> Option<tracing_appender::non_blocking::WorkerGuard
             .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
             .with_ansi(false)
             .with_target(true)
-            .with_filter(targets())
+            .with_filter(targets(front_end))
     }));
     let _ = tracing::subscriber::set_global_default(subscriber);
 

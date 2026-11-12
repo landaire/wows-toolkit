@@ -72,6 +72,9 @@ use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_replay_data::replay_index::SourceScope;
+use wows_toolkit_services::supervision::NextStep;
+use wows_toolkit_services::supervision::PanicReport;
+use wows_toolkit_services::supervision::RestartPolicy;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
@@ -87,9 +90,6 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_map_name;
 
 use crate::preview_hover::PreviewHover;
-use crate::supervision::NextStep;
-use crate::supervision::PanicReport;
-use crate::supervision::RestartPolicy;
 
 use super::map_thumbnails::MapSpace;
 use super::map_thumbnails::MapThumbnails;
@@ -180,7 +180,7 @@ pub(crate) fn copy_replay_files(paths: &[PathBuf], window: &mut Window, cx: &mut
 /// so rather than leaving the reader waiting for a window.
 fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &mut App) {
     let opened = wows_toolkit_launcher::open_replay_in_game(Path::new(wows_dir), replay.to_path_buf(), |command| {
-        crate::child_process::prepare(command);
+        wows_toolkit_services::child_process::prepare(command);
     });
     if let Err(err) = opened {
         tracing::warn!("replay browser: the game in {wows_dir} could not be launched: {err}");
@@ -212,7 +212,7 @@ pub(crate) fn reveal_in_file_manager(path: &std::path::Path) {
         command
     };
 
-    if let Err(err) = crate::child_process::prepare(&mut command).spawn() {
+    if let Err(err) = wows_toolkit_services::child_process::prepare(&mut command).spawn() {
         tracing::warn!("replay listing: {} could not be shown in the file manager: {err}", path.display());
     }
 }

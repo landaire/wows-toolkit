@@ -306,7 +306,7 @@ enum UpdateStatus {
 }
 
 /// How far the download has got, in the reader's own terms.
-fn describe_download(step: crate::update::Downloaded) -> String {
+fn describe_download(step: wows_toolkit_services::update::Downloaded) -> String {
     let read = humansize::format_size(step.read, humansize::BINARY);
     match step.total {
         Some(total) => {
@@ -1229,7 +1229,7 @@ impl App {
     /// button and a link to file an issue; this reports it and puts it on the
     /// clipboard, which is what a reader does with it next.
     pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(report) = crate::logging::take_crash_report() else { return };
+        let Some(report) = wows_toolkit_services::logging::take_crash_report() else { return };
         self.show_crash_report(report, window, cx);
     }
 
@@ -1297,7 +1297,7 @@ impl App {
 
     /// Puts the newest log file on the clipboard, for a bug report.
     pub(crate) fn copy_latest_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = crate::logging::newest_log() else {
+        let Some(path) = wows_toolkit_services::logging::newest_log() else {
             crate::toast::warn(t!("ui.messages.log_not_found").into_owned(), window, cx);
             return;
         };
@@ -1914,7 +1914,11 @@ impl App {
         cx.notify();
 
         self._twitch_poll = Some(cx.spawn(async move |this, cx| {
-            let client = match crate::http::client(&proxy, reqwest::redirect::Policy::default()) {
+            let client = match wows_toolkit_services::http::client(
+                crate::http::USER_AGENT,
+                &proxy,
+                reqwest::redirect::Policy::default(),
+            ) {
                 Ok(client) => client,
                 Err(err) => {
                     tracing::warn!("twitch: no client to poll with: {err}");
@@ -1924,7 +1928,7 @@ impl App {
 
             let session = match crate::runtime::spawn(cx, {
                 let client = client.clone();
-                async move { crate::twitch::Session::open(&token, &channel, client).await }
+                async move { wows_toolkit_services::twitch::Session::open(&token, &channel, client).await }
             })
             .await
             {
@@ -1963,7 +1967,7 @@ impl App {
                     Err(err) => tracing::warn!("twitch: a chat poll did not complete: {err}"),
                 }
 
-                cx.background_executor().timer(crate::twitch::poll_interval()).await;
+                cx.background_executor().timer(wows_toolkit_services::twitch::poll_interval()).await;
             }
         }));
     }
@@ -3273,7 +3277,7 @@ fn open_directory(dir: &std::path::Path) {
 
     let mut command = std::process::Command::new(opener);
     command.arg(dir);
-    if let Err(err) = crate::child_process::prepare(&mut command).spawn() {
+    if let Err(err) = wows_toolkit_services::child_process::prepare(&mut command).spawn() {
         tracing::warn!("settings: {} could not be opened: {err}", dir.display());
     }
 }

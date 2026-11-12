@@ -12,7 +12,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 #[derive(Debug, thiserror::Error)]
 pub enum RefreshError {
     #[error(transparent)]
-    Client(#[from] crate::http::HttpError),
+    Client(#[from] wows_toolkit_services::http::HttpError),
     #[error("the expected values could not be fetched")]
     Request(#[source] reqwest::Error),
     #[error("the expected values were rejected")]
@@ -21,7 +21,8 @@ pub enum RefreshError {
 
 /// Fetches the published expected values.
 async fn fetch(proxy_url: &str) -> Result<Vec<u8>, RefreshError> {
-    let client = crate::http::client(proxy_url, reqwest::redirect::Policy::default())?;
+    let client =
+        wows_toolkit_services::http::client(crate::http::USER_AGENT, proxy_url, reqwest::redirect::Policy::default())?;
 
     let response = client
         .get(personal_rating::EXPECTED_VALUES_URL)

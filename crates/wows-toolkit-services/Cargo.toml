@@ -1,0 +1,38 @@
+[package]
+name = "wows-toolkit-services"
+description = "Network, runtime, logging and update services shared by the desktop front ends"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_services"
+path = "src/lib.rs"
+
+[dependencies]
+# The update download reports its progress over a channel.
+futures = "0.3"
+jiff = { workspace = true }
+# Matches the egui app's feature set so both resolve one copy.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+rootcause = { workspace = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+# The update is staged beside the running executable.
+tempfile = "3"
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util"] }
+tracing = { workspace = true }
+# The rotated log file a bug report is copied from.
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time"] }
+# The chat poll behind the roster's possible-stream-sniper chip. Same version
+# and features as the egui app, so the two resolve one Twitch client.
+twitch_api = { version = "0.7.2", features = ["helix", "client", "reqwest"] }
+wows-data-mgr = { workspace = true }
+wows-toolkit-config = { workspace = true }
+wows-toolkit-hardening = { workspace = true }
+wows-toolkit-viewmodel = { workspace = true }
+# The release archive the update is read out of.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
