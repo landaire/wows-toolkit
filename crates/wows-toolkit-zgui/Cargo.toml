@@ -1,0 +1,70 @@
+[package]
+name = "wows-toolkit-zgui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# The window, the reactive graph, the components and their tokens.
+zgui = { workspace = true }
+zgui-ui = { workspace = true }
+zgui-ui-icons = { workspace = true }
+zgui-ui-tokens = { workspace = true }
+# Palettes, the theme root and the window chrome shared with other zgui front ends.
+landaire-ui = { workspace = true }
+# The icon set, shared with the other desktop front end.
+wows-toolkit-icons = { workspace = true }
+# Framework-neutral toolkit logic, game-data loading and the services both desktop front ends run.
+wows-toolkit-config = { workspace = true }
+wows-toolkit-viewmodel = { workspace = true }
+wows-toolkit-replay-data = { workspace = true }
+wows-toolkit-services = { workspace = true }
+# The Launcher tab's state and background work, and the launcher crates whose types it shows.
+wows-toolkit-launcher = { workspace = true }
+wgc-auth = { workspace = true }
+wgc-catalog = { workspace = true }
+wgc-download = { workspace = true }
+wgc-install = { workspace = true }
+# The process mitigations, applied before a window exists.
+wows-toolkit-hardening = { workspace = true }
+# `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
+rust-i18n = { workspace = true }
+wt-translations = { workspace = true }
+# `--help`, `--version`, and a refusal for an argument this build does not take.
+clap = { workspace = true }
+# Only to install the process-wide crypto provider at startup; see `main`.
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+futures = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+humansize = "2.1.3"
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# A release build has no console, so `--help`, `--version` and a refused argument are written to
+# the parent's console or shown in a message box.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+
+# The executable's icon, which is what Windows shows on the window, in the taskbar and in Explorer.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.31"
+
+# `wows_buck_build` is set by the Buck build, which compiles the Windows resources with its own
+# pinned rc.exe instead of the build script's.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wows_buck_build)'] }
+
+[dev-dependencies]
+# Opening the shell headlessly, driving it, and writing what it shows to a PNG.
+landaire-ui = { workspace = true, features = ["test-support"] }
+# Lets the tests point `storage_dir` at a temporary directory, so no test reads or writes the
+# running user's own data.
+wows-toolkit-config = { workspace = true, features = ["test-support"] }
+# File dialogs are recorded and answered as dismissed instead of opened.
+wows-toolkit-services = { workspace = true, features = ["test-support"] }
+tempfile = "3"

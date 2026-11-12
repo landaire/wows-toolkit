@@ -1,0 +1,81 @@
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "zgui_build",
+    crate = "wows_toolkit_zgui",
+    package = "wows-toolkit-zgui",
+    version = "1.0.5",
+    rustc_flags = ["--cfg=wows_buck_build"],
+)
+
+ZGUI_DEPS = [
+    "//crates/landaire-ui:landaire_ui",
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-catalog:wgc-catalog",
+    "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wows-toolkit-icons:wows_toolkit_icons",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
+    "//crates/wows-toolkit-services:wows_toolkit_services",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:clap",
+    "//third-party/rust:futures",
+    "//third-party/rust:humansize",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:rustls",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+    "//third-party/rust:windows-sys",
+    "//third-party/rust:zgui",
+    "//third-party/rust:zgui-ui",
+    "//third-party/rust:zgui-ui-icons",
+    "//third-party/rust:zgui-ui-tokens",
+]
+
+# Not wows_toolkit_zgui_bin: the target name is a path component of every object file a release
+# build writes, and the longest of those already sits near the 260 link.exe accepts.
+workspace_binary(
+    name = "zgui_bin",
+    crate = "wows_toolkit_zgui",
+    package = "wows-toolkit-zgui",
+    version = "1.0.5",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    deps = ZGUI_DEPS,
+    rustc_flags = os_select(
+        macos = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
+        windows = ["-Clink-arg=$(location toolchains//windows:app_resource)"],
+    ),
+)
+
+_TEST_SUPPORT_VARIANTS = {
+    "//crates/landaire-ui:landaire_ui": "//crates/landaire-ui:landaire_ui_test_support",
+    "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
+}
+
+workspace_test(
+    name = "zgui_test",
+    crate = "wows_toolkit_zgui",
+    package = "wows-toolkit-zgui",
+    version = "1.0.5",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
+    # headlessly.
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS],
+    test_deps = ["//third-party/rust:tempfile"],
+    incoming_transition = "//build-support/buck/test-support:transition",
+    # Each test opens a window. One thread per core wedges the run on a machine with many of them.
+    run_env = {"RUST_TEST_THREADS": "4"},
+)
