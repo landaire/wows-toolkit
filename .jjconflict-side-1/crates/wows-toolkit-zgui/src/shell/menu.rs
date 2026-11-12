@@ -44,6 +44,13 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
                 Icon(icon = ELLIPSIS)
             }
             DropdownMenuContent {
+                MenuItem(
+                    on_select = UnsyncCallback::new(move |()| shell.tactics.open()),
+                    attr:data-testid = "app-menu-tactics-board"
+                ) {
+                    {locale.text("ui.windows.tactics_board")}
+                }
+                MenuSeparator()
                 MenuItem(on_select = item(|services, shell| update::check_for_update(services, shell, Asked::ByHand))) {
                     {locale.text("ui.menu.check_updates")}
                 }

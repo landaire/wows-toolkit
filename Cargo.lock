@@ -16675,6 +16675,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "unidecode",
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
@@ -16684,6 +16685,7 @@ dependencies = [
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-client",
  "wt-translations",
 ]
 
