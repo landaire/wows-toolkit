@@ -418,9 +418,10 @@ pub fn apply_egui_theme(choice: ThemeChoice, zoom: ZoomFactor, window: &mut Wind
     theme.group_box = rgb(palette.card).into();
     theme.group_box_foreground = rgb(palette.text).into();
 
-    // Selection and hover use separate tones so a keyboard cursor remains
-    // distinct from the pointer.
-    theme.selection = rgb(palette.selection).into();
+    theme.selection = rgb(text_selection(palette)).into();
+
+    // A selected row and the hover use separate tones so a keyboard cursor
+    // remains distinct from the pointer.
     theme.accent = rgb(palette.widget_hot).into();
     theme.accent_foreground = rgb(palette.text_bright).into();
     theme.colors.list = rgb(palette.panel).into();
@@ -550,6 +551,35 @@ fn pressed(hot: Hsla) -> Hsla {
     const STEP: f32 = 0.035;
 
     Hsla { l: (hot.l - STEP).max(0.), ..hot }
+}
+
+/// The kit's text selection, in inputs and selectable text: a blue, as far off
+/// the panel as the text on it allows. Normal text keeps the contrast floor
+/// and dim text `DIM_FLOOR`, since both are selected. The hue tells a
+/// selection apart from the grey row tones and the yellow match mark where a
+/// palette leaves little room in lightness.
+fn text_selection(palette: &Palette) -> u32 {
+    const HUE: f32 = 210. / 360.;
+    const SATURATION: f32 = 0.8;
+    const DIM_FLOOR: f32 = 3.;
+    const STEPS: u16 = 200;
+
+    // Lighter than the panel on a dark palette, darker on a light one: the
+    // side the text is on, as a selected row's tone is.
+    let toward_text = |candidate: u32| {
+        let lighter = relative_luminance(candidate) > relative_luminance(palette.panel);
+        lighter == palette.mode.is_dark()
+    };
+    let text_reads = |candidate: u32| {
+        contrast_ratio(palette.text, candidate) >= CONTRAST_FLOOR
+            && contrast_ratio(palette.text_dim, candidate) >= DIM_FLOOR
+    };
+
+    (0..=STEPS)
+        .map(|step| pack(hsla(HUE, SATURATION, f32::from(step) / f32::from(STEPS), 1.)))
+        .filter(|candidate| toward_text(*candidate) && text_reads(*candidate))
+        .max_by(|a, b| contrast_ratio(*a, palette.panel).total_cmp(&contrast_ratio(*b, palette.panel)))
+        .expect("every palette has a blue next to its panel that its text reads on; each is tested")
 }
 
 fn palette_for(choice: ThemeChoice, system_dark: bool) -> &'static Palette {
@@ -762,5 +792,90 @@ mod tests {
         );
 
         assert_eq!(super::readable_on(pale_green, &[DARK.panel, DARK.faint]), pale_green, "already readable");
+    }
+
+    /// Text and dim text read on the selection, and no blue further off the
+    /// panel keeps them reading. The default palettes reach 1.6:1, and every
+    /// selection is a colour apart from the row tones and the match mark.
+    #[test]
+    fn the_text_selection_is_the_furthest_blue_its_text_reads_on() {
+        const SEEN: f32 = 1.6;
+        const DIM_FLOOR: f32 = 3.;
+        const FURTHER: f32 = 0.02;
+        // `crate::text_filter::match_mark` lays the notice tone over the
+        // panel at this opacity.
+        const MATCH_MARK_OPACITY: f32 = 0.3;
+        // A CIE76 difference at which two fills are told apart at a glance.
+        const APART: f32 = 12.;
+
+        for choice in ThemeChoice::ALL {
+            for system_dark in [true, false] {
+                let palette = super::palette_for(choice, system_dark);
+                let selection = super::text_selection(palette);
+                let reads = |ground: u32| {
+                    super::contrast_ratio(palette.text, ground) >= super::CONTRAST_FLOOR
+                        && super::contrast_ratio(palette.text_dim, ground) >= DIM_FLOOR
+                };
+                let text = super::contrast_ratio(palette.text, selection);
+                let dim = super::contrast_ratio(palette.text_dim, selection);
+                assert!(reads(selection), "{choice:?}: on {selection:#08x} text is {text:.2}:1 and dim {dim:.2}:1");
+
+                let blue = gpui_kit::Hsla::from(gpui_kit::rgb(selection));
+                assert!((blue.h * 360. - 210.).abs() < 3., "{choice:?}: {selection:#08x} is not the selection blue");
+                let step = if palette.mode.is_dark() { FURTHER } else { -FURTHER };
+                let further = super::pack(gpui_kit::Hsla { l: blue.l + step, ..blue });
+                assert!(!reads(further), "{choice:?}: {further:#08x} stands further off the panel and still reads");
+
+                let semantic = super::semantic_for(palette.mode.is_dark());
+                let mark = mix(semantic.notice, palette.panel, MATCH_MARK_OPACITY);
+                for (name, fill) in
+                    [("hover", palette.widget_hot), ("selected row", palette.selection), ("match mark", mark)]
+                {
+                    let apart = delta_e(selection, fill);
+                    assert!(apart >= APART, "{choice:?}: {selection:#08x} is {apart:.1} from the {name} {fill:#08x}");
+                }
+            }
+        }
+
+        for palette in [&DARK, &LIGHT] {
+            let selection = super::text_selection(palette);
+            let seen = super::contrast_ratio(selection, palette.panel);
+            assert!(seen >= SEEN, "{selection:#08x} stands only {seen:.2}:1 off the panel {:#08x}", palette.panel);
+        }
+    }
+
+    /// `top` laid over `ground` at `amount` opacity, both `0xRRGGBB`.
+    fn mix(top: u32, ground: u32, amount: f32) -> u32 {
+        let channel = |shift: u32| {
+            let top = ((top >> shift) & 0xff) as f32;
+            let ground = ((ground >> shift) & 0xff) as f32;
+            ((top * amount + ground * (1. - amount)).round() as u32) << shift
+        };
+
+        channel(16) | channel(8) | channel(0)
+    }
+
+    /// CIE76 difference between two `0xRRGGBB` colours.
+    fn delta_e(a: u32, b: u32) -> f32 {
+        let (a, b) = (lab(a), lab(b));
+
+        a.iter().zip(b).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
+    }
+
+    /// An sRGB colour in CIELAB, white point D65.
+    fn lab(color: u32) -> [f32; 3] {
+        let linear = |shift: u32| {
+            let channel = ((color >> shift) & 0xff) as f32 / 255.;
+            if channel <= 0.04045 { channel / 12.92 } else { ((channel + 0.055) / 1.055).powf(2.4) }
+        };
+        let (r, g, b) = (linear(16), linear(8), linear(0));
+
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+        let f = |t: f32| if t > 216. / 24389. { t.cbrt() } else { (24389. / 27. * t + 16.) / 116. };
+        let (fx, fy, fz) = (f(x), f(y), f(z));
+
+        [116. * fy - 16., 500. * (fx - fy), 200. * (fy - fz)]
     }
 }

@@ -3021,9 +3021,9 @@ impl Render for PlayerTable {
             let row = &table.model.rows[ix];
             let selected = table.selected == Some(db_id);
             // What the row is painted with, so a cut-off detail and the
-            // detail's well match it: the stripe or the selection.
+            // detail's well match it: the stripe or the selected-row tone.
             let fade_to = if selected {
-                cx.theme().selection
+                cx.theme().table_active
             } else {
                 crate::ui::stripe(ix, cx).unwrap_or(cx.theme().background)
             };
