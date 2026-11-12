@@ -241,3 +241,73 @@ fn JobLine(job: Signal<Option<Job>, LocalStorage>) -> impl IntoView {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use landaire_ui::PanelSide;
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::HeadlessWindow;
+    use landaire_ui::test_support::WindowSize;
+    use wows_toolkit_viewmodel::settings::ThemeChoice;
+    use zgui::component;
+    use zgui::reactive::LocalStorage;
+    use zgui::reactive::RwSignal;
+    use zgui::reactive::prelude::Get;
+    use zgui::reactive::prelude::Set;
+    use zgui::view;
+    use zgui::view::IntoView;
+    use zgui::view::ShowProps;
+
+    use super::ShellStatusBarProps;
+    use crate::shell::Shell;
+    use crate::shell::ShellHarnessProps;
+    use crate::shell::tabs::AppTab;
+    use crate::shell::tabs::PanelToggle;
+    use crate::shell::tabs::TabKey;
+
+    /// A tab page that puts one toggle in the status bar as it is built.
+    #[component]
+    fn TogglingPage(shell: Shell) -> impl IntoView {
+        let chrome = shell.chrome_of(TabKey::App(AppTab::Stats));
+        chrome.set_toggles(vec![PanelToggle {
+            test_id: "first-visit-toggle",
+            name: "Panel".to_string(),
+            side: PanelSide::Left,
+            open: RwSignal::new_local(false),
+        }]);
+        view! { box() }
+    }
+
+    /// The selected tab, then its page built after the status bar read it.
+    #[component]
+    fn FirstVisit(built: RwSignal<bool, LocalStorage>) -> impl IntoView {
+        let shell = Shell::current();
+        shell.select(TabKey::App(AppTab::Stats));
+        view! {
+            column {
+                if move || built.get() {
+                    TogglingPage(shell = shell)
+                } else {}
+                ShellStatusBar(shell = shell)
+            }
+        }
+    }
+
+    #[test]
+    fn a_tabs_toggles_show_on_its_first_visit() {
+        let built = RwSignal::new_local(false);
+        let mut window =
+            HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 800.0, height: 200.0 }), move || {
+                view! { ShellHarness(theme = ThemeChoice::Dark) { FirstVisit(built = built) } }
+            })
+            .expect("the status bar opens headlessly");
+        window.advance(Duration::from_millis(100));
+        assert!(window.by_test_id("first-visit-toggle").is_none());
+
+        built.set(true);
+        window.advance(Duration::from_millis(300));
+        assert!(window.by_test_id("first-visit-toggle").is_some(), "the first build's toggle is shown");
+    }
+}
