@@ -1639,7 +1639,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
     // 3. If we have a visual, use the full export pipeline.
     if let (Some(vp), Some(db), Some(vfs)) = (&resolved_visual, &db, vfs) {
         if list_textures {
-            let mfm_infos = collect_mfm_info(vp, db);
+            let mfm_infos = collect_mfm_info(vp, db, &db.build_self_id_index());
             let stems: Vec<String> = mfm_infos.iter().map(|i| i.stem.clone()).collect();
             let schemes = texture::discover_texture_schemes(vfs, &stems, &HashSet::new());
             if schemes.is_empty() {
@@ -1656,7 +1656,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
         let texture_set = if no_textures {
             gltf_export::TextureSet::empty()
         } else {
-            let mfm_infos = collect_mfm_info(vp, db);
+            let mfm_infos = collect_mfm_info(vp, db, &db.build_self_id_index());
             build_texture_set(&mfm_infos, vfs, texture_lod)
         };
 

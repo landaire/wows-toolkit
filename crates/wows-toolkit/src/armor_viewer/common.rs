@@ -310,12 +310,10 @@ pub(crate) fn load_ship_armor(
     // material opaque, so the underwater hull shows its stock skin and camos composite over it.
     let mut hull_textures = std::collections::HashMap::new();
     for (mfm, albedo) in ctx.hull_base_albedos(&hull_meshes) {
-        if let Ok(img) = image::load_from_memory(&albedo.png) {
-            let mut rgba = img.to_rgba8();
-            AlphaMode::Opaque.apply(&mut rgba);
-            let (w, h) = (rgba.width(), rgba.height());
-            hull_textures.insert(mfm, (w, h, rgba.into_raw()));
-        }
+        let mut rgba = albedo.image;
+        AlphaMode::Opaque.apply(&mut rgba);
+        let (w, h) = (rgba.width(), rgba.height());
+        hull_textures.insert(mfm, (w, h, rgba.into_raw()));
     }
 
     let hull_lod_count = ctx.hull_lod_count();

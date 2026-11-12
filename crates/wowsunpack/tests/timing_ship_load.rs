@@ -99,11 +99,11 @@ fn time_camo_decode() {
     let albedos = ctx.hull_base_albedos(&hull_meshes);
     eprintln!("[hull_base_albedos] {:?} ({} textures)", t.elapsed(), albedos.len());
 
-    let stock_by_stem: std::collections::HashMap<String, &Vec<u8>> = albedos
+    let stock_by_stem: std::collections::HashMap<String, _> = albedos
         .iter()
         .filter_map(|(path, albedo)| {
             let stem = path.rsplit('/').next()?.strip_suffix(".mfm")?;
-            Some((stem.to_string(), &albedo.png))
+            Some((stem.to_string(), &albedo.image))
         })
         .collect();
 
@@ -118,13 +118,10 @@ fn time_camo_decode() {
         let (cw, ch) = (camo_img.width(), camo_img.height());
         let has_coverage = camo_img.pixels().any(|p| p.0[3] < 250);
 
-        let Some(stock_png) = stock_by_stem.get(stem) else {
+        let Some(stock_img) = stock_by_stem.get(stem) else {
             eprintln!("  {stem} {cw}x{ch} coverage={has_coverage} (no stock albedo)");
             continue;
         };
-        let t = Instant::now();
-        let stock_img = image::load_from_memory(stock_png).expect("stock png decode").to_rgba8();
-        png_decode_total += t.elapsed();
 
         if !has_coverage {
             passthrough += 1;
@@ -237,11 +234,11 @@ fn verify_legacy_camo_alpha_and_blend() {
 
     let hull_meshes = ctx.interactive_hull_meshes().expect("hull meshes");
     let albedos = ctx.hull_base_albedos(&hull_meshes);
-    let stock_by_stem: std::collections::HashMap<String, &Vec<u8>> = albedos
+    let stock_by_stem: std::collections::HashMap<String, _> = albedos
         .iter()
         .filter_map(|(path, albedo)| {
             let stem = path.rsplit('/').next()?.strip_suffix(".mfm")?;
-            Some((stem.to_string(), &albedo.png))
+            Some((stem.to_string(), &albedo.image))
         })
         .collect();
 
@@ -302,11 +299,10 @@ fn verify_legacy_camo_alpha_and_blend() {
             }
             continuous_found = true;
 
-            let Some(stock_png) = stock_by_stem.get(stem.as_str()) else {
+            let Some(stock_img) = stock_by_stem.get(stem.as_str()) else {
                 eprintln!("    (no stock albedo for stem {stem}; skipping blend comparison)");
                 continue;
             };
-            let stock_img = image::load_from_memory(stock_png).expect("stock png decode").to_rgba8();
             let (sw, sh) = (stock_img.width(), stock_img.height());
             let stock_raw = stock_img.as_raw();
             let raw = img.as_raw();

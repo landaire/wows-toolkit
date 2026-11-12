@@ -36,7 +36,7 @@ use crate::viewport::types::Vertex;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::transform_normal;
 
-/// Hull-mesh vertex-color brightness boost for baked colors; the lighting
+/// Hull-mesh brightness boost for a mesh with no texture; the lighting
 /// shader multiplies this base by `(flat + key*halfLambert)`. Matches the
 /// egui original's `hull_brightness` constant (`tab.rs:1374`).
 const HULL_BRIGHTNESS: f32 = 2.0;
@@ -219,7 +219,6 @@ pub fn upload_hull_meshes(
         let layer = if blended { LAYER_HULL } else { hull_layer };
         let fallback_color: [f32; 4] =
             [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
-        let has_baked_colors = mesh.colors.len() == mesh.positions.len();
 
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
         for i in 0..mesh.positions.len() {
@@ -241,14 +240,7 @@ pub fn upload_hull_meshes(
                 [0.0, 0.0]
             };
 
-            let color = if has_texture {
-                [brightness, brightness, brightness, hull_alpha]
-            } else if has_baked_colors {
-                let c = mesh.colors[i];
-                [c[0] * HULL_BRIGHTNESS, c[1] * HULL_BRIGHTNESS, c[2] * HULL_BRIGHTNESS, hull_alpha]
-            } else {
-                fallback_color
-            };
+            let color = if has_texture { [brightness, brightness, brightness, hull_alpha] } else { fallback_color };
             vertices.push(Vertex { position: pos, normal: norm, color, uv });
         }
 

@@ -666,7 +666,6 @@ pub(crate) mod fixtures {
             indices: vec![0, 1, 2],
             mfm_path: None,
             mfm_path_id: 0,
-            colors: Vec::new(),
             transform: None,
             group: PartGroup::MainBattery,
             part: None,

@@ -52,6 +52,7 @@ use super::camouflage;
 use super::camouflage::CamouflageDb;
 use super::camouflage::UvTransform;
 use super::gltf_export;
+use super::gltf_export::BarrelPitch;
 use super::gltf_export::HardpointSet;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
@@ -474,6 +475,7 @@ impl ShipAssets {
     ) -> Result<ShipModelContext, Report> {
         let db = self.db()?;
         let self_id_index = db.build_self_id_index();
+        let model_leaves = ModelLeaves::new(&db);
 
         // Find all .visual files in the model directory.
         let visual_paths = self.find_visual_paths(&db, &self_id_index, &info.model_dir);
@@ -482,21 +484,20 @@ impl ShipAssets {
         }
 
         // Load hull sub-models.
-        let hull_parts = self.load_sub_models(&db, &self_id_index, &visual_paths)?;
+        let hull_parts = self.load_sub_models(&db, &self_id_index, &model_leaves, &visual_paths)?;
 
         // Load turret/mount models from GameParams.
         let mount_points: Vec<MountPoint> = vehicle
             .and_then(|v| select_hull_mount_points(v, options.hull.as_deref(), &options.module_overrides))
             .unwrap_or_default();
 
-        let loaded = self.load_mounts(&db, &self_id_index, &mount_points, &hull_parts)?;
+        let loaded = self.load_mounts(&db, &self_id_index, &model_leaves, &mount_points, &hull_parts)?;
         let turret_models = loaded.turret_models;
         let mounts = loaded.mounts;
 
         // Load misc parts (propellers, boats, deck fittings) from the skeleton extenders
         // the hull section and mount models name and the hull component adds, and place
         // them at their `MP_` nodes.
-        let model_leaves = ModelLeaves::new(&db);
         let upgrade = vehicle.and_then(|v| select_hull_upgrade(v, options.hull.as_deref()));
         let hull =
             HullSections::new(&hull_parts, &visual_paths, &db, &self_id_index, &model_leaves, &info.model_dir, upgrade);
@@ -803,13 +804,14 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        leaves: &ModelLeaves<'_>,
         visual_paths: &[(String, String)],
     ) -> Result<Vec<OwnedSubModel>, Report> {
         let mut result = Vec::new();
 
         for (sub_name, _) in visual_paths {
             let visual_suffix = format!("{sub_name}.visual");
-            let vis_data = match resolve_visual_data(db, &visual_suffix, self_id_index) {
+            let vis_data = match resolve_visual_data(db, leaves, &visual_suffix) {
                 Ok(data) => data,
                 Err(e) => {
                     eprintln!("Warning: skipping '{visual_suffix}': {e}");
@@ -886,7 +888,7 @@ impl ShipAssets {
         // leaf name is unique across the path store. Geometry is parsed here (not lazily
         // at export) so a model with malformed geometry is warn+skipped, keeping the
         // export/render paths panic-free.
-        match self.load_single_turret(db, self_id_index, &format!("{misc_name}.model")) {
+        match self.load_single_turret(db, self_id_index, model_leaves, &format!("{misc_name}.model")) {
             Ok(smd) if geometry::parse_geometry(&smd.geom_bytes).is_ok() => {
                 let idx = acc.models.len();
                 acc.index.insert(misc_name.to_string(), idx);
@@ -1023,13 +1025,15 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        leaves: &ModelLeaves<'_>,
         mount_points: &[MountPoint],
         hull_parts: &[OwnedSubModel],
     ) -> Result<LoadedMounts, Report> {
         let hp_transforms = hull_hardpoint_transforms(db, hull_parts);
 
         // Load unique turret models.
-        let (turret_models, turret_model_index) = self.load_turret_models_deduped(db, self_id_index, mount_points)?;
+        let (turret_models, turret_model_index) =
+            self.load_turret_models_deduped(db, self_id_index, leaves, mount_points)?;
 
         // Map hull HP names to turret model paths so we can find the parent
         // turret visual for compound hardpoints.
@@ -1114,6 +1118,7 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        leaves: &ModelLeaves<'_>,
         mount_points: &[MountPoint],
     ) -> Result<(Vec<OwnedSubModel>, HashMap<String, usize>), Report> {
         let mut index_map: HashMap<String, usize> = HashMap::new();
@@ -1124,7 +1129,7 @@ impl ShipAssets {
                 continue;
             }
 
-            match self.load_single_turret(db, self_id_index, mi.model_path()) {
+            match self.load_single_turret(db, self_id_index, leaves, mi.model_path()) {
                 Ok(smd) => {
                     let idx = models.len();
                     index_map.insert(mi.model_path().to_string(), idx);
@@ -1144,9 +1149,10 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        leaves: &ModelLeaves<'_>,
         mount_points: &[MountPoint],
     ) -> Result<Vec<OwnedSubModel>, Report> {
-        let (models, _) = self.load_turret_models_deduped(db, self_id_index, mount_points)?;
+        let (models, _) = self.load_turret_models_deduped(db, self_id_index, leaves, mount_points)?;
         Ok(models)
     }
 
@@ -1155,12 +1161,13 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        leaves: &ModelLeaves<'_>,
         model_path: &str,
     ) -> Result<OwnedSubModel, Report> {
         let visual_path = model_path.replace(".model", ".visual");
         let visual_suffix = visual_path.rsplit('/').next().unwrap_or(&visual_path).to_string();
 
-        let vis_data = resolve_visual_data(db, &visual_suffix, self_id_index)?;
+        let vis_data = resolve_visual_data(db, leaves, &visual_suffix)?;
         let vp = visual::parse_visual(vis_data).context("Failed to parse turret visual")?;
 
         let geom_path_idx = self_id_index
@@ -1245,12 +1252,17 @@ pub(super) fn hull_hardpoint_transforms(
 /// its `visual_resource_id` to look up the actual VisualPrototype.
 fn resolve_visual_data<'a>(
     db: &'a PrototypeDatabase<'a>,
+    leaves: &ModelLeaves<'_>,
     visual_suffix: &str,
-    self_id_index: &HashMap<u64, usize>,
 ) -> Result<&'a [u8], Report> {
-    let (vis_location, _) = db
-        .resolve_path(visual_suffix, self_id_index)
-        .context_with(|| format!("Could not resolve visual: {visual_suffix}"))?;
+    let position =
+        leaves.visual(visual_suffix).ok_or_else(|| rootcause::report!("Could not resolve visual: {visual_suffix}"))?;
+    let self_id = db.paths_storage[position].self_id;
+    let r2p_value = db
+        .lookup_r2p(self_id)
+        .ok_or_else(|| rootcause::report!("Visual {visual_suffix} (selfId=0x{self_id:016X}) is not in the r2p map"))?;
+    let vis_location =
+        db.decode_r2p_value(r2p_value).context_with(|| format!("Could not resolve visual: {visual_suffix}"))?;
 
     match vis_location.blob_index {
         1 => {
@@ -1424,39 +1436,60 @@ impl ShipModelContext {
 
         Ok(result)
     }
+
     /// Collect hull visual meshes for interactive display.
     ///
     /// Returns one [`InteractiveHullMesh`](gltf_export::InteractiveHullMesh) per
-    /// render set (hull parts + mounted turrets). LOD 0 is used.
-    /// Base albedo textures are baked into per-vertex colors when available.
+    /// render set (hull parts, mounted turrets and misc parts) at the loaded LOD.
+    /// Each model is decoded once and its meshes copied to every placement.
     pub fn interactive_hull_meshes(&self) -> Result<Vec<gltf_export::InteractiveHullMesh>, Report> {
-        use std::io::Cursor;
-
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes)
             .context("Failed to parse assets.bin for hull meshes")?;
+        let self_id_index = db.build_self_id_index();
 
         let lod = self.options.lod;
         let damaged = self.options.damaged;
+        let collect = |part: &OwnedSubModel, barrel_pitch: Option<&BarrelPitch>| {
+            let geom =
+                geometry::parse_geometry(&part.geom_bytes).context("Failed to parse geometry for hull meshes")?;
+
+            Ok::<_, Report>(gltf_export::collect_hull_meshes_indexed(
+                &part.visual,
+                &geom,
+                &db,
+                &self_id_index,
+                lod,
+                damaged,
+                barrel_pitch,
+            )?)
+        };
         let mut result = Vec::new();
 
         // Hull parts (no transform, already in world space).
         for (part, model) in self.hull_parts.iter().zip(&self.hull_models) {
-            let geom =
-                geometry::parse_geometry(&part.geom_bytes).context("Failed to parse hull geometry for hull meshes")?;
-            let mut meshes = gltf_export::collect_hull_meshes(&part.visual, &geom, &db, lod, damaged, None)?;
+            let mut meshes = collect(part, None)?;
             for mesh in &mut meshes {
                 mesh.part = model.clone().map(ShipPartKey::HullSection);
             }
             result.extend(meshes);
         }
 
-        // Mounted turrets (with mount transforms).
+        // Mounted turrets. A mount whose barrels are raised has its own pose;
+        // every other mount of a model shares one decode.
+        let mut unposed: HashMap<usize, Vec<gltf_export::InteractiveHullMesh>> = HashMap::new();
         for mount in &self.mounts {
             let part = &self.turret_models[mount.turret_model_index];
-            let geom = geometry::parse_geometry(&part.geom_bytes)
-                .context("Failed to parse turret geometry for hull meshes")?;
-            let mut meshes =
-                gltf_export::collect_hull_meshes(&part.visual, &geom, &db, lod, damaged, mount.barrel_pitch.as_ref())?;
+            let mut meshes = match mount.barrel_pitch.as_ref() {
+                Some(pitch) => collect(part, Some(pitch))?,
+                None => match unposed.get(&mount.turret_model_index) {
+                    Some(meshes) => meshes.clone(),
+                    None => {
+                        let meshes = collect(part, None)?;
+                        unposed.insert(mount.turret_model_index, meshes.clone());
+                        meshes
+                    }
+                },
+            };
             let group = PartGroup::from_mount_species(mount.species);
             for mesh in &mut meshes {
                 mesh.transform = mount.transform.map(gltf_export::negate_z_transform);
@@ -1468,18 +1501,9 @@ impl ShipModelContext {
         }
 
         // Misc parts (propellers, boats, deck fittings), instanced per placement.
-        let misc_geoms: Vec<_> = self
-            .misc_models
-            .iter()
-            .map(|part| {
-                geometry::parse_geometry(&part.geom_bytes).context("Failed to parse misc geometry for hull meshes")
-            })
-            .collect::<Result<_, _>>()?;
-
+        let misc_meshes: Vec<_> = self.misc_models.iter().map(|part| collect(part, None)).collect::<Result<_, _>>()?;
         for misc in &self.miscs {
-            let part = &self.misc_models[misc.misc_model_index];
-            let geom = &misc_geoms[misc.misc_model_index];
-            let mut meshes = gltf_export::collect_hull_meshes(&part.visual, geom, &db, lod, damaged, None)?;
+            let mut meshes = misc_meshes[misc.misc_model_index].clone();
             for mesh in &mut meshes {
                 mesh.transform = misc.transform.map(gltf_export::negate_z_transform);
                 mesh.name = format!("{} [{}]", mesh.name, misc.label());
@@ -1489,52 +1513,12 @@ impl ShipModelContext {
             result.extend(meshes);
         }
 
-        // Bake base albedo textures into per-vertex colors.
-        // Cache decoded images by MFM path to avoid re-loading the same texture.
-        let mut texture_cache: HashMap<String, Option<image_dds::image::RgbaImage>> = HashMap::new();
-
-        for mesh in &mut result {
-            let mfm_path = match &mesh.mfm_path {
-                Some(p) => p.clone(),
-                None => continue,
-            };
-            if mesh.uvs.len() != mesh.positions.len() {
-                continue;
-            }
-
-            let image = texture_cache.entry(mfm_path.clone()).or_insert_with(|| {
-                let dds_bytes = texture::load_base_albedo_bytes(&self.vfs, &mfm_path, self.options.texture_lod)?;
-                let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&dds_bytes)).ok()?;
-                image_dds::image_from_dds(&dds, 0).ok()
-            });
-
-            if let Some(img) = image {
-                let width = img.width();
-                let height = img.height();
-                if width == 0 || height == 0 {
-                    continue;
-                }
-
-                let mut colors = Vec::with_capacity(mesh.uvs.len());
-                for uv in &mesh.uvs {
-                    // Wrap UVs into [0, 1) range and sample the image.
-                    let u = uv[0].rem_euclid(1.0);
-                    let v = uv[1].rem_euclid(1.0);
-                    let x = ((u * width as f32) as u32).min(width - 1);
-                    let y = ((v * height as f32) as u32).min(height - 1);
-                    let pixel = img.get_pixel(x, y);
-                    colors.push([
-                        pixel[0] as f32 / 255.0,
-                        pixel[1] as f32 / 255.0,
-                        pixel[2] as f32 / 255.0,
-                        1.0, // alpha will be set by the viewer
-                    ]);
-                }
-                mesh.colors = colors;
-            }
-        }
-
         Ok(result)
+    }
+
+    /// Reads the textures of this ship's materials, apart from the ship.
+    pub fn material_reader(&self) -> texture::MaterialReader {
+        texture::MaterialReader::new(self.vfs.clone(), Arc::clone(&self.assets_bin_bytes))
     }
 
     /// Base albedos for the given hull meshes, keyed by mfm_path, with the
@@ -1542,27 +1526,20 @@ impl ShipModelContext {
     /// the underwater hull gets its stock skin.
     pub fn hull_base_albedos(&self, meshes: &[gltf_export::InteractiveHullMesh]) -> HashMap<String, MaterialAlbedo> {
         let mut out = HashMap::new();
-        let db = match assets_bin::parse_assets_bin(&self.assets_bin_bytes) {
-            Ok(db) => db,
-            Err(_) => return out,
+        let reader = self.material_reader();
+        let Ok(session) = reader.open() else {
+            return out;
         };
-        let self_id_index = db.build_self_id_index();
         for mesh in meshes {
             let Some(path) = &mesh.mfm_path else { continue };
             if out.contains_key(path) {
                 continue;
             }
-            if let Some(albedo) = texture::load_or_bake_albedo(
-                &self.vfs,
-                path,
-                mesh.mfm_path_id,
-                Some(&db),
-                Some(&self_id_index),
-                self.options.texture_lod,
-            ) {
+            if let Some(albedo) = session.albedo(path, mesh.mfm_path_id, self.options.texture_lod) {
                 out.insert(path.clone(), albedo);
             }
         }
+
         out
     }
 
@@ -1885,16 +1862,18 @@ impl ShipModelContext {
         &self,
         db: &PrototypeDatabase<'_>,
     ) -> Result<camo_textures::CamoTextureSource, Report> {
+        let self_id_index = db.build_self_id_index();
+        // Mounted models in mount order, each once: the first stem seen wins below.
+        let mut mounted = HashSet::new();
+        let turrets = self
+            .mounts
+            .iter()
+            .filter(|mount| mounted.insert(mount.turret_model_index))
+            .map(|mount| &self.turret_models[mount.turret_model_index]);
+        let visuals = self.hull_parts.iter().chain(turrets).chain(&self.misc_models);
         let mut all_mfm_infos = Vec::new();
-        for d in &self.hull_parts {
-            all_mfm_infos.extend(collect_mfm_info(&d.visual, db));
-        }
-        for mount in &self.mounts {
-            let turret = &self.turret_models[mount.turret_model_index];
-            all_mfm_infos.extend(collect_mfm_info(&turret.visual, db));
-        }
-        for misc in &self.misc_models {
-            all_mfm_infos.extend(collect_mfm_info(&misc.visual, db));
+        for model in visuals {
+            all_mfm_infos.extend(collect_mfm_info(&model.visual, db, &self_id_index));
         }
         let mut seen = HashSet::new();
         let unique_infos: Vec<MfmInfo> = all_mfm_infos.into_iter().filter(|i| seen.insert(i.stem.clone())).collect();
@@ -2234,25 +2213,37 @@ impl ShipPartSources<'_> {
 }
 
 /// Every `.model` entry by stem, the first in store order winning, as the
-/// loader's name lookups resolve them.
-struct ModelLeaves<'d> {
+/// loader's name lookups resolve them, and every `.visual` entry in store
+/// order.
+pub(super) struct ModelLeaves<'d> {
     positions: HashMap<&'d str, usize>,
+    visuals: Vec<(&'d str, usize)>,
 }
 
 impl<'d> ModelLeaves<'d> {
-    fn new(db: &'d PrototypeDatabase<'_>) -> Self {
+    pub(super) fn new(db: &'d PrototypeDatabase<'_>) -> Self {
         let mut positions = HashMap::new();
+        let mut visuals = Vec::new();
         for (position, entry) in db.paths_storage.iter().enumerate() {
             if let Some(stem) = entry.name.strip_suffix(".model") {
                 positions.entry(stem).or_insert(position);
+            } else if entry.name.ends_with(".visual") {
+                visuals.push((entry.name.as_str(), position));
             }
         }
 
-        Self { positions }
+        Self { positions, visuals }
     }
 
     fn position(&self, stem: &str) -> Option<usize> {
         self.positions.get(stem).copied()
+    }
+
+    /// The first `.visual` entry whose name ends with `file_name`, which is
+    /// the entry [`PrototypeDatabase::resolve_path`] finds for a name with no
+    /// directory, without walking every path in the store.
+    fn visual(&self, file_name: &str) -> Option<usize> {
+        self.visuals.iter().find(|(name, _)| name.ends_with(file_name)).map(|&(_, position)| position)
     }
 
     /// The prototype of the model named `stem`, when its record reads.
@@ -2375,8 +2366,11 @@ pub struct MfmInfo {
 }
 
 /// Collect MFM stems and full paths from a visual's render sets.
-pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) -> Vec<MfmInfo> {
-    let self_id_index = db.build_self_id_index();
+pub fn collect_mfm_info(
+    visual: &VisualPrototype,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+) -> Vec<MfmInfo> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
 
@@ -2391,7 +2385,7 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
         let stem = mfm_name.strip_suffix(".mfm").unwrap_or(mfm_name);
 
         if seen.insert(stem.to_string()) {
-            let full_path = db.reconstruct_path(path_idx, &self_id_index);
+            let full_path = db.reconstruct_path(path_idx, self_id_index);
             // Without the material record nothing marks the alpha as opacity.
             let alpha = texture::parse_mfm_from_db(db, rs.material_mfm_path_id)
                 .map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(&material, &full_path));

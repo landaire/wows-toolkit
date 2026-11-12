@@ -29,6 +29,7 @@ use crate::models::geometry::ArmorModel;
 use crate::models::geometry::ArmorTriangle;
 
 use super::gltf_export::InteractiveArmorMesh;
+use super::ship::ModelLeaves;
 use super::ship::ShipAssets;
 use super::ship::hull_hardpoint_transforms;
 
@@ -304,6 +305,7 @@ impl ShipAssets {
         };
         let db = self.db()?;
         let self_id_index = db.build_self_id_index();
+        let leaves = ModelLeaves::new(&db);
 
         let Some(upgrades) = vehicle.hull_upgrades().filter(|upgrades| !upgrades.is_empty()) else {
             bail!("vehicle {param_index} has no hull upgrades");
@@ -325,7 +327,7 @@ impl ShipAssets {
                     if visual_paths.is_empty() {
                         bail!("no .visual files for hull model {model_path} of {param_index}");
                     }
-                    let parts = self.load_sub_models(&db, &self_id_index, &visual_paths)?;
+                    let parts = self.load_sub_models(&db, &self_id_index, &leaves, &visual_paths)?;
 
                     let mut armor = Vec::new();
                     for part in &parts {
@@ -347,7 +349,7 @@ impl ShipAssets {
             };
 
             let mount_points: Vec<MountPoint> = config.all_mount_points().cloned().collect();
-            let loaded = self.load_mounts(&db, &self_id_index, &mount_points, &hull_parts[hull_model.0])?;
+            let loaded = self.load_mounts(&db, &self_id_index, &leaves, &mount_points, &hull_parts[hull_model.0])?;
 
             let mut model_paths: Vec<Option<&str>> = vec![None; loaded.turret_models.len()];
             for (path, &index) in &loaded.turret_model_index {

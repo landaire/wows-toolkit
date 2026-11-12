@@ -1566,7 +1566,6 @@ pub(crate) fn upload_hull_meshes_to_viewport(
 
         // Vertex-color brightness boost for hull meshes. The lighting shader multiplies
         // this base by (flat + key*halfLambert); the boost keeps textured camo vivid.
-        // Textured hulls use a stronger boost than baked-color hulls.
         let hull_brightness: f32 = 2.0;
         // Per-texture brightness: scale a high luminance percentile toward a ceiling so the
         // brightest regions (light camo stripes, snow) do not saturate to white, while dark
@@ -1576,7 +1575,6 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         let tex_brightness = sampled_p95_luminance(stock, camo);
         let fallback_color: [f32; 4] =
             [0.6 * hull_brightness, 0.6 * hull_brightness, 0.65 * hull_brightness, hull_alpha];
-        let has_baked_colors = mesh.colors.len() == mesh.positions.len();
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
         for i in 0..mesh.positions.len() {
             let mut pos = mesh.positions[i];
@@ -1588,14 +1586,8 @@ pub(crate) fn upload_hull_meshes_to_viewport(
             }
 
             let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
-            let color = if has_texture {
-                [tex_brightness, tex_brightness, tex_brightness, hull_alpha]
-            } else if has_baked_colors {
-                let c = mesh.colors[i];
-                [c[0] * hull_brightness, c[1] * hull_brightness, c[2] * hull_brightness, hull_alpha]
-            } else {
-                fallback_color
-            };
+            let color =
+                if has_texture { [tex_brightness, tex_brightness, tex_brightness, hull_alpha] } else { fallback_color };
             vertices.push(Vertex { position: pos, normal: norm, color, uv });
         }
 

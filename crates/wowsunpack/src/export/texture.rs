@@ -670,10 +670,13 @@ pub fn discover_texture_schemes(
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use image_dds::SurfaceRgba8;
 use image_dds::image::RgbaImage;
 
+use crate::models::assets_bin;
+use crate::models::assets_bin::AssetsBinError;
 use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::material;
 use crate::models::material::MaterialPrototype;
@@ -728,18 +731,7 @@ pub fn is_tiledland_material(mat: &MaterialPrototype) -> bool {
 /// Note: ODMap is intentionally NOT applied — it requires g_overlayOpacity/g_overlayDepth
 /// shader parameters for correct blending, and naive multiplication darkens the result.
 ///
-/// Returns PNG bytes of the baked albedo texture at the blend map's resolution.
-pub fn bake_tiledland_albedo(
-    mat: &MaterialPrototype,
-    vfs: &vfs::VfsPath,
-    db: &PrototypeDatabase<'_>,
-    self_id_index: &HashMap<u64, usize>,
-    lod: TextureLod,
-) -> Option<Vec<u8>> {
-    encode_png(&bake_tiledland_image(mat, vfs, db, self_id_index, lod)?).ok()
-}
-
-/// [`bake_tiledland_albedo`] before PNG encoding, for callers that want pixels.
+/// Returns the baked albedo at the blend map's resolution.
 pub(crate) fn bake_tiledland_image(
     mat: &MaterialPrototype,
     vfs: &vfs::VfsPath,
@@ -863,10 +855,16 @@ pub(crate) fn bake_tiledland_image(
     })
 }
 
-/// An albedo PNG whose alpha is rewritten to what its material draws.
+/// An albedo whose alpha is rewritten to what its material draws.
 pub struct MaterialAlbedo {
-    pub png: Vec<u8>,
+    pub image: RgbaImage,
     pub alpha: AlphaMode,
+}
+
+impl MaterialAlbedo {
+    pub fn to_png(&self) -> Result<Vec<u8>, Report<TextureError>> {
+        encode_png(&self.image)
+    }
 }
 
 /// Try to load a texture for a model mesh, with TILEDLAND baking support.
@@ -875,8 +873,6 @@ pub struct MaterialAlbedo {
 /// terrain material. If so, bakes a composite albedo from the tile atlas + blend
 /// map (the correct rendering). Otherwise falls back to simple filename-based
 /// texture lookup via `load_base_albedo_bytes`, with the alpha the material draws.
-///
-/// Returns the PNG and its alpha mode if successful.
 pub fn load_or_bake_albedo(
     vfs: &vfs::VfsPath,
     mfm_full_path: &str,
@@ -896,8 +892,8 @@ pub fn load_or_bake_albedo(
         && is_tiledland_material(mat)
     {
         eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
-        if let Some(png) = bake_tiledland_albedo(mat, vfs, db, idx, lod) {
-            return Some(MaterialAlbedo { png, alpha: AlphaMode::Opaque });
+        if let Some(image) = bake_tiledland_image(mat, vfs, db, idx, lod) {
+            return Some(MaterialAlbedo { image, alpha: AlphaMode::Opaque });
         }
         eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
     }
@@ -906,8 +902,46 @@ pub fn load_or_bake_albedo(
     // most albedo alpha channels carry other data (height, roughness).
     let alpha = material.as_ref().map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(material, mfm_full_path));
     let dds_bytes = load_base_albedo_bytes(vfs, mfm_full_path, lod)?;
-    let mut png = dds_to_png(&dds_bytes, lod).ok()?;
-    apply_png_alpha(&mut png, alpha);
+    let mut image = decode_dds(&dds_bytes, lod).ok()?;
+    alpha.apply(&mut image);
 
-    Some(MaterialAlbedo { png, alpha })
+    Some(MaterialAlbedo { image, alpha })
+}
+
+/// Reads the textures materials name, after the meshes naming them loaded.
+/// Cheap to clone and owns what it reads from, so the reads can run apart
+/// from the load that made it.
+#[derive(Clone)]
+pub struct MaterialReader {
+    vfs: vfs::VfsPath,
+    assets_bin_bytes: Arc<Vec<u8>>,
+}
+
+impl MaterialReader {
+    pub fn new(vfs: vfs::VfsPath, assets_bin_bytes: Arc<Vec<u8>>) -> Self {
+        Self { vfs, assets_bin_bytes }
+    }
+
+    /// Parses the database the material records are read from, once for
+    /// every read made through the session.
+    pub fn open(&self) -> Result<MaterialSession<'_>, Report<AssetsBinError>> {
+        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes)?;
+        let self_id_index = db.build_self_id_index();
+
+        Ok(MaterialSession { vfs: &self.vfs, db, self_id_index })
+    }
+}
+
+/// A [`MaterialReader`] with its database parsed.
+pub struct MaterialSession<'r> {
+    vfs: &'r vfs::VfsPath,
+    db: PrototypeDatabase<'r>,
+    self_id_index: HashMap<u64, usize>,
+}
+
+impl MaterialSession<'_> {
+    /// [`load_or_bake_albedo`] for the material at `mfm_path`.
+    pub fn albedo(&self, mfm_path: &str, mfm_path_id: u64, lod: TextureLod) -> Option<MaterialAlbedo> {
+        load_or_bake_albedo(self.vfs, mfm_path, mfm_path_id, Some(&self.db), Some(&self.self_id_index), lod)
+    }
 }

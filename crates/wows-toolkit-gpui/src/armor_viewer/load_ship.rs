@@ -534,14 +534,11 @@ fn load_ship_armor(
     let mut hull_textures = HashMap::new();
     let mut hull_alpha = HashMap::new();
     for (mfm, albedo) in ctx.hull_base_albedos(&hull_meshes) {
-        if let Ok(img) = image::load_from_memory(&albedo.png) {
-            let rgba = img.to_rgba8();
-            let (w, h) = (rgba.width(), rgba.height());
-            if albedo.alpha != AlphaMode::Opaque {
-                hull_alpha.insert(mfm.clone(), albedo.alpha);
-            }
-            hull_textures.insert(mfm, super::camo::RgbaTexture::new(w, h, rgba.into_raw()));
+        let (w, h) = (albedo.image.width(), albedo.image.height());
+        if albedo.alpha != AlphaMode::Opaque {
+            hull_alpha.insert(mfm.clone(), albedo.alpha);
         }
+        hull_textures.insert(mfm, super::camo::RgbaTexture::new(w, h, albedo.image.into_raw()));
     }
 
     let hull_lod_count = ctx.hull_lod_count();
@@ -875,7 +872,6 @@ mod tests {
                 indices: Vec::new(),
                 mfm_path: None,
                 mfm_path_id: 0,
-                colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::MainBattery,
                 part: None,
@@ -888,7 +884,6 @@ mod tests {
                 indices: Vec::new(),
                 mfm_path: None,
                 mfm_path_id: 0,
-                colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::Hull,
                 part: None,
@@ -901,7 +896,6 @@ mod tests {
                 indices: Vec::new(),
                 mfm_path: None,
                 mfm_path_id: 0,
-                colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::Hull,
                 part: None,

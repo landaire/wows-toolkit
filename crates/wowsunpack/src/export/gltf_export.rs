@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::io::Read;
 use std::io::Write;
 
@@ -398,10 +399,11 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                         self_id_index.as_ref(),
                         texture_lod,
                     )
-                    .map(|albedo| {
+                    .and_then(|albedo| {
+                        let png = albedo.to_png().ok()?;
                         let idx = textures.len();
-                        textures.push(albedo.png);
-                        (idx, albedo.alpha)
+                        textures.push(png);
+                        Some((idx, albedo.alpha))
                     })
                 })
             } else {
@@ -3099,8 +3101,6 @@ pub struct InteractiveHullMesh {
     pub mfm_path: Option<String>,
     /// The material MFM path id (0 if none); used to bake TILEDLAND albedos.
     pub mfm_path_id: u64,
-    /// Baked per-vertex colors from albedo texture (same length as positions, or empty for fallback).
-    pub colors: Vec<[f32; 4]>,
     /// Optional world-space transform (column-major 4x4) for turret mounts.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub transform: Option<[f32; 16]>,
@@ -3117,8 +3117,8 @@ pub struct InteractiveHullMesh {
 /// Collect hull visual meshes (render sets) from a visual prototype and geometry.
 ///
 /// Each render set becomes one `InteractiveHullMesh` with decoded
-/// positions, normals, UVs, and indices. The caller is responsible for
-/// baking textures into vertex colors using the `mfm_path` field.
+/// positions, normals, UVs, and indices. `mfm_path` names the material its
+/// textures are looked up by.
 pub fn collect_hull_meshes(
     visual: &VisualPrototype,
     geometry: &MergedGeometry,
@@ -3149,6 +3149,11 @@ pub(crate) fn collect_hull_meshes_indexed(
     let lod_entry = &visual.lods[lod];
 
     let exclude = if damaged { DAMAGED_EXCLUDE } else { INTACT_EXCLUDE };
+
+    // Render sets slice ranges out of shared merged buffers, so each buffer
+    // is decoded once rather than once per render set.
+    let mut vertex_buffers: HashMap<usize, Vec<u8>> = HashMap::new();
+    let mut index_buffers: HashMap<usize, Vec<u8>> = HashMap::new();
 
     for &rs_name_id in &lod_entry.render_set_names {
         let rs = visual
@@ -3196,10 +3201,17 @@ pub(crate) fn collect_hull_meshes_indexed(
         }
         let idx_proto = &geometry.merged_indices[ibuf_idx];
 
-        let decoded_vertices =
-            vert_proto.data.decode().map_err(|e| Report::new(ExportError::VertexDecode(format!("{e:?}"))))?;
-        let decoded_indices =
-            idx_proto.data.decode().map_err(|e| Report::new(ExportError::IndexDecode(format!("{e:?}"))))?;
+        let decoded_vertices: &Vec<u8> = match vertex_buffers.entry(vbuf_idx) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(
+                vert_proto.data.decode().map_err(|e| Report::new(ExportError::VertexDecode(format!("{e:?}"))))?,
+            ),
+        };
+        let decoded_indices: &Vec<u8> = match index_buffers.entry(ibuf_idx) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry
+                .insert(idx_proto.data.decode().map_err(|e| Report::new(ExportError::IndexDecode(format!("{e:?}"))))?),
+        };
 
         let format = vertex_format::parse_vertex_format(&vert_proto.format_name);
         let stride = vert_proto.stride_in_bytes as usize;
@@ -3268,7 +3280,6 @@ pub(crate) fn collect_hull_meshes_indexed(
             indices,
             mfm_path,
             mfm_path_id: rs.material_mfm_path_id,
-            colors: Vec::new(),
             transform: None,
             group: PartGroup::Hull,
             part: None,
