@@ -237,7 +237,7 @@ fn main() {
             .await;
             let render_defaults = runtime::spawn(cx, {
                 let pool = pool.clone();
-                async move { render_defaults::load(&pool).await }
+                async move { wows_toolkit_replay_data::render_defaults::load(&pool).await }
             })
             .await;
             if let Err(err) = cx.update_window(window.into(), |_root, window, cx| {
