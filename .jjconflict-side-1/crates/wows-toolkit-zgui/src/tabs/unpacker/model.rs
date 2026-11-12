@@ -408,7 +408,7 @@ impl UnpackerModel {
 
     /// Stops the scans of search panels that have been closed and forgets their results.
     pub fn forget_closed_panels(self) {
-        let open: Vec<PanelId> = self.dock.panels().into_iter().map(|entry| entry.id).collect();
+        let open: Vec<PanelId> = self.dock.panels_untracked().into_iter().map(|entry| entry.id).collect();
         self.searches.update_value(|searches| {
             searches.retain(|id, results| {
                 let keep = open.contains(id);

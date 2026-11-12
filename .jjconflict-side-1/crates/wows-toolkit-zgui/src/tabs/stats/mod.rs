@@ -788,7 +788,7 @@ fn load_charts(
             }
             persistence.restoring.set_value(true);
             restore_charts(dock, charts, next_chart_id, saved, layout, open_chart);
-            persistence.saved_layout.set_value(Some(dock.dump()));
+            persistence.saved_layout.set_value(Some(dock.dump_untracked()));
             persistence.restoring.set_value(false);
             persistence.enabled.set_value(true);
         });
@@ -897,7 +897,7 @@ fn keep_current_layout(
     persistence.enabled.set_value(true);
     let settings: Vec<ChartSettings> =
         charts.with_untracked(|charts| charts.iter().map(|slot| slot.settings.get_untracked()).collect());
-    let layout = dock.dump();
+    let layout = dock.dump_untracked();
     services.settings.save(CHARTS_SETTINGS_KEY, &settings);
     services.settings.save(CHARTS_DOCK_LAYOUT_KEY, &layout);
     persistence.saved_layout.set_value(Some(layout));

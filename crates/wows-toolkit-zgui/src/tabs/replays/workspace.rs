@@ -343,7 +343,7 @@ impl ReplayWorkspace {
     fn replaceable(self) -> Option<PathBuf> {
         let dock = self.dock;
         let mut showing: Vec<PathBuf> = dock
-            .panels()
+            .panels_untracked()
             .into_iter()
             .filter_map(|entry| {
                 let Some(Docked::Replay(path)) = Docked::of(&entry.id) else { return None };
@@ -424,7 +424,8 @@ impl ReplayWorkspace {
     /// Lets go of what the dock no longer holds: a closed tab's replay and what it read, and a
     /// closed viewport's session.
     pub fn forget_closed(self) {
-        let shown: HashSet<Docked> = self.dock.panels().iter().filter_map(|entry| Docked::of(&entry.id)).collect();
+        let shown: HashSet<Docked> =
+            self.dock.panels_untracked().iter().filter_map(|entry| Docked::of(&entry.id)).collect();
         let held = |docked: Docked| shown.contains(&docked);
         let released: Vec<PanelControl> = self.replays.with_untracked(|replays| {
             replays

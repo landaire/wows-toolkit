@@ -198,6 +198,11 @@ impl DockState {
         self.layout.with(Layout::panels)
     }
 
+    /// [`panels`](Self::panels) without subscribing the running effect to the layout.
+    pub fn panels_untracked(self) -> Vec<PanelEntry> {
+        self.layout.with_untracked(Layout::panels)
+    }
+
     pub fn group_of(self, panel: &PanelId) -> Option<GroupId> {
         self.layout.with(|layout| layout.group_of(panel))
     }
@@ -209,6 +214,11 @@ impl DockState {
 
     pub fn dump(self) -> SavedLayout {
         self.layout.with(Layout::dump)
+    }
+
+    /// [`dump`](Self::dump) without subscribing the running effect to the layout.
+    pub fn dump_untracked(self) -> SavedLayout {
+        self.layout.with_untracked(Layout::dump)
     }
 
     /// Puts the dock back as `saved` describes it. Panels whose kind has no factory, and second
