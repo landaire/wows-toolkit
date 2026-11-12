@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use landaire_ui::TabStripProps;
+use landaire_ui::TabStripStrings;
 use landaire_ui::TabStripTabProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::Element;
@@ -16,6 +17,7 @@ use landaire_ui::test_support::WindowSize;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
@@ -269,4 +271,54 @@ fn the_context_menu_disables_what_it_cannot_close() {
     window.advance(SETTLE);
     let after = window.by_role_and_label(Role::MenuItem, "Close to the right").expect("the item is announced");
     assert_eq!(window.a11y(after).map(|state| state.disabled), Some(true), "nothing follows delta");
+}
+
+/// A strip whose words follow `french`.
+#[component]
+fn Translated(french: RwSignal<bool, LocalStorage>) -> impl IntoView {
+    let say = move |english: &'static str, other: &'static str| {
+        Signal::derive_local(move || if french.get() { other } else { english }.to_owned())
+    };
+    let strings = TabStripStrings {
+        close: say("Close", "Fermer"),
+        close_others: say("Close others", "Fermer les autres"),
+        close_to_the_right: say("Close to the right", "Fermer a droite"),
+    };
+    let value = RwSignal::new_local("alpha".to_owned());
+
+    view! {
+        ThemeRoot {
+            TabStrip(value = value, label = say("Files", "Fichiers"), strings = strings) {
+                TabStripTab(value = "alpha", a11y:label = "Alpha") {"Alpha"}
+                TabStripTab(value = "bravo", on_close = UnsyncCallback::new(|()| {}), close_label = say("Close Bravo", "Fermer Bravo"), a11y:label = "Bravo") {"Bravo"}
+            }
+        }
+    }
+}
+
+#[test]
+fn a_change_of_language_reaches_the_strip_its_close_buttons_and_its_menu() {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let french = RwSignal::new_local(false);
+        sent.set(Some(french));
+        view! { Translated(french = french) }
+    })
+    .expect("opens");
+    let french = handed.get().expect("the view was built");
+    assert!(window.by_role_and_label(Role::Group, "Files").is_some());
+    assert!(window.by_role_and_label(Role::Button, "Close Bravo").is_some());
+
+    french.set(true);
+    window.advance(SETTLE);
+
+    assert!(window.by_role_and_label(Role::Group, "Fichiers").is_some(), "the strip is renamed");
+    assert!(window.by_role_and_label(Role::Group, "Files").is_none());
+    assert!(window.by_role_and_label(Role::Button, "Fermer Bravo").is_some(), "the close button is renamed");
+    let bravo = window.by_role_and_label(Role::Tab, "Bravo").expect("the tab is announced");
+    window.right_click(bravo).expect("the tab has a box");
+    window.advance(SETTLE);
+    assert!(window.by_role_and_label(Role::MenuItem, "Fermer les autres").is_some(), "the menu is translated");
+    assert!(window.by_role_and_label(Role::MenuItem, "Close others").is_none());
 }

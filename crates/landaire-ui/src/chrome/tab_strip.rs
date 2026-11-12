@@ -14,6 +14,7 @@ use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
@@ -282,19 +283,20 @@ pub struct TabStripPanels {
 }
 
 /// The words a [`TabStrip`]'s context menu shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct TabStripStrings {
-    pub close: String,
-    pub close_others: String,
-    pub close_to_the_right: String,
+    pub close: Signal<String, LocalStorage>,
+    pub close_others: Signal<String, LocalStorage>,
+    pub close_to_the_right: Signal<String, LocalStorage>,
 }
 
 impl TabStripStrings {
+    /// The words in English.
     pub fn new() -> Self {
         Self {
-            close: "Close".to_owned(),
-            close_others: "Close others".to_owned(),
-            close_to_the_right: "Close to the right".to_owned(),
+            close: "Close".into(),
+            close_others: "Close others".into(),
+            close_to_the_right: "Close to the right".into(),
         }
     }
 }
@@ -326,7 +328,7 @@ pub fn TabStrip(
     value: Binding<String>,
     /// What the strip is called, for a screen reader.
     #[prop(into)]
-    label: String,
+    label: Signal<String, LocalStorage>,
     /// Told the values of the tabs the context menu closes together, in strip order, to close
     /// them as one change. Without it each of those tabs is closed in turn.
     #[prop(optional)]
@@ -399,13 +401,13 @@ pub fn TabStrip(
     };
     // A strip given no words of its own labels its menu in English.
     let strings = strings.unwrap_or_default();
-    let menu = move || tab_menu(strip, &strings, on_close_tabs);
+    let menu = move || tab_menu(strip, strings, on_close_tabs);
 
     let class = Classes::from("lui-tab-strip").merged(class);
     let panels = tab_strip_panels.map(|panels| panels.children.into_view_once());
 
     view! {
-        Tabs(value = value, label = label, class = class, {..attrs}) {
+        Tabs(value = value, a11y:label = move || label.get(), class = class, {..attrs}) {
             ContextMenu {
                 ContextMenuTrigger(class = "lui-tab-strip__menu-area") {
                     box(
@@ -429,7 +431,7 @@ pub fn TabStrip(
                     }
                 }
                 ContextMenuContent {
-                    {menu.clone()}
+                    {menu}
                 }
             }
             {panels}
@@ -450,8 +452,8 @@ pub fn TabStripTab(
     #[prop(optional)]
     on_close: Option<UnsyncCallback<()>>,
     /// What the close button is called, for a screen reader.
-    #[prop(into, default = String::from("Close tab"))]
-    close_label: String,
+    #[prop(into, default = "Close tab".into())]
+    close_label: Signal<String, LocalStorage>,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
     children: Children,
@@ -468,7 +470,7 @@ pub fn TabStripTab(
 
     let mark = icon.map(|icon| AnyView::new(view! { Icon(icon = icon, size = IconSize::Sm) }));
     let close = on_close.map(|on_close| {
-        let semantics = A11yBinding::new(Role::Button).label(close_label);
+        let semantics = A11yBinding::new(Role::Button).label(move || close_label.get());
         AnyView::new(view! {
             control(
                 class = "lui-tab-strip__close",
@@ -588,7 +590,7 @@ pub fn TabStripTab(
 /// close the tabs after it. An item with no tab it can close is disabled.
 fn tab_menu(
     strip: StripContext,
-    strings: &TabStripStrings,
+    strings: TabStripStrings,
     on_close_tabs: Option<UnsyncCallback<Vec<String>>>,
 ) -> Option<AnyView> {
     let target = strip.menu_target.get()?;
@@ -614,14 +616,11 @@ fn tab_menu(
     });
     let close_others = close_together(others, on_close_tabs);
     let close_after = close_together(after, on_close_tabs);
-    let close_label = strings.close.clone();
-    let others_label = strings.close_others.clone();
-    let after_label = strings.close_to_the_right.clone();
 
     Some(AnyView::new(view! {
-        MenuItem(disabled = this.is_none(), on_select = close_this) {{close_label}}
-        MenuItem(disabled = none_others, on_select = close_others) {{others_label}}
-        MenuItem(disabled = none_after, on_select = close_after) {{after_label}}
+        MenuItem(disabled = this.is_none(), on_select = close_this) {{move || strings.close.get()}}
+        MenuItem(disabled = none_others, on_select = close_others) {{move || strings.close_others.get()}}
+        MenuItem(disabled = none_after, on_select = close_after) {{move || strings.close_to_the_right.get()}}
     }))
 }
 

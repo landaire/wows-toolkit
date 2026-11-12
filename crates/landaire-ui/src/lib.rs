@@ -53,6 +53,7 @@ pub use crate::chrome::status_bar::StatusToggleProps;
 pub use crate::chrome::tab_strip::TabStrip;
 pub use crate::chrome::tab_strip::TabStripPanels;
 pub use crate::chrome::tab_strip::TabStripProps;
+pub use crate::chrome::tab_strip::TabStripStrings;
 pub use crate::chrome::tab_strip::TabStripTab;
 pub use crate::chrome::tab_strip::TabStripTabProps;
 pub use crate::chrome::title_bar::TitleBar;

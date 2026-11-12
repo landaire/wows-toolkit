@@ -36,7 +36,6 @@ use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use landaire_ui::Toasts;
 use landaire_ui::WorkspaceInsetProps;
-use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -648,7 +647,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                                     TabStripTab(
                                         value = tab.value(),
                                         on_close = on_close_tab(id),
-                                        close_label = t!("ui.tabs.close_directory_stats").into_owned(),
+                                        close_label = Signal::derive_local(locale.text("ui.tabs.close_directory_stats")),
                                         attr:data-testid = tab.value()
                                     ) {
                                         row(class = "wt-tab-label") {

@@ -40,6 +40,7 @@ use zgui_ui_primitives::Orientation;
 
 use crate::chrome::tab_strip::TabStripPanels;
 use crate::chrome::tab_strip::TabStripProps;
+use crate::chrome::tab_strip::TabStripStrings;
 use crate::chrome::tab_strip::TabStripTabProps;
 use crate::dock::layout::CssLength;
 use crate::dock::layout::DockRegion;
@@ -153,13 +154,26 @@ const CSS: &str = css!(
     }"
 );
 
-/// What the dock's tab strips say to a screen reader.
-#[derive(Clone)]
+/// What the dock's tab strips say to a screen reader, and the words of their context menus.
+#[derive(Clone, Copy)]
 struct DockLabels {
     /// Said before a panel's label to name its tab's close button.
-    close: String,
+    close: Signal<String, LocalStorage>,
     /// What each group's strip of tabs is called.
-    tabs: String,
+    tabs: Signal<String, LocalStorage>,
+    strings: TabStripStrings,
+}
+
+impl DockLabels {
+    /// What a dock says when it is not told otherwise.
+    fn english() -> Self {
+        Self { close: "Close".into(), tabs: "Panels".into(), strings: TabStripStrings::new() }
+    }
+
+    /// The labels of the dock the calling scope is in.
+    fn current() -> Self {
+        use_local_context::<Self>().unwrap_or_else(Self::english)
+    }
 }
 
 /// The places in the dock's frame: three columns, and the center and bottom within the middle one.
@@ -416,17 +430,25 @@ impl FrameGroup {
 #[component]
 pub fn Dock(
     state: DockState,
-    /// Said before a panel's label to name its tab's close button.
-    #[prop(into, default = "Close".to_owned())]
-    close_label: String,
-    /// What each group's strip of tabs is called.
-    #[prop(into, default = "Panels".to_owned())]
-    tabs_label: String,
+    /// Said before a panel's label to name its tab's close button. "Close" when not given.
+    #[prop(into, optional)]
+    close_label: Option<Signal<String, LocalStorage>>,
+    /// What each group's strip of tabs is called. "Panels" when not given.
+    #[prop(into, optional)]
+    tabs_label: Option<Signal<String, LocalStorage>>,
+    /// The words of each tab's context menu. English when not given.
+    #[prop(optional)]
+    strings: Option<TabStripStrings>,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    provide_local_context(DockLabels { close: close_label, tabs: tabs_label });
+    let english = DockLabels::english();
+    provide_local_context(DockLabels {
+        close: close_label.unwrap_or(english.close),
+        tabs: tabs_label.unwrap_or(english.tabs),
+        strings: strings.unwrap_or(english.strings),
+    });
 
     view! {
         box(class = "lui-dock", {..attrs}, class = class) {
@@ -648,7 +670,7 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
         },
     );
     let single = move || panels.with(Vec::len) == 1;
-    let label = use_local_context::<DockLabels>().map(|labels| labels.tabs).unwrap_or_default();
+    let labels = DockLabels::current();
 
     let on_close_tabs = UnsyncCallback::new(move |values: Vec<String>| {
         for value in values {
@@ -660,7 +682,8 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
     view! {
         TabStrip(
             value = shown,
-            label = label,
+            label = labels.tabs,
+            strings = labels.strings,
             on_close_tabs = on_close_tabs,
             class = "lui-dock__group",
             class:lui-dock__group-single = single
@@ -682,18 +705,20 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
 #[component]
 fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
     let factory = state.factory(&entry.kind);
-    let label = factory.as_ref().map(|factory| factory.label(&entry.id)).unwrap_or_default();
+    let label = {
+        let factory = factory.clone();
+        let id = entry.id.clone();
+        Signal::derive_local(move || factory.as_ref().map(|factory| factory.label(&id)).unwrap_or_default())
+    };
     let title = factory.as_ref().map(|factory| factory.title(&entry.id));
     let value = entry.id.as_str().to_owned();
 
     if !entry.closable {
-        return AnyView::new(view! { TabStripTab(value = value, a11y:label = label) {{title}} });
+        return AnyView::new(view! { TabStripTab(value = value, a11y:label = move || label.get()) {{title}} });
     }
 
-    let close_label = match use_local_context::<DockLabels>() {
-        Some(labels) => format!("{} {label}", labels.close),
-        None => label.clone(),
-    };
+    let close = DockLabels::current().close;
+    let close_label = Signal::derive_local(move || format!("{} {}", close.get(), label.get()));
     let id = entry.id;
     let on_close = UnsyncCallback::new(move |()| {
         // A closable panel that is still in the dock always closes.
@@ -701,7 +726,7 @@ fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
     });
 
     AnyView::new(view! {
-        TabStripTab(value = value, on_close = on_close, close_label = close_label, a11y:label = label) {{title}}
+        TabStripTab(value = value, on_close = on_close, close_label = close_label, a11y:label = move || label.get()) {{title}}
     })
 }
 
