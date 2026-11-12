@@ -15,7 +15,6 @@ mod cap_layout_store;
 mod cli;
 mod collab;
 mod collab_popover;
-mod constants;
 mod dialog;
 mod first_run;
 mod frame_texture;

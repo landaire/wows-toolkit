@@ -5,6 +5,7 @@
 //! own executor.
 
 pub mod child_process;
+pub mod constants;
 pub mod dialog;
 pub mod http;
 pub mod logging;
