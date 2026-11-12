@@ -9,6 +9,9 @@
 //!   status bar, the settings drawer, the command palette, dialogs, messages and file drops.
 //! - `tabs/`: one module per tab, dispatched by [`tabs::TabBody`].
 //! - `windows/`: windows other than the main one.
+//! - `frames`: frames rasterised on the CPU, pushed through a [`frames::FrameSink`] from any thread
+//!   and shown by a [`frames::FrameView`].
+//! - `preview/`: the minimap preview a replay row plays when hovered, [`preview::HoverPreview`].
 //!
 //! # Contexts
 //!
@@ -80,11 +83,13 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 
 mod cli;
 mod desktop;
+mod frames;
 mod http;
 mod i18n;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+mod preview;
 mod services;
 mod shell;
 mod tabs;
