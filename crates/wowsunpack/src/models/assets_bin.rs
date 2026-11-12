@@ -1,4 +1,7 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ops::Range;
+use std::sync::Arc;
 
 use rootcause::Report;
 use thiserror::Error;
@@ -37,11 +40,12 @@ pub struct PrototypeDatabase<'a> {
     pub header: Header,
     pub strings: StringsSection<'a>,
     pub resource_to_prototype_map: HashmapSection<'a>,
-    pub paths_storage: Vec<PathEntry>,
+    /// Owned after [`parse_assets_bin`], borrowed from a [`SharedPrototypeDatabase`].
+    pub paths_storage: Cow<'a, [PathEntry]>,
     pub databases: Vec<DatabaseEntry<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Header {
     pub magic: u32,
     pub version: u32,
@@ -70,7 +74,7 @@ pub struct HashmapSection<'a> {
 }
 
 /// A path entry from the pathsStorage array.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PathEntry {
     pub self_id: u64,
     pub parent_id: u64,
@@ -388,15 +392,37 @@ fn parse_body_header(input: &mut &[u8]) -> WResult<BodyHeaderFields> {
     })
 }
 
-fn resolve_hashmap<'a>(
-    file_data: &'a [u8],
+/// Byte ranges of a hashmap section, validated against the file they came from.
+#[derive(Debug, Clone)]
+struct HashmapLayout {
+    capacity: u32,
+    buckets: Range<usize>,
+    values: Range<usize>,
+    bucket_stride: usize,
+    value_stride: usize,
+}
+
+impl HashmapLayout {
+    fn section<'a>(&self, file_data: &'a [u8]) -> HashmapSection<'a> {
+        HashmapSection {
+            capacity: self.capacity,
+            buckets: &file_data[self.buckets.clone()],
+            values: &file_data[self.values.clone()],
+            bucket_stride: self.bucket_stride,
+            value_stride: self.value_stride,
+        }
+    }
+}
+
+fn resolve_hashmap(
+    file_data: &[u8],
     base: usize,
     capacity: u32,
     buckets_relptr: i64,
     values_relptr: i64,
     bucket_stride: usize,
     value_stride: usize,
-) -> Result<HashmapSection<'a>, Report<AssetsBinError>> {
+) -> Result<HashmapLayout, Report<AssetsBinError>> {
     let cap = capacity as usize;
 
     let buckets_offset = resolve_relptr(base, buckets_relptr);
@@ -404,16 +430,20 @@ fn resolve_hashmap<'a>(
     if buckets_end > file_data.len() {
         return Err(Report::new(AssetsBinError::OutOfBounds { offset: buckets_offset }));
     }
-    let buckets = &file_data[buckets_offset..buckets_end];
 
     let values_offset = resolve_relptr(base, values_relptr);
     let values_end = values_offset + cap * value_stride;
     if values_end > file_data.len() {
         return Err(Report::new(AssetsBinError::OutOfBounds { offset: values_offset }));
     }
-    let values = &file_data[values_offset..values_end];
 
-    Ok(HashmapSection { capacity, buckets, values, bucket_stride, value_stride })
+    Ok(HashmapLayout {
+        capacity,
+        buckets: buckets_offset..buckets_end,
+        values: values_offset..values_end,
+        bucket_stride,
+        value_stride,
+    })
 }
 
 /// Parse path entry fields: (selfId, parentId)
@@ -472,11 +502,21 @@ fn parse_database_entry_fields(input: &mut &[u8]) -> WResult<(u32, u32, u32, u32
     Ok((magic, checksum, size, pad, relptr))
 }
 
-fn parse_database_entries<'a>(
-    file_data: &'a [u8],
+/// Byte range and header of one prototype blob.
+#[derive(Debug, Clone)]
+struct DatabaseLayout {
+    prototype_magic: u32,
+    prototype_checksum: u32,
+    size: u32,
+    data: Range<usize>,
+    record_count: u64,
+}
+
+fn parse_database_entries(
+    file_data: &[u8],
     entries_offset: usize,
     count: usize,
-) -> Result<Vec<DatabaseEntry<'a>>, Report<AssetsBinError>> {
+) -> Result<Vec<DatabaseLayout>, Report<AssetsBinError>> {
     let mut result = Vec::with_capacity(count);
 
     for i in 0..count {
@@ -495,81 +535,163 @@ fn parse_database_entries<'a>(
             let data = &file_data[data_offset..data_end];
 
             // Parse blob header: u64 count + u64 header_size (always 16)
-            let record_count = u64::from_le_bytes(data[..8].try_into().map_err(|_| {
+            let record_count = u64::from_le_bytes(data.get(..8).and_then(|h| h.try_into().ok()).ok_or_else(|| {
                 Report::new(AssetsBinError::ParseError(format!("database[{i}] blob header too short")))
             })?);
 
-            (data, record_count)
+            (data_offset..data_end, record_count)
         } else {
-            (&[] as &[u8], 0)
+            (0..0, 0)
         };
 
-        result.push(DatabaseEntry { prototype_magic, prototype_checksum, size, data, record_count });
+        result.push(DatabaseLayout { prototype_magic, prototype_checksum, size, data, record_count });
     }
 
     Ok(result)
 }
 
+/// Everything [`parse_assets_bin`] reads, as byte ranges into the file plus
+/// the owned path table, so a borrowed [`PrototypeDatabase`] can be rebuilt
+/// over the same bytes without parsing again.
+#[derive(Debug, Clone)]
+struct AssetsBinLayout {
+    header: Header,
+    offsets_map: HashmapLayout,
+    string_data: Range<usize>,
+    resource_to_prototype_map: HashmapLayout,
+    paths_storage: Vec<PathEntry>,
+    databases: Vec<DatabaseLayout>,
+}
+
+impl AssetsBinLayout {
+    fn parse(file_data: &[u8]) -> Result<Self, Report<AssetsBinError>> {
+        let input = &mut &file_data[..];
+
+        let header =
+            parse_header_fields(input).map_err(|e| Report::new(AssetsBinError::ParseError(format!("header: {e}"))))?;
+
+        if header.magic != BWDB_MAGIC {
+            return Err(Report::new(AssetsBinError::InvalidMagic { actual: header.magic, expected: BWDB_MAGIC }));
+        }
+        if header.version != BWDB_VERSION {
+            return Err(Report::new(AssetsBinError::UnsupportedVersion {
+                actual: header.version,
+                expected: BWDB_VERSION,
+            }));
+        }
+
+        let body_base = 0x10; // header is 16 bytes
+
+        let body = parse_body_header(&mut &file_data[body_base..])
+            .map_err(|e| Report::new(AssetsBinError::ParseError(format!("body header: {e}"))))?;
+
+        // strings section: base = body_base (0x10)
+        let strings_base = body_base;
+        let offsets_map = resolve_hashmap(
+            file_data,
+            strings_base,
+            body.offsets_map_capacity,
+            body.offsets_map_buckets_relptr,
+            body.offsets_map_values_relptr,
+            8, // u64 buckets
+            4, // u32 values
+        )?;
+
+        let string_data_offset = resolve_relptr(strings_base, body.string_data_relptr);
+        let string_data_end = string_data_offset + body.string_data_size as usize;
+        if string_data_end > file_data.len() {
+            return Err(Report::new(AssetsBinError::OutOfBounds { offset: string_data_offset }));
+        }
+
+        // resourceToPrototypeMap: base = body_base + 0x28
+        let r2p_base = body_base + 0x28;
+        let resource_to_prototype_map = resolve_hashmap(
+            file_data,
+            r2p_base,
+            body.r2p_capacity,
+            body.r2p_buckets_relptr,
+            body.r2p_values_relptr,
+            16, // u128 buckets (key_hash + metadata)
+            4,  // u32 values
+        )?;
+
+        // pathsStorage: base = body_base + 0x40
+        let paths_base = body_base + 0x40;
+        let paths_data_offset = resolve_relptr(paths_base, body.paths_data_relptr);
+        let paths_storage = parse_path_entries(file_data, paths_data_offset, body.paths_count as usize)?;
+
+        // databases: relptr relative to body_base
+        let db_entries_offset = resolve_relptr(body_base, body.databases_relptr);
+        let databases = parse_database_entries(file_data, db_entries_offset, body.databases_count as usize)?;
+
+        Ok(Self {
+            header,
+            offsets_map,
+            string_data: string_data_offset..string_data_end,
+            resource_to_prototype_map,
+            paths_storage,
+            databases,
+        })
+    }
+
+    /// The database over `file_data`, which must be the bytes [`Self::parse`]
+    /// read: the ranges were bounds-checked against them.
+    fn database<'a>(&self, file_data: &'a [u8], paths_storage: Cow<'a, [PathEntry]>) -> PrototypeDatabase<'a> {
+        let databases = self
+            .databases
+            .iter()
+            .map(|entry| DatabaseEntry {
+                prototype_magic: entry.prototype_magic,
+                prototype_checksum: entry.prototype_checksum,
+                size: entry.size,
+                data: &file_data[entry.data.clone()],
+                record_count: entry.record_count,
+            })
+            .collect();
+
+        PrototypeDatabase {
+            header: self.header.clone(),
+            strings: StringsSection {
+                offsets_map: self.offsets_map.section(file_data),
+                string_data: &file_data[self.string_data.clone()],
+            },
+            resource_to_prototype_map: self.resource_to_prototype_map.section(file_data),
+            paths_storage,
+            databases,
+        }
+    }
+}
+
+/// An `assets.bin` parsed once and kept with its bytes. [`Self::db`] hands out
+/// a [`PrototypeDatabase`] borrowing both, rebuilt from stored ranges, so
+/// repeated lookups skip the path table parse that dominates
+/// [`parse_assets_bin`].
+#[derive(Debug, Clone)]
+pub struct SharedPrototypeDatabase {
+    bytes: Arc<Vec<u8>>,
+    layout: AssetsBinLayout,
+}
+
+impl SharedPrototypeDatabase {
+    pub fn parse(bytes: Arc<Vec<u8>>) -> Result<Self, Report<AssetsBinError>> {
+        let layout = AssetsBinLayout::parse(&bytes)?;
+
+        Ok(Self { bytes, layout })
+    }
+
+    pub fn db(&self) -> PrototypeDatabase<'_> {
+        self.layout.database(&self.bytes, Cow::Borrowed(&self.layout.paths_storage))
+    }
+
+    pub fn bytes(&self) -> &Arc<Vec<u8>> {
+        &self.bytes
+    }
+}
+
 /// Parse an assets.bin file into a PrototypeDatabase.
 pub fn parse_assets_bin(file_data: &[u8]) -> Result<PrototypeDatabase<'_>, Report<AssetsBinError>> {
-    let input = &mut &file_data[..];
+    let mut layout = AssetsBinLayout::parse(file_data)?;
+    let paths_storage = std::mem::take(&mut layout.paths_storage);
 
-    let header =
-        parse_header_fields(input).map_err(|e| Report::new(AssetsBinError::ParseError(format!("header: {e}"))))?;
-
-    if header.magic != BWDB_MAGIC {
-        return Err(Report::new(AssetsBinError::InvalidMagic { actual: header.magic, expected: BWDB_MAGIC }));
-    }
-    if header.version != BWDB_VERSION {
-        return Err(Report::new(AssetsBinError::UnsupportedVersion { actual: header.version, expected: BWDB_VERSION }));
-    }
-
-    let body_base = 0x10; // header is 16 bytes
-
-    let body = parse_body_header(&mut &file_data[body_base..])
-        .map_err(|e| Report::new(AssetsBinError::ParseError(format!("body header: {e}"))))?;
-
-    // strings section: base = body_base (0x10)
-    let strings_base = body_base;
-    let offsets_map = resolve_hashmap(
-        file_data,
-        strings_base,
-        body.offsets_map_capacity,
-        body.offsets_map_buckets_relptr,
-        body.offsets_map_values_relptr,
-        8, // u64 buckets
-        4, // u32 values
-    )?;
-
-    let string_data_offset = resolve_relptr(strings_base, body.string_data_relptr);
-    let string_data_end = string_data_offset + body.string_data_size as usize;
-    if string_data_end > file_data.len() {
-        return Err(Report::new(AssetsBinError::OutOfBounds { offset: string_data_offset }));
-    }
-    let string_data = &file_data[string_data_offset..string_data_end];
-
-    let strings = StringsSection { offsets_map, string_data };
-
-    // resourceToPrototypeMap: base = body_base + 0x28
-    let r2p_base = body_base + 0x28;
-    let resource_to_prototype_map = resolve_hashmap(
-        file_data,
-        r2p_base,
-        body.r2p_capacity,
-        body.r2p_buckets_relptr,
-        body.r2p_values_relptr,
-        16, // u128 buckets (key_hash + metadata)
-        4,  // u32 values
-    )?;
-
-    // pathsStorage: base = body_base + 0x40
-    let paths_base = body_base + 0x40;
-    let paths_data_offset = resolve_relptr(paths_base, body.paths_data_relptr);
-    let paths_storage = parse_path_entries(file_data, paths_data_offset, body.paths_count as usize)?;
-
-    // databases: relptr relative to body_base
-    let db_entries_offset = resolve_relptr(body_base, body.databases_relptr);
-    let databases = parse_database_entries(file_data, db_entries_offset, body.databases_count as usize)?;
-
-    Ok(PrototypeDatabase { header, strings, resource_to_prototype_map, paths_storage, databases })
+    Ok(layout.database(file_data, Cow::Owned(paths_storage)))
 }

@@ -226,7 +226,7 @@ fn the_model_scale_matches_the_waterline_beam() {
     // Station key (the shared name suffix) to the x of the port and starboard node.
     let mut port: HashMap<String, f32> = HashMap::new();
     let mut starboard: HashMap<String, f32> = HashMap::new();
-    for entry in &db.paths_storage {
+    for entry in db.paths_storage.iter() {
         if entry.parent_id != directory_id || !entry.name.ends_with(".skel_ext") {
             continue;
         }

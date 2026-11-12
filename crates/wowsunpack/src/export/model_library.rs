@@ -17,9 +17,8 @@ use vfs::VfsPath;
 
 use crate::game_params::provider::GameMetadataProvider;
 use crate::game_params::types::ArmorMap;
-use crate::models::assets_bin;
-use crate::models::assets_bin::AssetsBinError;
 use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::assets_bin::SharedPrototypeDatabase;
 use crate::models::geometry;
 use crate::models::geometry::ArmorModel;
 use crate::models::material::MaterialPrototype;
@@ -99,7 +98,7 @@ pub struct ModelLoadOptions {
 /// The shared, once-built index every model load and lookup goes through.
 pub struct ModelLibrary {
     vfs: VfsPath,
-    assets: ParsedAssets,
+    assets: SharedPrototypeDatabase,
     self_id_index: HashMap<u64, usize>,
     model_index: ModelPathIndex,
     catalog: ModelCatalog,
@@ -113,9 +112,10 @@ impl ModelLibrary {
         assets_bin_bytes: Arc<Vec<u8>>,
         metadata: &GameMetadataProvider,
     ) -> Result<Self, Report<ModelLibraryError>> {
-        let assets = ParsedAssets::new(assets_bin_bytes).context(ModelLibraryError::AssetsBin)?;
-        let self_id_index = assets.db().build_self_id_index();
-        let model_index = ModelPathIndex::build(assets.db(), &self_id_index);
+        let assets = SharedPrototypeDatabase::parse(assets_bin_bytes).context(ModelLibraryError::AssetsBin)?;
+        let db = assets.db();
+        let self_id_index = db.build_self_id_index();
+        let model_index = ModelPathIndex::build(&db, &self_id_index);
         let catalog =
             ModelCatalog::from_paths(model_index.paths().cloned(), &model_catalog::peculiarity_models(metadata));
 
@@ -137,7 +137,7 @@ impl ModelLibrary {
         path: &ModelPath,
         options: &ModelLoadOptions,
     ) -> Result<LoadedModel, Report<ModelLoadError>> {
-        let db = self.assets.db();
+        let db = &self.assets.db();
 
         let sections = self.catalog.entry(path).into_iter().flat_map(ModelEntry::sections);
         let part_paths: Vec<&ModelPath> = std::iter::once(path).chain(sections).collect();
@@ -411,6 +411,23 @@ impl LoadedModel {
     ) -> Vec<InteractiveArmorMesh> {
         self.armor.iter().map(|armor| InteractiveArmorMesh::from_armor_model(armor, hull_armor, mount_armor)).collect()
     }
+
+    /// Takes the loaded data apart without copying meshes or textures.
+    pub fn into_parts(self) -> LoadedModelParts {
+        let Self { path, parts, meshes, materials, hardpoints, armor } = self;
+
+        LoadedModelParts { path, parts, meshes, materials, hardpoints, armor }
+    }
+}
+
+/// The contents of a [`LoadedModel`], as [`LoadedModel::into_parts`] returns them.
+pub struct LoadedModelParts {
+    pub path: ModelPath,
+    pub parts: Vec<ModelPart>,
+    pub meshes: Vec<InteractiveHullMesh>,
+    pub materials: BTreeMap<String, ModelMaterial>,
+    pub hardpoints: Vec<Hardpoint>,
+    pub armor: Vec<ArmorModel>,
 }
 
 /// One `.model` that contributed meshes to a [`LoadedModel`].
@@ -457,33 +474,6 @@ impl TextureSource {
             Self::MaterialProperty { path } | Self::NameMatch { path } => Some(path),
             Self::TiledLandBake => None,
         }
-    }
-}
-
-/// `assets.bin` parsed once and kept beside the bytes it borrows, so loads do
-/// not re-parse the 170 MB store.
-struct ParsedAssets {
-    /// Borrows `bytes`. Declared first so it drops first.
-    db: PrototypeDatabase<'static>,
-    #[expect(dead_code, reason = "owns the buffer `db` borrows")]
-    bytes: Arc<Vec<u8>>,
-}
-
-impl ParsedAssets {
-    fn new(bytes: Arc<Vec<u8>>) -> Result<Self, Report<AssetsBinError>> {
-        // SAFETY: the slice is the heap buffer of `bytes`, which this struct
-        // keeps alive. The buffer does not move when the `Arc` moves, and no
-        // one mutates it: the `Arc` is shared and `ParsedAssets` never asks
-        // for mutable access. `db` only leaves this struct through `db()`,
-        // which shortens its lifetime to the borrow of `self`.
-        let data: &'static [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
-        let db = assets_bin::parse_assets_bin(data)?;
-
-        Ok(Self { db, bytes })
-    }
-
-    fn db(&self) -> &PrototypeDatabase<'_> {
-        &self.db
     }
 }
 

@@ -214,7 +214,7 @@ pub fn resolve_fire_sections(
     // hull declares is a disagreement, and taking the bow-most subset of it would
     // silently place the sections on a different hull's geometry.
     let mut longitudinal: Vec<Option<Meters>> = vec![None; BurnNodeIndex::MAX_NODES as usize];
-    for entry in &db.paths_storage {
+    for entry in db.paths_storage.iter() {
         if entry.parent_id != directory_id
             || !entry.name.starts_with(&prefix)
             || !entry.name.ends_with(EFFECT_EXTENDER_SUFFIX)

@@ -1515,7 +1515,7 @@ fn run_assets_bin(
 
     println!("PathsStorage: {} entries", db.paths_storage.len());
     let mut shown = 0;
-    for entry in &db.paths_storage {
+    for entry in db.paths_storage.iter() {
         let matches = filter.map(|f| entry.name.contains(f)).unwrap_or(true);
         if !matches {
             continue;
