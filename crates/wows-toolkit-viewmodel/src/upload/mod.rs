@@ -6,13 +6,14 @@
 //! read it.
 //!
 //! The rules here are the egui app's (`task/replay_upload.rs`), moved so the port
-//! is not a second opinion on them. What stays in each app is the HTTP: one
-//! blocking client, one async.
+//! is not a second opinion on them. The HTTP is the egui app's blocking client
+//! and `wows_toolkit_services::upload`.
 
 use jiff::SignedDuration;
 use jiff::Timestamp;
 
 use crate::settings::DataSharingMode;
+use crate::upload::build_tracker::BuildTrackerPayload;
 
 pub mod build_tracker;
 
@@ -26,6 +27,24 @@ pub const RAW_UPLOAD_GRACE: SignedDuration = SignedDuration::from_secs(30 * 60);
 /// When a raw upload that is still waiting for results gives up waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RawUploadDeadline(pub Timestamp);
+
+/// What a decision needs to know about the parsed battle.
+///
+/// Taken as plain data rather than the report itself: the decision is shared and
+/// must not depend on either app's own types.
+pub struct Shareable {
+    /// `ReplayMeta::gameType`, which says whether the service takes this battle.
+    pub game_type: String,
+    pub version: wowsunpack::data::Version,
+    /// Whether the recording player's ship is positively known not to be a test
+    /// ship. Uncertainty is `false`, which keeps the file off `/api/replays`.
+    pub self_confirmed_non_test: bool,
+    /// Whether the packet stream carried an end-of-battle marker.
+    pub results: ResultsScan,
+    /// The per-player build payloads, for the build-data mode. Empty is nothing
+    /// to send.
+    pub builds: Vec<BuildTrackerPayload>,
+}
 
 /// Whether a replay's packet stream carries an end-of-battle marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
