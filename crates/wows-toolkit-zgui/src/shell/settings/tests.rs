@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use landaire_ui::Appearance as DesktopAppearance;
+use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
@@ -193,6 +194,24 @@ fn the_search_filters_every_section_and_counts_what_it_kept() {
     settle(&mut window);
     assert_eq!(label(&mut window, "settings-count").as_deref(), Some("0 settings"));
     assert!(window.by_test_id("settings-no-match").is_some(), "an empty result says so");
+}
+
+/// A kept row marks the letters of its name or description the search matched, and an empty
+/// search marks nothing.
+#[test]
+fn the_search_marks_what_it_matched() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    assert!(window.texts_by_class(MARK_CLASS).is_empty(), "nothing is marked before a search");
+
+    window.type_text("raw xp");
+    settle(&mut window);
+    let marked = window.texts_by_class(MARK_CLASS);
+    assert!(!marked.is_empty(), "the kept row is marked");
+    assert!(marked.iter().all(|piece| piece.eq_ignore_ascii_case("raw xp")), "{marked:?}");
+
+    click(&mut window, "settings-search-clear");
+    assert!(window.texts_by_class(MARK_CLASS).is_empty(), "clearing the search drops the marks");
 }
 
 /// A switch writes its row to the shared database, where the next start reads it.
