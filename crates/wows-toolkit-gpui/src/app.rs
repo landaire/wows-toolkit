@@ -2315,7 +2315,7 @@ impl App {
 
     /// Asks for the directory the per-battle exports are written to.
     fn choose_export_directory(&mut self, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder(&t!("ui.settings.replay.export_path_hint"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.settings.replay.export_path_hint"));
         cx.spawn(async move |this, cx| {
             let Some(directory) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let directory = directory.to_string_lossy().into_owned();
@@ -3032,7 +3032,7 @@ impl App {
     }
 
     fn browse_for_cache_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder("Game data cache directory");
+        let asked = wows_toolkit_services::dialog::pick_folder("Game data cache directory");
         cx.spawn(async move |this, cx| {
             let Some(picked) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let path = picked.to_string_lossy().into_owned();
@@ -3152,7 +3152,7 @@ impl App {
     }
 
     fn browse_for_wows_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder("World of Warships directory");
+        let asked = wows_toolkit_services::dialog::pick_folder("World of Warships directory");
         cx.spawn(async move |this, cx| {
             let Some(picked) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let path = picked.to_string_lossy().into_owned();

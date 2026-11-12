@@ -244,7 +244,7 @@ impl LauncherView {
     }
 
     fn add_install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
         cx.spawn_in(window, async move |this, cx| {
             let Some(dir) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| {
@@ -259,7 +259,7 @@ impl LauncherView {
     }
 
     fn browse_proton_binary(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_file(Some(&t!("ui.launcher.proton.binary")), None);
+        let asked = wows_toolkit_services::dialog::pick_file(Some(&t!("ui.launcher.proton.binary")), None);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_binary = Some(path)));
@@ -268,7 +268,7 @@ impl LauncherView {
     }
 
     fn browse_proton_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder(&t!("ui.launcher.proton.prefix"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.proton.prefix"));
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_prefix = Some(path)));
@@ -277,7 +277,7 @@ impl LauncherView {
     }
 
     fn download(&mut self, install: PathBuf, start: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
+        let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
         cx.spawn_in(window, async move |this, cx| {
             let Some(dest) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
@@ -293,8 +293,10 @@ impl LauncherView {
     }
 
     fn install_game(&mut self, game: KnownGame, window: &mut Window, cx: &mut Context<Self>) {
-        let asked =
-            crate::dialog::pick_folder_in(&t!("ui.launcher.install_title"), &wgc_download::default_install_dir());
+        let asked = wows_toolkit_services::dialog::pick_folder_in(
+            &t!("ui.launcher.install_title"),
+            &wgc_download::default_install_dir(),
+        );
         cx.spawn_in(window, async move |this, cx| {
             let Some(dest) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let _ = this.update_in(cx, |this, window, cx| {

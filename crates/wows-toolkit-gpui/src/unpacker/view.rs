@@ -289,7 +289,7 @@ impl UnpackerView {
     }
 
     fn browse_for_output_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let asked = crate::dialog::pick_folder("Extract to");
+        let asked = wows_toolkit_services::dialog::pick_folder("Extract to");
         cx.spawn(async move |this, cx| {
             let Some(picked) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let picked = picked.to_string_lossy().into_owned();
@@ -603,8 +603,11 @@ impl UnpackerView {
         // the raw pickled tree and has no meaning for them.
         let base_only = base_only && !format.is_minimal();
         let stem = if format.is_minimal() { "MinGameParams" } else { "GameParams" };
-        let asked =
-            crate::dialog::save_file(Some("Save game parameters"), &format!("{stem}.{}", format.extension()), None);
+        let asked = wows_toolkit_services::dialog::save_file(
+            Some("Save game parameters"),
+            &format!("{stem}.{}", format.extension()),
+            None,
+        );
 
         cx.spawn(async move |this, cx| {
             let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
@@ -640,7 +643,11 @@ impl UnpackerView {
     fn extract_as_json(&mut self, path: VfsPath, cx: &mut Context<Self>) {
         let name = path.filename();
         let stem = name.rsplit_once('.').map(|(stem, _)| stem.to_string()).unwrap_or(name);
-        let asked = crate::dialog::save_file(Some(&t!("ui.unpacker.extract_as_json")), &format!("{stem}.json"), None);
+        let asked = wows_toolkit_services::dialog::save_file(
+            Some(&t!("ui.unpacker.extract_as_json")),
+            &format!("{stem}.json"),
+            None,
+        );
         cx.spawn(async move |this, cx| {
             let Some(target) = crate::dialog::chosen(asked, &this, cx).await else { return };
             let written = cx

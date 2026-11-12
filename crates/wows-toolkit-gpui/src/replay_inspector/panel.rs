@@ -402,9 +402,9 @@ impl ReplayPanel {
             return;
         }
         let game_data = self.game_data.clone();
-        let asked = crate::dialog::pick_file(
+        let asked = wows_toolkit_services::dialog::pick_file(
             Some(&t!("ui.replay.load_alt_perspective")),
-            Some(crate::dialog::Filter { label: "WoWs Replays", extensions: &["wowsreplay"] }),
+            Some(wows_toolkit_services::dialog::Filter { label: "WoWs Replays", extensions: &["wowsreplay"] }),
         );
         let primary = self.path.clone();
 
@@ -492,7 +492,7 @@ impl ReplayPanel {
                 _ => "replay".to_string(),
             },
         };
-        let asked = crate::dialog::save_file(
+        let asked = wows_toolkit_services::dialog::save_file(
             Some(&t!("ui.replay.export_results_title")),
             &format!("{name}.{}", format.extension()),
             None,
