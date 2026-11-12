@@ -33,6 +33,7 @@ use zgui::view::Timers;
 use zgui::vocab::Modifiers;
 use zgui::vocab::Timestamp;
 use zgui_ui::ContextMenuPlace;
+use zgui_ui::virtualize::MeasuredVirtualize;
 use zgui_ui::virtualize::VirtualWindow;
 
 use crate::grid::column::ColumnId;
@@ -259,6 +260,8 @@ where
     pub(crate) fixed: Option<RowHeight>,
     /// The rows a fixed-height grid builds, and where each row sits.
     pub(crate) window: Option<Signal<VirtualWindow, LocalStorage>>,
+    /// The rows a measured grid builds, and their heights.
+    pub(crate) measured: Option<MeasuredVirtualize>,
     pub(crate) on_activate: Option<UnsyncCallback<K>>,
     pub(crate) on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
 
@@ -627,9 +630,16 @@ where
             (Some(_), None) | (None, _) => {
                 let cell = self.row_cells.borrow().get(key).copied();
                 let port = self.port.window_bounds();
-                cell.and_then(|cell| cell.window_bounds()).zip(port).map(|(cell, port)| {
+                let built = cell.and_then(|cell| cell.window_bounds()).zip(port).map(|(cell, port)| {
                     let top = (cell.origin.y.0 - port.origin.y.0) / scale + position.offset.y.0 / scale;
                     (top, top + cell.size.height.0 / scale)
+                });
+                // A measured row that is not built is where its measurement or estimate puts it.
+                built.or_else(|| {
+                    let seen = self.measured?;
+                    let top = seen.offset_of(index)?;
+                    let next = seen.offset_of(index + 1).filter(|next| *next > top).unwrap_or(top);
+                    Some((header + top, header + next))
                 })
             }
         };
