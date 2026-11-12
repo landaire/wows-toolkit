@@ -1,10 +1,22 @@
 //! What the shell offers on the palette itself: the commands whose work it or the shared services
 //! can do without a tab.
 
+use rust_i18n::t;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::settings::keys;
+use zgui::reactive::RwSignal;
 use zgui::task::spawn_detached;
+use zgui::view;
+use zgui::view::AnyView;
+use zgui_ui::AlertDialogActionProps;
+use zgui_ui::AlertDialogCancelProps;
+use zgui_ui::AlertDialogContentProps;
+use zgui_ui::AlertDialogDescriptionProps;
+use zgui_ui::AlertDialogFooterProps;
+use zgui_ui::AlertDialogHeaderProps;
+use zgui_ui::AlertDialogProps;
+use zgui_ui::AlertDialogTitleProps;
 
 use crate::shell::ReplayRequest;
 use crate::shell::Shell;
@@ -49,6 +61,7 @@ pub fn offer(shell: Shell) {
     palette.offer(RootCommand::OpenReplayFile, PaletteRun::action(move || open_replay_file(shell)));
     palette
         .offer(RootCommand::IndexAllReplays, PaletteRun::action(move || shell.build_replay_index(IndexMode::FillGaps)));
+    palette.offer(RootCommand::RefreshPersistedData, PaletteRun::action(move || confirm_refresh_persisted_data(shell)));
     palette.offer(RootCommand::CopyLatestLog, PaletteRun::action(move || crash::copy_latest_log(shell)));
     palette.offer(RootCommand::CopyBugReportInfo, PaletteRun::action(move || crash::copy_bug_report_info(shell)));
 
@@ -103,6 +116,32 @@ pub fn open_replay_file(shell: Shell) {
             file.clone()
         });
         shell.request_replay(ReplayRequest::OpenReplay(file));
+    });
+}
+
+/// Asks before reading every replay again, which takes a while and rewrites what is stored.
+fn confirm_refresh_persisted_data(shell: Shell) {
+    shell.dialogs.open(move |handle| {
+        let open = RwSignal::new_local(true);
+        AnyView::new(view! {
+            AlertDialog(open = open, on_open_change = handle.on_open_change()) {
+                AlertDialogContent(attr:data-testid = "refresh-persisted-data-confirm") {
+                    AlertDialogHeader {
+                        AlertDialogTitle {{t!("ui.windows.refresh_persisted_data").into_owned()}}
+                        AlertDialogDescription {{t!("ui.dialogs.refresh_persisted_data_message").into_owned()}}
+                    }
+                    AlertDialogFooter {
+                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogAction(
+                            attr:data-testid = "refresh-persisted-data-ok",
+                            on:click = move |_| shell.build_replay_index(IndexMode::RefreshAll)
+                        ) {
+                            {t!("ui.buttons.refresh_persisted_data_confirm").into_owned()}
+                        }
+                    }
+                }
+            }
+        })
     });
 }
 
