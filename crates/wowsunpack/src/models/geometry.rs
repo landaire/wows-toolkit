@@ -27,6 +27,8 @@ pub enum GeometryError {
     DecodeError(String),
     #[error("parse error: {0}")]
     ParseError(String),
+    #[error("{len} bytes are too few for a geometry header")]
+    TruncatedHeader { len: usize },
 }
 
 #[derive(Debug)]
@@ -248,6 +250,15 @@ fn parse_header(input: &mut &[u8]) -> WResult<HeaderFields> {
         collision_models_ptr,
         armor_models_ptr,
     })
+}
+
+/// The number of armor models a `.geometry` file holds, read from its header
+/// alone without decoding any mesh or armor data.
+pub fn armor_model_count(file_data: &[u8]) -> Result<u32, Report<GeometryError>> {
+    let hdr = parse_header(&mut &file_data[..])
+        .map_err(|_| Report::new(GeometryError::TruncatedHeader { len: file_data.len() }))?;
+
+    Ok(hdr.armor_model_count)
 }
 
 /// Parse the header and resolve all sub-structures from the full file data.

@@ -224,9 +224,9 @@ impl ModelLibrary {
         for source in &sources {
             summary.lod_count = summary.lod_count.max(source.visual.lods.len());
             if !summary.has_armor {
-                let geom = geometry::parse_geometry(&source.geometry_bytes)
+                let armor_models = geometry::armor_model_count(&source.geometry_bytes)
                     .context_with(|| ModelLoadError::GeometryParse { path: source.geometry_path.clone() })?;
-                summary.has_armor = !geom.armor_models.is_empty();
+                summary.has_armor = armor_models > 0;
             }
         }
 
