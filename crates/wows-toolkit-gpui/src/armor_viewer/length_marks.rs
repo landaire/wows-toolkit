@@ -80,8 +80,8 @@ pub(crate) struct Mark {
 /// A distance written over the scene beside the grid, at `position` in
 /// model space, as strong as the grid is there.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct LengthLabel {
-    pub(crate) text: String,
+pub(crate) struct LengthLabel<'a> {
+    pub(crate) text: &'a str,
     pub(crate) position: Vec3,
     pub(crate) opacity: f32,
 }
@@ -174,6 +174,42 @@ impl LengthMarks {
     fn step_distance(&self, step: u32) -> Meters {
         Meters::new(step as f32 * self.spacing.value())
     }
+}
+
+/// A grid's marks with their distances written out in one language, so that
+/// a frame only picks the sides nearer the camera and projects them.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MarkLabels {
+    marks: LengthMarks,
+    /// The language `texts` are written in.
+    locale: String,
+    along: Vec<Mark>,
+    across: Vec<Mark>,
+    /// The distance of each step of the spacing, as written. The length and
+    /// beam marks at a step read alike.
+    texts: Vec<String>,
+}
+
+impl MarkLabels {
+    /// `marks` written in the language in use.
+    pub(crate) fn new(marks: LengthMarks) -> Self {
+        let along = marks.along_length();
+        let across = marks.across_beam();
+        let texts = (0..=marks.length_steps().max(marks.beam_steps()))
+            .map(|step| Reading::of(marks.step_distance(step), marks.spacing).text())
+            .collect();
+
+        Self { marks, locale: rust_i18n::locale().to_string(), along, across, texts }
+    }
+
+    pub(crate) fn marks(&self) -> &LengthMarks {
+        &self.marks
+    }
+
+    /// Whether the texts are in the language in use.
+    pub(crate) fn is_current(&self) -> bool {
+        *rust_i18n::locale() == *self.locale
+    }
 
     /// The marks labelled beside the grid on the sides nearer the camera:
     /// the length marks along the nearer side, the beam marks across the
@@ -183,29 +219,28 @@ impl LengthMarks {
         &self,
         nearer: impl Fn(Vec3, Vec3) -> bool,
         opacity: impl Fn(Vec3) -> f32,
-    ) -> Vec<LengthLabel> {
+    ) -> impl Iterator<Item = LengthLabel<'_>> {
+        let marks = &self.marks;
         // Clear of the hull, so a label is not written over the side.
-        let margin = self.spacing.to_ship_model().value() * 0.4;
-        let middle = (self.low + self.high) * 0.5;
-        let at = |x: f32, z: f32| Vec3::new(x, self.plane_y, z);
+        let margin = marks.spacing.to_ship_model().value() * 0.4;
+        let middle = (marks.low + marks.high) * 0.5;
+        let at = move |x: f32, z: f32| Vec3::new(x, marks.plane_y, z);
 
         let side = |x: f32| at(x, middle.z);
-        let (port, starboard) = (self.low.x - margin, self.high.x + margin);
+        let (port, starboard) = (marks.low.x - margin, marks.high.x + margin);
         let near_x = if nearer(side(port), side(starboard)) { port } else { starboard };
 
         let end = |z: f32| at(middle.x, z);
-        let (bow, stern) = (self.low.z - margin, self.high.z + margin);
+        let (bow, stern) = (marks.low.z - margin, marks.high.z + margin);
         let near_z = if nearer(end(bow), end(stern)) { bow } else { stern };
 
-        let label = |position: Vec3, distance: Meters| LengthLabel {
-            text: Reading::of(distance, self.spacing).text(),
-            position,
-            opacity: opacity(position),
-        };
-        let along = self.along_length().into_iter().map(|mark| label(at(near_x, mark.at), mark.distance));
-        let across = self.across_beam().into_iter().map(|mark| label(at(mark.at, near_z), mark.distance));
+        let along = self.along.iter().zip(&self.texts).map(move |(mark, text)| (at(near_x, mark.at), text));
+        let across = self.across.iter().zip(&self.texts).map(move |(mark, text)| (at(mark.at, near_z), text));
 
-        along.chain(across).filter(|label| label.opacity > 0.).collect()
+        along
+            .chain(across)
+            .map(move |(position, text)| LengthLabel { text, position, opacity: opacity(position) })
+            .filter(|label| label.opacity > 0.)
     }
 }
 
@@ -306,15 +341,18 @@ mod tests {
     }
 
     /// The labels sit on the plane, beside the hull on whichever side and
-    /// end the camera is nearer, and take the grid's strength there.
+    /// end the camera is nearer, take the grid's strength there, and read
+    /// their distance.
     #[test]
     fn labels_sit_beside_the_model_on_the_side_facing_the_camera() {
         let (low, high) = bounds(Meters::new(200.), Meters::new(30.));
         let marks = LengthMarks::new((low, high), 0.).expect("marks");
+        let written = MarkLabels::new(marks);
         let eye = Vec3::new(500., 50., -400.);
         let nearer = |a: Vec3, b: Vec3| (a - eye).norm() < (b - eye).norm();
 
-        let labels = marks.labels(nearer, |position| if position.z > 0. { 0.5 } else { 1. });
+        let labels: Vec<LengthLabel> =
+            written.labels(nearer, |position| if position.z > 0. { 0.5 } else { 1. }).collect();
 
         assert_eq!(labels.len(), marks.along_length().len() + marks.across_beam().len());
         assert!(labels.iter().all(|label| label.position.y == 0.));
@@ -323,13 +361,15 @@ mod tests {
         assert!(across.iter().all(|label| label.position.z < low.z), "past the bow: {across:?}");
         assert_eq!(along[0].opacity, 0.5);
         assert_eq!(across[0].opacity, 1.);
+        let one_step = Reading::of(marks.spacing(), marks.spacing()).text();
+        assert_eq!((along[1].text, across[1].text), (one_step.as_str(), one_step.as_str()));
     }
 
     #[test]
     fn labels_where_the_grid_has_faded_are_dropped() {
         let marks = LengthMarks::new(bounds(Meters::new(50.), Meters::new(10.)), 0.).expect("marks");
 
-        assert!(marks.labels(|_, _| true, |_| 0.).is_empty());
+        assert_eq!(MarkLabels::new(marks).labels(|_, _| true, |_| 0.).count(), 0);
     }
 
     /// Ships read in whole metres, small parts in centimetres, each to as

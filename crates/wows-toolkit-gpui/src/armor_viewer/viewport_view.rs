@@ -53,6 +53,7 @@ use super::camera_rings;
 use super::depth_cues;
 use super::gaps;
 use super::length_marks::LengthMarks;
+use super::length_marks::MarkLabels;
 use super::length_marks::Reading;
 use super::splash;
 use super::trajectory;
@@ -931,9 +932,10 @@ pub struct ViewportView {
     /// The marked hardpoints' names and where each is drawn, for the
     /// labels painted over the scene.
     hardpoint_labels: Vec<hardpoint_overlay::HardpointLabel>,
-    /// The marks on the grid under the shown scene, read for their labels
-    /// and the overall size. `None` without a scene of any extent.
-    length_marks: Option<LengthMarks>,
+    /// The marks on the grid under the shown scene with their distances
+    /// written out, read for their labels and the overall size. `None`
+    /// without a scene of any extent.
+    length_marks: Option<MarkLabels>,
     /// The overlay mesh drawing the markers of `hardpoint_labels`.
     hardpoint_mesh: Option<MeshId>,
     /// The scene units per pixel `hardpoint_mesh` was sized for.
@@ -2278,7 +2280,7 @@ impl ViewportView {
 
     /// The shown model's overall length and beam, while the length marks are.
     pub(crate) fn length_readout(&self) -> Option<String> {
-        let marks = self.length_marks.filter(|_| self.display_settings.show_length_marks)?;
+        let marks = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks)?.marks();
         let (length, beam) = (Reading::of_size(marks.length()).text(), Reading::of_size(marks.beam()).text());
 
         Some(t!("ui.armor.length_readout", length = length, beam = beam).into_owned())
@@ -2636,15 +2638,16 @@ impl ViewportView {
         }
 
         // The grid is drawn in world space, so its labels are placed there too.
-        if let Some(marks) = self.length_marks.filter(|_| self.display_settings.show_length_marks) {
+        if let Some(written) = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks) {
             let eye = camera.eye_position();
-            let labels = marks
-                .labels(|a, b| (a - eye).norm() < (b - eye).norm(), |position| depth_cues::grid_fade(&marks, position));
+            let marks = written.marks();
+            let labels = written
+                .labels(|a, b| (a - eye).norm() < (b - eye).norm(), |position| depth_cues::grid_fade(marks, position));
             for label in labels {
                 let Some(at) = camera.project_to_screen(label.position, rect).filter(|at| rect.contains(*at)) else {
                     continue;
                 };
-                paint_box_label(&label.text, on_screen(at), label.opacity, window, cx);
+                paint_box_label(label.text, on_screen(at), label.opacity, window, cx);
             }
         }
 
@@ -2675,6 +2678,14 @@ impl ViewportView {
                 |at| camera.project_to_screen(at, rect).map(on_screen),
                 window,
             );
+        }
+    }
+
+    /// Writes the length marks' distances again when the language has
+    /// changed since they were written.
+    fn rewrite_length_marks(&mut self) {
+        if let Some(written) = self.length_marks.as_ref().filter(|written| !written.is_current()) {
+            self.length_marks = Some(MarkLabels::new(*written.marks()));
         }
     }
 
@@ -3826,13 +3837,16 @@ impl ViewportView {
 
         // A model has no water to stand in, so its grid lies under it.
         let plane_y = if armor.is_ship() { 0. } else { armor.bounds.0.y };
-        self.length_marks = LengthMarks::new(armor.bounds, plane_y);
+        let marks = LengthMarks::new(armor.bounds, plane_y);
+        if self.length_marks.as_ref().map(MarkLabels::marks) != marks.as_ref() {
+            self.length_marks = marks.map(MarkLabels::new);
+        }
         let layers = depth_cues::GridLayers {
             lines: self.display_settings.show_grid,
             marks: self.display_settings.show_length_marks,
         };
-        if let Some(marks) = self.length_marks.as_ref() {
-            depth_cues::upload_waterline_grid(&mut self.viewport, device, marks, layers);
+        if let Some(written) = self.length_marks.as_ref() {
+            depth_cues::upload_waterline_grid(&mut self.viewport, device, written.marks(), layers);
         }
 
         if self.display_settings.show_ship_center {
@@ -4543,6 +4557,7 @@ impl Render for ViewportView {
                     let _ = weak.update(cx, |this, cx| {
                         this.paint_scene(bounds, window);
                         depth_cues::paint_vignette(bounds, window);
+                        this.rewrite_length_marks();
                         this.paint_annotations(bounds, window, cx);
                         this.paint_hit_pulses(bounds, window, cx);
                     });
