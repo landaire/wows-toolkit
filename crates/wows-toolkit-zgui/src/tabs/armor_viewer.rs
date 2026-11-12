@@ -1,5 +1,6 @@
 //! The Armor Viewer tab.
 
+pub mod panels;
 pub mod sidebar;
 pub mod viewport;
 
