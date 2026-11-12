@@ -31,7 +31,6 @@ mod minimap_preview;
 mod motion;
 mod notices;
 mod palette;
-mod personal_rating;
 mod player_tracker;
 mod preview_hover;
 mod render_defaults;
