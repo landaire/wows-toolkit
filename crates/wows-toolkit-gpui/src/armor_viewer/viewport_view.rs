@@ -84,8 +84,6 @@ use crate::armor_viewer::load_ship::PlateKey;
 use crate::armor_viewer::load_ship::SceneSubject;
 use crate::armor_viewer::load_ship::ShipLoadError;
 use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
-use crate::armor_viewer::model_refs::HardpointTarget;
-use crate::armor_viewer::model_refs::OpenTarget;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
@@ -107,6 +105,8 @@ use crate::armor_viewer::visibility::VisibilitySnapshot;
 use crate::armor_viewer::visibility::VisibilityUndoStack;
 use crate::armor_viewer::xray::XrayHighlight;
 use crate::armor_viewer::xray::XrayHighlightView;
+use wows_toolkit_armor::model_refs::HardpointTarget;
+use wows_toolkit_armor::model_refs::OpenTarget;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -4793,7 +4793,9 @@ impl Render for ViewportView {
             // A zone and a plate are named the way the game names them, as the
             // egui tooltip does.
             let zone_label = match self.reload_bundle() {
-                Some(bundle) => super::catalog::translate_name(bundle.assets.metadata(), &hover.tooltip.zone),
+                Some(bundle) => {
+                    wows_toolkit_armor::catalog::translate_name(bundle.assets.metadata(), &hover.tooltip.zone)
+                }
                 None => hover.tooltip.zone.clone(),
             };
             let material_label = self.material_label(hover.tooltip.material);
@@ -5694,7 +5696,7 @@ mod opening_visibility_tests {
         if let crate::armor_viewer::load_ship::SceneSubject::Model(model) = &mut scene.subject {
             model.thickness =
                 crate::armor_viewer::load_ship::ArmorThickness::Ship(crate::armor_viewer::load_ship::ThicknessSource {
-                    vehicle_param_index: crate::armor_viewer::model_refs::VehicleParamIndex::new("PASC001".to_string()),
+                    vehicle_param_index: wows_toolkit_armor::model_refs::VehicleParamIndex::new("PASC001".to_string()),
                     display_name: "Iowa".to_string(),
                     hp: wowsunpack::export::hardpoint::HardpointName::new("HP_AGM_1"),
                 });
@@ -5960,7 +5962,7 @@ mod real_model_tests {
     use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
     use crate::armor_viewer::load_model::ModelLoadRequest;
     use crate::armor_viewer::load_model::load_model_scene;
-    use crate::armor_viewer::model_refs::HardpointTarget;
+    use wows_toolkit_armor::model_refs::HardpointTarget;
     use wows_toolkit_armor::viewport::types::Vec3;
     use wows_toolkit_armor::viewport::types::ViewRect;
 
