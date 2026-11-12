@@ -24,8 +24,10 @@ use crate::models::terrain::Terrain;
 use crate::models::vertex_format;
 use crate::models::vertex_format::AttributeSemantic;
 use crate::models::vertex_format::VertexFormat;
+use crate::models::visual::RenderSet;
 use crate::models::visual::VisualPrototype;
 
+use super::hardpoint::mat4_linear_determinant;
 use super::part_group::PartGroup;
 use super::texture;
 
@@ -235,7 +237,7 @@ pub struct MapEnvironment<'a> {
 pub struct MapMesh {
     /// Human-readable name (e.g. render set name or "Terrain").
     pub name: String,
-    /// Vertex positions (right-handed: Z negated).
+    /// Vertex positions, right-handed.
     pub positions: Vec<[f32; 3]>,
     /// Vertex normals (same length as positions).
     pub normals: Vec<[f32; 3]>,
@@ -1419,7 +1421,8 @@ pub fn export_merged_models_glb(
 ///
 /// Pairs `vertices_mapping[i]` with `indices_mapping[i]` by array index. Each
 /// pair becomes a separate glTF primitive. No material names, textures, or LOD
-/// filtering are available without the visual.
+/// filtering are available without the visual, nor the blend bones that show
+/// a skinned mesh is stored reflected, so every mesh is taken as left-handed.
 pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -> Result<(), Report<ExportError>> {
     let pair_count = geometry.vertices_mapping.len().min(geometry.indices_mapping.len());
 
@@ -1520,7 +1523,7 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
         let idx_slice = &decoded_indices[idx_start..idx_end];
 
         // Parse indices as u32.
-        let indices: Vec<u32> = match index_size {
+        let mut indices: Vec<u32> = match index_size {
             2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
             4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
@@ -1529,7 +1532,8 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
             }
         };
 
-        let verts = unpack_vertices(vert_slice, stride, &format);
+        let verts = unpack_vertices(vert_slice, stride, &format, VertexHandedness::Left);
+        wind_counterclockwise(&mut indices);
 
         // Build a DecodedPrimitive for reuse with add_primitive_to_root.
         let prim = DecodedPrimitive {
@@ -1742,7 +1746,7 @@ fn collect_primitives(
         let idx_slice = &decoded_indices[idx_start..idx_end];
 
         // Parse indices as u32.
-        let indices: Vec<u32> = match index_size {
+        let mut indices: Vec<u32> = match index_size {
             2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
             4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
@@ -1754,11 +1758,13 @@ fn collect_primitives(
         // (items_offset is applied when extracting the vertex slice).
 
         // Unpack vertex attributes.
-        let mut verts = unpack_vertices(vert_slice, stride, &format);
+        let handedness = VertexHandedness::of_render_set(visual, rs);
+        let mut verts = unpack_vertices(vert_slice, stride, &format, handedness);
+        wind_counterclockwise(&mut indices);
 
         // Apply per-vertex barrel pitch rotation if configured.
         if let Some(bp) = barrel_pitch {
-            apply_barrel_pitch(&mut verts.positions, &mut verts.normals, vert_slice, stride, &format, bp);
+            apply_barrel_pitch(&mut verts.positions, &mut verts.normals, vert_slice, stride, &format, bp, handedness);
         }
 
         // Material name for this render set.
@@ -1933,14 +1939,55 @@ pub(crate) fn primitive_summary_from_metadata(
     Ok(PrimitiveSummary { counts, mfm_stems })
 }
 
+/// The handedness a render set stores its vertices in. Static meshes are
+/// left-handed like the engine. A skinned mesh whose blend bones reflect it
+/// at rest is stored mirrored, which is already the right-handed shape the
+/// engine draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VertexHandedness {
+    Left,
+    Right,
+}
+
+impl VertexHandedness {
+    /// The handedness of `rs`, from the rest transform of its first blend
+    /// bone. A bone the skeleton does not hold reflects nothing.
+    fn of_render_set(visual: &VisualPrototype, rs: &RenderSet) -> Self {
+        if !rs.skinned {
+            return Self::Left;
+        }
+
+        let reflected = rs
+            .node_name_ids
+            .first()
+            .and_then(|&name_id| visual.find_node_index_by_name_id(name_id))
+            .and_then(|node| visual.node_world_matrix(node))
+            .is_some_and(|rest| mat4_linear_determinant(&rest) < 0.0);
+        if reflected { Self::Right } else { Self::Left }
+    }
+
+    /// A stored position or normal in right-handed coordinates.
+    fn to_right_handed(self, [x, y, z]: [f32; 3]) -> [f32; 3] {
+        match self {
+            Self::Left => [x, y, -z],
+            Self::Right => [x, y, z],
+        }
+    }
+}
+
 struct UnpackedVertices {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     uvs: Vec<[f32; 2]>,
 }
 
-/// Unpack vertex data into separate position, normal, and UV arrays.
-fn unpack_vertices(data: &[u8], stride: usize, format: &VertexFormat) -> UnpackedVertices {
+/// Unpack vertex data into separate right-handed position, normal, and UV arrays.
+fn unpack_vertices(
+    data: &[u8],
+    stride: usize,
+    format: &VertexFormat,
+    handedness: VertexHandedness,
+) -> UnpackedVertices {
     let count = data.len() / stride;
     let mut positions = Vec::with_capacity(count);
     let mut normals = Vec::with_capacity(count);
@@ -1960,17 +2007,14 @@ fn unpack_vertices(data: &[u8], stride: usize, format: &VertexFormat) -> Unpacke
             let x = f32::from_le_bytes(data[off..off + 4].try_into().unwrap());
             let y = f32::from_le_bytes(data[off + 4..off + 8].try_into().unwrap());
             let z = f32::from_le_bytes(data[off + 8..off + 12].try_into().unwrap());
-            // Negate Z: converts left-handed (BigWorld) to right-handed (glTF).
-            // This implicitly reverses triangle winding and flips normals consistently.
-            positions.push([x, y, -z]);
+            positions.push(handedness.to_right_handed([x, y, z]));
         }
 
-        // Normal: packed 4 bytes — negate Z to match position space.
+        // Normal: packed 4 bytes.
         if let Some(attr) = norm_attr {
             let off = base + attr.offset;
             let packed = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
-            let [nx, ny, nz] = vertex_format::unpack_normal(packed);
-            normals.push([nx, ny, -nz]);
+            normals.push(handedness.to_right_handed(vertex_format::unpack_normal(packed)));
         }
 
         // UV: packed 4 bytes (2 x float16)
@@ -2009,6 +2053,7 @@ fn apply_barrel_pitch(
     stride: usize,
     format: &VertexFormat,
     bp: &BarrelPitch,
+    handedness: VertexHandedness,
 ) {
     use crate::models::vertex_format::AttributeSemantic;
 
@@ -2017,7 +2062,12 @@ fn apply_barrel_pitch(
         return; // No bone data — can't split
     };
 
-    let m = &bp.pitch_matrix;
+    // The pitch matrix acts on Z-negated vertices; right-handed ones are not negated.
+    let m = match handedness {
+        VertexHandedness::Left => bp.pitch_matrix,
+        VertexHandedness::Right => negate_z_transform(bp.pitch_matrix),
+    };
+
     let count = positions.len();
     for i in 0..count {
         let base = i * stride;
@@ -2043,6 +2093,15 @@ fn apply_barrel_pitch(
                 m[2] * nx + m[6] * ny + m[10] * nz,
             ];
         }
+    }
+}
+
+/// Swaps two corners of every triangle. Stored triangles wind clockwise seen
+/// from outside once their vertices are right-handed; glTF and the viewer take
+/// counterclockwise as the front face.
+fn wind_counterclockwise(indices: &mut [u32]) {
+    for triangle in indices.as_chunks_mut::<3>().0 {
+        triangle.swap(1, 2);
     }
 }
 
@@ -3085,7 +3144,7 @@ pub(crate) fn collect_hull_meshes_indexed(
         }
         let idx_slice = &decoded_indices[idx_start..idx_end];
 
-        let indices: Vec<u32> = match index_size {
+        let mut indices: Vec<u32> = match index_size {
             2 => idx_slice.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as u32).collect(),
             4 => idx_slice.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
             _ => {
@@ -3093,11 +3152,13 @@ pub(crate) fn collect_hull_meshes_indexed(
             }
         };
 
-        let mut verts = unpack_vertices(vert_slice, stride, &format);
+        let handedness = VertexHandedness::of_render_set(visual, rs);
+        let mut verts = unpack_vertices(vert_slice, stride, &format, handedness);
+        wind_counterclockwise(&mut indices);
 
         // Apply per-vertex barrel pitch rotation if configured.
         if let Some(bp) = barrel_pitch {
-            apply_barrel_pitch(&mut verts.positions, &mut verts.normals, vert_slice, stride, &format, bp);
+            apply_barrel_pitch(&mut verts.positions, &mut verts.normals, vert_slice, stride, &format, bp, handedness);
         }
 
         // Resolve full MFM path for texture lookup.
@@ -3408,7 +3469,8 @@ pub struct SubModel<'a> {
 /// position and normal transformed by `pitch_matrix` (turret-local space).
 #[derive(Clone)]
 pub struct BarrelPitch {
-    /// 4x4 column-major pitch rotation matrix (around Rotate_X pivot).
+    /// 4x4 column-major pitch rotation matrix (around Rotate_X pivot), for
+    /// Z-negated vertices.
     pub pitch_matrix: [f32; 16],
     /// Bone indices (into the render set's blend bone list) that are barrel bones.
     pub barrel_bone_indices: Vec<u8>,
@@ -3715,5 +3777,51 @@ mod tests {
         assert_eq!(zones[0].positions, [[1.0, 2.0, -3.0], [4.0, 5.0, -6.0], [7.0, 8.0, 9.0]]);
         assert_eq!(zones[0].normals, [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]]);
         assert_eq!(zones[0].positions, interactive.positions, "export and viewer armor agree");
+    }
+
+    #[test]
+    fn a_skin_its_blend_bones_reflect_is_stored_right_handed() {
+        use crate::data::parser_utils::BoundingBox;
+        use crate::data::parser_utils::Matrix4x4;
+        use crate::models::visual::VisualNodes;
+
+        const ROOT: u32 = 1;
+        const BONE: u32 = 2;
+        const BLEND_BONE: u32 = 3;
+        let rotation = [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let reflection = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        // The blend bone hangs under a rotated bone, so only its own matrix reflects.
+        let visual = VisualPrototype {
+            nodes: VisualNodes {
+                name_map_name_ids: vec![ROOT, BONE, BLEND_BONE],
+                name_map_node_ids: vec![0, 1, 2],
+                name_ids: vec![ROOT, BONE, BLEND_BONE],
+                matrices: vec![Matrix4x4(rotation), Matrix4x4(rotation), Matrix4x4(reflection)],
+                parent_ids: vec![0xFFFF, 0, 1],
+            },
+            merged_geometry_path_id: 0,
+            underwater_model: false,
+            abovewater_model: true,
+            bounding_box: BoundingBox { min: [0.0; 3], max: [0.0; 3] },
+            render_sets: Vec::new(),
+            lods: Vec::new(),
+        };
+        let render_set = |skinned: bool, bone: u32| RenderSet {
+            name_id: 0,
+            material_name_id: 0,
+            vertices_mapping_id: 0,
+            indices_mapping_id: 0,
+            material_mfm_path_id: 0,
+            skinned,
+            node_name_ids: vec![bone],
+        };
+
+        assert_eq!(VertexHandedness::of_render_set(&visual, &render_set(true, BLEND_BONE)), VertexHandedness::Right);
+        assert_eq!(VertexHandedness::of_render_set(&visual, &render_set(true, BONE)), VertexHandedness::Left);
+        assert_eq!(
+            VertexHandedness::of_render_set(&visual, &render_set(false, BLEND_BONE)),
+            VertexHandedness::Left,
+            "a static mesh is not skinned to the bones it names"
+        );
     }
 }

@@ -397,18 +397,34 @@ impl VisualPrototype {
     pub fn find_hardpoint_transform(&self, hp_name: &str, strings: &StringsSection<'_>) -> Option<[f32; 16]> {
         let node_idx = self.find_node_index_by_name(hp_name, strings)?;
 
-        let mut result = self.nodes.matrices[node_idx as usize].0;
+        self.node_world_matrix(node_idx)
+    }
+
+    /// The world-space transform of node `node_idx`: its local matrix composed
+    /// with every ancestor's. `None` when the index is past the node table or
+    /// the node's ancestors form a cycle.
+    pub fn node_world_matrix(&self, node_idx: u16) -> Option<[f32; 16]> {
+        let mut result = self.nodes.matrices.get(node_idx as usize)?.0;
         let mut current = node_idx;
-        loop {
-            let parent = self.nodes.parent_ids[current as usize];
-            if parent == 0xFFFF || parent as usize >= self.nodes.matrices.len() {
-                break;
-            }
-            result = mat4_mul(&self.nodes.matrices[parent as usize].0, &result);
+        // A chain longer than the node table is a parent cycle.
+        for _ in 0..self.nodes.matrices.len() {
+            let &parent = self.nodes.parent_ids.get(current as usize)?;
+            let Some(parent_matrix) = self.nodes.matrices.get(parent as usize).filter(|_| parent != 0xFFFF) else {
+                return Some(result);
+            };
+            result = mat4_mul(&parent_matrix.0, &result);
             current = parent;
         }
 
-        Some(result)
+        None
+    }
+
+    /// The node index named by string id `name_id`, as render sets name their
+    /// blend bones.
+    pub fn find_node_index_by_name_id(&self, name_id: u32) -> Option<u16> {
+        let position = self.nodes.name_map_name_ids.iter().position(|&id| id == name_id)?;
+
+        self.nodes.name_map_node_ids.get(position).copied()
     }
 
     /// Get the local (non-composed) matrix of a named node.
@@ -420,8 +436,11 @@ impl VisualPrototype {
     /// Check whether `node_idx` is a descendant of `ancestor_idx` in the
     /// skeleton hierarchy.
     pub fn is_descendant_of(&self, mut node_idx: u16, ancestor_idx: u16) -> bool {
-        loop {
-            let parent = self.nodes.parent_ids[node_idx as usize];
+        // A chain longer than the node table is a parent cycle.
+        for _ in 0..self.nodes.parent_ids.len() {
+            let Some(&parent) = self.nodes.parent_ids.get(node_idx as usize) else {
+                return false;
+            };
             if parent == 0xFFFF || parent as usize >= self.nodes.parent_ids.len() {
                 return false;
             }
@@ -430,6 +449,8 @@ impl VisualPrototype {
             }
             node_idx = parent;
         }
+
+        false
     }
 
     /// Find the node index for a given node name string.
@@ -458,4 +479,54 @@ fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+    fn visual_with_parents(parent_ids: Vec<u16>) -> VisualPrototype {
+        VisualPrototype {
+            nodes: VisualNodes {
+                name_map_name_ids: Vec::new(),
+                name_map_node_ids: Vec::new(),
+                name_ids: Vec::new(),
+                matrices: vec![Matrix4x4(IDENTITY); parent_ids.len()],
+                parent_ids,
+            },
+            merged_geometry_path_id: 0,
+            underwater_model: false,
+            abovewater_model: false,
+            bounding_box: BoundingBox { min: [0.0; 3], max: [0.0; 3] },
+            render_sets: Vec::new(),
+            lods: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_parent_chain_composes_to_its_root() {
+        let visual = visual_with_parents(vec![0xFFFF, 0, 1]);
+
+        assert_eq!(visual.node_world_matrix(2), Some(IDENTITY));
+        assert!(visual.is_descendant_of(2, 0));
+    }
+
+    #[test]
+    fn a_self_parent_has_no_world_matrix() {
+        let visual = visual_with_parents(vec![0]);
+
+        assert_eq!(visual.node_world_matrix(0), None);
+        assert!(!visual.is_descendant_of(0, 1));
+    }
+
+    #[test]
+    fn a_two_node_cycle_has_no_world_matrix() {
+        let visual = visual_with_parents(vec![1, 0, 0]);
+
+        assert_eq!(visual.node_world_matrix(0), None);
+        assert_eq!(visual.node_world_matrix(2), None);
+        assert!(!visual.is_descendant_of(2, 2));
+    }
 }

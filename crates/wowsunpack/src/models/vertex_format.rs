@@ -229,11 +229,11 @@ pub fn parse_vertex_format(format_name: &str) -> VertexFormat {
 
 /// Unpack a 4-byte packed normal into `[f32; 3]`.
 ///
-/// The packed format is 4 signed bytes: `[x, y, z, w]` where each component
-/// is mapped from `[-127, 127]` to `[-1.0, 1.0]`.
+/// The packed format is 4 unsigned bytes `[x, y, z, w]`, each component mapped
+/// from `[0, 255]` to `[-1.0, 1.0]`, as armor normals are stored.
 pub fn unpack_normal(packed: u32) -> [f32; 3] {
     let bytes = packed.to_le_bytes();
-    [(bytes[0] as i8) as f32 / 127.0, (bytes[1] as i8) as f32 / 127.0, (bytes[2] as i8) as f32 / 127.0]
+    [bytes[0], bytes[1], bytes[2]].map(|byte| byte as f32 / 127.5 - 1.0)
 }
 
 /// Unpack a 4-byte packed UV into `[f32; 2]`.
@@ -319,11 +319,9 @@ mod tests {
 
     #[test]
     fn test_unpack_normal() {
-        // All-positive unit vector approximation
-        let packed = u32::from_le_bytes([127, 0, 0, 0]);
-        let n = unpack_normal(packed);
+        let n = unpack_normal(u32::from_le_bytes([255, 128, 0, 0]));
         assert!((n[0] - 1.0).abs() < 0.01);
         assert!(n[1].abs() < 0.01);
-        assert!(n[2].abs() < 0.01);
+        assert!((n[2] + 1.0).abs() < 0.01);
     }
 }

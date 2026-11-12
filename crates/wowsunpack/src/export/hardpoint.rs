@@ -211,12 +211,26 @@ fn extender_at_location(db: &PrototypeDatabase<'_>, location: PrototypeLocation)
 }
 
 /// Transform from a model's mesh space into its node space. Mount meshes are
-/// skinned to `Rotate_Y_BlendBone`, whose rest rotation (a Z reflection on
-/// many turrets) the node tree does not carry, so the inverse of that
-/// rotation lines the meshes up with the nodes and the armor. `None` when the
-/// model has no such bone and its meshes already sit in node space.
+/// skinned to `Rotate_Y_BlendBone`, whose rest rotation the node tree does not
+/// carry, so the inverse of that rotation lines the meshes up with the nodes
+/// and the armor. `None` when the model has no such bone and its meshes
+/// already sit in node space.
+///
+/// Many turrets' bone is a Z reflection. Decoding already undoes the reflection
+/// of the meshes skinned to it (`VertexHandedness::Right`), so only the rotation
+/// is left here, for every render set of the model. In build 13533378 every
+/// skinned render set of such a model is reflected, and its few static ones
+/// are stored unreflected in node space.
 pub(crate) fn mesh_to_node_space(visual: &VisualPrototype, strings: &StringsSection<'_>) -> Option<[f32; 16]> {
-    visual.find_node_local_matrix("Rotate_Y_BlendBone", strings).map(|bone| mat4_rotation_inverse(&bone))
+    const Z_REFLECTION: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+    let bone = visual.find_node_local_matrix("Rotate_Y_BlendBone", strings)?;
+    let inverse = mat4_rotation_inverse(&bone);
+    if mat4_linear_determinant(&bone) < 0.0 {
+        return Some(mat4_mul(&inverse, &Z_REFLECTION));
+    }
+
+    Some(inverse)
 }
 
 /// Column-major 4x4 product `a * b`.
@@ -235,6 +249,12 @@ pub(crate) fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
 /// transpose), with no translation.
 pub(crate) fn mat4_rotation_inverse(m: &[f32; 16]) -> [f32; 16] {
     [m[0], m[4], m[8], 0.0, m[1], m[5], m[9], 0.0, m[2], m[6], m[10], 0.0, 0.0, 0.0, 0.0, 1.0]
+}
+
+/// Determinant of the 3x3 linear part of a column-major transform. Negative
+/// for a transform that reflects.
+pub(crate) fn mat4_linear_determinant(m: &[f32; 16]) -> f32 {
+    m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2])
 }
 
 #[cfg(test)]
