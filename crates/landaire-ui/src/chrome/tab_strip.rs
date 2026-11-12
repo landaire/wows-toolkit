@@ -1,11 +1,14 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use zgui::component;
 use zgui::css;
 use zgui::elements::Focus;
+use zgui::geom::CssPx;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -17,6 +20,8 @@ use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::provide_local_context;
 use zgui::reactive::use_local_context;
 use zgui::slot;
@@ -26,14 +31,23 @@ use zgui::view::AnyView;
 use zgui::view::Attrs;
 use zgui::view::Children;
 use zgui::view::Classes;
+use zgui::view::EventCx;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
 use zgui::view::ScrollBehavior;
 use zgui::view::ScrollTarget;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
+use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
+use zgui_ui::ContextMenuContentProps;
+use zgui_ui::ContextMenuPlace;
+use zgui_ui::ContextMenuProps;
+use zgui_ui::ContextMenuTriggerProps;
+use zgui_ui::MenuItemProps;
 use zgui_ui::TabsContext;
 use zgui_ui::TabsListProps;
 use zgui_ui::TabsProps;
@@ -125,6 +139,20 @@ const CSS: &str = css!(
         background-color: var(--lui-color-widget-hot);
         color: var(--lui-color-text-bright);
     }
+    .lui-tab-strip__menu-area {
+        flex: none;
+        min-width: 0;
+    }
+    .lui-tab-strip__tab .lui-tab-strip__close {
+        opacity: 0;
+        transition: opacity var(--lui-motion-fade) var(--lui-motion-ease);
+    }
+    .lui-tab-strip__tab[data-state=\"active\"] .lui-tab-strip__close,
+    .lui-tab-strip__tab:hover .lui-tab-strip__close,
+    .lui-tab-strip__tab:focus-visible .lui-tab-strip__close,
+    .lui-tab-strip__tab:focus-within .lui-tab-strip__close {
+        opacity: 1;
+    }
     .lui-tab-strip__underline {
         position: absolute;
         bottom: 0;
@@ -180,13 +208,100 @@ struct Placed {
 #[derive(Clone, Copy)]
 struct StripContext {
     selected: RwSignal<Option<SelectedTab>, LocalStorage>,
+    tabs: StoredValue<Vec<KnownTab>, LocalStorage>,
+    serials: StoredValue<TabSerial, LocalStorage>,
+    /// The tab the context menu was last asked for over.
+    menu_target: RwSignal<Option<String>, LocalStorage>,
+    /// Whether a tab named itself the target of the menu being asked for. A request over the
+    /// strip's empty end opens nothing.
+    menu_claimed: StoredValue<bool, LocalStorage>,
 }
+
+impl StripContext {
+    /// Makes the tab called `value` known to the strip until the calling scope is cleaned up.
+    fn register(self, value: String, trigger: NodeRef, on_close: Option<UnsyncCallback<()>>) {
+        let serial = self.serials.get_value();
+        self.serials.set_value(TabSerial(serial.0 + 1));
+        self.tabs.update_value(|tabs| tabs.push(KnownTab { serial, value, trigger, on_close }));
+
+        // The strip may be cleaned up first, taking the list with it.
+        let tabs = self.tabs;
+        on_cleanup_local(move || tabs.update_value(|tabs| tabs.retain(|tab| tab.serial != serial)));
+    }
+
+    /// The known tabs in the order they are laid out along the strip.
+    fn tabs_in_order(self) -> Vec<KnownTab> {
+        let mut placed: Vec<(f32, KnownTab)> = self
+            .tabs
+            .get_value()
+            .into_iter()
+            .map(|tab| {
+                // A tab not laid out yet has no place along the strip and goes after the rest.
+                let left = tab.trigger.window_bounds().map_or(f32::INFINITY, |bounds| bounds.origin.x.0);
+                (left, tab)
+            })
+            .collect();
+        placed.sort_by(|(a, _), (b, _)| a.total_cmp(b));
+
+        placed.into_iter().map(|(_, tab)| tab).collect()
+    }
+
+    /// Names the tab called `value` as the one the context menu is for, as the pointer asks for
+    /// it.
+    fn claim_menu(self, value: &str) {
+        self.menu_target.set(Some(value.to_owned()));
+        self.menu_claimed.set_value(true);
+    }
+
+    /// Whether a tab claimed the menu being asked for, forgetting the claim.
+    fn take_claim(self) -> bool {
+        self.menu_claimed.try_update_value(std::mem::take) == Some(true)
+    }
+}
+
+/// One tab as its strip knows it.
+#[derive(Clone)]
+struct KnownTab {
+    /// Tells apart two tabs built in turn under one value.
+    serial: TabSerial,
+    value: String,
+    trigger: NodeRef,
+    on_close: Option<UnsyncCallback<()>>,
+}
+
+/// Which registration with its strip a tab is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TabSerial(u64);
 
 /// What a [`TabStrip`] shows under its tabs: a `TabsContent` for each tab whose panel it switches
 /// to.
 #[slot]
 pub struct TabStripPanels {
     children: Children,
+}
+
+/// The words a [`TabStrip`]'s context menu shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabStripStrings {
+    pub close: String,
+    pub close_others: String,
+    pub close_to_the_right: String,
+}
+
+impl TabStripStrings {
+    pub fn new() -> Self {
+        Self {
+            close: "Close".to_owned(),
+            close_others: "Close others".to_owned(),
+            close_to_the_right: "Close to the right".to_owned(),
+        }
+    }
+}
+
+impl Default for TabStripStrings {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// A row of tabs with one accent line under the selected tab.
@@ -198,6 +313,11 @@ pub struct TabStripPanels {
 /// One tab stop for the whole strip. The arrow keys move between tabs and select them,
 /// <kbd>Home</kbd> and <kbd>End</kbd> go to the ends, and <kbd>Delete</kbd> closes a tab that can
 /// be closed.
+///
+/// A tab that can be closed shows its close button while it is selected, hovered or focused, and
+/// closes on a middle click. Its context menu, from the secondary button or the menu key, closes
+/// it, every other tab, or the tabs after it, skipping the tabs that cannot be closed.
+#[allow(clippy::too_many_arguments, reason = "each prop is a named field of the props builder")]
 #[component(slot_aware)]
 pub fn TabStrip(
     /// The selected tab's value, written when a tab is chosen.
@@ -206,6 +326,13 @@ pub fn TabStrip(
     /// What the strip is called, for a screen reader.
     #[prop(into)]
     label: String,
+    /// Told the values of the tabs the context menu closes together, in strip order, to close
+    /// them as one change. Without it each of those tabs is closed in turn.
+    #[prop(optional)]
+    on_close_tabs: Option<UnsyncCallback<Vec<String>>>,
+    /// The context menu's words.
+    #[prop(optional)]
+    strings: Option<TabStripStrings>,
     /// The panels under the tabs.
     #[prop(optional)]
     tab_strip_panels: Option<TabStripPanels>,
@@ -217,7 +344,14 @@ pub fn TabStrip(
     install_stylesheet(SHEET, CSS);
 
     let selected = RwSignal::new_local(None::<SelectedTab>);
-    provide_local_context(StripContext { selected });
+    let strip = StripContext {
+        selected,
+        tabs: StoredValue::new_local(Vec::new()),
+        serials: StoredValue::new_local(TabSerial(0)),
+        menu_target: RwSignal::new_local(None),
+        menu_claimed: StoredValue::new_local(false),
+    };
+    provide_local_context(strip);
 
     let track = NodeRef::new();
     let track_box = track.observe_border_box();
@@ -252,24 +386,49 @@ pub fn TabStrip(
     });
     on_cleanup_local(move || drop(placing));
 
+    let on_menu_press = move |ev: &mut EventCx<'_, events::PointerDown>| {
+        if ev.button == Some(PointerButton::Secondary) && !strip.take_claim() {
+            ev.stop_propagation();
+        }
+    };
+    let on_menu_request = move |ev: &mut EventCx<'_, events::ContextMenu>| {
+        if !strip.take_claim() {
+            ev.stop_propagation();
+        }
+    };
+    // A strip given no words of its own labels its menu in English.
+    let strings = strings.unwrap_or_default();
+    let menu = move || tab_menu(strip, &strings, on_close_tabs);
+
     let class = Classes::from("lui-tab-strip").merged(class);
     let panels = tab_strip_panels.map(|panels| panels.children.into_view_once());
 
     view! {
         Tabs(value = value, label = label, class = class, {..attrs}) {
-            box(class = "lui-tab-strip__scroller") {
-                row(class = "lui-tab-strip__track", node_ref = track) {
-                    TabsList(class = "lui-tab-strip__list") {
-                        {children.into_view_once()}
-                    }
+            ContextMenu {
+                ContextMenuTrigger(class = "lui-tab-strip__menu-area") {
                     box(
-                        class = "lui-tab-strip__underline",
-                        a11y:hidden = true,
-                        attr:data-gliding = move || gliding.get().then(|| "true".to_owned()),
-                        style:display = move || span.get().is_none().then(|| "none".to_owned()),
-                        style:left = move || span.get().map(|span| format!("{}px", span.left)),
-                        style:width = move || span.get().map(|span| format!("{}px", span.width))
-                    )
+                        class = "lui-tab-strip__scroller",
+                        on:pointer_down = on_menu_press,
+                        on:context_menu = on_menu_request
+                    ) {
+                        row(class = "lui-tab-strip__track", node_ref = track) {
+                            TabsList(class = "lui-tab-strip__list") {
+                                {children.into_view_once()}
+                            }
+                            box(
+                                class = "lui-tab-strip__underline",
+                                a11y:hidden = true,
+                                attr:data-gliding = move || gliding.get().then(|| "true".to_owned()),
+                                style:display = move || span.get().is_none().then(|| "none".to_owned()),
+                                style:left = move || span.get().map(|span| format!("{}px", span.left)),
+                                style:width = move || span.get().map(|span| format!("{}px", span.width))
+                            )
+                        }
+                    }
+                }
+                ContextMenuContent {
+                    {menu.clone()}
                 }
             }
             {panels}
@@ -285,8 +444,8 @@ pub fn TabStripTab(
     #[prop(into)]
     value: String,
     #[prop(optional)] icon: Option<IconData>,
-    /// Run when the tab's close button is pressed or <kbd>Delete</kbd> is pressed on it. Without
-    /// one, the tab has no close button.
+    /// Run when the tab is closed: by its close button, a middle click, <kbd>Delete</kbd> or its
+    /// context menu. Without one, the tab cannot be closed and has no close button.
     #[prop(optional)]
     on_close: Option<UnsyncCallback<()>>,
     /// What the close button is called, for a screen reader.
@@ -298,10 +457,12 @@ pub fn TabStripTab(
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
 
-    if let Some(tabs) = TabsContext::current()
-        && let Some(strip) = use_local_context::<StripContext>()
-    {
+    let tabs = TabsContext::current();
+    let strip = use_local_context::<StripContext>();
+    let place = ContextMenuPlace::current();
+    if let (Some(tabs), Some(strip)) = (tabs, strip) {
         report_bounds(tabs, strip, value.clone());
+        strip.register(value.clone(), tabs.trigger_of(&value), on_close);
     }
 
     let mark = icon.map(|icon| AnyView::new(view! { Icon(icon = icon, size = IconSize::Sm) }));
@@ -323,31 +484,167 @@ pub fn TabStripTab(
             }
         })
     });
-    let deletes = StoredValue::new_local(on_close);
+
+    // Whether the middle button went down on this tab, so only a click that starts and ends on
+    // it closes it.
+    let middle_pressed = Rc::new(Cell::new(false));
+    let on_pointer_down = {
+        let value = value.clone();
+        let middle_pressed = Rc::clone(&middle_pressed);
+        move |ev: &mut EventCx<'_, events::PointerDown>| match ev.button {
+            Some(PointerButton::Middle) if on_close.is_some() => {
+                // Neither a focus nor a choice of the tab.
+                ev.prevent_default();
+                middle_pressed.set(true);
+            }
+            Some(PointerButton::Secondary) => {
+                if let Some(strip) = strip {
+                    strip.claim_menu(&value);
+                }
+            }
+            _ => {}
+        }
+    };
+    // A release away from the tab is not the end of a click on it.
+    let on_pointer_leave = {
+        let middle_pressed = Rc::clone(&middle_pressed);
+        move |_: &mut EventCx<'_, events::PointerLeave>| middle_pressed.set(false)
+    };
+    let on_pointer_up = move |ev: &mut EventCx<'_, events::PointerUp>| {
+        if ev.button != Some(PointerButton::Middle) || !middle_pressed.replace(false) {
+            return;
+        }
+        if let Some(on_close) = on_close {
+            ev.stop_propagation();
+            on_close.run(());
+        }
+    };
+    let on_context_menu = {
+        let value = value.clone();
+        move |_: &mut EventCx<'_, events::ContextMenu>| {
+            if let Some(strip) = strip {
+                strip.claim_menu(&value);
+            }
+        }
+    };
+    let on_key_down = {
+        let value = value.clone();
+        move |ev: &mut EventCx<'_, events::KeyDown>| {
+            if opens_menu(&ev.key, ev.modifiers) {
+                let (Some(strip), Some(place), Some(tabs)) = (strip, place, tabs) else {
+                    return;
+                };
+                let trigger = tabs.trigger_of(&value);
+                let Some(bounds) = trigger.window_bounds() else {
+                    return;
+                };
+
+                ev.prevent_default();
+                ev.stop_propagation();
+                strip.menu_target.set(Some(value.clone()));
+                let scale = trigger.scale();
+                let scale = if scale > 0.0 { scale } else { 1.0 };
+                place.open_at(Point::new(
+                    CssPx(bounds.origin.x.0 / scale),
+                    CssPx((bounds.origin.y.0 + bounds.size.height.0) / scale),
+                ));
+                return;
+            }
+
+            if ev.key != Key::Named(NamedKey::Delete) {
+                return;
+            }
+            let Some(on_close) = on_close else {
+                return;
+            };
+
+            on_close.run(());
+            ev.prevent_default();
+            ev.stop_propagation();
+        }
+    };
     let class = Classes::from("lui-tab-strip__tab").merged(class);
 
     view! {
         TabsTrigger(
             value = value,
             class = class,
-            on:key_down = move |ev| {
-                if ev.key != Key::Named(NamedKey::Delete) {
-                    return;
-                }
-                let Some(on_close) = deletes.get_value() else {
-                    return;
-                };
-
-                on_close.run(());
-                ev.prevent_default();
-                ev.stop_propagation();
-            },
+            on:pointer_down = on_pointer_down,
+            on:pointer_up = on_pointer_up,
+            on:pointer_leave = on_pointer_leave,
+            on:context_menu = on_context_menu,
+            on:key_down = on_key_down,
             {..attrs}
         ) {
             {mark}
             box(class = "lui-tab-strip__label") {{children.into_view_once()}}
             {close}
         }
+    }
+}
+
+/// The context menu for the tab it was last asked for over: close it, close the other tabs, or
+/// close the tabs after it. An item with no tab it can close is disabled.
+fn tab_menu(
+    strip: StripContext,
+    strings: &TabStripStrings,
+    on_close_tabs: Option<UnsyncCallback<Vec<String>>>,
+) -> Option<AnyView> {
+    let target = strip.menu_target.get()?;
+    let tabs = strip.tabs_in_order();
+    let index = tabs.iter().position(|tab| tab.value == target)?;
+
+    let this = tabs[index].on_close;
+    let others: Vec<KnownTab> = tabs
+        .iter()
+        .enumerate()
+        .filter(|(at, tab)| *at != index && tab.on_close.is_some())
+        .map(|(_, tab)| tab.clone())
+        .collect();
+    let after: Vec<KnownTab> = tabs[index + 1..].iter().filter(|tab| tab.on_close.is_some()).cloned().collect();
+
+    let none_others = others.is_empty();
+    let none_after = after.is_empty();
+    let close_this = UnsyncCallback::new(move |()| {
+        if let Some(on_close) = this {
+            // The tab may have been taken down while its menu was open.
+            on_close.try_run(());
+        }
+    });
+    let close_others = close_together(others, on_close_tabs);
+    let close_after = close_together(after, on_close_tabs);
+    let close_label = strings.close.clone();
+    let others_label = strings.close_others.clone();
+    let after_label = strings.close_to_the_right.clone();
+
+    Some(AnyView::new(view! {
+        MenuItem(disabled = this.is_none(), on_select = close_this) {{close_label}}
+        MenuItem(disabled = none_others, on_select = close_others) {{others_label}}
+        MenuItem(disabled = none_after, on_select = close_after) {{after_label}}
+    }))
+}
+
+/// Closes `tabs` as one change through `on_close_tabs`, or without it each in turn.
+fn close_together(tabs: Vec<KnownTab>, on_close_tabs: Option<UnsyncCallback<Vec<String>>>) -> UnsyncCallback<()> {
+    UnsyncCallback::new(move |()| {
+        if let Some(on_close_tabs) = on_close_tabs {
+            on_close_tabs.run(tabs.iter().map(|tab| tab.value.clone()).collect());
+            return;
+        }
+
+        for on_close in tabs.iter().filter_map(|tab| tab.on_close) {
+            // Closing one tab may have taken a later one down with it.
+            on_close.try_run(());
+        }
+    })
+}
+
+/// Whether `key` with `modifiers` asks for a context menu from the keyboard.
+fn opens_menu(key: &Key, modifiers: Modifiers) -> bool {
+    match key {
+        Key::Named(NamedKey::ContextMenu) => true,
+        Key::Named(NamedKey::F10) => modifiers.shift(),
+        _ => false,
     }
 }
 
