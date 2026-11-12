@@ -3,7 +3,7 @@
 //!
 //! The container shows [`ReplayBrowser`] and hears what the reader asks of a replay through its
 //! `on_event` callback; it routes `Shell::take_replay_requests`'s `OpenFolder` to
-//! [`BrowserControl::open_folder`].
+//! [`BrowserControl::open_folder`] and `OpenRecentFolder` to [`BrowserControl::open_recent_folder`].
 
 mod actions;
 mod controls;

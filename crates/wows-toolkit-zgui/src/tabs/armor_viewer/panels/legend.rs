@@ -91,14 +91,6 @@ impl LegendState {
 
         Self { visible: row.show_legend, collapsed: row.legend_collapsed, pos }
     }
-
-    /// Writes the legend's fields into the defaults row the viewer saves.
-    pub fn write_to(&self, row: &mut ArmorViewerDefaultsRow) {
-        row.show_legend = self.visible;
-        row.legend_collapsed = self.collapsed;
-        row.legend_pos_x = Some(f64::from(self.pos.x));
-        row.legend_pos_y = Some(f64::from(self.pos.y));
-    }
 }
 
 /// A legend entry's 0..1 RGBA as bytes, the way the egui legend converts it: each channel times

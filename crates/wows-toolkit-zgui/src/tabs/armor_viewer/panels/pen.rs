@@ -62,7 +62,6 @@ use crate::services::Services;
 use crate::tabs::armor_viewer::panels::incoming::IncomingFire;
 use crate::tabs::armor_viewer::panels::incoming::IncomingLogProps;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
-use crate::tabs::armor_viewer::viewport::CastShell;
 use crate::text_marks::marks_within;
 
 const SHEET: &str = "wt-armor-pen";
@@ -219,12 +218,6 @@ impl PenetrationState {
     pub fn firing(&self) -> Option<&ComparisonShip> {
         let firing = self.firing_ship.as_deref()?;
         self.ships.iter().find(|ship| ship.param_index == firing)
-    }
-
-    /// What a trajectory cast fires: the firing ship and its chosen shell. The tab hands it to
-    /// every viewport of the pane, so whichever one the reader casts in fires what the controls show.
-    pub fn cast_shell(&self) -> Option<CastShell> {
-        Some(CastShell { ship: self.firing()?.clone(), shell_index: self.firing_shell })
     }
 
     /// The ships `query` finds in `catalog`, best first, without those already compared. Empty for

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -28,15 +29,15 @@ use crate::theme::SemanticTokensProps;
 /// Rows tall enough to hold the sample's players in one view.
 const SIZE: WindowSize = WindowSize { width: 1280.0, height: 720.0 };
 
+thread_local! {
+    /// The open rows of the table built last on this thread.
+    pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<AccountId>, LocalStorage>>> = const { Cell::new(None) };
+}
+
 /// The table over `model`, as the Replays tab holds it. With `with_detail`, each open row's detail
 /// is a box naming the player and the third column drawn.
 #[component]
-fn Harness(
-    scheme: Scheme,
-    expanded: RwSignal<HashSet<AccountId>, LocalStorage>,
-    model: Rc<ReplayReportModel>,
-    with_detail: bool,
-) -> impl IntoView {
+fn Harness(scheme: Scheme, model: Rc<ReplayReportModel>, with_detail: bool) -> impl IntoView {
     Services::provide(None);
     let model = Signal::stored_local(model);
     let theme = match scheme {
@@ -53,7 +54,7 @@ fn Harness(
     // Built inside the theme root, under its context.
     let table = move || {
         if !with_detail {
-            return AnyView::new(view! { PlayerTable(model = model, debug = debug, expanded = expanded) });
+            return AnyView::new(view! { PlayerTable(model = model, debug = debug) });
         }
         let detail: PlayerDetail = Rc::new(|cx: PlayerDetailCx| {
             let id = format!("detail-{}", cx.row.db_id.raw());
@@ -64,7 +65,7 @@ fn Harness(
                 box(attr:data-testid = id, attr:data-third-column = third, style:padding = "8px") {{name}}
             })
         });
-        AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail, expanded = expanded) })
+        AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail) })
     };
 
     view! {
@@ -105,14 +106,14 @@ fn open_table_over(
     model: ReplayReportModel,
     with_detail: bool,
 ) -> (HeadlessWindow, RwSignal<HashSet<AccountId>, LocalStorage>) {
-    let expanded = RwSignal::new_local(HashSet::new());
     let model = Rc::new(model);
     let options = HeadlessOptions { drawing, desktop: Some(Appearance::Dark), ..HeadlessOptions::new(SIZE) };
     let mut window = HeadlessWindow::open(options, move || {
-        view! { Harness(scheme = scheme, expanded = expanded, model = Rc::clone(&model), with_detail = with_detail) }
+        view! { Harness(scheme = scheme, model = Rc::clone(&model), with_detail = with_detail) }
     })
     .expect("the table opens headlessly");
     window.advance(Duration::from_millis(300));
+    let expanded = EXPANDED.with(Cell::take).expect("the table was built");
 
     (window, expanded)
 }

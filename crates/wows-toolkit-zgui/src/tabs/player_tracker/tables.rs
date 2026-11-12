@@ -192,21 +192,16 @@ pub fn IconButton(
 
 /// Text with a hover, or bare text when the hover is empty.
 #[component]
-pub fn HoverText(
-    #[prop(into)] text: String,
-    #[prop(into)] hover: String,
-    class: &'static str,
-    #[prop(optional)] severity: Option<String>,
-) -> impl IntoView {
+pub fn HoverText(#[prop(into)] text: String, #[prop(into)] hover: String, class: &'static str) -> impl IntoView {
     if hover.is_empty() {
-        return AnyView::new(view! { text(class = class, attr:data-severity = severity) {{text}} });
+        return AnyView::new(view! { text(class = class) {{text}} });
     }
     let text = StoredValue::new(text);
     let hover = StoredValue::new(hover);
     AnyView::new(view! {
         Tooltip {
             TooltipTrigger(class = class) {
-                text(attr:data-severity = severity.clone(), a11y:label = hover.get_value()) {{text.get_value()}}
+                text(a11y:label = hover.get_value()) {{text.get_value()}}
             }
             TooltipContent {{hover.get_value()}}
         }

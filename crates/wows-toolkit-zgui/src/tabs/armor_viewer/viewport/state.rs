@@ -27,10 +27,7 @@ use super::types::ViewportChange;
 /// What the viewport's context menu offers from the pane around it.
 #[derive(Clone)]
 pub struct PaneMenu {
-    /// Whether the pane's options rail is open.
-    pub options_open: Signal<bool, LocalStorage>,
     pub toggle_options: UnsyncCallback<()>,
-    pub open_pen_check: UnsyncCallback<()>,
     /// The pane's quick toggles, appended to the menu.
     pub quick_toggles: UnsyncCallback<(), Vec<AnyView>>,
 }
@@ -222,6 +219,7 @@ impl ArmorViewportState {
     }
 
     /// Queues a screenshot for the next frame and asks for it. `false` once the state is gone.
+    #[cfg(test)]
     pub(super) fn ask_screenshot(self, reply: ScreenshotReply) -> bool {
         let asked = self.shared.try_update_value(|shared| shared.screenshots.push(reply)).is_some();
         if asked {
@@ -257,17 +255,6 @@ impl ArmorViewportState {
 
     pub(super) fn pane_menu(self) -> Option<PaneMenu> {
         self.shared.try_with_value(|shared| shared.pane_menu.clone()).flatten()
-    }
-
-    /// Whether motion is reduced, followed.
-    pub(super) fn motion(self) -> MotionPreference {
-        self.shared.try_with_value(|shared| shared.motion).map_or(MotionPreference::Full, |motion| motion.get())
-    }
-
-    /// The panel revision, for a test that waits on a change.
-    #[cfg(test)]
-    pub(super) fn revision(self) -> u64 {
-        self.revision.get_untracked()
     }
 }
 

@@ -37,9 +37,6 @@ const CSS: &str = css!(
     }"
 );
 
-/// How long a failure may be before it is worth a dialog rather than a message.
-const TOO_LONG_TO_TOAST: usize = 160;
-
 /// Shows an error worth reading in full, with a way to copy it.
 ///
 /// A message is right for a sentence and wrong for a chain of causes: it goes by itself and cannot
@@ -72,14 +69,4 @@ pub fn show_error(shell: Shell, text: String) {
             }
         })
     });
-}
-
-/// Says that something failed: a sentence as a message, a chain of causes as a dialog that can be
-/// read at length and copied.
-pub fn report_failure(shell: Shell, said: String) {
-    if said.len() > TOO_LONG_TO_TOAST || said.lines().count() > 1 {
-        show_error(shell, said);
-    } else {
-        shell.toasts().failed(said);
-    }
 }

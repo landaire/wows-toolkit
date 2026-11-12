@@ -193,6 +193,8 @@ pub enum ReplayRequest {
     OpenReplay(PathBuf),
     /// Lists the directory in a folder tab of the replays tab.
     OpenFolder(PathBuf),
+    /// Lists a directory from the recent list, or says it is gone and drops it from the list.
+    OpenRecentFolder(PathBuf),
     /// Plays the battle back on its minimap.
     RenderReplay(PathBuf),
     /// Renders the battle to a video in the background and puts the file on the clipboard.

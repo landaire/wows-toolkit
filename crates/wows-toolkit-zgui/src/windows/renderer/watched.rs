@@ -26,8 +26,6 @@ use wows_toolkit_services::collab::SharedWindow;
 use wt_collab_client::PlaybackFrame;
 use zgui::component;
 use zgui::css;
-use zgui::prelude::WindowHandle;
-use zgui::prelude::WindowOptions;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
@@ -50,8 +48,6 @@ use zgui_ui::SpinnerProps;
 use crate::frames::FrameSink;
 use crate::frames::FrameViewProps;
 use crate::services::Services;
-use crate::windows::renderer::DEFAULT_SIZE;
-use crate::windows::renderer::MIN_SIZE;
 
 const SHEET: &str = "wt-watched";
 
@@ -344,17 +340,6 @@ fn HostClockStrip(watch: WatchSession) -> impl IntoView {
             }
         }
     }
-}
-
-/// Opens a window watching `shared`. Called from a listener inside the main window.
-pub fn open_watched_window(shared: SharedWindow, link: CollabLink) -> WindowHandle {
-    let options = WindowOptions::new(shared.replay_name.clone())
-        .with_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
-        .with_min_size(MIN_SIZE.0, MIN_SIZE.1);
-    crate::windows::open(options, move || {
-        let (shared, link) = (shared.clone(), link.clone());
-        view! { WatchedPlayback(shared = shared, link = link) }
-    })
 }
 
 #[cfg(test)]

@@ -77,7 +77,6 @@
 //! language.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![expect(dead_code, reason = "API used by the tab, palette and settings drawer ports")]
 // The path deliberately holds no locale files: `TranslationsBackend` supplies them, parsed at
 // startup. Pointed at the real catalogs, `i18n!()` needs a stack frame larger than a thread gets by
 // default.

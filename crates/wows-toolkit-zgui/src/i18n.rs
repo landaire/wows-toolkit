@@ -3,8 +3,6 @@
 use rust_i18n::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
-use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Track;
 
@@ -40,14 +38,6 @@ impl Locale {
     /// Subscribes the calling reactive scope to a change of language.
     pub fn track(self) {
         self.chosen.track();
-    }
-
-    pub fn chosen(self) -> Option<LanguageCode> {
-        self.chosen.get()
-    }
-
-    pub fn chosen_untracked(self) -> Option<LanguageCode> {
-        self.chosen.get_untracked()
     }
 
     /// Switches every catalog to `code`.

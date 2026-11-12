@@ -16,7 +16,6 @@
 //! replay's [`PlayerTable`](crate::tabs::replays::table::PlayerTable).
 
 pub mod chat;
-pub mod controls;
 pub mod expanded;
 mod figures;
 mod raw_json;
@@ -276,20 +275,7 @@ const CSS: &str = css!(
     .wt-rp-chat__copy { position: absolute; top: 4px; right: 4px; visibility: hidden; }
     .wt-rp-chat__row:hover > .wt-rp-chat__copy { visibility: visible; }
     .wt-rp-json__lines { display: flex; flex-direction: column; padding: 4px 8px; }
-    .wt-rp-json__line { font-family: monospace; font-size: 12px; white-space: pre; }
-    .wt-rp-controls { width: 560px; }
-    .wt-rp-controls__body { max-height: 520px; }
-    .wt-rp-controls__groups { display: flex; flex-direction: column; gap: 16px; padding: 8px; }
-    .wt-rp-controls__group { display: flex; flex-direction: column; gap: 4px; }
-    .wt-rp-controls__title { font-size: 14px; font-weight: 700; }
-    .wt-rp-controls__row { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; }
-    .wt-rp-controls__label { flex: 1 1 auto; min-width: 0; }
-    .wt-rp-controls__keys {
-        flex: none;
-        width: 180px;
-        font-family: monospace;
-        color: var(--wt-color-text-dim);
-    }"
+    .wt-rp-json__line { font-family: monospace; font-size: 12px; white-space: pre; }"
 );
 
 /// How wide the side panel opens, and how far it may be dragged.

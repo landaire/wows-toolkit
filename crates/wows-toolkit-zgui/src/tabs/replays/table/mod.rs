@@ -259,14 +259,14 @@ pub fn PlayerTable(
     /// Told a row's raw metadata JSON when the reader asks to view it. Offered only in debug mode.
     #[prop(optional)]
     on_view_raw_json: Option<UnsyncCallback<String>>,
-    /// The players whose rows are open, for an owner that reads or sets them.
-    #[prop(optional)]
-    expanded: Option<RwSignal<HashSet<AccountId>, LocalStorage>>,
 ) -> impl IntoView {
     install_stylesheet(style::SHEET, style::CSS);
     let services = Services::current();
     let locale = services.locale;
-    let expanded = expanded.unwrap_or_else(|| RwSignal::new_local(HashSet::new()));
+    let expanded = RwSignal::new_local(HashSet::new());
+    // A test reads and sets the open rows of the table it built.
+    #[cfg(test)]
+    tests::EXPANDED.with(|slot| slot.set(Some(expanded)));
     let sort = RwSignal::new_local(SortOrder::default());
 
     let model_rows = Memo::new(move |_| model.with(|model| ModelRows::of(model)));

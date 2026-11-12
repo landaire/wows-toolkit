@@ -82,7 +82,6 @@ pub enum PaneState {
 pub struct Loaded {
     pub vfs: VfsPath,
     pub files: Arc<FileList>,
-    pub tree: Rc<FolderTree>,
 }
 
 /// A directory of the folder tree, by its absolute path.
@@ -180,10 +179,6 @@ impl Rows {
             Self::Directory(rows) => rows.len(),
             Self::Filtered { matches, .. } => matches.len(),
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// The row at `at`, built on demand for a filter result.
@@ -354,8 +349,8 @@ impl Pane {
         let tree = Rc::new(FolderTree::new(&build_folder_tree(&vfs, "")));
         let files = Arc::new(build_file_list(&vfs));
         self.reset_view();
-        self.tree.set(tree.clone());
-        self.state.set(PaneState::Ready(Rc::new(Loaded { vfs, files, tree })));
+        self.tree.set(tree);
+        self.state.set(PaneState::Ready(Rc::new(Loaded { vfs, files })));
     }
 
     /// Drops the loaded VFS, e.g. when the WoWs directory is cleared.

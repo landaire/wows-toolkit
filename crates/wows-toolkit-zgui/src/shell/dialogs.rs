@@ -53,11 +53,6 @@ impl Dialogs {
 
         DialogHandle { dialogs: self, id }
     }
-
-    /// How many hosted dialogs are open.
-    pub fn count(self) -> usize {
-        self.open.get().len()
-    }
 }
 
 impl Default for Dialogs {

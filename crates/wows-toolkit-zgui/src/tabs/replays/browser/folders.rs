@@ -225,6 +225,7 @@ impl FolderId {
     pub const INSTALL: Self = Self(0);
 
     /// The number the tab's elements are addressed by.
+    #[cfg(test)]
     pub fn raw(self) -> u64 {
         self.0
     }

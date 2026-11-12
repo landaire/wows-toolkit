@@ -258,6 +258,7 @@ fn carry_out(workspace: ReplayWorkspace, control: BrowserControl, request: Repla
             workspace.open(path, OpenTarget::ShowingTab);
         }
         ReplayRequest::OpenFolder(root) => control.open_folder(root),
+        ReplayRequest::OpenRecentFolder(root) => control.open_recent_folder(root),
         ReplayRequest::RenderReplay(path) => workspace.render(RenderRequest { path, alts: Vec::new() }),
         ReplayRequest::RenderToClipboard(path) => batch::render_many(workspace, vec![path], BatchTarget::Clipboard),
     }

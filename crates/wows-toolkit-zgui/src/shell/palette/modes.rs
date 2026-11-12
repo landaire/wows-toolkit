@@ -163,8 +163,9 @@ pub fn replay_folders(shell: Shell, history: Signal<Vec<PathBuf>, LocalStorage>)
     let checking = StoredValue::new_local(None::<Task>);
     let checked = StoredValue::new(0_u64);
     let browse = PaletteRun::action(move || browse_folder(shell));
-    let open =
-        move |path: PathBuf| PaletteRun::action(move || shell.request_replay(ReplayRequest::OpenFolder(path.clone())));
+    let open = move |path: PathBuf| {
+        PaletteRun::action(move || shell.request_replay(ReplayRequest::OpenRecentFolder(path.clone())))
+    };
     let filter = move |query: &str| {
         history.with(|paths| missing.with(|missing| folder_rows(paths, missing, query, &browse, &open)))
     };

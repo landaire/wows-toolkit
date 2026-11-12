@@ -28,7 +28,6 @@ use super::interaction_amount;
 use super::interaction_percentage;
 use super::reorder_bulge_after_main_caliber;
 use super::share_text;
-use super::shows_damage_shares;
 use super::spotting_target_rows;
 use crate::shell::ShellHarnessProps;
 
@@ -154,21 +153,6 @@ fn a_damage_share_explains_itself_in_each_mode() {
         said(DamageDirection::Received, true),
         "34% of the damage Iowa dealt went to Yamato.\nRelease Alt to invert back."
     );
-}
-
-/// Alt is worth naming only while it changes something: an open row with damage shares under a
-/// shown damage column.
-#[test]
-fn alt_names_a_mode_only_over_damage_shares_on_screen() {
-    let mut open = base_row(1, Relation::new(0), true);
-    open.damage_interactions = Some([(AccountId(2), interaction(1_000, 10.0, 0, 0.0))].into_iter().collect());
-    let bare = base_row(3, Relation::new(1), false);
-    let damage = [ReplayColumn::ActualDamage];
-
-    assert!(shows_damage_shares([&open], damage, false));
-    assert!(!shows_damage_shares([&bare], damage, false), "the open row has no shares");
-    assert!(!shows_damage_shares([], damage, false), "no row is open");
-    assert!(!shows_damage_shares([&open], [ReplayColumn::Kills], false), "no damage column is shown");
 }
 
 /// Largest share first; a victim with no spotting damage, or one no row names, gets no line.

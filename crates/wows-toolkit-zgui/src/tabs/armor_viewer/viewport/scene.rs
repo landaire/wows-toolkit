@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use wows_toolkit_armor::camera_rings;
+#[cfg(test)]
 use wows_toolkit_armor::hardpoint_overlay::HardpointLabel;
 use wows_toolkit_armor::hardpoint_overlay::HardpointMarkers;
 use wows_toolkit_armor::load_model::SceneProblem;
@@ -425,6 +426,7 @@ impl ViewportModel {
     }
 
     /// The marked hardpoints, as their labels name them.
+    #[cfg(test)]
     pub(super) fn hardpoint_labels(&self) -> &[HardpointLabel] {
         &self.hardpoint_labels
     }
@@ -479,14 +481,6 @@ impl ViewportModel {
     /// How the camera orbits are being drawn.
     pub(super) fn camera_rings(&self) -> CameraRingSettings {
         self.camera_rings.clone()
-    }
-
-    /// The camera modes this ship's own GameParams name, in their own order.
-    pub(super) fn camera_modes(&self) -> Vec<String> {
-        self.current_armor
-            .as_ref()
-            .map(|armor| armor.camera_trajectories.iter().map(|(name, _)| name.clone()).collect())
-            .unwrap_or_default()
     }
 
     pub(super) fn set_camera_rings(&mut self, settings: CameraRingSettings, cx: &mut ViewCx) {
@@ -832,25 +826,11 @@ impl ViewportModel {
         self.length_marks = None;
         self.upload_hardpoints();
     }
-
-    /// The names of the splash boxes and where each is written, while the boxes are outlined.
-    pub(super) fn splash_box_labels(&self) -> &[splash::SplashBoxLabel] {
-        &self.splash_labels
-    }
 }
 
 impl ArmorViewportState {
     pub fn apply_armor_defaults(self, defaults: Option<&ArmorViewerDefaultsRow>) {
         self.update(|this, cx| this.apply_armor_defaults(defaults, cx));
-    }
-
-    /// The assets the scene was loaded from.
-    pub fn reload_assets(self) -> Option<Arc<ShipAssets>> {
-        self.read(|this| this.reload_assets()).flatten()
-    }
-
-    pub fn shown_species(self) -> Option<Species> {
-        self.read(|this| this.shown_species()).flatten()
     }
 
     /// `material` named as the game names it on the ship shown.
@@ -913,6 +893,7 @@ impl ArmorViewportState {
         self.update(|this, cx| this.set_hardpoint_targets(targets, cx));
     }
 
+    #[cfg(test)]
     pub fn hardpoint_labels(self) -> Vec<HardpointLabel> {
         self.read(|this| this.hardpoint_labels().to_vec()).unwrap_or_default()
     }
@@ -936,10 +917,6 @@ impl ArmorViewportState {
 
     pub fn camera_rings(self) -> CameraRingSettings {
         self.read(|this| this.camera_rings()).unwrap_or_default()
-    }
-
-    pub fn camera_modes(self) -> Vec<String> {
-        self.read(|this| this.camera_modes()).unwrap_or_default()
     }
 
     pub fn set_camera_rings(self, settings: CameraRingSettings) {
@@ -1008,20 +985,12 @@ impl ArmorViewportState {
         self.update(|this, _cx| this.share_scene_rest(run));
     }
 
-    pub fn show_problem(self, problem: SceneProblem) {
-        self.update(|this, cx| this.show_problem(problem, cx));
-    }
-
     pub fn fail_load(self, problem: SceneProblem) {
         self.update(|this, cx| this.fail_load(problem, cx));
     }
 
     pub fn scene_problem(self) -> Option<SceneProblem> {
         self.read(|this| this.scene_problem().cloned()).flatten()
-    }
-
-    pub fn splash_box_labels(self) -> Vec<splash::SplashBoxLabel> {
-        self.read(|this| this.splash_box_labels().to_vec()).unwrap_or_default()
     }
 }
 
