@@ -162,6 +162,64 @@ pub fn dump_pickled(
     write_value(&value, path, format)
 }
 
+/// One entry of the dump menu: a format, and whether to write only the base entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DumpRequest {
+    pub format: GameParamsFormat,
+    /// Only ever set for a raw format: the minimal formats write the toolkit's own decoded set,
+    /// which has no base entry to cut.
+    base_only: bool,
+}
+
+impl DumpRequest {
+    pub fn new(format: GameParamsFormat, base_only: bool) -> Self {
+        Self { format, base_only: base_only && !format.is_minimal() }
+    }
+
+    pub fn base_only(self) -> bool {
+        self.base_only
+    }
+
+    /// The menu: each format for the whole tree, then the raw formats again for the base entry.
+    pub fn menu() -> (Vec<DumpRequest>, Vec<DumpRequest>) {
+        let whole = GameParamsFormat::ALL.into_iter().map(|format| Self::new(format, false)).collect();
+        let base = GameParamsFormat::ALL
+            .into_iter()
+            .filter(|format| !format.is_minimal())
+            .map(|format| Self::new(format, true))
+            .collect();
+        (whole, base)
+    }
+
+    /// The file name the save dialog suggests.
+    pub fn file_name(self) -> String {
+        let stem = if self.format.is_minimal() { "MinGameParams" } else { "GameParams" };
+        format!("{stem}.{}", self.format.extension())
+    }
+
+    /// A stable identifier for the entry, for element ids.
+    pub fn id(self) -> String {
+        let base = if self.base_only { "base-" } else { "" };
+        format!("{base}{}", self.format.label().replace(' ', "-")).to_lowercase()
+    }
+
+    /// Writes the dump to `path`. `load_minimal` decodes the toolkit's own parameters, which a
+    /// minimal format writes; it is only called for one.
+    pub fn write<T: Serialize>(
+        self,
+        package_vfs: &VfsPath,
+        path: &Path,
+        load_minimal: impl FnOnce(&VfsPath) -> Result<T, GameParamsDumpError>,
+    ) -> Result<(), GameParamsDumpError> {
+        if self.format.is_minimal() {
+            let params = load_minimal(package_vfs)?;
+            write_value(&params, path, self.format)
+        } else {
+            dump_pickled(package_vfs, path, self.format, self.base_only)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +237,20 @@ mod tests {
         assert!(GameParamsFormat::MinimalJson.is_minimal());
         assert!(GameParamsFormat::MinimalCbor.is_minimal());
         assert_eq!(GameParamsFormat::ALL.len(), 4);
+    }
+
+    #[test]
+    fn a_minimal_format_never_cuts_to_the_base_entry() {
+        assert!(!DumpRequest::new(GameParamsFormat::MinimalJson, true).base_only());
+        assert!(DumpRequest::new(GameParamsFormat::Json, true).base_only());
+        let (whole, base) = DumpRequest::menu();
+        assert_eq!(whole.len(), 4);
+        assert_eq!(
+            base.iter().map(|r| r.format).collect::<Vec<_>>(),
+            vec![GameParamsFormat::Json, GameParamsFormat::Cbor]
+        );
+        assert_eq!(DumpRequest::new(GameParamsFormat::MinimalCbor, false).file_name(), "MinGameParams.cbor");
+        assert_eq!(DumpRequest::new(GameParamsFormat::Cbor, true).id(), "base-cbor");
     }
 
     #[test]
