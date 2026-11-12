@@ -28,6 +28,8 @@ use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 use zgui::view::install_stylesheet;
 
+use crate::chrome::slide::Followed;
+use crate::motion::MotionPreference;
 use crate::motion::Movement;
 use crate::motion::motion_preference;
 
@@ -52,6 +54,9 @@ const CSS: &str = css!(
     }
     .lui-reveal[data-phase=\"open\"] {
         height: auto;
+        transition: none;
+    }
+    .lui-reveal[data-phase=\"closed\"] {
         transition: none;
     }
     .lui-reveal__content {
@@ -102,7 +107,8 @@ impl Phase {
 /// A block of content that opens to its own height and closes to nothing, clipped as it moves.
 ///
 /// The content is laid out at its full height throughout, so it wraps the same while moving as at
-/// rest. Once open it stays built at whatever height it takes; once shut it is dropped.
+/// rest. Once open it stays built at whatever height it takes; once shut it is dropped. A movement
+/// under way when motion is reduced ends where it was going.
 #[component]
 pub fn Reveal(
     #[prop(into)] open: Signal<bool, LocalStorage>,
@@ -118,30 +124,48 @@ pub fn Reveal(
     let frame: Rc<RefCell<Option<FrameHandle>>> = Rc::new(RefCell::new(None));
     let settling: Rc<RefCell<Option<TimeoutHandle>>> = Rc::new(RefCell::new(None));
 
+    let finish = {
+        let frame = Rc::clone(&frame);
+        let settling = Rc::clone(&settling);
+        move |open: bool| {
+            frame.borrow_mut().take();
+            settling.borrow_mut().take();
+            phase.set(if open { Phase::Open } else { Phase::Closed });
+        }
+    };
+
     let following = {
         let frame = Rc::clone(&frame);
         let settling = Rc::clone(&settling);
-        RenderEffect::new(move |previous: Option<bool>| {
-            let open = open.get();
-            if previous.is_none_or(|previous| previous == open) {
-                return open;
+        RenderEffect::new(move |previous: Option<Followed>| {
+            let now = Followed { open: open.get(), preference: preference.get() };
+            let Some(previous) = previous else {
+                return now;
+            };
+
+            let reduced = now.preference == MotionPreference::Reduced;
+            if previous.open == now.open {
+                if reduced && !matches!(phase.get_untracked(), Phase::Open | Phase::Closed) {
+                    finish(now.open);
+                }
+                return now;
             }
+
+            let Some(timers) = timers.as_ref().filter(|_| !reduced) else {
+                finish(now.open);
+                return now;
+            };
 
             frame.borrow_mut().take();
             settling.borrow_mut().take();
-            let Some(timers) = timers.as_ref() else {
-                phase.set(if open { Phase::Open } else { Phase::Closed });
-                return open;
-            };
-
-            let duration = Movement::Reveal.duration(preference.get_untracked());
-            if open {
+            let duration = Movement::Reveal.full_duration();
+            if now.open {
                 phase.set(Phase::Opening);
                 // A frame more than the movement: content built by this open is measured a frame
                 // after it is built, and its movement starts then.
                 let after = duration + Duration::from_millis(17);
                 *settling.borrow_mut() = Some(timers.set_timeout(after, move || phase.set(Phase::Open)));
-                return open;
+                return now;
             }
 
             let close = {
@@ -159,7 +183,7 @@ pub fn Reveal(
                 *settling.borrow_mut() = Some(close());
             }
 
-            open
+            now
         })
     };
 
