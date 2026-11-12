@@ -48,16 +48,12 @@ use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
 use super::viewer_panel::FileViewerPanel;
 use wows_toolkit_viewmodel::settings::keys as setting_keys;
-use wows_toolkit_viewmodel::unpacker::assets_bin;
-use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
 use wows_toolkit_viewmodel::unpacker::extract::PrototypeOutput;
 use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_root;
-use wows_toolkit_viewmodel::unpacker::game_params;
 use wows_toolkit_viewmodel::unpacker::game_params::GameParamsDumpError;
-use wows_toolkit_viewmodel::unpacker::game_params::GameParamsFormat;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
@@ -78,16 +74,13 @@ enum SearchUpdate {
     Progress(SearchProgress),
 }
 
-/// A game build number. A newtype so a build cannot be mixed up with the
-/// other bare integers on this tab (queue lengths, progress counts).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BuildNumber(pub u32);
-
-impl std::fmt::Display for BuildNumber {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
+use wows_toolkit_viewmodel::unpacker::build::BuildNumber;
+use wows_toolkit_viewmodel::unpacker::build::BuildSource;
+use wows_toolkit_viewmodel::unpacker::build::list_builds;
+use wows_toolkit_viewmodel::unpacker::build::load_assets_bin;
+use wows_toolkit_viewmodel::unpacker::build::load_package_vfs;
+use wows_toolkit_viewmodel::unpacker::extract::ExtractState;
+use wows_toolkit_viewmodel::unpacker::game_params::DumpRequest;
 
 /// One entry in the build combo. Local newtype: `BuildNumber` is ours but
 /// `SearchableListItem` is not, and carrying the build keeps the confirm
@@ -107,25 +100,13 @@ impl SearchableListItem for BuildItem {
     }
 }
 
-/// What the extraction queue is doing.
-enum ExtractState {
-    Idle,
-    /// Expanding the queue's directories. The file count is not known yet, so
-    /// there is no fraction to show.
-    Counting,
-    Running(ExtractProgress),
-    Failed(String),
-    /// Finished or cancelled, with what actually reached disk.
-    Done(ExtractOutcome),
-}
-
 pub struct UnpackerView {
     /// Builds found in the install, newest first -- the order the egui combo
     /// lists them.
     builds: Vec<BuildNumber>,
     selected_build: Option<BuildNumber>,
     /// The directory and build whose VFS the package pane currently holds.
-    loaded_source: Option<(PathBuf, BuildNumber)>,
+    loaded_source: Option<BuildSource>,
     /// Bumped per build-load request so a stale result can be dropped.
     load_generation: u64,
     /// The package VFS of the loaded build, for the parameters dump. Held here
@@ -272,20 +253,7 @@ impl UnpackerView {
 
     /// Where a run has got to, in words. `None` before anything has run.
     fn extract_status(&self) -> Option<String> {
-        match &self.extract_state {
-            ExtractState::Idle => None,
-            ExtractState::Counting => Some(t!("ui.unpacker.counting_files").into_owned()),
-            ExtractState::Running(progress) => {
-                Some(t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned())
-            }
-            ExtractState::Failed(reason) => Some(t!("ui.unpacker.extract_failed", reason = reason).into_owned()),
-            ExtractState::Done(ExtractOutcome::Completed { written }) => {
-                Some(t!("ui.unpacker.extracted", count = written).into_owned())
-            }
-            ExtractState::Done(ExtractOutcome::Stopped { written }) => {
-                Some(t!("ui.unpacker.cancelled", count = written).into_owned())
-            }
-        }
+        self.extract_state.status()
     }
 
     fn browse_for_output_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -316,15 +284,10 @@ impl UnpackerView {
         }
 
         let dir = PathBuf::from(&wows_dir);
-        let mut builds: Vec<BuildNumber> = match wowsunpack::game_data::list_available_builds(&dir) {
-            Ok(builds) => builds.into_iter().map(BuildNumber).collect(),
-            Err(err) => {
-                tracing::warn!("unpacker: could not list builds in {}: {err}", dir.display());
-                Vec::new()
-            }
-        };
-        builds.sort_unstable();
-        builds.reverse();
+        let builds = list_builds(&dir).unwrap_or_else(|err| {
+            tracing::warn!("unpacker: {err}");
+            Vec::new()
+        });
 
         self.wows_dir = Some(dir);
         self.build_select.update(cx, |state, cx| {
@@ -351,11 +314,12 @@ impl UnpackerView {
     /// the previous install's VFS on screen under the new directory.
     fn select_build(&mut self, build: BuildNumber, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dir) = self.wows_dir.clone() else { return };
-        if self.loaded_source.as_ref() == Some(&(dir.clone(), build)) {
+        let source = BuildSource { dir, build };
+        if self.loaded_source.as_ref() == Some(&source) {
             return;
         }
         self.selected_build = Some(build);
-        self.loaded_source = Some((dir.clone(), build));
+        self.loaded_source = Some(source.clone());
 
         if let Some(index) = self.builds.iter().position(|b| *b == build) {
             self.build_select.update(cx, |state, cx| {
@@ -373,16 +337,8 @@ impl UnpackerView {
         let pkg_browser = self.pkg_browser.clone();
         let assets_browser = self.assets_browser.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let loaded = cx
-                .background_spawn(async move {
-                    wowsunpack::game_data::build_game_vfs_for_build(
-                        &dir,
-                        build.0,
-                        wowsunpack::game_data::AssetsBin::Overlay,
-                    )
-                    .map_err(|err| format!("{err}"))
-                })
-                .await;
+            let loaded =
+                cx.background_spawn(async move { load_package_vfs(&source).map_err(|err| err.to_string()) }).await;
 
             let still_current = this.update(cx, |this, _cx| this.load_generation == generation).unwrap_or(false);
             if !still_current {
@@ -407,7 +363,7 @@ impl UnpackerView {
             // assets.bin is a separate archive inside that VFS: read and parsed
             // after the package tree, so the pane beside it is usable first.
             let opened =
-                cx.background_spawn(async move { assets_bin::open(&package_vfs).map_err(|err| err.to_string()) }).await;
+                cx.background_spawn(async move { load_assets_bin(&package_vfs).map_err(|err| err.to_string()) }).await;
 
             let still_current = this.update(cx, |this, _cx| this.load_generation == generation).unwrap_or(false);
             if !still_current {
@@ -582,12 +538,8 @@ impl UnpackerView {
         cx.notify();
     }
 
-    /// Writes the build's parameters out in `format`.
-    ///
-    /// The minimal formats write the toolkit's own decoded parameters, which
-    /// this tab does not hold, so they are not offered here; the two raw
-    /// formats are.
-    fn dump_game_params(&mut self, format: GameParamsFormat, base_only: bool, cx: &mut Context<Self>) {
+    /// Writes the build's parameters out as `request` asks.
+    fn dump_game_params(&mut self, request: DumpRequest, cx: &mut Context<Self>) {
         let Some(vfs) = self.package_vfs.clone() else {
             self.dump_status = Some(t!("ui.unpacker.load_a_build").into_owned());
             cx.notify();
@@ -598,16 +550,7 @@ impl UnpackerView {
             cx.notify();
             return;
         };
-        // The minimal formats write the toolkit's own decoded set, which is
-        // the same file for the whole tree; "base parameters only" is a cut of
-        // the raw pickled tree and has no meaning for them.
-        let base_only = base_only && !format.is_minimal();
-        let stem = if format.is_minimal() { "MinGameParams" } else { "GameParams" };
-        let asked = wows_toolkit_services::dialog::save_file(
-            Some("Save game parameters"),
-            &format!("{stem}.{}", format.extension()),
-            None,
-        );
+        let asked = wows_toolkit_services::dialog::save_file(Some("Save game parameters"), &request.file_name(), None);
 
         cx.spawn(async move |this, cx| {
             let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
@@ -617,13 +560,10 @@ impl UnpackerView {
             });
             let written = cx
                 .background_spawn(async move {
-                    if format.is_minimal() {
-                        let params = wows_toolkit_replay_data::load::load_game_params(&vfs, build.0)
-                            .map_err(|err| GameParamsDumpError::Decode(err.to_string()))?;
-                        game_params::write_value(&params, &path, format)
-                    } else {
-                        game_params::dump_pickled(&vfs, &path, format, base_only)
-                    }
+                    request.write(&vfs, &path, |vfs| {
+                        wows_toolkit_replay_data::load::load_game_params(vfs, build.0)
+                            .map_err(|err| GameParamsDumpError::Decode(err.to_string()))
+                    })
                 })
                 .await;
 
@@ -724,16 +664,10 @@ impl UnpackerView {
     fn publish_queue_view(&mut self, cx: &mut Context<Self>) {
         let view = QueueView {
             entries: self.queue.entries().to_vec(),
-            progress: match &self.extract_state {
-                ExtractState::Running(progress) => Some((progress.written, progress.total)),
-                _ => None,
-            },
-            writing: match &self.extract_state {
-                ExtractState::Running(progress) => Some(SharedString::from(progress.file.clone())),
-                _ => None,
-            },
+            progress: self.extract_state.progress().map(|progress| (progress.written, progress.total)),
+            writing: self.extract_state.progress().map(|progress| SharedString::from(progress.file.clone())),
             status: self.extract_status().map(SharedString::from),
-            busy: matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)),
+            busy: self.extract_state.is_busy(),
             decode_prototypes: matches!(self.prototypes, PrototypeOutput::DecodeToJson),
             has_output_dir: !self.output_dir.is_empty(),
         };
@@ -754,7 +688,7 @@ impl UnpackerView {
 
     /// Asks for a destination, then writes the queue to it off the UI thread.
     fn start_extraction(&mut self, cx: &mut Context<Self>) {
-        if self.queue.is_empty() || matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)) {
+        if self.queue.is_empty() || self.extract_state.is_busy() {
             return;
         }
         if self.output_dir.is_empty() {
@@ -792,10 +726,7 @@ impl UnpackerView {
 
             let outcome = worker.await;
             let _ = this.update(cx, |this, cx| {
-                this.extract_state = match outcome {
-                    Ok(outcome) => ExtractState::Done(outcome),
-                    Err(err) => ExtractState::Failed(format!("{err}")),
-                };
+                this.extract_state = ExtractState::finished(outcome);
                 cx.notify();
             });
         })
@@ -828,17 +759,11 @@ fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoEl
         });
 
     Popover::new("unpacker-dump-params-menu").trigger(trigger).content(move |_state, _window, _cx| {
-        let full = GameParamsFormat::ALL
-            .into_iter()
-            .map(|format| dump_params_item(view.clone(), format, false))
-            .collect::<Vec<_>>();
+        let (whole, base) = DumpRequest::menu();
+        let full = whole.into_iter().map(|request| dump_params_item(view.clone(), request)).collect::<Vec<_>>();
         // The base-entry cut only applies to the raw tree, so the minimal
         // formats are not offered a second time here.
-        let base = GameParamsFormat::ALL
-            .into_iter()
-            .filter(|format| !format.is_minimal())
-            .map(|format| dump_params_item(view.clone(), format, true))
-            .collect::<Vec<_>>();
+        let base = base.into_iter().map(|request| dump_params_item(view.clone(), request)).collect::<Vec<_>>();
 
         v_flex()
             .max_w(DUMP_POPOVER_MAX_WIDTH)
@@ -852,12 +777,12 @@ fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoEl
 }
 
 /// One dump-menu entry.
-fn dump_params_item(view: Entity<UnpackerView>, format: GameParamsFormat, base_only: bool) -> impl IntoElement {
-    let id = format!("unpacker-dump-{}{}", if base_only { "base-" } else { "" }, format.label().replace(' ', "-"));
+fn dump_params_item(view: Entity<UnpackerView>, request: DumpRequest) -> impl IntoElement {
+    let id = format!("unpacker-dump-{}", request.id());
 
-    Button::new(SharedString::from(id.to_lowercase())).label(format.label()).compact().on_click(
+    Button::new(SharedString::from(id)).label(request.format.label()).compact().on_click(
         move |_event, _window, cx: &mut App| {
-            view.update(cx, |this, cx| this.dump_game_params(format, base_only, cx));
+            view.update(cx, |this, cx| this.dump_game_params(request, cx));
         },
     )
 }
