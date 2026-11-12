@@ -123,15 +123,14 @@ pub(crate) enum Setting {
     TwitchToken,
     TwitchChannel,
     ArmorPlateEdges,
-    ArmorWaterline,
     ArmorOpaqueHull,
-    /// Stands in for the three above while nothing has been saved.
+    /// Stands in for the two above while nothing has been saved.
     ArmorNoDefaults,
 }
 
 impl Setting {
     /// Every setting, in the order the drawer lists them.
-    const ALL: [Self; 31] = [
+    const ALL: [Self; 30] = [
         Self::Language,
         Self::DataSharing,
         Self::CodeIntegrity,
@@ -160,7 +159,6 @@ impl Setting {
         Self::TwitchToken,
         Self::TwitchChannel,
         Self::ArmorPlateEdges,
-        Self::ArmorWaterline,
         Self::ArmorOpaqueHull,
         Self::ArmorNoDefaults,
     ];
@@ -187,9 +185,7 @@ impl Setting {
             | Self::AutoExport => SettingsSection::Replays,
             Self::DisplayName | Self::SuppressIpWarning | Self::DisableAutoOpen => SettingsSection::Collaboration,
             Self::TwitchGetToken | Self::TwitchToken | Self::TwitchChannel => SettingsSection::Twitch,
-            Self::ArmorPlateEdges | Self::ArmorWaterline | Self::ArmorOpaqueHull | Self::ArmorNoDefaults => {
-                SettingsSection::ArmorViewer
-            }
+            Self::ArmorPlateEdges | Self::ArmorOpaqueHull | Self::ArmorNoDefaults => SettingsSection::ArmorViewer,
         }
     }
 
@@ -223,7 +219,6 @@ impl Setting {
             Self::TwitchToken => t!("ui.settings.panel.token"),
             Self::TwitchChannel => t!("ui.settings.twitch.monitored_channel"),
             Self::ArmorPlateEdges => t!("ui.armor.plate_edges"),
-            Self::ArmorWaterline => t!("ui.armor.waterline"),
             Self::ArmorOpaqueHull => t!("ui.armor.opaque_hull"),
             Self::ArmorNoDefaults => t!("ui.settings.panel.armor_defaults"),
         }
@@ -258,9 +253,7 @@ impl Setting {
             Self::TwitchGetToken => t!("ui.settings.panel.get_token_description"),
             Self::TwitchToken => t!("ui.settings.twitch.paste_token_tooltip"),
             Self::TwitchChannel => t!("ui.settings.panel.monitored_channel_description"),
-            Self::ArmorPlateEdges | Self::ArmorWaterline | Self::ArmorOpaqueHull => {
-                t!("ui.settings.panel.armor_saved_description")
-            }
+            Self::ArmorPlateEdges | Self::ArmorOpaqueHull => t!("ui.settings.panel.armor_saved_description"),
             Self::ArmorNoDefaults => t!("ui.settings.armor.no_defaults"),
         }
     }
@@ -900,7 +893,7 @@ impl App {
             Setting::CachedBuilds => {
                 self.cache_base().is_some() && self.cache.stats.is_some_and(|stats| stats.version_count > 0)
             }
-            Setting::ArmorPlateEdges | Setting::ArmorWaterline | Setting::ArmorOpaqueHull => armor_saved,
+            Setting::ArmorPlateEdges | Setting::ArmorOpaqueHull => armor_saved,
             Setting::ArmorNoDefaults => !armor_saved,
             _ => true,
         }
@@ -1177,11 +1170,10 @@ impl App {
             ),
             // The viewport writes these itself when a pane changes, so the
             // drawer reports them rather than offering a second way to set them.
-            Setting::ArmorPlateEdges | Setting::ArmorWaterline | Setting::ArmorOpaqueHull => {
+            Setting::ArmorPlateEdges | Setting::ArmorOpaqueHull => {
                 let Some(defaults) = settings.armor_defaults.as_ref() else { return (None, None) };
                 let (id, on) = match setting {
                     Setting::ArmorPlateEdges => ("armor-show-plate-edges", defaults.show_plate_edges),
-                    Setting::ArmorWaterline => ("armor-show-waterline", defaults.show_waterline),
                     _ => ("armor-hull-opaque", defaults.hull_opaque),
                 };
                 (Some(setting_switch(id, setting, on).disabled(true).into_any_element()), None)

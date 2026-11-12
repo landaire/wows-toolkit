@@ -322,14 +322,10 @@ impl LoadedShipArmor {
         self.model().is_some_and(|model| model.thickness == ArmorThickness::Unknown)
     }
 
-    /// `display` as this scene can honour it: a model has no waterline, and
-    /// plates of unknown thickness are drawn rather than filtered as 0 mm.
+    /// `display` as this scene can honour it: plates of unknown thickness are
+    /// drawn rather than filtered as 0 mm.
     pub fn effective_display(&self, display: DisplaySettings) -> DisplaySettings {
-        DisplaySettings {
-            show_waterline: display.show_waterline && self.is_ship(),
-            show_zero_mm: display.show_zero_mm || self.thickness_unknown(),
-            ..display
-        }
+        DisplaySettings { show_zero_mm: display.show_zero_mm || self.thickness_unknown(), ..display }
     }
 }
 

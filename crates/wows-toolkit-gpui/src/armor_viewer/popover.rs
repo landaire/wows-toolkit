@@ -1338,7 +1338,6 @@ fn render_hull_mesh_row(
 struct DisplayPopoverSnapshot {
     display: super::upload::DisplaySettings,
     lighting: LightingSettings,
-    waterline_slider: Entity<SliderField>,
     marker_slider: Entity<SliderField>,
     /// Whether any impact marker is drawn, since a marker control with nothing
     /// to act on is what the egui popover hides.
@@ -1407,7 +1406,6 @@ pub(crate) fn render_display_popover_content(
         DisplayPopoverSnapshot {
             display: view.display_settings,
             lighting: view.lighting(),
-            waterline_slider: view.display_sliders.waterline_opacity.clone(),
             armor_slider: view.display_sliders.armor_opacity.clone(),
             roll_slider: view.display_sliders.model_roll_deg.clone(),
             camera_rings: view.camera_rings(),
@@ -1433,7 +1431,7 @@ pub(crate) fn render_display_popover_content(
     let features = entity.read(cx).scene_features();
     let armor = features.is_none_or(|features| features.armor);
     let ship = features.is_none_or(|features| features.ship);
-    let model = model_rows(entity, groups, &snapshot, ShownRows { armor, ship }, filter, cx);
+    let model = model_rows(entity, groups, &snapshot, armor, filter, cx);
     // The camera orbits are the ship's own, which a model has none of.
     let camera = ship
         .then(|| {
@@ -1460,21 +1458,14 @@ pub(crate) fn render_display_popover_content(
     (!parts.is_empty()).then(|| v_flex().w_full().gap_2().children(parts).into_any_element())
 }
 
-/// Which of the display section's model rows the scene has a use for.
-#[derive(Clone, Copy)]
-struct ShownRows {
-    /// The legend, plate edges, 0 mm plates and the armor and marker opacity.
-    armor: bool,
-    /// The waterline.
-    ship: bool,
-}
-
 /// The settings at the top of the display section, about the model itself.
+/// `armor` shows the legend, plate edges, 0 mm plates and the armor and
+/// marker opacity.
 fn model_rows(
     entity: &Entity<ViewportView>,
     groups: &DisplayGroups,
     snapshot: &DisplayPopoverSnapshot,
-    shown: ShownRows,
+    armor: bool,
     filter: &OptionsFilter,
     cx: &mut App,
 ) -> Option<AnyElement> {
@@ -1504,37 +1495,7 @@ fn model_rows(
             },
         )
     };
-    let waterline = t!("ui.armor.waterline").into_owned();
-    // The opacity row belongs to the waterline, so a match on either keeps
-    // both, and the row is indented under it.
-    let waterline_matched = filter.keeps(&waterline);
-    let waterline_filter = if waterline_matched { OptionsFilter::default() } else { filter.clone() };
-    let waterline_opacity = display
-        .show_waterline
-        .then(|| {
-            labeled_slider_row(
-                t!("ui.armor.opacity").into_owned(),
-                &snapshot.waterline_slider,
-                false,
-                &waterline_filter,
-                cx,
-            )
-        })
-        .flatten();
-    // Kept beside a kept opacity row even when its own label does not match.
-    let waterline_box_filter =
-        if waterline_opacity.is_some() && !waterline_matched { OptionsFilter::default() } else { filter.clone() };
-    let waterline_box = filtered_checkbox(
-        "armor-display-waterline",
-        waterline,
-        display.show_waterline,
-        false,
-        &waterline_box_filter,
-        setting(|d, on| d.show_waterline = on),
-    );
-
-    let waterline_rows = [waterline_box, waterline_opacity.map(|row| div().pl(px(20.)).child(row).into_any_element())];
-    let armor_rows = shown.armor.then(|| {
+    let armor_rows = armor.then(|| {
         [
             legend,
             filtered_checkbox(
@@ -1555,7 +1516,7 @@ fn model_rows(
             ),
         ]
     });
-    let opacity_rows = shown.armor.then(|| {
+    let opacity_rows = armor.then(|| {
         [
             labeled_slider_row(t!("ui.armor.armor_opacity").into_owned(), &snapshot.armor_slider, false, filter, cx),
             snapshot
@@ -1576,7 +1537,6 @@ fn model_rows(
     let rows: Vec<AnyElement> = armor_rows
         .into_iter()
         .flatten()
-        .chain(waterline_rows.into_iter().filter(|_| shown.ship))
         .chain([filtered_checkbox(
             "armor-display-ship-center",
             t!("ui.armor.ship_center").into_owned(),

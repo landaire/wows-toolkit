@@ -880,7 +880,7 @@ impl ArmorViewerPane {
     }
 
     /// Seeds the legend's initial visibility/collapsed/position, and every
-    /// current pane's display settings (plate edges, waterline, zero-mm
+    /// current pane's display settings (plate edges, zero-mm
     /// plates, armor opacity -- Task 7b), from the persisted
     /// `armor_viewer_defaults` row, the same way `app.rs` threads the rest of
     /// `GpuiSettings` into its child views on startup. Called once, before
@@ -888,7 +888,11 @@ impl ArmorViewerPane {
     /// single initial pane at this point -- no "Compare" pane can exist yet.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
         if let Some(defaults) = defaults {
-            self.unported_defaults = UnportedDefaults { show_splash_boxes: defaults.show_splash_boxes };
+            self.unported_defaults = UnportedDefaults {
+                show_splash_boxes: defaults.show_splash_boxes,
+                show_waterline: defaults.show_waterline,
+                waterline_opacity: defaults.waterline_opacity,
+            };
         }
         self.legend = LegendState::from_defaults(defaults);
         let panes = self.dock.read(cx).panes().to_vec();
@@ -1573,16 +1577,17 @@ impl ArmorViewerPane {
         let unported = self.unported_defaults;
         let row = ArmorViewerDefaultsRow {
             show_plate_edges: display.show_plate_edges,
-            show_waterline: display.show_waterline,
+            show_waterline: unported.show_waterline,
             show_zero_mm: display.show_zero_mm,
             armor_opacity: display.armor_opacity as f64,
-            waterline_opacity: display.waterline_opacity as f64,
+            waterline_opacity: unported.waterline_opacity,
             hull_opaque: display.hull_opaque,
             hull_all_visible: all_visible.hull,
             armor_all_visible: all_visible.armor,
-            // Splash boxes belong to a mode the port does not draw, so this
-            // is written back exactly as it was read and never overwrites
-            // what the other app set.
+            // Splash boxes belong to a mode the port does not draw, and the
+            // grid stands in for the water plane, so these are written back
+            // exactly as they were read and never overwrite what the other
+            // app set.
             show_splash_boxes: unported.show_splash_boxes,
             show_legend: visible,
             legend_collapsed: collapsed,
@@ -1606,10 +1611,20 @@ impl ArmorViewerPane {
 }
 
 /// The parts of `armor_viewer_defaults` the port does not draw a control
-/// for. Defaults match the row's own, for a database with no row yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// for.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct UnportedDefaults {
     show_splash_boxes: bool,
+    show_waterline: bool,
+    waterline_opacity: f64,
+}
+
+impl Default for UnportedDefaults {
+    /// The row's own column defaults (`001_initial.sql`), for a database with
+    /// no row yet.
+    fn default() -> Self {
+        Self { show_splash_boxes: false, show_waterline: true, waterline_opacity: 0.3 }
+    }
 }
 
 impl Render for ArmorViewerPane {

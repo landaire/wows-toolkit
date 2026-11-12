@@ -18,7 +18,7 @@
 //! and ship-center overlays are likewise out of scope (their toggles do not
 //! exist yet). `show_hidden_only` is still a fixed v1 default (no pane UI for
 //! it yet). [`DisplaySettings`] (Task 7b's display-settings popover,
-//! `popover.rs`) makes `show_plate_edges`/`show_waterline`/`waterline_opacity`/
+//! `popover.rs`) makes `show_plate_edges`/
 //! `show_zero_mm`/`armor_opacity` user-mutable, each through
 //! `ViewportView::mutate_display_settings` (re-uploads armor); `hull_opaque`
 //! (Task 8a) lives on the same struct for persistence symmetry with
@@ -38,7 +38,6 @@ use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::renderer::LAYER_DEFAULT;
-use crate::viewport::renderer::LAYER_HULL;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
@@ -51,16 +50,14 @@ use super::visibility::VisibilityFilter;
 use super::visibility::part_on;
 
 /// The v1 display-settings subset (Task 7b's display-settings popover,
-/// `popover.rs`): plate edges, waterline (+ its own opacity), zero-mm plate
-/// filtering, and per-vertex armor opacity. Threaded through every mesh
-/// upload alongside [`VisibilityFilter`]; changing any field re-uploads the
-/// armor since all of them affect geometry (edge outlines, the water plane,
-/// per-vertex alpha, and which triangles are even included).
+/// `popover.rs`): plate edges, zero-mm plate filtering, and per-vertex armor
+/// opacity. Threaded through every mesh upload alongside
+/// [`VisibilityFilter`]; changing any field re-uploads the armor since all of
+/// them affect geometry (edge outlines, per-vertex alpha, and which triangles
+/// are even included).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DisplaySettings {
     pub show_plate_edges: bool,
-    pub show_waterline: bool,
-    pub waterline_opacity: f32,
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
     /// Whether hull meshes render fully opaque with depth writes (like armor
@@ -83,8 +80,6 @@ impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
             show_plate_edges: true,
-            show_waterline: true,
-            waterline_opacity: 0.3,
             show_zero_mm: false,
             armor_opacity: 1.0,
             hull_opaque: false,
@@ -102,8 +97,6 @@ impl DisplaySettings {
         let Some(row) = row else { return Self::default() };
         Self {
             show_plate_edges: row.show_plate_edges,
-            show_waterline: row.show_waterline,
-            waterline_opacity: row.waterline_opacity as f32,
             show_zero_mm: row.show_zero_mm,
             armor_opacity: row.armor_opacity as f32,
             hull_opaque: row.hull_opaque,
@@ -163,8 +156,8 @@ pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityF
 }
 
 /// Clears `viewport` and uploads `armor`'s armor meshes (thickness-colored,
-/// per the v1 fixed display defaults above, honoring `plate_visibility`),
-/// plate boundary edges, and the waterline plane. Does not touch the camera;
+/// per the v1 fixed display defaults above, honoring `plate_visibility`) and
+/// plate boundary edges. Does not touch the camera;
 /// shared by [`upload_armor_to_viewport`] (initial load, frames the camera
 /// afterward) and [`reupload_armor_plates`] (visibility-toggle re-upload,
 /// which must NOT move the camera). Returns the per-mesh triangle tooltip
@@ -232,11 +225,6 @@ fn upload_armor_meshes(
         upload_plate_boundary_edges(viewport, armor, device, visibility, display.show_zero_mm);
     }
 
-    if display.show_waterline {
-        let (verts, indices) = create_water_plane(0.0, armor.bounds, display.waterline_opacity);
-        viewport.add_world_space_mesh(device, &verts, &indices, LAYER_HULL);
-    }
-
     viewport.mark_dirty();
     mesh_triangle_info
 }
@@ -272,32 +260,6 @@ pub fn reupload_armor_plates(
     display: DisplaySettings,
 ) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
     upload_armor_meshes(viewport, device, armor, visibility, display)
-}
-
-/// Create a water plane quad at the given Y height, extending beyond the hull
-/// bounding box. Ports `armor_viewer::ui::tab::create_water_plane` verbatim.
-fn create_water_plane(
-    y: f32,
-    bounds: (crate::viewport::types::Vec3, crate::viewport::types::Vec3),
-    opacity: f32,
-) -> (Vec<Vertex>, Vec<u32>) {
-    let cx = (bounds.0.x + bounds.1.x) * 0.5;
-    let cz = (bounds.0.z + bounds.1.z) * 0.5;
-    let ex = (bounds.1.x - bounds.0.x) * 2.25;
-    let ez = (bounds.1.z - bounds.0.z) * 2.25;
-
-    let color = [0.1, 0.4, 0.8, opacity];
-    let normal = [0.0, 1.0, 0.0];
-
-    let vertices = vec![
-        Vertex { position: [cx - ex, y, cz - ez], normal, color, uv: [0.0, 0.0] },
-        Vertex { position: [cx + ex, y, cz - ez], normal, color, uv: [0.0, 0.0] },
-        Vertex { position: [cx + ex, y, cz + ez], normal, color, uv: [0.0, 0.0] },
-        Vertex { position: [cx - ex, y, cz + ez], normal, color, uv: [0.0, 0.0] },
-    ];
-    let indices = vec![0, 1, 2, 0, 2, 3];
-
-    (vertices, indices)
 }
 
 /// Quantize a float position to an integer key to avoid floating-point
@@ -624,10 +586,8 @@ mod tests {
     fn display_settings_default_matches_the_egui_armor_viewer_defaults() {
         let d = DisplaySettings::default();
         assert!(d.show_plate_edges);
-        assert!(d.show_waterline);
         assert!(!d.show_zero_mm);
         assert_eq!(d.armor_opacity, 1.0);
-        assert_eq!(d.waterline_opacity, 0.3);
         assert!(!d.hull_opaque);
     }
 
@@ -655,11 +615,9 @@ mod tests {
         };
         let d = DisplaySettings::from_defaults(Some(&row));
         assert!(!d.show_plate_edges);
-        assert!(!d.show_waterline);
         assert!(d.show_zero_mm);
         assert!(d.hull_opaque);
         assert_eq!(d.armor_opacity, 0.5);
-        assert_eq!(d.waterline_opacity, 0.75);
     }
 
     /// Needs a local game install and a real GPU adapter: loads one real

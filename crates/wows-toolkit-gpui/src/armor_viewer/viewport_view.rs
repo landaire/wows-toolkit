@@ -631,9 +631,8 @@ struct HoverInfo {
     cursor: Point<Pixels>,
 }
 
-/// The display-settings popover's two numeric sliders (`popover.rs`),
-/// backing `ViewportView::display_settings`'s `waterline_opacity`/
-/// `armor_opacity` fields. A persistent `Entity<SliderField>` per slider so
+/// The display-settings popover's numeric sliders (`popover.rs`). A
+/// persistent `Entity<SliderField>` per slider so
 /// its thumb position survives the popover closing and reopening (the
 /// popover's `.content()` closure only runs while open, see `popover.rs`'s
 /// module doc); rebuilt wholesale whenever the seed changes outside a drag
@@ -641,7 +640,6 @@ struct HoverInfo {
 /// isn't available there -- mirrors `app.rs`'s own `zoom_slider`
 /// reseed-by-recreation.
 pub(crate) struct DisplaySettingsSliders {
-    pub(crate) waterline_opacity: Entity<SliderField>,
     pub(crate) armor_opacity: Entity<SliderField>,
     /// How solid the impact markers are drawn.
     pub(crate) marker_opacity: Entity<SliderField>,
@@ -984,7 +982,7 @@ pub struct ViewportView {
     /// owns this. Carried so the viewport's context menu can offer the pane's
     /// own controls -- the options rail and the penetration checker.
     pane: Option<WeakEntity<ArmorViewerPane>>,
-    /// Live display settings (plate edges, waterline, zero-mm plates, armor
+    /// Live display settings (plate edges, zero-mm plates, armor
     /// opacity) mutable via the display-settings popover (`popover.rs`, Task
     /// 7b); changing any field re-uploads the armor since they affect
     /// geometry. Seeded from `ArmorViewerDefaults` (`apply_armor_defaults`),
@@ -1047,7 +1045,7 @@ pub struct ViewportView {
     /// with the display defaults, because leaving it on is not a state to
     /// open the next ship in.
     show_hidden_only: bool,
-    /// The display section's waterline/armor opacity slider state.
+    /// The display section's slider state.
     pub(crate) display_sliders: DisplaySettingsSliders,
     /// Kept alive so `display_sliders`' change subscriptions
     /// keep firing; replaced wholesale (dropping and canceling the old ones)
@@ -1244,12 +1242,6 @@ impl ViewportView {
     ) -> (DisplaySettingsSliders, Vec<Subscription>) {
         // What each reset puts back: the settings a fresh install starts on.
         let factory = upload::DisplaySettings::default();
-        let waterline_opacity = Self::new_slider(
-            cx,
-            const { SliderRange::new(0.05, 1.0, 0.01) },
-            display.waterline_opacity,
-            factory.waterline_opacity,
-        );
         let armor_opacity = Self::new_slider(
             cx,
             const { SliderRange::new(0.1, 1.0, 0.01) },
@@ -1279,9 +1271,6 @@ impl ViewportView {
         let cast_range =
             Self::new_slider(cx, CAST_RANGE_SLIDER, DEFAULT_CAST_RANGE.value(), DEFAULT_CAST_RANGE.value());
         let subs = vec![
-            Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
-                this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
-            }),
             Self::subscribe_slider(cx, &armor_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.armor_opacity = v)
             }),
@@ -1302,7 +1291,6 @@ impl ViewportView {
         ];
         (
             DisplaySettingsSliders {
-                waterline_opacity,
                 armor_opacity,
                 marker_opacity,
                 perspective_fov,
@@ -1424,7 +1412,7 @@ impl ViewportView {
 
     /// Seeds `display_settings` from the persisted `armor_viewer_defaults`
     /// row (falls back to the egui defaults when `None`, matching `upload::
-    /// DisplaySettings::from_defaults`), rebuilds the two display sliders so
+    /// DisplaySettings::from_defaults`), rebuilds the display sliders so
     /// their thumbs reflect the new seed, and -- if a ship is already shown
     /// -- re-uploads it. Called once from `ArmorViewerPane::
     /// apply_armor_defaults`, itself called once from `App::apply_settings`.
@@ -3746,7 +3734,7 @@ impl ViewportView {
     /// every display-settings popover checkbox and slider (`popover.rs`)
     /// goes through this single seam, so no call site can forget the
     /// re-upload these settings need (they affect geometry: edge outlines,
-    /// the water plane, per-vertex alpha, and 0mm filtering).
+    /// per-vertex alpha, and 0mm filtering).
     pub(crate) fn mutate_display_settings(
         &mut self,
         cx: &mut Context<Self>,
