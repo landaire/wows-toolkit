@@ -14,6 +14,7 @@ use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::geom::Size;
+use zgui::platform::DecorationSource;
 use zgui::platform::Surface;
 use zgui::platform::SurfaceEvent;
 use zgui::prelude::IntoView;
@@ -185,10 +186,16 @@ impl HeadlessWindow {
 
     /// The first element that carries [`TEST_ID_ATTRIBUTE`] set to `id`, overlays included.
     pub fn by_test_id(&self, id: &str) -> Option<Element> {
-        let dom = self.window().dom();
-        let attribute = AttrName::new(TEST_ID_ATTRIBUTE);
+        self.by_attribute(TEST_ID_ATTRIBUTE, id)
+    }
 
-        self.first_in_document(|node| dom.attribute(node, attribute).as_deref() == Some(id))
+    /// The first element whose attribute `name` is `value`, overlays included, for a part a
+    /// component marks with an attribute.
+    pub fn by_attribute(&self, name: &str, value: &str) -> Option<Element> {
+        let dom = self.window().dom();
+        let attribute = AttrName::new(name);
+
+        self.first_in_document(|node| dom.attribute(node, attribute).as_deref() == Some(value))
     }
 
     /// The first element whose class list holds `class`, overlays included, for a part a
@@ -271,6 +278,15 @@ impl HeadlessWindow {
         self.press_on(element, PointerButton::Primary, modifiers)
     }
 
+    /// Presses and releases the primary button at `at`, in device pixels from the window's
+    /// top-left corner, for a point other than an element's middle.
+    pub fn click_at(&mut self, at: Point<DevicePx, Device>) {
+        let at = self.to_css(at);
+        self.move_pointer(at);
+        self.pointer_event(PointerAction::Pressed, at, Some(PointerButton::Primary));
+        self.pointer_event(PointerAction::Released, at, Some(PointerButton::Primary));
+    }
+
     /// Clicks the primary button twice over the middle of `element`, close enough together to
     /// count as a double click.
     pub fn double_click(&mut self, element: Element) -> Result<(), HeadlessError> {
@@ -346,6 +362,24 @@ impl HeadlessWindow {
     pub fn save_png(&mut self, path: &Path) -> Result<(), HeadlessError> {
         let pixels = self.pixels()?;
         crate::test_support::shot::write_png(&pixels, path)
+    }
+
+    /// Changes who the platform says draws the window's frame, as a compositor that answers again
+    /// would.
+    pub fn set_decoration_source(&mut self, source: DecorationSource) -> Result<(), HeadlessError> {
+        let Some(surface) = self.surface() else {
+            return Err(HeadlessError::NoWindow);
+        };
+
+        surface.set_decoration_source(source);
+        self.deliver(SurfaceEvent::DecorationSourceChanged(source));
+
+        Ok(())
+    }
+
+    /// Whether the window is still open.
+    pub fn is_open(&self) -> bool {
+        !self.harness.app().windows().is_empty()
     }
 
     fn window(&self) -> &zgui::runtime::Window {
