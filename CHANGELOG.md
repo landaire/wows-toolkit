@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - *(toolkit)* Keep replay export ship data attached after roster sorting
+- *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
 
 ## [1.0.1] - 2026-08-12
 

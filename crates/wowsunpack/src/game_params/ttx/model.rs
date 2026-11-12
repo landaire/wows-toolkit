@@ -680,9 +680,10 @@ pub struct ShellStats {
     pub caliber: Option<Millimeters>,
     /// `bulletSpeed * timeFactor` in m/s (PreprocessedAmmo.py:16).
     pub speed: Option<MetersPerSecond>,
-    /// HE `floor(alphaPiercingHE * GMPenetrationCoeffHE)` (FactoryArtillery.py:182),
-    /// CS `floor(alphaPiercingCS)` (FactoryArtillery.py:185). AP is a ballistic sim
-    /// (no closed-form `piercing` in the deob), left `None`.
+    /// HE `floor(alphaPiercingHE * penetration coefficient)` (FactoryArtillery.py:182).
+    /// Current builds use a battery-specific GM/GS coefficient; historical builds use
+    /// `penetrationCoeffHE`. CS is `floor(alphaPiercingCS)` (line 185). AP is a
+    /// ballistic simulation with no closed-form `piercing`, so it is `None`.
     pub penetration: Option<Millimeters>,
     /// HE/AP `calculateBurnChance(...)` as a percent (FactoryArtillery.py:171/188).
     pub burn_chance: Option<Percent>,
