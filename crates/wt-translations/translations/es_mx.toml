@@ -1893,6 +1893,7 @@ search = "Buscar barcos y modelos..."
 open = "Abrir"
 export = "Exportar modelo"
 copy_path = "Copiar ruta del modelo"
+path_copied = "Se copió %{path}"
 hardpoints_tooltip = "Mostrar puntos de anclaje"
 
 [ui.models.group]

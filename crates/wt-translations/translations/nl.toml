@@ -1939,6 +1939,7 @@ search = "Schepen en modellen zoeken..."
 open = "Openen"
 export = "Model exporteren"
 copy_path = "Modelpad kopiëren"
+path_copied = "%{path} gekopieerd"
 hardpoints_tooltip = "Bevestigingspunten tonen"
 
 [ui.models.group]

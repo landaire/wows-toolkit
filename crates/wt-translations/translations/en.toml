@@ -1965,6 +1965,7 @@ search = "Search ships and models..."
 open = "Open"
 export = "Export Model"
 copy_path = "Copy model path"
+path_copied = "Copied %{path}"
 hardpoints_tooltip = "Show attachment points"
 
 [ui.models.group]

@@ -1939,6 +1939,7 @@ search = "ค้นหาเรือและโมเดล..."
 open = "เปิด"
 export = "ส่งออกโมเดล"
 copy_path = "คัดลอกพาธโมเดล"
+path_copied = "คัดลอก %{path} แล้ว"
 hardpoints_tooltip = "แสดงจุดยึด"
 
 [ui.models.group]

@@ -1939,6 +1939,7 @@ search = "Rechercher des navires et des modèles..."
 open = "Ouvrir"
 export = "Exporter le modèle"
 copy_path = "Copier le chemin du modèle"
+path_copied = "%{path} copié"
 hardpoints_tooltip = "Afficher les points d'attache"
 
 [ui.models.group]

@@ -1893,6 +1893,7 @@ search = "Gemi ve model ara..."
 open = "Aç"
 export = "Modeli Dışa Aktar"
 copy_path = "Model yolunu kopyala"
+path_copied = "%{path} kopyalandı"
 hardpoints_tooltip = "Bağlantı noktalarını göster"
 
 [ui.models.group]

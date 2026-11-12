@@ -35,6 +35,7 @@ use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeEvent;
 use gpui_kit::component::tree::TreeState;
@@ -472,6 +473,8 @@ impl Sidebar {
         }
 
         self.rebuild_tree(Rebuild::Keep, cx);
+        // The rows' renderer and menu read the row map this rebuild replaced.
+        cx.notify();
     }
 
     fn rebuild_tree(&mut self, rebuild: Rebuild, cx: &mut Context<Self>) {
@@ -536,6 +539,25 @@ fn model_selection(kind: &RowKind) -> Option<ModelSelected> {
             from_ship: Some(ShipPartRef { vehicle_param_index: ship.clone(), part: part.clone() }),
         }),
         _ => None,
+    }
+}
+
+/// What a row's tooltip says: its whole name, which the row may cut short,
+/// and the model path or GameParams index behind it.
+fn row_tooltip(kind: &RowKind) -> Option<String> {
+    match kind {
+        RowKind::Ship { param_index, display_name } => Some(format!("{display_name}\n{param_index}")),
+        RowKind::Model(model) | RowKind::ShipPart { node: None, model, .. } => {
+            Some(format!("{}\n{model}", model.stem()))
+        }
+        RowKind::ShipPart { node: Some(node), model, .. } => Some(format!("{node} {}\n{model}", model.stem())),
+        RowKind::Nation(_)
+        | RowKind::Class(_)
+        | RowKind::PartFolder
+        | RowKind::Separator
+        | RowKind::ModelsStatus
+        | RowKind::ModelNation { .. }
+        | RowKind::ModelGroup => None,
     }
 }
 
@@ -621,6 +643,11 @@ fn render_sidebar_item(
         None => label,
     };
     row = row.child(label);
+    // The text is built on hover; a row only clones what it shows.
+    let hover = kind.filter(|kind| matches!(kind, RowKind::Ship { .. } | RowKind::Model(_) | RowKind::ShipPart { .. }));
+    if let Some(kind) = hover.cloned() {
+        row = row.tooltip(move |window, cx| Tooltip::new(row_tooltip(&kind).unwrap_or_default()).build(window, cx));
+    }
 
     if let Some(target) = kind.and_then(hardpoint_target) {
         let visible = hardpoints.contains(&target);
@@ -703,8 +730,9 @@ fn row_context_menu(sidebar: &Entity<Sidebar>, kind: Option<&RowKind>, menu: Pop
         let request = export.clone();
         export_entity.update(cx, |_sidebar, cx| cx.emit(request));
     }))
-    .item(PopupMenuItem::new(t!("ui.models.copy_path").into_owned()).on_click(move |_event, _window, cx| {
+    .item(PopupMenuItem::new(t!("ui.models.copy_path").into_owned()).on_click(move |_event, window, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+        crate::toast::ok(t!("ui.models.path_copied", path = path).into_owned(), window, cx);
     }))
 }
 
@@ -803,6 +831,7 @@ mod tests {
     use super::super::model_refs::VehicleParamIndex;
     use super::super::model_tree::ModelTreeIndex;
     use super::super::sidebar_tree::ModelSection;
+    use super::super::sidebar_tree::RowKind;
     use super::super::sidebar_tree::SearchMatches;
     use super::super::sidebar_tree::TreeSources;
     use super::super::sidebar_tree::fixture;
@@ -870,8 +899,9 @@ mod tests {
             .expect("the window is open")
     }
 
-    /// Opens row `row`'s context menu and lists the labels it offers, sorted.
-    fn row_menu_labels(window: WindowHandle<Sidebar>, row: usize, cx: &mut TestAppContext) -> Vec<String> {
+    /// Opens row `row`'s context menu and lists what it offers, each with the
+    /// menu row it answers to.
+    fn open_row_menu(window: WindowHandle<Sidebar>, row: usize, cx: &mut TestAppContext) -> Vec<(u64, String)> {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             window.right_click(("armor-sidebar-row", row), cx);
@@ -880,18 +910,82 @@ mod tests {
         // The menu opens through a deferred effect.
         cx.run_until_parked();
 
-        let mut labels: Vec<String> = cx
-            .update_window(window.into(), |_, window, cx| {
-                window.render_frame(cx);
-                crate::interaction_tests::menu_items(window)
-                    .into_iter()
-                    .filter_map(|(_, item)| item.label().map(str::to_owned))
-                    .collect()
-            })
-            .expect("the window is open");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            crate::interaction_tests::menu_items(window)
+                .into_iter()
+                .filter_map(|(menu_row, item)| Some((menu_row, item.label()?.to_owned())))
+                .collect()
+        })
+        .expect("the window is open")
+    }
+
+    /// Opens row `row`'s context menu and lists the labels it offers, sorted.
+    fn row_menu_labels(window: WindowHandle<Sidebar>, row: usize, cx: &mut TestAppContext) -> Vec<String> {
+        let mut labels: Vec<String> = open_row_menu(window, row, cx).into_iter().map(|(_, label)| label).collect();
         labels.sort();
 
         labels
+    }
+
+    fn choose_from_row_menu(window: WindowHandle<Sidebar>, row: usize, label: &str, cx: &mut TestAppContext) {
+        let offered = open_row_menu(window, row, cx);
+        let (menu_row, _) = offered
+            .iter()
+            .find(|(_, offer)| offer == label)
+            .unwrap_or_else(|| panic!("the row menu offers {label:?}, offered {offered:?}"));
+        cx.update_window(window.into(), |_, window, cx| {
+            window.within("popup-menu").click(gpui_kit::ElementId::Integer(*menu_row), cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+    }
+
+    /// The row reached by opening its folders with the pointer, as a reader
+    /// browsing the listing does.
+    #[gpui_kit::test]
+    fn copy_model_path_puts_the_path_on_the_clipboard(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let usa = "model-folder/nation-usa";
+        for folder in [usa.to_string(), format!("{usa}/Gun"), format!("{usa}/Gun/MainBattery")] {
+            let row = row_index(&window, &folder.into(), cx).expect("the folder is listed");
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.click(("armor-sidebar-row", row), cx);
+            })
+            .expect("the window is open");
+            cx.run_until_parked();
+        }
+        let turret = fixture::path(fixture::IOWA_TURRET);
+        let row = row_index(&window, &model_row_id(&turret), cx).expect("the opened folder lists the turret");
+
+        choose_from_row_menu(window, row, "Copy model path", cx);
+
+        let copied = cx.read_from_clipboard().and_then(|item| item.text());
+        assert_eq!(copied.as_deref(), Some(fixture::IOWA_TURRET));
+    }
+
+    #[test]
+    fn a_row_tooltip_names_the_whole_row_and_what_it_opens() {
+        let turret = fixture::path(fixture::IOWA_TURRET);
+        let ship = RowKind::Ship { param_index: fixture::IOWA_INDEX.to_string(), display_name: "Iowa".to_string() };
+        let part = RowKind::ShipPart {
+            ship: VehicleParamIndex::new(fixture::IOWA_INDEX),
+            part: ShipPartKey::Mount(HardpointName::new("HP_AGM_1")),
+            model: turret.clone(),
+            node: Some("HP_AGM_1".into()),
+        };
+
+        assert_eq!(super::row_tooltip(&ship).as_deref(), Some("Iowa\nPASB018"));
+        assert_eq!(
+            super::row_tooltip(&RowKind::Model(turret)).as_deref(),
+            Some(format!("AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
+        );
+        assert_eq!(
+            super::row_tooltip(&part).as_deref(),
+            Some(format!("HP_AGM_1 AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
+        );
+        assert_eq!(super::row_tooltip(&RowKind::PartFolder), None, "a folder shows its whole name already");
     }
 
     #[gpui_kit::test]

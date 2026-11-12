@@ -1939,6 +1939,7 @@ search = "함선 및 모델 검색..."
 open = "열기"
 export = "모델 내보내기"
 copy_path = "모델 경로 복사"
+path_copied = "%{path} 복사됨"
 hardpoints_tooltip = "부착 지점 표시"
 
 [ui.models.group]

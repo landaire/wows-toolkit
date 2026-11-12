@@ -1893,6 +1893,7 @@ search = "Szukaj okrętów i modeli..."
 open = "Otwórz"
 export = "Eksportuj model"
 copy_path = "Kopiuj ścieżkę modelu"
+path_copied = "Skopiowano %{path}"
 hardpoints_tooltip = "Pokaż punkty mocowania"
 
 [ui.models.group]
