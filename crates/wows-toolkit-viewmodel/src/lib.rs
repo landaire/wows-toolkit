@@ -45,6 +45,7 @@ pub mod search;
 pub mod search_results;
 pub mod search_settings;
 pub mod settings;
+pub mod settings_drawer;
 pub mod stats;
 pub mod tactics;
 pub mod text_filter;
