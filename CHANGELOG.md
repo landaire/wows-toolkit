@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - *(wows-query)* Add searchable computed quantities for ballistics, torpedoes, underwater weapons, and comparison factors
 - *(wows-query)* Expand battle impact with fixed-range accuracy, ammo, overmatch, secondaries, maneuverability, consumables, funny buttons, and commander talents
+- *(wows-query)* Calculate dispersion with a captain skill from another game-data build
 
 ### Bug Fixes
 

@@ -56,6 +56,32 @@ fn secondary_dispersion_with_and_without_modifiers() {
     }
 }
 
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn selected_skill_uses_the_normal_effects_pipeline() {
+    let skill = "Manual Secondary Battery Aiming";
+    let request =
+        DispersionAtRangeArgs { build: Some(skill.to_owned()), ..args("Hannover", 6.0, DispersionBattery::Secondary) };
+    let selected = GAME.dispersion_at_range_with_skill(&request, &GAME).expect("selected skill dispersion resolves");
+    let normal = GAME.dispersion_at_range(&request).expect("normal dispersion resolves");
+    let normal_row = normal
+        .builds
+        .iter()
+        .find(|row| row.build == skill && row.condition.is_some())
+        .expect("normal output lists the active skill");
+
+    assert_eq!(&selected.builds[1], normal_row);
+    assert_eq!(
+        selected.builds[1].condition.as_deref(),
+        Some("at the priority target within secondary range, after sustained fire")
+    );
+    assert_eq!(selected.headline.as_deref(), Some(skill));
+    assert!(selected.mechanics_version.is_some());
+    assert!(
+        selected.conclusion.contains("Condition: at the priority target within secondary range, after sustained fire")
+    );
+}
+
 /// Montana against Yamato at 12 km differs in sigma as well as ellipse size.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
