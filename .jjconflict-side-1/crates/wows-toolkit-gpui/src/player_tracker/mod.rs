@@ -347,7 +347,7 @@ pub struct PlayerTrackerView {
     _live_build_load: Option<Task<()>>,
     /// What this session has already asked the stats service, so a battle is
     /// asked about once and the service's budget is respected locally.
-    stats_budget: live::StatsBudget,
+    stats_budget: wows_toolkit_services::match_stats::StatsBudget,
     /// Holds the stats lookup until the Current Match section is on screen,
     /// which is when both flags below are set.
     stats_gate: StatsLookupGate<HeldLookup>,
@@ -475,7 +475,7 @@ impl PlayerTrackerView {
             proxy_url: String::new(),
             _live_scan: None,
             _live_build_load: None,
-            stats_budget: live::StatsBudget::default(),
+            stats_budget: wows_toolkit_services::match_stats::StatsBudget::default(),
             stats_gate: StatsLookupGate::default(),
             tab_shown: false,
             current_match_active: false,
@@ -1180,15 +1180,18 @@ impl PlayerTrackerView {
         cx.notify();
 
         self._live_scan = Some(cx.spawn(async move |this, cx| {
-            let source = live::LiveSource::in_dir(&replay_dir);
-            let deadline = Instant::now() + live::SCAN_RETRY_BUDGET;
+            let source = wows_toolkit_replay_data::live_match::LiveSource::in_dir(&replay_dir);
+            let deadline = Instant::now() + wows_toolkit_replay_data::live_match::SCAN_RETRY_BUDGET;
 
             let state = loop {
                 let attempt = {
                     let source = source.clone();
                     let metadata = metadata.clone();
                     let game_data = game_data.clone();
-                    cx.background_spawn(async move { live::scan_arena(&source, &metadata, &game_data) }).await
+                    cx.background_spawn(async move {
+                        wows_toolkit_replay_data::live_match::scan_arena(&source, &metadata, &game_data)
+                    })
+                    .await
                 };
                 if let Some(state) = attempt {
                     break Some(state);
@@ -1196,7 +1199,7 @@ impl PlayerTrackerView {
                 if Instant::now() >= deadline {
                     break None;
                 }
-                cx.background_executor().timer(live::SCAN_RETRY_INTERVAL).await;
+                cx.background_executor().timer(wows_toolkit_replay_data::live_match::SCAN_RETRY_INTERVAL).await;
             };
 
             let _ = this.update(cx, |this, cx| {
@@ -1204,7 +1207,8 @@ impl PlayerTrackerView {
                     return;
                 }
                 let Some(state) = state else {
-                    this.stats = StatsState::Failed(live::StatsError::NoRoster.to_string());
+                    this.stats =
+                        StatsState::Failed(wows_toolkit_services::match_stats::StatsError::NoRoster.to_string());
                     cx.notify();
                     return;
                 };
@@ -1246,7 +1250,7 @@ impl PlayerTrackerView {
         }
         let arena_id = state.arena_id;
         if let Err(refusal) = self.stats_budget.check(arena_id, Instant::now()) {
-            self.stats = StatsState::Failed(live::refusal_text(&refusal.into()));
+            self.stats = StatsState::Failed(wows_toolkit_services::match_stats::refusal_text(&refusal.into()));
             cx.notify();
             return;
         }
@@ -1256,7 +1260,10 @@ impl PlayerTrackerView {
 
         let proxy_url = self.proxy_url.clone();
         self._live_lookup = Some(cx.spawn(async move |this, cx| {
-            let fetched = runtime::spawn(cx, async move { live::fetch_stats(&state, &proxy_url).await }).await;
+            let fetched = runtime::spawn(cx, async move {
+                wows_toolkit_services::match_stats::fetch_stats(crate::http::USER_AGENT, &state, &proxy_url).await
+            })
+            .await;
 
             let _ = this.update(cx, |this, cx| {
                 if this.live_started_at() != Some(started_at) {
@@ -1270,7 +1277,7 @@ impl PlayerTrackerView {
                     }
                     Ok(Err(err)) => {
                         this.stats_budget.note_failure(arena_id, &err, Instant::now());
-                        StatsState::Failed(live::refusal_text(&err))
+                        StatsState::Failed(wows_toolkit_services::match_stats::refusal_text(&err))
                     }
                     Err(err) => StatsState::Failed(err.to_string()),
                 };
@@ -3033,7 +3040,8 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE), ARENA_INFO)
+            .expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_some()
@@ -3102,7 +3110,7 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
+        std::fs::write(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
             .expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
@@ -3455,7 +3463,8 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE), ARENA_INFO)
+            .expect("the arena info is writable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_some()
@@ -3509,7 +3518,8 @@ mod tests {
             })
             .expect("the window is open");
 
-        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE), ARENA_INFO)
+            .expect("the arena info is writable");
 
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
@@ -3525,7 +3535,8 @@ mod tests {
         .expect("the window is open");
 
         // The battle ending removes the file, and the roster goes with it.
-        std::fs::remove_file(dir.join(super::live::ARENA_INFO_FILE)).expect("the arena info is removable");
+        std::fs::remove_file(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE))
+            .expect("the arena info is removable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_none()
@@ -3569,10 +3580,10 @@ mod tests {
     fn the_stats_lookup_waits_for_the_current_match_section(cx: &mut TestAppContext) {
         use super::HeldLookup;
         use super::StatsState;
-        use super::live::StatsError;
         use std::time::Instant;
         use wows_replays::analyzer::arena_scan::ArenaState;
         use wows_replays::types::ArenaId;
+        use wows_toolkit_services::match_stats::StatsError;
         use wows_toolkit_viewmodel::match_stats::MatchStatsError;
         use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 

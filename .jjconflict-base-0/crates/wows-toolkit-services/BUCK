@@ -2,7 +2,9 @@ load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library
 
 SERVICES_COMMON_DEPS = [
     "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//third-party/rust:ciborium",
     "//third-party/rust:futures",
     "//third-party/rust:jiff",
     "//third-party/rust:reqwest",
