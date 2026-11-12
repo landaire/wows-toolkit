@@ -42,6 +42,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # The replay index store.
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+# A clipboard export renders to a temporary file that outlives the process.
+tempfile = "3"
 thiserror = { workspace = true }
 # The index pass runs its store writes on the runtime the front end owns.
 tokio = { version = "1", features = ["rt"] }
@@ -55,12 +57,15 @@ wows_minimap_renderer = { workspace = true, features = ["rendering"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-toolkit-config = { workspace = true }
+# The renderer toolbar names its tools' icons.
+wows-toolkit-icons = { workspace = true }
 # A directory watch that stops reports why, panics included.
 wows-toolkit-services = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
 wt-translations = { workspace = true }
-# The tactics board's shapes and capture points, as a collab session holds them.
+# The tactics board's shapes and capture points as a collab session holds them, the annotation tools,
+# and the frames a playback broadcasts to a session.
 wt-collab-client = { workspace = true }
 # A ship search folds accents, as the armor viewer's does.
 unidecode = "0.3"
@@ -69,6 +74,8 @@ unidecode = "0.3"
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"
-tempfile = "3"
+# A collab session's state, which a test builds a link over.
+parking_lot = "0.12.5"
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
+wows-toolkit-services = { workspace = true, features = ["test-support"] }
 wows-toolkit-viewmodel = { workspace = true, features = ["test-support"] }
