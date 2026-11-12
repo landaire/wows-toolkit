@@ -14,30 +14,30 @@ use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::texture::TextureLod;
 
-use super::hull_picking::HullPickIndex;
-use super::hull_picking::MeshSource;
-use super::load_ship::LoadedShipArmor;
-use super::surface_maps::decode_ship_surface_maps;
+use crate::hull_picking::HullPickIndex;
+use crate::hull_picking::MeshSource;
+use crate::load_ship::LoadedShipArmor;
+use crate::surface_maps::decode_ship_surface_maps;
 
 /// Asks a running load to stop. Clones share one flag.
 #[derive(Clone, Debug)]
-pub(crate) struct LoadCancel(Arc<AtomicBool>);
+pub struct LoadCancel(Arc<AtomicBool>);
 
 /// A load stopped because it was cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("the load was cancelled")]
-pub(crate) struct LoadCancelled;
+pub struct LoadCancelled;
 
 /// A scene as the first stage of its load leaves it, and the jobs that
 /// finish it.
-pub(crate) struct FirstStage {
-    pub(crate) scene: LoadedShipArmor,
-    pub(crate) rest: Vec<RestJob>,
+pub struct FirstStage {
+    pub scene: LoadedShipArmor,
+    pub rest: Vec<RestJob>,
 }
 
 /// One part of a scene the background stage reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum RestPiece {
+pub enum RestPiece {
     /// The hover-picking index.
     Pick,
     /// The camouflage schemes a ship can wear.
@@ -47,7 +47,7 @@ pub(crate) enum RestPiece {
 }
 
 /// A job of the background stage, with what it reads from.
-pub(crate) enum RestJob {
+pub enum RestJob {
     /// Builds the hover-picking index from the scene's hull meshes, one
     /// source per mesh.
     Pick(Vec<MeshSource>),
@@ -60,7 +60,7 @@ pub(crate) enum RestJob {
 
 /// Why a background job stored nothing.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum RestJobError {
+pub enum RestJobError {
     #[error(transparent)]
     Cancelled(#[from] LoadCancelled),
     #[error("failed to resolve camouflage textures: {report}")]
@@ -70,28 +70,28 @@ pub(crate) enum RestJobError {
 /// The load running for one purpose. Starting another, or dropping the slot
 /// with its owner, cancels the one held.
 #[derive(Debug, Default)]
-pub(crate) struct LoadSlot(Option<LoadCancel>);
+pub struct LoadSlot(Option<LoadCancel>);
 
 /// The background stage of one scene, held by every viewport showing the
 /// scene. Cancelled once the last of them lets it go.
 #[derive(Debug)]
-pub(crate) struct SharedLoad(LoadCancel);
+pub struct SharedLoad(LoadCancel);
 
 impl LoadCancel {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(Arc::new(AtomicBool::new(false)))
     }
 
-    pub(crate) fn cancel(&self) {
+    pub fn cancel(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
 
     /// `Err` once cancelled, for `?` between the steps of a load.
-    pub(crate) fn checkpoint(&self) -> Result<(), LoadCancelled> {
+    pub fn checkpoint(&self) -> Result<(), LoadCancelled> {
         if self.is_cancelled() { Err(LoadCancelled) } else { Ok(()) }
     }
 }
@@ -104,7 +104,7 @@ impl Default for LoadCancel {
 
 impl LoadSlot {
     /// Cancels the load held and holds a new one.
-    pub(crate) fn start(&mut self) -> LoadCancel {
+    pub fn start(&mut self) -> LoadCancel {
         self.cancel();
         let cancel = LoadCancel::new();
         self.0 = Some(cancel.clone());
@@ -112,7 +112,7 @@ impl LoadSlot {
         cancel
     }
 
-    pub(crate) fn cancel(&mut self) {
+    pub fn cancel(&mut self) {
         if let Some(cancel) = self.0.take() {
             cancel.cancel();
         }
@@ -126,11 +126,11 @@ impl Drop for LoadSlot {
 }
 
 impl SharedLoad {
-    pub(crate) fn start() -> Arc<Self> {
+    pub fn start() -> Arc<Self> {
         Arc::new(Self(LoadCancel::new()))
     }
 
-    pub(crate) fn cancel_flag(&self) -> &LoadCancel {
+    pub fn cancel_flag(&self) -> &LoadCancel {
         &self.0
     }
 }
@@ -142,7 +142,7 @@ impl Drop for SharedLoad {
 }
 
 impl RestJob {
-    pub(crate) fn piece(&self) -> RestPiece {
+    pub fn piece(&self) -> RestPiece {
         match self {
             Self::Pick(_) => RestPiece::Pick,
             Self::Camo(_) => RestPiece::Camo,
@@ -153,7 +153,7 @@ impl RestJob {
     /// Reads this job's piece and stores it in `scene`. Synchronous and
     /// CPU/IO-bound; callers run it off the UI thread. Nothing is stored once
     /// `cancel` is set.
-    pub(crate) fn run(self, scene: &LoadedShipArmor, cancel: &LoadCancel) -> Result<(), RestJobError> {
+    pub fn run(self, scene: &LoadedShipArmor, cancel: &LoadCancel) -> Result<(), RestJobError> {
         cancel.checkpoint()?;
 
         match self {

@@ -1,17 +1,17 @@
-//! Background ship-armor load: ports the egui app's `load_ship_armor`
+//! Ship-armor load: ports the egui app's `load_ship_armor`
 //! (`armor_viewer/common.rs:137-315`) plus the default-hull option building
 //! from `load_ship_for_pane_with_lod` (`armor_viewer/ui/tab.rs:2374`).
 //!
-//! **Default load.** [`spawn_load_ship_armor`]/[`load_ship_armor_by_param`]
+//! **Default load.** [`load_ship_armor_by_param`]
 //! load the DEFAULT hull at the DEFAULT (highest-detail) LOD -- `hull_lod: 0`
 //! and `selected_hull: None` both match the egui app's own per-pane defaults
 //! (`ArmorPane::with_defaults`, `armor_viewer/state.rs`), and
 //! `ShipExportOptions::hull: None` resolves to the first/stock hull the same
 //! way the egui app's own default load does.
 //!
-//! **Reload (Milestone 4 Task 8c).** [`spawn_reload_ship_armor`]/
+//! **Reload.** [`load_ship_armor_with_options`]/
 //! [`build_reload_options`] instead take an explicit hull/LOD/module
-//! selection from `viewport_view::ViewportView::reload_ship`, which the
+//! selection from the host's hull and LOD selectors, which the
 //! egui app's own incremental `start_hull_lod_reload`/`start_upgrade_reload`
 //! (`tab.rs:2472`/`2568`) mutate an existing `LoadedShipArmor` in place for;
 //! this port's `LoadedShipArmor` is an immutable `Arc`, so a reload always
@@ -30,7 +30,7 @@
 //! `hull_lod_count` are loaded (mirroring the egui core). `hull_upgrade_names`
 //! and `module_alternatives` are cheap to derive alongside a load/reload (same
 //! source data, no extra ship export), so they are populated for the hull
-//! popover's selectors (`popover.rs`) to consume directly.
+//! popover's selectors to consume directly.
 //!
 //! **Stages.** A load returns a [`FirstStage`]: the scene with everything
 //! the opening view draws, and the background jobs (`scene_load::RestJob`)
@@ -45,14 +45,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use wowsunpack::game_params::types::HitLocation;
 
-use gpui_kit::App;
-use gpui_kit::AppContext;
-use gpui_kit::Task;
 use rootcause::Report;
-use rust_i18n::t;
-
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::CamoTextureSource;
@@ -74,23 +68,24 @@ use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::HitLocation;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::game_types::GameParamId;
 
-use wows_toolkit_armor::viewport::camera::ArcballCamera;
-use wows_toolkit_armor::viewport::types::Vec3;
+use crate::viewport::camera::ArcballCamera;
+use crate::viewport::types::Vec3;
 
-use super::hull_picking::HullPickIndex;
-use super::hull_picking::MeshSource;
-use super::scene_load::FirstStage;
-use super::scene_load::LoadCancel;
-use super::scene_load::LoadCancelled;
-use super::scene_load::RestJob;
-use super::surface_maps::SurfaceMapsByPart;
-use super::upload::DisplaySettings;
-use wows_toolkit_armor::model_refs::ShipPartRef;
-use wows_toolkit_armor::model_refs::VehicleParamIndex;
+use crate::hull_picking::HullPickIndex;
+use crate::hull_picking::MeshSource;
+use crate::model_refs::ShipPartRef;
+use crate::model_refs::VehicleParamIndex;
+use crate::scene_load::FirstStage;
+use crate::scene_load::LoadCancel;
+use crate::scene_load::LoadCancelled;
+use crate::scene_load::RestJob;
+use crate::surface_maps::SurfaceMapsByPart;
+use crate::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
 ///
@@ -271,16 +266,16 @@ pub struct LoadedShipArmor {
     pub hull_part_groups: Vec<(String, Vec<String>)>,
     /// `hull_meshes` placed in model space for hover picking. Built by the
     /// background stage of the load; unset until it lands.
-    pub(crate) hull_pick: OnceLock<HullPickIndex>,
+    pub hull_pick: OnceLock<HullPickIndex>,
     /// Decoded hull textures, keyed by `.mfm` path.
-    pub hull_textures: super::camo::TexturesByPart,
+    pub hull_textures: crate::camo::TexturesByPart,
     /// The alpha mode of each hull material that tests or blends alpha, by
     /// `.mfm` path. A material not listed draws opaque.
     pub hull_alpha: HashMap<String, AlphaMode>,
     /// The normal and metal-gloss maps of each hull material, by `.mfm`
     /// path. A ship's are read by the background stage of its load; unset
     /// until they land.
-    pub(crate) hull_surface_maps: OnceLock<SurfaceMapsByPart>,
+    pub hull_surface_maps: OnceLock<SurfaceMapsByPart>,
     pub hull_lod_count: usize,
     pub hull_lod: usize,
     /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
@@ -292,18 +287,18 @@ pub struct LoadedShipArmor {
     /// The orbits the game's own camera rides, by mode name. Empty for a ship
     /// whose GameParams name none.
     pub camera_trajectories: Vec<(String, CameraTrajectory)>,
-    /// Camo scheme metadata for the picker (`popover.rs`); no textures
+    /// Camo scheme metadata for the picker; no textures
     /// decoded. Read by the background stage of a ship load; never set for a
     /// model, which has no camouflage of its own.
-    pub(crate) camo_scheme_infos: OnceLock<Vec<CamoSchemeInfo>>,
+    pub camo_scheme_infos: OnceLock<Vec<CamoSchemeInfo>>,
     /// Decodes a scheme's textures on demand when one is selected. Set
     /// before `camo_scheme_infos`, so a scheme that can be picked can be
     /// decoded.
-    pub(crate) camo_source: OnceLock<CamoTextureSource>,
+    pub camo_source: OnceLock<CamoTextureSource>,
     /// The splash boxes this hull ships with. `None` for a hull carrying no
     /// splash file, which the splash mode reports rather than drawing an
     /// empty burst over.
-    pub splash_data: Option<wows_toolkit_armor::splash::ShipSplashData>,
+    pub splash_data: Option<crate::splash::ShipSplashData>,
     /// The boxes grouped by the part they belong to, for the visibility list.
     pub splash_box_groups: Vec<(String, Vec<String>)>,
     /// The zones GameParams names for this ship, which is where a splash
@@ -318,22 +313,22 @@ impl LoadedShipArmor {
     }
 
     /// The hover-picking index, once the background stage has built it.
-    pub(crate) fn hull_pick_index(&self) -> Option<&HullPickIndex> {
+    pub fn hull_pick_index(&self) -> Option<&HullPickIndex> {
         self.hull_pick.get()
     }
 
     /// The camo schemes the picker offers. Empty until the background stage
     /// reads them, and for a model.
-    pub(crate) fn camo_schemes(&self) -> &[CamoSchemeInfo] {
+    pub fn camo_schemes(&self) -> &[CamoSchemeInfo] {
         self.camo_scheme_infos.get().map_or(&[], Vec::as_slice)
     }
 
-    pub(crate) fn camo_texture_source(&self) -> Option<&CamoTextureSource> {
+    pub fn camo_texture_source(&self) -> Option<&CamoTextureSource> {
         self.camo_source.get()
     }
 
     /// The hull's normal and metal-gloss maps, once they have landed.
-    pub(crate) fn surface_maps(&self) -> Option<&SurfaceMapsByPart> {
+    pub fn surface_maps(&self) -> Option<&SurfaceMapsByPart> {
         self.hull_surface_maps.get()
     }
 
@@ -360,7 +355,7 @@ impl LoadedShipArmor {
     }
 
     /// Why the scene has nothing to draw, or `None` when it has something.
-    pub(crate) fn emptiness(&self) -> Option<EmptyScene> {
+    pub fn emptiness(&self) -> Option<EmptyScene> {
         // A radius a hundredth of the least the camera frames draws as a few
         // pixels at most, which reads as an empty view.
         const SMALLEST_VISIBLE_RADIUS: f32 = ArcballCamera::SMALLEST_FRAMED_RADIUS / 100.0;
@@ -396,7 +391,7 @@ impl LoadedShipArmor {
 
 /// Why a loaded scene has nothing to draw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EmptyScene {
+pub enum EmptyScene {
     Meshless,
     /// No triangles at the level of detail shown, which is one of several.
     MeshlessAtLod,
@@ -406,7 +401,7 @@ pub(crate) enum EmptyScene {
 
 /// Whether any triangle of `indices` spans a nonzero area.
 fn encloses_area(positions: &[[f32; 3]], indices: &[u32]) -> bool {
-    indices.chunks_exact(3).any(|triangle| {
+    indices.as_chunks::<3>().0.iter().any(|triangle| {
         let corner = |at: u32| positions.get(at as usize).map(|p| Vec3::new(p[0], p[1], p[2]));
         let (Some(a), Some(b), Some(c)) = (corner(triangle[0]), corner(triangle[1]), corner(triangle[2])) else {
             return false;
@@ -418,7 +413,7 @@ fn encloses_area(positions: &[[f32; 3]], indices: &[u32]) -> bool {
 
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and
 /// renormalize. Ports `armor_viewer::ui::tab::transform_normal` verbatim.
-pub(crate) fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
+pub fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
     let x = t[0] * n[0] + t[4] * n[1] + t[8] * n[2];
     let y = t[1] * n[0] + t[5] * n[1] + t[9] * n[2];
     let z = t[2] * n[0] + t[6] * n[1] + t[10] * n[2];
@@ -428,7 +423,7 @@ pub(crate) fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
 
 /// Build hull part groups from a list of hull meshes. The group rides on each
 /// mesh, assigned from the mount's GameParams species when the ship was loaded.
-pub(crate) fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec<(String, Vec<String>)> {
+pub fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec<(String, Vec<String>)> {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
@@ -447,7 +442,7 @@ pub(crate) fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec
 
 /// Build sorted hull upgrade labels with diff-based suffixes. Ports
 /// `armor_viewer::common::build_hull_upgrade_names` verbatim.
-pub(crate) fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
+pub fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
     vehicle
         .hull_upgrades()
         .map(|upgrades| {
@@ -566,11 +561,9 @@ fn load_ship_armor(
 
     let meshes = ctx.interactive_armor_meshes().map_err(|e| ShipLoadError::ArmorMeshes(format!("{e:?}")))?;
 
-    let splash_data = wows_toolkit_armor::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
-    let splash_box_groups = splash_data
-        .as_ref()
-        .map(|data| wows_toolkit_armor::splash::build_splash_box_groups(&data.boxes))
-        .unwrap_or_default();
+    let splash_data = crate::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
+    let splash_box_groups =
+        splash_data.as_ref().map(|data| crate::splash::build_splash_box_groups(&data.boxes)).unwrap_or_default();
     let hit_locations = ctx.hit_locations().cloned();
 
     let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
@@ -628,7 +621,7 @@ fn load_ship_armor(
 /// not opaque, by `.mfm` path.
 #[derive(Default)]
 struct HullAlbedos {
-    textures: super::camo::TexturesByPart,
+    textures: crate::camo::TexturesByPart,
     alpha: HashMap<String, AlphaMode>,
 }
 
@@ -666,7 +659,7 @@ fn decode_hull_albedos(
     let half_the_cores = std::thread::available_parallelism().map_or(1, |cores| cores.get() / 2);
     let workers = half_the_cores.clamp(1, MOST_WORKERS).min(materials.len());
     let next = AtomicUsize::new(0);
-    let decoded: Vec<Vec<(String, super::camo::RgbaTexture, AlphaMode)>> = std::thread::scope(|scope| {
+    let decoded: Vec<Vec<(String, crate::camo::RgbaTexture, AlphaMode)>> = std::thread::scope(|scope| {
         let decode = || {
             let mut out = Vec::new();
             while let Some(&(path, mfm_path_id)) = materials.get(next.fetch_add(1, Ordering::Relaxed)) {
@@ -675,7 +668,7 @@ fn decode_hull_albedos(
                 }
                 let Some(albedo) = session.albedo(path, mfm_path_id, lod) else { continue };
                 let (width, height) = (albedo.image.width(), albedo.image.height());
-                let texture = super::camo::RgbaTexture::new(width, height, albedo.image.into_raw());
+                let texture = crate::camo::RgbaTexture::new(width, height, albedo.image.into_raw());
                 out.push((path.to_string(), texture, albedo.alpha));
             }
 
@@ -703,14 +696,14 @@ fn decode_hull_albedos(
 
 /// An armor mesh set's zones, the materials in each, and each material's
 /// plate thicknesses, sorted for the visibility tree.
-pub(crate) struct ArmorZones {
+pub struct ArmorZones {
     pub zones: Vec<String>,
     pub zone_parts: Vec<(String, Vec<String>)>,
     pub zone_part_plates: Vec<ArmorZone>,
 }
 
 impl ArmorZones {
-    pub(crate) fn from_meshes(meshes: &[InteractiveArmorMesh]) -> Self {
+    pub fn from_meshes(meshes: &[InteractiveArmorMesh]) -> Self {
         let mut plates_by_part: BTreeMap<String, BTreeMap<String, BTreeSet<i32>>> = BTreeMap::new();
         for mesh in meshes {
             for info in &mesh.triangle_info {
@@ -743,7 +736,7 @@ impl ArmorZones {
 }
 
 /// The box around every armor and hull vertex, placed by its transform.
-pub(crate) fn scene_bounds(armor: &[InteractiveArmorMesh], hull: &[InteractiveHullMesh]) -> (Vec3, Vec3) {
+pub fn scene_bounds(armor: &[InteractiveArmorMesh], hull: &[InteractiveHullMesh]) -> (Vec3, Vec3) {
     let armor_points = armor.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), p)));
     let hull_points = hull.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), p)));
 
@@ -786,9 +779,8 @@ fn resolve_species(ship_assets: &ShipAssets, param_index: &str) -> Option<Specie
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then runs the first
 /// stage of a load of its default-hull armor model at [`DEFAULT_LOD`].
-/// Synchronous and CPU/IO-bound; callers run it off the UI thread (see
-/// [`spawn_load_ship_armor`]).
-pub(crate) fn load_ship_armor_by_param(
+/// Synchronous and CPU/IO-bound; callers run it off the UI thread.
+pub fn load_ship_armor_by_param(
     ship_assets: &ShipAssets,
     param_index: &str,
     display_name: &str,
@@ -800,12 +792,11 @@ pub(crate) fn load_ship_armor_by_param(
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
-/// armor model under caller-supplied `options` -- a Milestone 4 Task 8c
-/// reload with a specific hull/LOD/module selection, as opposed to
-/// [`load_ship_armor_by_param`]'s always-default load. Synchronous and
-/// CPU/IO-bound; callers run it off the UI thread (see
-/// [`spawn_reload_ship_armor`]).
-fn load_ship_armor_with_options(
+/// armor model under caller-supplied `options`: a reload with a specific
+/// hull/LOD/module selection, as opposed to [`load_ship_armor_by_param`]'s
+/// always-default load. Synchronous and CPU/IO-bound; callers run it off the
+/// UI thread.
+pub fn load_ship_armor_with_options(
     ship_assets: &ShipAssets,
     param_index: &str,
     options: ShipLoadOptions,
@@ -821,8 +812,8 @@ fn load_ship_armor_with_options(
 /// small hashmap scan, mirroring the sync prep the egui app's own
 /// `load_ship_for_pane_with_lod` runs before spawning its background reload
 /// (`armor_viewer/ui/tab.rs:2427-2444`) -- so the caller can build this right
-/// before handing it to [`spawn_reload_ship_armor`]'s background task.
-pub(crate) fn build_reload_options(
+/// before handing it to [`load_ship_armor_with_options`] on a background task.
+pub fn build_reload_options(
     ship_assets: &ShipAssets,
     param_index: &str,
     display_name: String,
@@ -837,7 +828,7 @@ pub(crate) fn build_reload_options(
 /// Default save-file name for a GLB export (Milestone 5 Task 10), matching
 /// the egui app's own `format!("{}.glb", display_name)` default
 /// (`armor_viewer/ui/tab.rs:1057`).
-pub(crate) fn default_export_filename(display_name: &str) -> String {
+pub fn default_export_filename(display_name: &str) -> String {
     format!("{display_name}.glb")
 }
 
@@ -848,7 +839,7 @@ pub(crate) fn default_export_filename(display_name: &str) -> String {
 /// (`armor_viewer/ui/tab.rs:1057-1097`) so exported GLBs are textured on both
 /// UIs. A pure function, split out from [`export_ship_glb`] so it is
 /// unit-testable without a `ShipAssets`/`Vehicle`.
-pub(crate) fn export_options_from_selection(
+pub fn export_options_from_selection(
     lod: usize,
     selected_hull: Option<String>,
     module_overrides: HashMap<ComponentType, String>,
@@ -869,9 +860,8 @@ pub(crate) fn export_options_from_selection(
 /// under `options` (built by [`export_options_from_selection`] for a
 /// viewport-pane export, so the exported model matches what that pane
 /// currently displays). Synchronous and CPU/IO-bound; callers run it off the
-/// UI thread (`viewport_view::ViewportView::confirm_export`), matching every
-/// other `ShipAssets`-driven load in this module.
-pub(crate) fn export_ship_glb(
+/// UI thread, matching every other `ShipAssets`-driven load in this module.
+pub fn export_ship_glb(
     ship_assets: &ShipAssets,
     param_index: &str,
     options: &ShipExportOptions,
@@ -888,73 +878,6 @@ pub(crate) fn export_ship_glb(
         .map_err(|source| ExportGlbError::CreateFile { path: path.to_path_buf(), source })?;
     ctx.export_glb(&mut file).map_err(|report| ExportGlbError::WriteShip { path: path.to_path_buf(), report })?;
     Ok(())
-}
-
-/// Kicks off the first stage of a ship's armor load on the background
-/// executor. `bundle` is the Armor Viewer's already-loaded
-/// [`ArmorAssetsBundle`](super::assets::ArmorAssetsBundle) (shared `Arc`,
-/// cheap to clone into the background task); this never triggers a second
-/// game-data or `ShipAssets` load.
-pub(crate) fn spawn_load_ship_armor(
-    bundle: Arc<super::assets::ArmorAssetsBundle>,
-    param_index: String,
-    display_name: String,
-    cancel: LoadCancel,
-    cx: &App,
-) -> Task<Result<FirstStage, ShipLoadError>> {
-    cx.background_spawn(async move { load_ship_armor_by_param(&bundle.assets, &param_index, &display_name, &cancel) })
-}
-
-/// Kicks off a background reload of `param_index`'s armor under `options` --
-/// a hull-upgrade/LOD/module selection change from the hull popover
-/// (`popover.rs`), driven by `viewport_view::ViewportView::reload_ship`. Like
-/// [`spawn_load_ship_armor`], but the caller controls `options` (build it via
-/// [`build_reload_options`]) instead of getting the always-default load;
-/// `bundle` is the same shared `ArmorAssetsBundle`, so this never triggers a
-/// second game-data or `ShipAssets` load either.
-pub(crate) fn spawn_reload_ship_armor(
-    bundle: Arc<super::assets::ArmorAssetsBundle>,
-    param_index: String,
-    options: ShipLoadOptions,
-    cancel: LoadCancel,
-    cx: &App,
-) -> Task<Result<FirstStage, ShipLoadError>> {
-    cx.background_spawn(async move { load_ship_armor_with_options(&bundle.assets, &param_index, options, &cancel) })
-}
-
-/// Reports a finished export: what was written and how large it is, or why it
-/// was not.
-///
-/// Shared by the two surfaces that export the same file (`ArmorViewerPane` and
-/// the viewport's own confirmation), since a written file is otherwise invisible
-/// and both say it in the egui app's words. The destination is logged rather
-/// than shown: the reader chose it in the save dialog, and a support log is
-/// where it is asked for afterwards.
-pub(crate) fn report_export(
-    written: Result<(std::path::PathBuf, Option<u64>), ExportGlbError>,
-    ship: &str,
-    window: &mut gpui_kit::Window,
-    cx: &mut App,
-) {
-    match written {
-        Ok((path, size)) => {
-            tracing::info!("armor viewer: exported {ship} to {}", path.display());
-            let message = match size {
-                Some(bytes) => t!(
-                    "ui.armor.export.exported_with_size",
-                    ship = ship,
-                    size = wows_toolkit_viewmodel::formatting::byte_size(bytes)
-                )
-                .into_owned(),
-                None => t!("ui.armor.export.exported", ship = ship).into_owned(),
-            };
-            crate::toast::ok(message, window, cx);
-        }
-        Err(err) => {
-            tracing::error!("armor viewer: failed to export {ship}: {err}");
-            crate::toast::failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned(), window, cx);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1047,14 +970,14 @@ mod tests {
     /// Needs a local game install: loads one real ship's armor model end to
     /// end (`ShipAssets` -> vehicle resolution -> `load_ship_armor`) against
     /// the latest installed build, exercising the exact synchronous path
-    /// `spawn_load_ship_armor` wraps. Picks the first ship the real catalog
+    /// [`load_ship_armor_by_param`] runs. Picks the first ship the real catalog
     /// produces rather than hardcoding a param index, so this keeps working
     /// as GameParams data changes build to build. Mirrors `assets.rs`'s own
     /// real-install test. Run with:
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored load_ship_armor_against_a_real_install_produces_a_renderable_model
+    /// cargo test -p wows-toolkit-armor -- --ignored load_ship_armor_against_a_real_install_produces_a_renderable_model
     /// ```
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]
@@ -1080,7 +1003,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1141,7 +1064,7 @@ mod tests {
         );
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
-        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1166,7 +1089,7 @@ mod tests {
     }
 
     /// Needs a local game install: exercises the exact synchronous path
-    /// `viewport_view::ViewportView::confirm_export`'s background task runs
+    /// a viewport export runs
     /// (`export_options_from_selection` + `export_ship_glb`) end to end
     /// against a real ship, then checks the written file starts with the
     /// glTF Binary magic (`glTF`) and is non-empty. Same
@@ -1176,7 +1099,7 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored export_ship_glb_against_a_real_install_writes_a_valid_glb_file
+    /// cargo test -p wows-toolkit-armor -- --ignored export_ship_glb_against_a_real_install_writes_a_valid_glb_file
     /// ```
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]
@@ -1202,7 +1125,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1211,7 +1134,7 @@ mod tests {
             .next()
             .expect("expected at least one ship in the real catalog");
 
-        let out_dir = std::env::temp_dir().join("wows-toolkit-gpui-export-glb-test");
+        let out_dir = std::env::temp_dir().join("wows-toolkit-armor-export-glb-test");
         std::fs::create_dir_all(&out_dir).expect("failed to create scratch output dir");
         let out_path = out_dir.join(default_export_filename(&ship.display_name));
 
@@ -1245,7 +1168,7 @@ mod tests {
     fn the_first_stage_holds_the_whole_opening_view() {
         use std::time::Instant;
 
-        use wows_toolkit_armor::model_refs::ShipPartKey;
+        use crate::model_refs::ShipPartKey;
 
         let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
             .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
