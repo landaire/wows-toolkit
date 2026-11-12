@@ -98,9 +98,10 @@ impl IndexList {
                 .await
                 .map(IndexLookup::Players)
                 .map_err(|source| ModeQueryError::Players { source }),
-            Self::MyShips => {
-                ShipLookup::load_played(pool).await.map(IndexLookup::Ships).map_err(|source| ModeQueryError::Ships { source })
-            }
+            Self::MyShips => ShipLookup::load_played(pool)
+                .await
+                .map(IndexLookup::Ships)
+                .map_err(|source| ModeQueryError::Ships { source }),
         }
     }
 }

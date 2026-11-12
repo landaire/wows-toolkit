@@ -66,9 +66,9 @@ use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_replay_data::sort::SortOrder;
 use wows_toolkit_replay_data::sort::sort_rows;
 use wows_toolkit_replay_data::team_totals::TeamShare;
-use wows_toolkit_replay_data::team_totals::TeamTotals;
 #[cfg(test)]
 use wows_toolkit_replay_data::team_totals::TeamSide;
+use wows_toolkit_replay_data::team_totals::TeamTotals;
 
 use super::damage_mix;
 use super::expanded;
@@ -2839,7 +2839,8 @@ impl Render for PlayerTable {
         let h_scroll = self.h_scroll.clone();
         // Headings only while each team's rows stay together under the sort.
         let self_team = self.model.self_team;
-        let team_runs = wows_toolkit_replay_data::team_totals::team_runs(&self.model.rows, self_team).unwrap_or_default();
+        let team_runs =
+            wows_toolkit_replay_data::team_totals::team_runs(&self.model.rows, self_team).unwrap_or_default();
         let team_totals = TeamTotals::of(&self.model.rows, self_team, self.debug);
         let team_damage = team_totals.column(ReplayColumn::ActualDamage);
         let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
@@ -3011,13 +3012,13 @@ mod tests {
 
     use super::ConnectionNote;
     use super::PlayerTable;
-    use wows_toolkit_replay_data::team_totals::TeamDamage;
     use super::TeamShare;
     use super::TeamSide;
     use super::TeamTotals;
     use super::TimeOffline;
     use wows_replays::types::AccountId;
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::team_totals::TeamDamage;
 
     fn two_row_model() -> ReplayReportModel {
         ReplayReportModel {

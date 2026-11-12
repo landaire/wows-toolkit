@@ -1229,7 +1229,9 @@ impl ReplayBrowser {
         let translated: Vec<ReplayLite> = self
             .files
             .iter()
-            .map(|raw| ReplayLite::from_scanned(raw, self.build_cache.as_ref(), provider, self.summaries.get(&raw.path)))
+            .map(|raw| {
+                ReplayLite::from_scanned(raw, self.build_cache.as_ref(), provider, self.summaries.get(&raw.path))
+            })
             .collect();
         // The hover text is assembled per replay rather than per node: a leaf
         // knows its path, and the tree nodes carry only what they draw.

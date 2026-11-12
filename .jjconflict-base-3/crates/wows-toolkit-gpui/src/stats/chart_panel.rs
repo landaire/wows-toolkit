@@ -938,14 +938,7 @@ impl Render for StatsChartPanel {
             },
             move |bounds, _prepaint, window, cx| {
                 plot::paint(
-                    &Plot {
-                        series: &series,
-                        bars: &bars,
-                        x_label: &x_label,
-                        y_label: &value_label,
-                        show_values,
-                        view,
-                    },
+                    &Plot { series: &series, bars: &bars, x_label: &x_label, y_label: &value_label, show_values, view },
                     bounds,
                     window,
                     cx,

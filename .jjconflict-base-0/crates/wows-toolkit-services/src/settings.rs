@@ -146,8 +146,7 @@ impl StartupSettings {
             }
         };
         // Absent until the reader turns it off, and armor is the default.
-        let model_show_armor =
-            queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true);
+        let model_show_armor = queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true);
 
         let auto_dump_game_data = queries::get_setting::<bool>(pool, keys::AUTO_DUMP_GAME_DATA).await.unwrap_or(false);
         let game_data_cache_dir =

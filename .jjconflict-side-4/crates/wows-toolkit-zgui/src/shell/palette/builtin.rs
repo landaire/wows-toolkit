@@ -61,7 +61,8 @@ pub fn offer(shell: Shell) {
     let offers_ships = true;
     if offers_ships {
         let armor = shell.armor;
-        palette.offer_mode(PaletteMode::ArmorShips, modes::armor_ships(armor.ship_list(services), move || armor.want()));
+        palette
+            .offer_mode(PaletteMode::ArmorShips, modes::armor_ships(armor.ship_list(services), move || armor.want()));
     }
 
     palette.offer(RootCommand::GamesIDiedIn, PaletteRun::Request(TabRequest::Search(GAMES_I_DIED_IN.to_owned())));

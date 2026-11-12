@@ -2874,7 +2874,13 @@ fn timeline_popover(
         .map(|event| {
             let (label, hover) = row_text(&event.kind);
             // Marked by `query` when drawn.
-            TimelineRow { at: event.clock.seconds(), label, hover, tone: row_tone(&event.kind, viewer_team), marks: Vec::new() }
+            TimelineRow {
+                at: event.clock.seconds(),
+                label,
+                hover,
+                tone: row_tone(&event.kind, viewer_team),
+                marks: Vec::new(),
+            }
         })
         .collect();
     let copyable: String = view.visible_events().into_iter().map(format_timeline_event).collect::<Vec<_>>().join("\n");
