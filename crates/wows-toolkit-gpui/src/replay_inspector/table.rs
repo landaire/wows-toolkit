@@ -2406,9 +2406,10 @@ fn number_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     share_bar_cell(ix, col, row, cell, share, None, layout, width)
 }
 
-/// `cell_element` for `cell` with a bar as long as `share`: the damage types
-/// of `mix` stacked under the figure, or one faint bar behind it in the
-/// text's colour without one.
+/// `cell_element` for `cell` over a faint bar as long as the row's `share`
+/// of its team's total, with `mix`, when given, as a band of damage types
+/// under the figure spanning the whole cell: the share says how much of the
+/// team's damage, the band what this player's own damage was made of.
 #[allow(clippy::too_many_arguments)]
 fn share_bar_cell(
     ix: usize,
@@ -2422,15 +2423,16 @@ fn share_bar_cell(
 ) -> AnyElement {
     let color = cell.color.map_or(layout.foreground, resolve_color);
     let element = cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
-    let Some(share) = share else {
+    if share.is_none() && mix.is_none() {
         return element;
-    };
+    }
 
-    let cell = div().relative().w(px(width)).flex_none();
-    match mix {
-        Some(mix) => cell.child(element).child(div().px_1().child(mix.stacked_bar(share.fraction))),
-        None => cell
-            .child(
+    div()
+        .relative()
+        .w(px(width))
+        .flex_none()
+        .when_some(share, |cell, share| {
+            cell.child(
                 div()
                     .absolute()
                     .left_0()
@@ -2439,9 +2441,10 @@ fn share_bar_cell(
                     .w(relative(share.fraction))
                     .bg(color.opacity(MAGNITUDE_BAR_OPACITY)),
             )
-            .child(element),
-    }
-    .into_any_element()
+        })
+        .child(element)
+        .when_some(mix, |cell, mix| cell.child(div().px_1().child(mix.stacked_bar())))
+        .into_any_element()
 }
 
 /// Strength of a magnitude bar against the text colour it is drawn in.
@@ -2511,9 +2514,9 @@ impl TeamTotals {
     }
 }
 
-/// A damage cell whose share bar is stacked by damage type, listed with its
-/// colour key on hover. The plain number cell when there is no split to
-/// show.
+/// A damage cell over its team-share bar, with the player's damage split by
+/// type in a band under the figure and listed with its colour key on hover.
+/// The plain number cell when there is no split to show.
 fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let Some(lines) = damage_mix::shown_lines(row, col, layout.debug) else {
         return number_cell(ix, col, row, layout, width);
