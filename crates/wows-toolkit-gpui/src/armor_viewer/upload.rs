@@ -73,8 +73,10 @@ pub struct DisplaySettings {
     /// How solid the impact markers are drawn, so a hull crowded with them can
     /// still be read.
     pub marker_opacity: f32,
-    /// Distances marked and written on the grid under the model, with its
-    /// overall length and beam.
+    /// The crosshatch on the waterline under a ship, or under a model's base.
+    pub show_grid: bool,
+    /// Distances marked and written on the plane under the model, with its
+    /// overall length and beam. Independent of `show_grid`.
     pub show_length_marks: bool,
 }
 
@@ -88,6 +90,7 @@ impl Default for DisplaySettings {
             hull_opaque: false,
             show_ship_center: false,
             marker_opacity: 1.0,
+            show_grid: true,
             show_length_marks: true,
         }
     }
@@ -105,10 +108,11 @@ impl DisplaySettings {
             armor_opacity: row.armor_opacity as f32,
             hull_opaque: row.hull_opaque,
             // The egui viewer keeps the first two on the pane rather than in
-            // the shared `armor_viewer_defaults` row, and has no length marks,
-            // so none is restored.
+            // the shared `armor_viewer_defaults` row, and has no grid or
+            // length marks, so none is restored.
             show_ship_center: Self::default().show_ship_center,
             marker_opacity: Self::default().marker_opacity,
+            show_grid: Self::default().show_grid,
             show_length_marks: Self::default().show_length_marks,
         }
     }

@@ -62,6 +62,15 @@ pub(crate) fn paint_vignette(bounds: Bounds<Pixels>, window: &mut Window) {
     }
 }
 
+/// Which parts of the grid under a model are drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GridLayers {
+    /// The plain crosshatch.
+    pub(crate) lines: bool,
+    /// The heavier lines on the length marks.
+    pub(crate) marks: bool,
+}
+
 /// Lays the grid under a model whose marks are `marks`. In world space, so
 /// it stays level while the hull heels over. On the hull's layer, which is
 /// tested against the armor's depth without writing its own, so the model
@@ -70,9 +79,9 @@ pub(crate) fn upload_waterline_grid(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     marks: &LengthMarks,
-    show_marks: bool,
+    layers: GridLayers,
 ) {
-    let (vertices, indices) = build_waterline_grid(marks, show_marks);
+    let (vertices, indices) = build_waterline_grid(marks, layers);
     if !indices.is_empty() {
         viewport.add_world_space_mesh(device, &vertices, &indices, LAYER_HULL);
     }
@@ -96,9 +105,10 @@ pub(crate) fn grid_fade(marks: &LengthMarks, position: Vec3) -> f32 {
 /// middle to nothing at its edge. Drawn as thin flat quads, each line cut
 /// into short pieces so the fade follows it. The lines fall on the marks'
 /// spacing, or halfway between when there are few marks, counted from where
-/// the marks are; with `show_marks` the lines on a mark within the model are
-/// drawn heavier.
-pub(crate) fn build_waterline_grid(marks: &LengthMarks, show_marks: bool) -> (Vec<Vertex>, Vec<u32>) {
+/// the marks are. `layers` picks the plain lines, the heavier lines on the
+/// marks within the model, or both; the marks alone read as a ruler laid on
+/// the plane.
+pub(crate) fn build_waterline_grid(marks: &LengthMarks, layers: GridLayers) -> (Vec<Vertex>, Vec<u32>) {
     /// How wide a line is drawn, as a share of a cell.
     const LINE: f32 = 0.03;
     /// How wide a mark is drawn, as a share of the mark spacing.
@@ -127,12 +137,15 @@ pub(crate) fn build_waterline_grid(marks: &LengthMarks, show_marks: bool) -> (Ve
     let first = |from: f32| ((from - reach) / cell).ceil() as i32;
     let last = |from: f32| ((from + reach) / cell).floor() as i32;
     let is_mark = |index: i32, steps: u32| {
-        show_marks && index >= 0 && index % lines_per_mark == 0 && (index / lines_per_mark) as u32 <= steps
+        layers.marks && index >= 0 && index % lines_per_mark == 0 && (index / lines_per_mark) as u32 <= steps
     };
+    let drawn = |(at, mark): (f32, bool)| (mark || layers.lines).then_some((at, mark));
     let x_lines = (first(middle.x - low.x)..=last(middle.x - low.x))
-        .map(|index| (low.x + index as f32 * cell, is_mark(index, marks.beam_steps())));
+        .map(|index| (low.x + index as f32 * cell, is_mark(index, marks.beam_steps())))
+        .filter_map(drawn);
     let z_lines = (first(high.z - middle.z)..=last(high.z - middle.z))
-        .map(|index| (high.z - index as f32 * cell, is_mark(index, marks.length_steps())));
+        .map(|index| (high.z - index as f32 * cell, is_mark(index, marks.length_steps())))
+        .filter_map(drawn);
 
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -229,37 +242,24 @@ mod tests {
         LengthMarks::new((Vec3::new(-15., -10., -100.), Vec3::new(15., 20., 100.)), 0.).expect("marks")
     }
 
+    const BOTH: GridLayers = GridLayers { lines: true, marks: true };
+    const LINES: GridLayers = GridLayers { lines: true, marks: false };
+    const MARKS: GridLayers = GridLayers { lines: false, marks: true };
+    const NEITHER: GridLayers = GridLayers { lines: false, marks: false };
+
+    fn is_plain(vertex: &Vertex) -> bool {
+        vertex.color[..3] == [0.62, 0.68, 0.78]
+    }
+
     /// Vertices drawn in a mark's colour rather than a plain line's.
     fn mark_vertices(vertices: &[Vertex]) -> Vec<&Vertex> {
-        let plain = |vertex: &&Vertex| vertex.color[..3] == [0.62, 0.68, 0.78];
-        vertices.iter().filter(|vertex| !plain(vertex)).collect()
+        vertices.iter().filter(|vertex| !is_plain(vertex)).collect()
     }
 
-    /// The grid lies on the waterline and is strongest under the ship's
-    /// middle, fading to nothing toward its reach.
-    #[test]
-    fn the_grid_fades_away_from_the_ship() {
-        let (vertices, indices) = build_waterline_grid(&ship_marks(), false);
-
-        assert!(!indices.is_empty());
-        assert!(vertices.iter().all(|vertex| vertex.position[1] == 0.), "on the waterline");
-        let middle = alpha_at(&vertices, 0., 0.).expect("a line crosses the middle");
-        let near = alpha_at(&vertices, 0., -100.).expect("a line reaches the bow");
-        assert!(middle > near && near > 0., "fades with distance: {middle} then {near}");
-        assert!(vertices.iter().all(|vertex| vertex.color[3] <= middle));
-    }
-
-    /// With the marks shown, the lines on them are drawn in their own colour,
-    /// one along each mark within the ship and nowhere else; with them
-    /// hidden the grid is plain.
-    #[test]
-    fn the_marks_are_drawn_on_their_lines_only_while_shown() {
-        let marks = ship_marks();
-        let (shown, _) = build_waterline_grid(&marks, true);
-        let (hidden, _) = build_waterline_grid(&marks, false);
-
-        assert!(mark_vertices(&hidden).is_empty());
-        let drawn = mark_vertices(&shown);
+    /// Every mark has a line drawn along it, and every mark-coloured vertex
+    /// lies on one.
+    fn assert_marks_drawn(marks: &LengthMarks, vertices: &[Vertex]) {
+        let drawn = mark_vertices(vertices);
         let half_width = marks.spacing().to_ship_model().value() * 0.04;
         let on = |marks: &[Mark], at: f32| marks.iter().any(|mark| (mark.at - at).abs() <= half_width);
         let (along, across) = (marks.along_length(), marks.across_beam());
@@ -272,12 +272,63 @@ mod tests {
         }
     }
 
+    /// The grid lies on the waterline and is strongest under the ship's
+    /// middle, fading to nothing toward its reach.
+    #[test]
+    fn the_grid_fades_away_from_the_ship() {
+        let (vertices, indices) = build_waterline_grid(&ship_marks(), LINES);
+
+        assert!(!indices.is_empty());
+        assert!(vertices.iter().all(|vertex| vertex.position[1] == 0.), "on the waterline");
+        let middle = alpha_at(&vertices, 0., 0.).expect("a line crosses the middle");
+        let near = alpha_at(&vertices, 0., -100.).expect("a line reaches the bow");
+        assert!(middle > near && near > 0., "fades with distance: {middle} then {near}");
+        assert!(vertices.iter().all(|vertex| vertex.color[3] <= middle));
+    }
+
+    /// Both layers: the plain crosshatch, with the lines on the marks drawn
+    /// in their own colour.
+    #[test]
+    fn grid_and_marks_draw_both() {
+        let marks = ship_marks();
+        let (vertices, _) = build_waterline_grid(&marks, BOTH);
+
+        assert!(vertices.iter().any(is_plain));
+        assert_marks_drawn(&marks, &vertices);
+    }
+
+    #[test]
+    fn the_grid_alone_is_plain() {
+        let (vertices, indices) = build_waterline_grid(&ship_marks(), LINES);
+
+        assert!(!indices.is_empty());
+        assert!(mark_vertices(&vertices).is_empty());
+    }
+
+    /// The marks without the grid: only the lines on the marks, as a ruler.
+    #[test]
+    fn the_marks_alone_draw_no_plain_lines() {
+        let marks = ship_marks();
+        let (vertices, indices) = build_waterline_grid(&marks, MARKS);
+
+        assert!(!indices.is_empty());
+        assert!(!vertices.iter().any(is_plain));
+        assert_marks_drawn(&marks, &vertices);
+    }
+
+    #[test]
+    fn neither_layer_draws_nothing() {
+        let (vertices, indices) = build_waterline_grid(&ship_marks(), NEITHER);
+
+        assert!(vertices.is_empty() && indices.is_empty());
+    }
+
     /// The grid lies on the plane its marks were taken on, so a model's sits
     /// under it.
     #[test]
     fn the_grid_lies_on_the_marks_plane() {
         let marks = LengthMarks::new((Vec3::new(-1., -0.5, -2.), Vec3::new(1., 1., 2.)), -0.5).expect("marks");
-        let (vertices, _) = build_waterline_grid(&marks, true);
+        let (vertices, _) = build_waterline_grid(&marks, BOTH);
 
         assert!(!vertices.is_empty());
         assert!(vertices.iter().all(|vertex| vertex.position[1] == -0.5));

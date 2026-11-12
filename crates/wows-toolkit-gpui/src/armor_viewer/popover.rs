@@ -1540,6 +1540,14 @@ fn model_rows(
         .flatten()
         .chain([
             filtered_checkbox(
+                "armor-display-grid",
+                t!("ui.armor.grid").into_owned(),
+                display.show_grid,
+                false,
+                filter,
+                setting(|d, on| d.show_grid = on),
+            ),
+            filtered_checkbox(
                 "armor-display-length-marks",
                 t!("ui.armor.length_marks").into_owned(),
                 display.show_length_marks,

@@ -3694,11 +3694,12 @@ impl ViewportView {
         // A model has no water to stand in, so its grid lies under it.
         let plane_y = if armor.is_ship() { 0. } else { armor.bounds.0.y };
         self.length_marks = LengthMarks::new(armor.bounds, plane_y);
-        let show_marks = self.display_settings.show_length_marks;
-        if let Some(marks) = self.length_marks.as_ref()
-            && (armor.is_ship() || show_marks)
-        {
-            depth_cues::upload_waterline_grid(&mut self.viewport, device, marks, show_marks);
+        let layers = depth_cues::GridLayers {
+            lines: self.display_settings.show_grid,
+            marks: self.display_settings.show_length_marks,
+        };
+        if let Some(marks) = self.length_marks.as_ref() {
+            depth_cues::upload_waterline_grid(&mut self.viewport, device, marks, layers);
         }
 
         if self.display_settings.show_ship_center {
