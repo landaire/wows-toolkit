@@ -1955,3 +1955,12 @@ thickness_unknown = "Tloušťka neznámá: tento model nenese žádná loď"
 thickness_other_ships = "Jiné lodě"
 export_title = "Exportovat model"
 export_tooltip = "Exportovat model do souboru GLB"
+
+[ui.scene_problem]
+cannot_show = "%{name} nelze zobrazit"
+geometry_absent = "Geometrie tohoto modelu není ve vašich herních souborech."
+model_unreadable = "Data tohoto modelu nelze načíst. Podrobnosti jsou v protokolu."
+ship_unreadable = "Data této lodi nelze načíst. Podrobnosti jsou v protokolu."
+no_meshes = "Tento model nemá žádné sítě."
+no_meshes_at_lod = "Tento model nemá na zvolené úrovni detailů žádné sítě."
+no_visible_surface = "Tento model nemá žádný viditelný povrch k vykreslení."

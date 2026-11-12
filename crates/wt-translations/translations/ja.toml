@@ -2001,3 +2001,12 @@ thickness_unknown = "装甲厚不明: このモデルを搭載する艦艇はあ
 thickness_other_ships = "他の艦艇"
 export_title = "モデルをエクスポート"
 export_tooltip = "モデルを GLB ファイルにエクスポート"
+
+[ui.scene_problem]
+cannot_show = "%{name} を表示できません"
+geometry_absent = "このモデルのジオメトリはゲームファイルにありません。"
+model_unreadable = "このモデルのデータを読み込めませんでした。詳細はログにあります。"
+ship_unreadable = "この艦艇のデータを読み込めませんでした。詳細はログにあります。"
+no_meshes = "このモデルにはメッシュがありません。"
+no_meshes_at_lod = "選択した詳細レベルではこのモデルにメッシュがありません。"
+no_visible_surface = "このモデルには描画できる可視面がありません。"

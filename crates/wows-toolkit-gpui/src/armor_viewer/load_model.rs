@@ -9,8 +9,10 @@ use std::sync::Arc;
 
 use gpui_kit::App;
 use gpui_kit::AppContext;
+use gpui_kit::SharedString;
 use gpui_kit::Task;
 use rootcause::Report;
+use rust_i18n::t;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::hardpoint::HardpointName;
@@ -33,6 +35,7 @@ use super::assets::ModelAssets;
 use super::camo::RgbaTexture;
 use super::load_ship::ArmorThickness;
 use super::load_ship::ArmorZones;
+use super::load_ship::EmptyScene;
 use super::load_ship::ExportGlbError;
 use super::load_ship::HullThicknessSource;
 use super::load_ship::LoadedShipArmor;
@@ -60,6 +63,23 @@ pub enum ModelSceneError {
     Load { path: ModelPath, report: Report<ModelLoadError> },
 }
 
+impl ModelSceneError {
+    pub(crate) fn problem(&self) -> ProblemReason {
+        let Self::Load { report, .. } = self;
+        match report.current_context() {
+            ModelLoadError::GeometryAbsent { .. } => ProblemReason::GeometryAbsent,
+            ModelLoadError::UnknownModel { .. }
+            | ModelLoadError::ModelRecord { .. }
+            | ModelLoadError::MissingVisual { .. }
+            | ModelLoadError::VisualRecord { .. }
+            | ModelLoadError::UnresolvedGeometry { .. }
+            | ModelLoadError::GeometryRead { .. }
+            | ModelLoadError::GeometryParse { .. }
+            | ModelLoadError::Meshes { .. } => ProblemReason::ModelUnreadable,
+        }
+    }
+}
+
 /// Why a ship or a model could not be shown.
 #[derive(Debug, thiserror::Error)]
 pub enum SceneLoadError {
@@ -67,6 +87,55 @@ pub enum SceneLoadError {
     Ship(#[from] super::load_ship::ShipLoadError),
     #[error(transparent)]
     Model(#[from] ModelSceneError),
+}
+
+impl SceneLoadError {
+    /// What the viewport tells the reader in place of the scene.
+    pub(crate) fn problem(&self) -> ProblemReason {
+        match self {
+            Self::Ship(_) => ProblemReason::ShipUnreadable,
+            Self::Model(error) => error.problem(),
+        }
+    }
+}
+
+/// What the viewport shows in place of a scene it cannot draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SceneProblem {
+    /// The ship or model asked for, as the reader picked it.
+    pub subject: SharedString,
+    pub reason: ProblemReason,
+}
+
+impl SceneProblem {
+    pub(crate) fn headline(&self) -> String {
+        t!("ui.scene_problem.cannot_show", name = self.subject).into_owned()
+    }
+}
+
+/// Why a scene cannot be drawn, in the terms the reader is told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProblemReason {
+    /// The install lists the model but does not ship its geometry.
+    GeometryAbsent,
+    ModelUnreadable,
+    ShipUnreadable,
+    Empty(EmptyScene),
+}
+
+impl ProblemReason {
+    pub(crate) fn explanation(self) -> String {
+        let text = match self {
+            Self::GeometryAbsent => t!("ui.scene_problem.geometry_absent"),
+            Self::ModelUnreadable => t!("ui.scene_problem.model_unreadable"),
+            Self::ShipUnreadable => t!("ui.scene_problem.ship_unreadable"),
+            Self::Empty(EmptyScene::Meshless) => t!("ui.scene_problem.no_meshes"),
+            Self::Empty(EmptyScene::MeshlessAtLod) => t!("ui.scene_problem.no_meshes_at_lod"),
+            Self::Empty(EmptyScene::Invisible) => t!("ui.scene_problem.no_visible_surface"),
+        };
+
+        text.into_owned()
+    }
 }
 
 /// A model to show, and where its armor thickness should come from.
@@ -389,7 +458,7 @@ pub(crate) mod fixtures {
 
     use super::*;
 
-    fn hull_mesh() -> InteractiveHullMesh {
+    pub(crate) fn hull_mesh() -> InteractiveHullMesh {
         InteractiveHullMesh {
             name: "Turret".to_string(),
             positions: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 2.0, 6.0]],
@@ -455,6 +524,19 @@ pub(crate) mod fixtures {
             HashMap::new(),
             SceneLods { count: 2, shown: 0 },
         )
+    }
+
+    /// A model with no armor drawn from `hull` alone, authored with
+    /// `lod_count` levels of detail.
+    pub(crate) fn hull_scene(path: ModelPath, hull: Vec<InteractiveHullMesh>, lod_count: usize) -> LoadedShipArmor {
+        let subject = ModelSubject {
+            path,
+            from_ship: None,
+            hardpoints: Vec::new(),
+            thickness: ArmorThickness::Unknown,
+            thickness_choices: Vec::new(),
+        };
+        super::model_scene(subject, Vec::new(), hull, HashMap::new(), SceneLods { count: lod_count, shown: 0 })
     }
 }
 
@@ -542,15 +624,9 @@ mod tests {
         assert!(thickness_ref(&index, &armored, &opened_from_ship(misc)).is_none(), "a misc is not the hull");
     }
 
-    /// Opens the Iowa class main turret on its own against a real install:
-    /// its meshes, textures, hardpoints and armor, with the thickness read
-    /// from a ship that mounts it. Run with `WOWS_DIR` set to an install;
-    /// without one it returns at once.
-    #[test]
-    #[ignore = "needs a local game install in WOWS_DIR"]
-    fn a_turret_opens_with_textures_hardpoints_and_ship_armor() {
-        let Ok(wows_dir) = std::env::var("WOWS_DIR") else { return };
-        let wows_dir = std::path::PathBuf::from(wows_dir);
+    /// The models of the install `WOWS_DIR` names, or `None` without one.
+    fn real_models() -> Option<(ModelAssets, Arc<GameMetadataProvider>)> {
+        let wows_dir = std::path::PathBuf::from(std::env::var_os("WOWS_DIR")?);
         let builds = wowsunpack::game_data::list_available_builds(&wows_dir).expect("installed builds");
         let build = *builds.last().expect("at least one build");
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(
@@ -563,16 +639,25 @@ mod tests {
         let assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
         let library = assets.model_library().expect("the model library");
         let mount_armor = MountArmorIndex::build(&metadata, library.catalog());
-        let models = ModelAssets { library: Arc::new(library), mount_armor };
-        let turret = models
-            .library
-            .catalog()
-            .entries()
-            .iter()
-            .find(|entry| entry.name() == "AGM034_16in50_Mk7")
-            .expect("the Iowa class turret is catalogued")
-            .path()
-            .clone();
+
+        Some((ModelAssets { library: Arc::new(library), mount_armor }, metadata))
+    }
+
+    fn catalogued(models: &ModelAssets, name: &str) -> ModelPath {
+        let entry = models.library.catalog().entries().iter().find(|entry| entry.name() == name);
+
+        entry.unwrap_or_else(|| panic!("{name} is catalogued")).path().clone()
+    }
+
+    /// Opens the Iowa class main turret on its own against a real install:
+    /// its meshes, textures, hardpoints and armor, with the thickness read
+    /// from a ship that mounts it. Run with `WOWS_DIR` set to an install;
+    /// without one it returns at once.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_turret_opens_with_textures_hardpoints_and_ship_armor() {
+        let Some((models, metadata)) = real_models() else { return };
+        let turret = catalogued(&models, "AGM034_16in50_Mk7");
 
         let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(turret.clone(), None))
             .expect("the turret loads");
@@ -588,5 +673,75 @@ mod tests {
             scene.meshes.iter().flat_map(|mesh| &mesh.triangle_info).any(|info| info.thickness_mm > 100.0),
             "the face plate is thick"
         );
+    }
+
+    /// The catalogue lists the Harpoon, but build 13533378 ships no geometry
+    /// for it; a medallion there is a placeholder of a few hundred nanometres.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_model_that_cannot_be_drawn_is_given_a_reason() {
+        let Some((models, metadata)) = real_models() else { return };
+        let harpoon = catalogued(&models, "API2001_RGM_84_Harpoon");
+        let medallion = catalogued(&models, "RM626_Volga_Fleet_Medallion");
+
+        let Err(error) = load_model_scene(&models, &metadata, &ModelLoadRequest::new(harpoon, None)) else {
+            panic!("the Harpoon loads");
+        };
+        let placeholder =
+            load_model_scene(&models, &metadata, &ModelLoadRequest::new(medallion, None)).expect("the medallion loads");
+
+        assert_eq!(error.problem(), ProblemReason::GeometryAbsent);
+        assert_eq!(placeholder.emptiness(), Some(EmptyScene::Invisible));
+    }
+}
+
+#[cfg(test)]
+mod emptiness_tests {
+    use wowsunpack::export::model_catalog::ModelPath;
+    use wowsunpack::export::model_library::ModelLoadError;
+
+    use super::EmptyScene;
+    use super::ModelSceneError;
+    use super::ProblemReason;
+    use super::fixtures;
+
+    fn path() -> ModelPath {
+        ModelPath::parse("content/gameplay/usa/misc/AM001/AM001.model").expect("a model path")
+    }
+
+    #[test]
+    fn a_model_with_a_triangle_draws() {
+        assert_eq!(fixtures::hull_scene(path(), vec![fixtures::hull_mesh()], 1).emptiness(), None);
+    }
+
+    #[test]
+    fn a_model_without_triangles_says_whether_the_level_of_detail_is_to_blame() {
+        assert_eq!(fixtures::hull_scene(path(), Vec::new(), 1).emptiness(), Some(EmptyScene::Meshless));
+        assert_eq!(fixtures::hull_scene(path(), Vec::new(), 4).emptiness(), Some(EmptyScene::MeshlessAtLod));
+    }
+
+    /// Placeholder models ship a flat triangle, or a solid smaller than any
+    /// frame the camera takes.
+    #[test]
+    fn a_flat_or_vanishingly_small_model_has_no_visible_surface() {
+        let mut flat = fixtures::hull_mesh();
+        flat.positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let mut speck = fixtures::hull_mesh();
+        speck.positions = vec![[0.0, 0.0, 0.0], [5e-8, 0.0, 0.0], [0.0, 5e-8, 0.0]];
+
+        assert_eq!(fixtures::hull_scene(path(), vec![flat], 1).emptiness(), Some(EmptyScene::Invisible));
+        assert_eq!(fixtures::hull_scene(path(), vec![speck], 1).emptiness(), Some(EmptyScene::Invisible));
+    }
+
+    #[test]
+    fn geometry_the_install_lacks_is_told_apart_from_unreadable_data() {
+        let error =
+            |context: ModelLoadError| ModelSceneError::Load { path: path(), report: rootcause::Report::new(context) };
+
+        let absent = error(ModelLoadError::GeometryAbsent { path: "a.geometry".to_string() });
+        let unreadable = error(ModelLoadError::GeometryParse { path: "a.geometry".to_string() });
+
+        assert_eq!(absent.problem(), ProblemReason::GeometryAbsent);
+        assert_eq!(unreadable.problem(), ProblemReason::ModelUnreadable);
     }
 }

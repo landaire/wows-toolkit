@@ -1955,3 +1955,12 @@ thickness_unknown = "Kalınlık bilinmiyor: bu modeli taşıyan gemi yok"
 thickness_other_ships = "Diğer gemiler"
 export_title = "Modeli dışa aktar"
 export_tooltip = "Modeli bir GLB dosyasına aktar"
+
+[ui.scene_problem]
+cannot_show = "%{name} gösterilemiyor"
+geometry_absent = "Bu modelin geometrisi oyun dosyalarınızda yok."
+model_unreadable = "Bu modelin verileri okunamadı. Ayrıntılar günlükte."
+ship_unreadable = "Bu geminin verileri okunamadı. Ayrıntılar günlükte."
+no_meshes = "Bu modelin ağı yok."
+no_meshes_at_lod = "Bu modelin seçilen ayrıntı düzeyinde ağı yok."
+no_visible_surface = "Bu modelin çizilecek görünür bir yüzeyi yok."

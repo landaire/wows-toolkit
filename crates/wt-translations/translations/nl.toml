@@ -2001,3 +2001,12 @@ thickness_unknown = "Dikte onbekend: geen schip voert dit model"
 thickness_other_ships = "Andere schepen"
 export_title = "Model exporteren"
 export_tooltip = "Het model naar een GLB-bestand exporteren"
+
+[ui.scene_problem]
+cannot_show = "%{name} kan niet worden weergegeven"
+geometry_absent = "De geometrie van dit model staat niet in je spelbestanden."
+model_unreadable = "De gegevens van dit model konden niet worden gelezen. Het logboek bevat de details."
+ship_unreadable = "De gegevens van dit schip konden niet worden gelezen. Het logboek bevat de details."
+no_meshes = "Dit model heeft geen meshes."
+no_meshes_at_lod = "Dit model heeft geen meshes op het gekozen detailniveau."
+no_visible_surface = "Dit model heeft geen zichtbaar oppervlak om te tekenen."

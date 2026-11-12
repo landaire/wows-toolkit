@@ -2001,3 +2001,12 @@ thickness_unknown = "厚度未知: 沒有艦船搭載此模型"
 thickness_other_ships = "其他艦船"
 export_title = "匯出模型"
 export_tooltip = "將模型匯出為 GLB 檔案"
+
+[ui.scene_problem]
+cannot_show = "無法顯示 %{name}"
+geometry_absent = "此模型的幾何資料不在你的遊戲檔案中。"
+model_unreadable = "無法讀取此模型的資料。詳細資訊請見日誌。"
+ship_unreadable = "無法讀取此艦船的資料。詳細資訊請見日誌。"
+no_meshes = "此模型沒有網格。"
+no_meshes_at_lod = "此模型在所選細節等級下沒有網格。"
+no_visible_surface = "此模型沒有可繪製的可見表面。"

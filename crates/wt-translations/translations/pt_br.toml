@@ -1955,3 +1955,12 @@ thickness_unknown = "Espessura desconhecida: nenhum navio monta este modelo"
 thickness_other_ships = "Outros navios"
 export_title = "Exportar modelo"
 export_tooltip = "Exportar o modelo para um arquivo GLB"
+
+[ui.scene_problem]
+cannot_show = "Não é possível mostrar %{name}"
+geometry_absent = "A geometria deste modelo não está nos seus arquivos do jogo."
+model_unreadable = "Não foi possível ler os dados deste modelo. O log contém os detalhes."
+ship_unreadable = "Não foi possível ler os dados deste navio. O log contém os detalhes."
+no_meshes = "Este modelo não tem malhas."
+no_meshes_at_lod = "Este modelo não tem malhas no nível de detalhe escolhido."
+no_visible_surface = "Este modelo não tem nenhuma superfície visível para desenhar."

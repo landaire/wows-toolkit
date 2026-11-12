@@ -76,6 +76,8 @@ use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
 use super::load_model::ModelLoadRequest;
 use super::load_model::ModelSceneError;
+use super::load_model::ProblemReason;
+use super::load_model::SceneProblem;
 use super::load_model::spawn_load_model_scene;
 use super::model_refs::HardpointTarget;
 use super::model_refs::ShipPartRef;
@@ -154,13 +156,6 @@ pub(crate) enum CatalogStatus<'a> {
     Failed(&'a str),
 }
 
-/// Load status of the currently selected ship's armor model.
-enum ShipLoadState {
-    Idle,
-    Loading { display_name: String },
-    Failed { display_name: String, reason: String },
-}
-
 pub struct ArmorViewerPane {
     sidebar: Entity<Sidebar>,
     dock: Entity<ViewportDock>,
@@ -177,7 +172,6 @@ pub struct ArmorViewerPane {
     /// Kept for as long as that dialog is open: it is what redraws the window
     /// when a read reports into it.
     _export_dialog_subscription: Option<Subscription>,
-    ship_load: ShipLoadState,
     /// Set once a ship's armor has been shown in `viewport` at least once,
     /// gating the legend overlay exactly like the egui app's `any_ship_loaded`
     /// check (`ui/tab.rs`'s `tab.loaded_armor.is_some()`).
@@ -387,7 +381,6 @@ impl ArmorViewerPane {
             hardpoint_targets: HashSet::new(),
             export_dialog: None,
             _export_dialog_subscription: None,
-            ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             pending_hits: None,
             incoming: IncomingFire::default(),
@@ -1015,7 +1008,6 @@ impl ArmorViewerPane {
             return false;
         }
 
-        self.ship_load = ShipLoadState::Idle;
         self.push_open_target(cx);
         cx.notify();
 
@@ -1034,7 +1026,6 @@ impl ArmorViewerPane {
         let target_viewport = self.dock.read(cx).active_viewport();
 
         let display_name = request.path.stem().to_string();
-        self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         let generation = target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.into(), cx));
         cx.notify();
 
@@ -1061,21 +1052,24 @@ impl ArmorViewerPane {
             return;
         }
         let display_name = source.display_name().to_string();
-        match result {
-            Ok(scene) => {
-                self.ship_load = ShipLoadState::Idle;
-                target_viewport.update(cx, |viewport, cx| {
-                    viewport.set_ship_loading(None, cx);
-                    viewport.set_scene_source(source);
-                    viewport.show_armor(Arc::new(scene), self.opening_layer, cx);
-                });
-            }
+        let outcome = match result {
+            Ok(scene) => drawable_scene(scene),
             Err(e) => {
                 tracing::error!("model viewer: failed to load {display_name}: {e}");
-                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(None, cx));
-                self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
+                Err(e.problem())
             }
-        }
+        };
+        let layer = self.opening_layer;
+        target_viewport.update(cx, |viewport, cx| {
+            viewport.set_ship_loading(None, cx);
+            match outcome {
+                Ok(scene) => {
+                    viewport.set_scene_source(source);
+                    viewport.show_armor(Arc::new(scene), layer, cx);
+                }
+                Err(reason) => viewport.fail_load(SceneProblem { subject: display_name.into(), reason }, cx),
+            }
+        });
         self.push_open_target(cx);
         cx.notify();
     }
@@ -1427,7 +1421,6 @@ impl ArmorViewerPane {
         // was requested for.
         let target_viewport = self.dock.read(cx).active_viewport();
 
-        self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         // The viewport shows nothing until a ship arrives, so it says what it
         // is waiting for rather than inviting a selection already made.
         let generation =
@@ -1463,9 +1456,15 @@ impl ArmorViewerPane {
             // the result instead of clobbering that selection's state.
             return;
         }
-        match result {
+        let outcome = match result {
+            Ok(armor) => drawable_scene(armor),
+            Err(e) => {
+                tracing::error!("armor viewer: failed to load {display_name}: {e}");
+                Err(ProblemReason::ShipUnreadable)
+            }
+        };
+        match outcome {
             Ok(armor) => {
-                self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
                 let comparing = self.incoming.is_about(&param_index);
                 let load = StartedLoad { viewport: target_viewport.entity_id(), generation };
@@ -1494,30 +1493,15 @@ impl ArmorViewerPane {
                     }
                 });
             }
-            Err(e) => {
-                tracing::error!("armor viewer: failed to load {display_name}: {e}");
-                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(None, cx));
-                self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
+            Err(reason) => {
+                target_viewport.update(cx, |viewport, cx| {
+                    viewport.set_ship_loading(None, cx);
+                    viewport.fail_load(SceneProblem { subject: display_name.into(), reason }, cx);
+                });
             }
         }
         self.push_open_target(cx);
         cx.notify();
-    }
-
-    /// The status text shown above the split, if any. A ship load in flight
-    /// is not in it: the pane it is loading into says so itself
-    /// (`ViewportView::set_ship_loading`), where the user is looking.
-    fn status_text(&self) -> Option<String> {
-        match &self.bundle {
-            BundleState::NotStarted | BundleState::Loading => Some(t!("ui.armor.loading_catalog").into_owned()),
-            BundleState::Failed(reason) => Some(t!("ui.armor.catalog_failed", reason = reason).to_string()),
-            BundleState::Ready(_) => match &self.ship_load {
-                ShipLoadState::Idle | ShipLoadState::Loading { .. } => None,
-                ShipLoadState::Failed { display_name, reason } => {
-                    Some(t!("ui.armor.ship_load_failed", ship = display_name, reason = reason).into_owned())
-                }
-            },
-        }
     }
 
     /// Header button handler (`legend::render_panel`): flips the legend
@@ -1681,9 +1665,13 @@ impl Render for ArmorViewerPane {
         // Legend floats over the whole pane (not just the viewport), gated
         // on a ship being loaded, matching the egui app's `any_ship_loaded`
         // window gate (`ui/tab.rs` ~627-628).
-        // A model without armor has no thicknesses for it to explain.
-        let active_armor = self.dock.read(cx).active_viewport().read(cx).scene_features().map(|f| f.armor);
-        let show_legend = self.legend.visible && active_armor.unwrap_or(self.ship_loaded);
+        // A model without armor has no thicknesses for it to explain, and a
+        // pane telling why it shows nothing has none either.
+        let active_viewport = self.dock.read(cx).active_viewport();
+        let active = active_viewport.read(cx);
+        let active_armor = active.scene_features().map(|f| f.armor);
+        let show_legend =
+            self.legend.visible && active.scene_problem().is_none() && active_armor.unwrap_or(self.ship_loaded);
         let legend_panel = show_legend.then(|| legend::render_panel(&self.legend, cx));
 
         div()
@@ -1733,6 +1721,17 @@ fn is_ship_already_loaded(loaded_param_index: Option<&str>, requested_param_inde
     loaded_param_index == Some(requested_param_index)
 }
 
+/// `scene` when it has something to draw, else why it has nothing.
+fn drawable_scene(scene: LoadedShipArmor) -> Result<LoadedShipArmor, ProblemReason> {
+    match scene.emptiness() {
+        None => Ok(scene),
+        Some(empty) => {
+            tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", scene.display_name);
+            Err(ProblemReason::Empty(empty))
+        }
+    }
+}
+
 /// A ship load started into one viewport.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StartedLoad {
@@ -1766,6 +1765,7 @@ mod tests {
     use std::sync::Arc;
 
     use gpui_kit::AppContext as _;
+    use gpui_kit::Entity;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
     use gpui_kit::size;
@@ -1773,6 +1773,10 @@ mod tests {
     use wowsunpack::export::hardpoint::HardpointKind;
     use wowsunpack::export::hardpoint::HardpointName;
     use wowsunpack::export::model_catalog::ModelPath;
+    use wowsunpack::export::ship::ShipAssets;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
 
     use super::ArmorViewerPane;
     use super::LoadGeneration;
@@ -1781,8 +1785,97 @@ mod tests {
     use super::is_ship_already_loaded;
     use super::other_pane_indices;
     use super::take_pending_hits;
+    use crate::armor_viewer::assets::ArmorAssetsBundle;
+    use crate::armor_viewer::load_model::ProblemReason;
+    use crate::armor_viewer::load_model::SceneProblem;
     use crate::armor_viewer::load_model::fixtures;
+    use crate::armor_viewer::load_ship::EmptyScene;
+    use crate::armor_viewer::load_ship::LoadedShipArmor;
+    use crate::armor_viewer::load_ship::ShipLoadError;
     use crate::armor_viewer::model_refs::HardpointTarget;
+    use crate::armor_viewer::sidebar_tree::fixture;
+    use crate::armor_viewer::viewport_view::ViewportView;
+    use crate::replay_inspector::icons::IconCache;
+
+    /// Ship assets over an empty store: a load result lands without reading it.
+    fn bundle() -> Arc<ArmorAssetsBundle> {
+        let vfs: VfsPath = MemoryFS::new().into();
+        let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+        let assets = ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new()));
+
+        Arc::new(ArmorAssetsBundle { assets, catalog: fixture::ships(), icons: IconCache::new() })
+    }
+
+    /// Lands `result` as the outcome of a ship load into the active pane,
+    /// which shows a model beforehand. Returns the pane and what it says.
+    fn land_ship_load(
+        cx: &mut TestAppContext,
+        result: Result<LoadedShipArmor, ShipLoadError>,
+    ) -> (Entity<ViewportView>, Option<SceneProblem>) {
+        rust_i18n::set_locale("en");
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let shown = Arc::new(fixtures::model_scene(turret, Vec::new()));
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                let viewport = pane.active_viewport(cx);
+                viewport.update(cx, |view, cx| view.show_armor(shown, layer, cx));
+                let generation = viewport.update(cx, |view, cx| view.begin_load("Iowa".into(), cx));
+
+                pane.apply_ship_load_result(
+                    generation,
+                    "PASB028".to_string(),
+                    "Iowa".to_string(),
+                    bundle(),
+                    viewport.clone(),
+                    result,
+                    cx,
+                );
+
+                let view = viewport.read(cx);
+                assert!(view.current_armor().is_none(), "the model shown before is not passed off as the ship");
+                assert!(view.open_target().is_none(), "the sidebar marks nothing");
+
+                let problem = view.scene_problem().cloned();
+
+                (viewport, problem)
+            })
+            .expect("the test window stays open")
+    }
+
+    #[gpui_kit::test]
+    fn a_ship_that_fails_to_load_says_so_in_its_pane(cx: &mut TestAppContext) {
+        let (_, problem) = land_ship_load(cx, Err(ShipLoadError::NoVehicle("PASB028".to_string())));
+
+        let expected = SceneProblem { subject: "Iowa".into(), reason: ProblemReason::ShipUnreadable };
+        assert_eq!(problem, Some(expected));
+    }
+
+    #[gpui_kit::test]
+    fn a_ship_with_nothing_to_draw_says_so_in_its_pane(cx: &mut TestAppContext) {
+        let path = ModelPath::parse("content/gameplay/usa/misc/AM001/AM001.model").expect("a model path");
+        let (_, problem) = land_ship_load(cx, Ok(fixtures::hull_scene(path, Vec::new(), 1)));
+
+        let reason = ProblemReason::Empty(EmptyScene::Meshless);
+        assert_eq!(problem, Some(SceneProblem { subject: "Iowa".into(), reason }));
+    }
+
+    /// The reason stays up until the next load starts.
+    #[gpui_kit::test]
+    fn a_new_load_takes_the_reason_down(cx: &mut TestAppContext) {
+        let (viewport, problem) = land_ship_load(cx, Err(ShipLoadError::NoVehicle("PASB028".to_string())));
+        assert!(problem.is_some());
+
+        let problem = viewport.update(cx, |view, cx| {
+            view.begin_load("Yamato".into(), cx);
+            view.scene_problem().cloned()
+        });
+
+        assert_eq!(problem, None);
+    }
 
     /// Clicking the model on screen while another loads keeps it on screen:
     /// the other load is dropped rather than replacing it when it lands.

@@ -73,6 +73,10 @@ impl Default for ArcballCamera {
 }
 
 impl ArcballCamera {
+    /// The least bounding-sphere radius [`Self::framing`] frames; a smaller
+    /// box is framed as if it had this radius.
+    pub const SMALLEST_FRAMED_RADIUS: f32 = 1e-3;
+
     /// Create a camera that frames the given bounding box.
     pub fn from_bounds(min: Vec3, max: Vec3) -> Self {
         let center = (min + max) * 0.5;
@@ -100,9 +104,8 @@ impl ArcballCamera {
     /// the vertical and horizontal fields of view.
     pub fn framing(min: Vec3, max: Vec3, aspect: f32) -> Self {
         const MARGIN: f32 = 1.15;
-        const SMALLEST_RADIUS: f32 = 1e-3;
 
-        let radius = ((max - min).norm() * 0.5).max(SMALLEST_RADIUS);
+        let radius = ((max - min).norm() * 0.5).max(Self::SMALLEST_FRAMED_RADIUS);
         let fov = std::f32::consts::FRAC_PI_4;
         let half_vertical = fov * 0.5;
         let half_horizontal = (half_vertical.tan() * aspect.max(f32::EPSILON)).atan();

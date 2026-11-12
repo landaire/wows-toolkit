@@ -65,7 +65,9 @@ use crate::armor_viewer::legend::swatch_color;
 use crate::armor_viewer::load_model;
 use crate::armor_viewer::load_model::ModelLoadRequest;
 use crate::armor_viewer::load_model::MountRef;
+use crate::armor_viewer::load_model::ProblemReason;
 use crate::armor_viewer::load_model::SceneLoadError;
+use crate::armor_viewer::load_model::SceneProblem;
 use crate::armor_viewer::load_ship;
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
@@ -793,6 +795,8 @@ pub struct ViewportView {
     /// place of whatever it was drawing, matching the egui pane
     /// (`ui/tab.rs:2081`).
     ship_loading: Option<SharedString>,
+    /// Why the scene asked for cannot be drawn, shown in its place.
+    scene_problem: Option<SceneProblem>,
     /// The latest load the pane started into this viewport.
     load_generation: LoadGeneration,
     /// The armor currently displayed, kept (beyond the initial upload) so a
@@ -1140,6 +1144,7 @@ impl ViewportView {
             pending_armor: None,
             mesh_seed: MeshSeed::default(),
             ship_loading: None,
+            scene_problem: None,
             load_generation: LoadGeneration::default(),
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
@@ -1674,6 +1679,7 @@ impl ViewportView {
         let mesh = layer == OpeningLayer::Mesh;
         self.mesh_seed = MeshSeed { armor: mesh, hull: mesh };
         self.model_bounds = Some(armor.bounds);
+        self.scene_problem = None;
         // The arcs were cast at the plates of the ship before; on this one
         // they mark nothing.
         self.arcs.clear();
@@ -2468,6 +2474,7 @@ impl ViewportView {
     /// not.
     pub(crate) fn begin_load(&mut self, name: SharedString, cx: &mut Context<Self>) -> LoadGeneration {
         self.load_generation = LoadGeneration(self.load_generation.0 + 1);
+        self.scene_problem = None;
         self.set_ship_loading(Some(name), cx);
 
         self.load_generation
@@ -2488,6 +2495,59 @@ impl ViewportView {
         self.set_ship_loading(None, cx);
 
         true
+    }
+
+    /// Shows `problem` in place of the scene. The scene stays loaded, so the
+    /// selectors that led here can pick a level of detail or hull that draws.
+    pub(crate) fn show_problem(&mut self, problem: SceneProblem, cx: &mut Context<Self>) {
+        self.scene_problem = Some(problem);
+        cx.notify();
+    }
+
+    /// Drops the scene and shows `problem` in its place. The failed load was
+    /// for another subject, which the old scene must not pass for: the
+    /// sidebar and option rail would go on describing it.
+    pub(crate) fn fail_load(&mut self, problem: SceneProblem, cx: &mut Context<Self>) {
+        self.clear_scene();
+        self.show_problem(problem, cx);
+    }
+
+    pub(crate) fn scene_problem(&self) -> Option<&SceneProblem> {
+        self.scene_problem.as_ref()
+    }
+
+    /// Returns the pane to showing no scene, as it starts.
+    fn clear_scene(&mut self) {
+        // A reload in flight was for the scene going away.
+        self.reload_generation += 1;
+        self.current_armor = None;
+        self.pending_armor = None;
+        self.scene_source = None;
+        self.model_bounds = None;
+        self.home_camera = None;
+        self.hovered = None;
+        self.hover_highlight = None;
+        self.hovered_ring = None;
+        self.ring_hovers.clear();
+        self.sidebar_highlight = None;
+        self.hit_pulses.clear();
+        self.arcs.clear();
+        self.selected_arc = None;
+        self.hits.clear();
+        self.hit_health = None;
+        self.sim_verdicts.clear();
+        self.sim_unchecked = 0;
+        self.last_plate = None;
+        self.splash_result = None;
+        self.splash_labels.clear();
+        self.gap_count = 0;
+
+        self.viewport.clear();
+        self.mesh_triangle_info.clear();
+        self.hull_mesh_ids.clear();
+        self.aim_mesh_ids.clear();
+        self.hardpoint_mesh = None;
+        self.upload_hardpoints();
     }
 
     /// Paints the scene at `bounds`, drawing it again first if it changed or
@@ -4079,6 +4139,10 @@ impl ViewportView {
             Ok(reloaded) => reloaded,
             Err(e) => {
                 tracing::error!("armor viewer: failed to reload: {e}");
+                if let Some(shown) = &self.current_armor {
+                    let problem = SceneProblem { subject: shown.display_name.clone().into(), reason: e.problem() };
+                    self.show_problem(problem, cx);
+                }
                 return;
             }
         };
@@ -4133,6 +4197,10 @@ impl ViewportView {
         let (width, height) = self.viewport_size();
         self.home_camera = Some(opening_camera(&armor, self.shown_layers(&armor), width / height.max(1.0)));
         self.hull_textures.clear();
+        self.scene_problem = armor.emptiness().map(|empty| {
+            tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", armor.display_name);
+            SceneProblem { subject: armor.display_name.clone().into(), reason: ProblemReason::Empty(empty) }
+        });
         self.current_armor = Some(armor);
         self.reupload_current_armor(cx);
         if let Some(picked) = picked_since {
@@ -4256,9 +4324,10 @@ impl Render for ViewportView {
         // flight replaces whatever is drawn, as it does in the egui pane, so
         // the ship on screen is never mistaken for the one being loaded.
         let loading_ship = self.ship_loading.clone();
-        let empty_state = (self.current_armor.is_none() && loading_ship.is_none())
+        let problem = self.scene_problem.clone().filter(|_| loading_ship.is_none() && status.is_none());
+        let empty_state = (self.current_armor.is_none() && loading_ship.is_none() && problem.is_none())
             .then(|| status.clone().unwrap_or_else(|| t!("ui.armor.select_ship").into_owned()));
-        let scene_shown = loading_ship.is_none() && empty_state.is_none() && status.is_none();
+        let scene_shown = loading_ship.is_none() && problem.is_none() && empty_state.is_none() && status.is_none();
         let image_child = if let Some(name) = loading_ship {
             crate::loading::Loading::new(
                 "armor-viewport-loading",
@@ -4269,6 +4338,15 @@ impl Render for ViewportView {
             // Also covers a lost device not yet replaced, which has no end.
             crate::loading::Loading::new("armor-viewport-initializing", t!("ui.armor.initializing").into_owned())
                 .unbounded()
+                .into_any_element()
+        } else if let Some(problem) = problem {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .child(div().text_sm().child(problem.headline()))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(problem.reason.explanation()))
                 .into_any_element()
         } else if let Some(message) = empty_state.or(status) {
             h_flex()
@@ -4286,7 +4364,7 @@ impl Render for ViewportView {
         // The gizmo orients a model; with none loaded there is nothing for it
         // to orient, and the egui pane draws it inside the has-a-ship branch
         // only (`ui/tab.rs`'s `draw_gizmo` call).
-        let gizmo_drawn = self.current_armor.is_some();
+        let gizmo_drawn = self.current_armor.is_some() && self.scene_problem.is_none();
         let hover = self.gizmo_hover;
         let weak = cx.weak_entity();
         let overlay = canvas(

@@ -64,6 +64,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 
+use crate::viewport::camera::ArcballCamera;
 use crate::viewport::types::Vec3;
 
 use super::model_refs::ShipPartRef;
@@ -293,6 +294,28 @@ impl LoadedShipArmor {
         !self.meshes.is_empty()
     }
 
+    /// Why the scene has nothing to draw, or `None` when it has something.
+    pub(crate) fn emptiness(&self) -> Option<EmptyScene> {
+        // A radius a hundredth of the least the camera frames draws as a few
+        // pixels at most, which reads as an empty view.
+        const SMALLEST_VISIBLE_RADIUS: f32 = ArcballCamera::SMALLEST_FRAMED_RADIUS / 100.0;
+
+        let hull = self.hull_meshes.iter().map(|mesh| (mesh.positions.as_slice(), mesh.indices.as_slice()));
+        let armor = self.meshes.iter().map(|mesh| (mesh.positions.as_slice(), mesh.indices.as_slice()));
+        let mut surfaces = hull.chain(armor);
+        if surfaces.clone().all(|(_, indices)| indices.len() < 3) {
+            return Some(if self.hull_lod_count > 1 { EmptyScene::MeshlessAtLod } else { EmptyScene::Meshless });
+        }
+
+        let (min, max) = self.bounds;
+        let has_area = surfaces.any(|(positions, indices)| encloses_area(positions, indices));
+        if !has_area || (max - min).norm() * 0.5 < SMALLEST_VISIBLE_RADIUS {
+            return Some(EmptyScene::Invisible);
+        }
+
+        None
+    }
+
     /// Whether the plates carry no thickness, so none of them is 0 mm in
     /// the sense the zero-mm filter hides.
     pub fn thickness_unknown(&self) -> bool {
@@ -308,6 +331,28 @@ impl LoadedShipArmor {
             ..display
         }
     }
+}
+
+/// Why a loaded scene has nothing to draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EmptyScene {
+    Meshless,
+    /// No triangles at the level of detail shown, which is one of several.
+    MeshlessAtLod,
+    /// Triangles that enclose no area, or too small to see once framed.
+    Invisible,
+}
+
+/// Whether any triangle of `indices` spans a nonzero area.
+fn encloses_area(positions: &[[f32; 3]], indices: &[u32]) -> bool {
+    indices.chunks_exact(3).any(|triangle| {
+        let corner = |at: u32| positions.get(at as usize).map(|p| Vec3::new(p[0], p[1], p[2]));
+        let (Some(a), Some(b), Some(c)) = (corner(triangle[0]), corner(triangle[1]), corner(triangle[2])) else {
+            return false;
+        };
+
+        (b - a).cross(&(c - a)).norm() > 0.0
+    })
 }
 
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and
