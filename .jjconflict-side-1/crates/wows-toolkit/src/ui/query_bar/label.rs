@@ -1,0 +1,4 @@
+//! Moved to `wows_toolkit_viewmodel::query_bar::label`, shared with the
+//! GPUI port. Re-exported here so this crate's paths keep working.
+
+pub use wows_toolkit_viewmodel::query_bar::label::*;

@@ -53,6 +53,7 @@ use wows_toolkit_replay_data::columns::Section;
 use wows_toolkit_replay_data::columns::ShownColumns;
 use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
+use wows_toolkit_replay_data::columns::markdown_table;
 use wows_toolkit_replay_data::columns::name_color_kind;
 use wows_toolkit_replay_data::columns::player_color_kind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
@@ -64,6 +65,10 @@ use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_replay_data::sort::SortOrder;
 use wows_toolkit_replay_data::sort::sort_rows;
+use wows_toolkit_replay_data::team_totals::TeamShare;
+use wows_toolkit_replay_data::team_totals::TeamTotals;
+#[cfg(test)]
+use wows_toolkit_replay_data::team_totals::TeamSide;
 
 use super::damage_mix;
 use super::expanded;
@@ -71,8 +76,6 @@ use super::icons::IconCache;
 use super::icons::nation_flag_key;
 use super::team_bands;
 use super::team_bands::RowMark;
-use super::team_bands::TeamDamage;
-use super::team_bands::TeamSide;
 use crate::replay_inspector::player_colors::class_icon_tint;
 use crate::replay_inspector::player_colors::player_color_kind_rgb;
 use crate::replay_inspector::player_colors::relation_color_rgb;
@@ -199,8 +202,8 @@ fn measure_column_widths(
     for &col in &model.columns {
         // A sortable header always holds room for its indicator, so sorting
         // never changes a width.
-        let indicator_w = if column_sort(col).is_some() { gap_1 + icon_default } else { 0. };
-        let header_w = text_width(column_label(col).into(), window, true) + indicator_w;
+        let indicator_w = if col.sort_column().is_some() { gap_1 + icon_default } else { 0. };
+        let header_w = text_width(col.label().into(), window, true) + indicator_w;
         let content_w = match col {
             ReplayColumn::Name => {
                 let mut max_w = header_w;
@@ -317,57 +320,6 @@ struct MeasuredWidths {
     /// The width each column needs to show every shown detail in full, by
     /// `ReplayColumn as usize`. `None` where no shown row has detail there.
     detail_fit: Vec<Option<Pixels>>,
-}
-
-/// Header label for a column, matching the egui app's `ui.replay.column.*`
-/// English strings.
-pub(super) const fn column_label_key(col: ReplayColumn) -> &'static str {
-    match col {
-        ReplayColumn::Name => "ui.replay.column.player_name",
-        ReplayColumn::ShipName => "ui.replay.column.ship_name",
-        ReplayColumn::Skills => "ui.replay.column.skills",
-        ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
-        ReplayColumn::BaseXp => "stat.base_xp",
-        ReplayColumn::RawXp => "stat.raw_xp",
-        ReplayColumn::Kills => "ui.replay.column.kills",
-        ReplayColumn::ObservedDamage => "ui.replay.column.observed_damage",
-        ReplayColumn::ActualDamage => "ui.replay.column.actual_damage",
-        ReplayColumn::ReceivedDamage => "ui.replay.column.received_damage",
-        ReplayColumn::SpottingDamage => "stat.spotting_damage",
-        ReplayColumn::PotentialDamage => "ui.replay.column.potential_damage",
-        ReplayColumn::Hits => "ui.replay.column.hits",
-        ReplayColumn::Heals => "ui.replay.column.heals",
-        ReplayColumn::DistanceTraveled => "ui.replay.column.distance_traveled",
-        ReplayColumn::TimeLived => "ui.replay.column.time_lived",
-    }
-}
-
-/// The column's heading in the reader's own language.
-fn column_label(col: ReplayColumn) -> String {
-    t!(column_label_key(col)).into_owned()
-}
-
-/// The `SortColumn` a header click sorts by, or `None` for the columns the
-/// egui app renders as plain (non-clickable) headers: Actions, Skills, and
-/// Time Lived.
-fn column_sort(col: ReplayColumn) -> Option<SortColumn> {
-    match col {
-        ReplayColumn::Skills | ReplayColumn::TimeLived => None,
-        ReplayColumn::Name => Some(SortColumn::Name),
-        ReplayColumn::ShipName => Some(SortColumn::ShipName),
-        ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
-        ReplayColumn::BaseXp => Some(SortColumn::BaseXp),
-        ReplayColumn::RawXp => Some(SortColumn::RawXp),
-        ReplayColumn::Kills => Some(SortColumn::Kills),
-        ReplayColumn::ObservedDamage => Some(SortColumn::ObservedDamage),
-        ReplayColumn::ActualDamage => Some(SortColumn::ActualDamage),
-        ReplayColumn::ReceivedDamage => Some(SortColumn::ReceivedDamage),
-        ReplayColumn::SpottingDamage => Some(SortColumn::SpottingDamage),
-        ReplayColumn::PotentialDamage => Some(SortColumn::PotentialDamage),
-        ReplayColumn::Hits => Some(SortColumn::Hits),
-        ReplayColumn::Heals => Some(SortColumn::Heals),
-        ReplayColumn::DistanceTraveled => Some(SortColumn::DistanceTraveled),
-    }
 }
 
 /// Sort-direction icon shown after the active sort column's label. The egui
@@ -907,7 +859,7 @@ impl PlayerTable {
     /// The narrowest `col` is drawn at its reader's width: a sortable header
     /// keeps its padding and indicator, which grow with the zoom.
     fn header_min(&self, col: ReplayColumn) -> Pixels {
-        match (column_sort(col), self.measured_rem) {
+        match (col.sort_column(), self.measured_rem) {
             // `px_1` either side of a one-rem indicator.
             (Some(_), Some(rem)) => COLUMN_DRAG_MIN.max(rem * 1.5),
             _ => COLUMN_DRAG_MIN,
@@ -1221,43 +1173,26 @@ impl PlayerTable {
     /// reads back as columns.
     fn row_text(&self, player: AccountId) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
-        Some(
-            self.shown_columns()
-                .iter()
-                .map(|col| cell_value(row, col, self.debug).text.to_string())
-                .collect::<Vec<_>>()
-                .join("\t"),
-        )
+        let columns: Vec<ReplayColumn> = self.shown_columns().iter().collect();
+        Some(wows_toolkit_replay_data::columns::row_text(row, &columns, self.debug))
     }
 
     /// The whole table: the column headings, then every row in the order the
     /// table is sorted into.
     fn table_text(&self) -> String {
-        let mut lines = vec![self.shown_columns().iter().map(column_label).collect::<Vec<_>>().join("\t")];
-        lines.extend(self.model.rows.iter().filter_map(|row| self.row_text(row.db_id)));
-        lines.join("\n")
+        let columns: Vec<ReplayColumn> = self.shown_columns().iter().collect();
+        wows_toolkit_replay_data::columns::table_text(self.model.rows.iter(), &columns, self.debug)
     }
 
     fn row_markdown(&self, player: AccountId) -> Option<String> {
         let row = self.model.rows.iter().find(|row| row.db_id == player)?;
-        Some(self.markdown_table(std::iter::once(row)))
+        let columns: Vec<ReplayColumn> = self.shown_columns().iter().collect();
+        Some(markdown_table(std::iter::once(row), &columns, self.debug))
     }
 
     fn table_markdown(&self) -> String {
-        self.markdown_table(self.model.rows.iter())
-    }
-
-    fn markdown_table<'a>(&self, rows: impl Iterator<Item = &'a PlayerRow>) -> String {
-        let columns = self.shown_columns();
-        let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
-        let mut lines = vec![
-            line(columns.iter().map(|col| markdown_cell(&column_label(col))).collect()),
-            line(columns.iter().map(|_| "---".to_owned()).collect()),
-        ];
-        lines.extend(rows.map(|row| {
-            line(columns.iter().map(|col| markdown_cell(&cell_value(row, col, self.debug).text)).collect())
-        }));
-        lines.join("\n")
+        let columns: Vec<ReplayColumn> = self.shown_columns().iter().collect();
+        markdown_table(self.model.rows.iter(), &columns, self.debug)
     }
 
     /// Puts `col` back on its content-fitted width.
@@ -1300,7 +1235,7 @@ impl PlayerTable {
                 }),
             );
 
-        let sorted = column_sort(col).filter(|sort_column| self.sort.column() == *sort_column).map(|_| self.sort);
+        let sorted = col.sort_column().filter(|sort_column| self.sort.column() == *sort_column).map(|_| self.sort);
         let base = div()
             .id(("replay-header", col as usize))
             .test_support()
@@ -1332,7 +1267,7 @@ impl PlayerTable {
                     .flex_shrink_1()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(column_label(col)),
+                    .child(col.label()),
             )
             .when_some(sorted, |el, sort| {
                 el.child(
@@ -1344,7 +1279,7 @@ impl PlayerTable {
                 )
             });
 
-        let base = match column_sort(col) {
+        let base = match col.sort_column() {
             None => base,
             Some(sort_column) => {
                 base.cursor_pointer().on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
@@ -1437,7 +1372,7 @@ impl PlayerTable {
             .border_1()
             .border_color(accent)
             .shadow_md()
-            .child(column_label(*column));
+            .child(column.label());
 
         Some(div().absolute().inset_0().child(zone).children(slot).child(ghost).into_any_element())
     }
@@ -2270,24 +2205,6 @@ fn build_actions_menu(
     menu
 }
 
-fn markdown_cell(text: &str) -> String {
-    let mut escaped = String::new();
-    for ch in text.replace("\r\n", "\n").chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '\n' | '\r' => escaped.push_str("<br>"),
-            '\\' | '|' | '`' | '*' | '_' | '[' | ']' | '~' => {
-                escaped.push('\\');
-                escaped.push(ch);
-            }
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
 /// Writes `text` to the clipboard and says so.
 ///
 /// `None` means the player the menu was opened on is no longer in the table,
@@ -2449,70 +2366,6 @@ fn share_bar_cell(
 
 /// Strength of a magnitude bar against the text colour it is drawn in.
 const MAGNITUDE_BAR_OPACITY: f32 = 0.13;
-
-/// The figure a column draws a share bar for, when the cell shows it. A
-/// hidden figure gets no bar and is left out of its team's total, as it is
-/// from the team heading.
-fn bar_figure(row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<u64> {
-    let hidden = row.should_hide_stats() && !debug;
-    match col {
-        ReplayColumn::ActualDamage if !hidden => row.actual_damage,
-        ReplayColumn::ReceivedDamage if !hidden => row.received_damage,
-        ReplayColumn::PotentialDamage if !hidden => row.potential_damage,
-        // Shown on every row: it is damage allies dealt on this player's spotting.
-        ReplayColumn::SpottingDamage => row.spotting_damage,
-        _ => None,
-    }
-}
-
-/// A row's figure as part of its own team's total in that column.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct TeamShare {
-    side: TeamSide,
-    /// From 0 to 1.
-    fraction: f32,
-}
-
-impl TeamShare {
-    fn text(self) -> String {
-        let pct = format!("{:.0}%", self.fraction * 100.);
-        t!("ui.replay.team_share", pct = pct, team = self.side.label()).into_owned()
-    }
-}
-
-/// Each barred column's figure summed over each team, indexed by
-/// `ReplayColumn as usize`. The team heading shows the Actual Damage entry,
-/// so a bar and its heading count the same rows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct TeamTotals {
-    self_team: TeamId,
-    columns: Vec<TeamDamage>,
-}
-
-impl TeamTotals {
-    fn of(rows: &[PlayerRow], self_team: TeamId, debug: bool) -> Self {
-        let columns = ReplayColumn::ALL
-            .into_iter()
-            .map(|col| TeamDamage::summing(rows, self_team, |row| bar_figure(row, col, debug)))
-            .collect();
-
-        Self { self_team, columns }
-    }
-
-    fn column(&self, col: ReplayColumn) -> TeamDamage {
-        self.columns[col as usize]
-    }
-
-    /// `row`'s figure in `col` against its team's total. `None` where there
-    /// is no bar to draw.
-    fn share(&self, row: &PlayerRow, col: ReplayColumn, debug: bool) -> Option<TeamShare> {
-        let figure = bar_figure(row, col, debug)?;
-        let side = TeamSide::of(row, self.self_team);
-        let total = self.column(col).side(side)?;
-
-        (figure > 0 && total > 0).then(|| TeamShare { side, fraction: (figure as f64 / total as f64) as f32 })
-    }
-}
 
 /// A damage cell over its team-share bar, with the player's damage split by
 /// type in a band under the figure and listed with its colour key on hover.
@@ -2986,7 +2839,7 @@ impl Render for PlayerTable {
         let h_scroll = self.h_scroll.clone();
         // Headings only while each team's rows stay together under the sort.
         let self_team = self.model.self_team;
-        let team_runs = team_bands::team_runs(&self.model.rows, self_team).unwrap_or_default();
+        let team_runs = wows_toolkit_replay_data::team_totals::team_runs(&self.model.rows, self_team).unwrap_or_default();
         let team_totals = TeamTotals::of(&self.model.rows, self_team, self.debug);
         let team_damage = team_totals.column(ReplayColumn::ActualDamage);
         let render_item = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
@@ -3158,7 +3011,7 @@ mod tests {
 
     use super::ConnectionNote;
     use super::PlayerTable;
-    use super::TeamDamage;
+    use wows_toolkit_replay_data::team_totals::TeamDamage;
     use super::TeamShare;
     use super::TeamSide;
     use super::TeamTotals;
@@ -3255,7 +3108,7 @@ mod tests {
             for col in &columns {
                 let Some(header) = window.try_find(("replay-header", *col as usize)) else { continue };
                 let header = header.bounds();
-                let label = px(super::text_width(super::column_label(*col).into(), window, true));
+                let label = px(super::text_width(col.label().into(), window, true));
                 assert!(header.size.width >= label, "{col:?}'s header {header:?} holds its label, {label:?} wide");
                 checked += 1;
             }
@@ -3411,7 +3264,7 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             let label = window.find(("replay-header-label", base_xp)).bounds();
-            let text = super::text_width(super::column_label(ReplayColumn::BaseXp).into(), window, true);
+            let text = super::text_width(ReplayColumn::BaseXp.label().into(), window, true);
             assert!(label.size.width.as_f32() >= text - 0.5, "the fitted label is cut to {:?}", label.size.width);
             assert!(indicator_inside(window), "the fitted header holds the indicator");
         })

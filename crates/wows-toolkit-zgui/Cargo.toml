@@ -21,6 +21,9 @@ wows-toolkit-icons = { workspace = true }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
+# The replay's own types a player row carries: account ids, relations and connection notes.
+wows_replays = { workspace = true }
+wows-replay-insights = { workspace = true }
 wows-toolkit-services = { workspace = true }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
@@ -69,6 +72,8 @@ landaire-ui = { workspace = true, features = ["test-support"] }
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
+# The sample replay the player table tests draw.
+wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # Game versions, for the palette's version list tests.
 wowsunpack = { workspace = true }

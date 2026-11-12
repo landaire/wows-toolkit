@@ -1,0 +1,173 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: sources
+---
+ship:
+  name: Akizuki
+  index: PJSD108
+  tier: 8
+  class: destroyer
+  nation: Japan
+  group: upgradeable
+  category: tech_tree
+  status: released
+ally_heals:
+  - consumable: Engineering Crew Assistance
+    carriers:
+      - ships:
+          - "T10 New Jersey (battleship, USA, test)"
+          - "T10 Pérez Gacitúa (battleship, Pan_America, test)"
+        delivered_by: ship
+        name: Engineering Crew Assistance
+        type: tacticalBuffHealConsumableReload
+        charges: 2
+        reload_s: 180
+        action_time_s: 30
+        preparation_s: 90
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "HP regeneration: restores 0.46% of max HP per second for 30 s, 13.8% of max HP in total"
+            - "-15% Consumable preparation and cooldown time"
+          on_self:
+            - "HP regeneration: restores 0.23% of max HP per second for 30 s, 6.9% of max HP in total"
+            - "-7.5% Consumable preparation and cooldown time"
+      - ships:
+          - "T10 Comodoro (battleship, Pan_America, test)"
+        delivered_by: ship
+        name: Engineering Crew Assistance
+        type: tacticalBuffHealConsumableReload
+        charges: 2
+        reload_s: 180
+        action_time_s: 30
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 20
+          on_ally:
+            - "HP regeneration: restores 0.46% of max HP per second for 30 s, 13.8% of max HP in total"
+            - "-15% Consumable preparation and cooldown time"
+          on_self:
+            - "HP regeneration: restores 0.23% of max HP per second for 30 s, 6.9% of max HP in total"
+            - "-7.5% Consumable preparation and cooldown time"
+  - consumable: Repair Assistance
+    carriers:
+      - ships:
+          - "T6 Furious (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 1
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 15
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"
+      - ships:
+          - "T8 Implacable (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 2
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 17.5
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"
+      - ships:
+          - "T11 Eagle (aircraft_carrier, United_Kingdom)"
+          - "T10 Audacious (aircraft_carrier, United_Kingdom)"
+        delivered_by: squadron
+        name: Repair Assistance
+        type: tacticalBuffHeal
+        charges: 2
+        reload_s: 180
+        action_time_s: 20
+        buff:
+          target: an allied ship in range or your own ship
+          range_km: 20
+          on_ally:
+            - "HP regeneration: restores 0.5% of max HP per second for 20 s, 10% of max HP in total"
+          on_self:
+            - "HP regeneration: restores 0.25% of max HP per second for 20 s, 5% of max HP in total"
+commander_talents:
+  - commander: Yamamoto Isoroku
+    talents:
+      - name: Second Wind
+        variants:
+          - battle_types: "Random, Co-op, Ranked and Brawl battles"
+            condition: Activates upon destroying a certain number of ships.
+            progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+            activations_per_battle: 3
+            activations:
+              - activation: 1
+                condition: Activates upon destroying 2 ships.
+                effects:
+                  - "-5% Main battery reload time"
+                  - "-3% Torpedo tube reload time"
+                  - "-3% Aircraft preparation time"
+                  - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+              - activation: 2
+                condition: Activates upon destroying 5 ships.
+                effects:
+                  - "-25% Main battery reload time"
+                  - "-12.5% Torpedo tube reload time"
+                  - "-12.5% Aircraft preparation time"
+                  - "HP regeneration: restores 0.208% of max HP per second for 120 s, 24.996% of max HP in total"
+              - activation: 3
+                condition: Activates upon destroying 7 ships.
+                effects:
+                  - "-40% Main battery reload time"
+                  - "-20% Torpedo tube reload time"
+                  - "-20% Aircraft preparation time"
+                  - "HP regeneration: restores 0.333% of max HP per second for 120 s, 39.96% of max HP in total"
+          - battle_types: Operations
+            condition: Activates upon destroying a certain number of ships.
+            progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+            activations_per_battle: 3
+            activations:
+              - activation: 1
+                condition: Activates upon destroying 2 ships.
+                effects:
+                  - "-5% Main battery reload time"
+                  - "-5% Torpedo tube reload time"
+                  - "-5% Aircraft preparation time"
+                  - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+              - activation: 2
+                condition: Activates upon destroying 5 ships.
+                effects:
+                  - "-10% Main battery reload time"
+                  - "-10% Torpedo tube reload time"
+                  - "-10% Aircraft preparation time"
+                  - "HP regeneration: restores 0.083% of max HP per second for 120 s, 9.996% of max HP in total"
+              - activation: 3
+                condition: Activates upon destroying 7 ships.
+                effects:
+                  - "-15% Main battery reload time"
+                  - "-15% Torpedo tube reload time"
+                  - "-15% Aircraft preparation time"
+                  - "HP regeneration: restores 0.125% of max HP per second for 120 s, 15% of max HP in total"
+game_modes:
+  - mode: Arms Race
+    rules: "Buffs are delivered by aircraft and dropped in designated map areas. Enter those areas to collect them.\n\nAny ship that enters the buff area first receives the buff for all ships on her team.\n\nBuff effects remain active for the entire battle."
+    buffs:
+      - name: HP Regeneration
+        max_stacks: 3
+        stacks:
+          - stacks: 1
+            effects:
+              - "HP regeneration: restores 0.04% of max HP per second for the rest of the battle"
+          - stacks: 2
+            effects:
+              - "HP regeneration: restores 0.08% of max HP per second for the rest of the battle"
+          - stacks: 3
+            effects:
+              - "HP regeneration: restores 0.12% of max HP per second for the rest of the battle"

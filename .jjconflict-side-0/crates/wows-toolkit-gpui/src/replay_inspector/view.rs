@@ -1,0 +1,2808 @@
+//! Top-level Replay Inspector tab: the file browser (`browser_view.rs`) in a
+//! resizable sidebar next to a `DockArea` holding one `ReplayPanel` tab per
+//! open replay. Double-clicking a replay in the browser
+//! (`ReplayBrowserEvent::OpenReplay`) starts a background parse and adds a
+//! tab; the tab itself shows "Loading..." until the parse completes (see
+//! `panel.rs`). A repeat double-click on an already-open replay brings its
+//! tab forward rather than adding a second one (see `open_replay`).
+
+#[path = "folders.rs"]
+mod folders;
+
+#[path = "folder_index.rs"]
+mod folder_index;
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Icon;
+use gpui_kit::component::IconName;
+use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::dock::DockArea;
+use gpui_kit::component::dock::DockEvent;
+use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSkin;
+use gpui_kit::component::dock::PaneRef;
+use gpui_kit::component::dock::PanelId;
+use gpui_kit::component::dock::panel_handle;
+use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::popover::PopoverState;
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use rust_i18n::t;
+use wows_toolkit_config::ReplayGrouping;
+use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::columns::default_columns;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_replay_data::paths::shown_path;
+use wows_toolkit_replay_data::replay_index::SourceScope;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+
+use super::browser_view::ListingWatch;
+use super::browser_view::ReplayBrowser;
+use super::browser_view::ReplayBrowserEvent;
+use super::empty_map::sample_map;
+use super::load::spawn_parse;
+use super::load::spawn_startup_preload;
+use super::panel::AutoExport;
+use super::panel::PanelSetup;
+use super::panel::RenderRequested;
+use super::panel::ReparseCause;
+use super::panel::ReplayPanel;
+use crate::replay_renderer::RendererEvent;
+use crate::replay_renderer::ReplayRendererPanel;
+use crate::side_split::SideSplit;
+use crate::side_split::SideWidth;
+use crate::stats::directory::DirectoryStatsRequested;
+use folder_index::FolderIndex;
+use folder_index::Offer;
+use folders::FolderHistory;
+use folders::FolderId;
+use folders::FolderSource;
+use folders::FolderState;
+use folders::ReplayFolder;
+use folders::SavedList;
+use gpui_kit::component::Disableable;
+use gpui_kit::component::input::InputState;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
+
+/// Identifies the message an auto-export failure keeps up, so a directory of
+/// battles that all fail says so once.
+const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
+
+/// Identifies the message that a battle was exported, so a burst of battles
+/// says only the latest.
+const AUTO_EXPORTED: &str = "replay-auto-exported";
+
+/// Identifies the message that a battle landed, for the same reason.
+const NEW_BATTLE: &str = "replay-new-battle";
+
+/// How long a replay must go unchanged before it is exported. The game writes
+/// a replay in bursts and each write is a file event.
+const AUTO_EXPORT_QUIET: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The same, for the notice that a battle was read through a mapping that does
+/// not fit, which stands until one that does is on disk.
+const CONSTANTS_UNFIT: &str = "replay-constants-unfit";
+
+/// Sidebar width for the file browser, matching the egui app's left panel.
+const BROWSER_WIDTH: Pixels = px(280.);
+const BROWSER_MIN_WIDTH: Pixels = px(180.);
+const BROWSER_MAX_WIDTH: Pixels = px(520.);
+
+/// The catalogue key for a grouping's name, so the choice reads in the
+/// reader's language as the egui app's own menu does
+/// (`ui/replay_parser/mod.rs:4301`).
+const fn grouping_label_key(grouping: ReplayGrouping) -> &'static str {
+    match grouping {
+        ReplayGrouping::Date => "ui.replay.group.date",
+        ReplayGrouping::Ship => "ui.replay.group.ship",
+        ReplayGrouping::None => "ui.replay.group.none",
+    }
+}
+
+/// Offered order, matching the egui app's `selectable_value` order.
+const GROUPINGS: [ReplayGrouping; 3] = [ReplayGrouping::Date, ReplayGrouping::Ship, ReplayGrouping::None];
+
+/// Where a batch render's files go.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BatchTarget {
+    /// A directory the reader is asked for when the batch starts.
+    Directory,
+    /// A temporary directory, whose files go on the clipboard afterwards.
+    Clipboard,
+}
+
+/// What a toast calls the battle at `path`: its "Ship - Map" from the
+/// listing, or its file name while the file is not listed.
+fn battle_label(browser: &Entity<ReplayBrowser>, path: &std::path::Path, cx: &App) -> String {
+    match browser.read(cx).battle_label(path) {
+        Some(label) => label.to_string(),
+        None => path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+    }
+}
+
+/// Puts the rendered videos on the clipboard, or says why they are not there.
+fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set().file_list(written))
+        .map_err(|err| err.to_string())
+}
+
+/// Where the repair that rates unrated index rows stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RatingRepair {
+    Idle,
+    /// A repair is reading the index. `again` asks for one more once it ends.
+    Running {
+        again: bool,
+    },
+}
+
+pub struct ReplayInspectorView {
+    /// One tab per directory the listing can show, the install's first.
+    folders: Vec<ReplayFolder>,
+    /// The tab whose listing is on screen.
+    selected_folder: FolderId,
+    /// Scrolls the tab strip, so a tab selected from outside it comes into
+    /// view.
+    folder_scroll: ScrollHandle,
+    /// Whether the pinned directories have been read from the settings.
+    pins_saved: SavedList,
+    /// The directories most recently opened, for the palette.
+    folder_history: FolderHistory,
+    /// Whether `folder_history` has been read from the settings.
+    history_saved: SavedList,
+    /// Recent directories dropped before the stored list was read, kept out
+    /// of it once it is.
+    history_dropped: Vec<PathBuf>,
+    /// The install's replays directory as tabs are compared, once
+    /// `scan_install` has found it.
+    install_root: Option<PathBuf>,
+    /// Finds `install_root` off the UI thread.
+    _install_root_check: Option<Task<()>>,
+    /// The language the listings' figures are grouped in.
+    locale: Option<String>,
+    /// How wide the listing is drawn, kept while it is shut.
+    listing_width: Entity<SideWidth>,
+    /// The collaborative session, hosted or joined from this tab's header.
+    collab: wows_toolkit_services::collab::CollabState,
+    /// The two fields the session popover writes into, held so a name typed
+    /// once survives the popover closing.
+    collab_name: Entity<InputState>,
+    collab_token: Entity<InputState>,
+    dock_area: Entity<DockArea>,
+    /// `None` until `apply_settings` learns the WoWs directory; opening a
+    /// replay before then is a no-op (the browser has nothing to
+    /// double-click yet either, since its scan needs the same directory).
+    game_data: Option<GameDataCache>,
+    /// Startup preload of the current installed build's game data (see
+    /// `load::spawn_startup_preload`), kicked off from `apply_settings` once
+    /// the WoWs directory is known. `Loading` before that (including before
+    /// settings arrive at all); a later replay open still works while this
+    /// is `Loading` or `Failed` -- `spawn_parse` loads its own build on
+    /// demand either way -- this only lets an already-warm build skip the
+    /// wait.
+    game_data_status: GameDataStatus,
+    /// Whether the dock has visible content, which controls the empty-state
+    /// overlay without replacing the dock when its first panel is opened.
+    has_dock_content: bool,
+    /// Live replay panels keyed by the path they were opened from, so a
+    /// repeat open on an already-open replay can be deduped instead of
+    /// adding a second tab for it. Entries survive their panel's tab being
+    /// closed until the next open for that same path notices the weak
+    /// handle no longer upgrades and replaces the entry.
+    open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
+    /// The replay this view last opened or brought forward, which decides
+    /// which tab a plain open replaces when more than one is showing.
+    current_replay: Option<PathBuf>,
+    /// The playback viewports open, one per replay, for the same reason
+    /// `open_panels` exists: a second ask brings the tab forward.
+    open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
+    /// The viewports onto battles the session is playing elsewhere, keyed by the
+    /// window each draws, so a second ask brings the open one forward.
+    watched: HashMap<u64, WeakEntity<crate::watched_playback::WatchedPlayback>>,
+    install_dir: String,
+    /// Held so a viewport's request for its own window still reaches this
+    /// view; a dropped subscription is a silent button.
+    renderer_events: Vec<Subscription>,
+    /// Held for each open replay panel, so its Actions menu can reach this
+    /// view. Swept with the panels themselves.
+    panel_events: Vec<Subscription>,
+    /// Whether the viewports have been told there is a session. Only a change
+    /// is worth pushing, and this is read every draw.
+    session_shared: bool,
+    /// The expected-values table every replay tab rates its players against,
+    /// loaded once per session beside the Stats tab's copy (`App::
+    /// apply_session_stats`). Held here rather than fetched per tab so a
+    /// replay opened before it arrives can still be filled in afterward by
+    /// `set_personal_rating`.
+    personal_rating: Option<Arc<PersonalRatingData>>,
+    /// Session debug-mode flag: seeded from `AppPreferences.debug_mode` (the
+    /// shared config DB) in `apply_settings`, then flippable at runtime via
+    /// `App`'s global Ctrl+Shift+D shortcut (`set_debug_mode`, called from
+    /// `app.rs`), which also pushes the new value into every currently open
+    /// `ReplayPanel` -- not just panels opened afterward. This crate never
+    /// writes settings back to the DB (see `settings.rs`'s module doc), so
+    /// the toggle only overrides the setting for the running session.
+    debug_mode: bool,
+    /// Session-local copy of the persisted `ReplaySettings`, seeded from the
+    /// shared config DB in `apply_settings`. The header toolbar's
+    /// column-filter checkboxes read/write this and drive `default_columns`
+    /// off it (`set_column_filter`). The live grouping selection lives on the
+    /// listings; `set_grouping` keeps this copy, every listing and the stored
+    /// row in step.
+    replay_settings: ReplaySettings,
+    /// What the reader agreed to share, which decides what a finished battle
+    /// contributes. Seeded from the row the Settings drawer writes.
+    data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
+    /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
+    /// the shared config DB in `apply_settings`, then flippable at runtime via
+    /// the header checkbox, and read by the directory watcher when a replay
+    /// lands. The flip is not written back to the DB, so it lasts the session
+    /// (`docs/gpui-port-gaps.md`).
+    auto_load_latest_replay: bool,
+    /// The builds whose result mapping has already been asked about this
+    /// session, so a second scan does not ask again.
+    constants_asked: std::collections::BTreeSet<u32>,
+    /// The builds already reported as read through the wrong mapping, so a second
+    /// replay on the same build does not say it again.
+    constants_mismatched: std::collections::BTreeSet<u32>,
+    /// The bulk contribution now running, if one is: a second pass over the same
+    /// directory would send everything twice.
+    contributing: Option<Task<()>>,
+    /// Keys the next batch render on the status bar, so two batches running at
+    /// once are each shown until each ends.
+    next_batch: crate::status_bar::RunNumber,
+    /// The pending auto-export for each replay. A newer event for the same
+    /// replay replaces, and so cancels, the older one, so a burst of writes
+    /// is read once and an earlier read never overwrites a later one.
+    auto_exports: HashMap<PathBuf, Task<()>>,
+    /// Whether the app's own index pass is running, which a second pass from
+    /// the listing header would race.
+    index_pass_running: bool,
+    /// Keeps at most one repair of unrated index rows reading at a time.
+    rating_repair: RatingRepair,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// What the replay inspector takes from the app's settings.
+pub struct InspectorSettings {
+    pub wows_dir: String,
+    /// Where the dumped builds are kept, so a replay from a build that is no
+    /// longer installed can still be read. Empty is the default location.
+    pub game_data_cache_dir: String,
+    /// What the reader agreed to share: nothing, their builds, or the replays.
+    pub data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
+    /// Whether a build loaded out of the install is written to that cache.
+    pub auto_dump_game_data: bool,
+    pub debug_mode: bool,
+    pub replay_settings: ReplaySettings,
+    pub auto_load_latest_replay: bool,
+    /// The locale the listing's figures are grouped in.
+    pub locale: Option<String>,
+    /// The name a session appears under, as the Settings drawer stores it. The
+    /// popover writes the same row back, so a name set in either holds in
+    /// both.
+    pub collab_display_name: String,
+}
+
+/// A replay setting this tab owns was changed here, so the app writes the
+/// row back. Carries the whole blob because that is how it is stored.
+pub struct ReplaySettingsChanged(pub ReplaySettings);
+
+/// The session started or stopped, for whoever owns a window this view does
+/// not: the tactics board is the app's, and it draws in the session too.
+pub struct SessionShared(pub wows_toolkit_services::collab::CollabLink);
+
+/// The collab popover's Tactics Board button. The board is the app's window, so
+/// the ask goes up rather than opening anything here.
+pub struct TacticsBoardRequested;
+
+/// The reader asked which of the listed replays' game data is missing.
+pub(crate) struct CheckGameDataRequested(pub Vec<MissingBuild>);
+impl EventEmitter<CheckGameDataRequested> for ReplayInspectorView {}
+
+pub(crate) struct AutoloadChanged(pub bool);
+impl EventEmitter<AutoloadChanged> for ReplayInspectorView {}
+
+/// Requests a search over one folder's index source in the shared Search tab.
+pub struct SearchFolder(pub SourceScope);
+
+/// The reader asked for a folder's listed replays that its index source does
+/// not hold yet to be indexed.
+///
+/// Raised to the app, which owns the index pass.
+pub struct IndexFolderRequested {
+    pub scope: SourceScope,
+    pub candidates: Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate>,
+}
+
+/// The listing holds replays from builds nothing on this machine can read.
+///
+/// Raised to the app, which owns the game-data cache and the jobs that fetch
+/// into it.
+pub struct GameDataMissing(pub Vec<MissingBuild>);
+
+/// A battle was read through a mapping that does not fit its build.
+///
+/// Raised to the app, which holds the commit the published mappings were last
+/// checked at: forgetting it is what makes the next check fetch again rather
+/// than report the repository unchanged.
+pub struct ConstantsUnfit;
+
+/// The reader asked for these replays to be read again and their index
+/// entries rewritten.
+///
+/// Raised to the app, which owns the index pass and the game-data cache a
+/// pass may have to fetch into first.
+pub struct ForceReindexRequested {
+    pub candidates: Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate>,
+    pub confirm: wows_toolkit_replay_data::force_reindex::Confirm,
+}
+
+/// A replay tab that is the one showing in its dock group.
+#[derive(Clone)]
+struct ShowingReplay {
+    path: PathBuf,
+    panel: PanelId,
+}
+
+/// Where an open puts the replay it was asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenTarget {
+    /// In place of the replay tab already showing.
+    ShowingTab,
+    NewTab,
+}
+
+/// What an open did.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TabShown {
+    Opened,
+    /// The replay was already open, and its tab came forward.
+    BroughtForward,
+}
+
+impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
+impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
+impl EventEmitter<SearchFolder> for ReplayInspectorView {}
+impl EventEmitter<IndexFolderRequested> for ReplayInspectorView {}
+impl EventEmitter<SessionShared> for ReplayInspectorView {}
+impl EventEmitter<TacticsBoardRequested> for ReplayInspectorView {}
+impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
+impl EventEmitter<ForceReindexRequested> for ReplayInspectorView {}
+
+/// A viewport asked for an armor viewer on one of the battle's ships, with
+/// what that ship had taken by where playback is.
+pub struct ShowArmorRequested {
+    pub param_index: String,
+    pub display_name: String,
+    pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// Who was firing at that ship, for the incoming-fire log.
+    pub incoming: Box<crate::replay_renderer::IncomingContext>,
+}
+
+impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
+
+/// Playback moved and the followed ship has taken different hits by now.
+pub struct ArmorFollowed {
+    /// Where playback has reached, which the health strip marks.
+    pub at: wows_replays::types::GameClock,
+    pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    pub health: Option<f32>,
+}
+
+impl EventEmitter<ArmorFollowed> for ReplayInspectorView {}
+
+impl ReplayInspectorView {
+    /// The side panels this tab can show or put away, for the status bar.
+    pub(crate) fn panel_toggles(&self, entity: &Entity<Self>, cx: &App) -> Vec<crate::status_bar::PanelToggle> {
+        let listing = entity.downgrade();
+        let open = !self.replay_settings.listing_collapsed;
+        let mut toggles = vec![crate::status_bar::PanelToggle {
+            id: "replay-listing-toggle".into(),
+            name: t!("ui.replay.listing_caption").into_owned().into(),
+            side: crate::ui::PanelSide::Left,
+            open,
+            toggle: std::rc::Rc::new(move |_window, cx| {
+                let _ = listing.update(cx, |view, cx| {
+                    let collapsed = view.replay_settings.listing_collapsed;
+                    view.set_listing_collapsed(!collapsed, cx);
+                });
+            }),
+        }];
+        toggles.extend(crate::status_bar::PanelToggle::for_docks("replay-inspector-dock-toggle", &self.dock_area, cx));
+        toggles
+    }
+
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let install = Self::new_folder(FolderSource::Install, false, FolderState::Listed, window, cx);
+        let selected_folder = install.id();
+        // The skinned area is what draws a tab bar over a group holding more
+        // than one panel; a bare one renders only the displayed panel.
+        let (dock_area, skin) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
+        // The status bar shows and hides the docks.
+        skin.set_toggle_button_visible(false, cx);
+        // Opt-in in the kit; a panel that refuses to close still shows none.
+        skin.set_close_button_visible(true, cx);
+        let dock_subscription = cx.subscribe_in(&dock_area, window, |this, dock, event, _window, cx| {
+            if matches!(event, DockEvent::LayoutChanged) {
+                let has_content = !dock.read(cx).is_empty(DockPlacement::Center, cx);
+                if this.has_dock_content != has_content {
+                    this.has_dock_content = has_content;
+                    cx.notify();
+                }
+            }
+        });
+
+        Self {
+            data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode::default(),
+            folders: vec![install],
+            selected_folder,
+            folder_scroll: ScrollHandle::new(),
+            pins_saved: SavedList::NotRead,
+            folder_history: FolderHistory::default(),
+            history_saved: SavedList::NotRead,
+            history_dropped: Vec::new(),
+            install_root: None,
+            _install_root_check: None,
+            locale: None,
+            listing_width: cx.new(|_| SideWidth::new(BROWSER_WIDTH, BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)),
+            collab: wows_toolkit_services::collab::CollabState::default(),
+            collab_name: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string())),
+            collab_token: cx.new(|cx| InputState::new(window, cx).placeholder("toolkit-...".to_string())),
+            dock_area,
+            game_data: None,
+            game_data_status: GameDataStatus::Loading { version: None },
+            has_dock_content: false,
+            open_panels: HashMap::new(),
+            current_replay: None,
+            open_renderers: HashMap::new(),
+            watched: HashMap::new(),
+            install_dir: String::new(),
+            renderer_events: Vec::new(),
+            panel_events: Vec::new(),
+            session_shared: false,
+            personal_rating: None,
+            debug_mode: false,
+            replay_settings: ReplaySettings::default(),
+            auto_load_latest_replay: true,
+            constants_asked: std::collections::BTreeSet::new(),
+            constants_mismatched: std::collections::BTreeSet::new(),
+            contributing: None,
+            next_batch: crate::status_bar::RunNumber(0),
+            auto_exports: HashMap::new(),
+            index_pass_running: false,
+            rating_repair: RatingRepair::Idle,
+            _subscriptions: vec![dock_subscription],
+        }
+    }
+
+    /// Starts the browser's directory scan, (re)builds the game-data cache
+    /// for `wows_dir`, seeds the session debug-mode flag from
+    /// `debug_mode` (`AppPreferences.debug_mode`), seeds the session
+    /// `replay_settings`/`auto_load_latest_replay` flags and the browser's
+    /// initial grouping (`replay_settings.grouping`), and kicks off the
+    /// startup preload of the current installed build through that same cache
+    /// -- so a later `spawn_parse` for a replay on that build (see
+    /// `panel.rs`) finds the slot already warm instead of reloading it.
+    /// Adopts a language without touching anything else.
+    ///
+    /// Separate from `apply_settings`: that one rebuilds the game-data cache
+    /// and rescans the directory, which a language change has no reason to
+    /// do, and which would strand every open panel on the discarded cache.
+    pub fn set_locale(&mut self, locale: Option<String>, cx: &mut Context<Self>) {
+        if let Some(game_data) = &self.game_data {
+            game_data.set_locale(locale.as_deref().unwrap_or("en"));
+        }
+        // Kept preview tracks carry ship names in the previous language.
+        wows_toolkit_replay_data::minimap_preview::forget_kept_previews();
+        self.locale = locale.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.set_locale(locale.clone(), cx));
+        }
+        cx.notify();
+    }
+
+    /// Called from `App::apply_settings`, which `main.rs` runs inside a
+    /// `window.update`, so a `Window` is available for the grouping combo.
+    pub fn apply_settings(&mut self, settings: InspectorSettings, window: &mut Window, cx: &mut Context<Self>) {
+        let InspectorSettings {
+            wows_dir,
+            game_data_cache_dir,
+            auto_dump_game_data,
+            data_sharing,
+            debug_mode,
+            replay_settings,
+            auto_load_latest_replay,
+            locale,
+            collab_display_name,
+        } = settings;
+        // Seeded rather than overwritten: a name typed into the popover and
+        // not yet saved is the reader's most recent word on it.
+        if self.collab.display_name.is_empty() {
+            self.collab.display_name = collab_display_name.clone();
+            self.collab_name.update(cx, |state, cx| state.set_value(collab_display_name, window, cx));
+        }
+        self.locale = locale.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| {
+                browser.set_locale(locale.clone(), cx);
+                // The listing's second line is what the index knows about each
+                // file, so it is read once the directory is known.
+                browser.load_summaries(cx);
+            });
+        }
+        self.debug_mode = debug_mode;
+        self.data_sharing = data_sharing;
+        self.auto_load_latest_replay = auto_load_latest_replay;
+        let grouping = replay_settings.grouping;
+        self.replay_settings = replay_settings;
+        self.adopt_grouping(grouping, cx);
+
+        // The kept preview renderers hold art read out of the previous
+        // install's VFS, and the kept tracks names in its language. Both
+        // branches below replace the cache that produced them.
+        wows_toolkit_replay_data::minimap_preview::forget_kept_previews();
+        self.install_dir = wows_dir.clone();
+        if wows_dir.is_empty() {
+            let cache = GameDataCache::without_install()
+                .with_cache_dir(&game_data_cache_dir)
+                .with_locale(locale.as_deref().unwrap_or("en"));
+            self.game_data = Some(cache.clone());
+            for panel in self.open_panels.values() {
+                let _ = panel.update(cx, |panel, _cx| panel.set_game_data(cache.clone()));
+            }
+            self.game_data_status = GameDataStatus::Failed(t!("ui.messages.wows_dir_not_set").into_owned());
+            self.scan_install(wows_dir, cx);
+            self.share_game_data(cx);
+            self.index_listed_folders(cx);
+            return;
+        }
+
+        let game_data = GameDataCache::new(PathBuf::from(&wows_dir))
+            .with_cache_dir(&game_data_cache_dir)
+            .with_locale(locale.as_deref().unwrap_or("en"))
+            .with_auto_dump(auto_dump_game_data);
+        // The per-build caches for builds nothing can open any more, which is
+        // gigabytes after a year of game updates.
+        {
+            let wows_dir = PathBuf::from(&wows_dir);
+            let dump_base = wows_toolkit_config::game_data_dump_base_with_override(&game_data_cache_dir);
+            cx.background_spawn(async move {
+                wows_toolkit_replay_data::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
+            })
+            .detach();
+        }
+        self.game_data = Some(game_data.clone());
+        // An open tab reads its own copy, which carries the directory and the
+        // dump preference by value and would otherwise stay on the old install.
+        for panel in self.open_panels.values() {
+            let _ = panel.update(cx, |panel, _cx| panel.set_game_data(game_data.clone()));
+        }
+        // Named from the install's own `preferences.xml`, which is a file read
+        // rather than a build load, so the listing can say which version it is
+        // waiting for while the load runs.
+        self.game_data_status = GameDataStatus::Loading {
+            version: wows_toolkit_replay_data::install::installed_version(std::path::Path::new(&wows_dir))
+                .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+        };
+        self.scan_install(wows_dir.clone(), cx);
+        // The listing's hover previews bake against whichever build a replay
+        // was recorded on, which is what this cache loads.
+        self.share_game_data(cx);
+        // The chosen directories' replays are read through this cache too.
+        self.index_listed_folders(cx);
+
+        let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let status = preload.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.game_data_status = status.clone();
+                this.share_game_data(cx);
+                // What the egui app reports when the same load finishes
+                // (`app.rs`'s `GameDataLoaded`): the install is readable, and
+                // separately whether it has any replays to show.
+                match &status {
+                    GameDataStatus::Ready(_) => {
+                        crate::toast::ok(t!("ui.messages.game_data_loaded").to_string(), window, cx);
+                        if this.install_browser().read(cx).is_empty() {
+                            crate::toast::warn(t!("ui.messages.no_replays_detected").to_string(), window, cx);
+                        }
+                    }
+                    GameDataStatus::Failed(reason) => {
+                        crate::toast::failed(reason.clone(), window, cx);
+                    }
+                    GameDataStatus::Loading { .. } => {}
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Hands every listing the install and the game data its rows are named
+    /// and its previews baked with.
+    fn share_game_data(&self, cx: &mut Context<Self>) {
+        let install_dir = self.install_dir.clone();
+        let cache = self.game_data.clone();
+        let status = self.game_data_status.clone();
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| {
+                // "Open in Game" launches the install whichever directory is listed.
+                browser.set_wows_dir(install_dir.clone());
+                browser.set_build_cache(cache.clone());
+                browser.set_game_data(&status, cx);
+            });
+        }
+    }
+
+    /// The current game-data preload status. Read by `App` so the Armor
+    /// Viewer tab can adopt the SAME `Arc<LoadedGameData>` once it reaches
+    /// `Ready` -- see `armor_viewer::pane::ArmorViewerPane::load_game_data` --
+    /// rather than running a second `GameDataCache`/VFS/`GameParams` load for
+    /// the same build.
+    pub fn game_data_status(&self) -> GameDataStatus {
+        self.game_data_status.clone()
+    }
+
+    fn on_browser_event(
+        &mut self,
+        browser: &Entity<ReplayBrowser>,
+        event: &ReplayBrowserEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ReplayBrowserEvent::OpenReplay(path) => self.open_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::OpenReplayInNewTab(path) => self.open_replay_in_new_tab(path.clone(), window, cx),
+            ReplayBrowserEvent::SessionStats { paths, replace } => {
+                self.record_session_stats(paths.clone(), *replace, cx)
+            }
+            ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::BuildsListed(builds) => {
+                self.fetch_missing_constants(builds.clone(), wows_toolkit_services::constants::Cached::Keep, window, cx)
+            }
+            ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
+            ReplayBrowserEvent::RenderManyToClipboard(paths) => {
+                self.render_many_to_clipboard(paths.clone(), window, cx)
+            }
+            // The game has just finished a match. The egui app opens it
+            // straight away when this is on, which is what the checkbox
+            // promises.
+            ReplayBrowserEvent::ReplayAppeared(path) => {
+                // Written whether or not it is opened: that is what "export
+                // every battle" means, and the egui app writes it from the
+                // background parser for the same reason.
+                self.auto_export_landed(path, window, cx);
+                let scope = browser.read(cx).index_scope();
+                self.index_landed(path, scope, cx);
+                self.contribute_landed(path, cx);
+                // A battle the game has just finished opens and is announced
+                // whichever tab is shown, as the checkbox promises. Elsewhere,
+                // a directory not on screen counts it on its tab rather than
+                // taking the reader away from the one they are looking at.
+                let noted = self.note_unseen(browser, path, folders::Noted::Landed, cx);
+                if noted && browser != self.install_browser() {
+                    return;
+                }
+                let battle = battle_label(browser, path, cx);
+                let opened = self.auto_load_latest_replay
+                    && self.open_replay_into(path.clone(), OpenTarget::ShowingTab, window, cx).is_some();
+                let said = if opened {
+                    t!("ui.replay.opened_new_battle", battle = battle)
+                } else {
+                    t!("ui.replay.new_battle_listed", battle = battle)
+                };
+                crate::toast::replacing(NEW_BATTLE, crate::toast::Level::Info, said.into_owned(), window, cx);
+            }
+            // The file under an open tab has changed, so that tab is reading
+            // something that is no longer on disk. The change may be the
+            // battle results arriving for a battle the client left early, so
+            // the export is tried again.
+            ReplayBrowserEvent::ReplayChanged(path) => {
+                self.auto_export_landed(path, window, cx);
+                self.reparse_open_replay(path, ReparseCause::FileRewritten, window, cx);
+                self.note_unseen(browser, path, folders::Noted::Rewritten, cx);
+            }
+            ReplayBrowserEvent::ReplayRemoved(path) => self.forget_unseen(browser, path, cx),
+            ReplayBrowserEvent::WatchStopped { cause, next } => {
+                self.say_watch_stopped(browser, cause, *next, window, cx);
+            }
+            ReplayBrowserEvent::WatchResumed => self.say_watch_resumed(browser, window, cx),
+            ReplayBrowserEvent::WatchWithdrawn => crate::toast::withdraw(folders::watch_toast_key(browser), window, cx),
+            // The app owns the cache and the jobs that fill it, so the offer to
+            // fetch these builds is raised to it.
+            ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),
+            ReplayBrowserEvent::ForceReindex { candidates, confirm } => {
+                cx.emit(ForceReindexRequested { candidates: candidates.clone(), confirm: *confirm })
+            }
+        }
+    }
+
+    /// Adopts what the reader agreed to share, so a battle landing after the
+    /// change is contributed under the new setting rather than the old one.
+    pub(crate) fn set_data_sharing(&mut self, mode: wows_toolkit_viewmodel::settings::DataSharingMode) {
+        self.data_sharing = mode;
+    }
+
+    /// Fetches the result mapping for any listed build that has none.
+    ///
+    /// Battle results are read through a per-build mapping; without it the figures
+    /// a replay reports are read through whatever mapping was last written, which
+    /// is what the egui app fetches per build to avoid
+    /// (`task/networking.rs`'s `FetchVersionedConstants`). Small files, so they are
+    /// fetched without asking, and each build is asked about once a session.
+    fn fetch_missing_constants(
+        &mut self,
+        builds: Vec<(u32, Option<String>)>,
+        cached: wows_toolkit_services::constants::Cached,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // What is already cached, and what this session has already had an answer
+        // about, is not asked again. A build a sweep never reached stays unasked, so
+        // the next scan picks it up.
+        let wanted: Vec<(u32, Option<String>)> = builds
+            .into_iter()
+            .filter(|(build, _)| !self.constants_asked.contains(build))
+            .filter(|(build, _)| {
+                cached == wows_toolkit_services::constants::Cached::Replace
+                    || !wows_toolkit_services::constants::is_cached(*build)
+            })
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+
+        cx.spawn_in(window, async move |this, cx| {
+            let outcomes = cx
+                .background_spawn(async move { wows_toolkit_services::constants::fetch_for_builds(wanted, cached) })
+                .await;
+
+            let mut written = 0usize;
+            let mut answered = Vec::new();
+            for (build, outcome) in outcomes {
+                match outcome {
+                    wows_toolkit_services::constants::Fetched::Written { build, actual } => {
+                        wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                            wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
+                        );
+                        tracing::info!(build, actual, "constants: the result mapping was fetched");
+                        written += 1;
+                        answered.push(build);
+                    }
+                    wows_toolkit_services::constants::Fetched::AlreadyOnDisk => answered.push(build),
+                    // Left unanswered deliberately: a repository that refused once
+                    // is worth asking again on a later scan, where marking it here
+                    // would need a restart to retry.
+                    wows_toolkit_services::constants::Fetched::Failed(reason) => {
+                        wows_toolkit_viewmodel::bug_report::record_constants_fetch(
+                            wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(format!(
+                                "build {build}: {reason}"
+                            )),
+                        );
+                        tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
+                    }
+                }
+            }
+
+            let _ = this.update(cx, |this, _cx| this.constants_asked.extend(answered));
+            if written == 0 {
+                return;
+            }
+            // Withdrawn now a mapping that fits is on disk: the battles read
+            // through the old one are read again below.
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.constants_mismatched.clear();
+                crate::toast::resolved(CONSTANTS_UNFIT, window, cx);
+            });
+            // What is open was read through the mapping that was there before, so
+            // it is read again now there is a better one.
+            let _ = this.update_in(cx, |this, window, cx| {
+                crate::toast::info(t!("ui.replay.constants_written", count = written).into_owned(), window, cx);
+                this.reparse_open_replays(window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The build the game data now loaded is for.
+    ///
+    /// `None` until a build is loaded, which is what refuses an import: a mapping
+    /// is cached under a build, and there is no build to cache it under.
+    fn loaded_build(&self) -> Option<u32> {
+        let GameDataStatus::Ready(loaded) = &self.game_data_status else { return None };
+        Some(loaded.build())
+    }
+
+    /// Says that a battle was read through the wrong mapping, and fetches the
+    /// right one.
+    ///
+    /// What is on disk is fetched over rather than dropped first: a mapping the
+    /// reader imported by hand is the only one some builds will ever have, and a
+    /// fetch that fails would leave nothing in its place. The message stays up
+    /// until one arrives, as the egui app keeps its own up
+    /// (`app.rs`'s `check_constants_version_mismatch`).
+    fn recover_constants(&mut self, build: u32, version: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.constants_mismatched.insert(build) {
+            return;
+        }
+        crate::toast::stuck(CONSTANTS_UNFIT, t!("ui.messages.constants_version_mismatch").into_owned(), window, cx);
+        cx.emit(ConstantsUnfit);
+        // Asked about again, whatever this session already asked: the answer it
+        // got is the mapping that does not fit.
+        self.constants_asked.remove(&build);
+        self.fetch_missing_constants(
+            vec![(build, version)],
+            wows_toolkit_services::constants::Cached::Replace,
+            window,
+            cx,
+        );
+    }
+
+    /// Moves the playback that is feeding an armor viewer to `clock`.
+    ///
+    /// Only the viewport that is feeding one: another playback open beside it is
+    /// showing a different battle, or the same one somewhere else on purpose.
+    pub(crate) fn seek_following_playback(
+        &mut self,
+        clock: wows_replays::types::GameClock,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for panel in self.open_renderers.values() {
+            let Some(panel) = panel.upgrade() else { continue };
+            if !panel.read(cx).is_following_armor() {
+                continue;
+            }
+            panel.update(cx, |panel, cx| panel.go_to_clock(clock, window, cx));
+            return;
+        }
+    }
+
+    /// Reads every open replay again, for a mapping or a dump that has since
+    /// arrived.
+    pub(crate) fn reparse_open_replays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let open: Vec<PathBuf> = self.open_panels.keys().cloned().collect();
+        for path in open {
+            self.reparse_open_replay(&path, ReparseCause::GameDataArrived, window, cx);
+        }
+    }
+
+    /// Takes a mapping the reader points at as the loaded build's own.
+    pub(crate) fn import_constants(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(build) = self.loaded_build() else {
+            crate::toast::warn(t!("ui.replay.constants_no_build").into_owned(), window, cx);
+            return;
+        };
+        let asked = wows_toolkit_services::dialog::pick_file(
+            Some(&t!("ui.replay.constants_import_title")),
+            Some(wows_toolkit_services::dialog::Filter { label: "JSON", extensions: &["json"] }),
+        );
+
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
+            let imported = wows_toolkit_services::constants::import(&path, build);
+            let _ = this.update_in(cx, |this, window, cx| match imported {
+                Ok(()) => {
+                    crate::toast::ok(t!("ui.replay.constants_imported", build = build).into_owned(), window, cx);
+                    this.reparse_open_replays(window, cx);
+                }
+                Err(reason) => crate::toast::failed(
+                    t!("ui.replay.constants_import_failed", reason = reason).into_owned(),
+                    window,
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    /// Reads every listed directory again, for game data that has since
+    /// arrived.
+    pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
+        for folder in &self.folders {
+            // A missing directory has nothing to walk; Refresh lists it once it is back.
+            if folder.state() == FolderState::Listed {
+                folder.browser().update(cx, |browser, cx| browser.relist(cx));
+            }
+        }
+    }
+
+    /// Every replay a palette command re-indexes, each once: the install's
+    /// directory and the pinned ones, each replay under its own directory's
+    /// source.
+    ///
+    /// A directory opened once is left out: a palette command covers the
+    /// directories the reader keeps.
+    pub(crate) fn reindex_candidates(
+        &self,
+        cx: &App,
+    ) -> Vec<wows_toolkit_replay_data::force_reindex::ReindexCandidate> {
+        let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        let mut candidates = Vec::new();
+        let kept = self.folders.iter().filter(|folder| folder.source() == &FolderSource::Install || folder.is_pinned());
+        for folder in kept {
+            let listed = folder.browser().read(cx).reindex_candidates();
+            candidates.extend(listed.into_iter().filter(|candidate| seen.insert(candidate.path.clone())));
+        }
+
+        candidates
+    }
+
+    /// Reads what the index holds for every listing's replays again, so the
+    /// rows show what a pass that has just finished wrote.
+    pub(crate) fn reload_index_summaries(&mut self, cx: &mut Context<Self>) {
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.load_summaries(cx));
+        }
+    }
+
+    /// Writes a video of each marked battle into a directory the reader picks.
+    ///
+    /// One background batch rather than one viewport per replay: the menu item
+    /// says "Render N Replays to Video", and N open tabs baking tracks nobody
+    /// watches is not that. Mirrors the egui app's own batch
+    /// (`replay/renderer/video_export.rs:458`), which also writes into a chosen
+    /// folder.
+    fn render_many_to_video(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+        self.render_many(paths, BatchTarget::Directory, window, cx);
+    }
+
+    /// Renders each marked battle and puts the files on the clipboard.
+    ///
+    /// The egui app's own batch to clipboard (`video_export.rs:488`): the videos
+    /// go to a temporary directory this process does not clean up, because the
+    /// clipboard holds paths into it until the reader pastes them.
+    pub(crate) fn render_many_to_clipboard(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        self.render_many(paths, BatchTarget::Clipboard, window, cx);
+    }
+
+    /// Runs one batch render, saying which replay it has reached and what it
+    /// managed in the end.
+    fn render_many(&mut self, paths: Vec<PathBuf>, target: BatchTarget, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+        let to_clipboard = matches!(target, BatchTarget::Clipboard);
+        let job = crate::status_bar::JobKind::BatchRender(self.next_batch);
+        self.next_batch = crate::status_bar::RunNumber(self.next_batch.0 + 1);
+        let owner = cx.entity_id();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let out_dir = match target {
+                // Dismissed at the dialog, or the dialog failed and said so.
+                BatchTarget::Directory => {
+                    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
+                    match crate::dialog::chosen(asked, &this, cx).await {
+                        Some(picked) => picked,
+                        None => return,
+                    }
+                }
+                BatchTarget::Clipboard => match crate::replay_renderer::temporary_batch_dir() {
+                    Some(temporary) => temporary,
+                    None => {
+                        let _ = cx.update(|window, cx| {
+                            crate::toast::failed(t!("ui.replay.renderer.export_path_unusable").into_owned(), window, cx)
+                        });
+                        return;
+                    }
+                },
+            };
+            let count = paths.len();
+            let shown = out_dir.display().to_string();
+            let _ = cx.update(|window, cx| {
+                crate::toast::info(
+                    t!("ui.replay.renderer.batch_started", count = count, dir = shown).into_owned(),
+                    window,
+                    cx,
+                );
+            });
+
+            let (report, mut steps) = futures::channel::mpsc::unbounded();
+            let batch = cx.update(|_window, cx| {
+                // What a viewport would have shown, so a batch does not write a
+                // different video than the reader has been watching.
+                let defaults = crate::render_defaults::defaults(cx);
+                crate::replay_renderer::batch_export(paths, game_data, out_dir, defaults, report, cx)
+            });
+            let Ok(batch) = batch else { return };
+
+            // One status bar entry, rewritten as the batch walks the set: forty
+            // replays is minutes of work, and a line that never moves reads as a
+            // hang.
+            let watch = {
+                let mut cx = cx.clone();
+                async move {
+                    while let Some(step) = futures::StreamExt::next(&mut steps).await {
+                        let told = cx.update(|_window, cx| {
+                            crate::status_bar::working(
+                                this.clone().into(),
+                                job,
+                                t!(
+                                    "ui.replay.renderer.batch_progress",
+                                    done = step.done + 1,
+                                    total = step.total,
+                                    replay = step.replay
+                                )
+                                .into_owned(),
+                                None,
+                                cx,
+                            );
+                        });
+                        if told.is_err() {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let ((written, failed), ()) = futures::future::join(batch, watch).await;
+
+            let _ = cx.update(|window, cx| {
+                crate::status_bar::finished(owner, job, cx);
+                let copied = if to_clipboard && !written.is_empty() { copy_rendered_files(&written) } else { Ok(()) };
+                let said = match (&copied, failed.is_empty(), to_clipboard) {
+                    // The files were written either way, so the message says where
+                    // they are rather than only that the clipboard refused them.
+                    (Err(reason), _, _) => {
+                        t!("ui.replay.renderer.batch_not_copied", dir = shown.clone(), reason = reason.clone())
+                            .into_owned()
+                    }
+                    (Ok(()), true, true) => t!("ui.replay.renderer.batch_copied", written = written.len()).into_owned(),
+                    (Ok(()), true, false) => {
+                        t!("ui.replay.renderer.batch_all_written", written = written.len()).into_owned()
+                    }
+                    (Ok(()), false, _) => {
+                        t!("ui.replay.renderer.batch_finished", written = written.len(), failed = failed.len())
+                            .into_owned()
+                    }
+                };
+                if failed.is_empty() && copied.is_ok() {
+                    crate::toast::ok(said, window, cx);
+                } else {
+                    crate::toast::warn(said, window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Contributes every listed battle, as the data-sharing setting asks.
+    ///
+    /// The egui app's "Send all replays to ShipBuilds" (`app.rs:4712`): a pass
+    /// over what is listed rather than only what lands while the app is open.
+    /// Under `LedgerUse::Consult` a replay already in the ledger is skipped before
+    /// it is read, so a second pass costs one ledger read per replay; the pass
+    /// that ignores the ledger reads and sends every one of them.
+    pub(crate) fn contribute_all(
+        &mut self,
+        ledger: wows_toolkit_services::upload::LedgerUse,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use wows_toolkit_viewmodel::settings::DataSharingMode;
+
+        if self.data_sharing == DataSharingMode::Off {
+            crate::toast::warn(t!("ui.replay.contribute_nothing_shared").into_owned(), window, cx);
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let paths = self.browser().read(cx).listed_paths();
+        if paths.is_empty() {
+            crate::toast::warn(t!("ui.replay.contribute_none_listed").into_owned(), window, cx);
+            return;
+        }
+        if self.contributing.is_some() {
+            // One pass at a time: two would read the same directory twice and, with
+            // the ledger ignored, send every battle twice.
+            crate::toast::warn(t!("ui.replay.contribute_already_running").into_owned(), window, cx);
+            return;
+        }
+        let mode = self.data_sharing;
+        let total = paths.len();
+        let owner = cx.entity_id();
+
+        self.contributing = Some(cx.spawn_in(window, async move |this, cx| {
+            let mut sent = 0usize;
+            for (index, path) in paths.into_iter().enumerate() {
+                let told = cx.update(|_window, cx| {
+                    crate::status_bar::working(
+                        this.clone().into(),
+                        crate::status_bar::JobKind::Contribute,
+                        t!("ui.replay.contributing", done = index + 1, total = total).into_owned(),
+                        None,
+                        cx,
+                    );
+                });
+                if told.is_err() {
+                    return;
+                }
+
+                // The ledger before the read: a replay already contributed is
+                // seconds of parsing for a request that would be refused.
+                if ledger == wows_toolkit_services::upload::LedgerUse::Consult {
+                    let Ok(already) =
+                        cx.update(|_window, cx| crate::upload::already_contributed(path.clone(), pool.clone(), cx))
+                    else {
+                        return;
+                    };
+                    if already.await {
+                        continue;
+                    }
+                }
+
+                let parse = match cx.update(|_window, cx| spawn_parse(path.clone(), game_data.clone(), None, cx)) {
+                    Ok(parse) => parse,
+                    Err(_) => return,
+                };
+                let Ok(parsed) = parse.await else {
+                    tracing::warn!(path = %path.display(), "sharing: the replay did not parse");
+                    continue;
+                };
+
+                // The anchor both apps keep, recorded on the first sight of this
+                // replay: a battle still being played is held for its results
+                // rather than sent half-finished.
+                let Ok(first_seen) = cx.update(|_window, cx| crate::upload::first_seen(path.clone(), pool.clone(), cx))
+                else {
+                    return;
+                };
+                let candidate = wows_toolkit_services::upload::Candidate {
+                    path: path.clone(),
+                    shareable: parsed.shareable,
+                    first_seen: first_seen.await,
+                };
+                let Ok(contributed) = cx.update(|_window, cx| {
+                    crate::upload::contribute(candidate, mode, ledger, pool.clone(), String::new(), cx)
+                }) else {
+                    return;
+                };
+                if matches!(contributed.await, wows_toolkit_services::upload::Outcome::Sent) {
+                    sent += 1;
+                }
+            }
+
+            let _ = cx.update(|window, cx| {
+                crate::status_bar::finished(owner, crate::status_bar::JobKind::Contribute, cx);
+                crate::toast::ok(t!("ui.replay.contributed", sent = sent, total = total).into_owned(), window, cx);
+            });
+            let _ = this.update(cx, |this, _cx| this.contributing = None);
+        }));
+    }
+
+    /// Contributes a battle that has just landed, if the reader asked for that.
+    ///
+    /// This is what the data-sharing setting governs: off sends nothing, build
+    /// data sends each player's setup, and replays sends the file itself. The
+    /// rules are shared with the egui app (`wows_toolkit_viewmodel::upload`), and
+    /// so is the ledger, so a battle is contributed once however it was read.
+    fn contribute_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        use wows_toolkit_viewmodel::settings::DataSharingMode;
+
+        if self.data_sharing == DataSharingMode::Off {
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let mode = self.data_sharing;
+        // The service is reached through whatever proxy this machine is on,
+        // which `http::client` resolves; the manual setting is the app's.
+        let proxy = String::new();
+        let parse = spawn_parse(path.to_path_buf(), game_data, None, cx);
+        let named = path.to_path_buf();
+
+        cx.spawn(async move |_this, cx| {
+            let parsed = match parse.await {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "sharing: the replay did not parse");
+                    return;
+                }
+            };
+            let candidate = wows_toolkit_services::upload::Candidate {
+                path: named.clone(),
+                shareable: parsed.shareable,
+                // First seen now, which is what a replay the watcher just
+                // reported is: the grace window for its results starts here.
+                first_seen: jiff::Timestamp::now(),
+            };
+            let sent = cx.update(|cx| {
+                crate::upload::contribute(
+                    candidate,
+                    mode,
+                    wows_toolkit_services::upload::LedgerUse::Consult,
+                    pool,
+                    proxy,
+                    cx,
+                )
+            });
+            match sent.await {
+                wows_toolkit_services::upload::Outcome::Sent => {
+                    tracing::info!(path = %named.display(), "sharing: the battle was contributed")
+                }
+                wows_toolkit_services::upload::Outcome::Failed(reason) => {
+                    tracing::warn!(path = %named.display(), %reason, "sharing: the battle was not contributed")
+                }
+                other => tracing::debug!(path = %named.display(), ?other, "sharing: nothing sent"),
+            }
+        })
+        .detach();
+    }
+
+    /// Puts a battle that has just landed into the replay index, under the
+    /// source of the directory it landed in.
+    ///
+    /// The egui app indexes each replay as its background parser reads it
+    /// (`task/replays.rs:540`), so an index fills as you play. Without this the
+    /// port's index only grows when the reader presses Build Index, and every row
+    /// of the newest battles reads as "not indexed" until they do.
+    ///
+    /// Its own parse, deliberately: this runs whether or not the replay is opened,
+    /// and a tab that opens it will not be waiting on this.
+    fn index_landed(&mut self, path: &std::path::Path, scope: SourceScope, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let Some(runtime) = crate::runtime::runtime(cx) else { return };
+        // Roots the Live source when this battle is the first thing it holds.
+        let Some(live_root) = path.parent().map(std::path::Path::to_path_buf) else { return };
+        let path = path.to_path_buf();
+        let personal_rating = self.personal_rating.clone();
+        let read_with = personal_rating.clone();
+
+        cx.spawn(async move |this, cx| {
+            let indexed = cx
+                .background_spawn(async move {
+                    let now = jiff::Timestamp::now();
+                    let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
+                    wows_toolkit_replay_data::replay_index::index_one(
+                        &runtime,
+                        &pool,
+                        &path,
+                        &game_data,
+                        personal_rating.as_deref(),
+                        source,
+                        now,
+                        wows_toolkit_config::index::rows::IndexWriteMode::Incremental,
+                    )
+                })
+                .await;
+            if let Err(err) = indexed {
+                tracing::warn!("replay index: the battle that just landed was not indexed: {err}");
+                return;
+            }
+            let _ = this.update(cx, |view, cx| {
+                view.index_pass_rated(read_with.as_ref(), cx);
+                view.reload_index_summaries(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Writes a battle that has landed or changed out to the auto-export
+    /// directory.
+    ///
+    /// The egui app exports from its background parser as each replay appears
+    /// or changes (`task/replays.rs`), so a match nobody opens is still
+    /// written. Skipped for a replay carrying no battle results, as the egui
+    /// gate skips it: a battle the client left early is written once the game
+    /// adds the results to its replay, which arrives here as a change.
+    ///
+    /// Named by ship, map, scenario, mode and time, which is the name the egui
+    /// app writes (`wows_toolkit_viewmodel::replay_export::exported_file_stem`),
+    /// so a directory both apps write into reads as one set.
+    fn auto_export_landed(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
+        let AutoExport::To { directory, format } = AutoExport::from_settings(&self.replay_settings) else { return };
+        let Some(game_data) = self.game_data.clone() else { return };
+
+        let debug = self.debug_mode;
+        let personal_rating = self.personal_rating.clone();
+        let named = path.to_path_buf();
+        let task = cx.spawn_in(window, async move |_this, cx| {
+            cx.background_executor().timer(AUTO_EXPORT_QUIET).await;
+
+            // An error is the window having closed, which ends the export.
+            let Ok(parse) = cx.update(|_window, cx| spawn_parse(named.clone(), game_data, personal_rating, cx)) else {
+                return;
+            };
+            let parsed = match parse.await {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "auto-export: the replay did not parse");
+                    return;
+                }
+            };
+            if parsed.raw_results_json.is_none() {
+                tracing::debug!(path = %named.display(), "auto-export: no battle results, so nothing is written");
+                return;
+            }
+            let out = directory.join(&parsed.export_stem).with_extension(format.extension());
+            let file = out.file_name().unwrap_or(out.as_os_str()).to_string_lossy().into_owned();
+
+            let export = if debug { parsed.export } else { parsed.export.stripped() };
+            let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
+            match written {
+                Ok(()) => {
+                    tracing::info!(path = %named.display(), "auto-export: the battle was written");
+                    // Whatever stopped the last one has passed, so the notice
+                    // about it comes down.
+                    let _ = cx.update(|window, cx| {
+                        crate::toast::resolved(AUTO_EXPORT_FAILED, window, cx);
+                        crate::toast::replacing(
+                            AUTO_EXPORTED,
+                            crate::toast::Level::Ok,
+                            t!("ui.replay.auto_exported", file = file).into_owned(),
+                            window,
+                            cx,
+                        );
+                    });
+                }
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "auto-export failed");
+                    // Kept up rather than flashed past: the reader asked for a file
+                    // per battle and is not getting one. Taken down again by the
+                    // next battle that writes.
+                    let _ = cx.update(|window, cx| {
+                        crate::toast::stuck(
+                            AUTO_EXPORT_FAILED,
+                            t!("ui.replay.auto_export_failed", error = err.to_string()).into_owned(),
+                            window,
+                            cx,
+                        );
+                    });
+                }
+            }
+        });
+        self.auto_exports.insert(path.to_path_buf(), task);
+    }
+
+    /// Re-reads a replay a tab is open on, leaving the tab where it is.
+    fn reparse_open_replay(
+        &mut self,
+        path: &PathBuf,
+        cause: ReparseCause,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(panel) = self.open_panels.get(path).and_then(|panel| panel.upgrade()) else { return };
+        let Some(game_data) = self.game_data.clone() else { return };
+        panel.update(cx, |panel, cx| panel.reparse(game_data, cause, window, cx));
+    }
+
+    /// Opens `path` in a dock tab. A repeat double-click on a replay that is
+    /// already open is a no-op rather than adding a second tab for it:
+    /// `open_panels` tracks the live panel entity per path, checked here
+    /// before creating a new one.
+    /// A repeat open brings that tab forward (`DockArea::select_panel`) rather
+    /// than leaving the reader on whichever tab was in front.
+    ///
+    /// `pub(crate)` so another tab can send a replay here: the Search tab's
+    /// results open in this inspector rather than in one of their own.
+    pub(crate) fn open_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_replay_into(path, OpenTarget::ShowingTab, window, cx);
+    }
+
+    /// Opens `path` beside whatever is already open, which is what the
+    /// listing's "Open in New Tab" asks for.
+    pub(crate) fn open_replay_in_new_tab(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_replay_into(path, OpenTarget::NewTab, window, cx);
+    }
+
+    /// Shows `path` in a tab. `None` when nothing could be shown, because no
+    /// game data is loaded to read it with.
+    fn open_replay_into(
+        &mut self,
+        path: PathBuf,
+        target: OpenTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<TabShown> {
+        let Some(game_data) = self.game_data.clone() else {
+            tracing::warn!(
+                path = %path.display(),
+                "replay inspector: open requested before the WoWs directory was known"
+            );
+            return None;
+        };
+
+        // A replay that is already open is shown, not opened twice: the tab
+        // it is in comes forward, which is what the egui listing does with a
+        // replay it has already hydrated.
+        if let Some(existing) = self.open_panels.get(&path).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(existing.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            self.current_replay = Some(path);
+            cx.notify();
+            return Some(TabShown::BroughtForward);
+        }
+
+        // A plain open takes the place of the replay tab on screen, as the
+        // egui listing does; the reader asks for a second tab by name.
+        let replaced = (target == OpenTarget::ShowingTab).then(|| self.replaceable_panel(cx)).flatten();
+
+        let columns = default_columns(&self.replay_settings);
+        let personal_rating = self.personal_rating.clone();
+        let setup = PanelSetup { path: path.clone(), game_data, debug: self.debug_mode, columns, personal_rating };
+        let panel = cx.new(|cx| ReplayPanel::new(setup, window, cx));
+        // A panel's Actions menu can ask for its own replay to be rendered,
+        // which is this view's to do: it owns the dock the viewport opens in.
+        self.panel_events.push(cx.subscribe_in(&panel, window, |this, _panel, event: &RenderRequested, window, cx| {
+            let RenderRequested { path, alts } = event;
+            this.render_replay_with_alts(path.clone(), alts.clone(), window, cx);
+        }));
+        // A battle read through a mapping that is not its build's: said once, and
+        // the right one fetched so the next read is decoded properly.
+        self.panel_events.push(cx.subscribe_in(
+            &panel,
+            window,
+            |this, _panel, event: &super::panel::ConstantsMismatched, window, cx| {
+                this.recover_constants(event.build, event.version.clone(), window, cx);
+            },
+        ));
+        if let Some(showing) = &replaced {
+            self.open_panels.remove(&showing.path);
+        }
+        self.open_panels.insert(path.clone(), panel.downgrade());
+        self.current_replay = Some(path);
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+            if let Some(showing) = &replaced {
+                dock_area.remove_panel_id(showing.panel, window, cx);
+            }
+        });
+        // A closed viewport leaves a dangling weak handle behind, and the
+        // map is only walked when one is asked for, so it is swept here.
+        self.open_renderers.retain(|_, panel| panel.upgrade().is_some());
+        cx.notify();
+        Some(TabShown::Opened)
+    }
+
+    /// The replay tab a plain open replaces: one that is the active tab of
+    /// its own group.
+    ///
+    /// A dock can hold several groups, each with a replay showing, so the one
+    /// this view last opened or brought forward wins; failing that, any of
+    /// them does, in path order so the choice is at least repeatable.
+    fn replaceable_panel(&self, cx: &App) -> Option<ShowingReplay> {
+        let mut active: Vec<PanelId> = Vec::new();
+        if let Some(tree) = self.dock_area.read(cx).layout(DockPlacement::Center) {
+            tree.root().walk(&mut |node| {
+                if let PaneRef::Tabs { panels, active_ix } = node.kind()
+                    && let Some(id) = panels.get(active_ix)
+                {
+                    active.push(*id);
+                }
+            });
+        }
+
+        let mut showing: Vec<ShowingReplay> = self
+            .open_panels
+            .iter()
+            .filter_map(|(path, panel)| {
+                let panel = PanelId::from(panel.upgrade()?.entity_id());
+                active.contains(&panel).then(|| ShowingReplay { path: path.clone(), panel })
+            })
+            .collect();
+        showing.sort_by(|left, right| left.path.cmp(&right.path));
+
+        let current = self.current_replay.as_ref();
+        showing.iter().find(|shown| Some(&shown.path) == current).cloned().or_else(|| showing.into_iter().next())
+    }
+
+    /// Records `paths` in the Stats tab's session.
+    ///
+    /// Each replay is parsed on the background executor, as opening it would
+    /// be: the figures a session row carries come from the battle results,
+    /// which are only in the file. A replay that will not parse is logged and
+    /// skipped rather than taking the rest of the set down with it.
+    ///
+    /// `replace` forgets what is recorded first, which is what the listing's
+    /// "Set as Session Stats" means; "Add to" leaves it and appends.
+    fn record_session_stats(&mut self, paths: Vec<PathBuf>, replace: bool, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else {
+            tracing::warn!("replay inspector: session stats asked for before the WoWs directory was known");
+            return;
+        };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        cx.spawn(async move |_this, cx| {
+            if replace {
+                let cleared = crate::runtime::spawn(cx, {
+                    let pool = pool.clone();
+                    async move { wows_toolkit_config::queries::clear_session_stats(&pool).await }
+                })
+                .await;
+                if let Ok(Err(err)) = cleared {
+                    tracing::warn!("session stats: the session could not be cleared: {err}");
+                    return;
+                }
+            }
+
+            for path in paths {
+                let parsed = {
+                    let game_data = game_data.clone();
+                    let path = path.clone();
+                    cx.background_spawn(
+                        async move { wows_toolkit_replay_data::load::parse_replay(&path, &game_data, None) },
+                    )
+                    .await
+                };
+                let stat = match parsed {
+                    Ok(parsed) => parsed.session_stat,
+                    Err(err) => {
+                        tracing::warn!(path = %path.display(), "session stats: the replay would not parse: {err}");
+                        continue;
+                    }
+                };
+                let Some(stat) = stat else {
+                    tracing::warn!(path = %path.display(), "session stats: the replay names no recording player");
+                    continue;
+                };
+
+                let row = stat.to_row();
+                let pool = pool.clone();
+                let written = crate::runtime::spawn(cx, async move {
+                    wows_toolkit_config::queries::add_session_stat(&pool, &row).await
+                })
+                .await;
+                match written {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => tracing::warn!("session stats: the battle could not be recorded: {err}"),
+                    Err(err) => tracing::warn!("session stats: the write did not complete: {err}"),
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Opens a playback viewport on `path`, in a dock tab of its own.
+    ///
+    /// A second ask for the same replay brings the tab it is in forward
+    /// rather than baking the battle twice.
+    pub(crate) fn render_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.render_replay_with_alts(path, Vec::new(), window, cx);
+    }
+
+    /// The same, reading the battle through other recordings of it as well.
+    pub(crate) fn render_replay_with_alts(
+        &mut self,
+        path: PathBuf,
+        alts: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(game_data) = self.game_data.clone() else {
+            tracing::warn!(
+                path = %path.display(),
+                "replay inspector: render requested before the WoWs directory was known"
+            );
+            return;
+        };
+
+        if let Some(existing) = self.open_renderers.get(&path).and_then(|panel| panel.upgrade()) {
+            // A recording added since this viewport was baked is not on the map
+            // it is showing, so it is baked again rather than brought forward
+            // as it is.
+            let stale = existing.read(cx).baked_alts() != alts.as_slice();
+            if stale {
+                existing.update(cx, |panel, cx| panel.rebake_with_alts(alts, cx));
+            }
+            let id = PanelId::from(existing.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
+            return;
+        }
+
+        let title: SharedString = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned())
+            .into();
+        let link = self.collab.link();
+        let panel = cx.new(|cx| {
+            let mut panel = ReplayRendererPanel::new(path.clone(), alts, title, game_data, window, cx);
+            panel.seed_collab(link, cx);
+            panel
+        });
+        self.renderer_events.push(cx.subscribe_in(&panel, window, Self::on_renderer_event));
+        self.open_renderers.insert(path, panel.downgrade());
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Hands every open viewport this app's end of the session, when whether
+    /// there is one has changed.
+    ///
+    /// A session can start or stop while a viewport is open, and a viewport
+    /// built before one started would otherwise never hear about it.
+    fn share_session_with_renderers(&mut self, cx: &mut Context<Self>) {
+        let active = self.collab.is_active();
+        if active == self.session_shared {
+            return;
+        }
+        self.session_shared = active;
+        // One link each rather than one cloned to all: a link holds what its own
+        // viewport has drawn while there is no session to hold it, and a shared
+        // one would put every viewport's drawings on every other.
+        for panel in self.open_renderers.values() {
+            if let Some(panel) = panel.upgrade() {
+                let link = self.collab.link();
+                panel.update(cx, |panel, cx| panel.set_collab(link, cx));
+            }
+        }
+        // The tactics board is a window this view does not own, and it draws in
+        // the session as a viewport does.
+        cx.emit(SessionShared(self.collab.link()));
+    }
+
+    /// Whether a session is running, for a window this view does not own.
+    pub fn session_link(&self) -> wows_toolkit_services::collab::CollabLink {
+        self.collab.link()
+    }
+
+    /// Opens a viewport on a battle the session is playing elsewhere.
+    ///
+    /// For a reader with no copy of that replay, which is the whole reason the
+    /// end that has it sends what it draws. One viewport per window: asking
+    /// twice brings the open one forward rather than drawing the same frames
+    /// into two panels.
+    pub fn watch_shared_window(
+        &mut self,
+        shared: wows_toolkit_services::collab::SharedWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let replay_id = shared.replay_id;
+        if let Some(open) = self.watched.get(&replay_id).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(open.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
+            return;
+        }
+        let link = self.collab.link();
+        let game_data = self.game_data();
+        let panel = cx.new(|cx| crate::watched_playback::WatchedPlayback::new(shared, link, game_data, cx));
+        self.watched.insert(replay_id, panel.downgrade());
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Opens what the host has asked every peer to open.
+    ///
+    /// Read as the session is polled rather than once when it starts: the ask
+    /// arrives whenever the host makes it.
+    fn open_what_the_host_asked_for(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let asked = self.collab.link().take_forced_windows();
+        if asked.is_empty() {
+            return;
+        }
+        let shared = self.collab.shared_windows();
+        for window_id in asked {
+            let Some(found) = shared.iter().find(|one| one.replay_id == window_id).cloned() else { continue };
+            self.watch_shared_window(found, window, cx);
+        }
+    }
+
+    /// Answers a viewport that asked for a window of its own, or for an
+    /// armor viewer on one of the battle's ships.
+    fn on_renderer_event(
+        &mut self,
+        panel: &Entity<ReplayRendererPanel>,
+        event: &RendererEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            RendererEvent::PopOut => self.pop_out_renderer(panel.clone(), window, cx),
+            // Passed further up: the armor viewer is another tab, which this
+            // view does not own either.
+            RendererEvent::ShowArmor { param_index, display_name, hits, incoming } => cx.emit(ShowArmorRequested {
+                param_index: param_index.clone(),
+                display_name: display_name.clone(),
+                hits: hits.clone(),
+                incoming: incoming.clone(),
+            }),
+            RendererEvent::ArmorFollowed { hits, health, at } => {
+                cx.emit(ArmorFollowed { at: *at, hits: hits.clone(), health: *health })
+            }
+        }
+    }
+
+    /// Moves a viewport out of the dock and into a window of its own.
+    ///
+    /// The same entity is re-hosted rather than a new one built: the baked
+    /// track and the renderer it draws through come with it, so nothing is
+    /// walked or loaded twice. GPUI entities are not owned by a window, which
+    /// is what makes that possible.
+    pub(crate) fn pop_out_renderer(
+        &mut self,
+        panel: Entity<ReplayRendererPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if panel.read(cx).is_popped_out() {
+            return;
+        }
+        let title = panel.read(cx).path().file_stem().map(|stem| stem.to_string_lossy().into_owned());
+
+        // Out of the dock first: the same entity drawn in two places would
+        // fight over the one renderer it rasterises through.
+        let id = PanelId::from(panel.entity_id());
+        self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(id, window, cx));
+
+        let options = crate::window_shell::options(
+            wows_toolkit_config::WindowKind::ReplayRenderer,
+            title.clone().unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned()),
+            cx,
+        );
+        let opened = cx.open_window(options, {
+            let panel = panel.clone();
+            move |window, cx| {
+                crate::window_shell::remember(wows_toolkit_config::WindowKind::ReplayRenderer, window, cx);
+                // Through a `Shell` so the panel's toasts and dialogs are drawn
+                // in this window too, not only in the one the dock lives in.
+                let view: AnyView = cx.new(|_cx| crate::window_shell::Shell::new(panel)).into();
+                cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
+            }
+        });
+
+        match opened {
+            Ok(_) => panel.update(cx, |panel, cx| panel.mark_popped_out(cx)),
+            Err(err) => {
+                // The window would not open, so the viewport goes back where
+                // it was rather than vanishing.
+                tracing::warn!("replay renderer: the window could not be opened: {err}");
+                self.dock_area.update(cx, |dock_area, cx| {
+                    dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// The per-build game-data cache this tab loads replays through, once
+    /// the WoWs directory is known. Shared rather than cloned fresh so a
+    /// build another tab needs is loaded once for the whole app.
+    /// Hands the view a game-data cache directly, which is all
+    /// [`Self::open_replay`] waits on. Skips the directory scan and the
+    /// startup build preload `apply_settings` starts, neither of which a test
+    /// about the dock has anything to say about.
+    #[cfg(test)]
+    pub(crate) fn seed_game_data(&mut self, wows_dir: &str) {
+        self.game_data = Some(GameDataCache::new(PathBuf::from(wows_dir)));
+    }
+
+    /// The listing on screen, so a test can raise what its directory watcher
+    /// raises.
+    #[cfg(test)]
+    pub(crate) fn browser_for_test(&self) -> &Entity<ReplayBrowser> {
+        self.browser()
+    }
+
+    /// The listing of the tab for `root`, as the tab compares it.
+    #[cfg(test)]
+    pub(crate) fn folder_browser_for_test(&self, root: &std::path::Path) -> Option<&Entity<ReplayBrowser>> {
+        self.folders
+            .iter()
+            .find(|folder| *folder.source() == FolderSource::Chosen(root.to_path_buf()))
+            .map(ReplayFolder::browser)
+    }
+
+    pub(crate) fn game_data(&self) -> Option<GameDataCache> {
+        self.game_data.clone()
+    }
+
+    /// The session's expected-values table, once it has loaded.
+    pub(crate) fn personal_rating(&self) -> Option<&Arc<PersonalRatingData>> {
+        self.personal_rating.as_ref()
+    }
+
+    /// Adopts the session's expected-values table and pushes it into every
+    /// open replay tab, so a replay opened before the table loaded gets its
+    /// Personal Rating column filled in rather than staying empty until it is
+    /// reopened. Called from `App::apply_session_stats`.
+    ///
+    /// Takes the table itself, not an option: a caller that has none must not
+    /// be able to clear one already in hand, which would leave later tabs
+    /// unrated while the tabs open at the time kept their ratings.
+    pub(crate) fn set_personal_rating(&mut self, table: Arc<PersonalRatingData>, cx: &mut Context<Self>) {
+        self.personal_rating = Some(table.clone());
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
+            }
+        }
+        self.repair_personal_ratings(cx);
+        cx.notify();
+    }
+
+    /// Rates every index row stored without a rating, then rereads the
+    /// listings so their chips show.
+    ///
+    /// Rows are stored unrated when they are indexed before the table has
+    /// loaded, which is what the startup pass ordinarily does. A request made
+    /// while a repair runs is served by one more repair after it, which also
+    /// covers rows written while the first one read.
+    fn repair_personal_ratings(&mut self, cx: &mut Context<Self>) {
+        if let RatingRepair::Running { again } = &mut self.rating_repair {
+            *again = true;
+            return;
+        }
+        let Some(table) = self.personal_rating.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        self.rating_repair = RatingRepair::Running { again: false };
+        cx.spawn(async move |this, cx| {
+            // Waited on from a GPUI background thread rather than awaited on a
+            // tokio worker: the test scheduler refuses a wakeup from one.
+            let repaired = crate::runtime::block_on(cx, move || async move {
+                wows_toolkit_replay_data::replay_index::repair_missing_pr(&pool, &table).await
+            })
+            .await;
+
+            let _ = this.update(cx, |view, cx| {
+                match repaired {
+                    Ok(0) => {}
+                    Ok(filled) => {
+                        tracing::info!(filled, "personal rating: rated the index rows stored without a rating");
+                        view.reload_index_summaries(cx);
+                    }
+                    Err(err) => tracing::warn!("personal rating: the unrated index rows were not rated: {err}"),
+                }
+
+                let again = view.rating_repair == RatingRepair::Running { again: true };
+                view.rating_repair = RatingRepair::Idle;
+                if again {
+                    view.repair_personal_ratings(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Rates what an index pass stored unrated because it began before the
+    /// table arrived. `read_with` is the table the pass was given.
+    pub(crate) fn index_pass_rated(&mut self, read_with: Option<&Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
+        if read_with.is_none() {
+            self.repair_personal_ratings(cx);
+        }
+    }
+
+    /// Flips the session debug-mode flag and pushes the new value into every
+    /// currently open replay tab (`open_panels`'s live entries; closed tabs'
+    /// stale weak handles just fail to upgrade and are skipped), so toggling
+    /// debug mode takes effect immediately rather than only on the next
+    /// replay opened. Called from `App::toggle_debug_mode` (the app-wide
+    /// Ctrl+Shift+D shortcut, `app.rs`) -- this crate has no enable UI of its
+    /// own for debug mode.
+    pub(crate) fn set_debug_mode(&mut self, debug_mode: bool, cx: &mut Context<Self>) {
+        self.debug_mode = debug_mode;
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_debug(debug_mode, cx));
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Open manually": the header toolbar's file-picker button. Mirrors the
+    /// egui app's `build_replay_header` open-manually handler
+    /// (`ui/replay_parser/mod.rs:3659`) exactly -- same file filter -- except
+    /// the picked path opens through this port's own dock flow
+    /// (`open_replay`) rather than the egui app's `parse_replay_from_path`
+    /// background task. A cancelled dialog is a no-op.
+    pub(crate) fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let asked = wows_toolkit_services::dialog::pick_file(None, Some(wows_toolkit_services::dialog::REPLAYS));
+        cx.spawn(async move |this, cx| {
+            let Some(file) = crate::dialog::chosen(asked, &this, cx).await else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                // What the Settings drawer reports as the current replay: the one
+                // the reader named, which is what the egui app writes here too.
+                crate::settings_store::save(wows_toolkit_viewmodel::settings::keys::CURRENT_REPLAY_PATH, &file, cx);
+                this.open_replay(file, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Flips "Autoload Latest Replay", which the directory watcher reads when a
+    /// replay lands, and writes it to the row the egui app reads.
+    pub(crate) fn adopt_autoload(&mut self, value: bool, cx: &mut Context<Self>) {
+        if self.auto_load_latest_replay != value {
+            self.auto_load_latest_replay = value;
+            cx.notify();
+        }
+    }
+
+    fn set_auto_load_latest_replay(&mut self, value: bool, cx: &mut Context<Self>) {
+        self.auto_load_latest_replay = value;
+        crate::settings_store::save(wows_toolkit_viewmodel::settings::keys::AUTO_LOAD_LATEST_REPLAY, &value, cx);
+        cx.emit(AutoloadChanged(value));
+        cx.notify();
+    }
+
+    /// The grouping the listing on screen shows. The listings are the single
+    /// source of truth for it; the listing's options only show it.
+    pub(crate) fn grouping(&self, cx: &App) -> ReplayGrouping {
+        self.browser().read(cx).grouping()
+    }
+
+    /// Shows or hides the replay listing beside the open replays.
+    fn set_listing_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        if self.replay_settings.listing_collapsed == collapsed {
+            return;
+        }
+        self.set_column_filter(|settings| settings.listing_collapsed = collapsed, cx);
+    }
+
+    /// Switches every listing's grouping strategy. The only writer, so the
+    /// stored row cannot drift from the listings.
+    fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+        self.adopt_grouping(grouping, cx);
+        // Written back as the egui header writes it, so the listing is grouped
+        // the same way on the next launch.
+        self.set_column_filter(|settings| settings.grouping = grouping, cx);
+    }
+
+    /// Shows `grouping` without writing it back, for the seed from the stored
+    /// row: announcing that would ask the app to save what it just read.
+    fn adopt_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+        for browser in self.browsers() {
+            browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        }
+        cx.notify();
+    }
+
+    /// Applies one column-filter checkbox's change: mutates `replay_settings`
+    /// via `apply`, recomputes the visible-column set
+    /// (`columns::default_columns`), and pushes it into every currently open
+    /// replay tab (mirroring `set_debug_mode`'s live-propagation pattern) so
+    /// the table(s) update immediately rather than only on the next replay
+    /// opened.
+    /// Replaces the whole settings blob, for an edit made in the Settings drawer
+    /// rather than through this header's own checkboxes.
+    pub(crate) fn set_replay_settings(&mut self, settings: ReplaySettings, cx: &mut Context<Self>) {
+        // Adopted, not announced: this came from the row, so saying it
+        // changed would ask the app to write back what it just read.
+        self.adopt_replay_settings(|current| *current = settings, cx);
+    }
+
+    /// An edit made here, which the app writes back to the shared row.
+    fn set_column_filter(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
+        self.adopt_replay_settings(apply, cx);
+        cx.emit(ReplaySettingsChanged(self.replay_settings.clone()));
+    }
+
+    /// Applies `apply` and pushes the resulting columns into every open tab.
+    fn adopt_replay_settings(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
+        apply(&mut self.replay_settings);
+        let columns = default_columns(&self.replay_settings);
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_columns(columns.clone(), cx));
+            }
+        }
+        cx.notify();
+    }
+}
+
+/// The listing's own header: its caption, the selected folder's search and
+/// index actions, and the listing's options and open actions, which belong to
+/// the listing rather than to whichever replay is showing. The status bar
+/// shows and hides the listing.
+fn listing_header(entity: Entity<ReplayInspectorView>, view: &ReplayInspectorView, cx: &App) -> impl IntoElement {
+    let searching = entity.downgrade();
+    let search = header_action(
+        Button::new("replay-listing-search").icon(crate::icons::Glyph::Search),
+        view.search_offer(),
+        t!("ui.replay.search_these_replays").into_owned(),
+    )
+    .on_click(move |_event, window, cx| {
+        let _ = searching.update(cx, |view, cx| view.search_selected_folder(window, cx));
+    });
+    let indexing = entity.downgrade();
+    let index = header_action(
+        Button::new("replay-listing-index").icon(crate::icons::Glyph::Database),
+        view.index_offer(),
+        t!("ui.index_folder.tooltip").into_owned(),
+    )
+    .on_click(move |_event, _window, cx| {
+        let _ = indexing.update(cx, |view, cx| view.index_selected_folder(cx));
+    });
+    let details = FolderDetails {
+        path: view.selected_folder_path(),
+        game_data_ready: matches!(view.game_data_status, GameDataStatus::Ready(_)),
+    };
+
+    h_flex()
+        .id("replay-listing-header")
+        .test_support()
+        .flex_none()
+        .gap_1()
+        .items_center()
+        .px_2()
+        .py_1()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .child(t!("ui.replay.listing_caption").to_string()),
+        )
+        .child(search)
+        .child(index)
+        .child(listing_options_popover(
+            entity.clone(),
+            view.replay_settings.clone(),
+            view.auto_load_latest_replay,
+            details,
+        ))
+        .child(listing_open_menu(entity))
+}
+
+/// An icon action in the listing header, disabled with the reason as its
+/// tooltip when it is not offered.
+fn header_action(button: Button, offer: Offer, tooltip: String) -> Button {
+    let button = button.ghost().small();
+    match offer {
+        Offer::Enabled => button.tooltip(tooltip),
+        Offer::Disabled(reason) => button.disabled(true).tooltip(reason),
+    }
+}
+
+/// What the listing options say about the selected folder.
+struct FolderDetails {
+    /// The folder's whole path, once it is known.
+    path: Option<PathBuf>,
+    game_data_ready: bool,
+}
+
+/// The listing's open actions: one replay file, or a directory of replays
+/// opened as a tab of its own in the strip under this header.
+fn listing_open_menu(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
+    let opening = entity.downgrade();
+    Button::new("replay-listing-open")
+        .icon(IconName::FolderOpen)
+        .ghost()
+        .small()
+        .tooltip(t!("ui.replay.open").to_string())
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+            let file = opening.clone();
+            let directory = opening.clone();
+            menu.item(PopupMenuItem::new(t!("ui.replay.open_file").into_owned()).on_click(move |_event, window, cx| {
+                let Some(view) = file.upgrade() else { return };
+                view.update(cx, |view, cx| view.open_manually(window, cx));
+            }))
+            .item(PopupMenuItem::new(t!("ui.replay.open_directory").into_owned()).on_click(
+                move |_event, window, cx| {
+                    let Some(view) = directory.upgrade() else { return };
+                    view.update(cx, |view, cx| view.browse_folder(window, cx));
+                },
+            ))
+        })
+}
+
+/// One column-filter checkbox in the listing options: `checked` reflects
+/// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
+/// and recomputes the visible columns. Built once per optional column the egui
+/// app's `build_replay_header` (`ui/replay_parser/mod.rs:3697-3711`) exposes a
+/// toggle for and that has a live column in this port: Raw XP, Observed
+/// Damage, Heals. Received Damage and Distance Traveled stay at
+/// `ReplaySettings`'s config defaults, as the egui app never lets the user
+/// toggle those.
+fn column_filter_checkbox(
+    entity: Entity<ReplayInspectorView>,
+    id: &'static str,
+    label: String,
+    checked: bool,
+    apply: impl Fn(&mut ReplaySettings, bool) + Copy + 'static,
+) -> impl IntoElement {
+    Checkbox::new(id).label(label).checked(checked).on_click(move |checked: &bool, _window, cx: &mut App| {
+        let checked = *checked;
+        entity.update(cx, |view, cx| view.set_column_filter(move |settings| apply(settings, checked), cx));
+    })
+}
+
+/// The listing's options: the selected folder's path and the actions on the
+/// folder as a whole, then autoload, grouping and the column filters of the
+/// egui app's `build_replay_header` (`ui/replay_parser/mod.rs:3657`).
+/// `settings`, `auto_load` and `details` are snapshots: the `.content()`
+/// closure is rebuilt on every render of this view, so it reflects the latest
+/// state.
+///
+/// Grouping is a row of exclusive buttons rather than a combo: a combo's list
+/// is drawn outside the popover, and a click on it would dismiss the popover
+/// before the choice landed. The egui column popup carries a fourth toggle,
+/// Entity ID, which neither app has a column for; it is left out here.
+fn listing_options_popover(
+    entity: Entity<ReplayInspectorView>,
+    settings: ReplaySettings,
+    auto_load: bool,
+    details: FolderDetails,
+) -> impl IntoElement {
+    Popover::new("replay-listing-options-menu")
+        .anchor(Anchor::TopRight)
+        .trigger(
+            Button::new("replay-listing-options")
+                .icon(IconName::Settings2)
+                .ghost()
+                .small()
+                .tooltip(t!("ui.replay.listing_options").to_string()),
+        )
+        .content(move |_state, _window, cx| {
+            let popover = cx.entity();
+            let autoload_entity = entity.clone();
+            let grouping_buttons: Vec<_> = GROUPINGS
+                .into_iter()
+                .map(|offered| {
+                    let chosen = settings.grouping == offered;
+                    let entity = entity.clone();
+                    crate::ui::selectable(
+                        ("replay-listing-grouping", offered as usize),
+                        chosen,
+                        Button::new(("replay-listing-grouping-button", offered as usize))
+                            .label(t!(grouping_label_key(offered)).into_owned())
+                            .compact()
+                            .selected(chosen)
+                            .on_click(move |_event, _window, cx| {
+                                entity.update(cx, |view, cx| view.set_grouping(offered, cx));
+                            }),
+                    )
+                })
+                .collect();
+
+            // Where a long path wraps.
+            const WIDTH: Pixels = px(300.);
+
+            v_flex()
+                .w(WIDTH)
+                .gap_1()
+                .p_1()
+                .when_some(details.path.as_deref(), |menu, path| menu.child(folder_path_line(path)))
+                .child(check_game_data_item(entity.clone(), popover.clone()))
+                .when_some(details.path.clone(), |menu, path| {
+                    menu.child(directory_stats_item(entity.clone(), path, details.game_data_ready, popover.clone()))
+                })
+                .child(crate::ui::rule_h(cx))
+                .child(
+                    Checkbox::new("replay-listing-auto-load-latest")
+                        .label(t!("ui.replay.autoload_latest").to_string())
+                        .checked(auto_load)
+                        .tooltip(t!("ui.replay.autoload_latest_tooltip").to_string())
+                        .on_click(move |checked: &bool, _window, cx: &mut App| {
+                            let checked = *checked;
+                            autoload_entity.update(cx, |view, cx| view.set_auto_load_latest_replay(checked, cx));
+                        }),
+                )
+                .child(crate::ui::rule_h(cx))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.group_label").to_string()))
+                .child(h_flex().gap_1().flex_wrap().children(grouping_buttons))
+                .child(crate::ui::rule_h(cx))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.column_filters").to_string()))
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-listing-filter-raw-xp",
+                    t!("stat.raw_xp").into_owned(),
+                    settings.show_raw_xp,
+                    |settings, value| settings.show_raw_xp = value,
+                ))
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-listing-filter-observed-damage",
+                    t!("ui.replay.column.observed_damage").into_owned(),
+                    settings.show_observed_damage,
+                    |settings, value| settings.show_observed_damage = value,
+                ))
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-listing-filter-heals",
+                    t!("ui.replay.column.heals").into_owned(),
+                    settings.show_heals,
+                    |settings, value| settings.show_heals = value,
+                ))
+        })
+}
+
+/// The selected folder's whole path, selectable for copying. It wraps rather
+/// than truncating, and says itself again on hover.
+fn folder_path_line(path: &std::path::Path) -> impl IntoElement {
+    let shown = shown_path(path);
+    let hover = shown.clone();
+    h_flex()
+        .id("replay-listing-folder-path")
+        .test_support()
+        .aria_label(shown.clone())
+        .gap_1()
+        .items_start()
+        .text_xs()
+        .text_color(crate::theme::text_dim())
+        .child(crate::icons::icon(crate::icons::Glyph::Folder))
+        .child(div().flex_1().min_w_0().child(crate::ui::selectable_text("replay-listing-folder-path-text", shown)))
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+}
+
+/// Asks which of the listed replays' game data is missing, with what that
+/// does said under it.
+fn check_game_data_item(entity: Entity<ReplayInspectorView>, popover: Entity<PopoverState>) -> impl IntoElement {
+    v_flex()
+        .gap_0p5()
+        .child(
+            Button::new("directory-game-data")
+                .icon(crate::icons::Glyph::Download)
+                .label(t!("ui.replay.check_game_data").to_string())
+                .compact()
+                .w_full()
+                .on_click(move |_event, window, cx| {
+                    entity.update(cx, |view, cx| {
+                        let missing = view.browser().read(cx).missing_builds();
+                        cx.emit(CheckGameDataRequested(missing));
+                    });
+                    popover.update(cx, |state, cx| state.dismiss(window, cx));
+                }),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.check_game_data_tooltip").to_string()),
+        )
+}
+
+/// Opens the stats of every replay under `directory` in a tab of its own.
+fn directory_stats_item(
+    entity: Entity<ReplayInspectorView>,
+    directory: PathBuf,
+    game_data_ready: bool,
+    popover: Entity<PopoverState>,
+) -> impl IntoElement {
+    Button::new("directory-stats")
+        .icon(IconName::ChartPie)
+        .label(t!("ui.stats.open_directory_stats").to_string())
+        .compact()
+        .w_full()
+        .disabled(!game_data_ready)
+        .tooltip(if game_data_ready {
+            t!("ui.stats.open_directory_stats_tooltip").to_string()
+        } else {
+            t!("ui.stats.directory_stats_unavailable").to_string()
+        })
+        .on_click(move |_event, window, cx| {
+            entity.update(cx, |_view, cx| cx.emit(DirectoryStatsRequested(directory.clone())));
+            popover.update(cx, |state, cx| state.dismiss(window, cx));
+        })
+}
+
+/// The replay pane with nothing open: the faint outline of a map inside a
+/// dashed drop target, and what can be dropped on it.
+fn empty_pane(cx: &App) -> impl IntoElement {
+    let outline = crate::theme::text_dim().opacity(0.35);
+    let faint = crate::theme::text_dim().opacity(0.12);
+
+    v_flex()
+        .id("replay-pane-empty")
+        .test_support()
+        .max_w_full()
+        .items_center()
+        .gap_3()
+        .p_6()
+        .border_2()
+        .border_dashed()
+        .border_color(outline)
+        .rounded(cx.theme().radius_lg)
+        .child(sample_map(outline, faint))
+        .child(div().text_sm().child(t!("ui.replay.select_replay").into_owned()))
+        .child(
+            div()
+                .max_w(px(260.))
+                .text_center()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.drop_hint").into_owned()),
+        )
+}
+
+impl Render for ReplayInspectorView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.grouping(cx) != self.replay_settings.grouping {
+            self.adopt_grouping(self.replay_settings.grouping, cx);
+        }
+        let dock_content: AnyElement = div()
+            .relative()
+            .size_full()
+            .child(self.dock_area.clone())
+            .when(!self.has_dock_content, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p_2()
+                        .overflow_hidden()
+                        .bg(cx.theme().background)
+                        .child(empty_pane(cx)),
+                )
+            })
+            .into_any_element();
+
+        // The listing says so itself while the game data loads (it is what
+        // the rows are named from), so the banner carries only the failure,
+        // which nothing else reports.
+        let status_banner = match &self.game_data_status {
+            GameDataStatus::Failed(reason) => Some(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.replay.game_data_failed", error = reason).to_string())
+                    .into_any_element(),
+            ),
+            GameDataStatus::Loading { .. } | GameDataStatus::Ready(_) => None,
+        };
+
+        let entity = cx.entity();
+
+        self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
+        crate::collab::bind(&self.collab, &entity, cx);
+        // The session's event inbox is unbounded, so it is drained here every
+        // draw rather than left to grow for as long as the session runs. What it
+        // raised is said after the draw: a message queued during one is not on
+        // the frame being drawn.
+        let notices = self.collab.poll();
+        if !notices.is_empty() {
+            cx.defer_in(window, move |_this, window, cx| {
+                for notice in notices {
+                    crate::collab::say(&notice, window, cx);
+                }
+            });
+        }
+        self.share_session_with_renderers(cx);
+        cx.defer_in(window, Self::open_what_the_host_asked_for);
+
+        v_flex()
+            .size_full()
+            .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
+            .child(
+                // A plain flex row rather than `h_flex`, which centres its
+                // children: this is the body, and the listing beside the
+                // replays is a full-height column rather than a toolbar item.
+                div().flex().flex_row().flex_1().min_h(px(0.)).child({
+                    let folder_tabs = self.render_folder_tabs(cx);
+                    let body = match self.render_folder_notice(cx) {
+                        Some(missing) => missing,
+                        None => self.browser().clone().into_any_element(),
+                    };
+                    let listing = v_flex()
+                        .size_full()
+                        .child(listing_header(entity.clone(), self, cx))
+                        .child(folder_tabs)
+                        .child(div().flex_1().min_h(px(0.)).child(body));
+                    SideSplit::new(
+                        "replay-listing",
+                        &self.listing_width,
+                        !self.replay_settings.listing_collapsed,
+                        listing,
+                        dock_content,
+                    )
+                }),
+            )
+    }
+}
+
+impl crate::collab_popover::SessionHost for ReplayInspectorView {
+    fn collab(&self) -> &wows_toolkit_services::collab::CollabState {
+        &self.collab
+    }
+
+    fn collab_mut(&mut self) -> &mut wows_toolkit_services::collab::CollabState {
+        &mut self.collab
+    }
+
+    fn name_input(&self) -> &Entity<InputState> {
+        &self.collab_name
+    }
+
+    fn token_input(&self) -> &Entity<InputState> {
+        &self.collab_token
+    }
+
+    fn request_tactics_board(&mut self, cx: &mut Context<Self>) {
+        cx.emit(TacticsBoardRequested);
+    }
+
+    fn watch_shared_window(
+        &mut self,
+        shared: wows_toolkit_services::collab::SharedWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        ReplayInspectorView::watch_shared_window(self, shared, window, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InspectorSettings;
+    use super::ReplayInspectorView;
+    use gpui_kit::AppContext as _;
+    use gpui_kit::Entity;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::WindowHandle;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestAppContextExt;
+    use gpui_kit::test::TestWindowExt as _;
+    use std::path::PathBuf;
+
+    /// The test window's height, which the listing is measured against.
+    const WINDOW_HEIGHT: gpui_kit::Pixels = px(800.);
+
+    /// Every grouping names a catalogue entry, since the options draw whatever
+    /// the key resolves to and an absent one draws the key itself.
+    #[test]
+    fn every_grouping_has_a_name_in_the_catalog() {
+        for grouping in super::GROUPINGS {
+            let key = super::grouping_label_key(grouping);
+            let rendered = rust_i18n::t!(key).into_owned();
+            assert_ne!(rendered, key, "no catalog entry for {key}");
+        }
+    }
+
+    /// Settings with a directory named, which is all `open_replay` waits on
+    /// before it builds a panel. The directory does not have to exist: the
+    /// panel reports the failed parse itself.
+    fn settings() -> InspectorSettings {
+        InspectorSettings {
+            wows_dir: "G:/does-not-exist".to_string(),
+            game_data_cache_dir: String::new(),
+            auto_dump_game_data: false,
+            data_sharing: Default::default(),
+            debug_mode: false,
+            replay_settings: Default::default(),
+            auto_load_latest_replay: false,
+            locale: None,
+            collab_display_name: String::new(),
+        }
+    }
+
+    /// The view inside a `Root`, which the dock's own overlays need under
+    /// them.
+    fn open_view(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, Entity<ReplayInspectorView>) {
+        cx.update(gpui_kit::init);
+        let view = std::cell::RefCell::new(None);
+        let window = cx.open_window(size(px(1200.), WINDOW_HEIGHT), |window, cx| {
+            let inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
+            *view.borrow_mut() = Some(inspector.clone());
+            gpui_kit::component::Root::new(inspector, window, cx)
+        });
+        let view = view.borrow_mut().take().expect("the view was built inside the window");
+        (window, view)
+    }
+
+    /// The listing's own controls draw in its header; rendering belongs to a
+    /// replay, so an opened one carries it in its own Actions menu rather
+    /// than the header carrying it for whichever replay happens to be showing.
+    #[gpui_kit::test]
+    fn the_listing_header_carries_the_listing_controls(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-header-render").is_none(), "rendering is not a header control");
+            assert!(window.try_find("replay-listing-search").is_some());
+            assert!(window.try_find("replay-listing-index").is_some());
+            assert!(window.try_find("replay-listing-options").is_some());
+            assert!(window.try_find("replay-listing-open").is_some());
+        })
+        .expect("the window is open");
+
+        view.update(cx, |view, cx| view.set_listing_collapsed(true, cx));
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        // The listing slides shut before it leaves.
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-listing-options").is_none(), "the listing header is away with it");
+        })
+        .expect("the window is open");
+    }
+
+    /// The "Replays" header comes first, the folder tabs directly under it,
+    /// then the listing.
+    #[gpui_kit::test]
+    fn the_listing_header_sits_above_the_folder_tabs(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let header = window.find("replay-listing-header").bounds();
+            let tabs = window.find("replay-folder-tabs").bounds();
+            let rows = window.find("replay-browser-rows").bounds();
+            assert!(header.bottom() <= tabs.top(), "the header {header:?} is above the tabs {tabs:?}");
+            assert!(tabs.bottom() <= rows.top(), "the tabs {tabs:?} are above the listing {rows:?}");
+        })
+        .expect("the window is open");
+    }
+
+    /// The selected folder's path and the actions on the folder as a whole
+    /// are in the listing options, and nothing above the listing repeats
+    /// them. Checking game data asks the app and closes the options.
+    #[gpui_kit::test]
+    fn the_listing_options_carry_the_folder_and_its_actions(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let root = std::fs::canonicalize(dir.path()).expect("the directory exists");
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| view.open_folder(root.clone(), window, cx));
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        let asked = std::rc::Rc::new(std::cell::Cell::new(false));
+        let heard = std::rc::Rc::clone(&asked);
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&view, move |_view, _event: &super::CheckGameDataRequested, _cx| heard.set(true))
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("directory-game-data").is_none(), "the actions live behind the cog");
+            window.click("replay-listing-options", cx);
+            window.render_frame(cx);
+            let shown = wows_toolkit_replay_data::paths::shown_path(&root);
+            assert_eq!(window.find("replay-listing-folder-path").label(), Some(shown.as_str()));
+            assert_eq!(window.find("directory-stats").disabled(), Some(true), "stats wait for the game data");
+            window.click("directory-game-data", cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+
+        assert!(asked.get(), "checking game data is asked of the app");
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("directory-game-data").is_none(), "and the options close");
+        })
+        .expect("the window is open");
+    }
+
+    /// The listing rendered at its content height, centred in an otherwise
+    /// empty tab, for as long as its row was an `h_flex` (which installs
+    /// `items_center`).
+    #[gpui_kit::test]
+    fn the_listing_runs_down_the_tab(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        let listing = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            listing.size.height > WINDOW_HEIGHT / 2.,
+            "the listing runs down the tab rather than sitting at its content height, got {:?}",
+            listing.size.height
+        );
+    }
+
+    /// The boundary between the listing and the replays beside it drags.
+    #[gpui_kit::test]
+    fn the_listing_is_adjustable_in_width(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            // The boundary sits on the listing's trailing edge.
+            let from = gpui_kit::point(before.right(), before.center().y);
+            window.drag(from, gpui_kit::point(from.x + px(80.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let after = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            after.size.width > before.size.width,
+            "the listing widened with the drag, from {:?} to {:?}",
+            before.size.width,
+            after.size.width
+        );
+    }
+
+    /// The listing keeps its place, and its drag, once a replay is open
+    /// beside it: the dock that replaces the placeholder is the thing most
+    /// likely to take the space over.
+    #[gpui_kit::test]
+    fn the_listing_survives_a_replay_being_opened_beside_it(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                view.update(cx, |view, cx| {
+                    view.seed_game_data("G:/does-not-exist");
+                    view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                });
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(before.size.width > px(0.), "the listing still has width with a replay open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let from = gpui_kit::point(before.right(), before.center().y);
+            window.drag(from, gpui_kit::point(from.x + px(80.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let after = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            after.size.width > before.size.width,
+            "the boundary still drags with a replay open, from {:?} to {:?}",
+            before.size.width,
+            after.size.width
+        );
+    }
+
+    /// A plain open takes the place of the replay on screen, and "Open in New
+    /// Tab" is how a second one is asked for.
+    #[gpui_kit::test]
+    fn a_plain_open_replaces_the_replay_on_screen(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| {
+                view.apply_settings(settings(), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1, "the first replay opens a tab");
+
+                view.open_replay(PathBuf::from("second.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1, "the second takes its place");
+                assert!(view.open_panels.contains_key(&PathBuf::from("second.wowsreplay")));
+
+                view.open_replay_in_new_tab(PathBuf::from("third.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 2, "a new tab is asked for by name");
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// Re-opening a replay already open brings its tab forward rather than
+    /// replacing it with a second copy of itself.
+    #[gpui_kit::test]
+    fn re_opening_the_showing_replay_leaves_it_alone(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| {
+                view.apply_settings(settings(), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1);
+                assert!(view.open_panels.contains_key(&PathBuf::from("first.wowsreplay")));
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// A battle the index stored before the expected values loaded, under
+    /// the Live source the install's listing reads.
+    async fn store_unrated_battle(pool: &sqlx::SqlitePool, path: &std::path::Path) {
+        use wows_replays::types::ArenaId;
+        use wows_replays::types::GameParamId;
+        use wows_toolkit_config::index::query;
+        use wows_toolkit_config::index::rows::MatchOutcome;
+        use wows_toolkit_config::index::rows::ObjectiveMatch;
+        use wows_toolkit_config::index::rows::ReplayRecord;
+
+        let now = jiff::Timestamp::now();
+        let source = query::ensure_default_source(pool, std::path::Path::new("G:/wows/replays"), now)
+            .await
+            .expect("the live source is made");
+        let battle = ObjectiveMatch {
+            arena_id: ArenaId::new(1),
+            timestamp: now,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(100),
+        };
+        query::upsert_match(pool, &battle).await.expect("the match inserts");
+        let record = ReplayRecord {
+            arena_id: ArenaId::new(1),
+            source_id: source,
+            replay_path: path.to_path_buf(),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: Some(GameParamId::from(wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID)),
+            self_survived: Some(true),
+            self_damage: Some(50_000),
+            self_kills: Some(1),
+            self_pr: None,
+            results_available: true,
+            indexed_at: now,
+        };
+        query::upsert_record(pool, &record).await.expect("the record inserts");
+    }
+
+    /// A row indexed before the expected values loaded has no chip. When the
+    /// table arrives the row is rated and the listing reread, so the chip
+    /// shows without a restart.
+    #[gpui_kit::test]
+    fn a_listed_battle_shows_its_rating_once_the_expected_values_arrive(cx: &mut TestAppContext) {
+        let (_window, view) = open_view(cx);
+        let pool = crate::interaction_tests::open_index(cx);
+        let runtime = cx.update(|cx| crate::runtime::runtime(cx)).expect("the runtime is installed");
+        let path = PathBuf::from("G:/wows/replays/early.wowsreplay");
+        runtime.block_on(store_unrated_battle(&pool, &path));
+        let browser = cx.update(|cx| view.read(cx).browser().clone());
+        browser.update(cx, |browser, cx| {
+            browser.seed_listing_for_test(path.clone(), cx);
+            browser.load_summaries(cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| browser.read(cx).listed_rating_for_test(&path)), None, "no rating yet");
+
+        let table = std::sync::Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
+        view.update(cx, |view, cx| view.set_personal_rating(table, cx));
+        cx.run_until_parked();
+
+        let shown = cx.update(|cx| browser.read(cx).listed_rating_for_test(&path));
+        assert!(shown.is_some(), "the row carries a chip once the table arrives");
+    }
+}

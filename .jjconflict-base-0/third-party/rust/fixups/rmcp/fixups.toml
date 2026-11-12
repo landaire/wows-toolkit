@@ -1,0 +1,2 @@
+# The build script only installs git hooks inside the rmcp repository.
+buildscript.run = false

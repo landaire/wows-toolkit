@@ -1,0 +1,308 @@
+//! Version-aware GUI asset resolution.
+//!
+//! Consumers (the renderer, the replay inspector) request an asset by what it
+//! *is* — e.g. [`GuiAsset::Consumable`] for `"PCY009_CrashCrewPremium"` — rather
+//! than by where it lives. The resolver maps each request to candidate VFS
+//! paths (newest layout first) for the build's version and returns the first
+//! that exists, so callers never track how WoWs has moved assets between game
+//! versions. Assets that simply don't exist in a build (e.g. the Flash-era
+//! GUI, which has no per-file ribbon/ship icons) resolve to `None` and let the
+//! caller degrade gracefully.
+
+use std::io::Read;
+
+use vfs::VfsPath;
+
+use crate::data::Version;
+use crate::game_params::types::CrewSkillName;
+use crate::game_params::types::Species;
+
+/// Minimap ship-icon state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShipIconState {
+    Alive,
+    Dead,
+    Invisible,
+    LastVisible,
+}
+
+impl ShipIconState {
+    fn suffix(self) -> &'static str {
+        match self {
+            ShipIconState::Alive => "",
+            ShipIconState::Dead => "_dead",
+            ShipIconState::Invisible => "_invisible",
+            ShipIconState::LastVisible => "_last_visible",
+        }
+    }
+}
+
+/// Team relation for relation-keyed icons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Relation {
+    Ally,
+    Enemy,
+    Neutral,
+}
+
+impl Relation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Relation::Ally => "ally",
+            Relation::Enemy => "enemy",
+            Relation::Neutral => "neutral",
+        }
+    }
+}
+
+/// The modern crew-skill icon filename stem for a skill: the snake_case form of
+/// its SkillTypeEnum name. The single home of this conversion so the renderer
+/// (texture-map keys) and the inspector (asset lookup) agree.
+pub fn crew_skill_icon_slug(name: &CrewSkillName) -> String {
+    use convert_case::Case;
+    use convert_case::Casing;
+    name.as_str().to_case(Case::Snake)
+}
+
+/// A GUI asset identified by what it represents, not by its file path.
+#[derive(Clone, Copy, Debug)]
+pub enum GuiAsset<'a> {
+    /// Minimap class icon for another player's ship.
+    ShipClassIcon { species: Species, state: ShipIconState },
+    /// Minimap icon for the viewing player's own ship.
+    SelfShipIcon { species: Species, alive: bool },
+    /// Consumable icon by PCY identifier (e.g. `"PCY009_CrashCrewPremium"`).
+    Consumable(&'a str),
+    /// Achievement icon by lowercase key.
+    Achievement(&'a str),
+    /// Ribbon icon by name.
+    Ribbon(&'a str),
+    /// Sub-ribbon icon by name.
+    SubRibbon(&'a str),
+    /// Upgrade/modernization icon by file stem.
+    Modernization(&'a str),
+    /// Signal flag icon by file stem.
+    SignalFlag(&'a str),
+    /// Small nation flag by nation name.
+    NationFlag(&'a str),
+    /// Ship silhouette by ship index (e.g. `"PJSB018"`).
+    ShipSilhouette(&'a str),
+    /// Capture-point base flag by team relation.
+    CapturePointFlag(Relation),
+    /// Captain-skill icon by skill name. Modern clients use a flat snake_case
+    /// PNG; pre-rework clients keep icon_perk_<Name>.png under big/ or small/.
+    CrewSkill { name: &'a CrewSkillName },
+}
+
+impl GuiAsset<'_> {
+    /// Candidate VFS paths for this asset, highest-priority (newest layout)
+    /// first. `version` lets the mapping branch when a path genuinely moved
+    /// between game versions; today most assets share one path plus a fallback.
+    ///
+    /// Branch on `major`/`minor`/`patch` only — never the build number — so the
+    /// same logic works across servers (e.g. the China client ships different
+    /// build numbers for the same `major.minor.patch`). `None` means the version
+    /// is unknown; callers get the newest layout with its fallbacks.
+    pub fn candidate_paths(&self, version: Option<&Version>) -> Vec<String> {
+        // Reserved for version-gated path overrides, e.g.
+        // `if version.is_some_and(|v| (v.major, v.minor) < (N, M)) { old } else { new }`.
+        // Today every asset resolves the same across modern versions (with
+        // in-order fallbacks), so the parameter is not yet branched on.
+        let _ = version;
+        match *self {
+            GuiAsset::ShipClassIcon { species, state } => {
+                let s = species.name().to_ascii_lowercase();
+                vec![format!("gui/fla/minimap/ship_icons/minimap_{s}{}.svg", state.suffix())]
+            }
+            GuiAsset::SelfShipIcon { species, alive } => {
+                let s = species.name().to_ascii_lowercase();
+                let life = if alive { "alive" } else { "dead" };
+                vec![
+                    format!("gui/fla/minimap/ship_icons_self/minimap_self_{life}_{s}.svg"),
+                    format!("gui/fla/minimap/ship_icons_self/minimap_self_{life}.svg"),
+                ]
+            }
+            GuiAsset::Consumable(pcy) => vec![format!("gui/consumables/consumable_{pcy}.png")],
+            GuiAsset::Achievement(key) => vec![format!("gui/achievements/icon_achievement_{key}.png")],
+            GuiAsset::Ribbon(name) => vec![format!("gui/ribbons/{name}.png")],
+            GuiAsset::SubRibbon(name) => vec![format!("gui/ribbons/subribbons/{name}.png")],
+            GuiAsset::Modernization(name) => vec![format!("gui/modernization_icons/icon_modernization_{name}.png")],
+            GuiAsset::SignalFlag(name) => vec![format!("gui/signal_flags/{name}.png")],
+            GuiAsset::NationFlag(nation) => vec![format!("gui/nation_flags/tiny/flag_{nation}.png")],
+            GuiAsset::ShipSilhouette(index) => vec![format!("gui/ships_silhouettes/{index}.png")],
+            GuiAsset::CapturePointFlag(rel) => {
+                vec![format!("gui/battle_hud/markers/capture_point/icon_base_{}_flag.png", rel.as_str())]
+            }
+            GuiAsset::CrewSkill { name } => {
+                let slug = crew_skill_icon_slug(name);
+                let internal = name.as_str();
+                vec![
+                    format!("gui/crew_commander/skills/{slug}.png"),
+                    format!("gui/crew_commander/skills/big/icon_perk_{internal}.png"),
+                    format!("gui/crew_commander/skills/small/icon_perk_{internal}.png"),
+                    format!("gui/crew_commander/skills/small/icon_perk_small_{internal}.png"),
+                ]
+            }
+        }
+    }
+
+    /// Resolve to the first candidate path that exists in `vfs`, or `None` when
+    /// the asset isn't present in this build.
+    pub fn resolve(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<VfsPath> {
+        for path in self.candidate_paths(version) {
+            if let Ok(entry) = vfs.join(&path)
+                && entry.exists().unwrap_or(false)
+            {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    /// Read the asset's bytes from the first candidate path that exists.
+    pub fn read(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<Vec<u8>> {
+        let entry = self.resolve(vfs, version)?;
+        let mut buf = Vec::new();
+        entry.open_file().ok()?.read_to_end(&mut buf).ok()?;
+        (!buf.is_empty()).then_some(buf)
+    }
+}
+
+/// Which plane-marker subdirectory under `gui/battle_hud/markers_minimap/plane/`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneMarkerKind {
+    Consumables,
+    Controllable,
+    AirSupport,
+}
+
+impl PlaneMarkerKind {
+    fn dir(self) -> &'static str {
+        match self {
+            PlaneMarkerKind::Consumables => "consumables",
+            PlaneMarkerKind::Controllable => "controllable",
+            PlaneMarkerKind::AirSupport => "airsupport",
+        }
+    }
+}
+
+/// A GUI asset *directory* identified by what it holds, not its path. Used by
+/// bulk loaders that enumerate a whole directory (e.g. all consumable icons),
+/// where only the directory location is version-dependent.
+#[derive(Clone, Copy, Debug)]
+pub enum GuiAssetDir {
+    ShipClassIcons,
+    SelfShipIcons,
+    PlaneMarkers(PlaneMarkerKind),
+    BuildingIcons,
+    Consumables,
+    CrewSkills,
+    Modernizations,
+    SignalFlags,
+    DeathCauseIcons,
+    PowerupDrops,
+    CapturePoint,
+    Ribbons,
+    SubRibbons,
+    Achievements,
+    NationFlags,
+    Silhouettes,
+}
+
+impl GuiAssetDir {
+    /// Candidate directory paths, highest-priority (newest layout) first. As
+    /// with [`GuiAsset::candidate_paths`], branch only on `major.minor.patch`.
+    pub fn candidate_paths(&self, version: Option<&Version>) -> Vec<String> {
+        let _ = version;
+        let dir = match *self {
+            GuiAssetDir::ShipClassIcons => "gui/fla/minimap/ship_icons".to_string(),
+            GuiAssetDir::SelfShipIcons => "gui/fla/minimap/ship_icons_self".to_string(),
+            GuiAssetDir::PlaneMarkers(kind) => {
+                format!("gui/battle_hud/markers_minimap/plane/{}", kind.dir())
+            }
+            GuiAssetDir::BuildingIcons => "gui/battle_hud/markers/building_icons/normal".to_string(),
+            GuiAssetDir::Consumables => "gui/consumables".to_string(),
+            GuiAssetDir::CrewSkills => "gui/crew_commander/skills".to_string(),
+            GuiAssetDir::Modernizations => "gui/modernization_icons".to_string(),
+            GuiAssetDir::SignalFlags => "gui/signal_flags".to_string(),
+            GuiAssetDir::DeathCauseIcons => "gui/battle_hud/icon_frag".to_string(),
+            GuiAssetDir::PowerupDrops => "gui/powerups/drops".to_string(),
+            GuiAssetDir::CapturePoint => "gui/battle_hud/markers/capture_point".to_string(),
+            GuiAssetDir::Ribbons => "gui/ribbons".to_string(),
+            GuiAssetDir::SubRibbons => "gui/ribbons/subribbons".to_string(),
+            GuiAssetDir::Achievements => "gui/achievements".to_string(),
+            GuiAssetDir::NationFlags => "gui/nation_flags/tiny".to_string(),
+            GuiAssetDir::Silhouettes => "gui/ships_silhouettes".to_string(),
+        };
+        vec![dir]
+    }
+
+    /// Resolve to the first candidate directory that exists in `vfs`.
+    pub fn resolve(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<VfsPath> {
+        for path in self.candidate_paths(version) {
+            if let Ok(entry) = vfs.join(&path)
+                && entry.exists().unwrap_or(false)
+            {
+                return Some(entry);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game_params::types::CrewSkillName;
+
+    const VERSION: Version = Version { major: 15, minor: 0, patch: 0, build: std::num::NonZeroU32::new(11791718) };
+
+    #[test]
+    fn crew_skill_icon_slug_is_snake_case() {
+        assert_eq!(crew_skill_icon_slug(&CrewSkillName::from("TriggerSpreading")), "trigger_spreading");
+    }
+
+    #[test]
+    fn crew_skill_candidate_paths_cover_modern_and_prerework() {
+        let paths = GuiAsset::CrewSkill { name: &CrewSkillName::from("HePenetration") }.candidate_paths(Some(&VERSION));
+        assert_eq!(paths[0], "gui/crew_commander/skills/he_penetration.png");
+        assert_eq!(paths[1], "gui/crew_commander/skills/big/icon_perk_HePenetration.png");
+        assert_eq!(paths[2], "gui/crew_commander/skills/small/icon_perk_HePenetration.png");
+        assert_eq!(paths[3], "gui/crew_commander/skills/small/icon_perk_small_HePenetration.png");
+    }
+
+    #[test]
+    fn self_icon_falls_back_to_generic() {
+        let paths = GuiAsset::SelfShipIcon { species: Species::Destroyer, alive: true }.candidate_paths(Some(&VERSION));
+        assert_eq!(paths[0], "gui/fla/minimap/ship_icons_self/minimap_self_alive_destroyer.svg");
+        assert_eq!(paths[1], "gui/fla/minimap/ship_icons_self/minimap_self_alive.svg");
+    }
+
+    #[test]
+    fn consumable_and_capture_point_paths() {
+        assert_eq!(
+            GuiAsset::Consumable("PCY009_CrashCrewPremium").candidate_paths(Some(&VERSION))[0],
+            "gui/consumables/consumable_PCY009_CrashCrewPremium.png"
+        );
+        assert_eq!(
+            GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(Some(&VERSION))[0],
+            "gui/battle_hud/markers/capture_point/icon_base_enemy_flag.png"
+        );
+    }
+
+    #[test]
+    fn modernization_path_has_icon_prefix() {
+        assert_eq!(
+            GuiAsset::Modernization("PCM082_SpecialBonus_Mod_I").candidate_paths(Some(&VERSION))[0],
+            "gui/modernization_icons/icon_modernization_PCM082_SpecialBonus_Mod_I.png"
+        );
+    }
+
+    #[test]
+    fn signal_flag_path_is_bare() {
+        assert_eq!(
+            GuiAsset::SignalFlag("PCEF019_JW1_SignalFlag").candidate_paths(Some(&VERSION))[0],
+            "gui/signal_flags/PCEF019_JW1_SignalFlag.png"
+        );
+    }
+}

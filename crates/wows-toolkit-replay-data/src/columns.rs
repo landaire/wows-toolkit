@@ -12,6 +12,7 @@ use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::breakdown;
 
 use crate::model::PlayerRow;
+use crate::sort::SortColumn;
 
 /// All displayable columns in the replay player list, in the same
 /// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus
@@ -76,7 +77,7 @@ impl ReplayColumn {
     /// The name this column is stored under in the settings database. Fixed
     /// strings rather than positions or variant names, so a stored
     /// arrangement still reads after a column is added, dropped or renamed.
-    const fn storage_key(self) -> &'static str {
+    pub const fn storage_key(self) -> &'static str {
         match self {
             ReplayColumn::Name => "name",
             ReplayColumn::ShipName => "ship_name",
@@ -97,8 +98,57 @@ impl ReplayColumn {
         }
     }
 
-    fn from_storage_key(key: &str) -> Option<Self> {
+    pub fn from_storage_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|col| col.storage_key() == key)
+    }
+
+    /// The translation key of the column's heading.
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            ReplayColumn::Name => "ui.replay.column.player_name",
+            ReplayColumn::ShipName => "ui.replay.column.ship_name",
+            ReplayColumn::Skills => "ui.replay.column.skills",
+            ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
+            ReplayColumn::BaseXp => "stat.base_xp",
+            ReplayColumn::RawXp => "stat.raw_xp",
+            ReplayColumn::Kills => "ui.replay.column.kills",
+            ReplayColumn::ObservedDamage => "ui.replay.column.observed_damage",
+            ReplayColumn::ActualDamage => "ui.replay.column.actual_damage",
+            ReplayColumn::ReceivedDamage => "ui.replay.column.received_damage",
+            ReplayColumn::SpottingDamage => "stat.spotting_damage",
+            ReplayColumn::PotentialDamage => "ui.replay.column.potential_damage",
+            ReplayColumn::Hits => "ui.replay.column.hits",
+            ReplayColumn::Heals => "ui.replay.column.heals",
+            ReplayColumn::DistanceTraveled => "ui.replay.column.distance_traveled",
+            ReplayColumn::TimeLived => "ui.replay.column.time_lived",
+        }
+    }
+
+    /// The column's heading in the reader's own language.
+    pub fn label(self) -> String {
+        t!(self.label_key()).into_owned()
+    }
+
+    /// What a press on the column's header sorts by. `None` for the columns
+    /// the egui app renders as plain headers: Skills and Time Lived.
+    pub const fn sort_column(self) -> Option<SortColumn> {
+        match self {
+            ReplayColumn::Skills | ReplayColumn::TimeLived => None,
+            ReplayColumn::Name => Some(SortColumn::Name),
+            ReplayColumn::ShipName => Some(SortColumn::ShipName),
+            ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
+            ReplayColumn::BaseXp => Some(SortColumn::BaseXp),
+            ReplayColumn::RawXp => Some(SortColumn::RawXp),
+            ReplayColumn::Kills => Some(SortColumn::Kills),
+            ReplayColumn::ObservedDamage => Some(SortColumn::ObservedDamage),
+            ReplayColumn::ActualDamage => Some(SortColumn::ActualDamage),
+            ReplayColumn::ReceivedDamage => Some(SortColumn::ReceivedDamage),
+            ReplayColumn::SpottingDamage => Some(SortColumn::SpottingDamage),
+            ReplayColumn::PotentialDamage => Some(SortColumn::PotentialDamage),
+            ReplayColumn::Hits => Some(SortColumn::Hits),
+            ReplayColumn::Heals => Some(SortColumn::Heals),
+            ReplayColumn::DistanceTraveled => Some(SortColumn::DistanceTraveled),
+        }
     }
 }
 
@@ -523,6 +573,48 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             None => CellValue::plain(DASH),
         },
     }
+}
+
+/// One row's cells in `columns`, tab separated, which is what a spreadsheet
+/// reads back as columns.
+pub fn row_text(row: &PlayerRow, columns: &[ReplayColumn], debug: bool) -> String {
+    columns.iter().map(|col| cell_value(row, *col, debug).text).collect::<Vec<_>>().join("\t")
+}
+
+/// The column headings, then every row in the order given.
+pub fn table_text<'a>(rows: impl Iterator<Item = &'a PlayerRow>, columns: &[ReplayColumn], debug: bool) -> String {
+    let mut lines = vec![columns.iter().map(|col| col.label()).collect::<Vec<_>>().join("\t")];
+    lines.extend(rows.map(|row| row_text(row, columns, debug)));
+    lines.join("\n")
+}
+
+/// `rows` as a Markdown table under the column headings.
+pub fn markdown_table<'a>(rows: impl Iterator<Item = &'a PlayerRow>, columns: &[ReplayColumn], debug: bool) -> String {
+    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+    let mut lines = vec![
+        line(columns.iter().map(|col| markdown_cell(&col.label())).collect()),
+        line(columns.iter().map(|_| "---".to_owned()).collect()),
+    ];
+    lines.extend(rows.map(|row| line(columns.iter().map(|col| markdown_cell(&cell_value(row, *col, debug).text)).collect())));
+    lines.join("\n")
+}
+
+fn markdown_cell(text: &str) -> String {
+    let mut escaped = String::new();
+    for ch in text.replace("\r\n", "\n").chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\n' | '\r' => escaped.push_str("<br>"),
+            '\\' | '|' | '`' | '*' | '_' | '[' | ']' | '~' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]
