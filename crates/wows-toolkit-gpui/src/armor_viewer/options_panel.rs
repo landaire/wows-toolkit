@@ -220,34 +220,57 @@ fn section(
     let title = marked.unwrap_or_else(|| StyledText::new(title.to_string()));
     let pane = pane.clone();
 
-    let head = h_flex()
-        .id(SharedString::from(format!("armor-options-section-{which:?}")))
-        .test_support()
-        .gap_1()
-        .items_center()
-        // A band, not dim small caps: the trees inside carry their own group
-        // labels, and a section title has to read above them.
-        .px_2()
-        .py_1()
-        .rounded(cx.theme().radius)
-        .bg(cx.theme().muted)
-        .child(crate::motion::DisclosureChevron::new("caret", expanded))
-        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+    let id = SharedString::from(format!("armor-options-section-{which:?}"));
+    let head = folding_head(id, title, expanded, HeadDepth::Section)
         .when(!filter.is_active(), |head| {
             head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {
                 pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
             })
-        });
+        })
+        .test_support();
+    let body_id = SharedString::from(format!("armor-options-body-{which:?}"));
 
     Some(
         v_flex()
             .gap_1()
             .child(head)
-            .children(content.map(|content| {
-                div().id(SharedString::from(format!("armor-options-body-{which:?}"))).test_support().child(content)
-            }))
+            .children(content.map(|content| div().id(body_id).test_support().pl_1().child(content)))
             .into_any_element(),
     )
+}
+
+/// How deep a folding head sits in the rail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HeadDepth {
+    /// A section of the rail.
+    Section,
+    /// A group inside a section.
+    Group,
+}
+
+/// The head of a part of the rail that folds away: a band one surface step
+/// above the rail, ruled off at its top, so the reader can see where each
+/// part begins. A section's title is set larger than a group's inside it.
+/// Callers add `test_support` after their own handlers.
+pub(crate) fn folding_head(id: SharedString, title: StyledText, open: bool, depth: HeadDepth) -> Stateful<Div> {
+    let chevron = crate::motion::DisclosureChevron::new("caret", open);
+    let (chevron, label) = match depth {
+        HeadDepth::Section => (chevron, div().text_base().font_weight(FontWeight::BOLD)),
+        HeadDepth::Group => (chevron.xsmall(), div().text_sm().font_weight(FontWeight::SEMIBOLD)),
+    };
+
+    h_flex()
+        .id(id)
+        .w_full()
+        .gap_1()
+        .items_center()
+        .px_2()
+        .py_1()
+        .bg(crate::theme::card())
+        .border_t_1()
+        .border_color(crate::theme::border_bright())
+        .child(chevron)
+        .child(label.child(title))
 }
 
 // The test module imports by name: `use super::*` would pull in the glob
@@ -407,18 +430,7 @@ mod tests {
             use_color_scheme: false,
             uv_transforms: HashMap::new(),
         }];
-        // The test window has no GPU, so a shown scene would wait for one; the
-        // rail reads only the scene itself.
-        window
-            .update(cx, |pane, _window, cx| {
-                pane.active_viewport(cx).update(cx, |view, cx| {
-                    view.current_armor = Some(Arc::new(scene));
-                    cx.notify();
-                });
-                pane.open_option_section(OptionSection::Hull, cx);
-            })
-            .expect("the test window stays open");
-        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+        install(window, scene, &[OptionSection::Hull], cx);
 
         cx.update_window(window.into(), |_, window, _cx| {
             let tree = window.find("armor-hull-visibility-tree").bounds();
@@ -426,6 +438,56 @@ mod tests {
             let lod = window.find("armor-hull-lod-0").bounds();
             assert!(tree.bottom() <= camo.top(), "the tree at {tree:?} is above the camo picker at {camo:?}");
             assert!(camo.bottom() <= lod.top(), "the camo picker at {camo:?} is above the LOD row at {lod:?}");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// Gives the active pane `scene` and opens `sections`. The test window has
+    /// no GPU, so a shown scene would wait for one; the rail reads only the
+    /// scene itself.
+    fn install(
+        window: WindowHandle<ArmorViewerPane>,
+        scene: LoadedShipArmor,
+        sections: &[OptionSection],
+        cx: &mut TestAppContext,
+    ) {
+        window
+            .update(cx, |pane, _window, cx| {
+                pane.active_viewport(cx).update(cx, |view, cx| {
+                    view.current_armor = Some(Arc::new(scene));
+                    cx.notify();
+                });
+                for section in sections {
+                    pane.open_option_section(*section, cx);
+                }
+            })
+            .expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    /// Each section head is a band across its section's whole width, and a
+    /// group head across the width of the section it sits in, so each reads
+    /// as where that part of the rail begins.
+    #[gpui_kit::test]
+    fn each_folding_head_spans_its_column(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+        let scene = fixtures::hull_scene(turret(), vec![fixtures::hull_mesh()], 1);
+        install(window, scene, &[OptionSection::Hull, OptionSection::Display, OptionSection::Lighting], cx);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            for which in [OptionSection::Hull, OptionSection::Display] {
+                let head = window.find(section(which)).bounds();
+                let body = window.find(format!("armor-options-body-{which:?}")).bounds();
+                assert!(
+                    head.left() == body.left() && head.right() == body.right(),
+                    "{which:?}'s head at {head:?} spans its body at {body:?}"
+                );
+            }
+
+            let display = window.find("armor-options-body-Display").bounds();
+            let group = window.find("armor-options-group-Lighting").bounds();
+            assert!(inside_across(display, group), "the lighting head at {group:?} is inside {display:?}");
+            assert_eq!(group.right(), display.right(), "the lighting head reaches the section's edge");
         })
         .expect("the test window stays open");
     }

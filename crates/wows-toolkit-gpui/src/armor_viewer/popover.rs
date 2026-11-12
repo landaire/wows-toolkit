@@ -62,6 +62,8 @@ use super::load_ship::ArmorZone;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
+use super::options_panel::HeadDepth;
+use super::options_panel::folding_head;
 use super::viewport_view::SceneFeatures;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
@@ -1667,23 +1669,16 @@ fn display_group(
     let title = marked.unwrap_or_else(|| StyledText::new(title));
 
     let pane = groups.pane.clone();
-    let head = h_flex()
-        .id(SharedString::from(format!("armor-options-group-{which:?}")))
-        .test_support()
-        .gap_1()
-        .items_center()
-        .pt_1()
-        .border_t_1()
-        .border_color(cx.theme().border)
-        .child(crate::motion::DisclosureChevron::new("caret", open).xsmall())
-        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+    let id = SharedString::from(format!("armor-options-group-{which:?}"));
+    let head = folding_head(id, title, open, HeadDepth::Group)
         .when(!filter.is_active(), |head| {
             head.cursor_pointer().on_click(move |_event, _window, cx: &mut App| {
                 pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
             })
-        });
+        })
+        .test_support();
 
-    Some(v_flex().gap_2().child(head).children(content).into_any_element())
+    Some(v_flex().gap_2().child(head).children(content.map(|content| div().pl_1().child(content))).into_any_element())
 }
 
 /// One labelled colour row: what it tints, and the picker that sets it.
