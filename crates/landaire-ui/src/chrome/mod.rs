@@ -1,6 +1,7 @@
 //! The frame around an application's content: the title bar and window frame, tab strips, side
 //! panels, drawers, the status bar and transient messages, and the movements they share.
 
+pub(crate) mod count_up;
 pub(crate) mod drawer;
 pub(crate) mod frame_window;
 pub(crate) mod reveal;
