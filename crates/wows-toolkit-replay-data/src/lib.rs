@@ -24,6 +24,7 @@ pub mod links;
 pub mod load;
 pub mod model;
 pub mod paths;
+pub mod render_defaults;
 pub mod replay_index;
 #[cfg(any(test, feature = "test-support"))]
 pub mod sample;
