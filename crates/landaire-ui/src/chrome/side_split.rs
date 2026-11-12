@@ -84,6 +84,9 @@ const CSS: &str = css!(
     .lui-side-split > .lui-side-split__panel[data-shown] {
         transform: none;
     }
+    .lui-side-split > .lui-side-split__panel[data-away] {
+        display: none;
+    }
     .lui-side-split__edge {
         position: absolute;
         top: 0;
@@ -120,7 +123,8 @@ const CSS: &str = css!(
     }"
 );
 
-/// The panel beside a [`SideSplit`]'s main area. Built each time the panel opens.
+/// The panel beside a [`SideSplit`]'s main area. Built each time the panel opens, unless the split
+/// keeps it mounted.
 #[slot]
 pub struct SidePanel {
     children: ChildrenFn,
@@ -177,6 +181,9 @@ pub fn SideSplit(
     resize_label: String,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
+    /// Keeps the panel built, and hidden, while it is shut, so whatever it runs keeps running.
+    #[prop(optional)]
+    keep_mounted: bool,
     children: Children,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -230,10 +237,11 @@ pub fn SideSplit(
             column(class = "lui-side-split__main") {
                 {children.into_view_once()}
             }
-            if move || slide.mounted.get() {
+            if move || keep_mounted || slide.mounted.get() {
                 column(
                     class = "lui-side-split__panel",
-                    attr:data-shown = move || slide.shown.get().then(|| "true".to_owned())
+                    attr:data-shown = move || slide.shown.get().then(|| "true".to_owned()),
+                    attr:data-away = move || (!slide.mounted.get()).then(|| "true".to_owned())
                 ) {
                     {panel.get_value().view()}
                 }

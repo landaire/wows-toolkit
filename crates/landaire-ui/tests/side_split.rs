@@ -189,3 +189,50 @@ fn a_width_asked_for_in_a_narrow_split_is_kept_for_when_it_grows() {
     window.advance(Duration::from_millis(32));
     assert_eq!(width_of(&window, main), 280.0, "grown again, the panel takes the width asked for");
 }
+
+#[component]
+fn KeptSplit(open: RwSignal<bool, LocalStorage>) -> impl IntoView {
+    let width = RwSignal::new_local(PanelWidth(200.0));
+
+    // The panel lies over the split, so the split takes its height from its container.
+    view! {
+        ThemeRoot {
+            column(style = "height: 300px") {
+                SideSplit(open = open, width = width, range = RANGE, keep_mounted = true, resize_label = "Resize panel") {
+                    SidePanel(slot) {
+                        Counter()
+                    }
+                    column(attr:data-testid = "main", style = "flex: 1 1 auto")
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_kept_panel_keeps_its_state_while_shut() {
+    let signal = Rc::new(Cell::new(None));
+    let handed = Rc::clone(&signal);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let open = RwSignal::new_local(true);
+        handed.set(Some(open));
+        view! { KeptSplit(open = open) }
+    })
+    .expect("opens");
+    let open = signal.get().expect("the view was built");
+    let count = window.by_test_id("count").expect("the panel is open");
+    window.click(count).expect("the counter has a box");
+
+    open.set(false);
+    window.advance(SETTLE);
+    let main = window.by_test_id("main").expect("the main area is built");
+    assert_eq!(width_of(&window, main), 600.0, "a shut panel takes no room");
+    assert!(window.bounds(count).is_none_or(|bounds| bounds.size.width.0 == 0.0), "a shut panel is not laid out");
+
+    open.set(true);
+    window.advance(SETTLE);
+    assert_eq!(window.by_test_id("count"), Some(count), "the panel is the same element throughout");
+    window.click(count).expect("the counter has a box");
+    let label = window.a11y(count).and_then(|state| state.label);
+    assert_eq!(label.as_deref(), Some("count 2"), "what the panel held survived the toggle");
+}
