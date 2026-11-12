@@ -439,6 +439,39 @@ pub fn bar_chart_series(
         .collect()
 }
 
+/// Distinguishes one chart pane from another, in its saved settings and its dock panel.
+pub type ChartId = usize;
+
+/// One chart pane as a settings row remembers it.
+///
+/// The games themselves are not here: they come from the session, and a
+/// chart is a way of looking at them rather than a copy.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChartSettings {
+    #[serde(default)]
+    pub id: Option<ChartId>,
+    #[serde(default)]
+    pub stat: ChartableStat,
+    #[serde(default)]
+    pub mode: ChartMode,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub combined: bool,
+    #[serde(default)]
+    pub show_values: bool,
+    /// The chart's own narrowing, when it was taken off the tab's.
+    #[serde(default)]
+    pub own_filters: Option<super::StatsFilters>,
+    /// The ships plotted, when the reader picked them. Empty follows the
+    /// session in older settings rows.
+    #[serde(default)]
+    pub selected_ships: Vec<u64>,
+    /// Distinguishes an explicit empty selection from an older empty list.
+    #[serde(default)]
+    pub selection_touched: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::PerGameStat;
@@ -449,6 +482,40 @@ mod tests {
     use super::bar_series;
     use super::line_series;
     use super::rolling_average;
+
+    /// A chart comes back set up the way it was left, override and ship
+    /// selection included.
+    #[test]
+    fn a_chart_round_trips_through_the_settings_row() {
+        use super::super::DivisionFilter;
+        use super::super::GameLimit;
+        use super::super::StatsFilters;
+        use super::ChartSettings;
+
+        let saved = ChartSettings {
+            id: Some(7),
+            stat: ChartableStat::Frags,
+            mode: ChartMode::Bar,
+            running: true,
+            combined: true,
+            show_values: true,
+            own_filters: Some(StatsFilters {
+                limit: GameLimit::Recent(25),
+                division: DivisionFilter::DivOnly,
+                game_modes: ["RandomBattle".to_string()].into_iter().collect(),
+            }),
+            selected_ships: vec![4288575440, 3541279184],
+            selection_touched: true,
+        };
+
+        let json = serde_json::to_string(&saved).expect("a chart serializes");
+        let read: ChartSettings = serde_json::from_str(&json).expect("and reads back");
+        assert_eq!(read, saved);
+
+        // A row written before a field existed still reads, on the defaults.
+        let older: ChartSettings = serde_json::from_str("{}").expect("an empty row reads");
+        assert_eq!(older, ChartSettings::default());
+    }
 
     fn game(ship: &str, time: &str, damage: u64, frags: i64, win: bool) -> PerGameStat {
         PerGameStat {
