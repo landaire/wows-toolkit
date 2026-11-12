@@ -128,6 +128,14 @@ pub(crate) const CSS: &str = css!(
         grid-column: 1 / -1;
         height: var(--lui-grid-spacer, 0px);
     }
+    .lui-grid__gauge {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
     .lui-grid__detail {
         grid-column: 1 / -1;
         overflow: clip;

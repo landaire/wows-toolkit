@@ -36,13 +36,17 @@ use zgui_ui::ContextMenuContentProps;
 use zgui_ui::ContextMenuPlace;
 use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
+use zgui_ui::virtualize::MeasuredRows;
+use zgui_ui::virtualize::MeasuredVirtualize;
 use zgui_ui::virtualize::Virtualize;
 
 use crate::grid::body;
 use crate::grid::column::GridColumn;
 use crate::grid::header;
 use crate::grid::layout::ColumnLayout;
+use crate::grid::mode::Building;
 use crate::grid::mode::RowMode;
+use crate::grid::mode::RowParts;
 use crate::grid::selection::GridSelectionMode;
 use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
@@ -170,9 +174,10 @@ where
     });
 
     let port = node_ref.unwrap_or_default();
-    let (detail, groups, fixed, overscan) = match mode {
-        RowMode::Natural { detail, groups } => (detail, groups, None, 0),
-        RowMode::Fixed { height, overscan } => (None, None, Some(height), overscan),
+    let RowParts { detail, groups, building } = mode.into_parts();
+    let fixed = match building {
+        Building::Fixed { height, .. } => Some(height),
+        Building::All | Building::Measured { .. } => None,
     };
     let row_key: Rc<dyn Fn(&T) -> K> = Rc::new(row_key);
     // A detail region and a group heading stay as wide as the view while the columns scroll.
@@ -184,11 +189,22 @@ where
         port_size.get().map(|size| format!("{}px", size.width.0 / scale))
     });
     let order: RwSignal<Rc<Vec<K>>, LocalStorage> = RwSignal::new_local(Rc::new(Vec::new()));
-    let window = fixed.map(|height| {
-        let count = Signal::derive_local(move || order.with(|order| order.len()));
-        let seen = Virtualize::new(port, count, height.0, overscan);
-        Signal::derive_local(move || seen.window())
-    });
+    let count = Signal::derive_local(move || order.with(|order| order.len()));
+    let window = match building {
+        Building::Fixed { height, overscan } => {
+            let seen = Virtualize::new(port, count, height.0, overscan);
+            Some(Signal::derive_local(move || seen.window()))
+        }
+        Building::All | Building::Measured { .. } => None,
+    };
+    let measured = match building {
+        Building::Measured { estimate, overscan } => {
+            // A measurement follows its row through a sort.
+            let rows = MeasuredRows::new(estimate.0).keyed(move |index| order.with(|order| order.get(index).cloned()));
+            Some(MeasuredVirtualize::new(port, count, rows, overscan))
+        }
+        Building::All | Building::Fixed { .. } => None,
+    };
     let carry = RwSignal::new_local(None);
     let carried =
         Memo::new(move |_| carry.with(|carry: &Option<Carry>| carry.as_ref().and_then(Carry::moving).cloned()));
@@ -225,6 +241,7 @@ where
         groups,
         fixed,
         window,
+        measured,
         on_activate,
         on_row_hover,
         row_menu,

@@ -54,11 +54,6 @@ impl<T: 'static> RowGroups<T> {
 }
 
 /// How a grid builds and sizes its rows.
-///
-/// A variable-height virtualized mode belongs here as a further variant carrying an estimated
-/// height and a [`RowDetail`]: its window comes from the virtualizer instead of from
-/// [`RowMode::Fixed`]'s arithmetic, and the rows, their detail regions and their reveal stay as
-/// they are.
 #[non_exhaustive]
 pub enum RowMode<T> {
     /// Every row is built, each as tall as its content, and a row may open a detail region under
@@ -70,6 +65,15 @@ pub enum RowMode<T> {
         /// How many rows beyond each edge of the view are built, so a fast scroll shows rows
         /// rather than a gap.
         overscan: usize,
+    },
+    /// Only the rows in view are built, each as tall as its content and its open detail region.
+    /// A row stands at `estimate` until it has been built and measured. For row counts in the
+    /// thousands whose rows differ in height.
+    Measured {
+        estimate: RowHeight,
+        /// How many rows beyond each edge of the view are built.
+        overscan: usize,
+        detail: Option<RowDetail<T>>,
     },
 }
 
@@ -90,14 +94,46 @@ impl<T: 'static> RowMode<T> {
         Self::Fixed { height, overscan: 4 }
     }
 
-    /// The same mode with its rows run under `groups`' headings. A fixed-height grid places every
-    /// row by arithmetic on one height and so draws no headings.
+    /// Rows built in view and measured, each standing at `estimate` until it is.
+    pub fn measured(estimate: RowHeight) -> Self {
+        Self::Measured { estimate, overscan: 4, detail: None }
+    }
+
+    /// The same mode with its rows run under `groups`' headings. Only a grid that builds every
+    /// row draws headings.
     pub fn grouped(self, groups: RowGroups<T>) -> Self {
         match self {
             Self::Natural { detail, .. } => Self::Natural { detail, groups: Some(groups) },
-            fixed @ Self::Fixed { .. } => fixed,
+            virtualized @ (Self::Fixed { .. } | Self::Measured { .. }) => virtualized,
         }
     }
+
+    pub(crate) fn into_parts(self) -> RowParts<T> {
+        match self {
+            Self::Natural { detail, groups } => RowParts { detail, groups, building: Building::All },
+            Self::Fixed { height, overscan } => {
+                RowParts { detail: None, groups: None, building: Building::Fixed { height, overscan } }
+            }
+            Self::Measured { estimate, overscan, detail } => {
+                RowParts { detail, groups: None, building: Building::Measured { estimate, overscan } }
+            }
+        }
+    }
+}
+
+/// A [`RowMode`] taken apart for building the grid.
+pub(crate) struct RowParts<T> {
+    pub(crate) detail: Option<RowDetail<T>>,
+    pub(crate) groups: Option<RowGroups<T>>,
+    pub(crate) building: Building,
+}
+
+/// Which rows a grid builds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Building {
+    All,
+    Fixed { height: RowHeight, overscan: usize },
+    Measured { estimate: RowHeight, overscan: usize },
 }
 
 #[cfg(test)]
