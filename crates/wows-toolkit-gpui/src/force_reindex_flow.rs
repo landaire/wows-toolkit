@@ -492,6 +492,8 @@ impl App {
 
         let stop = Arc::clone(&cancel);
         let write_mode = purpose.write_mode();
+        let personal_rating = self.replay_inspector.read(cx).personal_rating().cloned();
+        let read_with = personal_rating.clone();
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let ran = cx
                 .background_spawn(async move {
@@ -502,6 +504,7 @@ impl App {
                         &replays,
                         write_mode,
                         &game_data,
+                        personal_rating.as_deref(),
                         &stop,
                         |step| {
                             let _ = progress_tx.unbounded_send(step);
@@ -521,7 +524,10 @@ impl App {
                 this.job_said.push(report);
 
                 // The rows read what the index held before the pass.
-                this.replay_inspector.update(cx, |view, cx| view.reload_index_summaries(cx));
+                this.replay_inspector.update(cx, |view, cx| {
+                    view.index_pass_rated(read_with.as_ref(), cx);
+                    view.reload_index_summaries(cx);
+                });
                 cx.notify();
             });
         }));

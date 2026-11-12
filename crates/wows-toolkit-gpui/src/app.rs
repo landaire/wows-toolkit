@@ -2784,6 +2784,8 @@ impl App {
         let Some(pool) = settings_store::pool(cx) else { return };
         let Some(runtime) = runtime::runtime(cx) else { return };
         let Some(game_data) = self.replay_inspector.read(cx).game_data() else { return };
+        let personal_rating = self.replay_inspector.read(cx).personal_rating().cloned();
+        let read_with = personal_rating.clone();
 
         let root = std::path::Path::new(&wows_dir).join("replays");
         let cancel = self.begin_index_pass(cx);
@@ -2805,6 +2807,7 @@ impl App {
                         source,
                         &root,
                         &game_data,
+                        personal_rating.as_deref(),
                         &cancel,
                         mode,
                         |step| {
@@ -2841,6 +2844,11 @@ impl App {
                 // Said as well as written to the Settings line: an index started
                 // from the palette finishes while the reader is somewhere else.
                 this.job_said.push(report(said));
+                // The rows read what the index held before the pass.
+                this.replay_inspector.update(cx, |view, cx| {
+                    view.index_pass_rated(read_with.as_ref(), cx);
+                    view.reload_index_summaries(cx);
+                });
                 cx.notify();
             });
         }));

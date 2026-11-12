@@ -12,6 +12,8 @@ use jiff::Timestamp;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::battle_report::NormalizedPlayer;
+use wows_replay_insights::personal_rating::PersonalRatingData;
+use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::ArenaId;
 use wows_replays::types::GameParamId;
@@ -19,6 +21,9 @@ use wows_replays::types::Relation;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
+use wows_toolkit_config::index::rows::PrGap;
+use wows_toolkit_config::index::rows::PrInputs;
+use wows_toolkit_config::index::rows::PrRepair;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::VehicleRelation;
@@ -251,6 +256,25 @@ pub fn suppress_untrusted_results(rows: &mut MappedRows) {
     rows.record.self_kills = None;
     rows.record.self_pr = None;
     rows.record.results_available = false;
+}
+
+/// The single-battle rating for one stored row's worth of stats, or `None` when
+/// the expected values carry nothing for that ship.
+///
+/// The same calculation `NormalizedBattleReport::populate_personal_ratings`
+/// makes at parse time: one battle, damage and frags as recorded, and a win
+/// counted from the battle's outcome. A repaired row and a freshly indexed one
+/// therefore agree.
+pub fn single_battle_pr(pr_data: &PersonalRatingData, inputs: &PrInputs) -> Option<f64> {
+    rate_single_battle(pr_data, inputs.ship_id, inputs.damage, inputs.kills, inputs.is_win).map(|result| result.pr)
+}
+
+/// The ratings `pr_data` gives the rows in `gaps`. A gap whose ship the table
+/// does not rate is left out, so its row stays NULL.
+pub fn pr_repairs(gaps: &[PrGap], pr_data: &PersonalRatingData) -> Vec<PrRepair> {
+    gaps.iter()
+        .filter_map(|gap| single_battle_pr(pr_data, &gap.inputs).map(|pr| PrRepair { target: gap.target, pr }))
+        .collect()
 }
 
 #[cfg(test)]

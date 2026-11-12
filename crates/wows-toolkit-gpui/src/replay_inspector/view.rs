@@ -144,6 +144,16 @@ fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+/// Where the repair that rates unrated index rows stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RatingRepair {
+    Idle,
+    /// A repair is reading the index. `again` asks for one more once it ends.
+    Running {
+        again: bool,
+    },
+}
+
 pub struct ReplayInspectorView {
     /// One tab per directory the listing can show, the install's first.
     folders: Vec<ReplayFolder>,
@@ -266,6 +276,8 @@ pub struct ReplayInspectorView {
     /// Whether the app's own index pass is running, which a second pass from
     /// the listing header would race.
     index_pass_running: bool,
+    /// Keeps at most one repair of unrated index rows reading at a time.
+    rating_repair: RatingRepair,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -478,6 +490,7 @@ impl ReplayInspectorView {
             next_batch: crate::status_bar::RunNumber(0),
             auto_exports: HashMap::new(),
             index_pass_running: false,
+            rating_repair: RatingRepair::Idle,
             _subscriptions: vec![dock_subscription],
         }
     }
@@ -1245,8 +1258,10 @@ impl ReplayInspectorView {
         // Roots the Live source when this battle is the first thing it holds.
         let Some(live_root) = path.parent().map(std::path::Path::to_path_buf) else { return };
         let path = path.to_path_buf();
+        let personal_rating = self.personal_rating.clone();
+        let read_with = personal_rating.clone();
 
-        cx.spawn(async move |_this, cx| {
+        cx.spawn(async move |this, cx| {
             let indexed = cx
                 .background_spawn(async move {
                     let now = jiff::Timestamp::now();
@@ -1256,6 +1271,7 @@ impl ReplayInspectorView {
                         &pool,
                         &path,
                         &game_data,
+                        personal_rating.as_deref(),
                         source,
                         now,
                         wows_toolkit_config::index::rows::IndexWriteMode::Incremental,
@@ -1264,7 +1280,12 @@ impl ReplayInspectorView {
                 .await;
             if let Err(err) = indexed {
                 tracing::warn!("replay index: the battle that just landed was not indexed: {err}");
+                return;
             }
+            let _ = this.update(cx, |view, cx| {
+                view.index_pass_rated(read_with.as_ref(), cx);
+                view.reload_index_summaries(cx);
+            });
         })
         .detach();
     }
@@ -1803,7 +1824,60 @@ impl ReplayInspectorView {
                 panel.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
             }
         }
+        self.repair_personal_ratings(cx);
         cx.notify();
+    }
+
+    /// Rates every index row stored without a rating, then rereads the
+    /// listings so their chips show.
+    ///
+    /// Rows are stored unrated when they are indexed before the table has
+    /// loaded, which is what the startup pass ordinarily does. A request made
+    /// while a repair runs is served by one more repair after it, which also
+    /// covers rows written while the first one read.
+    fn repair_personal_ratings(&mut self, cx: &mut Context<Self>) {
+        if let RatingRepair::Running { again } = &mut self.rating_repair {
+            *again = true;
+            return;
+        }
+        let Some(table) = self.personal_rating.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        self.rating_repair = RatingRepair::Running { again: false };
+        cx.spawn(async move |this, cx| {
+            // Waited on from a GPUI background thread rather than awaited on a
+            // tokio worker: the test scheduler refuses a wakeup from one.
+            let repaired = crate::runtime::block_on(cx, move || async move {
+                crate::replay_index::repair_missing_pr(&pool, &table).await
+            })
+            .await;
+
+            let _ = this.update(cx, |view, cx| {
+                match repaired {
+                    Ok(0) => {}
+                    Ok(filled) => {
+                        tracing::info!(filled, "personal rating: rated the index rows stored without a rating");
+                        view.reload_index_summaries(cx);
+                    }
+                    Err(err) => tracing::warn!("personal rating: the unrated index rows were not rated: {err}"),
+                }
+
+                let again = view.rating_repair == RatingRepair::Running { again: true };
+                view.rating_repair = RatingRepair::Idle;
+                if again {
+                    view.repair_personal_ratings(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Rates what an index pass stored unrated because it began before the
+    /// table arrived. `read_with` is the table the pass was given.
+    pub(crate) fn index_pass_rated(&mut self, read_with: Option<&Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
+        if read_with.is_none() {
+            self.repair_personal_ratings(cx);
+        }
     }
 
     /// Flips the session debug-mode flag and pushes the new value into every
@@ -2643,5 +2717,74 @@ mod tests {
             });
         })
         .expect("the window is open");
+    }
+
+    /// A battle the index stored before the expected values loaded, under
+    /// the Live source the install's listing reads.
+    async fn store_unrated_battle(pool: &sqlx::SqlitePool, path: &std::path::Path) {
+        use wows_replays::types::ArenaId;
+        use wows_replays::types::GameParamId;
+        use wows_toolkit_config::index::query;
+        use wows_toolkit_config::index::rows::MatchOutcome;
+        use wows_toolkit_config::index::rows::ObjectiveMatch;
+        use wows_toolkit_config::index::rows::ReplayRecord;
+
+        let now = jiff::Timestamp::now();
+        let source = query::ensure_default_source(pool, std::path::Path::new("G:/wows/replays"), now)
+            .await
+            .expect("the live source is made");
+        let battle = ObjectiveMatch {
+            arena_id: ArenaId::new(1),
+            timestamp: now,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: Some(100),
+        };
+        query::upsert_match(pool, &battle).await.expect("the match inserts");
+        let record = ReplayRecord {
+            arena_id: ArenaId::new(1),
+            source_id: source,
+            replay_path: path.to_path_buf(),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: Some(GameParamId::from(crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID)),
+            self_survived: Some(true),
+            self_damage: Some(50_000),
+            self_kills: Some(1),
+            self_pr: None,
+            results_available: true,
+            indexed_at: now,
+        };
+        query::upsert_record(pool, &record).await.expect("the record inserts");
+    }
+
+    /// A row indexed before the expected values loaded has no chip. When the
+    /// table arrives the row is rated and the listing reread, so the chip
+    /// shows without a restart.
+    #[gpui_kit::test]
+    fn a_listed_battle_shows_its_rating_once_the_expected_values_arrive(cx: &mut TestAppContext) {
+        let (_window, view) = open_view(cx);
+        let pool = crate::interaction_tests::open_index(cx);
+        let runtime = cx.update(|cx| crate::runtime::runtime(cx)).expect("the runtime is installed");
+        let path = PathBuf::from("G:/wows/replays/early.wowsreplay");
+        runtime.block_on(store_unrated_battle(&pool, &path));
+        let browser = cx.update(|cx| view.read(cx).browser().clone());
+        browser.update(cx, |browser, cx| {
+            browser.seed_listing_for_test(path.clone(), cx);
+            browser.load_summaries(cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| browser.read(cx).listed_rating_for_test(&path)), None, "no rating yet");
+
+        let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+        view.update(cx, |view, cx| view.set_personal_rating(table, cx));
+        cx.run_until_parked();
+
+        let shown = cx.update(|cx| browser.read(cx).listed_rating_for_test(&path));
+        assert!(shown.is_some(), "the row carries a chip once the table arrives");
     }
 }

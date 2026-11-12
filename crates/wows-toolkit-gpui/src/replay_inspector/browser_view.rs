@@ -503,6 +503,13 @@ impl ReplayBrowser {
         self.rebuild_tree(cx);
     }
 
+    /// The rating the listing row for `path` shows in its chip. Test-only.
+    #[cfg(test)]
+    pub(crate) fn listed_rating_for_test(&self, path: &std::path::Path) -> Option<f64> {
+        let leaf = self.leaf_info.values().find(|leaf| leaf.path == path)?;
+        leaf.personal_rating.as_ref().map(|rating| rating.pr)
+    }
+
     /// The tree row showing `path`, while one does. Test-only.
     #[cfg(test)]
     pub(crate) fn row_for_test(&self, path: &Path, cx: &App) -> Option<usize> {

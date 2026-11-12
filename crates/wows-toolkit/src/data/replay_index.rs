@@ -14,6 +14,8 @@ use tracing::warn;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit as SharedFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
+use wows_toolkit_viewmodel::index_rows::pr_repairs;
+use wows_toolkit_viewmodel::index_rows::single_battle_pr;
 
 use crate::data::constants::ConstantsFit;
 use crate::db::index::query;
@@ -22,7 +24,6 @@ use crate::db::index::rows::IndexWriteMode;
 use crate::db::index::rows::IndexedVehicleRow;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::PrInputs;
-use crate::db::index::rows::PrRepair;
 use crate::db::index::rows::ResultsWrite;
 use crate::db::index::rows::SourceId;
 use crate::ui::replay_parser::Replay;
@@ -198,24 +199,6 @@ pub async fn write_index(
     Ok(())
 }
 
-/// The single-battle rating for one stored row's worth of stats, or `None` when
-/// the expected values carry nothing for that ship.
-///
-/// Mirrors `UiReport::populate_personal_ratings`: one battle, damage and frags
-/// as recorded, and a win counted from the battle's outcome. Keeping the two in
-/// one shape is what stops a repaired row from disagreeing with a freshly
-/// indexed one.
-pub fn single_battle_pr(pr_data: &PersonalRatingData, inputs: &PrInputs) -> Option<f64> {
-    wows_replay_insights::personal_rating::rate_single_battle(
-        pr_data,
-        inputs.ship_id,
-        inputs.damage,
-        inputs.kills,
-        inputs.is_win,
-    )
-    .map(|result| result.pr)
-}
-
 /// Fill the ratings a freshly mapped set of rows is missing, before it is
 /// written. `map_rows` carries whatever the UI report already computed; a
 /// report built while the expected values were still loading carries nothing,
@@ -332,14 +315,9 @@ pub async fn repair_missing_pr(
         return Ok(0);
     }
 
-    // The guard is confined to this block: it is not a Send lock and must not
-    // be held across the write below.
-    let repairs: Vec<PrRepair> = {
-        let pr = pr_data.read();
-        gaps.iter()
-            .filter_map(|gap| single_battle_pr(&pr, &gap.inputs).map(|pr| PrRepair { target: gap.target, pr }))
-            .collect()
-    };
+    // The guard is a temporary of this statement: it is not a Send lock and
+    // must not be held across the write below.
+    let repairs = pr_repairs(&gaps, &pr_data.read());
 
     query::apply_pr_repairs(&pool, &repairs).await
 }

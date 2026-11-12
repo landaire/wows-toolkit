@@ -198,21 +198,28 @@ impl ReplayInspectorView {
         let said = t!("ui.replay_folders.indexing", dir = folder_name(&root)).into_owned();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&cancel);
+        let personal_rating = self.personal_rating.clone();
+        let unrated = personal_rating.is_none();
+        let (ended, pass_ended) = futures::channel::oneshot::channel::<()>();
         let task = cx.spawn(async move |this, cx| {
             let (report, mut steps) = futures::channel::mpsc::unbounded::<IndexProgress>();
             let walking = cx.background_spawn(async move {
-                crate::replay_index::build_index(
+                let built = crate::replay_index::build_index(
                     &runtime,
                     &pool,
                     source,
                     &root,
                     &game_data,
+                    personal_rating.as_deref(),
                     &stop,
                     IndexMode::FillGaps,
                     |step| {
                         let _ = report.unbounded_send(step);
                     },
-                )
+                );
+                let _ = ended.send(());
+
+                built
             });
             let owner: AnyWeakEntity = browser.into();
             let follow = async {
@@ -230,6 +237,16 @@ impl ReplayInspectorView {
             let (built, ()) = futures::future::join(walking, follow).await;
             let _ = this.update(cx, |this, cx| this.folder_pass_finished(id, built, cx));
         });
+        if unrated {
+            // A stopped pass drops this task but still finishes the replay it is
+            // reading, so its unrated rows are rated once the walk has ended.
+            cx.spawn(async move |this, cx| {
+                if pass_ended.await.is_ok() {
+                    let _ = this.update(cx, |this, cx| this.repair_personal_ratings(cx));
+                }
+            })
+            .detach();
+        }
         if let Some(folder) = self.folder_mut(id) {
             folder.index_mut().pass = FolderPassState::Running(FolderPass { cancel, _task: task });
         }

@@ -21,10 +21,14 @@ use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::unindexable::Unindexable;
+use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
+use wows_toolkit_viewmodel::index_rows::pr_repairs;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use crate::replay_inspector::load::GameDataCache;
+use crate::replay_inspector::load::IndexableBattle;
 use crate::replay_inspector::load::parse_replay;
 
 /// The extension the game records replays under.
@@ -211,32 +215,64 @@ impl IndexOneError {
 ///
 /// Blocking: the parse walks the packet stream and the writes are awaited on
 /// the runtime the caller provides. Run it off whatever thread is drawing.
+#[allow(clippy::too_many_arguments)]
 pub fn index_one(
     runtime: &tokio::runtime::Runtime,
     pool: &SqlitePool,
     path: &Path,
     game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
     source_id: SourceId,
     indexed_at: Timestamp,
     mode: IndexWriteMode,
 ) -> Result<(), IndexOneError> {
+    // Rated here rather than by the parse: the parse would also rate every row
+    // of the player table, which the index never reads.
     let parsed = parse_replay(path, game_data, None).map_err(IndexOneError::Parse)?;
-    let battle = &parsed.indexable;
+    let file_mtime = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_secs() as i64);
+    let stored = StoredReplay { path, file_mtime, source_id, indexed_at, mode };
+
+    runtime.block_on(store_battle(pool, parsed.indexable, personal_rating, &stored))
+}
+
+/// Where and how one parsed battle is written.
+struct StoredReplay<'a> {
+    path: &'a Path,
+    file_mtime: Option<i64>,
+    source_id: SourceId,
+    indexed_at: Timestamp,
+    mode: IndexWriteMode,
+}
+
+/// Rates `battle` against `personal_rating`, when there is one, and writes
+/// its rows.
+///
+/// A battle written with no table is stored unrated, and
+/// [`repair_missing_pr`] rates it once a table arrives.
+async fn store_battle(
+    pool: &SqlitePool,
+    mut battle: IndexableBattle,
+    personal_rating: Option<&PersonalRatingData>,
+    stored: &StoredReplay<'_>,
+) -> Result<(), IndexOneError> {
+    if let Some(table) = personal_rating {
+        battle.normalized.populate_personal_ratings(table);
+    }
 
     let context = IndexContext {
         arena_id: battle.arena_id,
         game_mode_id: battle.game_mode_id,
         version_build: battle.version_build,
-        source_id,
-        replay_path: path.to_path_buf(),
-        file_mtime: std::fs::metadata(path)
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|since| since.as_secs() as i64),
+        source_id: stored.source_id,
+        replay_path: stored.path.to_path_buf(),
+        file_mtime: stored.file_mtime,
         self_ship_id: battle.self_ship_id,
         results_pending: battle.results_pending,
-        indexed_at,
+        indexed_at: stored.indexed_at,
         // Judged as the replay was read: a build whose published mapping is not
         // here yet is read through the nearest one there is, and results read
         // that way are not worth storing.
@@ -245,18 +281,30 @@ pub fn index_one(
 
     let rows = map_rows(&battle.normalized, &context);
     let results = match battle.constants_fit {
-        wows_toolkit_viewmodel::index_rows::ConstantsFit::Matched => ResultsWrite::Store,
-        wows_toolkit_viewmodel::index_rows::ConstantsFit::Mismatched => ResultsWrite::Keep,
+        ConstantsFit::Matched => ResultsWrite::Store,
+        ConstantsFit::Mismatched => ResultsWrite::Keep,
     };
-    runtime.block_on(query::write_indexed_replay(
-        pool,
-        &rows.objective,
-        &rows.vehicles,
-        &rows.record,
-        mode,
-        results,
-    ))?;
+    query::write_indexed_replay(pool, &rows.objective, &rows.vehicles, &rows.record, stored.mode, results).await?;
+
     Ok(())
+}
+
+/// Rates every stored row that has no rating against `personal_rating`,
+/// returning how many rows were filled.
+///
+/// A stored rating is never replaced: expected values drift, and a battle's
+/// number changing month to month would change what a saved `pr < 800`
+/// search matches. Scans `replay_record` and `indexed_vehicle`, so run it off
+/// the UI thread.
+pub async fn repair_missing_pr(pool: &SqlitePool, personal_rating: &PersonalRatingData) -> Result<u64, IndexError> {
+    if !personal_rating.is_loaded() {
+        return Ok(0);
+    }
+
+    let gaps = query::pr_gaps(pool).await?;
+    let repairs = pr_repairs(&gaps, personal_rating);
+
+    query::apply_pr_repairs(pool, &repairs).await
 }
 
 /// Walks `root` and indexes every replay under it into `source_id`,
@@ -275,6 +323,7 @@ pub fn build_index(
     source_id: SourceId,
     root: &Path,
     game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
     cancel: &AtomicBool,
     mode: IndexMode,
     report: impl Fn(IndexProgress),
@@ -308,7 +357,8 @@ pub fn build_index(
             continue;
         }
 
-        match index_one(runtime, pool, &path, game_data, source_id, Timestamp::now(), mode.write_mode()) {
+        let indexed_at = Timestamp::now();
+        match index_one(runtime, pool, &path, game_data, personal_rating, source_id, indexed_at, mode.write_mode()) {
             Ok(()) => progress.indexed += 1,
             Err(err) => {
                 tracing::warn!("replay index: {} contributed nothing: {err}", path.display());
@@ -348,6 +398,7 @@ pub fn reindex_replays(
     replays: &[ScopedReplay],
     write_mode: IndexWriteMode,
     game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
     cancel: &AtomicBool,
     report: impl Fn(IndexProgress),
 ) -> Result<IndexProgress, ScopeSourceError> {
@@ -373,7 +424,7 @@ pub fn reindex_replays(
         }
         let path = &replay.path;
         let source_id = sources[&replay.scope];
-        match index_one(runtime, pool, path, game_data, source_id, Timestamp::now(), write_mode) {
+        match index_one(runtime, pool, path, game_data, personal_rating, source_id, Timestamp::now(), write_mode) {
             // A file that reads is no longer one for later passes to skip.
             Ok(()) => {
                 progress.indexed += 1;
@@ -400,12 +451,125 @@ pub fn reindex_replays(
 
 #[cfg(test)]
 mod tests {
+    use wows_replays::analyzer::battle_controller::BattleResult;
+    use wows_replays::types::ArenaId;
+    use wows_replays::types::GameParamId;
+
     use super::*;
+    use crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
+    use crate::replay_inspector::test_support::fixture_normalized_battle_report;
 
     fn touch(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, b"not a real replay").expect("the file can be written");
         path
+    }
+
+    /// Expected values for the one ship [`rated_battle`] is played in.
+    fn expected_values(win_rate: f64) -> PersonalRatingData {
+        let json = format!(
+            r#"{{"time":0,"data":{{"{FIXTURE_PR_SHIP_ID}":{{"average_damage_dealt":50000.0,"average_frags":1.0,"win_rate":{win_rate}}}}}}}"#
+        );
+        let mut table = PersonalRatingData::new();
+        table.load_from_bytes(json.as_bytes()).expect("the table is valid JSON");
+        table
+    }
+
+    /// A won battle with 50,000 damage and one kill. Against
+    /// `expected_values(100.0)` that is play exactly at expectation, which
+    /// rates 1150.
+    fn rated_battle() -> IndexableBattle {
+        let ship = GameParamId::from(FIXTURE_PR_SHIP_ID);
+        let mut normalized = fixture_normalized_battle_report();
+        normalized.metadata.battle_result = Some(BattleResult::Win(0));
+        for player in &mut normalized.players {
+            player.ship_id = ship;
+        }
+
+        IndexableBattle {
+            normalized,
+            arena_id: ArenaId::new(1),
+            game_mode_id: None,
+            version_build: Some(100),
+            constants_fit: ConstantsFit::Matched,
+            self_ship_id: Some(ship),
+            results_pending: false,
+        }
+    }
+
+    /// Writes [`rated_battle`] as an index pass given `personal_rating` would,
+    /// returning the source it went under.
+    async fn store_rated_battle(
+        pool: &SqlitePool,
+        path: &Path,
+        personal_rating: Option<&PersonalRatingData>,
+    ) -> SourceId {
+        let now = Timestamp::now();
+        let source = query::ensure_default_source(pool, Path::new("G:/wows/replays"), now)
+            .await
+            .expect("the live source is made");
+        let stored = StoredReplay {
+            path,
+            file_mtime: None,
+            source_id: source,
+            indexed_at: now,
+            mode: IndexWriteMode::Incremental,
+        };
+        store_battle(pool, rated_battle(), personal_rating, &stored).await.expect("the battle is written");
+
+        source
+    }
+
+    /// The owner's rating as the listing reads it.
+    async fn listed_rating(pool: &SqlitePool, source: SourceId, path: &Path) -> Option<f64> {
+        let summaries = query::row_summaries_for_source(pool, source).await.expect("the summaries read");
+        summaries.get(path).expect("the battle is indexed").self_pr
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime")
+    }
+
+    /// A pass given the expected values stores the owner's rating with the
+    /// battle, which is what the listing's chip shows.
+    #[test]
+    fn a_battle_indexed_with_the_expected_values_stores_the_owners_rating() {
+        runtime().block_on(async {
+            let pool = wows_toolkit_config::test_pool().await;
+            let path = Path::new("G:/wows/replays/rated.wowsreplay");
+            let table = expected_values(100.0);
+
+            let source = store_rated_battle(&pool, path, Some(&table)).await;
+
+            let rating = listed_rating(&pool, source, path).await.expect("the battle was rated");
+            assert!((rating - 1150.0).abs() < 1e-6, "expected 1150, stored {rating}");
+        });
+    }
+
+    /// A battle indexed before the expected values loaded is stored unrated,
+    /// and the repair rates it as indexing with the table would have. A rating
+    /// once stored is kept when another table arrives.
+    #[test]
+    fn a_battle_indexed_before_the_expected_values_is_rated_once_they_arrive() {
+        runtime().block_on(async {
+            let pool = wows_toolkit_config::test_pool().await;
+            let path = Path::new("G:/wows/replays/early.wowsreplay");
+
+            let source = store_rated_battle(&pool, path, None).await;
+            assert_eq!(listed_rating(&pool, source, path).await, None, "nothing rated it yet");
+
+            let unloaded = repair_missing_pr(&pool, &PersonalRatingData::new()).await.expect("the repair runs");
+            assert_eq!(unloaded, 0, "a table that has not loaded rates nothing");
+
+            let filled = repair_missing_pr(&pool, &expected_values(100.0)).await.expect("the repair runs");
+            assert!(filled > 0, "the unrated rows were filled");
+            let rating = listed_rating(&pool, source, path).await.expect("the battle was rated");
+            assert!((rating - 1150.0).abs() < 1e-6, "expected 1150, stored {rating}");
+
+            let refilled = repair_missing_pr(&pool, &expected_values(50.0)).await.expect("the repair runs");
+            assert_eq!(refilled, 0, "a stored rating is not replaced");
+            assert_eq!(listed_rating(&pool, source, path).await, Some(rating));
+        });
     }
 
     /// Only a file that will not read is recorded as unreadable. Game data
