@@ -32,6 +32,7 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 use crate::search_pills::StructuralEdit;
 use wows_toolkit_config::index::query;
@@ -60,7 +61,6 @@ use wows_toolkit_viewmodel::search as search_hint;
 use wows_toolkit_viewmodel::search as ship_display;
 use wows_toolkit_viewmodel::search::ship_display_name;
 
-use crate::replay_inspector::GameDataCache;
 use crate::runtime;
 use crate::ui::selectable;
 

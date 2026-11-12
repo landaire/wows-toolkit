@@ -74,6 +74,9 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_replay_data::columns::BattleOutcome;
 use wows_toolkit_replay_data::columns::ColorRole;
 use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::battle_title;
@@ -89,9 +92,6 @@ use header_figures::OwnFigures;
 
 use super::chat::ChatPanel;
 use super::debug_view::RawJsonPanel;
-use super::load::GameDataCache;
-use super::load::ParsedReplay;
-use super::load::ReplayLoadError;
 use super::load::spawn_parse;
 use super::load::spawn_parse_with_alts;
 use super::table::PlayerTable;
@@ -714,7 +714,7 @@ impl ReplayPanel {
     fn load_title_icons(
         &mut self,
         model: &ReplayReportModel,
-        game_data: &super::load::LoadedGameData,
+        game_data: &wows_toolkit_replay_data::load::LoadedGameData,
         cx: &mut Context<Self>,
     ) {
         self.title_icons = None;

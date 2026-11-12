@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use gpui_kit::component::tooltip::Tooltip;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 use super::*;
-use crate::replay_inspector::load::GameDataCache;
 
 /// A stats tab over every replay in one directory. Not saved: the tabs last
 /// one run.

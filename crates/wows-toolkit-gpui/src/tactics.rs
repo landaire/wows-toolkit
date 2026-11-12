@@ -34,6 +34,7 @@ use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_replay_insights::cap_layout::CapLayout;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_types::WorldPos;
@@ -41,7 +42,6 @@ use wowsunpack::game_types::WorldPos;
 use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
-use crate::replay_inspector::GameDataCache;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///

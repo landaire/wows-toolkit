@@ -39,13 +39,13 @@ use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
 use wows_replays::types::GameClock;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 
 use crate::frame_texture::BgraFrame;
-use crate::replay_inspector::GameDataCache;
-use crate::replay_inspector::LoadedGameData;
 
 /// A renderer shared between the previews that draw the same map.
 ///
@@ -137,7 +137,7 @@ fn renderer_for(
 /// which is what a deliberate toggle can afford.
 pub fn renderer_for_replay(
     path: &std::path::Path,
-    game_data: &crate::replay_inspector::GameDataCache,
+    game_data: &wows_toolkit_replay_data::load::GameDataCache,
     layout: SidePanelLayout,
 ) -> Result<(SharedPreviewRenderer, (u32, u32)), PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
@@ -451,7 +451,7 @@ pub struct BakedTrack {
 /// not wait for it.
 pub fn extract_events(
     path: &std::path::Path,
-    game_data: &crate::replay_inspector::GameDataCache,
+    game_data: &wows_toolkit_replay_data::load::GameDataCache,
 ) -> Result<
     (TimelineExtractionResult, std::collections::HashMap<wows_replays::types::EntityId, ShipShotTimeline>),
     PreviewError,
@@ -485,7 +485,7 @@ pub fn extract_events(
 pub fn bake_track(
     path: &std::path::Path,
     alts: &[std::path::PathBuf],
-    game_data: &crate::replay_inspector::GameDataCache,
+    game_data: &wows_toolkit_replay_data::load::GameDataCache,
     cancel: &AtomicBool,
     budget: usize,
     frame_interval: f32,
@@ -593,7 +593,7 @@ pub fn map_frame(map_name: &str, game_data: &GameDataCache, edge: PreviewEdge) -
 /// `None` when no build is open, or the open one ships no art for that map.
 pub fn render_map(
     map_name: &str,
-    game_data: &crate::replay_inspector::GameDataCache,
+    game_data: &wows_toolkit_replay_data::load::GameDataCache,
     view: wows_minimap_renderer::viewport::MapViewport,
     commands: &[DrawCommand],
 ) -> Option<BgraFrame> {
@@ -618,7 +618,7 @@ pub fn render_map(
 pub fn render_map_art(
     held_as: &str,
     art: &image::RgbImage,
-    game_data: &crate::replay_inspector::GameDataCache,
+    game_data: &wows_toolkit_replay_data::load::GameDataCache,
     view: wows_minimap_renderer::viewport::MapViewport,
     commands: &[DrawCommand],
 ) -> Option<BgraFrame> {
