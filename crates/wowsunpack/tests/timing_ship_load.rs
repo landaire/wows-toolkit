@@ -101,9 +101,9 @@ fn time_camo_decode() {
 
     let stock_by_stem: std::collections::HashMap<String, &Vec<u8>> = albedos
         .iter()
-        .filter_map(|(path, png)| {
+        .filter_map(|(path, albedo)| {
             let stem = path.rsplit('/').next()?.strip_suffix(".mfm")?;
-            Some((stem.to_string(), png))
+            Some((stem.to_string(), &albedo.png))
         })
         .collect();
 
@@ -239,9 +239,9 @@ fn verify_legacy_camo_alpha_and_blend() {
     let albedos = ctx.hull_base_albedos(&hull_meshes);
     let stock_by_stem: std::collections::HashMap<String, &Vec<u8>> = albedos
         .iter()
-        .filter_map(|(path, png)| {
+        .filter_map(|(path, albedo)| {
             let stem = path.rsplit('/').next()?.strip_suffix(".mfm")?;
-            Some((stem.to_string(), png))
+            Some((stem.to_string(), &albedo.png))
         })
         .collect();
 

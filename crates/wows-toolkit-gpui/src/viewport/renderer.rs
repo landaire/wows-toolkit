@@ -51,6 +51,8 @@ fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
 @group(1) @binding(0) var diffuse_texture: texture_2d<f32>;
 @group(1) @binding(1) var diffuse_sampler: sampler;
 
+@group(1) @binding(2) var<uniform> texture_params: vec4<f32>;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -82,6 +84,12 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
     // Sample texture and multiply with vertex color.
     // Non-textured meshes bind a 1x1 white fallback, so this is a passthrough.
     let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    // A sample under the texture's alpha cutoff draws nothing, so the cut-out
+    // parts of an alpha-tested texture neither show nor hide what lies behind
+    // them. x holds the cutoff.
+    if (tex_color.a < texture_params.x) {
+        discard;
+    }
     let base_color = tex_color * in.color;
 
     var color = base_color.rgb;
@@ -120,6 +128,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MSAA_SAMPLE_COUNT: u32 = 4;
+/// Bytes of the per-texture uniform: the alpha cutoff, padded to a `vec4`.
+const TEXTURE_PARAMS_SIZE: u64 = 16;
 
 /// The color format the scene is drawn in, and where its sRGB encoding happens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +219,16 @@ impl GpuPipeline {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(TEXTURE_PARAMS_SIZE),
+                    },
                     count: None,
                 },
             ],
@@ -361,6 +381,8 @@ impl GpuPipeline {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&fallback_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&default_sampler) },
+                // The fallback is opaque white, which no cutoff discards.
+                wgpu::BindGroupEntry { binding: 2, resource: texture_params_buffer(device, 0.0).as_entire_binding() },
             ],
         });
 
@@ -380,19 +402,18 @@ impl GpuPipeline {
         self.color
     }
 
-    /// Create a texture bind group from RGBA8 pixel data and the lower levels
-    /// of its mip chain, so a texture seen from afar is filtered rather than
-    /// aliased. `mips` must have been built from `rgba_data`.
+    /// Create a texture bind group from RGBA8 pixels and the lower levels of
+    /// their mip chain, so a texture seen from afar is filtered rather than
+    /// aliased. Samples with alpha below `alpha_cutoff` are not drawn.
     pub fn create_texture_bind_group(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        rgba_data: &[u8],
-        width: u32,
-        height: u32,
-        mips: &MipChain,
+        image: TextureImage<'_>,
+        alpha_cutoff: f32,
     ) -> wgpu::BindGroup {
-        let top = (width, height, rgba_data);
+        let TextureImage { pixels, width, height, mips } = image;
+        let top = (width, height, pixels);
         let lower = mips.levels.iter().map(|level| (level.width, level.height, level.pixels.as_slice()));
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_hull_texture"),
@@ -424,15 +445,40 @@ impl GpuPipeline {
         }
 
         let view = texture.create_view(&Default::default());
+        let cutoff = texture_params_buffer(device, alpha_cutoff);
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport_3d_texture_bg"),
             layout: &self.texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: cutoff.as_entire_binding() },
             ],
         })
     }
+}
+
+/// An RGBA8 texture and the lower levels of its mip chain, which must have
+/// been built from `pixels`.
+pub struct TextureImage<'a> {
+    pub pixels: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+    pub mips: &'a MipChain,
+}
+
+/// The per-texture uniform the fragment shader reads: `x` is the alpha
+/// cutoff, the rest pads it to the 16 bytes a uniform binding takes.
+fn texture_params_buffer(device: &wgpu::Device, alpha_cutoff: f32) -> wgpu::Buffer {
+    use wgpu::util::DeviceExt;
+
+    let params: [f32; 4] = [alpha_cutoff, 0.0, 0.0, 0.0];
+
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("viewport_3d_texture_params"),
+        contents: bytemuck::cast_slice(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    })
 }
 
 /// The levels of a texture's mip chain below its full size, down to one

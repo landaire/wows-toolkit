@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use crate::export::camouflage;
 use crate::export::camouflage::UvTransform;
 use crate::export::gltf_export::CamoOrigin;
+use crate::export::material_alpha::AlphaMode;
 use crate::export::ship::MfmInfo;
 use crate::export::texture;
 
@@ -114,7 +115,7 @@ pub(crate) fn decode_mat_scheme(
                 // which lets the compositor identify passthrough reliably.
                 match texture::dds_to_png(&dds, lod) {
                     Ok(mut p) => {
-                        texture::force_png_opaque(&mut p);
+                        texture::apply_png_alpha(&mut p, AlphaMode::Opaque);
                         p
                     }
                     Err(e) => {
@@ -270,6 +271,17 @@ impl CamoTextureSource {
             }
         }
         out
+    }
+
+    /// The alpha mode of each base material that tests or blends alpha, by
+    /// MFM stem, as [`TextureSet::base_alpha`](super::gltf_export::TextureSet)
+    /// holds it.
+    pub fn base_alpha(&self) -> HashMap<String, AlphaMode> {
+        self.unique_infos
+            .iter()
+            .filter(|info| info.alpha != AlphaMode::Opaque)
+            .map(|info| (info.stem.clone(), info.alpha))
+            .collect()
     }
 
     /// The base albedo DDS path per stem, without reading it.

@@ -51,6 +51,7 @@ use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::hardpoint::Hardpoint;
 use wowsunpack::export::hardpoint::HardpointName;
+use wowsunpack::export::material_alpha::AlphaMode;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelExportError;
 use wowsunpack::export::ship::ExportContents;
@@ -239,6 +240,9 @@ pub struct LoadedShipArmor {
     pub hull_part_groups: Vec<(String, Vec<String>)>,
     /// Decoded hull textures, keyed by `.mfm` path.
     pub hull_textures: super::camo::TexturesByPart,
+    /// The alpha mode of each hull material that tests or blends alpha, by
+    /// `.mfm` path. A material not listed draws opaque.
+    pub hull_alpha: HashMap<String, AlphaMode>,
     pub hull_lod_count: usize,
     pub hull_lod: usize,
     /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
@@ -510,10 +514,14 @@ fn load_ship_armor(
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
     let mut hull_textures = HashMap::new();
-    for (mfm, png) in ctx.hull_base_albedos(&hull_meshes) {
-        if let Ok(img) = image::load_from_memory(&png) {
+    let mut hull_alpha = HashMap::new();
+    for (mfm, albedo) in ctx.hull_base_albedos(&hull_meshes) {
+        if let Ok(img) = image::load_from_memory(&albedo.png) {
             let rgba = img.to_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
+            if albedo.alpha != AlphaMode::Opaque {
+                hull_alpha.insert(mfm.clone(), albedo.alpha);
+            }
             hull_textures.insert(mfm, super::camo::RgbaTexture::new(w, h, rgba.into_raw()));
         }
     }
@@ -548,6 +556,7 @@ fn load_ship_armor(
         hull_meshes,
         hull_part_groups,
         hull_textures,
+        hull_alpha,
         hull_lod_count,
         hull_lod: options.lod,
         hull_upgrade_names: options.hull_upgrade_names,

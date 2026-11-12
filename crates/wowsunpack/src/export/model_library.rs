@@ -43,6 +43,7 @@ use super::hardpoint::Hardpoint;
 use super::hardpoint::ModelSpaceHardpoints;
 use super::hardpoint::mesh_to_node_space;
 use super::hardpoint::model_extenders;
+use super::material_alpha::AlphaMode;
 use super::model_catalog;
 use super::model_catalog::GeometryAvailability;
 use super::model_catalog::ModelCatalog;
@@ -514,12 +515,16 @@ impl ModelLibrary {
 
             let mfm_path = db.reconstruct_path(position, &self.self_id_index);
             let material = self.resolve_material(db, &mfm_path, mfm_path_id, &load_options);
+            let alpha = material.alpha;
             let Some(image) = material.albedo.and_then(|albedo| albedo.image) else {
                 continue;
             };
             let png =
                 encode_png(image).context_with(|| ModelExportError::TextureEncode { mfm_path: mfm_path.clone() })?;
             textures.base.insert(stem.to_string(), png);
+            if alpha != AlphaMode::Opaque {
+                textures.base_alpha.insert(stem.to_string(), alpha);
+            }
         }
 
         Ok(textures)
@@ -652,8 +657,10 @@ impl ModelLibrary {
         let material = texture::parse_mfm_from_db(db, mfm_path_id);
         let decode_albedo = options.textures != TextureDecode::None;
         let decode_maps = options.textures == TextureDecode::AllMaps;
+        // Without the material record nothing marks the alpha as opacity.
+        let alpha = material.as_ref().map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(material, mfm_path));
 
-        let albedo = self.resolve_albedo(db, material.as_ref(), mfm_path, decode_albedo, options.texture_lod);
+        let albedo = self.resolve_albedo(db, material.as_ref(), mfm_path, alpha, decode_albedo, options.texture_lod);
         let normal = material
             .as_ref()
             .and_then(|m| self.referenced_texture(db, m, "normalMap", decode_maps, options.texture_lod));
@@ -661,16 +668,18 @@ impl ModelLibrary {
             .as_ref()
             .and_then(|m| self.referenced_texture(db, m, "metallicGlossMap", decode_maps, options.texture_lod));
 
-        ModelMaterial { mfm_path: mfm_path.to_string(), albedo, normal, metal_gloss }
+        ModelMaterial { mfm_path: mfm_path.to_string(), alpha, albedo, normal, metal_gloss }
     }
 
     /// The albedo a material shows: a baked TILEDLAND composite, else its
-    /// `diffuseMap`, else the texture named after the material.
+    /// `diffuseMap`, else the texture named after the material, with its
+    /// alpha rewritten to what `alpha` draws.
     fn resolve_albedo(
         &self,
         db: &PrototypeDatabase<'_>,
         material: Option<&MaterialPrototype>,
         mfm_path: &str,
+        alpha: AlphaMode,
         decode: bool,
         lod: TextureLod,
     ) -> Option<MaterialTexture> {
@@ -692,11 +701,8 @@ impl ModelLibrary {
                 load_texture(&self.vfs, TextureSource::NameMatch { path }, decode, lod)
             })?;
 
-        // Albedo alpha carries other data (height, roughness), not opacity.
         if let Some(image) = &mut albedo.image {
-            for pixel in image.pixels.chunks_exact_mut(4) {
-                pixel[3] = u8::MAX;
-            }
+            alpha.apply(&mut image.pixels);
         }
 
         Some(albedo)
@@ -823,6 +829,8 @@ pub struct ModelPart {
 #[derive(Clone)]
 pub struct ModelMaterial {
     pub mfm_path: String,
+    /// How the albedo's alpha is drawn; the decoded albedo already carries it.
+    pub alpha: AlphaMode,
     pub albedo: Option<MaterialTexture>,
     pub normal: Option<MaterialTexture>,
     pub metal_gloss: Option<MaterialTexture>,

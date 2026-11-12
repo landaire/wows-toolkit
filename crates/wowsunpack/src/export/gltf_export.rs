@@ -28,6 +28,7 @@ use crate::models::visual::RenderSet;
 use crate::models::visual::VisualPrototype;
 
 use super::hardpoint::mat4_linear_determinant;
+use super::material_alpha::AlphaMode;
 use super::part_group::PartGroup;
 use super::texture;
 
@@ -351,8 +352,8 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
 
     // Shared texture storage: each unique texture is stored once.
     let mut textures: Vec<Vec<u8>> = Vec::new();
-    // Cache: MFM full path → Option<texture index>
-    let mut texture_cache: HashMap<String, Option<usize>> = HashMap::new();
+    // Cache: MFM full path -> texture index and the alpha its material draws.
+    let mut texture_cache: HashMap<String, Option<(usize, AlphaMode)>> = HashMap::new();
 
     // Build path_id → model index map for instance lookups.
     let path_to_model: HashMap<u64, usize> = merged.models.iter().enumerate().map(|(i, r)| (r.path_id, i)).collect();
@@ -384,7 +385,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
         for prim in primitives {
             // Load texture on demand via full MFM path (deduplicated).
             // Falls back to TILEDLAND baking for terrain materials.
-            let albedo_texture = if let Some(vfs) = vfs
+            let albedo = if let Some(vfs) = vfs
                 && let Some(mfm_path) = &prim.mfm_full_path
             {
                 *texture_cache.entry(mfm_path.clone()).or_insert_with(|| {
@@ -396,15 +397,16 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                         self_id_index.as_ref(),
                         texture_lod,
                     )
-                    .map(|png_bytes| {
+                    .map(|albedo| {
                         let idx = textures.len();
-                        textures.push(png_bytes);
-                        idx
+                        textures.push(albedo.png);
+                        (idx, albedo.alpha)
                     })
                 })
             } else {
                 None
             };
+            let alpha = albedo.map_or(AlphaMode::Opaque, |(_, alpha)| alpha);
 
             model_meshes.push(MapMesh {
                 name: prim.material_name,
@@ -412,10 +414,13 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                 normals: prim.normals,
                 uvs: prim.uvs,
                 indices: prim.indices,
-                albedo_texture,
+                albedo_texture: albedo.map(|(idx, _)| idx),
                 base_color: [1.0, 1.0, 1.0, 1.0],
-                alpha_blend: false,
-                alpha_cutoff: None,
+                alpha_blend: alpha == AlphaMode::Blend,
+                alpha_cutoff: match alpha {
+                    AlphaMode::Mask { cutoff } => Some(cutoff),
+                    AlphaMode::Opaque | AlphaMode::Blend => None,
+                },
             });
         }
 
@@ -469,7 +474,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                     Ok(mut png_bytes) => {
                         // Force alpha=255: the lightmap DDS stores shadow data in
                         // the alpha channel which causes terrain transparency in viewers.
-                        texture::force_png_opaque(&mut png_bytes);
+                        texture::apply_png_alpha(&mut png_bytes, AlphaMode::Opaque);
                         let idx = textures.len();
                         textures.push(png_bytes);
                         mesh.albedo_texture = Some(idx);
@@ -1190,6 +1195,8 @@ fn build_map_mesh_primitive(
             // Textured material: reference the shared glTF Texture.
             let (alpha_mode, alpha_cutoff_val, double_sided) = if let Some(cutoff) = mesh.alpha_cutoff {
                 (Valid(json::material::AlphaMode::Mask), Some(json::material::AlphaCutoff(cutoff)), true)
+            } else if mesh.alpha_blend {
+                (Valid(json::material::AlphaMode::Blend), None, true)
             } else {
                 (Valid(json::material::AlphaMode::Opaque), None, false)
             };
@@ -2187,6 +2194,9 @@ pub struct TextureSet {
     /// UV scale/offset for a baked tiled camo, by MFM stem. A baked camo has no
     /// variant material to carry `KHR_texture_transform`, so it rides the default.
     pub base_uv_transforms: HashMap<String, [f32; 4]>,
+    /// The alpha mode of each base albedo whose material tests or blends
+    /// alpha, by MFM stem. A stem not listed draws opaque.
+    pub base_alpha: HashMap<String, AlphaMode>,
 }
 
 impl TextureSet {
@@ -2196,6 +2206,7 @@ impl TextureSet {
             camo_schemes: Vec::new(),
             tiled_uv_transforms: HashMap::new(),
             base_uv_transforms: HashMap::new(),
+            base_alpha: HashMap::new(),
         }
     }
 }
@@ -2350,6 +2361,20 @@ fn create_textured_material(
         },
         ..Default::default()
     })
+}
+
+/// Sets `material`'s glTF alpha mode. A tested or blended material is drawn
+/// from both sides, as the game draws propeller discs, glass and nets.
+fn set_material_alpha(root: &mut json::Root, material: json::Index<json::Material>, alpha: AlphaMode) {
+    let material = &mut root.materials[material.value()];
+    let (mode, cutoff) = match alpha {
+        AlphaMode::Opaque => (json::material::AlphaMode::Opaque, None),
+        AlphaMode::Mask { cutoff } => (json::material::AlphaMode::Mask, Some(json::material::AlphaCutoff(cutoff))),
+        AlphaMode::Blend => (json::material::AlphaMode::Blend, None),
+    };
+    material.alpha_mode = Valid(mode);
+    material.alpha_cutoff = cutoff;
+    material.double_sided = alpha != AlphaMode::Opaque;
 }
 
 /// Create an untextured material.
@@ -2547,7 +2572,7 @@ fn add_primitive_to_root(
         let default_mat = if let Some((stem, png_bytes)) =
             prim.mfm_stem.as_ref().and_then(|stem| texture_set.base.get(stem).map(|png| (stem, png)))
         {
-            create_textured_material(
+            let material = create_textured_material(
                 root,
                 bin_data,
                 image_cache,
@@ -2555,7 +2580,12 @@ fn add_primitive_to_root(
                 &prim.material_name,
                 Some(stem.clone()),
                 texture_set.base_uv_transforms.get(stem).copied(),
-            )
+            );
+            if let Some(&alpha) = texture_set.base_alpha.get(stem) {
+                set_material_alpha(root, material, alpha);
+            }
+
+            material
         } else {
             create_untextured_material(root, &prim.material_name)
         };

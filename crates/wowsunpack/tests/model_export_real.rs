@@ -151,3 +151,56 @@ fn a_ship_exports_its_hardpoints_per_part() {
     let scene = gltf.document.default_scene().expect("a default scene");
     assert!(scene.nodes().all(|node| node.name() != Some("Hardpoints")), "hardpoints are left out on request");
 }
+
+const CURTISS_TS1: &str =
+    "content/gameplay/usa/aircraft/fighter/AAF014_Curtiss_TS1_float/AAF014_Curtiss_TS1_float.model";
+
+/// The TS-1's propeller disc material is alpha-blended (`*_Disk_*_alpha.mfm`);
+/// its hull material is opaque. The load keeps the disc's alpha, and the
+/// GLB marks it `BLEND`.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_propeller_disc_keeps_its_alpha_in_the_load_and_the_glb() {
+    use wowsunpack::export::material_alpha::AlphaMode;
+
+    let Some(assets) = assets() else {
+        return;
+    };
+    let library = assets.model_library().expect("model library");
+    let plane = ModelPath::parse(CURTISS_TS1).expect("model path");
+    let lod = TextureLod::Capped(MaxEdge::new(256).expect("nonzero"));
+
+    let loaded = library
+        .load_model(&plane, &ModelLoadOptions { texture_lod: lod, ..ModelLoadOptions::default() })
+        .expect("the TS-1 loads");
+    let disc = loaded.meshes().iter().find(|mesh| mesh.name == "discShape").expect("a propeller disc");
+    let hull = loaded.meshes().iter().find(|mesh| mesh.name == "hullShape").expect("a hull");
+    let material = |mesh: &wowsunpack::export::gltf_export::InteractiveHullMesh| {
+        loaded.material(mesh.mfm_path.as_deref().expect("a material")).expect("the material resolves").clone()
+    };
+    let (disc, hull) = (material(disc), material(hull));
+    let disc_pixels = disc.albedo.and_then(|albedo| albedo.image).expect("the disc albedo decodes").pixels;
+    let hull_pixels = hull.albedo.and_then(|albedo| albedo.image).expect("the hull albedo decodes").pixels;
+
+    assert_eq!(disc.alpha, AlphaMode::Blend);
+    assert!(disc_pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc is see-through somewhere");
+    assert_eq!(hull.alpha, AlphaMode::Opaque);
+    assert!(hull_pixels.chunks_exact(4).all(|px| px[3] == u8::MAX), "the hull is opaque");
+
+    let options = ModelExportOptions {
+        lod: 0,
+        damaged: false,
+        texture_lod: lod,
+        textures: true,
+        contents: ExportContents::Mesh,
+        hardpoints: false,
+    };
+    let mut glb = Vec::new();
+    library.export_glb(&plane, &options, ModelArmorMaps::default(), &mut glb).expect("export");
+    let gltf = gltf::Gltf::from_slice(&glb).expect("a valid GLB");
+    let modes: Vec<gltf::material::AlphaMode> =
+        gltf.document.materials().map(|material| material.alpha_mode()).collect();
+
+    assert!(modes.contains(&gltf::material::AlphaMode::Blend), "{modes:?}");
+    assert!(modes.contains(&gltf::material::AlphaMode::Opaque), "{modes:?}");
+}

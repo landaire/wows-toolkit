@@ -62,6 +62,7 @@ use super::hardpoint::ModelSpaceHardpoints;
 use super::hardpoint::mat4_mul;
 use super::hardpoint::mesh_to_node_space;
 use super::hardpoint::model_extenders;
+use super::material_alpha::AlphaMode;
 use super::model_catalog::ModelPath;
 use super::model_library::ModelLibrary;
 use super::model_library::ModelLibraryError;
@@ -79,6 +80,7 @@ use super::ship_parts::select_hull_upgrade;
 use super::ship_parts::split_compound_hp;
 use super::size_estimate;
 use super::texture;
+use super::texture::MaterialAlbedo;
 
 /// What geometry the exported GLB carries. Armor is a per-zone triangle soup for
 /// the hull and every mount, so a caller who wants the visual model should not
@@ -1526,9 +1528,10 @@ impl ShipModelContext {
         Ok(result)
     }
 
-    /// Base albedo PNGs for the given hull meshes, keyed by mfm_path. Bakes TILEDLAND
-    /// (underwater) materials and force-opaques, so the underwater hull gets its stock skin.
-    pub fn hull_base_albedos(&self, meshes: &[gltf_export::InteractiveHullMesh]) -> HashMap<String, Vec<u8>> {
+    /// Base albedos for the given hull meshes, keyed by mfm_path, with the
+    /// alpha their materials draw. Bakes TILEDLAND (underwater) materials, so
+    /// the underwater hull gets its stock skin.
+    pub fn hull_base_albedos(&self, meshes: &[gltf_export::InteractiveHullMesh]) -> HashMap<String, MaterialAlbedo> {
         let mut out = HashMap::new();
         let db = match assets_bin::parse_assets_bin(&self.assets_bin_bytes) {
             Ok(db) => db,
@@ -1540,7 +1543,7 @@ impl ShipModelContext {
             if out.contains_key(path) {
                 continue;
             }
-            if let Some(png) = texture::load_or_bake_albedo(
+            if let Some(albedo) = texture::load_or_bake_albedo(
                 &self.vfs,
                 path,
                 mesh.mfm_path_id,
@@ -1548,7 +1551,7 @@ impl ShipModelContext {
                 Some(&self_id_index),
                 self.options.texture_lod,
             ) {
-                out.insert(path.clone(), png);
+                out.insert(path.clone(), albedo);
             }
         }
         out
@@ -1908,6 +1911,7 @@ impl ShipModelContext {
         let source = self.camo_texture_source_from_db(db)?;
         let mut tex_set = TextureSet::empty();
         tex_set.base = source.base_albedos();
+        tex_set.base_alpha = source.base_alpha();
 
         if let CamoSelection::Baked(id) = &self.options.camos {
             let info =
@@ -2353,10 +2357,12 @@ pub(crate) fn resolve_part_texture<'a>(
     textures.get("tile").or_else(|| textures.get("hull"))
 }
 
-/// Resolved MFM info: stem (leaf name without `.mfm`) and full VFS path.
+/// Resolved MFM info: stem (leaf name without `.mfm`), full VFS path, and
+/// the alpha its material draws.
 pub struct MfmInfo {
     pub stem: String,
     pub full_path: String,
+    pub alpha: AlphaMode,
 }
 
 /// Collect MFM stems and full paths from a visual's render sets.
@@ -2377,7 +2383,10 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
 
         if seen.insert(stem.to_string()) {
             let full_path = db.reconstruct_path(path_idx, &self_id_index);
-            result.push(MfmInfo { stem: stem.to_string(), full_path });
+            // Without the material record nothing marks the alpha as opacity.
+            let alpha = texture::parse_mfm_from_db(db, rs.material_mfm_path_id)
+                .map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(&material, &full_path));
+            result.push(MfmInfo { stem: stem.to_string(), full_path, alpha });
         }
     }
 
@@ -2388,6 +2397,7 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
 /// `CamoTextureSource`, which is the single enumeration ids are defined against.
 pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::TextureLod) -> TextureSet {
     let mut base = HashMap::new();
+    let mut base_alpha = HashMap::new();
 
     let mut seen_stems = HashSet::new();
     let mut unique_infos: Vec<&MfmInfo> = Vec::new();
@@ -2403,6 +2413,9 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::Tex
             match texture::dds_to_png(&dds_bytes, lod) {
                 Ok(png_bytes) => {
                     base.insert(info.stem.clone(), png_bytes);
+                    if info.alpha != AlphaMode::Opaque {
+                        base_alpha.insert(info.stem.clone(), info.alpha);
+                    }
                 }
                 Err(e) => {
                     eprintln!("  Warning: failed to decode base texture for {}: {e}", info.stem);
@@ -2411,7 +2424,7 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::Tex
         }
     }
 
-    TextureSet { base, ..TextureSet::empty() }
+    TextureSet { base, base_alpha, ..TextureSet::empty() }
 }
 
 /// Resolve a compound hardpoint (e.g. `HP_AGM_3_HP_AGA_1`) by finding the

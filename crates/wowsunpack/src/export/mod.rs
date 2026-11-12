@@ -18,6 +18,8 @@ pub mod gltf_export;
 #[cfg(feature = "models")]
 pub mod hardpoint;
 #[cfg(feature = "models")]
+pub mod material_alpha;
+#[cfg(feature = "models")]
 pub mod model_catalog;
 #[cfg(feature = "models")]
 pub mod model_library;

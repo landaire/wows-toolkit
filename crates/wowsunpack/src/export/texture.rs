@@ -186,19 +186,21 @@ fn read_tier_below_top(vfs: &vfs::VfsPath, stem: &str, tail_path: &str, drop: Ti
     read_vfs_file(vfs, tail_path)
 }
 
-/// Force all alpha values to 255 in an RGBA8 PNG buffer.
-/// Re-decodes and re-encodes the PNG. Used for model textures where the DDS alpha
-/// channel stores non-opacity data (height, roughness).
-pub fn force_png_opaque(png_bytes: &mut Vec<u8>) {
+/// Rewrites the alpha of an RGBA8 PNG buffer to what `alpha` draws (see
+/// [`AlphaMode::apply`]). Re-decodes and re-encodes the PNG; a masked or
+/// blended material's PNG is left as it is.
+pub fn apply_png_alpha(png_bytes: &mut Vec<u8>, alpha: AlphaMode) {
     use image_dds::image::ImageReader;
+
+    if alpha != AlphaMode::Opaque {
+        return;
+    }
     let Ok(reader) = ImageReader::new(Cursor::new(&*png_bytes)).with_guessed_format() else {
         return;
     };
     let Ok(img) = reader.decode() else { return };
     let mut rgba = img.into_rgba8();
-    for pixel in rgba.pixels_mut() {
-        pixel[3] = 255;
-    }
+    alpha.apply(&mut rgba);
     let mut buf = Vec::new();
     if PngEncoder::new(&mut buf)
         .write_image(rgba.as_raw(), rgba.width(), rgba.height(), ExtendedColorType::Rgba8)
@@ -676,6 +678,8 @@ use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::material;
 use crate::models::material::MaterialPrototype;
 
+use super::material_alpha::AlphaMode;
+
 /// Resolve a texture selfId hash from an MFM property to a VFS path,
 /// load the DDS bytes, and return them.
 fn load_texture_by_hash(
@@ -859,14 +863,20 @@ pub(crate) fn bake_tiledland_image(
     })
 }
 
+/// An albedo PNG whose alpha is rewritten to what its material draws.
+pub struct MaterialAlbedo {
+    pub png: Vec<u8>,
+    pub alpha: AlphaMode,
+}
+
 /// Try to load a texture for a model mesh, with TILEDLAND baking support.
 ///
 /// If assets.bin is available, first parses the MFM to check if it's a TILEDLAND
 /// terrain material. If so, bakes a composite albedo from the tile atlas + blend
 /// map (the correct rendering). Otherwise falls back to simple filename-based
-/// texture lookup via `load_base_albedo_bytes`.
+/// texture lookup via `load_base_albedo_bytes`, with the alpha the material draws.
 ///
-/// Returns PNG bytes if successful.
+/// Returns the PNG and its alpha mode if successful.
 pub fn load_or_bake_albedo(
     vfs: &vfs::VfsPath,
     mfm_full_path: &str,
@@ -874,28 +884,30 @@ pub fn load_or_bake_albedo(
     db: Option<&PrototypeDatabase<'_>>,
     self_id_index: Option<&HashMap<u64, usize>>,
     lod: TextureLod,
-) -> Option<Vec<u8>> {
+) -> Option<MaterialAlbedo> {
+    let material = db.filter(|_| mfm_path_id != 0).and_then(|db| parse_mfm_from_db(db, mfm_path_id));
+
     // Try MFM-based TILEDLAND baking first (terrain materials).
     // This must come before filename-based lookup because _od files exist for
     // TILEDLAND tiles but are overlay maps, not standalone albedo textures.
     if let Some(db) = db
         && let Some(idx) = self_id_index
-        && mfm_path_id != 0
-        && let Some(mat) = parse_mfm_from_db(db, mfm_path_id)
-        && is_tiledland_material(&mat)
+        && let Some(mat) = &material
+        && is_tiledland_material(mat)
     {
         eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
-        if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, lod) {
-            return Some(png);
+        if let Some(png) = bake_tiledland_albedo(mat, vfs, db, idx, lod) {
+            return Some(MaterialAlbedo { png, alpha: AlphaMode::Opaque });
         }
         eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
     }
 
-    // Fall back to simple filename-based lookup (works for standard PBS materials).
-    // Force alpha=255 since model albedo textures often store non-opacity data
-    // (height, roughness) in the alpha channel which would cause unwanted transparency.
+    // Without the material record nothing marks the alpha as opacity, and
+    // most albedo alpha channels carry other data (height, roughness).
+    let alpha = material.as_ref().map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(material, mfm_full_path));
     let dds_bytes = load_base_albedo_bytes(vfs, mfm_full_path, lod)?;
     let mut png = dds_to_png(&dds_bytes, lod).ok()?;
-    force_png_opaque(&mut png);
-    Some(png)
+    apply_png_alpha(&mut png, alpha);
+
+    Some(MaterialAlbedo { png, alpha })
 }

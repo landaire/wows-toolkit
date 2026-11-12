@@ -16,6 +16,7 @@ use rust_i18n::t;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::hardpoint::HardpointName;
+use wowsunpack::export::material_alpha::AlphaMode;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelArmorMaps;
 use wowsunpack::export::model_library::ModelExportOptions;
@@ -337,8 +338,12 @@ pub(crate) fn load_model_scene(
     let parts = model.into_parts();
 
     let mut hull_textures = HashMap::new();
+    let mut hull_alpha = HashMap::new();
     for (mfm_path, material) in parts.materials {
         let Some(image) = material.albedo.and_then(|albedo| albedo.image) else { continue };
+        if material.alpha != AlphaMode::Opaque {
+            hull_alpha.insert(mfm_path.clone(), material.alpha);
+        }
         let texture = RgbaTexture::new(image.width, image.height, image.pixels);
         hull_textures.insert(mfm_path, texture);
     }
@@ -352,7 +357,7 @@ pub(crate) fn load_model_scene(
     };
     let lods = SceneLods { count: lod_count, shown: request.lod };
 
-    Ok(model_scene(subject, meshes, parts.meshes, hull_textures, lods))
+    Ok(model_scene(subject, meshes, parts.meshes, HullTextures { textures: hull_textures, alpha: hull_alpha }, lods))
 }
 
 /// How many mesh LODs a model has, and which one is shown.
@@ -361,12 +366,20 @@ struct SceneLods {
     shown: usize,
 }
 
+/// A model's decoded albedos and the alpha modes of those that are not
+/// opaque, by `.mfm` path.
+#[derive(Default)]
+struct HullTextures {
+    textures: super::camo::TexturesByPart,
+    alpha: HashMap<String, AlphaMode>,
+}
+
 /// One model's scene, with the ship-only data empty.
 fn model_scene(
     subject: ModelSubject,
     meshes: Vec<InteractiveArmorMesh>,
     hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
-    hull_textures: super::camo::TexturesByPart,
+    hull_textures: HullTextures,
     lods: SceneLods,
 ) -> LoadedShipArmor {
     let bounds = scene_bounds(&meshes, &hull_meshes);
@@ -384,7 +397,8 @@ fn model_scene(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
-        hull_textures,
+        hull_textures: hull_textures.textures,
+        hull_alpha: hull_textures.alpha,
         hull_lod_count: lods.count,
         hull_lod: lods.shown,
         hull_upgrade_names: Vec::new(),
@@ -510,7 +524,13 @@ pub(crate) mod fixtures {
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
         };
-        super::model_scene(subject, Vec::new(), vec![hull_mesh()], HashMap::new(), SceneLods { count: 2, shown: 0 })
+        super::model_scene(
+            subject,
+            Vec::new(),
+            vec![hull_mesh()],
+            HullTextures::default(),
+            SceneLods { count: 2, shown: 0 },
+        )
     }
 
     /// A one-triangle model carrying one plate of unknown thickness.
@@ -526,7 +546,7 @@ pub(crate) mod fixtures {
             subject,
             vec![armor_mesh()],
             vec![hull_mesh()],
-            HashMap::new(),
+            HullTextures::default(),
             SceneLods { count: 2, shown: 0 },
         )
     }
@@ -541,7 +561,7 @@ pub(crate) mod fixtures {
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
         };
-        super::model_scene(subject, Vec::new(), hull, HashMap::new(), SceneLods { count: lod_count, shown: 0 })
+        super::model_scene(subject, Vec::new(), hull, HullTextures::default(), SceneLods { count: lod_count, shown: 0 })
     }
 }
 
@@ -697,6 +717,23 @@ mod tests {
 
         assert_eq!(error.problem(), ProblemReason::GeometryAbsent);
         assert_eq!(placeholder.emptiness(), Some(EmptyScene::Invisible));
+    }
+
+    /// The TS-1's propeller disc material blends; the scene says so, so the
+    /// upload draws it see-through, and its albedo keeps the alpha to do it.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_propeller_disc_opens_see_through() {
+        let Some((models, metadata)) = real_models() else { return };
+        let plane = catalogued(&models, "AAF014_Curtiss_TS1_float");
+
+        let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(plane, None)).expect("the TS-1 loads");
+
+        let disc = scene.hull_meshes.iter().find(|mesh| mesh.name == "discShape").expect("a propeller disc");
+        let disc_material = disc.mfm_path.as_ref().expect("a material");
+        assert_eq!(scene.hull_alpha.get(disc_material), Some(&AlphaMode::Blend));
+        let texture = scene.hull_textures.get(disc_material).expect("the disc albedo");
+        assert!(texture.pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc keeps its alpha");
     }
 }
 

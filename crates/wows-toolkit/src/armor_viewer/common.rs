@@ -7,6 +7,7 @@ use wowsunpack::ballistics::PlateIndex;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::export::camouflage::UvTransform;
+use wowsunpack::export::material_alpha::AlphaMode;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -305,12 +306,13 @@ pub(crate) fn load_ship_armor(
 
     tracing::debug!("Ship loaded: bounds Y=[{:.4}, {:.4}]", min[1], max[1]);
 
-    // Hull albedo textures (base/stock skin). Bakes TILEDLAND underwater materials + force-opaque,
-    // so the underwater hull shows its stock skin and camos composite over it correctly.
+    // Hull albedo textures (base/stock skin). Bakes TILEDLAND underwater materials and draws every
+    // material opaque, so the underwater hull shows its stock skin and camos composite over it.
     let mut hull_textures = std::collections::HashMap::new();
-    for (mfm, png) in ctx.hull_base_albedos(&hull_meshes) {
-        if let Ok(img) = image::load_from_memory(&png) {
-            let rgba = img.to_rgba8();
+    for (mfm, albedo) in ctx.hull_base_albedos(&hull_meshes) {
+        if let Ok(img) = image::load_from_memory(&albedo.png) {
+            let mut rgba = img.to_rgba8();
+            AlphaMode::Opaque.apply(&mut rgba);
             let (w, h) = (rgba.width(), rgba.height());
             hull_textures.insert(mfm, (w, h, rgba.into_raw()));
         }

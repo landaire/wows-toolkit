@@ -25,10 +25,12 @@ use std::collections::HashMap;
 use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
+use wowsunpack::export::material_alpha::AlphaMode;
 
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::LAYER_HULL;
+use crate::viewport::renderer::TextureImage;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
@@ -102,7 +104,7 @@ enum TextureKey {
 /// active camo: clear it when any of them changes.
 #[derive(Default)]
 pub(crate) struct HullTextureCache {
-    textures: HashMap<TextureKey, (wgpu::BindGroup, f32)>,
+    textures: HashMap<TextureKey, CachedTexture>,
 }
 
 impl HullTextureCache {
@@ -118,6 +120,14 @@ impl HullTextureCache {
     pub(crate) fn len(&self) -> usize {
         self.textures.len()
     }
+}
+
+/// One uploaded hull texture and how its material draws alpha.
+#[derive(Clone)]
+struct CachedTexture {
+    bind_group: wgpu::BindGroup,
+    brightness: f32,
+    alpha: AlphaMode,
 }
 
 /// Re-uploads `armor`'s hull meshes: removes every previously-uploaded hull
@@ -168,10 +178,13 @@ pub fn upload_hull_meshes(
         let stem = mesh.mfm_path.as_deref().map(mfm_stem);
         // Active camo texture for this stem takes precedence; otherwise the base albedo.
         let camo_texture = stem.and_then(|s| active_camo_textures.get(s).map(|texture| (s, texture)));
+        // A camo is drawn opaque over the hull; a material missing from
+        // `hull_alpha` draws opaque, as that map lists only the others.
         let texture = match camo_texture {
-            Some((stem, texture)) => Some((TextureKey::Camo(stem.to_string()), texture)),
+            Some((stem, texture)) => Some((TextureKey::Camo(stem.to_string()), texture, AlphaMode::Opaque)),
             None => mesh.mfm_path.as_ref().and_then(|path| {
-                armor.hull_textures.get(path).map(|texture| (TextureKey::Base(path.clone()), texture))
+                let alpha = armor.hull_alpha.get(path).copied().unwrap_or(AlphaMode::Opaque);
+                armor.hull_textures.get(path).map(|texture| (TextureKey::Base(path.clone()), texture, alpha))
             }),
         }
         .filter(|_| has_uvs);
@@ -179,26 +192,33 @@ pub fn upload_hull_meshes(
         // active camo texture; otherwise the mesh falls back to base albedo
         // with its own UVs.
         let camo_uv = camo_texture.and_then(|(s, _)| active_camo_uvs.get(s));
-        let bound = texture.map(|(key, texture)| {
+        let bound = texture.map(|(key, texture, alpha)| {
             texture_cache
                 .textures
                 .entry(key)
                 .or_insert_with(|| {
-                    let bind_group = pipeline.create_texture_bind_group(
-                        device,
-                        queue,
-                        &texture.pixels,
-                        texture.width,
-                        texture.height,
-                        &texture.take_mips(),
-                    );
-                    (bind_group, tex_brightness(&texture.pixels))
+                    let mips = texture.take_mips();
+                    let image = TextureImage {
+                        pixels: &texture.pixels,
+                        width: texture.width,
+                        height: texture.height,
+                        mips: &mips,
+                    };
+                    CachedTexture {
+                        bind_group: pipeline.create_texture_bind_group(device, queue, image, alpha.cutoff()),
+                        brightness: tex_brightness(&texture.pixels),
+                        alpha,
+                    }
                 })
                 .clone()
         });
         let has_texture = bound.is_some();
 
-        let brightness = bound.as_ref().map_or(FALLBACK_TEX_BRIGHTNESS, |(_, brightness)| *brightness);
+        let brightness = bound.as_ref().map_or(FALLBACK_TEX_BRIGHTNESS, |cached| cached.brightness);
+        // Blended texels are drawn without depth writes, behind which the
+        // opaque hull still shows, like the see-through hull.
+        let blended = bound.as_ref().is_some_and(|cached| cached.alpha == AlphaMode::Blend);
+        let layer = if blended { LAYER_HULL } else { hull_layer };
         let fallback_color: [f32; 4] =
             [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
@@ -238,10 +258,10 @@ pub fn upload_hull_meshes(
             continue;
         }
         let mid = match bound {
-            Some((bind_group, _)) => {
-                viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, bind_group)
+            Some(cached) => {
+                viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, layer, cached.bind_group)
             }
-            None => viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer),
+            None => viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, layer),
         };
         viewport.set_lit(mid, true);
         hull_mesh_ids.push(mid);
