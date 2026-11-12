@@ -53,7 +53,6 @@ use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::InspectorSettings;
-use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
@@ -61,6 +60,7 @@ use crate::replay_inspector::view::ReplaySettingsChanged;
 use crate::zoom::ResetZoom;
 use crate::zoom::ZoomIn;
 use crate::zoom::ZoomOut;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
 
 pub(crate) use settings_drawer::Setting;
 
