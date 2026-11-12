@@ -106,8 +106,9 @@ use crate::replay_inspector::columns::PlayerColorKind;
 use crate::replay_inspector::columns::class_icon_tint;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
 use crate::ui::selectable;
 
 const ROW_HEIGHT: Pixels = px(24.);
@@ -368,6 +369,8 @@ pub struct PlayerTrackerView {
     sort: Sort,
     clan_sort: ClanSort,
     filter_text: String,
+    /// The query read from `filter_text`, kept while it is unchanged.
+    filter_query: TypedQuery,
     filter_input: Entity<InputState>,
     /// Everyone the index returned for the current period, unfiltered. The
     /// filter and sort are applied per render over this.
@@ -484,6 +487,7 @@ impl PlayerTrackerView {
             sort: Sort::default(),
             clan_sort: ClanSort::default(),
             filter_text: String::new(),
+            filter_query: TypedQuery::default(),
             filter_input,
             players: Vec::new(),
             met_before: HashMap::new(),
@@ -952,8 +956,8 @@ impl PlayerTrackerView {
     }
 
     /// The typed filter, folded once for every row it is tried on.
-    fn filter(&self) -> FilterQuery {
-        FilterQuery::new(&self.filter_text)
+    fn filter(&self) -> MarkedQuery {
+        self.filter_query.of(&self.filter_text)
     }
 
     /// The historical table's rows: the indexed players, joined to what the

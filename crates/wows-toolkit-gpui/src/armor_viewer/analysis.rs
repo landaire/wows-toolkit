@@ -51,6 +51,8 @@ use super::viewport_view::ViewportView;
 use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
 
 /// How far the search results run before they scroll, so they never push the
 /// ships being compared off the rail.
@@ -91,8 +93,9 @@ pub struct PenetrationState {
     /// The plate the pointer was last over: its zone and how thick it is.
     /// `None` until the pointer has been on the hull.
     pub plate: Option<PlateUnderPointer>,
-    /// What has been typed into the search field.
+    /// What has been typed into the search field, and the query read from it.
     pub search: Entity<InputState>,
+    search_query: TypedQuery,
     /// Every ship that can be searched, flattened from the catalog once.
     pub catalog: Vec<CatalogEntry>,
 }
@@ -115,6 +118,7 @@ impl PenetrationState {
             ifhe: false,
             plate: None,
             search,
+            search_query: TypedQuery::default(),
             catalog: Vec::new(),
         }
     }
@@ -259,7 +263,7 @@ pub fn render_section(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx
 fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
     let state = view.penetration();
     let search = state.search.clone();
-    let query = FilterQuery::new(&search.read(cx).value());
+    let query = state.search_query.of(&search.read(cx).value());
     let matches = state.matches(&query);
     let results: Option<AnyElement> = (!matches.is_empty()).then(|| {
         v_flex()
@@ -293,7 +297,7 @@ fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx
 
 /// A search result: the ship's tier, then its name marked where `query`
 /// matched it.
-fn result_label(entry: &CatalogEntry, query: &FilterQuery) -> Div {
+fn result_label(entry: &CatalogEntry, query: &MarkedQuery) -> Div {
     h_flex().gap_1().child(tier_roman(entry.tier)).child(query.marked(entry.display_name.clone()))
 }
 
@@ -883,7 +887,7 @@ mod tests {
             assert_eq!(found(&state, "smaland"), ["Sm\u{e5}land"]);
             assert!(found(&state, " ").is_empty(), "nothing typed offers nothing");
 
-            let query = FilterQuery::new("smal");
+            let query = crate::text_filter::MarkedQuery::new("smal");
             let matches = state.matches(&query);
             crate::text_filter::take_marks();
             let _ = result_label(matches[0], &query);

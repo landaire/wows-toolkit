@@ -94,8 +94,8 @@ use crate::tactics::ShipLookup;
 use crate::tactics::ship_match_label;
 use crate::tactics::ship_match_name;
 use crate::text_filter::FilterKey;
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 
 /// How many frames of a battle the track keeps.
 ///
@@ -290,7 +290,7 @@ pub struct ReplayRendererPanel {
     /// What has been typed into it, and what that matched. Recomputed as it
     /// is typed rather than while the popover is built, which happens over
     /// and over and cannot reach the catalogue mutably.
-    ship_query: FilterQuery,
+    ship_query: MarkedQuery,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
     /// Every ship the loaded build knows, built once when first asked for.
     ship_lookup: Option<ShipLookup>,
@@ -319,7 +319,7 @@ pub struct ReplayRendererPanel {
     /// Which of the battle's events the timeline shows.
     event_filter: TimelineFilter,
     /// The filter's search, folded once each time it changes.
-    event_query: FilterQuery,
+    event_query: MarkedQuery,
     /// The timeline's search box.
     event_search: Entity<InputState>,
     _event_search: Option<Subscription>,
@@ -484,7 +484,7 @@ impl ReplayRendererPanel {
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.ship_query = FilterQuery::new(&state.read(cx).value());
+                this.ship_query = MarkedQuery::new(&state.read(cx).value());
                 this.matched_ships = this.matching_ships();
                 cx.notify();
             }
@@ -532,7 +532,7 @@ impl ReplayRendererPanel {
             turning: None,
             ship_search,
             _ship_search: Some(ship_search_subscription),
-            ship_query: FilterQuery::default(),
+            ship_query: MarkedQuery::default(),
             matched_ships: Vec::new(),
             ship_lookup: None,
             history: Vec::new(),
@@ -544,7 +544,7 @@ impl ReplayRendererPanel {
             ship_ranges: HashMap::new(),
             menu_for: None,
             event_filter: TimelineFilter::default(),
-            event_query: FilterQuery::default(),
+            event_query: MarkedQuery::default(),
             event_search,
             _event_search: Some(event_search_subscription),
             viewer_team: None,
@@ -616,7 +616,7 @@ impl ReplayRendererPanel {
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.ship_query = FilterQuery::new(&state.read(cx).value());
+                this.ship_query = MarkedQuery::new(&state.read(cx).value());
                 this.matched_ships = this.matching_ships();
                 cx.notify();
             }
@@ -674,7 +674,7 @@ impl ReplayRendererPanel {
             turning: None,
             ship_search,
             _ship_search: Some(ship_search_subscription),
-            ship_query: FilterQuery::default(),
+            ship_query: MarkedQuery::default(),
             matched_ships: Vec::new(),
             ship_lookup: None,
             history: Vec::new(),
@@ -686,7 +686,7 @@ impl ReplayRendererPanel {
             ship_ranges: HashMap::new(),
             menu_for: None,
             event_filter: TimelineFilter::default(),
-            event_query: FilterQuery::default(),
+            event_query: MarkedQuery::default(),
             event_search,
             _event_search: Some(event_search_subscription),
             viewer_team: None,
@@ -1475,7 +1475,7 @@ impl ReplayRendererPanel {
     /// Changes which events the timeline shows.
     pub(crate) fn set_event_filter(&mut self, apply: impl FnOnce(&mut TimelineFilter), cx: &mut Context<Self>) {
         apply(&mut self.event_filter);
-        self.event_query = FilterQuery::new(&self.event_filter.search);
+        self.event_query = MarkedQuery::new(&self.event_filter.search);
         cx.notify();
     }
 
@@ -2426,7 +2426,7 @@ impl ReplayRendererPanel {
                 config: Some(wt_collab_client::types::AnnotationShipConfig::new(param.id(), ship.display_name.clone())),
             },
         );
-        self.ship_query = FilterQuery::default();
+        self.ship_query = MarkedQuery::default();
         self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
         self.draw_current(cx);
         cx.notify();
@@ -4221,7 +4221,7 @@ fn ship_chooser(
     search: &Entity<InputState>,
     named: Option<String>,
     matches: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
-    query: &FilterQuery,
+    query: &MarkedQuery,
     cx: &App,
 ) -> AnyElement {
     v_flex()
@@ -4576,7 +4576,7 @@ fn timeline_filter_bar(
 fn timeline_rows(
     panel: &Entity<ReplayRendererPanel>,
     rows: Vec<TimelineRow>,
-    query: &FilterQuery,
+    query: &MarkedQuery,
     read: bool,
     any_events: bool,
 ) -> AnyElement {
@@ -5525,7 +5525,7 @@ mod tests {
         use crate::armor_viewer::catalog::ShipCatalog;
         use crate::armor_viewer::catalog::ShipEntry;
         use crate::tactics::ShipLookup;
-        use crate::text_filter::FilterQuery;
+        use crate::text_filter::MarkedQuery;
 
         let ship = |display_name: &str| ShipEntry {
             param_index: format!("P{display_name}"),
@@ -5550,10 +5550,10 @@ mod tests {
             panel.update(cx, |panel, _cx| {
                 panel.ship_lookup = Some(ShipLookup::new(&catalog));
 
-                panel.ship_query = FilterQuery::new("ya");
+                panel.ship_query = MarkedQuery::new("ya");
                 assert_eq!(names(panel.matching_ships()), ["Yamato", "Hayate"]);
 
-                panel.ship_query = FilterQuery::new("ymt");
+                panel.ship_query = MarkedQuery::new("ymt");
                 panel.matched_ships = panel.matching_ships();
                 assert_eq!(names(panel.matched_ships.clone()), ["Yamato"]);
             });
@@ -5561,7 +5561,7 @@ mod tests {
             let search = panel.read(cx).ship_search.clone();
             let matches = panel.read(cx).matched_ships.clone();
             crate::text_filter::take_marks();
-            let _ = super::ship_chooser(&panel, &search, None, matches, &FilterQuery::new("ymt"), cx);
+            let _ = super::ship_chooser(&panel, &search, None, matches, &MarkedQuery::new("ymt"), cx);
             assert_eq!(crate::text_filter::marks_for("Yamato"), Some(vec![0..1, 2..3, 4..5]));
         })
         .expect("the window is open");

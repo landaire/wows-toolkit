@@ -50,6 +50,7 @@ use crate::replay_inspector::GameDataCache;
 use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///
@@ -695,7 +696,7 @@ impl ShipLookup {
 
 /// A ship the search found: its tier, then its name marked where `query`
 /// matched it.
-pub(crate) fn ship_match_label(ship: &ShipEntry, query: &FilterQuery) -> Div {
+pub(crate) fn ship_match_label(ship: &ShipEntry, query: &MarkedQuery) -> Div {
     h_flex().gap_1().child(tier_roman(ship.tier)).child(query.marked(ship.display_name.clone()))
 }
 
@@ -796,7 +797,7 @@ pub struct TacticsBoard {
     /// What is typed into the ship search, and what it matched. Placing a ship
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
-    ship_query: FilterQuery,
+    ship_query: MarkedQuery,
     matched_ships: Vec<(Species, ShipEntry)>,
     map_select: Entity<SelectState<FilteredSelect<MapItem>>>,
     _map_select_subscription: Subscription,
@@ -896,7 +897,7 @@ impl TacticsBoard {
         });
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, gpui_kit::component::input::InputEvent::Change) {
-                this.ship_query = FilterQuery::new(&state.read(cx).value());
+                this.ship_query = MarkedQuery::new(&state.read(cx).value());
                 this.matched_ships = this.matching_ships();
                 cx.notify();
             }
@@ -909,7 +910,7 @@ impl TacticsBoard {
             scan_cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             version: None,
             ship_search,
-            ship_query: FilterQuery::default(),
+            ship_query: MarkedQuery::default(),
             matched_ships: Vec::new(),
             map_select,
             _map_select_subscription: map_select_subscription,
@@ -2009,7 +2010,7 @@ impl TacticsBoard {
         });
         self.adding = false;
         self.selected = None;
-        self.ship_query = FilterQuery::default();
+        self.ship_query = MarkedQuery::default();
         self.matched_ships.clear();
         self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
         cx.notify();
@@ -4014,7 +4015,7 @@ mod filter_tests {
     #[test]
     fn a_ship_match_is_drawn_marked_where_its_name_matched() {
         crate::text_filter::take_marks();
-        let _ = ship_match_label(&ship("Yamato", 10), &FilterQuery::new("ymt"));
+        let _ = ship_match_label(&ship("Yamato", 10), &crate::text_filter::MarkedQuery::new("ymt"));
 
         assert_eq!(crate::text_filter::marks_for("Yamato"), Some(vec![0..1, 2..3, 4..5]));
     }

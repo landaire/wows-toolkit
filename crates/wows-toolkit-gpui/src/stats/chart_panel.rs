@@ -49,6 +49,8 @@ use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
 use crate::ui::selectable;
 
 use super::plot;
@@ -128,6 +130,8 @@ pub struct StatsChartPanel {
     /// lists.
     played: Arc<[PlayedShip]>,
     ship_search: Entity<InputState>,
+    /// The query read from `ship_search`, kept while its text is unchanged.
+    ship_query: TypedQuery,
     _ship_search_subscription: Subscription,
     selected_ships: Vec<GameParamId>,
     /// Until the selection is touched, it follows the games: a session that
@@ -172,6 +176,7 @@ impl StatsChartPanel {
             ships: Vec::new(),
             played: Arc::from([]),
             ship_search,
+            ship_query: TypedQuery::default(),
             _ship_search_subscription: ship_search_subscription,
             selected_ships: Vec::new(),
             selection_touched: false,
@@ -767,7 +772,7 @@ impl StatsChartPanel {
         let played = Arc::clone(&self.played);
         let ship_search = self.ship_search.clone();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let filter = FilterQuery::new(&ship_query);
+        let filter = self.ship_query.of(&ship_query);
         let selected = self.selected_ships.clone();
         let selected_count = played.iter().filter(|ship| selected.contains(&ship.ship_id)).count();
         let total_count = played.len();
@@ -1051,7 +1056,7 @@ fn visible_ships<'a>(played: &'a [PlayedShip], filter: &FilterQuery) -> Vec<&'a 
 }
 
 /// One ship's row in the picker, its name marked where `filter` matched.
-fn ship_checkbox(chart: ChartId, ship: &PlayedShip, filter: &FilterQuery, checked: bool, foreground: Hsla) -> Checkbox {
+fn ship_checkbox(chart: ChartId, ship: &PlayedShip, filter: &MarkedQuery, checked: bool, foreground: Hsla) -> Checkbox {
     Checkbox::new(SharedString::from(format!("chart-ship-{chart}-{}", ship.ship_id.raw())))
         .accessibility_label(ship.name.clone())
         .child(div().text_color(foreground).child(filter.marked(ship.name.clone())))
@@ -1145,11 +1150,12 @@ mod tests {
         let played = played(&["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst"]);
 
         take_marks();
-        let _row = ship_checkbox(0, &played[0], &FilterQuery::new("fdg"), true, gpui_kit::black());
+        let _row = ship_checkbox(0, &played[0], &crate::text_filter::MarkedQuery::new("fdg"), true, gpui_kit::black());
         assert_eq!(marks_for("Friedrich der Grosse"), Some(vec![0..1, 10..11, 14..15]));
 
         take_marks();
-        let _row = ship_checkbox(0, &played[1], &FilterQuery::new("grosse"), true, gpui_kit::black());
+        let _row =
+            ship_checkbox(0, &played[1], &crate::text_filter::MarkedQuery::new("grosse"), true, gpui_kit::black());
         assert_eq!(marks_for("Gro\u{df}er Kurf\u{fc}rst"), Some(std::iter::once(0..6).collect()));
     }
 }

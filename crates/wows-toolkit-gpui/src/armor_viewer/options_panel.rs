@@ -30,8 +30,8 @@ use rust_i18n::t;
 use super::pane::ArmorViewerPane;
 use super::pane::OptionSection;
 use super::popover;
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 
 /// Fixed: the sections below are their own widths, so there is nothing for a
 /// drag handle to do but overflow or pad them.
@@ -94,6 +94,8 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     };
 
     let filter = view.options_filter(cx);
+    let zone_query = view.zone_filter(cx);
+    let part_query = view.part_filter(cx);
     let filter_input = view.options_filter_input().clone();
     let header = v_flex()
         .flex_none()
@@ -198,7 +200,9 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 t!("ui.armor.armor_options").as_ref(),
                 &filter,
                 cx,
-                |filter, cx| popover::render_popover_content(&visibility, filter, view.zone_filter_input(), cx),
+                |filter, cx| {
+                    popover::render_popover_content(&visibility, filter, view.zone_filter_input(), &zone_query, cx)
+                },
             ),
         ]
     } else {
@@ -206,7 +210,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     };
     let mesh_sections = [
         section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), &filter, cx, |filter, cx| {
-            popover::render_hull_popover_content(&hull, filter, view.part_filter_input(), cx)
+            popover::render_hull_popover_content(&hull, filter, view.part_filter_input(), &part_query, cx)
         }),
         section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), &filter, cx, |filter, cx| {
             popover::render_display_popover_content(&display, &groups, filter, cx)
@@ -253,13 +257,13 @@ fn section(
     pane: &Entity<ArmorViewerPane>,
     which: OptionSection,
     title: &str,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
-    body: impl FnOnce(&FilterQuery, &mut App) -> Option<AnyElement>,
+    body: impl FnOnce(&MarkedQuery, &mut App) -> Option<AnyElement>,
 ) -> Option<AnyElement> {
     let marked = filter.label(title.to_string());
     let (expanded, content) = if filter.is_active() {
-        let inner = if marked.is_some() { FilterQuery::default() } else { filter.clone() };
+        let inner = if marked.is_some() { MarkedQuery::default() } else { filter.clone() };
         let content = body(&inner, cx);
         if content.is_none() && marked.is_none() {
             return None;
@@ -292,7 +296,7 @@ fn section(
 }
 
 /// Whether `filter` keeps any of the labels the translation `keys` name.
-fn keeps_any(filter: &FilterQuery, keys: &[&str]) -> bool {
+fn keeps_any(filter: &MarkedQuery, keys: &[&str]) -> bool {
     !filter.is_active() || keys.iter().any(|key| filter.keeps(&t!(*key)))
 }
 
@@ -498,7 +502,8 @@ mod tests {
             origin: CamoOrigin::ShipSpecific,
             use_color_scheme: false,
             uv_transforms: HashMap::new(),
-        }];
+        }]
+        .into();
         install(window, scene, &[OptionSection::Hull], cx);
 
         cx.update_window(window.into(), |_, window, _cx| {
@@ -719,7 +724,7 @@ mod tests {
             uv_transforms: HashMap::new(),
         };
         scene.camo_scheme_infos =
-            vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)];
+            vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)].into();
         install(window, scene, &[], cx);
         let roll = rust_i18n::t!("ui.armor.roll").into_owned();
         let bodies = [OptionSection::Visibility, OptionSection::Hull, OptionSection::Display]

@@ -333,6 +333,15 @@ pub struct PlayerFacet {
     pub match_count: i64,
 }
 
+/// A player with every name the index has seen them under, so that a lookup
+/// finds a player by a name they no longer use.
+#[derive(Debug, Clone)]
+pub struct NamedPlayer {
+    pub facet: PlayerFacet,
+    /// The latest name first.
+    pub names: Vec<String>,
+}
+
 /// A distinct ship the user has played (for palette/Search facets).
 #[derive(Debug, Clone)]
 pub struct ShipFacet {

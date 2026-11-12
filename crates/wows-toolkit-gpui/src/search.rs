@@ -36,6 +36,11 @@ use rust_i18n::t;
 use crate::search_pills::StructuralEdit;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
+use futures::FutureExt as _;
+use futures::future::Shared;
+use std::sync::Arc;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
@@ -45,8 +50,11 @@ use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_viewmodel::name_lookup::PlayerLookup;
+use wows_toolkit_viewmodel::name_lookup::ShipLookup;
 use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::select::Selection;
 use wows_toolkit_viewmodel::query_bar::suggest;
@@ -203,7 +211,7 @@ const RERUN_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 const CALENDAR_DATE_FORMAT: &str = "%Y-%m-%d";
 
 /// Rows a value lookup offers, matching the egui bar's own limit.
-const VALUE_LIMIT: i64 = 50;
+const VALUE_LIMIT: usize = 50;
 /// How tall the completions dropdown grows before it scrolls, matching the
 /// egui bar's own cap, and the width it is kept between so it neither reads
 /// as a strip nor spans the window.
@@ -284,15 +292,54 @@ fn parse_saved_settings(
     Ok((query, history, sort, operator_preferences))
 }
 
-/// The values `request` asks the index for.
-///
-/// Ships and players are searched by what has been typed so far; maps and
-/// sources are whole catalogues, which are small enough to offer entire.
-async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<ValueOption> {
-    match request {
-        ValueRequest::Players { needle } => match query::search_players(pool, needle, VALUE_LIMIT).await {
-            Ok(rows) => rows
-                .iter()
+/// The names a player or ship field ranks as its value is typed.
+enum ValueNames {
+    Players(PlayerLookup),
+    Ships(ShipLookup),
+}
+
+/// Which names a value field ranks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NameList {
+    Players,
+    Ships,
+}
+
+/// A field's names, read once while the caret stays in the field, so that a
+/// keystroke only ranks them. `None` when they could not be read.
+type NamesRead = Shared<Task<Option<Arc<ValueNames>>>>;
+
+/// The names the caret's field is ranked over.
+struct FieldNames {
+    list: NameList,
+    names: NamesRead,
+}
+
+/// The values a field's request waits on.
+enum PendingValues {
+    Names { names: NamesRead, needle: String },
+    Maps,
+    Sources,
+}
+
+impl NameList {
+    async fn load(self, pool: &sqlx::SqlitePool) -> Result<ValueNames, IndexError> {
+        match self {
+            Self::Players => Ok(ValueNames::Players(PlayerLookup::load(pool).await?)),
+            Self::Ships => Ok(ValueNames::Ships(ShipLookup::load_roster(pool).await?)),
+        }
+    }
+}
+
+impl ValueNames {
+    /// The values whose names `needle` matches, best first, ranked over
+    /// every name before the dropdown's cap.
+    fn options(&self, needle: &str) -> Vec<ValueOption> {
+        let query = FilterQuery::new(needle);
+        match self {
+            Self::Players(players) => players
+                .find(&query, VALUE_LIMIT)
+                .into_iter()
                 .map(|facet| ValueOption {
                     label: if facet.clan.is_empty() {
                         facet.latest_name.clone()
@@ -302,41 +349,40 @@ async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<
                     token: facet.account_id.raw().to_string(),
                 })
                 .collect(),
-            Err(err) => {
-                tracing::warn!("search: the player lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Ships { needle } => match query::search_ships(pool, needle, VALUE_LIMIT).await {
-            Ok(rows) => rows
-                .iter()
+            Self::Ships(ships) => ships
+                .find(&query, VALUE_LIMIT)
+                .into_iter()
                 .map(|facet| ValueOption { label: facet.ship_name.clone(), token: facet.ship_id.raw().to_string() })
                 .collect(),
-            Err(err) => {
-                tracing::warn!("search: the ship lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Maps => match query::distinct_maps(pool, VALUE_LIMIT).await {
-            Ok(names) => names
-                .iter()
-                .map(|name| ValueOption { label: name.clone(), token: query_text::quote_if_needed(name) })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the map lookup failed: {err}");
-                Vec::new()
-            }
-        },
-        ValueRequest::Sources => match query::list_sources(pool).await {
-            Ok(sources) => sources
-                .iter()
-                .map(|source| ValueOption { label: source.name.clone(), token: source.id.0.to_string() })
-                .collect(),
-            Err(err) => {
-                tracing::warn!("search: the source lookup failed: {err}");
-                Vec::new()
-            }
-        },
+        }
+    }
+}
+
+/// The maps the index has seen, offered entire.
+async fn look_up_maps(pool: &sqlx::SqlitePool) -> Vec<ValueOption> {
+    match query::distinct_maps(pool, VALUE_LIMIT as i64).await {
+        Ok(names) => names
+            .iter()
+            .map(|name| ValueOption { label: name.clone(), token: query_text::quote_if_needed(name) })
+            .collect(),
+        Err(err) => {
+            tracing::warn!("search: the map lookup failed: {err}");
+            Vec::new()
+        }
+    }
+}
+
+/// The index sources, offered entire.
+async fn look_up_sources(pool: &sqlx::SqlitePool) -> Vec<ValueOption> {
+    match query::list_sources(pool).await {
+        Ok(sources) => sources
+            .iter()
+            .map(|source| ValueOption { label: source.name.clone(), token: source.id.0.to_string() })
+            .collect(),
+        Err(err) => {
+            tracing::warn!("search: the source lookup failed: {err}");
+            Vec::new()
+        }
     }
 }
 
@@ -402,6 +448,12 @@ pub struct SearchView {
     /// once and kept.
     value_request: Option<ValueRequest>,
     value_options: Vec<ValueOption>,
+    /// The typed value the options are marked by, kept while it is unchanged.
+    value_query: TypedQuery,
+    /// The names the caret's player or ship field is ranked over, dropped
+    /// when the caret leaves the field so that the next one reads the index
+    /// afresh.
+    value_names: Option<FieldNames>,
     /// Whether the index is still being asked. A whole-index name search is
     /// seconds on an established index, so the bar says it is looking rather
     /// than showing an empty dropdown that reads as "nothing matches".
@@ -553,7 +605,9 @@ impl SearchView {
             completion_source: String::new(),
             reading: None,
             value_request: None,
+            value_names: None,
             value_options: Vec::new(),
+            value_query: TypedQuery::default(),
             value_lookup_running: false,
             _value_lookup: None,
             completion_cursor: None,
@@ -1106,8 +1160,8 @@ impl SearchView {
         // A player or ship lookup is narrowed by the typed value; a catalogue
         // is offered entire, so nothing in it is marked.
         let typed = match &self.value_request {
-            Some(ValueRequest::Players { needle } | ValueRequest::Ships { needle }) => FilterQuery::new(needle),
-            Some(ValueRequest::Sources | ValueRequest::Maps) | None => FilterQuery::default(),
+            Some(ValueRequest::Players { needle } | ValueRequest::Ships { needle }) => self.value_query.of(needle),
+            Some(ValueRequest::Sources | ValueRequest::Maps) | None => MarkedQuery::default(),
         };
         self.value_options
             .iter()
@@ -1257,9 +1311,9 @@ impl SearchView {
     /// Asks for the values the caret's field takes, when it takes any.
     ///
     /// A fragment that names no field, or one whose values are typed rather
-    /// than chosen, leaves the static suggestions showing. The lookup waits
-    /// out `VALUE_DEBOUNCE` so typing a ship name does not put one query per
-    /// keystroke through the index.
+    /// than chosen, leaves the static suggestions showing. A player or ship
+    /// field reads the index's names once, and each value typed into it waits
+    /// out `VALUE_DEBOUNCE` before they are ranked.
     fn refresh_value_options(&mut self, text: &str, cx: &mut Context<Self>) {
         let request = suggest::value_request_for(text);
         if request == self.value_request {
@@ -1268,29 +1322,87 @@ impl SearchView {
         self.value_request = request.clone();
         self.value_options.clear();
         let Some(request) = request else {
+            self.value_names = None;
             self.value_lookup_running = false;
             self._value_lookup = None;
             return;
         };
         let Some(pool) = crate::settings_store::pool(cx) else { return };
 
+        let pending = match &request {
+            ValueRequest::Players { needle } => {
+                PendingValues::Names { names: self.field_names(NameList::Players, &pool, cx), needle: needle.clone() }
+            }
+            ValueRequest::Ships { needle } => {
+                PendingValues::Names { names: self.field_names(NameList::Ships, &pool, cx), needle: needle.clone() }
+            }
+            ValueRequest::Maps => {
+                self.value_names = None;
+                PendingValues::Maps
+            }
+            ValueRequest::Sources => {
+                self.value_names = None;
+                PendingValues::Sources
+            }
+        };
+
         self.value_lookup_running = true;
         self._value_lookup = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(VALUE_DEBOUNCE).await;
-            let asked = request.clone();
-            let found = runtime::spawn(cx, async move { look_up_values(&pool, &asked).await }).await;
+            let options = match pending {
+                PendingValues::Names { names, needle } => match names.await {
+                    Some(names) => cx.background_spawn(async move { names.options(&needle) }).await,
+                    None => Vec::new(),
+                },
+                PendingValues::Maps => {
+                    runtime::spawn(cx, async move { look_up_maps(&pool).await }).await.unwrap_or_else(|err| {
+                        tracing::warn!("search: the map lookup did not finish: {err}");
+                        Vec::new()
+                    })
+                }
+                PendingValues::Sources => {
+                    runtime::spawn(cx, async move { look_up_sources(&pool).await }).await.unwrap_or_else(|err| {
+                        tracing::warn!("search: the source lookup did not finish: {err}");
+                        Vec::new()
+                    })
+                }
+            };
             let _ = this.update(cx, |this, cx| {
-                // The caret has moved on to another field since.
+                // The caret has moved on since.
                 if this.value_request.as_ref() != Some(&request) {
                     return;
                 }
                 this.value_lookup_running = false;
-                if let Ok(options) = found {
-                    this.value_options = options;
-                }
+                this.value_options = options;
                 cx.notify();
             });
         }));
+    }
+
+    /// The names the caret's `list` field ranks: the ones being read for it
+    /// already, or a read started now.
+    fn field_names(&mut self, list: NameList, pool: &sqlx::SqlitePool, cx: &mut Context<Self>) -> NamesRead {
+        if let Some(field) = self.value_names.as_ref().filter(|field| field.list == list) {
+            return field.names.clone();
+        }
+
+        let pool = pool.clone();
+        let names = cx
+            .spawn(async move |_this, cx| match runtime::spawn(cx, async move { list.load(&pool).await }).await {
+                Ok(Ok(names)) => Some(Arc::new(names)),
+                Ok(Err(err)) => {
+                    tracing::warn!(?list, "search: the name lookup failed: {err}");
+                    None
+                }
+                Err(err) => {
+                    tracing::warn!(?list, "search: the name lookup did not finish: {err}");
+                    None
+                }
+            })
+            .shared();
+        self.value_names = Some(FieldNames { list, names: names.clone() });
+
+        names
     }
 
     /// The results follow the query as it is typed, and Enter runs it at
@@ -2787,7 +2899,7 @@ mod tests {
     /// row marks what the typed value matched, accents folded.
     #[gpui_kit::test]
     fn a_completion_row_marks_the_letters_that_matched(cx: &mut TestAppContext) {
-        use super::FilterQuery;
+        use super::MarkedQuery;
         use super::ValueOption;
         use super::ValueRequest;
         use crate::search_pills::Completion;
@@ -2799,7 +2911,7 @@ mod tests {
                     label: "Enemy damage".to_string(),
                     context: "player".to_string(),
                     replacement: "enemy.damage:".to_string(),
-                    query: FilterQuery::new("en dmg"),
+                    query: MarkedQuery::new("en dmg"),
                 }];
                 view.completions_open = true;
             })

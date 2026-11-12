@@ -12,7 +12,10 @@ use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use futures::FutureExt as _;
+use futures::future::Shared;
 use gpui_kit::AppContext as _;
 use gpui_kit::Context;
 use gpui_kit::Entity;
@@ -44,6 +47,8 @@ use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::px;
 use rust_i18n::t;
+use wows_toolkit_viewmodel::name_lookup::PlayerLookup;
+use wows_toolkit_viewmodel::name_lookup::ShipLookup;
 use wowsunpack::game_params::types::Species;
 
 use crate::app::App;
@@ -61,7 +66,9 @@ use crate::runtime;
 use crate::settings_store;
 use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedQuery;
 use crate::text_filter::highlighted_text;
+use crate::text_filter::no_ranges;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 /// What confirming an entry asks the window to do.
@@ -161,8 +168,8 @@ impl PaletteMode {
     }
 }
 
-/// Maximum rows returned by one cascading index query.
-pub const MODE_LIMIT: i64 = 50;
+/// Maximum rows one index-backed layer lists.
+pub const MODE_LIMIT: usize = 50;
 
 /// One entry: what it is called and what it does.
 #[derive(Clone)]
@@ -301,7 +308,7 @@ pub fn folder_entries(rows: &[FolderRow], query: &FilterQuery) -> Vec<PaletteEnt
 /// The directory layer's rows as the component draws them: the name, with
 /// the whole path dimmed after it, and the row dimmed and marked when the
 /// directory is gone.
-fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &FilterQuery) -> Vec<CommandItem> {
+fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &MarkedQuery) -> Vec<CommandItem> {
     entries
         .iter()
         .enumerate()
@@ -314,8 +321,8 @@ fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &FilterQuer
             let shown = SharedString::from(shown_path(path));
             // The row is kept by its path; the name is marked where it also
             // matches, and drawn unmarked otherwise.
-            let name_marks = query.ranges(&name).unwrap_or_default();
-            let shown_marks = query.ranges(&shown).unwrap_or_default();
+            let name_marks = query.ranges(&name).unwrap_or_else(no_ranges);
+            let shown_marks = query.ranges(&shown).unwrap_or_else(no_ranges);
             CommandItem::new().label(entry.label.clone()).child(move |_window, cx| {
                 let dim = crate::theme::text_dim();
                 h_flex()
@@ -330,7 +337,7 @@ fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &FilterQuer
                             .flex_none()
                             .text_sm()
                             .text_color(cx.theme().foreground)
-                            .child(highlighted_text(name.clone(), name_marks.clone())),
+                            .child(highlighted_text(name.clone(), &name_marks)),
                     )
                     .when(missing, |row| {
                         row.child(
@@ -346,7 +353,7 @@ fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &FilterQuer
                             .truncate()
                             .text_xs()
                             .text_color(dim)
-                            .child(highlighted_text(shown.clone(), shown_marks.clone())),
+                            .child(highlighted_text(shown.clone(), &shown_marks)),
                     )
             })
         })
@@ -364,14 +371,56 @@ pub enum ShipList {
 
 /// Where a second layer's rows come from.
 pub enum ModeSource {
-    /// The replay index, queried as the reader types.
-    Index,
+    /// The replay index, read once when first searched and then ranked as
+    /// the reader types. The read is shared, so a keystroke made while it
+    /// runs waits on it rather than starting it again.
+    Index { list: IndexList, read: Option<LookupRead> },
     /// The ship catalogue, filtered in memory.
     Ships(ShipList),
     /// The game versions the listing holds, newest first.
     Versions(Rc<[VersionCount]>),
     /// The directories most recently opened, most recent first.
     Folders(Rc<[FolderRow]>),
+}
+
+impl ModeSource {
+    /// `list`, to be read from the index when first searched.
+    pub fn index(list: IndexList) -> Self {
+        Self::Index { list, read: None }
+    }
+}
+
+/// What an index-backed layer lists.
+#[derive(Clone, Copy, Debug)]
+pub enum IndexList {
+    Players,
+    /// The ships the reader has played.
+    MyShips,
+}
+
+/// An index-backed layer's rows, read once and ranked for each query.
+pub enum IndexLookup {
+    Players(PlayerLookup),
+    Ships(ShipLookup),
+}
+
+/// The one read of an index-backed layer's rows.
+type LookupRead = Shared<Task<Result<Arc<IndexLookup>, String>>>;
+
+impl IndexList {
+    /// Reads the rows `self` ranks.
+    pub async fn load(self, pool: &sqlx::sqlite::SqlitePool) -> Result<IndexLookup, String> {
+        match self {
+            Self::Players => PlayerLookup::load(pool)
+                .await
+                .map(IndexLookup::Players)
+                .map_err(|err| format!("The indexed players could not be read: {err}")),
+            Self::MyShips => ShipLookup::load_played(pool)
+                .await
+                .map(IndexLookup::Ships)
+                .map_err(|err| format!("The indexed ships could not be read: {err}")),
+        }
+    }
 }
 
 /// Stands in for the ship catalogue in tests, which have no game data to
@@ -395,7 +444,7 @@ pub struct ModeDialog {
     source: ModeSource,
     entries: Rc<Vec<PaletteEntry>>,
     /// The query `entries` were found for, which their rows mark.
-    query: FilterQuery,
+    query: MarkedQuery,
     error: Option<String>,
     generation: u64,
     _query_task: Option<Task<()>>,
@@ -413,7 +462,7 @@ impl ModeDialog {
             mode,
             source,
             entries: Rc::default(),
-            query: FilterQuery::default(),
+            query: MarkedQuery::default(),
             error: None,
             generation: 0,
             _query_task: None,
@@ -484,9 +533,9 @@ impl ModeDialog {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.error = None;
-        self.query = FilterQuery::new(&needle);
+        self.query = MarkedQuery::new(&needle);
 
-        match &self.source {
+        let (list, read) = match &self.source {
             ModeSource::Ships(ShipList::Ready(rows)) => {
                 self.entries = Rc::new(armor_ship_entries(rows, &self.query));
                 cx.notify();
@@ -507,8 +556,8 @@ impl ModeDialog {
                 cx.notify();
                 return;
             }
-            ModeSource::Index => {}
-        }
+            ModeSource::Index { list, read } => (*list, read.clone()),
+        };
 
         self.entries = Rc::default();
         self.command.update(cx, |command, cx| command.set_loading(true, window, cx));
@@ -526,7 +575,19 @@ impl ModeDialog {
             cx.notify();
             return;
         };
-        let mode = self.mode;
+        let read = match read {
+            Some(read) => read,
+            None => {
+                let read = cx
+                    .background_spawn(async move { runtime.handle().block_on(list.load(&pool)).map(Arc::new) })
+                    .shared();
+                if let ModeSource::Index { read: held, .. } = &mut self.source {
+                    *held = Some(read.clone());
+                }
+                read
+            }
+        };
+        let query = self.query.query().clone();
 
         self._query_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
@@ -535,13 +596,21 @@ impl ModeDialog {
                 return;
             }
 
-            let read =
-                cx.background_spawn(async move { runtime.handle().block_on(mode_entries(mode, &pool, &needle)) }).await;
+            let found = match read.await {
+                Ok(lookup) => Ok(cx.background_spawn(async move { mode_entries(&lookup, &query) }).await),
+                Err(error) => Err(error),
+            };
             let _ = this.update_in(cx, |this, window, cx| {
+                // A failed read is dropped so that the next query tries again.
+                if found.is_err()
+                    && let ModeSource::Index { read, .. } = &mut this.source
+                {
+                    *read = None;
+                }
                 if this.generation != generation {
                     return;
                 }
-                match read {
+                match found {
                     Ok(entries) => {
                         this.entries = Rc::new(entries);
                         this.error = None;
@@ -788,7 +857,7 @@ pub struct RootPalette {
     /// Each entry's label folded, in `entries` order.
     keys: Vec<FilterKey>,
 
-    query: FilterQuery,
+    query: MarkedQuery,
     /// The entries `query` keeps, best first.
     shown: Rc<Vec<PaletteEntry>>,
 }
@@ -797,11 +866,11 @@ impl RootPalette {
     pub fn new(entries: Vec<PaletteEntry>) -> Self {
         let keys = entries.iter().map(|entry| FilterKey::new(&entry.label)).collect();
         let shown = Rc::new(entries.clone());
-        Self { entries, keys, query: FilterQuery::default(), shown }
+        Self { entries, keys, query: MarkedQuery::default(), shown }
     }
 
     pub fn search(&mut self, typed: &str) {
-        self.query = FilterQuery::new(typed);
+        self.query = MarkedQuery::new(typed);
         let kept = self.query.rank(self.entries.iter().zip(&self.keys), |(_, key)| *key);
         self.shown = Rc::new(kept.into_iter().map(|(entry, _)| entry.clone()).collect());
     }
@@ -810,7 +879,7 @@ impl RootPalette {
         Rc::clone(&self.shown)
     }
 
-    pub fn query(&self) -> &FilterQuery {
+    pub fn query(&self) -> &MarkedQuery {
         &self.query
     }
 }
@@ -818,13 +887,13 @@ impl RootPalette {
 /// The entries as the component's own items, in the same order, so an index
 /// into one is an index into the other. Each row marks where `query`
 /// matched it.
-pub fn items(entries: &[PaletteEntry], query: &FilterQuery) -> Vec<CommandItem> {
+pub fn items(entries: &[PaletteEntry], query: &MarkedQuery) -> Vec<CommandItem> {
     entries.iter().map(|entry| marked_item(entry, query, None)).collect()
 }
 
 /// One entry's row: the label, marked where `query` matched the text the
 /// layer filtered on, and named by the label for accessibility.
-fn marked_item(entry: &PaletteEntry, query: &FilterQuery, icon: Option<IconName>) -> CommandItem {
+fn marked_item(entry: &PaletteEntry, query: &MarkedQuery, icon: Option<IconName>) -> CommandItem {
     let label = SharedString::from(entry.label.clone());
     let marks = entry_marks(entry, query);
 
@@ -845,86 +914,59 @@ fn marked_item(entry: &PaletteEntry, query: &FilterQuery, icon: Option<IconName>
             .gap_2()
             .items_center()
             .when_some(icon.clone(), |row, icon| row.child(Icon::new(icon).size_4().text_color(muted)))
-            .child(highlighted_text(label.clone(), marks.clone()))
+            .child(highlighted_text(label.clone(), &marks))
     })
 }
 
 /// The byte ranges of `entry.label` to mark for `query`. A layer that
 /// filters on part of the label (a ship's name, a version) marks only that
 /// part; the others mark the label itself.
-fn entry_marks(entry: &PaletteEntry, query: &FilterQuery) -> Vec<Range<usize>> {
+fn entry_marks(entry: &PaletteEntry, query: &MarkedQuery) -> Rc<[Range<usize>]> {
     let filtered = match &entry.action {
         PaletteAction::ViewArmor { display_name, .. } => Some(display_name.clone()),
         PaletteAction::ForceReindex(ReindexScope::Version(version)) => Some(version_said(version)),
         _ => None,
     };
     // A row kept by a text other than the one marked draws unmarked.
-    let Some(filtered) = filtered else { return query.ranges(&entry.label).unwrap_or_default() };
-    let Some(offset) = entry.label.find(&filtered) else { return Vec::new() };
+    let Some(filtered) = filtered else { return query.ranges(&entry.label).unwrap_or_else(no_ranges) };
+    let Some(offset) = entry.label.find(&filtered) else { return no_ranges() };
 
     query
         .ranges(&filtered)
-        .unwrap_or_default()
-        .into_iter()
+        .unwrap_or_else(no_ranges)
+        .iter()
         .map(|range| range.start + offset..range.end + offset)
         .collect()
 }
 
-/// Rows one index-backed mode offers for the current query.
-///
-/// An empty result is distinct from a query failure so the palette can report
-/// each one correctly.
-pub async fn mode_entries(
-    mode: PaletteMode,
-    pool: &sqlx::sqlite::SqlitePool,
-    needle: &str,
-) -> Result<Vec<PaletteEntry>, String> {
-    use wows_toolkit_config::index::query;
+/// The rows `lookup` offers for `query`, best first.
+pub fn mode_entries(lookup: &IndexLookup, query: &FilterQuery) -> Vec<PaletteEntry> {
+    use wows_toolkit_config::index::query_text::print_query;
     use wows_toolkit_viewmodel::query_bar::seed;
 
-    match mode {
-        PaletteMode::Players => query::search_players(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|player| {
-                        let named = match player.clan.as_str() {
-                            "" => player.latest_name.clone(),
-                            clan => format!("[{clan}] {}", player.latest_name),
-                        };
-                        PaletteEntry {
-                            label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
-                            action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                                &seed::matches_with_player(player.account_id),
-                            )),
-                        }
-                    })
-                    .collect()
+    match lookup {
+        IndexLookup::Players(players) => players
+            .find(query, MODE_LIMIT)
+            .into_iter()
+            .map(|player| {
+                let named = match player.clan.as_str() {
+                    "" => player.latest_name.clone(),
+                    clan => format!("[{clan}] {}", player.latest_name),
+                };
+                PaletteEntry {
+                    label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
+                    action: PaletteAction::SearchFor(print_query(&seed::matches_with_player(player.account_id))),
+                }
             })
-            .map_err(|err| format!("The indexed players could not be read: {err}")),
-        PaletteMode::MyShips => query::search_self_ships(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|ship| PaletteEntry {
-                        label: format!(
-                            "{} -- {}",
-                            ship.ship_name,
-                            t!("ui.palette.matches_found", count = ship.match_count)
-                        ),
-                        action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                            &seed::my_matches_in_ship(ship.ship_id),
-                        )),
-                    })
-                    .collect()
+            .collect(),
+        IndexLookup::Ships(ships) => ships
+            .find(query, MODE_LIMIT)
+            .into_iter()
+            .map(|ship| PaletteEntry {
+                label: format!("{} -- {}", ship.ship_name, t!("ui.palette.matches_found", count = ship.match_count)),
+                action: PaletteAction::SearchFor(print_query(&seed::my_matches_in_ship(ship.ship_id))),
             })
-            .map_err(|err| format!("The indexed ships could not be read: {err}")),
-        // Read from the loaded build rather than the index: armor is a property of
-        // the ship, not of anything the reader has played. The versions and the
-        // recent directories are the listing's, read when the layer opens.
-        PaletteMode::ArmorShips | PaletteMode::ReindexVersions | PaletteMode::ReplayFolders => Ok(Vec::new()),
+            .collect(),
     }
 }
 
@@ -934,6 +976,8 @@ mod tests {
     use gpui_kit::ParentElement as _;
     use gpui_kit::test::TestWindowExt as _;
 
+    use super::IndexList;
+    use super::IndexLookup;
     use super::PaletteAction;
     use super::PaletteMode;
     use super::entries;
@@ -1052,8 +1096,10 @@ mod tests {
 
         let pool = wows_toolkit_config::test_pool().await;
         // Nothing indexed returns an empty result rather than a query error.
-        assert!(mode_entries(PaletteMode::Players, &pool, "").await.expect("query players").is_empty());
-        assert!(mode_entries(PaletteMode::MyShips, &pool, "").await.expect("query ships").is_empty());
+        for list in [IndexList::Players, IndexList::MyShips] {
+            let lookup = list.load(&pool).await.expect("the empty index reads");
+            assert!(mode_entries(&lookup, &FilterQuery::default()).is_empty(), "{list:?}");
+        }
 
         // What a row would do, checked against the seed rather than the SQL: a
         // query the Search tab cannot parse back is a row that does nothing.
@@ -1062,6 +1108,30 @@ mod tests {
         assert_eq!(
             query_text::parse_query(&printed).expect("the seeded query parses"),
             seed::matches_with_player(account)
+        );
+    }
+
+    /// An indexed layer matches as every other list does: by letters in
+    /// order and folded, ranked over every row before the list is capped.
+    #[test]
+    fn an_indexed_ship_is_found_by_its_letters() {
+        use wows_toolkit_config::index::rows::ShipFacet;
+        use wows_toolkit_viewmodel::name_lookup::ShipLookup;
+        use wowsunpack::game_types::GameParamId;
+
+        let ship =
+            |id: u64, name: &str| ShipFacet { ship_id: GameParamId::from(id), ship_name: name.into(), match_count: 1 };
+        let mut ships: Vec<ShipFacet> = (0..super::MODE_LIMIT as u64).map(|id| ship(id, "Filler")).collect();
+        ships.extend([ship(100, "Yamato"), ship(101, "Sm\u{e5}land")]);
+        let lookup = IndexLookup::Ships(ShipLookup::new(ships));
+        let found = |typed: &str| -> Vec<String> {
+            mode_entries(&lookup, &FilterQuery::new(typed)).into_iter().map(|entry| entry.label).collect()
+        };
+
+        assert_eq!(found("ymt"), [format!("Yamato -- {}", rust_i18n::t!("ui.palette.matches_found", count = 1))]);
+        assert_eq!(
+            found("smaland"),
+            [format!("Sm\u{e5}land -- {}", rust_i18n::t!("ui.palette.matches_found", count = 1))]
         );
     }
 
@@ -1261,12 +1331,12 @@ mod tests {
         use super::PaletteEntry;
         use crate::text_filter::marks_for;
 
-        draw_layer(cx, ModeSource::Index, |layer, _window, _cx| {
+        draw_layer(cx, ModeSource::index(super::IndexList::Players), |layer, _window, _cx| {
             layer.entries = std::rc::Rc::new(vec![PaletteEntry {
                 label: "[KLAN] J\u{fc}rgen -- 3 match(es)".to_owned(),
                 action: PaletteAction::SearchFor("player:7".to_owned()),
             }]);
-            layer.query = FilterQuery::new("jurgen");
+            layer.query = crate::text_filter::MarkedQuery::new("jurgen");
         });
 
         assert_eq!(marks_for("[KLAN] J\u{fc}rgen -- 3 match(es)"), Some(std::iter::once(7..14).collect()));

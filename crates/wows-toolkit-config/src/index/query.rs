@@ -27,6 +27,7 @@ use super::rows::IndexedVehicleRow;
 use super::rows::MatchFilter;
 use super::rows::MatchHit;
 use super::rows::MatchOutcome;
+use super::rows::NamedPlayer;
 use super::rows::ObjectiveMatch;
 use super::rows::PlayerFacet;
 use super::rows::PrGap;
@@ -1356,6 +1357,79 @@ pub async fn search_ships(pool: &SqlitePool, needle: &str, limit: i64) -> Result
             ship_name: name.unwrap_or_default(),
             match_count: count,
         })
+        .collect())
+}
+
+/// Every non-bot player the index has seen, most-met first, with each name
+/// they were seen under.
+///
+/// Unfiltered so that the caller can rank names by its own matching before
+/// it caps the list. One pass over the roster; sorting it in SQL as well
+/// would cost more than the grouping below.
+pub async fn named_players(pool: &SqlitePool) -> Result<Vec<NamedPlayer>, IndexError> {
+    struct Seen {
+        name: String,
+        clan: String,
+        match_count: i64,
+        last_seen: i64,
+    }
+
+    let rows: Vec<(i64, String, String, i64, i64)> = sqlx::query_as(
+        "SELECT v.account_id, v.player_name, v.clan, COUNT(DISTINCT v.arena_id), MAX(m.timestamp) \
+         FROM indexed_vehicle v JOIN indexed_match m ON m.arena_id = v.arena_id \
+         WHERE v.account_id <> 0 GROUP BY v.account_id, v.player_name, v.clan",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut by_account: HashMap<i64, Vec<Seen>> = HashMap::new();
+    for (account, name, clan, match_count, last_seen) in rows {
+        by_account.entry(account).or_default().push(Seen { name, clan, match_count, last_seen });
+    }
+
+    let mut players: Vec<NamedPlayer> = by_account
+        .into_iter()
+        .filter_map(|(account, mut seen)| {
+            seen.sort_by_key(|seen| std::cmp::Reverse(seen.last_seen));
+            // An account is in one row per battle, so the per-name counts are
+            // disjoint and sum to the account's.
+            let match_count = seen.iter().map(|seen| seen.match_count).sum();
+            let mut names: Vec<String> = Vec::with_capacity(seen.len());
+            for seen in &seen {
+                if !names.contains(&seen.name) {
+                    names.push(seen.name.clone());
+                }
+            }
+            let latest = seen.into_iter().next()?;
+
+            Some(NamedPlayer {
+                facet: PlayerFacet {
+                    account_id: AccountId::from(account),
+                    latest_name: latest.name,
+                    clan: latest.clan,
+                    match_count,
+                },
+                names,
+            })
+        })
+        .collect();
+    players.sort_by_key(|player| (std::cmp::Reverse(player.facet.match_count), player.facet.account_id.raw()));
+
+    Ok(players)
+}
+
+/// Every ship the index has seen on either side, most-played first.
+pub async fn distinct_ships(pool: &SqlitePool) -> Result<Vec<ShipFacet>, IndexError> {
+    let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT v.ship_id, MAX(v.ship_name), COUNT(DISTINCT v.arena_id) AS match_count \
+         FROM indexed_vehicle v GROUP BY v.ship_id ORDER BY match_count DESC, v.ship_id",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, ship_name, match_count)| ShipFacet { ship_id: GameParamId::from(id as u64), ship_name, match_count })
         .collect())
 }
 

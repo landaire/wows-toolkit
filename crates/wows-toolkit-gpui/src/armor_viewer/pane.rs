@@ -63,6 +63,8 @@ use crate::side_split::SideWidth;
 use crate::status_bar;
 use crate::status_bar::ModeHint;
 use crate::status_bar::ModifierKey;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
 use crate::viewport::device::SharedSceneDevice;
 
 use gpui_kit::component::WindowExt as _;
@@ -216,12 +218,15 @@ pub struct ArmorViewerPane {
     sidebar_width: Entity<SideWidth>,
     /// Which of the rail's sections are expanded.
     option_sections: OptionSectionsOpen,
-    /// What the rail's filter field holds.
+    /// What the rail's filter field holds, and the query read from it.
     options_filter: Entity<gpui_kit::component::input::InputState>,
-    /// The armor zone tree's own filter field.
+    options_query: TypedQuery,
+    /// The armor zone tree's own filter field, and the query read from it.
     zone_filter: Entity<gpui_kit::component::input::InputState>,
-    /// The hull part tree's own filter field.
+    zone_query: TypedQuery,
+    /// The hull part tree's own filter field, and the query read from it.
     part_filter: Entity<gpui_kit::component::input::InputState>,
+    part_query: TypedQuery,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -404,8 +409,11 @@ impl ArmorViewerPane {
             sidebar_width: cx.new(|_| SideWidth::new(SIDEBAR_WIDTH, SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)),
             option_sections: OptionSectionsOpen::default(),
             options_filter,
+            options_query: TypedQuery::default(),
             zone_filter,
+            zone_query: TypedQuery::default(),
             part_filter,
+            part_query: TypedQuery::default(),
             _subscriptions: vec![
                 pen_search_sub,
                 options_filter_sub,
@@ -626,8 +634,18 @@ impl ArmorViewerPane {
     }
 
     /// What the rail's filter field asks for.
-    pub(crate) fn options_filter(&self, cx: &App) -> crate::text_filter::FilterQuery {
-        crate::text_filter::FilterQuery::new(&self.options_filter.read(cx).value())
+    pub(crate) fn options_filter(&self, cx: &App) -> MarkedQuery {
+        self.options_query.of(&self.options_filter.read(cx).value())
+    }
+
+    /// What the armor zone tree's own filter field asks for.
+    pub(crate) fn zone_filter(&self, cx: &App) -> MarkedQuery {
+        self.zone_query.of(&self.zone_filter.read(cx).value())
+    }
+
+    /// What the hull part tree's own filter field asks for.
+    pub(crate) fn part_filter(&self, cx: &App) -> MarkedQuery {
+        self.part_query.of(&self.part_filter.read(cx).value())
     }
 
     /// The armor zone tree's own filter field.

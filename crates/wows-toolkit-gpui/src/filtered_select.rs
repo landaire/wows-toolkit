@@ -22,8 +22,8 @@ use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder;
 
 use crate::text_filter::FilterKey;
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 use crate::text_filter::MatchScore;
 
 /// An item a [`FilteredSelect`] lists.
@@ -43,7 +43,7 @@ pub(crate) struct FilteredSelect<T> {
 
     /// Positions in `items` of the rows shown, in the order shown.
     shown: Vec<usize>,
-    query: FilterQuery,
+    query: MarkedQuery,
 }
 
 impl<T> FilteredSelect<T>
@@ -55,7 +55,7 @@ where
             items.iter().map(|item| item.search_texts().iter().map(|text| FilterKey::new(text)).collect()).collect();
         let shown = (0..items.len()).collect();
 
-        Self { items, keys, shown, query: FilterQuery::default() }
+        Self { items, keys, shown, query: MarkedQuery::default() }
     }
 }
 
@@ -82,7 +82,7 @@ where
     }
 
     fn perform_search(&mut self, query: &str, _window: &mut Window, _cx: &mut App) -> Task<()> {
-        self.query = FilterQuery::new(query);
+        self.query = MarkedQuery::new(query);
         if !self.query.is_active() {
             self.shown = (0..self.items.len()).collect();
             return Task::ready(());

@@ -39,7 +39,7 @@ use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
 
-use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedQuery;
 
 /// How many completions the dropdown offers at once. The egui bar shows the
 /// same number before it scrolls.
@@ -410,7 +410,7 @@ pub struct Completion {
     /// The query text this completion produces when taken.
     pub replacement: String,
     /// The typed text the row's label is marked by.
-    pub query: FilterQuery,
+    pub query: MarkedQuery,
 }
 
 /// The completions for the fragment the caret sits in, best first.
@@ -421,7 +421,7 @@ pub struct Completion {
 /// on a fresh query.
 pub fn completions(query: &str) -> Vec<Completion> {
     let fragment = suggest::active_fragment(query);
-    let typed = FilterQuery::new(fragment);
+    let typed = MarkedQuery::new(fragment);
     let all = suggest::static_suggestions();
     // The bar keeps no record of which operator a field was last given, so a
     // field is offered with the leading one it allows.

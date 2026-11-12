@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -85,6 +86,7 @@ use super::sidebar_tree::open_row_id;
 use super::viewport_view::OpeningLayer;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 use crate::text_filter::highlighted_text;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
@@ -192,14 +194,14 @@ struct RowContext {
     index: Option<Arc<ModelTreeIndex>>,
     hardpoints: Rc<HashSet<HardpointTarget>>,
     /// The search the rows are listed for, which marks what it matched.
-    query: FilterQuery,
+    query: MarkedQuery,
 }
 
 pub struct Sidebar {
     bundle: Option<Arc<ArmorAssetsBundle>>,
     search_state: Entity<InputState>,
-    /// The search as applied to the tree.
-    query: FilterQuery,
+    /// The search as applied to the tree, with the marks drawn for it.
+    query: MarkedQuery,
     /// `query` matched against the listing; `None` when not searching.
     search: Option<SearchMatches>,
     tree_state: Entity<TreeState>,
@@ -275,7 +277,7 @@ impl Sidebar {
         Self {
             bundle: None,
             search_state,
-            query: FilterQuery::default(),
+            query: MarkedQuery::default(),
             search: None,
             tree_state,
             row_info: Rc::new(HashMap::new()),
@@ -665,7 +667,7 @@ impl Sidebar {
         let InputEvent::Change = event else { return };
         let text = self.search_state.read(cx).value().to_string();
         let query = FilterQuery::new(&text);
-        if query == self.query {
+        if query == *self.query {
             self._search_debounce = None;
             return;
         }
@@ -706,7 +708,7 @@ impl Sidebar {
     fn apply_pending_query(&mut self, cx: &mut Context<Self>) {
         let text = self.search_state.read(cx).value().to_string();
         let query = FilterQuery::new(&text);
-        if query != self.query {
+        if query != *self.query {
             self._search_debounce = None;
             self.apply_query(query, cx);
         }
@@ -796,7 +798,7 @@ impl Sidebar {
     }
 
     fn apply_query(&mut self, query: FilterQuery, cx: &mut Context<Self>) {
-        self.query = query;
+        self.query = MarkedQuery::from(query);
         self.search_expanded.clear();
         self.search_collapsed.clear();
         self.rebuild_tree(Rebuild::Rematch, cx);
@@ -1148,7 +1150,7 @@ fn render_sidebar_item(
 }
 
 /// `text` marked where the search matched it; plain outside a search.
-fn marked_text(query: &FilterQuery, text: impl Into<SharedString>) -> StyledText {
+fn marked_text(query: &MarkedQuery, text: impl Into<SharedString>) -> StyledText {
     if !query.is_active() {
         return StyledText::new(text);
     }
@@ -1158,15 +1160,16 @@ fn marked_text(query: &FilterQuery, text: impl Into<SharedString>) -> StyledText
 
 /// A ship row's label, its tier and then its name, with only the name
 /// marked: the tier is not one of the texts a search finds a ship by.
-fn marked_ship_label(query: &FilterQuery, label: SharedString, display_name: &str) -> StyledText {
+fn marked_ship_label(query: &MarkedQuery, label: SharedString, display_name: &str) -> StyledText {
     let Some(tier) = label.strip_suffix(display_name).map(str::len) else {
         return marked_text(query, label);
     };
     let Some(ranges) = query.is_active().then(|| query.ranges(display_name)).flatten() else {
         return StyledText::new(label);
     };
+    let shifted: Vec<Range<usize>> = ranges.iter().map(|range| range.start + tier..range.end + tier).collect();
 
-    highlighted_text(label, ranges.into_iter().map(|range| range.start + tier..range.end + tier).collect())
+    highlighted_text(label, &shifted)
 }
 
 /// The right-click menu for one row.
@@ -1788,7 +1791,11 @@ mod tests {
     fn a_ship_label_marks_a_folded_match_past_its_tier() {
         crate::text_filter::take_marks();
 
-        let _ = super::marked_ship_label(&FilterQuery::new("smaland"), "X Sm\u{e5}land".into(), "Sm\u{e5}land");
+        let _ = super::marked_ship_label(
+            &crate::text_filter::MarkedQuery::new("smaland"),
+            "X Sm\u{e5}land".into(),
+            "Sm\u{e5}land",
+        );
 
         assert_eq!(crate::text_filter::marks_for("X Sm\u{e5}land"), Some(std::iter::once(2..10).collect()));
     }

@@ -46,8 +46,8 @@ use wows_toolkit_viewmodel::stats::table as stats_table;
 use crate::icons;
 use crate::replay_inspector::icons::IconCache;
 use crate::text_filter::FilterKey;
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::TypedQuery;
 
 const LABEL_COLUMN_WIDTH: Pixels = px(140.);
 const CELL_COLUMN_WIDTH: Pixels = px(110.);
@@ -110,6 +110,8 @@ pub struct StatsShipsPanel {
     icons: IconCache,
     icon_task: Option<Task<()>>,
     ship_search: Entity<InputState>,
+    /// The query read from `ship_search`, kept while its text is unchanged.
+    ship_query: TypedQuery,
     _ship_search_subscription: Subscription,
     scroll: ScrollHandle,
     focus_handle: FocusHandle,
@@ -139,6 +141,7 @@ impl StatsShipsPanel {
             icons: IconCache::new(),
             icon_task: None,
             ship_search,
+            ship_query: TypedQuery::default(),
             _ship_search_subscription: ship_search_subscription,
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
@@ -331,7 +334,7 @@ impl Render for StatsShipsPanel {
         let border = cx.theme().border;
         let entity = cx.entity();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let filter = FilterQuery::new(&ship_query);
+        let filter = self.ship_query.of(&ship_query);
         // The sections keep their chosen order; the search only narrows them.
         let visible_sections: Vec<_> =
             self.sections.iter().filter(|section| filter.score(&section.ship_key).is_some()).collect();

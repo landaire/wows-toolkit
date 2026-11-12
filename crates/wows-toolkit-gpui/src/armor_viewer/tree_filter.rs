@@ -3,13 +3,15 @@
 //! query matches it, or when a row under it is kept.
 
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui_kit::SharedString;
 use gpui_kit::StyledText;
 
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 use crate::text_filter::highlighted_text;
+use crate::text_filter::no_ranges;
 
 /// A filter a checkbox row's label is drawn and kept by.
 pub(crate) trait RowFilter {
@@ -19,9 +21,9 @@ pub(crate) trait RowFilter {
     fn row_label(&self, text: String) -> Option<StyledText>;
 }
 
-impl RowFilter for FilterQuery {
+impl RowFilter for MarkedQuery {
     fn is_active(&self) -> bool {
-        FilterQuery::is_active(self)
+        self.query().is_active()
     }
 
     fn row_label(&self, text: String) -> Option<StyledText> {
@@ -30,14 +32,14 @@ impl RowFilter for FilterQuery {
 }
 
 /// The rail's query and a tree's own, applied together.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TreeFilter {
-    rail: FilterQuery,
-    tree: FilterQuery,
+    rail: MarkedQuery,
+    tree: MarkedQuery,
 }
 
 impl TreeFilter {
-    pub(crate) fn new(rail: FilterQuery, tree: FilterQuery) -> Self {
+    pub(crate) fn new(rail: MarkedQuery, tree: MarkedQuery) -> Self {
         Self { rail, tree }
     }
 
@@ -51,7 +53,7 @@ impl TreeFilter {
     /// The filter for the rows under a row reading `text`: a query that
     /// matched the row keeps everything under it.
     pub(crate) fn below(&self, text: &str) -> Self {
-        let keep = |query: &FilterQuery| if query.keeps(text) { FilterQuery::default() } else { query.clone() };
+        let keep = |query: &MarkedQuery| if query.keeps(text) { MarkedQuery::default() } else { query.clone() };
 
         Self { rail: keep(&self.rail), tree: keep(&self.tree) }
     }
@@ -59,7 +61,7 @@ impl TreeFilter {
     /// The rail's query alone, which is what decides the rows a group's box
     /// acts on.
     pub(crate) fn rail_only(&self) -> Self {
-        Self { rail: self.rail.clone(), tree: FilterQuery::default() }
+        Self { rail: self.rail.clone(), tree: MarkedQuery::default() }
     }
 
     /// Whether every typed query matches `text`.
@@ -71,18 +73,18 @@ impl TreeFilter {
     /// the rows under it.
     pub(crate) fn marked(&self, text: String) -> StyledText {
         let text = SharedString::from(text);
-        let ranges = [&self.rail, &self.tree].into_iter().filter_map(|query| query.ranges(&text)).flatten().collect();
+        let ranges = joined(
+            self.rail.ranges(&text).unwrap_or_else(no_ranges),
+            self.tree.ranges(&text).unwrap_or_else(no_ranges),
+        );
 
-        highlighted_text(text, merge(ranges))
+        highlighted_text(text, &ranges)
     }
 
     /// The byte ranges of `text` every typed query matched, merged; `None`
     /// unless every typed query matches it.
-    fn ranges(&self, text: &str) -> Option<Vec<Range<usize>>> {
-        let mut ranges = self.rail.ranges(text)?;
-        ranges.extend(self.tree.ranges(text)?);
-
-        Some(merge(ranges))
+    fn ranges(&self, text: &str) -> Option<Rc<[Range<usize>]>> {
+        Some(joined(self.rail.ranges(text)?, self.tree.ranges(text)?))
     }
 }
 
@@ -95,18 +97,30 @@ impl RowFilter for TreeFilter {
         let text = SharedString::from(text);
         let ranges = self.ranges(&text)?;
 
-        Some(highlighted_text(text, ranges))
+        Some(highlighted_text(text, &ranges))
     }
 }
 
 /// How many rows of a tree `query` matches by name, over the whole tree:
 /// each group's label and the labels of the rows under it.
-pub(crate) fn match_count(query: &FilterQuery, groups: &[(String, Vec<String>)]) -> usize {
+pub(crate) fn match_count(query: &MarkedQuery, groups: &[(String, Vec<String>)]) -> usize {
     groups
         .iter()
         .flat_map(|(group, rows)| std::iter::once(group).chain(rows))
         .filter(|label| query.keeps(label))
         .count()
+}
+
+/// Both queries' marks, joined only when both marked something.
+fn joined(rail: Rc<[Range<usize>]>, tree: Rc<[Range<usize>]>) -> Rc<[Range<usize>]> {
+    if tree.is_empty() {
+        return rail;
+    }
+    if rail.is_empty() {
+        return tree;
+    }
+
+    merge(rail.iter().chain(tree.iter()).cloned().collect()).into()
 }
 
 /// `ranges` sorted, with those that overlap or touch joined.
@@ -128,7 +142,7 @@ mod tests {
     use super::*;
 
     fn filter(rail: &str, tree: &str) -> TreeFilter {
-        TreeFilter::new(FilterQuery::new(rail), FilterQuery::new(tree))
+        TreeFilter::new(MarkedQuery::new(rail), MarkedQuery::new(tree))
     }
 
     #[test]
@@ -154,7 +168,7 @@ mod tests {
 
     #[test]
     fn both_queries_marks_are_drawn_joined() {
-        assert_eq!(filter("bow", "belt").ranges("Bow belt"), Some(vec![0..3, 4..8]));
+        assert_eq!(filter("bow", "belt").ranges("Bow belt").as_deref(), Some([0..3, 4..8].as_slice()));
         assert_eq!(merge(vec![4..6, 0..2, 1..3, 3..4]), vec![0..6]);
     }
 
@@ -179,8 +193,8 @@ mod tests {
             ("Stern".to_string(), vec!["Stern deck".to_string()]),
         ];
 
-        assert_eq!(match_count(&FilterQuery::new("bow"), &groups), 2);
-        assert_eq!(match_count(&FilterQuery::new("deck"), &groups), 2);
-        assert_eq!(match_count(&FilterQuery::new("zzz"), &groups), 0);
+        assert_eq!(match_count(&MarkedQuery::new("bow"), &groups), 2);
+        assert_eq!(match_count(&MarkedQuery::new("deck"), &groups), 2);
+        assert_eq!(match_count(&MarkedQuery::new("zzz"), &groups), 0);
     }
 }

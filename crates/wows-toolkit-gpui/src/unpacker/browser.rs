@@ -56,8 +56,8 @@ use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
 use wows_toolkit_viewmodel::unpacker::listing::filter_files;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 
 /// Which VFS a pane browses. The two sources load differently -- the package
 /// VFS arrives with the build, assets.bin is parsed in the background -- so
@@ -119,8 +119,10 @@ enum Rows {
     Directory(Rc<Vec<ListingEntry>>),
     Filtered {
         files: Arc<FileList>,
-        filter: Rc<PathFilter>,
         matches: Rc<Vec<FileIndex>>,
+        /// The typed text the rows are marked by; `None` for a glob, which
+        /// marks nothing.
+        marks: Option<MarkedQuery>,
     },
 }
 
@@ -154,12 +156,9 @@ impl Rows {
 
     /// The typed text a filter result matched, which its label is marked by.
     /// A glob marks nothing.
-    fn query(&self) -> Option<&FilterQuery> {
+    fn query(&self) -> Option<&MarkedQuery> {
         match self {
-            Rows::Filtered { filter, .. } => match filter.as_ref() {
-                PathFilter::Text(query) => Some(query),
-                PathFilter::Glob(_) => None,
-            },
+            Rows::Filtered { marks, .. } => marks.as_ref(),
             Rows::Directory(_) => None,
         }
     }
@@ -365,7 +364,10 @@ impl BrowserPanel {
             (PaneState::Ready(loaded), Some(filter)) => Rows::Filtered {
                 files: loaded.files.clone(),
                 matches: Rc::new(filter_files(&loaded.files, &filter)),
-                filter: Rc::new(filter),
+                marks: match filter {
+                    PathFilter::Text(query) => Some(MarkedQuery::from(query)),
+                    PathFilter::Glob(_) => None,
+                },
             },
             (PaneState::Ready(loaded), None) => Rows::Directory(Rc::new(directory_entries(
                 &loaded.vfs,

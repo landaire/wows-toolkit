@@ -52,8 +52,8 @@ use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Species;
 
-use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
 use crate::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
@@ -97,7 +97,7 @@ const CHECKBOX_BOX: Pixels = px(16.);
 pub(super) fn render_tools(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     // An open model keeps only the tools it has anything for; with nothing
     // open every tool is drawn, disabled.
@@ -131,7 +131,7 @@ fn tool_label(label: StyledText) -> impl IntoElement {
 
 /// A tool's label as `filter` marks it, kept when the filter matches the
 /// label or the tooltip that says what the tool does.
-fn tool_text(filter: &FilterQuery, label: String, tooltip: &str) -> Option<StyledText> {
+fn tool_text(filter: &MarkedQuery, label: String, tooltip: &str) -> Option<StyledText> {
     if filter.keeps(&label) || filter.keeps(tooltip) { Some(filter.marked(label)) } else { None }
 }
 
@@ -215,7 +215,7 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
 fn render_hidden_plates_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let showing = view.show_hidden_only();
     let has_armor = view.has_armor();
@@ -252,7 +252,7 @@ fn render_hidden_plates_button(
 fn camera_rings_group(
     entity: &Entity<ViewportView>,
     snapshot: &DisplayPopoverSnapshot,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let rings = &snapshot.camera_rings;
@@ -389,7 +389,7 @@ fn perspective_rows(
     entity: &Entity<ViewportView>,
     perspective: &PerspectiveSettings,
     fov_slider: &Entity<SliderField>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Vec<AnyElement> {
     let toggled = entity.clone();
@@ -419,7 +419,7 @@ fn perspective_rows(
     ];
     // The heading names the choice, so a match on it keeps both buttons.
     let heading = filter.label(projection.clone());
-    let inner = if heading.is_some() { FilterQuery::default() } else { filter.clone() };
+    let inner = if heading.is_some() { MarkedQuery::default() } else { filter.clone() };
     let buttons: Vec<AnyElement> = modes
         .into_iter()
         .filter_map(|(id, label, mode)| {
@@ -470,7 +470,7 @@ fn zoom_path_checkbox(
     rings: &CameraRingSettings,
     checked: bool,
     enabled: bool,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     apply: fn(&mut CameraRingSettings, bool),
 ) -> Option<AnyElement> {
     let entity = entity.clone();
@@ -525,7 +525,7 @@ fn filtered_checkbox(
 
 /// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
-fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>, filter: &FilterQuery) -> Option<AnyElement> {
+fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>, filter: &MarkedQuery) -> Option<AnyElement> {
     let gaps = view.gaps();
     let has_armor = view.has_armor();
     let entity = entity.clone();
@@ -566,7 +566,7 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>, filter
 fn render_splash_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
@@ -609,7 +609,7 @@ fn render_splash_button(
 fn render_splash_boxes_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
@@ -644,7 +644,7 @@ fn render_splash_boxes_button(
 fn render_export_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let has_armor = view.current_armor.is_some();
     let click_entity = entity.clone();
@@ -677,8 +677,9 @@ fn render_export_button(
 /// tree's own filter field.
 pub(crate) fn render_popover_content(
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     zone_field: &Entity<InputState>,
+    field_query: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
@@ -745,17 +746,27 @@ pub(crate) fn render_popover_content(
         zone_tooltip: t!("ui.armor.zone_toggle_tooltip", key = ModifierKey::Secondary.label(cx)).into_owned().into(),
     };
 
-    let field_query = FilterQuery::new(&zone_field.read(cx).value());
-    let labels: Vec<(String, Vec<String>)> = armor
-        .zone_part_plates
-        .iter()
-        .map(|zone| (names.zone(&zone.name), zone.parts.iter().map(|part| names.part(&part.name)).collect()))
-        .collect();
+    // Only a query counts matches; the rows translate their own labels as
+    // they are drawn.
+    let labels: Option<Vec<(String, Vec<String>)>> = (filter.is_active() || field_query.is_active()).then(|| {
+        armor
+            .zone_part_plates
+            .iter()
+            .map(|zone| (names.zone(&zone.name), zone.parts.iter().map(|part| names.part(&part.name)).collect()))
+            .collect()
+    });
     // Only the rail's query drops the section; the tree's own field narrows
     // the rows under it.
-    if filter.is_active() && match_count(filter, &labels) == 0 {
+    if let Some(labels) = &labels
+        && filter.is_active()
+        && match_count(filter, labels) == 0
+    {
         return None;
     }
+    let field_matches = match &labels {
+        Some(labels) if field_query.is_active() => Some(match_count(field_query, labels)),
+        _ => None,
+    };
 
     let tree_filter = TreeFilter::new(filter.clone(), field_query.clone());
     let zones: Vec<AnyElement> = armor
@@ -791,22 +802,16 @@ pub(crate) fn render_popover_content(
             // The bulk switches act on every plate, not only the ones a filter
             // left showing, so they are put away while one is typed.
             .when(!filter.is_active(), |this| this.child(header).child(div().h(px(1.)).bg(border)))
-            .child(tree_field("armor-zone-filter", zone_field, &field_query, &labels))
+            .child(tree_field("armor-zone-filter", zone_field, field_matches))
             .child(div().relative().max_h(px(360.)).child(scroll_area).child(Scrollbar::vertical(&scroll)))
             .into_any_element(),
     )
 }
 
 /// A tree's own filter field, and under it how many of the tree's rows the
-/// field matched by name while something is typed in it. `labels` are the
-/// tree's groups with the rows under each, as drawn.
-fn tree_field(
-    id: &'static str,
-    field: &Entity<InputState>,
-    query: &FilterQuery,
-    labels: &[(String, Vec<String>)],
-) -> AnyElement {
-    let count = query.is_active().then(|| match match_count(query, labels) {
+/// field matched by name, `field_matches`, while something is typed in it.
+fn tree_field(id: &'static str, field: &Entity<InputState>, field_matches: Option<usize>) -> AnyElement {
+    let count = field_matches.map(|count| match count {
         0 => t!("ui.armor.tree_no_matches").into_owned(),
         count => t!("ui.armor.tree_matches", count = count).into_owned(),
     });
@@ -899,8 +904,9 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
 /// (`SidebarHighlightKey::HullMeshes`), shown or not, as egui does.
 pub(crate) fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     part_field: &Entity<InputState>,
+    field_query: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (
@@ -977,7 +983,6 @@ pub(crate) fn render_hull_popover_content(
             },
         ));
 
-    let field_query = FilterQuery::new(&part_field.read(cx).value());
     let tree_filter = TreeFilter::new(filter.clone(), field_query.clone());
     let groups: Vec<AnyElement> = armor
         .hull_part_groups
@@ -986,7 +991,8 @@ pub(crate) fn render_hull_popover_content(
             render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn, &tree_filter)
         })
         .collect();
-    let field = tree_field("armor-part-filter", part_field, &field_query, &armor.hull_part_groups);
+    let field_matches = field_query.is_active().then(|| match_count(field_query, &armor.hull_part_groups));
+    let field = tree_field("armor-part-filter", part_field, field_matches);
     let upgrade =
         (armor.hull_upgrade_names.len() > 1).then(|| render_hull_upgrade_row(entity, &armor, &selected_hull, filter));
     let modules: Vec<AnyElement> = armor
@@ -1065,7 +1071,7 @@ fn render_hull_upgrade_row(
     entity: &Entity<ViewportView>,
     armor: &LoadedShipArmor,
     selected_hull: &Option<String>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let stock_key = &armor.hull_upgrade_names[0].0;
     let heading = t!("ui.armor.upgrade").into_owned();
@@ -1102,8 +1108,8 @@ fn render_hull_upgrade_row(
 
 /// What a row's choices are filtered by: nothing when the row's heading
 /// matches, which keeps every choice in it, and `filter` otherwise.
-fn within(filter: &FilterQuery, heading: &str) -> FilterQuery {
-    if filter.keeps(heading) { FilterQuery::default() } else { filter.clone() }
+fn within(filter: &MarkedQuery, heading: &str) -> MarkedQuery {
+    if filter.keeps(heading) { MarkedQuery::default() } else { filter.clone() }
 }
 
 /// One module-alternative selector row for component type `ct`: a "{ct}:"
@@ -1119,7 +1125,7 @@ fn render_module_alternative_row(
     ct: ComponentType,
     alternatives: &[String],
     selected: Option<&String>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let heading = format!("{ct}:");
     let inner = within(filter, &heading);
@@ -1169,7 +1175,7 @@ fn render_lod_row(
     entity: &Entity<ViewportView>,
     armor: &LoadedShipArmor,
     hull_lod: usize,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let heading = t!("ui.armor.lod").into_owned();
     let inner = within(filter, &heading);
@@ -1215,7 +1221,7 @@ fn render_camo_picker(
     armor: &LoadedShipArmor,
     selected_camo: Option<CamoSchemeId>,
     expanded_camo_groups: &HashSet<String>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let heading = t!("ui.armor.camouflage").into_owned();
     let inner = within(filter, &heading);
@@ -1285,7 +1291,7 @@ fn render_camo_row(
     entity: &Entity<ViewportView>,
     info: &CamoSchemeInfo,
     selected_camo: Option<CamoSchemeId>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> AnyElement {
     let id = info.id;
     let is_selected = selected_camo == Some(id);
@@ -1310,7 +1316,7 @@ fn render_camo_group(
     infos: &[&CamoSchemeInfo],
     selected_camo: Option<CamoSchemeId>,
     expanded_camo_groups: &HashSet<String>,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     filtering: bool,
 ) -> AnyElement {
     let expanded = filtering || expanded_camo_groups.contains(label);
@@ -1521,7 +1527,7 @@ pub(crate) struct DisplayGroups {
 pub(crate) fn render_display_popover_content(
     entity: &Entity<ViewportView>,
     groups: &DisplayGroups,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     // The egui app draws none of this without a loaded hull
@@ -1602,7 +1608,7 @@ fn model_rows(
     groups: &DisplayGroups,
     snapshot: &DisplayPopoverSnapshot,
     armor: bool,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let display = snapshot.display;
@@ -1714,7 +1720,7 @@ fn model_rows(
 fn lighting_group(
     entity: &Entity<ViewportView>,
     snapshot: &DisplayPopoverSnapshot,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let lighting = &snapshot.lighting;
@@ -1785,13 +1791,13 @@ fn display_group(
     groups: &DisplayGroups,
     which: OptionSection,
     title: String,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
-    body: impl FnOnce(&FilterQuery, &mut App) -> Option<AnyElement>,
+    body: impl FnOnce(&MarkedQuery, &mut App) -> Option<AnyElement>,
 ) -> Option<AnyElement> {
     let marked = filter.label(title.clone());
     let (open, content) = if filter.is_active() {
-        let inner = if marked.is_some() { FilterQuery::default() } else { filter.clone() };
+        let inner = if marked.is_some() { MarkedQuery::default() } else { filter.clone() };
         let content = body(&inner, cx);
         if content.is_none() && marked.is_none() {
             return None;
@@ -1821,7 +1827,7 @@ fn labeled_color_row(
     label: String,
     picker: &Entity<gpui_kit::component::color_picker::ColorPickerState>,
     lighting_off: bool,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
 ) -> Option<AnyElement> {
     let marked = filter.label(label.clone())?;
     // Dimmed rather than taken away when the lighting is off: the colour it would
@@ -1850,7 +1856,7 @@ pub(super) fn labeled_slider_row(
     label: String,
     field: &Entity<SliderField>,
     disabled: bool,
-    filter: &FilterQuery,
+    filter: &MarkedQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let marked = filter.label(label)?;

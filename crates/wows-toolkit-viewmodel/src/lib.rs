@@ -31,6 +31,7 @@ pub mod glyphs;
 pub mod index_rows;
 pub mod listing_row;
 pub mod match_stats;
+pub mod name_lookup;
 pub mod personal_rating;
 pub mod player_tracker;
 pub mod preview_dwell;

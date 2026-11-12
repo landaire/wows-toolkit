@@ -14,6 +14,8 @@ use gpui_kit::component::tooltip::Tooltip;
 use super::*;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
+use crate::text_filter::MarkedQuery;
+use crate::text_filter::TypedQuery;
 
 /// How wide the drawer is.
 const DRAWER_WIDTH: Pixels = px(440.);
@@ -324,6 +326,8 @@ impl Drawn {
 pub(super) struct SettingsDrawer {
     open: bool,
     search: Entity<InputState>,
+    /// The query read from `search`, kept while its text is unchanged.
+    query: TypedQuery,
     scroll: ScrollHandle,
     /// Where to scroll once there is a layout to measure it against.
     scroll_to: Option<SettingsTarget>,
@@ -353,6 +357,7 @@ impl SettingsDrawer {
         Self {
             open: false,
             search,
+            query: TypedQuery::default(),
             scroll: ScrollHandle::new(),
             scroll_to: None,
             drawn: Vec::new(),
@@ -742,7 +747,7 @@ impl App {
     fn render_settings_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.measure_cache_once(cx);
 
-        let query = FilterQuery::new(&self.settings_drawer.search.read(cx).value());
+        let query = self.settings_drawer.query.of(&self.settings_drawer.search.read(cx).value());
         let rows: Vec<Setting> = Setting::ALL
             .into_iter()
             .filter(|setting| self.setting_present(*setting) && setting.matches(&query))
@@ -915,7 +920,7 @@ impl App {
     fn render_setting_row(
         &self,
         setting: Setting,
-        query: &FilterQuery,
+        query: &MarkedQuery,
         first: bool,
         last: bool,
         window: &Window,

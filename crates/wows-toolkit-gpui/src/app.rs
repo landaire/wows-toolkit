@@ -2090,8 +2090,11 @@ impl App {
             crate::palette::PaletteMode::ArmorShips => {
                 crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
             }
-            crate::palette::PaletteMode::Players | crate::palette::PaletteMode::MyShips => {
-                crate::palette::ModeSource::Index
+            crate::palette::PaletteMode::Players => {
+                crate::palette::ModeSource::index(crate::palette::IndexList::Players)
+            }
+            crate::palette::PaletteMode::MyShips => {
+                crate::palette::ModeSource::index(crate::palette::IndexList::MyShips)
             }
             crate::palette::PaletteMode::ReindexVersions => {
                 let candidates = self.listed_reindex_candidates(cx);

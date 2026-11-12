@@ -405,6 +405,70 @@ async fn ship_search_spans_the_whole_roster_not_just_ships_the_user_played() {
     assert_eq!(query::search_ships(&pool, "", 1).await.unwrap().len(), 1, "the limit is respected");
 }
 
+/// The lookups rank these rows themselves, so every player and ship comes
+/// back, most-met first, and a player renamed since is listed under both
+/// names with the latest name and clan shown.
+#[tokio::test]
+async fn named_players_and_distinct_ships_list_the_whole_roster() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+    let renamed = IndexedVehicleRow {
+        arena_id: ArenaId::new(200),
+        account_id: AccountId(501),
+        player_name: "renamed".into(),
+        clan: "NEW".into(),
+        realm: None,
+        ship_id: GameParamId::from(111u64),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: None,
+        survived: None,
+        damage: None,
+        kills: None,
+        spotting: None,
+        potential: None,
+        received: None,
+        pr: None,
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+    query::upsert_vehicles(&pool, &[renamed]).await.unwrap();
+
+    let players = query::named_players(&pool).await.unwrap();
+    let listed: Vec<(i64, &str, &str, i64, Vec<&str>)> = players
+        .iter()
+        .map(|player| {
+            (
+                player.facet.account_id.raw(),
+                player.facet.latest_name.as_str(),
+                player.facet.clan.as_str(),
+                player.facet.match_count,
+                player.names.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            (7, "p7", "", 2, vec!["p7"]),
+            (501, "renamed", "NEW", 2, vec!["renamed", "p501"]),
+            (777, "p777", "", 1, vec!["p777"]),
+        ]
+    );
+
+    let ships = query::distinct_ships(&pool).await.unwrap();
+    let listed: Vec<(u64, &str, i64)> =
+        ships.iter().map(|ship| (ship.ship_id.raw(), ship.ship_name.as_str(), ship.match_count)).collect();
+    assert_eq!(listed, vec![(111, "Yamato", 2), (999, "Harugumo", 2), (222, "Shimakaze", 1), (333, "Bot", 1)]);
+}
+
 /// The `map:` dropdown reads from here, so the names must be the ones the index
 /// holds and each must appear once however many matches used it.
 #[tokio::test]
