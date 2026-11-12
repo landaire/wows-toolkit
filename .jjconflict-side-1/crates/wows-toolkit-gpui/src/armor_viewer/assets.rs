@@ -1,11 +1,9 @@
-//! Background load of the Armor Viewer's ship data: the shared
-//! [`ShipAssets`] (assets.bin + camo DB, reused across every ship the
-//! viewer opens), the [`ShipCatalog`] the sidebar/tree will list ships from,
+//! Background loads of the Armor Viewer's data on GPUI's executor: the shared
+//! [`ShipAssets`], the [`ShipCatalog`] the sidebar/tree will list ships from,
 //! and the nation-flag/class-icon [`IconCache`] that sidebar rows key their
 //! icons from. Reuses the replay inspector's [`LoadedGameData`] (the same
 //! preloaded VFS + `GameMetadataProvider` `spawn_startup_preload` already
-//! warms) rather than a second game-data load: `ShipAssets::from_vfs_with_metadata`
-//! takes an already-parsed `GameMetadataProvider`, so this never re-parses
+//! warms) rather than a second game-data load, so this never re-parses
 //! `GameParams`.
 //!
 //! **Split for testability.** [`load_armor_assets`] is a plain, synchronous
@@ -27,11 +25,20 @@ use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::SvgRenderer;
 use gpui_kit::Task;
-use rootcause::Report;
-use wowsunpack::export::building_armor::BuildingArmorIndex;
-use wowsunpack::export::model_library::ModelLibrary;
-use wowsunpack::export::model_library::ModelLibraryError;
-use wowsunpack::export::mount_armor::MountArmorIndex;
+use wows_toolkit_armor::assets::ArmorAssetsError;
+use wows_toolkit_armor::assets::ModelAssets;
+use wows_toolkit_armor::assets::ModelLibraryLoadError;
+use wows_toolkit_armor::assets::load_ship_assets;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::load_model::ModelLoadRequest;
+use wows_toolkit_armor::load_model::ModelSceneError;
+use wows_toolkit_armor::load_model::load_model_scene;
+use wows_toolkit_armor::load_ship::ShipLoadError;
+use wows_toolkit_armor::load_ship::ShipLoadOptions;
+use wows_toolkit_armor::load_ship::load_ship_armor_by_param;
+use wows_toolkit_armor::load_ship::load_ship_armor_with_options;
+use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::scene_load::LoadCancel;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_assets::ShipIconState;
@@ -43,32 +50,12 @@ use crate::replay_inspector::icons::IconCache;
 use crate::replay_inspector::icons::decode_ship_class_svg;
 use crate::replay_inspector::load::LoadedGameData;
 
-use wows_toolkit_armor::catalog::ShipCatalog;
-
 /// Class-icon tint: the replay table tints ship-class icons by team/division
 /// color (`replay_inspector::columns::class_icon_tint`), but the armor
 /// sidebar has no per-row team context, so this renders the icon undyed
 /// (`0xffffff` leaves every channel at full intensity in `decode_ship_class_svg`'s
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.
 pub(crate) const CLASS_ICON_TINT: u32 = 0xffffff;
-
-/// Reasons the Armor Viewer's ship data failed to load. Wraps `ShipAssets`'
-/// `rootcause::Report` errors (the same convention `ReplayLoadError` in
-/// `replay_inspector::load` uses for its own `anyhow`/`Report`-returning
-/// dependencies) rather than surfacing the raw report type across the
-/// background-task boundary.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum ArmorAssetsError {
-    #[error("failed to load ship assets: {0}")]
-    ShipAssets(String),
-}
-
-/// Why the model library could not be built from a loaded bundle.
-#[derive(Debug, thiserror::Error)]
-pub enum ModelLibraryLoadError {
-    #[error("failed to build the model library: {report}")]
-    Build { report: Report<ModelLibraryError> },
-}
 
 /// One loaded build's Armor Viewer data: the shared ship-export assets, the
 /// pre-built ship catalog for the sidebar/tree, and the nation-flag/class-icon
@@ -91,13 +78,7 @@ fn load_armor_assets(
     metadata: &Arc<GameMetadataProvider>,
     svg_renderer: &SvgRenderer,
 ) -> Result<ArmorAssetsBundle, ArmorAssetsError> {
-    // The overlay already holds the blob; reading it again would hold 174 MiB
-    // of it twice.
-    let assets = match assets_bin_bytes {
-        Some(bytes) => ShipAssets::from_parts(vfs, Arc::clone(metadata), Arc::clone(bytes)),
-        None => ShipAssets::from_vfs_with_metadata(vfs, Arc::clone(metadata))
-            .map_err(|report| ArmorAssetsError::ShipAssets(format!("{report:?}")))?,
-    };
+    let assets = load_ship_assets(vfs, assets_bin_bytes, metadata)?;
 
     let catalog = ShipCatalog::build(metadata);
 
@@ -153,15 +134,6 @@ pub fn spawn_load_armor_assets(
     })
 }
 
-/// What opening and exporting any catalogued model reads: the library over
-/// `assets.bin`, the index of which ship mounts which model, where a model's
-/// armor thickness comes from, and the armored buildings with their mounts.
-pub struct ModelAssets {
-    pub library: Arc<ModelLibrary>,
-    pub mount_armor: MountArmorIndex,
-    pub buildings: BuildingArmorIndex,
-}
-
 /// Builds [`ModelAssets`] over `bundle`'s assets on the background executor.
 /// Separate from the bundle load so the ship list is usable while
 /// `assets.bin` is indexed.
@@ -169,13 +141,42 @@ pub fn spawn_build_model_library(
     bundle: Arc<ArmorAssetsBundle>,
     cx: &App,
 ) -> Task<Result<ModelAssets, ModelLibraryLoadError>> {
-    cx.background_spawn(async move {
-        let library = bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build { report })?;
-        let mount_armor = MountArmorIndex::build(bundle.assets.metadata(), library.catalog());
-        let buildings = BuildingArmorIndex::build(bundle.assets.metadata(), &library);
+    cx.background_spawn(async move { ModelAssets::build(&bundle.assets) })
+}
 
-        Ok(ModelAssets { library: Arc::new(library), mount_armor, buildings })
-    })
+/// Kicks off the first stage of a ship's armor load on the background
+/// executor, over the bundle's already-loaded `ShipAssets`.
+pub fn spawn_load_ship_armor(
+    bundle: Arc<ArmorAssetsBundle>,
+    param_index: String,
+    display_name: String,
+    cancel: LoadCancel,
+    cx: &App,
+) -> Task<Result<FirstStage, ShipLoadError>> {
+    cx.background_spawn(async move { load_ship_armor_by_param(&bundle.assets, &param_index, &display_name, &cancel) })
+}
+
+/// Kicks off a background reload of `param_index`'s armor under `options`,
+/// a hull-upgrade/LOD/module selection from the hull popover.
+pub fn spawn_reload_ship_armor(
+    bundle: Arc<ArmorAssetsBundle>,
+    param_index: String,
+    options: ShipLoadOptions,
+    cancel: LoadCancel,
+    cx: &App,
+) -> Task<Result<FirstStage, ShipLoadError>> {
+    cx.background_spawn(async move { load_ship_armor_with_options(&bundle.assets, &param_index, options, &cancel) })
+}
+
+/// Kicks off the first stage of a model load on the background executor.
+pub fn spawn_load_model_scene(
+    models: Arc<ModelAssets>,
+    bundle: Arc<ArmorAssetsBundle>,
+    request: ModelLoadRequest,
+    cancel: LoadCancel,
+    cx: &App,
+) -> Task<Result<FirstStage, ModelSceneError>> {
+    cx.background_spawn(async move { load_model_scene(&models, bundle.assets.metadata(), &request, &cancel) })
 }
 
 #[cfg(test)]

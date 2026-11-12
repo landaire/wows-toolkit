@@ -39,8 +39,9 @@ use wowsunpack::export::size_estimate::SchemeLadderStatus;
 use wowsunpack::export::size_estimate::SizeEstimate;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
-use super::assets::ModelAssets;
-use super::load_model::ModelLoadRequest;
+use wows_toolkit_armor::assets::ModelAssets;
+use wows_toolkit_armor::load_model::ModelLoadRequest;
+use wows_toolkit_armor::load_ship::ExportGlbError;
 
 /// What the dialog has read of its target, enough to offer its levels of
 /// detail and its camo schemes.
@@ -473,8 +474,8 @@ fn read_model_meta(
         .library
         .model_summary(&request.path)
         .map_err(|report| ModelMetaError { path: request.path.clone(), report })?;
-    let thickness_known = super::load_model::thickness_known(models, metadata, request);
-    let has_armor = super::load_model::building_has_armor(models, request).unwrap_or(summary.has_armor);
+    let thickness_known = wows_toolkit_armor::load_model::thickness_known(models, metadata, request);
+    let has_armor = wows_toolkit_armor::load_model::building_has_armor(models, request).unwrap_or(summary.has_armor);
 
     Ok(ShipMeta {
         hull_lod_count: summary.lod_count,
@@ -500,7 +501,7 @@ fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index:
 
     let Some(param) = assets.metadata().game_param_by_index(param_index) else { return Vec::new() };
     let Some(vehicle) = param.vehicle() else { return Vec::new() };
-    super::load_ship::build_hull_upgrade_names(vehicle)
+    wows_toolkit_armor::load_ship::build_hull_upgrade_names(vehicle)
 }
 
 /// Fills `dialog` with the export choices, reading them off `state`.
@@ -835,6 +836,41 @@ fn offered_contents(has_armor: bool) -> impl Iterator<Item = ExportContents> {
     [ExportContents::Mesh, ExportContents::Armor, ExportContents::MeshAndArmor]
         .into_iter()
         .filter(move |contents| has_armor || !contents.includes_armor())
+}
+
+/// Reports a finished export: what was written and how large it is, or why it
+/// was not.
+///
+/// Shared by the two surfaces that export the same file (`ArmorViewerPane` and
+/// the viewport's own confirmation), since a written file is otherwise invisible
+/// and both say it in the egui app's words. The destination is logged rather
+/// than shown: the reader chose it in the save dialog, and a support log is
+/// where it is asked for afterwards.
+pub(crate) fn report_export(
+    written: Result<(std::path::PathBuf, Option<u64>), ExportGlbError>,
+    ship: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    match written {
+        Ok((path, size)) => {
+            tracing::info!("armor viewer: exported {ship} to {}", path.display());
+            let message = match size {
+                Some(bytes) => t!(
+                    "ui.armor.export.exported_with_size",
+                    ship = ship,
+                    size = wows_toolkit_viewmodel::formatting::byte_size(bytes)
+                )
+                .into_owned(),
+                None => t!("ui.armor.export.exported", ship = ship).into_owned(),
+            };
+            crate::toast::ok(message, window, cx);
+        }
+        Err(err) => {
+            tracing::error!("armor viewer: failed to export {ship}: {err}");
+            crate::toast::failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned(), window, cx);
+        }
+    }
 }
 
 #[cfg(test)]

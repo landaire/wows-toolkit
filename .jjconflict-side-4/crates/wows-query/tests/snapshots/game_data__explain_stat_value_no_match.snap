@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1307
+expression: "explain(json!({ \"ship\": \"Des Moines\", \"value\": 77777, \"unit\": \"hp\" }))"
+---
+ship: "T10 Des Moines (cruiser, USA)"
+value: 77777 hp
+rule: "A match is a stat of this ship whose value rounds to the number at its decimals, on the stock modules or another module combination, alone or with up to three captain skills (21 points, a skill on every cheaper tier) and upgrades (one per slot); conditional skills count with their trigger met only where marked active, and the ship's special ability only where named. Fewer assumptions rank first. Signals, camouflage and commander talents are not searched."
+matches: []
+nearest:
+  - stat: durability.health
+    label: Hit Points
+    value: 55100 hp
+    build:
+      - Survivability Expert
+    difference: "-22677 hp"
+  - stat: artillery.shells.salvo_damage
+    label: Main battery salvo damage (AP)
+    value: 47250 hp
+    build:
+      - Heavy AP Shells
+    difference: "-30527 hp"
+  - stat: artillery.shells.salvo_damage
+    label: Main battery salvo damage (HE)
+    value: 27720 hp
+    build:
+      - Heavy HE and SAP Shells
+    difference: "-50057 hp"
+  - stat: aa.rating
+    label: "AA rating: damage the AA deals to one plane flying straight in at 150 knots from the farthest aura to the ship, continuous damage times hit chance plus a tenth of the flak bursts spawned on the way; a judgment to compare ships of one class and tier, not a game value"
+    value: 9328 hp
+    build:
+      - AA Defense and ASW Expert
+    difference: "-68449 hp"
+  - stat: durability.flood_damage
+    label: Damage of one flood over its whole duration
+    value: 5510 hp
+    build:
+      - Survivability Expert
+    difference: "-72267 hp"

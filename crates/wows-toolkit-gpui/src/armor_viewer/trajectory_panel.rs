@@ -30,13 +30,13 @@ use super::legend::swatch_color;
 use super::pane::ArmorViewerPane;
 use super::pane::OptionSection;
 use super::popover::labeled_slider_row;
-use super::trajectory::ArcId;
 use super::viewport_view::ArcSummary;
 use super::viewport_view::CastShell;
 use super::viewport_view::Isolate;
 use super::viewport_view::ViewportView;
 use crate::slider_field::SliderField;
 use crate::text_filter::MarkedQuery;
+use wows_toolkit_armor::trajectory::ArcId;
 
 /// How wide a marker is drawn.
 const MARKER_SIZE: Pixels = px(22.);
@@ -525,9 +525,9 @@ mod tests {
     use wowsunpack::game_params::types::ShipModelDistance;
 
     use crate::armor_viewer::pane::ArmorViewerPane;
-    use crate::armor_viewer::trajectory;
-    use crate::armor_viewer::trajectory::TrajectoryHit;
     use crate::slider_field::SliderFieldChange;
+    use wows_toolkit_armor::trajectory;
+    use wows_toolkit_armor::trajectory::TrajectoryHit;
     use wows_toolkit_armor::viewport::types::Vec3;
 
     /// A shell through two plates, cast with no ship chosen.

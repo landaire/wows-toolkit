@@ -1,0 +1,825 @@
+//! Uploads a [`LoadedShipArmor`]'s armor plates into a [`Viewport3D`] and
+//! frames the camera on it. Ports the egui app's `upload_armor_to_viewport`
+//! (`armor_viewer/ui/tab.rs:1147-1335`) and the camera-framing half of
+//! `init_armor_viewport` (`tab.rs:1445-1495`).
+//!
+//! [`upload_armor_to_viewport`] is the initial-load path: it uploads and
+//! frames the camera. [`reupload_armor_plates`] rebuilds the plates after a
+//! visibility or display change and leaves the camera alone, so the view does
+//! not reset. Both share [`upload_armor_meshes`].
+//!
+//! Hull meshes are uploaded by `upload_hull.rs` into the same `Viewport3D`
+//! under their own mesh ids, so a hull-only change never runs the armor
+//! rebuild. [`DisplaySettings`] is mutated by the host: armor fields re-upload
+//! the plates, while `hull_opaque` re-uploads only the hull.
+
+use std::collections::HashMap;
+
+use wowsunpack::export::armor_ray::transform_point;
+use wowsunpack::export::gltf_export::ArmorTriangleInfo;
+
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+
+use crate::viewport::camera::ArcballCamera;
+use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::MeshId;
+use crate::viewport::types::Vertex;
+
+use crate::load_ship::ArmorTriangleTooltip;
+use crate::load_ship::LoadedShipArmor;
+use crate::load_ship::PlateKey;
+use crate::load_ship::transform_normal;
+use crate::visibility::VisibilityFilter;
+use crate::visibility::part_on;
+
+/// The display settings that shape the armor upload: plate edges, zero-mm
+/// plate filtering, and per-vertex armor
+/// opacity. Threaded through every mesh upload alongside
+/// [`VisibilityFilter`]; changing any field re-uploads the armor since all of
+/// them affect geometry (edge outlines, per-vertex alpha, and which triangles
+/// are even included).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplaySettings {
+    pub show_plate_edges: bool,
+    pub show_zero_mm: bool,
+    pub armor_opacity: f32,
+    /// Whether hull meshes render fully opaque with depth writes (like armor
+    /// plates) rather than semi-transparent behind them. The hull upload
+    /// (`upload_hull.rs`) reads this for `hull_alpha`/`hull_layer`; a change
+    /// to it re-uploads only the hull, not the (potentially much larger)
+    /// armor mesh set.
+    pub hull_opaque: bool,
+    /// A cross at the model's own origin, which is where the game measures the
+    /// ship from rather than where its middle looks to be.
+    pub show_ship_center: bool,
+    /// How solid the impact markers are drawn, so a hull crowded with them can
+    /// still be read.
+    pub marker_opacity: f32,
+    /// The crosshatch on the waterline under a ship, or under a model's base.
+    pub show_grid: bool,
+    /// Distances marked and written on the plane under the model, with its
+    /// overall length and beam. Independent of `show_grid`.
+    pub show_length_marks: bool,
+}
+
+impl Default for DisplaySettings {
+    /// `ArmorViewerDefaults::default()` (`armor_viewer/state.rs:96-112`).
+    fn default() -> Self {
+        Self {
+            show_plate_edges: true,
+            show_zero_mm: false,
+            armor_opacity: 1.0,
+            hull_opaque: false,
+            show_ship_center: false,
+            marker_opacity: 1.0,
+            show_grid: true,
+            show_length_marks: true,
+        }
+    }
+}
+
+impl DisplaySettings {
+    /// Seeds from the persisted `armor_viewer_defaults` row, falling back to
+    /// the egui defaults above when there is no row yet (fresh DB). Mirrors
+    /// `legend::LegendState::from_defaults`'s same fallback shape.
+    pub fn from_defaults(row: Option<&ArmorViewerDefaultsRow>) -> Self {
+        let Some(row) = row else { return Self::default() };
+        Self {
+            show_plate_edges: row.show_plate_edges,
+            show_zero_mm: row.show_zero_mm,
+            armor_opacity: row.armor_opacity as f32,
+            hull_opaque: row.hull_opaque,
+            // The egui viewer keeps the first two on the pane rather than in
+            // the shared `armor_viewer_defaults` row, and has no grid or
+            // length marks, so none is restored.
+            show_ship_center: Self::default().show_ship_center,
+            marker_opacity: Self::default().marker_opacity,
+            show_grid: Self::default().show_grid,
+            show_length_marks: Self::default().show_length_marks,
+        }
+    }
+}
+
+/// `armor_viewer::constants::PLATE_EDGE_HALF_WIDTH`.
+const PLATE_EDGE_HALF_WIDTH: f32 = 0.003;
+/// `armor_viewer::constants::PLATE_EDGE_NORMAL_OFFSET`.
+const PLATE_EDGE_NORMAL_OFFSET: f32 = 0.005;
+/// `armor_viewer::constants::EDGE_COLOR`.
+const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
+/// Skip an armor triangle whose thickness rounds to (effectively) 0mm, unless
+/// `show_zero_mm` is on. Matches the egui app's own `0.05` epsilon.
+pub fn is_zero_mm(thickness_mm: f32) -> bool {
+    thickness_mm.abs() < 0.05
+}
+
+/// Derives a triangle's [`PlateKey`] (zone, material_name, thickness rounded
+/// to tenths of mm). Matches the egui app's own inline key derivation at
+/// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
+pub fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
+    PlateKey {
+        zone: info.zone.clone(),
+        material_name: info.material.name().to_owned(),
+        thickness_tenths: (info.thickness_mm * 10.0).round() as i32,
+    }
+}
+
+/// Whether triangle `info` should be included in an upload: not (effectively)
+/// 0mm (unless `show_zero_mm`), its `(zone, material)` part is on in
+/// `visibility.part` (absent means visible), and its plate is not in
+/// `visibility.plate` (which stores only explicitly-hidden plate keys --
+/// absent means visible; see `visibility.rs`'s module doc for why the two
+/// maps use opposite boolean senses). Shared by the main mesh loop, plate
+/// boundary edges, and the hover/sidebar highlights (`plate_picking.rs`) so all
+/// of them treat a hidden part/plate identically.
+pub fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, show_zero_mm: bool) -> bool {
+    if !show_zero_mm && is_zero_mm(info.thickness_mm) {
+        return false;
+    }
+    // "Show Hidden" is a mode rather than an addition: it shows the plates
+    // the game's own viewer never draws, and nothing else.
+    if visibility.show_hidden_only && !info.hidden {
+        return false;
+    }
+    if !part_on(visibility.part, &info.zone, info.material.name()) {
+        return false;
+    }
+    !visibility.plate.get(&derive_plate_key(info)).copied().unwrap_or(false)
+}
+
+/// Clears `viewport` and uploads `armor`'s armor meshes (thickness-colored,
+/// per the v1 fixed display defaults above, honoring `plate_visibility`) and
+/// plate boundary edges. Does not touch the camera;
+/// shared by [`upload_armor_to_viewport`] (initial load, frames the camera
+/// afterward) and [`reupload_armor_plates`] (visibility-toggle re-upload,
+/// which must NOT move the camera). Returns the per-mesh triangle tooltip
+/// data for hover/click picking (`plate_picking.rs`).
+fn upload_armor_meshes(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    visibility: VisibilityFilter,
+    display: DisplaySettings,
+) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
+    viewport.clear();
+
+    let mut mesh_triangle_info = Vec::new();
+    for mesh in &armor.meshes {
+        let mut vertices: Vec<Vertex> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        let mut tooltips: Vec<ArmorTriangleTooltip> = Vec::new();
+
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if !plate_is_visible(info, visibility, display.show_zero_mm) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+
+            let new_base = vertices.len() as u32;
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx < mesh.positions.len() {
+                    let mut pos = mesh.positions[orig_idx];
+                    let mut norm = mesh.normals[orig_idx];
+
+                    if let Some(t) = &mesh.transform {
+                        pos = transform_point(t, pos);
+                        norm = transform_normal(t, norm);
+                    }
+
+                    let mut color = mesh.colors[orig_idx];
+                    color[3] = display.armor_opacity;
+                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
+                }
+            }
+            indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
+
+            tooltips.push(ArmorTriangleTooltip {
+                material: info.material,
+                zone: info.zone.clone(),
+                thickness_mm: info.thickness_mm,
+                layers: info.layers.clone(),
+                color: info.color,
+            });
+        }
+
+        if !indices.is_empty() {
+            let mesh_id = viewport.add_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+            mesh_triangle_info.push((mesh_id, tooltips));
+        }
+    }
+
+    if display.show_plate_edges {
+        upload_plate_boundary_edges(viewport, armor, device, visibility, display.show_zero_mm);
+    }
+
+    viewport.mark_dirty();
+    mesh_triangle_info
+}
+
+/// Initial-load upload: builds `armor`'s meshes (see [`upload_armor_meshes`])
+/// and frames the camera on `armor.bounds`, matching the egui app's
+/// `init_armor_viewport` (`tab.rs:1445-1495`). Use [`reupload_armor_plates`]
+/// instead when only `visibility`/`display` changed and the camera should
+/// stay put.
+pub fn upload_armor_to_viewport(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    visibility: VisibilityFilter,
+    display: DisplaySettings,
+) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
+    let mesh_triangle_info = upload_armor_meshes(viewport, device, armor, visibility, display);
+    let (min, max) = armor.bounds;
+    viewport.camera = ArcballCamera::from_bounds(min, max);
+    viewport.mark_dirty();
+    mesh_triangle_info
+}
+
+/// Re-upload after a `part_visibility`/`plate_visibility`/`display` change
+/// (popover toggle, click-to-hide, context-menu toggle): rebuilds the meshes
+/// but leaves the camera alone, so neither kind of change ever resets the
+/// user's view.
+pub fn reupload_armor_plates(
+    viewport: &mut Viewport3D,
+    device: &wgpu::Device,
+    armor: &LoadedShipArmor,
+    visibility: VisibilityFilter,
+    display: DisplaySettings,
+) -> Vec<(MeshId, Vec<ArmorTriangleTooltip>)> {
+    upload_armor_meshes(viewport, device, armor, visibility, display)
+}
+
+/// Quantize a float position to an integer key to avoid floating-point
+/// comparison issues when matching up shared triangle edges.
+fn quantize(v: [f32; 3]) -> [i32; 3] {
+    [(v[0] * 10000.0).round() as i32, (v[1] * 10000.0).round() as i32, (v[2] * 10000.0).round() as i32]
+}
+
+type EdgeKey = ([i32; 3], [i32; 3]);
+
+fn make_edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
+    if a < b { (a, b) } else { (b, a) }
+}
+
+/// One triangle edge's plate identity and face normal, for boundary-edge detection.
+struct EdgeInfo {
+    plate_key: PlateKey,
+    normal: [f32; 3],
+    p0: [f32; 3],
+    p1: [f32; 3],
+}
+
+/// Upload plate boundary edge outlines where adjacent triangles have
+/// different thickness values, differing plates, or a sharp crease. Ports
+/// `armor_viewer::ui::tab::upload_plate_boundary_edges` verbatim (minus the
+/// `show_hidden_only` filter -- v1 has no pane UI for it yet, see the module
+/// doc; `part_visibility`/`plate_visibility` are applied like the main mesh
+/// loop, via the shared `plate_is_visible`).
+fn upload_plate_boundary_edges(
+    viewport: &mut Viewport3D,
+    armor: &LoadedShipArmor,
+    device: &wgpu::Device,
+    visibility: VisibilityFilter,
+    show_zero_mm: bool,
+) {
+    let mut edge_map: HashMap<EdgeKey, Vec<EdgeInfo>> = HashMap::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if !plate_is_visible(info, visibility, show_zero_mm) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+
+            let plate_key: PlateKey = derive_plate_key(info);
+
+            let mut tri_pos = [[0.0_f32; 3]; 3];
+            for (k, vertex) in tri_pos.iter_mut().enumerate() {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx >= mesh.positions.len() {
+                    continue;
+                }
+                let mut pos = mesh.positions[orig_idx];
+                if let Some(t) = &mesh.transform {
+                    pos = transform_point(t, pos);
+                }
+                *vertex = pos;
+            }
+
+            let e1 = [tri_pos[1][0] - tri_pos[0][0], tri_pos[1][1] - tri_pos[0][1], tri_pos[1][2] - tri_pos[0][2]];
+            let e2 = [tri_pos[2][0] - tri_pos[0][0], tri_pos[2][1] - tri_pos[0][1], tri_pos[2][2] - tri_pos[0][2]];
+            let nx = e1[1] * e2[2] - e1[2] * e2[1];
+            let ny = e1[2] * e2[0] - e1[0] * e2[2];
+            let nz = e1[0] * e2[1] - e1[1] * e2[0];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt();
+            let face_normal = if len > 1e-10 { [nx / len, ny / len, nz / len] } else { [0.0, 1.0, 0.0] };
+
+            let edges = [(0, 1), (1, 2), (2, 0)];
+            for (a, b) in edges {
+                let qa = quantize(tri_pos[a]);
+                let qb = quantize(tri_pos[b]);
+                let edge_key = make_edge_key(qa, qb);
+
+                edge_map.entry(edge_key).or_default().push(EdgeInfo {
+                    plate_key: plate_key.clone(),
+                    normal: face_normal,
+                    p0: tri_pos[a],
+                    p1: tri_pos[b],
+                });
+            }
+        }
+    }
+
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for infos in edge_map.values() {
+        let is_mesh_boundary = infos.len() == 1;
+        let first_plate = &infos[0].plate_key;
+        let is_plate_boundary = infos.len() >= 2 && infos.iter().any(|i| i.plate_key != *first_plate);
+        let is_crease = infos.len() >= 2 && {
+            let n0 = &infos[0].normal;
+            infos[1..].iter().any(|i| {
+                let dot = n0[0] * i.normal[0] + n0[1] * i.normal[1] + n0[2] * i.normal[2];
+                dot < 0.7
+            })
+        };
+        if !is_mesh_boundary && !is_plate_boundary && !is_crease {
+            continue;
+        }
+
+        let p0 = infos[0].p0;
+        let p1 = infos[0].p1;
+
+        let mut avg_normal = [0.0_f32; 3];
+        for info in infos {
+            avg_normal[0] += info.normal[0];
+            avg_normal[1] += info.normal[1];
+            avg_normal[2] += info.normal[2];
+        }
+        let n_len =
+            (avg_normal[0] * avg_normal[0] + avg_normal[1] * avg_normal[1] + avg_normal[2] * avg_normal[2]).sqrt();
+        if n_len < 1e-10 {
+            continue;
+        }
+        avg_normal[0] /= n_len;
+        avg_normal[1] /= n_len;
+        avg_normal[2] /= n_len;
+
+        let edge_dir = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let edge_len = (edge_dir[0] * edge_dir[0] + edge_dir[1] * edge_dir[1] + edge_dir[2] * edge_dir[2]).sqrt();
+        if edge_len < 1e-10 {
+            continue;
+        }
+
+        let tx = edge_dir[1] * avg_normal[2] - edge_dir[2] * avg_normal[1];
+        let ty = edge_dir[2] * avg_normal[0] - edge_dir[0] * avg_normal[2];
+        let tz = edge_dir[0] * avg_normal[1] - edge_dir[1] * avg_normal[0];
+        let t_len = (tx * tx + ty * ty + tz * tz).sqrt();
+        if t_len < 1e-10 {
+            continue;
+        }
+        let tangent = [tx / t_len, ty / t_len, tz / t_len];
+
+        for &n_sign in &[1.0_f32, -1.0] {
+            let base = vertices.len() as u32;
+            let offset = [
+                avg_normal[0] * PLATE_EDGE_NORMAL_OFFSET * n_sign,
+                avg_normal[1] * PLATE_EDGE_NORMAL_OFFSET * n_sign,
+                avg_normal[2] * PLATE_EDGE_NORMAL_OFFSET * n_sign,
+            ];
+            let vert_normal = [avg_normal[0] * n_sign, avg_normal[1] * n_sign, avg_normal[2] * n_sign];
+            for &p in &[p0, p1] {
+                for &sign in &[-1.0_f32, 1.0] {
+                    vertices.push(Vertex {
+                        position: [
+                            p[0] + tangent[0] * PLATE_EDGE_HALF_WIDTH * sign + offset[0],
+                            p[1] + tangent[1] * PLATE_EDGE_HALF_WIDTH * sign + offset[1],
+                            p[2] + tangent[2] * PLATE_EDGE_HALF_WIDTH * sign + offset[2],
+                        ],
+                        normal: vert_normal,
+                        color: EDGE_COLOR,
+                        uv: [0.0, 0.0],
+                        tangent: [0.0; 4],
+                    });
+                }
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
+        }
+    }
+
+    if !indices.is_empty() {
+        viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
+
+    #[test]
+    fn is_zero_mm_matches_the_egui_epsilon() {
+        assert!(is_zero_mm(0.0));
+        assert!(is_zero_mm(0.04));
+        assert!(!is_zero_mm(0.05));
+        assert!(!is_zero_mm(1.0));
+    }
+
+    #[test]
+    fn make_edge_key_is_order_independent() {
+        let a = [1, 2, 3];
+        let b = [4, 5, 6];
+        assert_eq!(make_edge_key(a, b), make_edge_key(b, a));
+    }
+
+    #[test]
+    fn quantize_rounds_to_the_nearest_tenth_of_a_millimeter_bucket() {
+        assert_eq!(quantize([0.00001, 0.0, 0.0]), [0, 0, 0]);
+        assert_eq!(quantize([0.12345, -0.12345, 1.0]), [1235, -1235, 10000]);
+    }
+
+    fn test_triangle_info(zone: &str, material: &str, thickness_mm: f32) -> ArmorTriangleInfo {
+        ArmorTriangleInfo {
+            model_index: 1,
+            triangle_index: 0,
+            material_id: 0,
+            material: ArmorMaterial::parse(material).expect("test material is a table key"),
+            zone: zone.to_string(),
+            thickness_mm,
+            layers: vec![thickness_mm],
+            color: [0.0, 0.0, 0.0, 1.0],
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn derive_plate_key_rounds_thickness_to_tenths_of_a_mm() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.04);
+        assert_eq!(
+            derive_plate_key(&info),
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 }
+        );
+    }
+
+    fn no_overrides() -> (HashMap<(String, String), bool>, HashMap<PlateKey, bool>) {
+        (HashMap::new(), HashMap::new())
+    }
+
+    /// "Show Hidden" is a mode: it swaps which plates are drawn rather than
+    /// adding the hidden ones to what is already there.
+    #[test]
+    fn show_hidden_only_swaps_which_plates_are_drawn() {
+        let drawn = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let never_drawn = ArmorTriangleInfo { hidden: true, ..test_triangle_info("Hull", "Trans", 19.0) };
+        let (part, plate) = no_overrides();
+
+        let ordinary = VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false };
+        assert!(plate_is_visible(&drawn, ordinary, false));
+        assert!(plate_is_visible(&never_drawn, ordinary, false), "an ordinary view draws both");
+
+        let hidden_only = VisibilityFilter { part: &part, plate: &plate, show_hidden_only: true };
+        assert!(!plate_is_visible(&drawn, hidden_only, false), "the plates the game draws stand aside");
+        assert!(plate_is_visible(&never_drawn, hidden_only, false));
+    }
+
+    /// The mode does not override the rules that hide a plate outright: a
+    /// hidden plate the reader has switched off stays off.
+    #[test]
+    fn show_hidden_only_still_obeys_an_explicitly_hidden_plate() {
+        let never_drawn = ArmorTriangleInfo { hidden: true, ..test_triangle_info("Hull", "Trans", 19.0) };
+        let (part, _) = no_overrides();
+        let switched_off = HashMap::from([(derive_plate_key(&never_drawn), true)]);
+
+        let hidden_only = VisibilityFilter { part: &part, plate: &switched_off, show_hidden_only: true };
+        assert!(!plate_is_visible(&never_drawn, hidden_only, false));
+    }
+
+    #[test]
+    fn plate_is_visible_hides_zero_mm_triangles_by_default() {
+        let info = test_triangle_info("Hull", "Trans", 0.0);
+        let (part, plate) = no_overrides();
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            false
+        ));
+    }
+
+    #[test]
+    fn plate_is_visible_shows_zero_mm_triangles_when_show_zero_mm_is_on() {
+        let info = test_triangle_info("Hull", "Trans", 0.0);
+        let (part, plate) = no_overrides();
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            true
+        ));
+    }
+
+    #[test]
+    fn plate_is_visible_respects_an_explicitly_hidden_plate() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let key = derive_plate_key(&info);
+        let (part, empty) = no_overrides();
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &empty, show_hidden_only: false },
+            false
+        ));
+
+        let mut hidden = HashMap::new();
+        hidden.insert(key, true);
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &hidden, show_hidden_only: false },
+            false
+        ));
+    }
+
+    #[test]
+    fn plate_is_visible_ignores_other_plates_in_the_visibility_map() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let (part, _) = no_overrides();
+        let mut hidden = HashMap::new();
+        hidden.insert(
+            PlateKey { zone: "Bow".to_string(), material_name: "Bow_Bottom".to_string(), thickness_tenths: 16 },
+            true,
+        );
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &hidden, show_hidden_only: false },
+            false
+        ));
+    }
+
+    #[test]
+    fn plate_is_visible_hides_a_triangle_whose_part_is_off() {
+        let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let mut part = HashMap::new();
+        part.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
+        let plate = HashMap::new();
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            false
+        ));
+    }
+
+    #[test]
+    fn display_settings_default_matches_the_egui_armor_viewer_defaults() {
+        let d = DisplaySettings::default();
+        assert!(d.show_plate_edges);
+        assert!(!d.show_zero_mm);
+        assert_eq!(d.armor_opacity, 1.0);
+        assert!(!d.hull_opaque);
+    }
+
+    #[test]
+    fn display_settings_from_defaults_falls_back_when_no_row() {
+        assert_eq!(DisplaySettings::from_defaults(None), DisplaySettings::default());
+    }
+
+    #[test]
+    fn display_settings_from_defaults_reads_a_persisted_row() {
+        let row = ArmorViewerDefaultsRow {
+            show_plate_edges: false,
+            show_waterline: false,
+            show_zero_mm: true,
+            armor_opacity: 0.5,
+            waterline_opacity: 0.75,
+            hull_opaque: true,
+            hull_all_visible: false,
+            armor_all_visible: true,
+            show_splash_boxes: false,
+            show_legend: true,
+            legend_collapsed: false,
+            legend_pos_x: None,
+            legend_pos_y: None,
+        };
+        let d = DisplaySettings::from_defaults(Some(&row));
+        assert!(!d.show_plate_edges);
+        assert!(d.show_zero_mm);
+        assert!(d.hull_opaque);
+        assert_eq!(d.armor_opacity, 0.5);
+    }
+
+    /// Needs a local game install and a real GPU adapter: loads one real
+    /// ship's armor (mirrors `load_ship.rs`'s own real-install test), uploads
+    /// it into a fresh `Viewport3D` on the test-only `HeadlessDevice`, and
+    /// renders it offscreen -- proving the whole T4 pipeline (catalog ->
+    /// load -> upload -> camera framing -> render) end to end without a
+    /// windowed app. Asserts the render actually shows thickness-colored
+    /// geometry (not just the clear color) and that plate boundary edges
+    /// (pure black) are present, matching `DisplaySettings::default()`'s
+    /// `show_plate_edges = true`. Run with:
+    ///
+    /// ```text
+    /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]
+    fn upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry() {
+        use crate::viewport::headless::HeadlessDevice;
+        use crate::viewport::headless::SRGB_TARGET;
+        use crate::viewport::types::TargetSize;
+
+        let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
+            .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+
+        let available =
+            wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
+        let build = *available.last().expect("expected at least one installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the game VFS for the latest installed build");
+        let metadata = std::sync::Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
+                .expect("failed to build GameMetadataProvider from the VFS"),
+        );
+        let ship_assets =
+            wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, std::sync::Arc::clone(&metadata))
+                .expect("failed to load ShipAssets from the VFS");
+
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
+        // A battleship tends to have the richest armor scheme (many distinct
+        // plates/zones), which best exercises the plate-boundary-edge path.
+        let ship = catalog
+            .nations
+            .iter()
+            .flat_map(|n| &n.classes)
+            .filter(|c| c.species == wowsunpack::game_params::types::Species::Battleship)
+            .flat_map(|c| &c.ships)
+            .next()
+            .expect("expected at least one battleship in the real catalog");
+
+        let armor = crate::load_ship::load_ship_armor_by_param(
+            &ship_assets,
+            &ship.param_index,
+            &ship.display_name,
+            &crate::scene_load::LoadCancel::new(),
+        )
+        .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index))
+        .scene;
+
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let size = TargetSize::new(512, 512).expect("a nonzero size");
+        let mut viewport = Viewport3D::new();
+
+        let empty_part = HashMap::new();
+        let empty_plate = HashMap::new();
+        let display = DisplaySettings::default();
+        let mesh_triangle_info = upload_armor_to_viewport(
+            &mut viewport,
+            &headless.device,
+            &armor,
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
+            display,
+        );
+        assert!(!mesh_triangle_info.is_empty(), "expected at least one uploaded armor mesh");
+        let total_triangles: usize = mesh_triangle_info.iter().map(|(_, tooltips)| tooltips.len()).sum();
+        assert!(total_triangles > 0, "expected at least one uploaded armor triangle");
+
+        // Hiding one real plate and re-uploading (the click-to-hide path,
+        // `plate_picking.rs`) should drop exactly that plate's triangles and
+        // nothing else, without moving the camera.
+        let tooltip_key = |t: &ArmorTriangleTooltip| PlateKey {
+            zone: t.zone.clone(),
+            material_name: t.material.name().to_owned(),
+            thickness_tenths: (t.thickness_mm * 10.0).round() as i32,
+        };
+        let hidden_key = mesh_triangle_info[0]
+            .1
+            .first()
+            .map(tooltip_key)
+            .expect("expected at least one tooltip to derive a plate key from");
+        let hidden_count_before =
+            mesh_triangle_info.iter().flat_map(|(_, t)| t).filter(|t| tooltip_key(t) == hidden_key).count();
+        let mut plate_visibility = HashMap::new();
+        plate_visibility.insert(hidden_key.clone(), true);
+        let (target_before, distance_before, azimuth_before, elevation_before) =
+            (viewport.camera.target, viewport.camera.distance, viewport.camera.azimuth, viewport.camera.elevation);
+        let reuploaded = reupload_armor_plates(
+            &mut viewport,
+            &headless.device,
+            &armor,
+            VisibilityFilter { part: &empty_part, plate: &plate_visibility, show_hidden_only: false },
+            display,
+        );
+        let total_after: usize = reuploaded.iter().map(|(_, tooltips)| tooltips.len()).sum();
+        assert_eq!(
+            total_triangles - total_after,
+            hidden_count_before,
+            "expected hiding one plate to drop exactly its own triangles"
+        );
+        assert!(
+            reuploaded.iter().flat_map(|(_, t)| t).all(|t| tooltip_key(t) != hidden_key),
+            "hidden plate's triangles should not reappear in the reuploaded tooltips"
+        );
+        assert_eq!(viewport.camera.target, target_before, "re-upload for a visibility toggle must not move the camera");
+        assert_eq!(viewport.camera.distance, distance_before, "re-upload for a visibility toggle must not zoom");
+        assert_eq!(viewport.camera.azimuth, azimuth_before, "re-upload for a visibility toggle must not rotate");
+        assert_eq!(viewport.camera.elevation, elevation_before, "re-upload for a visibility toggle must not rotate");
+
+        let rgba = headless.render_rgba(&viewport, size);
+        let (w, h) = (size.width(), size.height());
+        assert_eq!(rgba.len(), (w * h * 4) as usize);
+
+        let clear = viewport.clear_color;
+        let clear_rgb =
+            [(clear.r * 255.0).round() as i32, (clear.g * 255.0).round() as i32, (clear.b * 255.0).round() as i32];
+        let mut non_clear_pixels = 0usize;
+        let mut black_pixels = 0usize;
+        for px in rgba.as_chunks::<4>().0 {
+            let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
+            let dist = (r - clear_rgb[0]).abs() + (g - clear_rgb[1]).abs() + (b - clear_rgb[2]).abs();
+            if dist > 20 {
+                non_clear_pixels += 1;
+            }
+            if r < 20 && g < 20 && b < 20 {
+                black_pixels += 1;
+            }
+        }
+        assert!(
+            non_clear_pixels > 1000,
+            "expected a substantial number of non-clear-color pixels (thickness-colored armor), got {non_clear_pixels}"
+        );
+        assert!(
+            black_pixels > 0,
+            "expected some near-black pixels from plate boundary edges (show_plate_edges = true), got none"
+        );
+
+        // Task 7b: `show_plate_edges = false` must drop the boundary-edge
+        // overlay -- the near-black pixel count should fall well below the
+        // edges-on render (armor material colors are never solid black in
+        // the thickness legend, so near-black pixels are edge outlines).
+        let no_edges = DisplaySettings { show_plate_edges: false, ..display };
+        reupload_armor_plates(
+            &mut viewport,
+            &headless.device,
+            &armor,
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
+            no_edges,
+        );
+        let rgba_no_edges = headless.render_rgba(&viewport, size);
+        let black_pixels_no_edges =
+            rgba_no_edges.as_chunks::<4>().0.iter().filter(|px| px[0] < 20 && px[1] < 20 && px[2] < 20).count();
+        assert!(
+            black_pixels_no_edges < black_pixels,
+            "expected show_plate_edges = false to reduce near-black (edge) pixels: before={black_pixels} after={black_pixels_no_edges}"
+        );
+
+        // Task 7b: `armor_opacity` sets every uploaded vertex's alpha, and
+        // the pipeline alpha-blends (`BlendState::ALPHA_BLENDING`), so a
+        // lower opacity should blend the armor color toward the clear color
+        // -- the average non-clear-color distance should shrink.
+        let dim = DisplaySettings { armor_opacity: 0.3, ..no_edges };
+        reupload_armor_plates(
+            &mut viewport,
+            &headless.device,
+            &armor,
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
+            dim,
+        );
+        let rgba_dim = headless.render_rgba(&viewport, size);
+        let avg_clear_distance = |rgba: &[u8]| -> f64 {
+            let mut total = 0i64;
+            let mut n = 0i64;
+            for px in rgba.as_chunks::<4>().0 {
+                let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
+                total +=
+                    (r - clear_rgb[0]).abs() as i64 + (g - clear_rgb[1]).abs() as i64 + (b - clear_rgb[2]).abs() as i64;
+                n += 1;
+            }
+            total as f64 / n as f64
+        };
+        let dist_full = avg_clear_distance(&rgba_no_edges);
+        let dist_dim = avg_clear_distance(&rgba_dim);
+        assert!(
+            dist_dim < dist_full,
+            "expected a lower armor_opacity to blend pixels closer to the clear color: full={dist_full:.1} dim={dist_dim:.1}"
+        );
+
+        println!(
+            "uploaded {} ({}, build {build}): {} meshes / {total_triangles} triangles; render {w}x{h}, {non_clear_pixels} non-clear pixels, {black_pixels} near-black (edge) pixels",
+            armor.display_name,
+            ship.param_index,
+            mesh_triangle_info.len(),
+        );
+    }
+}

@@ -1,0 +1,13 @@
+# libdbus-sys's build.rs, by default, probes pkg-config for the system libdbus-1
+# dev headers, which depends on host state unavailable in the sandboxed buck
+# build. Force the "vendored" feature so build_vendored.rs statically compiles
+# the bundled libdbus C sources (via the `cc` crate) instead of linking a system
+# lib.
+features = ["vendored"]
+
+[buildscript.build]
+extra_deps = ["//third-party/rust:cc-1"]
+
+[buildscript.run]
+rustc_link_lib = true
+rustc_link_search = true

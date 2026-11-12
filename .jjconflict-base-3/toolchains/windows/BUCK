@@ -1,0 +1,77 @@
+load(":hermetic_msvc.bzl", "hermetic_msvc_rust_toolchain", "hermetic_msvc_tools", "windows_resource")
+load(":windows-x86_64-msvc.bzl", "windows_x86_64_msvc_platform")
+load(":wix.bzl", "wix_msi")
+load("@prelude//toolchains:cxx.bzl", "cxx_tools_info_toolchain")
+
+hermetic_msvc_tools(
+    name = "msvc_tools",
+    visibility = ["PUBLIC"],
+)
+
+cxx_tools_info_toolchain(
+    name = "cxx",
+    cxx_tools_info = ":msvc_tools",
+    c_flags = ["/nologo", "/Brepro"],
+    cxx_flags = ["/nologo", "/Brepro"],
+    # rustc already passes /DEBUG to link.exe, so a PDB is written regardless.
+    # Naming the flag here is what makes the prelude declare that PDB as an
+    # output, which is the only way to reach it as //:wows_toolkit_egui[pdb].
+    link_flags = ["/Brepro", "/INCREMENTAL:NO", "/DEBUG"],
+    visibility = ["PUBLIC"],
+)
+
+hermetic_msvc_rust_toolchain(
+    name = "rust",
+    default_edition = "2024",
+    tools = ":msvc_tools",
+    visibility = ["PUBLIC"],
+)
+
+windows_x86_64_msvc_platform(
+    name = "windows_x86_64_msvc",
+    visibility = ["PUBLIC"],
+)
+
+windows_resource(
+    name = "app_resource",
+    src = "root//assets:wows_toolkit_rc",
+    resources = ["root//assets:wows_toolkit_ico"],
+    tools = ":msvc_tools",
+    out = "wows_toolkit.res",
+    visibility = ["PUBLIC"],
+)
+
+windows_resource(
+    name = "gpui_app_resource",
+    src = "root//assets:wows_toolkit_gpui_rc",
+    resources = [
+        "root//assets:wows_toolkit_gpui_manifest",
+        "root//assets:wows_toolkit_rc",
+        "root//assets:wows_toolkit_ico",
+    ],
+    tools = ":msvc_tools",
+    out = "wows_toolkit_gpui.res",
+    visibility = ["PUBLIC"],
+)
+
+wix_msi(
+    name = "wows_toolkit_msi",
+    tools = ":msvc_tools",
+    wxs = ["root//wix:main_wxs"],
+    assets = [
+        "root//assets:wows_toolkit_ico",
+        "root//wix:banner_bmp",
+        "root//wix:license_rtf",
+    ],
+    binaries = {"wows_toolkit.exe": {
+        "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
+        "gpui": "root//crates/wows-toolkit-gpui:gpui_bin",
+    }[read_root_config("release", "frontend", "egui")]},
+    pdbs = {},
+    # MSI ProductVersion is numeric only, so a pre-release tag ships under its
+    # release version. scripts/test-workspace-package-metadata.nu holds this to
+    # the numeric core of the workspace version.
+    version = "1.0.5",
+    out = "wows-toolkit-windows-x86_64-unsigned.msi",
+    visibility = ["PUBLIC"],
+)

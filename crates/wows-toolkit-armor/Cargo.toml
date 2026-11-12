@@ -17,9 +17,12 @@ test-support = ["dep:pollster"]
 
 [dependencies]
 bytemuck = { workspace = true }
+# Camouflage tiles arrive as PNG.
+image = { workspace = true, features = ["png"] }
 nalgebra = "0.34"
 # The headless test device's adapter and device requests.
 pollster = { version = "0.4", optional = true }
+rootcause = { workspace = true }
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once
 # per process (see `wt_translations::backend`).
 rust-i18n = { workspace = true }
@@ -32,11 +35,14 @@ wows-replay-insights = { workspace = true, features = ["arc", "build"] }
 wows_replays = { workspace = true, features = ["arc"] }
 # The typed-text filter matching shared with the other listings.
 wows-toolkit-viewmodel = { workspace = true }
+# The saved Armor Viewer defaults the scene options start from.
+wows-toolkit-config = { workspace = true }
 wt-translations = { workspace = true }
 # The wgpu instance GPUI's renderer uses, so a host can pass its own device in.
 wgpu = { workspace = true }
-# The ray-triangle test the picking shares with the armor export.
-wowsunpack = { workspace = true, features = ["parsing", "models"] }
+# Ship, model and armor loading, and the ray-triangle test the picking shares
+# with the armor export.
+wowsunpack = { workspace = true, features = ["arc", "parsing", "models"] }
 
 [dev-dependencies]
 pollster = "0.4"

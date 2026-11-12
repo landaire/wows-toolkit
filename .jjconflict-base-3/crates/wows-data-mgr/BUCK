@@ -1,0 +1,79 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+WDM_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:clap",
+    "//third-party/rust:home",
+    "//third-party/rust:http-body-util",
+    "//third-party/rust:indicatif",
+    "//third-party/rust:jiff",
+    "//third-party/rust:octocrab",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:ruzstd",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sha2",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:toml",
+    "//third-party/rust:tracing",
+    "//third-party/rust:tracing-subscriber",
+]
+
+workspace_library(
+    name = "wows_data_mgr",
+    crate = "wows_data_mgr",
+    package = "wows-data-mgr",
+    version = "0.23.0",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
+)
+
+workspace_binary(
+    name = "wows_data_mgr_bin",
+    crate = "wows_data_mgr",
+    package = "wows-data-mgr",
+    version = "0.23.0",
+    crate_root = "src/main.rs",
+    features = ["constants", "download"],
+    deps = [":wows_data_mgr"] + WDM_DEPS,
+)
+
+WDM_TEST_DEPS = [
+    "//third-party/rust:futures",
+    "//third-party/rust:rustls-graviola",
+    "//third-party/rust:tempfile",
+]
+
+workspace_test(
+    name = "wows_data_mgr_test",
+    crate = "wows_data_mgr",
+    crate_root = "src/lib.rs",
+    package = "wows-data-mgr",
+    version = "0.23.0",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
+)
+
+# The binary's own modules carry tests of their own.
+workspace_test(
+    name = "wows_data_mgr_bin_test",
+    crate = "wows_data_mgr",
+    crate_root = "src/main.rs",
+    package = "wows-data-mgr",
+    version = "0.23.0",
+    features = ["constants", "download"],
+    deps = [":wows_data_mgr"] + WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows-data-mgr",
+    version = "0.23.0",
+    library = ":wows_data_mgr",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
+    test_deps = WDM_TEST_DEPS,
+)

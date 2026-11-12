@@ -16542,8 +16542,10 @@ name = "wows-toolkit-armor"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "image",
  "nalgebra",
  "pollster 0.4.0",
+ "rootcause",
  "rust-i18n 3.1.5",
  "serde",
  "serde_json",
@@ -16551,6 +16553,7 @@ dependencies = [
  "tracing",
  "wgpu",
  "wows-replay-insights",
+ "wows-toolkit-config",
  "wows-toolkit-viewmodel",
  "wows_replays",
  "wowsunpack",

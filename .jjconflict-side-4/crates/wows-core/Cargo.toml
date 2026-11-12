@@ -1,0 +1,32 @@
+[package]
+exclude = ["BUCK"]
+name = "wows-core"
+description = "Lightweight domain core (shared types and small derived data) for the WoWS toolkit"
+version = "0.15.0"
+repository = "https://github.com/landaire/wows-toolkit"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "wows_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true, optional = true }
+rkyv = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+roxmltree = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+# Unify Rc/Arc across the workspace: with `arc`, shared pointers are `Arc`.
+arc = []
+serde = ["dep:serde"]
+rkyv = ["dep:rkyv"]
+# JSON Schema for tool arguments that take unit values.
+schemars = ["dep:schemars"]
+# XML-derived constructors (e.g. Version::from_account_def). Pulls roxmltree.
+parsing = ["dep:roxmltree"]
