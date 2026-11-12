@@ -53,6 +53,7 @@ use crate::grid::state::MenuTarget;
 use crate::grid::state::Pins;
 use crate::grid::state::RowMenu;
 use crate::grid::style;
+use crate::motion::motion_preference;
 
 /// A table of keyed rows under a header that sorts, resizes, reorders and pins its columns.
 ///
@@ -203,6 +204,7 @@ where
         instant: RwSignal::new_local(false),
         slide: Rc::new(RefCell::new(None)),
         settle: Rc::new(RefCell::new(None)),
+        motion: motion_preference(),
         sort,
         on_sort,
         selection_mode,
