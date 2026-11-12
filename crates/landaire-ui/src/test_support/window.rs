@@ -1,7 +1,10 @@
+use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use accesskit_consumer::Node;
@@ -15,8 +18,10 @@ use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::geom::Size;
 use zgui::platform::DecorationSource;
+use zgui::platform::PlatformCx;
 use zgui::platform::Surface;
 use zgui::platform::SurfaceEvent;
+use zgui::platform::WakeReason;
 use zgui::prelude::IntoView;
 use zgui::prelude::Zoom;
 use zgui::render::RenderTarget;
@@ -121,20 +126,20 @@ pub struct HeadlessWindow {
     scale: DisplayScale,
     pointer: Option<Point<CssPx, Css>>,
     a11y: Option<Tree>,
-    _exclusive: MutexGuard<'static, ()>,
+    exclusive: Exclusive,
 }
 
 impl HeadlessWindow {
     /// Opens `view` in a window and runs the frames that asks for.
     ///
-    /// Windows in one process open one at a time: the call waits while another is open.
+    /// Any number of windows may be open on one thread. Windows on different threads open one
+    /// at a time: the call waits while another thread has one open.
     pub fn open<F, V>(options: HeadlessOptions, view: F) -> Result<Self, HeadlessError>
     where
         F: FnMut() -> V + 'static,
         V: IntoView,
     {
-        static EXCLUSIVE: Mutex<()> = Mutex::new(());
-        let exclusive = EXCLUSIVE.lock().unwrap_or_else(|held| held.into_inner());
+        let exclusive = Exclusive::take();
 
         let factory: zgui::runtime::RendererFactory = match options.drawing {
             Drawing::Recorded => Box::new(|_: &Arc<dyn Surface>, _: RenderTarget| {
@@ -168,7 +173,7 @@ impl HeadlessWindow {
         harness.deliver_to_first(SurfaceEvent::ScaleFactorChanged { scale_factor: scale.0, size: device });
         harness.settle(SETTLE_TURNS);
 
-        let mut window = Self { harness, scale, pointer: None, a11y: None, _exclusive: exclusive };
+        let mut window = Self { harness, scale, pointer: None, a11y: None, exclusive };
         window.redraw_whole();
 
         Ok(window)
@@ -177,6 +182,8 @@ impl HeadlessWindow {
     /// Moves the virtual clock on by `total` one output frame at a time, running the frames each
     /// step asks for, so a transition is sampled as a display would sample it.
     pub fn advance(&mut self, total: Duration) {
+        self.wake_if_unrouted();
+
         let steps = total.as_nanos().div_ceil(FRAME.as_nanos()).max(1);
         for _ in 0..steps {
             self.harness.advance(FRAME);
@@ -529,8 +536,22 @@ impl HeadlessWindow {
     }
 
     fn deliver(&mut self, event: SurfaceEvent) {
+        self.wake_if_unrouted();
         self.harness.deliver_to_first(event);
         self.harness.settle(SETTLE_TURNS);
+    }
+
+    /// Asks for a frame for reactive work, when this window's runtime does not receive the
+    /// thread's reactive wakes: a signal its view depends on, written between frames, then wakes
+    /// no loop or some other window's.
+    fn wake_if_unrouted(&self) {
+        if self.exclusive.receives_wakes() {
+            return;
+        }
+
+        let platform = self.harness.platform();
+        let surfaces = platform.offscreens().iter().map(|surface| Surface::id(surface.as_ref())).collect();
+        platform.waker().wake(WakeReason::ReactiveWork { surfaces });
     }
 }
 
@@ -542,6 +563,74 @@ impl TreeChangeHandler for Silent {
     fn node_updated(&mut self, _: &Node<'_>, _: &Node<'_>) {}
     fn focus_moved(&mut self, _: Option<&Node<'_>>, _: Option<&Node<'_>>) {}
     fn node_removed(&mut self, _: &Node<'_>) {}
+}
+
+/// A thread's claim on the process's windows, held while any [`HeadlessWindow`] is open on it.
+///
+/// Threads take turns, but one thread may hold any number of windows: a second window opened
+/// beside the first must not wait on a claim its own thread holds.
+struct Exclusive {
+    window: WindowKey,
+    /// Ties the claim to the thread that counted it.
+    _thread: PhantomData<*const ()>,
+}
+
+impl Exclusive {
+    fn take() -> Self {
+        static PROCESS: Mutex<()> = Mutex::new(());
+
+        let window = HELD.with_borrow_mut(|held| {
+            let held = held.get_or_insert_with(|| Held {
+                _guard: PROCESS.lock().unwrap_or_else(PoisonError::into_inner),
+                open: 0,
+                newest: WindowKey(0),
+            });
+            held.open += 1;
+            held.newest = WindowKey(held.newest.0 + 1);
+
+            held.newest
+        });
+
+        Self { window, _thread: PhantomData }
+    }
+
+    /// Whether this window's runtime receives the thread's reactive wakes. A runtime takes them
+    /// when it starts, so the window opened last on the thread has them, and while it is open no
+    /// other window does.
+    fn receives_wakes(&self) -> bool {
+        HELD.with_borrow(|held| held.as_ref().is_some_and(|held| held.newest == self.window))
+    }
+}
+
+impl Drop for Exclusive {
+    fn drop(&mut self) {
+        // A window dropped while its thread is torn down has nothing left to release.
+        let _ = HELD.try_with(|held| {
+            let mut held = held.borrow_mut();
+            let last = held.as_mut().is_some_and(|held| {
+                held.open -= 1;
+                held.open == 0
+            });
+            if last {
+                *held = None;
+            }
+        });
+    }
+}
+
+/// One window among those opened on a thread while its claim is held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WindowKey(u64);
+
+/// The process claim a thread holds, how many of its windows are open and which opened last.
+struct Held {
+    _guard: MutexGuard<'static, ()>,
+    open: usize,
+    newest: WindowKey,
+}
+
+thread_local! {
+    static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
 }
 
 fn device_renderer(_surface: &Arc<dyn Surface>, target: RenderTarget) -> Result<Box<dyn Renderer>, AppError> {
