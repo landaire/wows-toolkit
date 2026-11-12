@@ -84,6 +84,7 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 mod cli;
 mod desktop;
 mod frames;
+mod game_art;
 mod http;
 mod i18n;
 mod icons;

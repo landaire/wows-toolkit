@@ -60,10 +60,10 @@ use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::ui::ELLIPSIS;
 
 use crate::desktop;
+use crate::game_art::ClassIconKey;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::player_tracker::class_icon::ClassIconKey;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::tables::HoverTextProps;
 use crate::tabs::player_tracker::tables::severity;

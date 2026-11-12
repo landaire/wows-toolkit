@@ -54,10 +54,10 @@ use zgui::reactive::prelude::WithValue;
 use zgui::reactive::spawn_local;
 use zgui_image::ImageBytes;
 
+use crate::game_art;
+use crate::game_art::ClassIconKey;
 use crate::http::USER_AGENT;
 use crate::services::Services;
-use crate::tabs::player_tracker::class_icon;
-use crate::tabs::player_tracker::class_icon::ClassIconKey;
 
 /// How often the chat observations are re-read while a battle is under way. The egui app's chat
 /// poll writes them every two minutes, so reading faster only repeats the same rows.
@@ -196,7 +196,7 @@ impl LiveModel {
             let drawn: Vec<(ClassIconKey, Vec<u8>)> = blocking(move || {
                 fresh
                     .into_iter()
-                    .filter_map(|key| match class_icon::render(data.vfs(), key) {
+                    .filter_map(|key| match game_art::turned_class_icon_png(data.vfs(), key) {
                         Ok(png) => Some((key, png)),
                         Err(err) => {
                             tracing::warn!("live match: {err}");
