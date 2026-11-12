@@ -9,11 +9,15 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Add searchable computed quantities for ballistics, torpedoes, underwater weapons, and comparison factors
 - *(wows-query)* Expand battle impact with fixed-range accuracy, ammo, overmatch, secondaries, maneuverability, consumables, funny buttons, and commander talents
 - *(wows-query)* Calculate dispersion with a captain skill from another game-data build
+- *(wows-query)* Include raw AP penetration and fuse-arming threshold in battle impact firepower
+- *(wows-query)* Compare dispersion with and without one named build item at a fixed 12 km default
+- *(wows-query)* Resolve PvO as Prins van Oranje
 
 ### Bug Fixes
 
 - *(toolkit)* Keep replay export ship data attached after roster sorting
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
+- *(wows-query)* Direct total side armor questions to full citadel plate stacks
 
 ## [1.0.1] - 2026-08-12
 

@@ -20,6 +20,9 @@ expression: resolutions
 - name: Brick
   resolved: Vermont
   method: exact-alias
+- name: PvO
+  resolved: Prins van Oranje
+  method: exact-alias
 - name: Friedrich der Große
   resolved: F. der Grosse
   method: exact-alias

@@ -24,6 +24,8 @@ factors:
   - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "effective_gun_damage (index, higher is better): main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time"
+  - "ap_penetration (mm, higher is better): raw penetration of the largest main battery AP shell at the reference range, against a plate struck head-on before impact angle"
+  - "ap_fuse_threshold (mm, lower is better): minimum normalized armor thickness that arms the fuse of the largest main battery AP shell; a hit that crosses the target without arming overpenetrates"
   - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
   - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
   - "vertical_dispersion (m, lower is better): main battery vertical dispersion at the reference range, or at the ship's own range when shorter"
@@ -219,6 +221,20 @@ leaders:
     worst:
       - Shimakaze (Japan) 13.13 index
       - "Somers (USA, premium) 14.2 index"
+  ap_penetration:
+    best:
+      - "Hull (USA, premium) 255.64 mm"
+      - Elbing (Germany) 223.78 mm
+    worst:
+      - "Fuyutsuki (Japan, premium) 44.26 mm"
+      - "Z-42 (Germany, premium) 48.65 mm"
+  ap_fuse_threshold:
+    best:
+      - "Druid (United_Kingdom, premium) 12 mm"
+      - "Fuyutsuki (Japan, premium) 17 mm"
+    worst:
+      - "Hull (USA, premium) 34 mm"
+      - "Lübeck (Germany, test) 25 mm"
   turret_traverse:
     best:
       - "F. Sherman (USA, premium) 3.4 s"

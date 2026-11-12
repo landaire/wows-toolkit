@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: shells
+---
+ships:
+  - ship: "T10 G. Kurfürst (battleship, Germany, premium)"
+    quantities:
+      - quantity: shell.raw_penetration
+        unit: mm
+        values:
+          - option: main battery 406 mm P.Spr.Gr. L/4.4
+            value: 566.47
+          - option: "main battery 420 mm P.Spr.Gr. L/4.6 (modules: 420 mm/48 SK C/40 on a Drh LC/34 mount)"
+            value: 597.77
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

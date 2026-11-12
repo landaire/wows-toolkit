@@ -1,0 +1,96 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: broadside
+---
+fall_angle_deg: 0
+rays_over_citadel: 496
+glancing_rays: 0
+armor_before_citadel_mm:
+  min: 301.1
+  median: 311
+  max: 329.2
+citadel_plate_mm:
+  min: 40
+  median: 40.1
+  max: 40.5
+bands:
+  - band: 0 to 2 m
+    rays: 496
+    median_angle_deg: 3.5
+    doubled_pct: 0
+stacks:
+  - label: least
+    from_bow_m: 167.8
+    height_m: 0.4
+    plates:
+      - plate: "torpedo protection: Side Plating"
+        zone: TorpedoProtection
+        thickness_mm: 30
+        angle_deg: 6.4
+        effective_mm: 30.2
+      - plate: "casemate: Armor Belt"
+        zone: Casemate
+        thickness_mm: 225
+        angle_deg: 15
+        effective_mm: 232.9
+      - plate: "casemate: Armored Deck Slope"
+        zone: Casemate
+        thickness_mm: 25
+        angle_deg: 48.9
+        effective_mm: 38
+      - plate: "citadel: Torpedo Bulkhead"
+        zone: Citadel
+        thickness_mm: 40
+        angle_deg: 3.5
+        effective_mm: 40.1
+    total_effective_mm: 341.2
+  - label: median
+    from_bow_m: 113.8
+    height_m: 0.4
+    plates:
+      - plate: "torpedo protection: Side Plating"
+        zone: TorpedoProtection
+        thickness_mm: 30
+        angle_deg: 1.2
+        effective_mm: 30
+      - plate: "casemate: Armor Belt"
+        zone: Casemate
+        thickness_mm: 225
+        angle_deg: 14.8
+        effective_mm: 232.8
+      - plate: "casemate: Armored Deck Slope"
+        zone: Casemate
+        thickness_mm: 25
+        angle_deg: 58.8
+        effective_mm: 48.2
+      - plate: "citadel: Torpedo Bulkhead"
+        zone: Citadel
+        thickness_mm: 40
+        angle_deg: 0
+        effective_mm: 40
+    total_effective_mm: 351
+  - label: most
+    from_bow_m: 64.8
+    height_m: 0.9
+    plates:
+      - plate: "torpedo protection: Side Plating"
+        zone: TorpedoProtection
+        thickness_mm: 30
+        angle_deg: 21
+        effective_mm: 32.1
+      - plate: "casemate: Armor Belt"
+        zone: Casemate
+        thickness_mm: 225
+        angle_deg: 20.8
+        effective_mm: 240.6
+      - plate: "casemate: Armored Deck Slope"
+        zone: Casemate
+        thickness_mm: 25
+        angle_deg: 63.7
+        effective_mm: 56.5
+      - plate: "citadel: Torpedo Bulkhead"
+        zone: Citadel
+        thickness_mm: 40
+        angle_deg: 6.2
+        effective_mm: 40.2
+    total_effective_mm: 369.5

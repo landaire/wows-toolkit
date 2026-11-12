@@ -309,7 +309,7 @@ impl GameData {
         const NOTES: &[&str] = &[
             "A judgment from game data, not from win rates or player results: the weights are a stated opinion of what sways a battle. Read the components to see why a ship scores as it does.",
             "Scores compare released ships of one class and tier range only; a named test or experimental ship is included on request. A cruiser's score says nothing against a battleship's.",
-            "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion and flight time measured at 12 km. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice.",
+            "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion, flight time and raw AP penetration measured at 12 km. AP penetration is the head-on Krupp result at impact velocity, distinct from overmatch. The AP fuse threshold is the normalized armor thickness needed to arm the shell; a hit that crosses the target without arming overpenetrates, so lower thresholds score higher. Fuse time and residual velocity still decide how far an armed shell travels. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice.",
             "The funny button means the F key: Combat Instructions or an alternative fire mode. Its effect index measures modifier magnitude and duration. Its access index uses the least demanding repeatable charge path. Equal burden means 20 ribbons, 10 adjustment salvos, 4 visibility changes, 3 consumable uses, 120 timer seconds, or potential damage equal to 10 times ship HP.",
             "Mobile smoke counts its active duration. Unique-commander talent potential measures the modifiers from a talent's first activation; talent activation difficulty, improved skills and non-modifier talent effects are not estimated.",
             "Not counted: anti-aircraft, exact shell hit probability, consumable uptime, ability charge events during a real match and player positioning.",
@@ -432,6 +432,18 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
             factors: &[
                 GUN_DPM,
                 FactorSpec { name: "gun_alpha", keys: ALPHA, weight: Weight(0.4), absent: Absent::Worst },
+                FactorSpec {
+                    name: "ap_penetration",
+                    keys: &["ap_penetration"],
+                    weight: Weight(0.25),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "ap_fuse_threshold",
+                    keys: &["ap_fuse_threshold"],
+                    weight: Weight(0.25),
+                    absent: Absent::Unmeasured,
+                },
                 FactorSpec { name: "torpedo_dpm", keys: &["torpedo_dpm"], weight: Weight(0.8), absent: Absent::Worst },
                 FactorSpec {
                     name: "fires_per_minute",
@@ -516,6 +528,18 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
             factors: &[
                 GUN_DPM,
                 FactorSpec { name: "gun_alpha", keys: ALPHA, weight: Weight(0.75), absent: Absent::Worst },
+                FactorSpec {
+                    name: "ap_penetration",
+                    keys: &["ap_penetration"],
+                    weight: Weight(0.5),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "ap_fuse_threshold",
+                    keys: &["ap_fuse_threshold"],
+                    weight: Weight(0.5),
+                    absent: Absent::Unmeasured,
+                },
                 FactorSpec { name: "torpedo_dpm", keys: &["torpedo_dpm"], weight: Weight(0.2), absent: Absent::Worst },
                 FactorSpec {
                     name: "fires_per_minute",
@@ -635,6 +659,18 @@ fn class_specs(class: ShipClass) -> Option<&'static [ComponentSpec]> {
                     keys: &["main_battery_range"],
                     weight: Weight(0.25),
                     absent: Absent::Worst,
+                },
+                FactorSpec {
+                    name: "ap_penetration",
+                    keys: &["ap_penetration"],
+                    weight: Weight(1.0),
+                    absent: Absent::Unmeasured,
+                },
+                FactorSpec {
+                    name: "ap_fuse_threshold",
+                    keys: &["ap_fuse_threshold"],
+                    weight: Weight(0.5),
+                    absent: Absent::Unmeasured,
                 },
                 FactorSpec {
                     name: "cruiser_bow_overmatch",

@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output.conclusion
+---
+"At the requested 21 km, G. Kurfürst's main battery builds are evaluated at different distances: without Gun Fire Control System Modification 2, 266.1 m horizontal and 159.7 m vertical at 20.61 km; with Gun Fire Control System Modification 2, 270 m horizontal and 155.4 m vertical at 21 km."

@@ -138,6 +138,48 @@ fn tier_8_to_10_cruiser_he_flight_time_to_10_km() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn grosser_kurfurst_ap_penetration_and_fuse_threshold() {
+    let shells = values(json!({
+        "quantities": [{ "name": "shell.raw_penetration", "params": { "range_km": 12, "ammo": "AP" } }],
+        "ships": ["G. Kurfurst"],
+    }));
+    let shells_at_10_km = values(json!({
+        "quantities": [{ "name": "shell.raw_penetration", "params": { "range_km": 10, "ammo": "AP" } }],
+        "ships": ["G. Kurfurst"],
+    }));
+    let factor = values(json!({
+        "quantities": [{ "name": "comparison.ap_penetration" }],
+        "ships": ["G. Kurfurst"],
+    }));
+    let fuse_factor = values(json!({
+        "quantities": [{ "name": "comparison.ap_fuse_threshold" }],
+        "ships": ["G. Kurfurst"],
+    }));
+
+    let shell_traits = GAME.call_tool("ship_shells", json!({ "ship": "G. Kurfurst" })).expect("shells resolve");
+    let mut thresholds: Vec<(f64, f64)> = shell_traits["shells"]
+        .as_array()
+        .expect("shells are listed")
+        .iter()
+        .filter(|shell| shell["battery"] == "main" && shell["ammo"] == "AP")
+        .map(|shell| {
+            (
+                shell["caliber_mm"].as_f64().expect("AP caliber"),
+                shell["fuse_threshold_mm"].as_f64().expect("AP fuse threshold"),
+            )
+        })
+        .collect();
+
+    thresholds.sort_by(|left, right| left.0.total_cmp(&right.0));
+    assert_eq!(thresholds, [(406.0, 68.0), (420.0, 70.0)]);
+    assert_eq!(first_value(&factor), 554.58);
+    assert_eq!(first_value(&fuse_factor), 70.0);
+    insta::assert_yaml_snapshot!(shells);
+    insta::assert_yaml_snapshot!("grosser_kurfurst_ap_penetration_at_10_km", shells_at_10_km);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn underwater_fields_of_venezia_and_des_moines() {
     let output = values(json!({
         "quantities": [

@@ -53,6 +53,9 @@ const MAIN_RANGE_NOTE: &str = "max range is the modified main battery range: fir
 const SECONDARY_NOTE: &str = "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled.";
 const SIGMA_NOTE: &str = "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread.";
 const TAPER_NOTE: &str = "Below the gun's taperDist, 4 to 5 km for most guns, the game narrows horizontal dispersion further toward the muzzle; values at these distances do not apply it and overstate dispersion.";
+fn default_dispersion_range() -> Km {
+    Km::new(12.0)
+}
 /// Distances below this may fall under a gun's taperDist.
 const TAPER_REACH_KM: f32 = 5.0;
 
@@ -63,7 +66,8 @@ pub struct DispersionAtRangeArgs {
     /// Ship name, e.g. "Yamato".
     pub ship: String,
 
-    /// Firing distance in km, more than 0, e.g. 12.
+    /// Firing distance in km, more than 0. Defaults to 12.
+    #[serde(default = "default_dispersion_range")]
     pub range_km: Km,
 
     /// "main_battery" (default) or "secondary".
@@ -631,10 +635,10 @@ impl GameData {
             None => None,
         };
 
-        let mut conclusion = conclusion(ship, kind, range, &computed.rows);
-        if let Some(index) = headline {
-            conclusion = format!("{} {conclusion}", headline_sentence(ship, kind, range, &computed.rows[index]));
-        }
+        let mut conclusion = match headline {
+            Some(0) | None => conclusion(ship, kind, range, &computed.rows),
+            Some(index) => build_comparison_sentence(ship, kind, range, &computed.rows[0], &computed.rows[index]),
+        };
         if let Some(group) = &group {
             conclusion.push_str(&group_sentence(ship, range, group));
         }
@@ -721,7 +725,7 @@ impl GameData {
             Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, Some(headline))?),
             None => None,
         };
-        let mut conclusion = headline_sentence(ship, kind, range, &computed.rows[headline]);
+        let mut conclusion = build_comparison_sentence(ship, kind, range, &computed.rows[0], &computed.rows[headline]);
         if let Some(condition) = &computed.rows[headline].condition {
             conclusion.push_str(" Condition: ");
             conclusion.push_str(condition);
@@ -1478,32 +1482,71 @@ fn standing(entries: &[(String, GroupEntry)], value: impl Fn(&GroupEntry) -> Opt
     })
 }
 
-/// The lead sentence for the build asked about.
-fn headline_sentence(ship: &Ship, kind: DispersionBattery, range: Km, row: &DispersionRow) -> String {
+/// A direct comparison between the base build and the build asked about.
+fn build_comparison_sentence(
+    ship: &Ship,
+    kind: DispersionBattery,
+    range: Km,
+    base: &DispersionRow,
+    selected: &DispersionRow,
+) -> String {
     let at = format_km(range.value());
-    let max = format_km(row.max_range_km.value());
-    let Some(ellipse) = first_ellipse(row) else {
-        return format!("With {}, {}'s {} reaches {max} km, short of {at} km.", row.build, ship.name, kind.noun());
+    let selected_max = format_km(selected.max_range_km.value());
+    let Some(selected_ellipse) = first_ellipse(selected) else {
+        return format!(
+            "At {at} km, {}'s {} is out of range both without and with {}; its range with {} is {selected_max} km.",
+            ship.name,
+            kind.noun(),
+            selected.build,
+            selected.build,
+        );
     };
+    let used = selected_ellipse.evaluated_at_km.unwrap_or(range);
+    let distance = format_km(used.value());
+    let Some(base_ellipse) = first_ellipse(base) else {
+        return format!(
+            "Without {}, {}'s {} reaches {} km, short of {at} km. With {} ({selected_max} km range), dispersion at {distance} km is {} m horizontal and {} m vertical.",
+            selected.build,
+            ship.name,
+            kind.noun(),
+            format_km(base.max_range_km.value()),
+            selected.build,
+            format_m(selected_ellipse.horizontal_m),
+            format_m(selected_ellipse.vertical_m),
+        );
+    };
+    let base_used = base_ellipse.evaluated_at_km.unwrap_or(range);
+    if base_used != used {
+        return format!(
+            "At the requested {at} km, {}'s {} builds are evaluated at different distances: without {}, {} m horizontal and {} m vertical at {} km; with {}, {} m horizontal and {} m vertical at {distance} km.",
+            ship.name,
+            kind.noun(),
+            selected.build,
+            format_m(base_ellipse.horizontal_m),
+            format_m(base_ellipse.vertical_m),
+            format_km(base_used.value()),
+            selected.build,
+            format_m(selected_ellipse.horizontal_m),
+            format_m(selected_ellipse.vertical_m),
+        );
+    }
 
-    let (clamp, used) = match ellipse.evaluated_at_km {
-        Some(used) => (
-            format!(
-                "{at} km is past {}'s {max} km {} range with {}; using {} km. ",
-                ship.name,
-                kind.noun(),
-                row.build,
-                format_km(used.value())
-            ),
-            format_km(used.value()),
-        ),
-        None => (String::new(), at),
-    };
+    let clamped = selected_ellipse
+        .evaluated_at_km
+        .map(|_| format!(" {at} km is past its {selected_max} km range, so the comparison uses {distance} km."))
+        .unwrap_or_default();
     format!(
-        "{clamp}With {} ({max} km range), dispersion at {used} km is {} m horizontal and {} m vertical.",
-        row.build,
-        format_m(ellipse.horizontal_m),
-        format_m(ellipse.vertical_m),
+        "At {distance} km, {}'s {} dispersion without {} is {} m horizontal and {} m vertical; with {} it is {} m horizontal and {} m vertical ({} horizontal, {} vertical).{clamped}",
+        ship.name,
+        kind.noun(),
+        selected.build,
+        format_m(base_ellipse.horizontal_m),
+        format_m(base_ellipse.vertical_m),
+        selected.build,
+        format_m(selected_ellipse.horizontal_m),
+        format_m(selected_ellipse.vertical_m),
+        format_pct(selected_ellipse.horizontal_change_pct.unwrap_or(Percent::new(0.0))),
+        format_pct(selected_ellipse.vertical_change_pct.unwrap_or(Percent::new(0.0))),
     )
 }
 

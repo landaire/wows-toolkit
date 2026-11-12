@@ -45,6 +45,7 @@ pub(crate) const SHIP_ALIASES: &[(&str, &str)] = &[
     ("Mega Grober", "Hannover"),
     ("Brik", "Vermont"),
     ("Brick", "Vermont"),
+    ("PvO", "Prins van Oranje"),
     ("Friedrich der Gro\u{df}e", "F. der Grosse"),
     ("FdG", "F. der Grosse"),
     ("DM", "Des Moines"),

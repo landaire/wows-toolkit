@@ -7,7 +7,7 @@ expression: pairs
     - ships:
         - Yamato
         - Amagi
-      compared: 41
+      compared: 43
       first_better:
         - health
         - repair_party_total_heal
@@ -20,6 +20,7 @@ expression: pairs
         - flight_time_ap
         - flight_time_he
         - effective_gun_damage
+        - ap_penetration
         - dispersion
         - vertical_dispersion
         - sigma
@@ -36,6 +37,7 @@ expression: pairs
         - cruiser_he_damaging
         - cruiser_external_overmatch
       second_better:
+        - ap_fuse_threshold
         - turret_traverse
         - stern_barrels
         - concealment
@@ -60,13 +62,13 @@ expression: pairs
         - bb_ap_citadel 3 vs 9.6% (69% apart)
         - bow_overmatch 3.05 vs 5.74% (47% apart)
         - stern_overmatch 3.05 vs 5.74% (47% apart)
-      verdict: "On paper Yamato is better: it leads on 26 of 41 compared factors, by the most on effective_gun_damage, aa_flak, bow_barrels. Yamato is better on 26 of 41 compared factors, Amagi on 10, 5 tied."
+      verdict: "On paper Yamato is better: it leads on 27 of 43 compared factors, by the most on effective_gun_damage, aa_flak, bow_barrels. Yamato is better on 27 of 43 compared factors, Amagi on 11, 5 tied."
 - group: tier 10 cruisers
   head_to_head:
     - ships:
         - Des Moines
         - Zaō
-      compared: 40
+      compared: 42
       first_better:
         - health
         - repair_party_total_heal
@@ -91,6 +93,7 @@ expression: pairs
         - alpha_he
         - flight_time_ap
         - flight_time_he
+        - ap_penetration
         - dispersion
         - vertical_dispersion
         - stern_barrels
@@ -105,6 +108,7 @@ expression: pairs
       tied:
         - repair_party_heal
         - damage_control_reload
+        - ap_fuse_threshold
         - turret_traverse
         - sigma
         - secondary_range
@@ -118,4 +122,4 @@ expression: pairs
         - alpha_he 44880 vs 27720 HP (38% apart)
         - bb_ap_citadel 3.6 vs 5.8% (38% apart)
         - stern_barrels 50 vs 33.33% (33% apart)
-      verdict: "Mixed: Des Moines is better on 17 of 40 compared factors, Zaō on 16, 7 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+      verdict: "Mixed: Des Moines is better on 17 of 42 compared factors, Zaō on 17, 8 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."

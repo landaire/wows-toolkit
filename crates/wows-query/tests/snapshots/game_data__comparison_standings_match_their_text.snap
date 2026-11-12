@@ -16,6 +16,8 @@ standings:
   - "flight_time_ap 6.98 s (Lower is better): rank 20/35, better 19, worse 14, tied 1, outlier None, beaten 41.18%, ties half 42.65%"
   - "flight_time_he 6.98 s (Lower is better): rank 22/37, better 21, worse 14, tied 1, outlier None, beaten 38.89%, ties half 40.28%"
   - "effective_gun_damage 25.59 index (Higher is better): rank 24/40, better 23, worse 16, tied 0, outlier None, beaten 41.03%, ties half 41.03%"
+  - "ap_penetration 48.65 mm (Higher is better): rank 33/35, better 32, worse 1, tied 1, outlier Some(Worse), beaten 2.94%, ties half 4.41%"
+  - "ap_fuse_threshold 18.00 mm (Lower is better): rank 4/35, better 3, worse 30, tied 1, outlier None, beaten 88.24%, ties half 89.71%"
   - "turret_traverse 7.56 s (Lower is better): rank 20/40, better 19, worse 15, tied 5, outlier None, beaten 38.46%, ties half 44.87%"
   - "dispersion 84.00 m (Lower is better): rank 7/40, better 6, worse 0, tied 33, outlier None, beaten 0.00%, ties half 42.31%"
   - "vertical_dispersion 43.00 m (Lower is better): rank 7/40, better 6, worse 16, tied 17, outlier None, beaten 41.03%, ties half 62.82%"
