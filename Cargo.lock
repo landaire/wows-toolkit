@@ -16559,7 +16559,6 @@ dependencies = [
 name = "wows-toolkit-gpui"
 version = "1.0.5"
 dependencies = [
- "ab_glyph",
  "anyhow",
  "arboard",
  "bytemuck",
@@ -16568,7 +16567,6 @@ dependencies = [
  "csv",
  "dhat",
  "filetime",
- "fontdb",
  "futures",
  "gettext",
  "gpui-fast-wgpu",
@@ -16591,7 +16589,6 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "thiserror 2.0.20",
- "tiny-skia 0.12.0",
  "tokio",
  "tracing",
  "walkdir",
@@ -16726,8 +16723,10 @@ dependencies = [
 name = "wows-toolkit-viewmodel"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "ciborium",
  "escaper",
+ "fontdb",
  "glob",
  "jiff",
  "language-tags",
@@ -16743,6 +16742,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.20",
  "thousands",
+ "tiny-skia 0.12.0",
  "tokio",
  "tracing",
  "unidecode",

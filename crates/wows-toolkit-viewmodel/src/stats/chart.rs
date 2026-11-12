@@ -472,6 +472,32 @@ pub struct ChartSettings {
     pub selection_touched: bool,
 }
 
+/// Statistics a chart drawn this way can plot.
+///
+/// Personal rating is offered only with the expected-values table to rate against. Win rate and
+/// personal rating carry no meaning for a single game, so a line plots them only as a running
+/// figure, the same rule the egui pane applies.
+pub fn selectable_stats(mode: ChartMode, running: bool, combined: bool, personal_rating: bool) -> Vec<ChartableStat> {
+    ChartableStat::ALL
+        .into_iter()
+        .filter(|stat| !stat.requires_personal_rating() || personal_rating)
+        .filter(|stat| mode == ChartMode::Bar || stat.is_per_game() || running || combined)
+        .collect()
+}
+
+/// What the value axis is called: the statistic, plus how it is being read when that is not the
+/// raw per-game figure.
+pub fn value_axis_label(stat: ChartableStat, mode: ChartMode, running: bool, combined: bool) -> String {
+    if mode == ChartMode::Bar {
+        return t!("ui.stats.series_average", stat = stat.label()).into_owned();
+    }
+    if running || combined {
+        return t!("ui.stats.series_running", stat = stat.label()).into_owned();
+    }
+
+    stat.label()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::PerGameStat;
@@ -754,5 +780,19 @@ mod tests {
         assert!(ChartableStat::ALL.iter().all(|stat| !stat.label().is_empty()));
         assert_eq!(ChartMode::ALL.len(), 2);
         assert!(ChartMode::ALL.iter().all(|mode| !mode.label().is_empty()));
+    }
+
+    #[test]
+    fn a_plain_line_offers_only_per_game_statistics() {
+        let line = super::selectable_stats(ChartMode::Line, false, false, true);
+        assert!(!line.contains(&ChartableStat::WinRate) && !line.contains(&ChartableStat::PersonalRating));
+
+        let running = super::selectable_stats(ChartMode::Line, true, false, true);
+        assert!(running.contains(&ChartableStat::WinRate) && running.contains(&ChartableStat::PersonalRating));
+        assert_eq!(super::selectable_stats(ChartMode::Line, false, true, true), running, "combining is a running line");
+
+        let unrated = super::selectable_stats(ChartMode::Bar, false, false, false);
+        assert!(unrated.contains(&ChartableStat::WinRate));
+        assert!(!unrated.contains(&ChartableStat::PersonalRating), "no table, no rating");
     }
 }
