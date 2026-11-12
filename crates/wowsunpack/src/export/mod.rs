@@ -6,6 +6,8 @@ pub mod armor_extract;
 #[cfg(feature = "models")]
 pub mod armor_ray;
 #[cfg(feature = "models")]
+pub mod building_armor;
+#[cfg(feature = "models")]
 pub mod camo_composite;
 #[cfg(feature = "models")]
 pub mod camo_textures;
