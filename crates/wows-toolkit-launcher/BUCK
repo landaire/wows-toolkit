@@ -24,6 +24,17 @@ workspace_library(
     deps = LAUNCHER_DEPS,
 )
 
+# Event constructors for a front end's tests. Separate from the shipping library so they stay out
+# of the application binaries.
+workspace_library(
+    name = "wows_toolkit_launcher_test_support",
+    crate = "wows_toolkit_launcher",
+    package = "wows-toolkit-launcher",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = LAUNCHER_DEPS,
+)
+
 workspace_test(
     name = "wows_toolkit_launcher_test",
     crate = "wows_toolkit_launcher",
