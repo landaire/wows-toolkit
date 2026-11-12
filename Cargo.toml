@@ -130,25 +130,25 @@ sha2 = "0.10"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 rust-i18n = "3.1.5"
 sys-locale = "0.3"
-# Local checkout of landaire-contrib/zgui, bookmark `wows-toolkit`.
-zgui = { path = "../zgui-wows/crates/zgui" }
-zgui-ui = { path = "../zgui-wows/crates/zgui-ui" }
-zgui-ui-icons = { path = "../zgui-wows/crates/zgui-ui-icons" }
-zgui-ui-primitives = { path = "../zgui-wows/crates/zgui-ui-primitives" }
-zgui-ui-tokens = { path = "../zgui-wows/crates/zgui-ui-tokens" }
-zgui-image = { path = "../zgui-wows/crates/zgui-image" }
-zgui-css = { path = "../zgui-wows/crates/zgui-css" }
-zgui-platform-headless = { path = "../zgui-wows/crates/zgui-platform-headless" }
-zgui-render-wgpu = { path = "../zgui-wows/crates/zgui-render-wgpu" }
-zgui-render-vector-vello = { path = "../zgui-wows/crates/zgui-render-vector-vello" }
-zgui-testkit-scene = { path = "../zgui-wows/crates/zgui-testkit-scene" }
+# landaire-contrib/zgui, branch `wows-toolkit`.
+zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-image = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-css = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
 # The accessibility tree zgui publishes, read back as a screen reader reads it.
 accesskit_consumer = "0.38"
 
 [patch.crates-io]
 # zgui's copy of fontique, which keeps resolved font families across queries
 # and caches the system font collection between launches.
-fontique = { path = "../zgui-wows/vendor/fontique" }
+fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
 # GPUI Fast from our fork: the wgpu renderer on every desktop platform and the
 # dynamic textures the armor viewport and replay renderer draw into. The branch
 # holds the fork's generated release workspace, so the crates keep their
