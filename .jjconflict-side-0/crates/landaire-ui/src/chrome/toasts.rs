@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::UpdateValue;
@@ -282,13 +283,78 @@ pub fn withdraw_everywhere(key: &ToastKey) {
 #[component]
 fn Publish(children: Children) -> impl IntoView {
     if let Some(queue) = use_toaster() {
-        let toasts = Toasts { queue, keyed: StoredValue::new_local(HashMap::new()) };
+        let keyed = StoredValue::new_local(HashMap::new());
+        let toasts = Toasts { queue, keyed };
         provide_local_context(toasts);
+
+        // A message that expires, is dismissed or is pushed out leaves the queue on its own.
+        let pruning = RenderEffect::new(move |_| {
+            let showing = queue.showing();
+            keyed.update_value(|keyed: &mut HashMap<ToastKey, ToastId>| {
+                keyed.retain(|_, id| showing.iter().any(|queued| queued.id == *id));
+            });
+        });
 
         let id = HostId(NEXT_HOST.with(|next| next.replace(next.get() + 1)));
         HOSTS.with(|hosts| hosts.borrow_mut().push((id, toasts)));
-        on_cleanup_local(move || HOSTS.with(|hosts| hosts.borrow_mut().retain(|(host, _)| *host != id)));
+        on_cleanup_local(move || {
+            drop(pruning);
+            HOSTS.with(|hosts| hosts.borrow_mut().retain(|(host, _)| *host != id));
+        });
     }
 
     children.into_view_once()
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod tests {
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    use zgui::reactive::prelude::WithValue;
+
+    use super::*;
+    use crate::root::ThemeRootProps;
+    use crate::test_support::HeadlessOptions;
+    use crate::test_support::HeadlessWindow;
+    use crate::test_support::WindowSize;
+
+    /// Hands the window's messages to the test.
+    #[component]
+    fn Grab(handed: Rc<Cell<Option<Toasts>>>) -> impl IntoView {
+        handed.set(Toasts::current());
+
+        view! { box() }
+    }
+
+    #[test]
+    fn keys_of_messages_that_leave_on_their_own_are_forgotten() {
+        let handed = Rc::new(Cell::new(None));
+        let sent = Rc::clone(&handed);
+        let mut window =
+            HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 640.0, height: 400.0 }), move || {
+                let sent = Rc::clone(&sent);
+                view! {
+                    ThemeRoot {
+                        ToastHost {
+                            Grab(handed = sent)
+                        }
+                    }
+                }
+            })
+            .expect("opens");
+        let toasts = handed.get().expect("the host publishes its messages");
+        let remembered = || toasts.keyed.with_value(HashMap::len);
+
+        for worker in 0..5 {
+            toasts.show(
+                Notice::info(format!("Worker {worker} started")).keyed(ToastKey::new(format!("worker-{worker}"))),
+            );
+        }
+        window.advance(Duration::from_secs(1));
+        assert_eq!(remembered(), 3, "the two pushed out by the limit are forgotten");
+
+        window.advance(Duration::from_secs(8));
+        assert_eq!(remembered(), 0, "the ones that expired are forgotten");
+    }
 }
