@@ -7277,6 +7277,9 @@ version = "0.1.0"
 dependencies = [
  "accesskit_consumer 0.38.0",
  "image",
+ "insta",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "zgui",
  "zgui-platform-headless",

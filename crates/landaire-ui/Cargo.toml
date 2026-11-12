@@ -23,6 +23,7 @@ test-support = [
 ]
 
 [dependencies]
+serde.workspace = true
 thiserror.workspace = true
 zgui.workspace = true
 zgui-ui.workspace = true
@@ -35,6 +36,10 @@ zgui-platform-headless = { workspace = true, optional = true }
 zgui-render-vector-vello = { workspace = true, optional = true }
 zgui-render-wgpu = { workspace = true, optional = true }
 zgui-testkit-scene = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true
+serde_json.workspace = true
 
 [[example]]
 name = "gallery"

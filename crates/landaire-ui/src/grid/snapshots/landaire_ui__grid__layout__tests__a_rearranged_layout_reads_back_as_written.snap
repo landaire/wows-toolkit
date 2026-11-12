@@ -1,0 +1,22 @@
+---
+source: crates/landaire-ui/src/grid/layout.rs
+expression: text
+---
+{
+  "columns": [
+    {
+      "id": "c",
+      "pinned": true
+    },
+    {
+      "id": "d"
+    },
+    {
+      "id": "a",
+      "width": 132.5
+    },
+    {
+      "id": "b"
+    }
+  ]
+}
