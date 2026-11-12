@@ -352,3 +352,25 @@ fn a_stand_in_hull_section_is_reported_rather_than_drawn() {
     assert!(front - back > 10.0, "the bow section spans the hull: {back}..{front}");
     assert!(ship.parts().iter().any(|part| part.model_path.as_str() == BEARN_MID_BACK), "the ship still loads it");
 }
+
+const CURTISS_TS1: &str =
+    "content/gameplay/usa/aircraft/fighter/AAF014_Curtiss_TS1_float/AAF014_Curtiss_TS1_float.model";
+
+/// The TS-1's propeller disc is stored at the origin of its `disc` node,
+/// which sits under `propeller_mod` at the nose.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_render_set_bound_to_a_node_lands_on_that_node() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    let plane = library.load_model(&path(CURTISS_TS1), &options(TextureDecode::None)).expect("the TS-1 loads");
+    let disc = plane.meshes().iter().find(|mesh| mesh.name == "discShape").expect("a propeller disc");
+
+    let count = disc.positions.len() as f32;
+    let center = disc.positions.iter().fold([0.0f32; 3], |sum, p| [sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]]);
+    let center = center.map(|c| c / count);
+    let propeller = [0.0, 0.136, -0.083];
+    let distance = (0..3).map(|axis| (center[axis] - propeller[axis]).powi(2)).sum::<f32>().sqrt();
+    assert!(distance < 0.01, "the disc centres on the propeller node: {center:?}");
+}

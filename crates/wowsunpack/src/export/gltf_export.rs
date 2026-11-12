@@ -1761,6 +1761,7 @@ fn collect_primitives(
         let handedness = VertexHandedness::of_render_set(visual, rs);
         let mut verts = unpack_vertices(vert_slice, stride, &format, handedness);
         wind_counterclockwise(&mut indices);
+        place_on_node(visual, rs, &mut verts, &mut indices);
 
         // Apply per-vertex barrel pitch rotation if configured.
         if let Some(bp) = barrel_pitch {
@@ -2102,6 +2103,61 @@ fn apply_barrel_pitch(
 fn wind_counterclockwise(indices: &mut [u32]) {
     for triangle in indices.as_chunks_mut::<3>().0 {
         triangle.swap(1, 2);
+    }
+}
+
+/// Moves a static render set from the space of the node it is bound to into
+/// the visual's. Static render sets are stored relative to their node (an
+/// aircraft's propeller disc sits at the origin of its `disc` node, below
+/// `propeller_mod`; a director exported in centimetres carries a 0.01 scale
+/// on its node). Skinned render sets are stored in the visual's space.
+/// `verts` are right-handed and `indices` counterclockwise on entry.
+fn place_on_node(visual: &VisualPrototype, rs: &RenderSet, verts: &mut UnpackedVertices, indices: &mut [u32]) {
+    const IDENTITY: [f32; 16] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+
+    if rs.skinned {
+        return;
+    }
+    let world = rs
+        .node_name_ids
+        .first()
+        .and_then(|&name_id| visual.find_node_index_by_name_id(name_id))
+        .and_then(|node| visual.node_world_matrix(node));
+    let Some(world) = world.filter(|world| *world != IDENTITY) else {
+        return;
+    };
+
+    let m = negate_z_transform(world);
+    for position in &mut verts.positions {
+        let [x, y, z] = *position;
+        *position = [
+            m[0] * x + m[4] * y + m[8] * z + m[12],
+            m[1] * x + m[5] * y + m[9] * z + m[13],
+            m[2] * x + m[6] * y + m[10] * z + m[14],
+        ];
+    }
+
+    // Normals take the cofactor matrix, the inverse transpose scaled by the
+    // determinant; the determinant's sign is put back before normalizing.
+    let determinant = mat4_linear_determinant(&m);
+    let sign = determinant.signum();
+    let cofactor = [
+        [m[5] * m[10] - m[9] * m[6], m[9] * m[2] - m[1] * m[10], m[1] * m[6] - m[5] * m[2]],
+        [m[8] * m[6] - m[4] * m[10], m[0] * m[10] - m[8] * m[2], m[4] * m[2] - m[0] * m[6]],
+        [m[4] * m[9] - m[8] * m[5], m[8] * m[1] - m[0] * m[9], m[0] * m[5] - m[4] * m[1]],
+    ];
+    for normal in &mut verts.normals {
+        let n = *normal;
+        let transformed = cofactor.map(|row| sign * (row[0] * n[0] + row[1] * n[1] + row[2] * n[2]));
+        let length = transformed.iter().map(|c| c * c).sum::<f32>().sqrt();
+        if length > 0.0 {
+            *normal = transformed.map(|c| c / length);
+        }
+    }
+
+    // A reflecting node turns the triangles over.
+    if determinant < 0.0 {
+        wind_counterclockwise(indices);
     }
 }
 
@@ -3155,6 +3211,7 @@ pub(crate) fn collect_hull_meshes_indexed(
         let handedness = VertexHandedness::of_render_set(visual, rs);
         let mut verts = unpack_vertices(vert_slice, stride, &format, handedness);
         wind_counterclockwise(&mut indices);
+        place_on_node(visual, rs, &mut verts, &mut indices);
 
         // Apply per-vertex barrel pitch rotation if configured.
         if let Some(bp) = barrel_pitch {
