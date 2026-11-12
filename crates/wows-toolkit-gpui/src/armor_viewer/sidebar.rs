@@ -49,8 +49,10 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use wows_toolkit_viewmodel::settings::keys;
+use wowsunpack::export::building_armor::BuildingArmorIndex;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelLibrary;
+use wowsunpack::game_types::GameParamId;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
@@ -60,11 +62,13 @@ use super::model_refs::HardpointTarget;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartRef;
 use super::model_refs::VehicleParamIndex;
+use super::model_tree::FortificationRow;
 use super::model_tree::ModelReferences;
 use super::model_tree::ModelTreeIndex;
 use super::model_tree::ShipPartRows;
 use super::model_tree::SkinUse;
 use super::model_tree::list_all_ship_parts;
+use super::model_tree::list_fortifications;
 use super::search_key::fold;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
@@ -126,6 +130,12 @@ pub struct ModelSelected {
     pub from_ship: Option<ShipPartRef>,
 }
 
+/// Emitted when the user opens an armored building under Fortifications.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildingSelected {
+    pub building: GameParamId,
+}
+
 /// Emitted when the user ticks or clears a row's hardpoint checkbox.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HardpointsToggled {
@@ -183,6 +193,7 @@ pub struct Sidebar {
     model_library: Option<Arc<ModelLibrary>>,
     models: ModelsState,
     ship_parts: Arc<HashMap<VehicleParamIndex, ShipPartRows>>,
+    fortifications: Arc<Vec<FortificationRow>>,
 
     /// Folders open while not searching. Kept across searches.
     browse_expanded: HashSet<SharedString>,
@@ -216,6 +227,7 @@ impl EventEmitter<ShipSelected> for Sidebar {}
 impl EventEmitter<CompareSplit> for Sidebar {}
 impl EventEmitter<ExportModelRequested> for Sidebar {}
 impl EventEmitter<ModelSelected> for Sidebar {}
+impl EventEmitter<BuildingSelected> for Sidebar {}
 impl EventEmitter<HardpointsToggled> for Sidebar {}
 impl EventEmitter<ExportCatalogModelRequested> for Sidebar {}
 
@@ -239,6 +251,7 @@ impl Sidebar {
             model_library: None,
             models: ModelsState::Loading,
             ship_parts: Arc::new(HashMap::new()),
+            fortifications: Arc::new(Vec::new()),
             browse_expanded: HashSet::new(),
             search_expanded: HashSet::new(),
             search_collapsed: HashSet::new(),
@@ -377,6 +390,7 @@ impl Sidebar {
         self.model_library = None;
         self.models = ModelsState::Loading;
         self.ship_parts = Arc::new(HashMap::new());
+        self.fortifications = Arc::new(Vec::new());
         self._model_index_task = None;
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
@@ -487,8 +501,13 @@ impl Sidebar {
                 let metadata = index_bundle.assets.metadata();
                 ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog, &index_references, metadata)
             });
+            let (fortifications_bundle, fortifications_library) = (Arc::clone(&bundle), Arc::clone(&library));
             let parts = cx.background_spawn(async move {
                 list_all_ship_parts(&bundle.catalog, bundle.assets.metadata(), &library, &references)
+            });
+            let fortifications = cx.background_spawn(async move {
+                let metadata = fortifications_bundle.assets.metadata();
+                list_fortifications(&BuildingArmorIndex::build(metadata, &fortifications_library), metadata)
             });
 
             let index = index.await;
@@ -498,7 +517,12 @@ impl Sidebar {
             }
 
             let parts = parts.await;
-            let _ = this.update(cx, |this, cx| this.adopt_ship_parts(parts, cx));
+            if this.update(cx, |this, cx| this.adopt_ship_parts(parts, cx)).is_err() {
+                return;
+            }
+
+            let fortifications = fortifications.await;
+            let _ = this.update(cx, |this, cx| this.adopt_fortifications(fortifications, cx));
         }));
     }
 
@@ -512,6 +536,12 @@ impl Sidebar {
         self.ship_parts = Arc::new(parts);
         // A search names parts as well as ships. Folders the user closed
         // meanwhile stay closed.
+        self.rebuild_tree(Rebuild::Rematch, cx);
+        cx.notify();
+    }
+
+    fn adopt_fortifications(&mut self, fortifications: Vec<FortificationRow>, cx: &mut Context<Self>) {
+        self.fortifications = Arc::new(fortifications);
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
@@ -602,6 +632,7 @@ impl Sidebar {
             RowKind::Ship { param_index, display_name } => {
                 cx.emit(ShipSelected { param_index: param_index.clone(), display_name: display_name.clone() })
             }
+            RowKind::Building { id, .. } => cx.emit(BuildingSelected { building: *id }),
             RowKind::Model(_) | RowKind::ShipPart { .. } => {
                 if let Some(selection) = model_selection(&kind) {
                     cx.emit(selection);
@@ -611,7 +642,8 @@ impl Sidebar {
             | RowKind::Class(_)
             | RowKind::PartFolder
             | RowKind::ModelNation { .. }
-            | RowKind::ModelGroup => self.toggle_folder(id, cx),
+            | RowKind::ModelGroup
+            | RowKind::BuildingGroup => self.toggle_folder(id, cx),
             // A heading and a status line do nothing.
             RowKind::Separator | RowKind::ModelsStatus => {}
         }
@@ -704,7 +736,12 @@ impl Sidebar {
             ModelsState::Unavailable => ModelSection::Unavailable,
             ModelsState::Ready(index) => ModelSection::Ready(index),
         };
-        let sources = TreeSources { ships: &bundle.catalog, ship_parts: &self.ship_parts, models };
+        let sources = TreeSources {
+            ships: &bundle.catalog,
+            ship_parts: &self.ship_parts,
+            models,
+            fortifications: &self.fortifications,
+        };
         if rebuild == Rebuild::Rematch {
             self.search = SearchMatches::from_query(&sources, &self.query, self.tiers);
         }
@@ -789,7 +826,7 @@ fn model_selection(kind: &RowKind) -> Option<ModelSelected> {
 
 /// Whether a row opens a ship or model, rather than being a folder or heading.
 fn opens_on_its_own(kind: &RowKind) -> bool {
-    matches!(kind, RowKind::Ship { .. } | RowKind::Model(_) | RowKind::ShipPart { .. })
+    matches!(kind, RowKind::Ship { .. } | RowKind::Building { .. } | RowKind::Model(_) | RowKind::ShipPart { .. })
 }
 
 /// What a row's tooltip says: its whole name, which the row may cut short,
@@ -798,6 +835,7 @@ fn opens_on_its_own(kind: &RowKind) -> bool {
 fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse]) -> Option<String> {
     let mut text = match kind {
         RowKind::Ship { param_index, display_name } => format!("{display_name}\n{param_index}"),
+        RowKind::Building { display_name, param_name, .. } => format!("{display_name}\n{param_name}"),
         RowKind::Model(model) | RowKind::ShipPart { node: None, model, .. } => format!("{}\n{model}", model.stem()),
         RowKind::ShipPart { node: Some(node), model, .. } => format!("{node} {}\n{model}", model.stem()),
         RowKind::Nation(_)
@@ -806,7 +844,8 @@ fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse]) -> Option<String> {
         | RowKind::Separator
         | RowKind::ModelsStatus
         | RowKind::ModelNation { .. }
-        | RowKind::ModelGroup => return None,
+        | RowKind::ModelGroup
+        | RowKind::BuildingGroup => return None,
     };
 
     // A line per exterior, so the sentence reads the same in every locale.
@@ -942,6 +981,12 @@ fn render_sidebar_item(
             list_item = list_item.on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
                 let selected = selected.clone();
                 sidebar.update(cx, |_sidebar, cx| cx.emit(selected));
+            });
+        }
+        Some(RowKind::Building { id, .. }) => {
+            let selected = BuildingSelected { building: *id };
+            list_item = list_item.on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
+                sidebar.update(cx, |_sidebar, cx| cx.emit(selected.clone()));
             });
         }
         Some(kind) => {
@@ -1107,6 +1152,7 @@ mod tests {
     use wowsunpack::export::hardpoint::HardpointName;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::game_types::GameParamId;
     use wowsunpack::vfs::MemoryFS;
     use wowsunpack::vfs::VfsPath;
 
@@ -1124,10 +1170,12 @@ mod tests {
     use super::super::sidebar_tree::RowKind;
     use super::super::sidebar_tree::SearchMatches;
     use super::super::sidebar_tree::TreeSources;
+    use super::super::sidebar_tree::building_row_id;
     use super::super::sidebar_tree::fixture;
     use super::super::sidebar_tree::model_row_id;
     use super::super::sidebar_tree::part_row_id;
     use super::super::sidebar_tree::ship_row_id;
+    use super::BuildingSelected;
     use super::HardpointsToggled;
     use super::ModelSelected;
     use super::ModelsState;
@@ -1462,6 +1510,30 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_fortification_row_opens_its_building_by_click_and_by_enter(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let buildings = record::<BuildingSelected>(&window, cx);
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.browse_expanded.extend(["armor-fortifications".into(), "armor-fortifications/Complex".into()]);
+                sidebar.adopt_fortifications(fixture::fortifications(), cx);
+            })
+            .expect("the window is open");
+        let fort = GameParamId::from(4229999600u64);
+        let row = row_index(&window, &building_row_id(fort), cx).expect("the fort is listed");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("armor-sidebar-row", row), cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+        press_on_row(window, row, "enter", cx);
+
+        assert_eq!(*buildings.borrow(), [BuildingSelected { building: fort }, BuildingSelected { building: fort }]);
+    }
+
+    #[gpui_kit::test]
     fn enter_in_the_search_field_opens_the_first_match_and_down_moves_into_the_list(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
         let ships = record::<ShipSelected>(&window, cx);
@@ -1567,6 +1639,7 @@ mod tests {
                         ships: &bundle.catalog,
                         ship_parts: &sidebar.ship_parts,
                         models: ModelSection::Ready(index),
+                        fortifications: &sidebar.fortifications,
                     };
                     SearchMatches::from_query(&sources, "yamato", TierRange::ALL)
                 };

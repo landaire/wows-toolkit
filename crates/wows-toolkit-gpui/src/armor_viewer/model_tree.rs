@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::export::building_armor::BuildingArmorIndex;
 use wowsunpack::export::model_catalog::BuildingKind;
 use wowsunpack::export::model_catalog::MiscCategory;
 use wowsunpack::export::model_catalog::ModelCatalog;
@@ -475,6 +476,50 @@ fn folder_order(name: &FolderName) -> FolderOrder {
         FolderName::SubKind(sub_kind) => FolderOrder::SubKind(sub_kind.clone()),
         FolderName::Building { kind, .. } => FolderOrder::Building(kind.clone()),
     }
+}
+
+/// An armored building, which the Ships section lists under Fortifications.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FortificationRow {
+    pub id: GameParamId,
+    pub kind: BuildingKind,
+    /// The game's name for the kind, where it has one.
+    pub kind_name: Option<String>,
+    /// The game's name for the building, or its GameParams name.
+    pub display_name: String,
+    /// The GameParams name, e.g. `PCBX001`.
+    pub param_name: String,
+    /// The name, GameParams name and id.
+    pub search_key: SearchKey,
+}
+
+/// Every armored building, by kind then name as `index` lists them.
+pub fn list_fortifications(index: &BuildingArmorIndex, metadata: &GameMetadataProvider) -> Vec<FortificationRow> {
+    index
+        .buildings()
+        .iter()
+        .map(|building| {
+            let param = building.param();
+            let kind = param.kind().clone();
+            let kind_name = kind.translation_key().and_then(|key| metadata.localized_name_from_id(&key));
+            let name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}", param.name().to_uppercase()));
+            let display_name = metadata.localized_name_from_id(&name_key).unwrap_or_else(|| param.name().to_string());
+
+            let mut search_key = SearchKey::new();
+            search_key.push(display_name.clone());
+            search_key.push(param.name());
+            search_key.push(building.id().to_string());
+
+            FortificationRow {
+                id: building.id(),
+                kind,
+                kind_name,
+                display_name,
+                param_name: param.name().to_string(),
+                search_key,
+            }
+        })
+        .collect()
 }
 
 /// Lists the parts of every ship in `ships` on its default hull, the first

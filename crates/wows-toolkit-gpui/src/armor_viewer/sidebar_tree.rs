@@ -26,6 +26,7 @@ use wowsunpack::export::model_catalog::ModelSubKind;
 use wowsunpack::export::model_catalog::ModelVariantKind;
 use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::GameParamId;
 
 use super::catalog::NationGroup;
 use super::catalog::ShipCatalog;
@@ -37,6 +38,7 @@ use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
 use super::model_tree::FolderName;
+use super::model_tree::FortificationRow;
 use super::model_tree::HullRow;
 use super::model_tree::ModelFolder;
 use super::model_tree::ModelMatch;
@@ -80,6 +82,13 @@ pub(super) enum RowKind {
     },
     ModelGroup,
     Model(ModelPath),
+    /// The Fortifications folder or one of its kind folders.
+    BuildingGroup,
+    Building {
+        id: GameParamId,
+        display_name: String,
+        param_name: String,
+    },
 }
 
 /// Where the model section stands.
@@ -93,6 +102,8 @@ pub(super) struct TreeSources<'a> {
     pub ships: &'a ShipCatalog,
     pub ship_parts: &'a HashMap<VehicleParamIndex, ShipPartRows>,
     pub models: ModelSection<'a>,
+    /// Armored buildings, listed after the ships; empty until listed.
+    pub fortifications: &'a [FortificationRow],
 }
 
 /// Which folders are expanded. With `auto` set, every folder a search wants
@@ -132,6 +143,9 @@ pub(super) struct SearchMatches {
     ships: ShipMatches,
     /// `None` until the model catalogue is listed.
     models: Option<ModelMatches>,
+    /// Buildings in [`TreeSources::fortifications`] order. The tiers do not
+    /// apply to them.
+    fortifications: MatchGroup<bool>,
 }
 
 /// Ships by nation and class, in [`ShipCatalog`] order.
@@ -164,7 +178,9 @@ impl SearchMatches {
             ModelSection::Ready(_) | ModelSection::Loading | ModelSection::Unavailable => None,
         };
 
-        Some(Self { query: query.to_string(), ships, models })
+        let fortifications = sources.fortifications.iter().map(|row| row.search_key.matches(query)).collect();
+
+        Some(Self { query: query.to_string(), ships, models, fortifications })
     }
 }
 
@@ -272,6 +288,12 @@ impl MatchCount for FolderMatches {
     }
 }
 
+impl MatchCount for bool {
+    fn match_count(&self) -> usize {
+        usize::from(*self)
+    }
+}
+
 /// Builds the tree. `search` is `None` when listing everything.
 pub(super) fn build_tree(
     sources: &TreeSources<'_>,
@@ -286,6 +308,13 @@ pub(super) fn build_tree(
         if shown(matches) {
             items.push(builder.ship_nation(nation, matches));
         }
+    }
+
+    let fortification_matches = search.map(|search| search.fortifications.members.as_slice());
+    let fortifications: Vec<(&FortificationRow, Option<&bool>)> =
+        paired(sources.fortifications, fortification_matches).filter(|(_, found)| shown(*found)).collect();
+    if !fortifications.is_empty() {
+        items.push(builder.fortifications(&fortifications));
     }
 
     builder.rows.insert(SEPARATOR_ID.into(), RowKind::Separator);
@@ -318,6 +347,10 @@ pub(super) fn open_row_id(open: &OpenTarget) -> SharedString {
 
 pub(super) fn ship_row_id(param_index: &str) -> SharedString {
     format!("armor-ship-{param_index}").into()
+}
+
+pub(super) fn building_row_id(id: GameParamId) -> SharedString {
+    format!("armor-building-{id}").into()
 }
 
 pub(super) fn model_row_id(model: &ModelPath) -> SharedString {
@@ -582,6 +615,42 @@ impl Builder<'_, '_, '_, '_> {
         })
     }
 
+    /// The Fortifications folder, with a folder per building kind. `rows`
+    /// are the listed buildings, in kind order.
+    fn fortifications(&mut self, rows: &[(&FortificationRow, Option<&bool>)]) -> TreeItem {
+        const FORTIFICATIONS_ID: &str = "armor-fortifications";
+
+        // The tiers do not filter buildings, so only a search counts them.
+        let searching = self.search.is_some_and(|search| !search.query.is_empty());
+        let with_count = |label: String, count: usize| if searching { format!("{label} ({count})") } else { label };
+        let label = with_count(t!("ui.armor.fortifications").into_owned(), rows.len());
+        let wanted = self.opens_ships();
+        self.folder(FORTIFICATIONS_ID.into(), label, RowKind::BuildingGroup, wanted, |b| {
+            rows.chunk_by(|(left, _), (right, _)| left.kind == right.kind)
+                .map(|group| {
+                    let (first, _) = group[0];
+                    let id: SharedString = format!("{FORTIFICATIONS_ID}/{:?}", first.kind).into();
+                    let name = first.kind_name.clone().unwrap_or_else(|| building_kind_label(&first.kind));
+                    b.folder(id, with_count(name, group.len()), RowKind::BuildingGroup, wanted, |b| {
+                        group.iter().map(|(row, _)| b.building_row(row)).collect()
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn building_row(&mut self, row: &FortificationRow) -> TreeItem {
+        let id = building_row_id(row.id);
+        let kind = RowKind::Building {
+            id: row.id,
+            display_name: row.display_name.clone(),
+            param_name: row.param_name.clone(),
+        };
+        self.note(&id, &row.search_key);
+
+        self.leaf(id, row.display_name.clone(), kind)
+    }
+
     /// `found` is `None` when listing everything.
     fn ship_row(&mut self, ship: &ShipEntry, found: Option<ShipMatch>) -> TreeItem {
         let id = ship_row_id(&ship.param_index);
@@ -812,12 +881,14 @@ pub(super) mod fixture {
     use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::game_params::types::PeculiarityModel;
     use wowsunpack::game_params::types::Species;
+    use wowsunpack::game_types::GameParamId;
 
     use super::super::catalog::ClassGroup;
     use super::super::catalog::NationGroup;
     use super::super::catalog::ShipCatalog;
     use super::super::catalog::ShipEntry;
     use super::super::model_refs::VehicleParamIndex;
+    use super::super::model_tree::FortificationRow;
     use super::super::model_tree::ModelReferences;
     use super::super::model_tree::PartKeys;
     use super::super::model_tree::ShipPartRows;
@@ -924,6 +995,25 @@ pub(super) mod fixture {
         ModelCatalog::from_paths(paths.map(path), &CatalogLinks::new(skins, vec![fort]))
     }
 
+    /// A fort the game names and a coastal battery it does not.
+    pub fn fortifications() -> Vec<FortificationRow> {
+        let row = |id: u64, kind: BuildingKind, kind_name: Option<&str>, display_name: &str, param_name: &str| {
+            FortificationRow {
+                id: GameParamId::from(id),
+                kind,
+                kind_name: kind_name.map(str::to_string),
+                display_name: display_name.to_string(),
+                param_name: param_name.to_string(),
+                search_key: key(&[display_name, param_name, &id.to_string()]),
+            }
+        };
+
+        vec![
+            row(4229999600, BuildingKind::Complex, Some("Fort"), "Fort of the Isles", "PCBX001"),
+            row(4229999601, BuildingKind::CoastalArtillery, None, "PCBC002", "PCBC002"),
+        ]
+    }
+
     /// A provider without params or translations: names the game would give
     /// fall back to their keys.
     pub fn metadata() -> GameMetadataProvider {
@@ -978,6 +1068,7 @@ mod tests {
         ships: ShipCatalog,
         index: ModelTreeIndex,
         parts: HashMap<VehicleParamIndex, ShipPartRows>,
+        fortifications: Vec<FortificationRow>,
     }
 
     fn data() -> Data {
@@ -988,7 +1079,7 @@ mod tests {
         let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
         let parts = fixture::ship_parts(&catalog, &references);
 
-        Data { ships, index, parts }
+        Data { ships, index, parts, fortifications: Vec::new() }
     }
 
     /// A catalogue far larger than a search opens: 3000 main battery guns in
@@ -1007,7 +1098,7 @@ mod tests {
         let references = super::super::model_tree::ModelReferences::new();
         let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
 
-        Data { ships, index, parts: HashMap::new() }
+        Data { ships, index, parts: HashMap::new(), fortifications: Vec::new() }
     }
 
     fn build(data: &Data, query: &str, set: &mut HashSet<SharedString>, auto: bool) -> BuiltTree {
@@ -1021,11 +1112,49 @@ mod tests {
         set: &mut HashSet<SharedString>,
         auto: bool,
     ) -> BuiltTree {
-        let sources =
-            TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
+        let sources = TreeSources {
+            ships: &data.ships,
+            ship_parts: &data.parts,
+            models: ModelSection::Ready(&data.index),
+            fortifications: &data.fortifications,
+        };
         let search = SearchMatches::from_query(&sources, query, tiers);
 
         build_tree(&sources, search.as_ref(), &mut Expansion { set, closed: &HashSet::new(), auto })
+    }
+
+    #[test]
+    fn armored_buildings_are_listed_by_kind_after_the_ships_and_found_by_name() {
+        let data = Data { fortifications: fixture::fortifications(), ..data() };
+        let mut set = HashSet::from(["armor-fortifications".into(), "armor-fortifications/Complex".into()]);
+
+        let built = build(&data, "", &mut set, false);
+        assert_eq!(
+            outline(&built.items)[..5],
+            ["Japan +", "U.S.A. +", "Fortifications", "  Fort", "    Fort of the Isles"],
+        );
+        assert_eq!(
+            built.rows.get(&building_row_id(GameParamId::from(4229999600u64))),
+            Some(&RowKind::Building {
+                id: GameParamId::from(4229999600u64),
+                display_name: "Fort of the Isles".to_string(),
+                param_name: "PCBX001".to_string(),
+            })
+        );
+
+        assert_eq!(
+            search(&data, "pcbx001"),
+            ["Fortifications (1)", "  Fort (1)", "    Fort of the Isles", "Models"],
+            "a building is found by its GameParams name"
+        );
+        assert_eq!(search(&data, "pcbc002"), ["Fortifications (1)", "  CoastalArtillery (1)", "    PCBC002", "Models"]);
+
+        let built = build_in_tiers(&data, "", TierRange::new(1, 5), &mut set, false);
+        assert_eq!(
+            outline(&built.items)[1..4],
+            ["Fortifications", "  Fort", "    Fort of the Isles"],
+            "the tiers neither filter nor count buildings"
+        );
     }
 
     #[test]
@@ -1554,12 +1683,24 @@ mod tests {
             assert!(flagged, "{directory} has a flag");
         }
 
-        let data = Data { ships, index, parts };
+        let started = Instant::now();
+        let buildings = wowsunpack::export::building_armor::BuildingArmorIndex::build(&metadata, &library);
+        let fortifications = super::super::model_tree::list_fortifications(&buildings, &metadata);
+        eprintln!("[measured] {} fortifications in {:?}", fortifications.len(), started.elapsed());
+        for row in fortifications.iter().take(4) {
+            eprintln!("  {:?} {:?} {} ({})", row.kind, row.kind_name, row.display_name, row.param_name);
+        }
+
+        let data = Data { ships, index, parts, fortifications };
         let queries =
             ["", "a", "gun", "iowa", "agm", "pasb018", "south carolina", "406 mm/50", "pagm034", "4276041712"];
         for query in queries {
-            let sources =
-                TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
+            let sources = TreeSources {
+                ships: &data.ships,
+                ship_parts: &data.parts,
+                models: ModelSection::Ready(&data.index),
+                fortifications: &data.fortifications,
+            };
             let started = Instant::now();
             let matches = SearchMatches::from_query(&sources, query, TierRange::ALL);
             eprintln!("[measured] {query:?}: matched in {:?}", started.elapsed());
