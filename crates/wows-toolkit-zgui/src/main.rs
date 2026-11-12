@@ -96,6 +96,7 @@ mod preview;
 mod services;
 mod shell;
 mod tabs;
+mod text_marks;
 mod theme;
 mod window_shell;
 mod windows;
