@@ -35,14 +35,17 @@ mod inputs;
 mod schemes;
 #[path = "gallery_parts/surfaces.rs"]
 mod surfaces;
+#[path = "gallery_parts/title_bar.rs"]
+mod title_bar;
 #[path = "gallery_parts/tree.rs"]
 mod tree;
 
 /// The sections in the order the window shows them.
-const SECTIONS: [Section; 7] = [
+const SECTIONS: [Section; 8] = [
     schemes::SECTION,
     surfaces::SECTION,
     chrome::SECTION,
+    title_bar::SECTION,
     tree::SECTION,
     grid::SECTION,
     inputs::SECTION,
