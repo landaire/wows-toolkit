@@ -742,9 +742,7 @@ impl StatsChartPanel {
         Popover::new(("chart-ship-filter-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
             let visible: Vec<_> = played
                 .iter()
-                .filter(|(_, name)| {
-                    normalized_query.is_empty() || ShipSearchKey::new(name).contains(&normalized_query)
-                })
+                .filter(|(_, name)| normalized_query.is_empty() || ShipSearchKey::new(name).contains(&normalized_query))
                 .cloned()
                 .collect();
             let visible_ids: Vec<_> = visible.iter().map(|(ship_id, _)| *ship_id).collect();
