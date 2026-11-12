@@ -15,6 +15,7 @@ use wows_toolkit_viewmodel::match_stats::MatchStatsError;
 use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
 use wows_toolkit_viewmodel::match_stats::RateLimiter;
 use wows_toolkit_viewmodel::match_stats::build_request;
+use wows_toolkit_viewmodel::player_tracker::live::StatsState;
 
 use crate::http::UserAgent;
 
@@ -81,6 +82,42 @@ impl StatsBudget {
         if matches!(error, StatsError::Refused(MatchStatsError::Http { .. } | MatchStatsError::Decode(_))) {
             self.failed.insert(arena_id, now);
         }
+    }
+
+    /// Clears a request for `arena_id` and spends it against the budget, or
+    /// says why it may not be sent.
+    pub fn begin(&mut self, arena_id: ArenaId, now: Instant) -> Result<(), StatsState> {
+        if let Err(refusal) = self.check(arena_id, now) {
+            return Err(StatsState::Failed(refusal_text(&refusal.into())));
+        }
+        self.record(now);
+        Ok(())
+    }
+
+    /// Takes a request's outcome: remembers an answer, starts a cooldown for a
+    /// failure that warrants one, and returns what the view shows.
+    pub fn finish(
+        &mut self,
+        arena_id: ArenaId,
+        fetched: Result<MatchStatsResponse, StatsError>,
+        now: Instant,
+    ) -> StatsState {
+        match fetched {
+            Ok(response) => {
+                let state = StatsState::ready(response.players.clone());
+                self.remember(response);
+                state
+            }
+            Err(err) => {
+                self.note_failure(arena_id, &err, now);
+                StatsState::Failed(refusal_text(&err))
+            }
+        }
+    }
+
+    /// What this session already has for `arena_id`, as the view shows it.
+    pub fn answered_state(&self, arena_id: ArenaId) -> Option<StatsState> {
+        self.answered(arena_id).map(|answered| StatsState::ready(answered.players.clone()))
     }
 }
 

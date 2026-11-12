@@ -12,7 +12,10 @@
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use wows_replays::ReplayFile;
@@ -187,6 +190,30 @@ pub fn scan_arena(source: &LiveSource, loaded: &LoadedGameData, game_data: &Game
     };
 
     scan_arena_state(loaded.provider().entity_specs(), version, &replay, &constants)
+}
+
+/// [`scan_arena`] retried every [`SCAN_RETRY_INTERVAL`] until the roster is
+/// read or [`SCAN_RETRY_BUDGET`] runs out. `None` when it runs out, or when
+/// `cancelled` is set, which is checked between attempts.
+pub fn scan_arena_retrying(
+    source: &LiveSource,
+    loaded: &LoadedGameData,
+    game_data: &GameDataCache,
+    cancelled: &AtomicBool,
+) -> Option<ArenaState> {
+    let deadline = Instant::now() + SCAN_RETRY_BUDGET;
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        if let Some(state) = scan_arena(source, loaded, game_data) {
+            return Some(state);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(SCAN_RETRY_INTERVAL);
+    }
 }
 
 #[cfg(test)]

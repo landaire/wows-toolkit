@@ -80,6 +80,26 @@ pub fn shipbuilds_player_url(region: Region, account_id: AccountId, name: &str) 
     format!("https://shipbuilds.com/player/{}/{}/{}", region.as_url_segment(), account_id.0, name)
 }
 
+/// The settings row the tracker keeps its view in.
+pub const TRACKER_SETTINGS_KEY: &str = "player_tracker";
+
+/// What the tracker remembers between sessions: the window of time it looks
+/// back over, how each table is ordered, and what the filter box holds.
+///
+/// The egui tracker keeps none of this, so this row belongs to the newer
+/// front ends rather than one all three share.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackerSettings {
+    #[serde(default)]
+    pub period: TimePeriod,
+    #[serde(default)]
+    pub sort: Sort,
+    #[serde(default)]
+    pub clan_sort: ClanSort,
+    #[serde(default)]
+    pub filter: String,
+}
+
 /// How far back the tracker looks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimePeriod {

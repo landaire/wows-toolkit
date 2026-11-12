@@ -73,7 +73,9 @@ use wows_toolkit_viewmodel::player_tracker::PlayerRow;
 use wows_toolkit_viewmodel::player_tracker::Sort;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortOrder;
+use wows_toolkit_viewmodel::player_tracker::TRACKER_SETTINGS_KEY;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
+use wows_toolkit_viewmodel::player_tracker::TrackerSettings;
 use wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown;
 use wows_toolkit_viewmodel::player_tracker::clans::visible_clans;
 use wows_toolkit_viewmodel::player_tracker::history;
@@ -85,6 +87,7 @@ use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
 use wows_toolkit_viewmodel::player_tracker::live::RowStats;
 use wows_toolkit_viewmodel::player_tracker::live::StatsLookupGate;
+use wows_toolkit_viewmodel::player_tracker::live::StatsState;
 use wows_toolkit_viewmodel::player_tracker::live::TrackedIndex;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
@@ -168,21 +171,14 @@ const RANGE_COUNT_COLUMN_WIDTH: Pixels = px(170.);
 /// Wide enough for a relative age such as "2 months, 3 days ago".
 const LAST_SEEN_COLUMN_WIDTH: Pixels = px(200.);
 
-/// Where the stats lookup for the battle in progress has got to.
-///
-/// The service's budget is small, so each battle is asked about once and the
-/// answer held for its duration; a failure is reported rather than retried.
-enum StatsState {
-    /// No battle, or one whose roster has not been read yet.
-    Idle,
-    /// Waiting for the game to flush the packet that names the roster.
-    Scanning,
-    /// The roster is read; the lookup waits for the Current Match section to
-    /// be shown.
-    Held,
-    Fetching,
-    Ready(HashMap<AccountId, PlayerStatsOut>),
-    Failed(String),
+/// Stops a running roster scan when dropped.
+#[derive(Default)]
+struct ScanCancel(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for ScanCancel {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// A battle's stats lookup, held until the Current Match section is shown.
@@ -250,26 +246,6 @@ enum LoadState {
     Loading,
     Failed(String),
     Loaded,
-}
-
-/// The settings row the tracker keeps its view in.
-const TRACKER_SETTINGS_KEY: &str = "player_tracker";
-
-/// What the tracker remembers between sessions: the window of time it looks
-/// back over, how each table is ordered, and what the filter box holds.
-///
-/// The egui tracker keeps none of this, so this row is the port's own rather
-/// than one the two apps share.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct TrackerSettings {
-    #[serde(default)]
-    period: TimePeriod,
-    #[serde(default)]
-    sort: Sort,
-    #[serde(default)]
-    clan_sort: ClanSort,
-    #[serde(default)]
-    filter: String,
 }
 
 pub struct PlayerTrackerView {
@@ -1181,26 +1157,17 @@ impl PlayerTrackerView {
 
         self._live_scan = Some(cx.spawn(async move |this, cx| {
             let source = wows_toolkit_replay_data::live_match::LiveSource::in_dir(&replay_dir);
-            let deadline = Instant::now() + wows_toolkit_replay_data::live_match::SCAN_RETRY_BUDGET;
-
-            let state = loop {
-                let attempt = {
-                    let source = source.clone();
-                    let metadata = metadata.clone();
-                    let game_data = game_data.clone();
-                    cx.background_spawn(async move {
-                        wows_toolkit_replay_data::live_match::scan_arena(&source, &metadata, &game_data)
-                    })
-                    .await
-                };
-                if let Some(state) = attempt {
-                    break Some(state);
-                }
-                if Instant::now() >= deadline {
-                    break None;
-                }
-                cx.background_executor().timer(wows_toolkit_replay_data::live_match::SCAN_RETRY_INTERVAL).await;
-            };
+            // Set when this task is dropped, which ends the retries with it.
+            let cancel = ScanCancel::default();
+            let cancelled = Arc::clone(&cancel.0);
+            let state = cx
+                .background_spawn(async move {
+                    wows_toolkit_replay_data::live_match::scan_arena_retrying(
+                        &source, &metadata, &game_data, &cancelled,
+                    )
+                })
+                .await;
+            drop(cancel);
 
             let _ = this.update(cx, |this, cx| {
                 if this.live_started_at() != Some(started_at) {
@@ -1228,8 +1195,8 @@ impl PlayerTrackerView {
     /// the Current Match section is shown, or holds it until it is.
     fn offer_lookup(&mut self, lookup: HeldLookup, cx: &mut Context<Self>) {
         // An answer this session already has costs no request.
-        if let Some(answered) = self.stats_budget.answered(lookup.state.arena_id) {
-            self.stats = StatsState::Ready(index_by_account(answered.players.clone()));
+        if let Some(answered) = self.stats_budget.answered_state(lookup.state.arena_id) {
+            self.stats = answered;
             cx.notify();
             return;
         }
@@ -1249,12 +1216,11 @@ impl PlayerTrackerView {
             return;
         }
         let arena_id = state.arena_id;
-        if let Err(refusal) = self.stats_budget.check(arena_id, Instant::now()) {
-            self.stats = StatsState::Failed(wows_toolkit_services::match_stats::refusal_text(&refusal.into()));
+        if let Err(refused) = self.stats_budget.begin(arena_id, Instant::now()) {
+            self.stats = refused;
             cx.notify();
             return;
         }
-        self.stats_budget.record(Instant::now());
         self.stats = StatsState::Fetching;
         cx.notify();
 
@@ -1270,15 +1236,7 @@ impl PlayerTrackerView {
                     return;
                 }
                 this.stats = match fetched {
-                    Ok(Ok(response)) => {
-                        let players = index_by_account(response.players.clone());
-                        this.stats_budget.remember(response);
-                        StatsState::Ready(players)
-                    }
-                    Ok(Err(err)) => {
-                        this.stats_budget.note_failure(arena_id, &err, Instant::now());
-                        StatsState::Failed(wows_toolkit_services::match_stats::refusal_text(&err))
-                    }
+                    Ok(fetched) => this.stats_budget.finish(arena_id, fetched, Instant::now()),
                     Err(err) => StatsState::Failed(err.to_string()),
                 };
                 cx.notify();
@@ -1364,7 +1322,7 @@ impl PlayerTrackerView {
     ) {
         self.live_identities = Some(identities);
         self.recompute_twitch_candidates();
-        self.stats = StatsState::Ready(index_by_account(players));
+        self.stats = StatsState::ready(players);
         cx.notify();
     }
 
@@ -2263,12 +2221,6 @@ fn sort_header(
             .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx))),
     )
     .into_any_element()
-}
-
-/// The service's answer keyed by account, which is how a row looks its own
-/// statistics up.
-fn index_by_account(players: Vec<PlayerStatsOut>) -> HashMap<AccountId, PlayerStatsOut> {
-    players.into_iter().map(|player| (player.account_id, player)).collect()
 }
 
 /// A live roster row's colour kind. The same table the replay inspector's
