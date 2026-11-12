@@ -16785,6 +16785,7 @@ dependencies = [
  "wows-toolkit-replay-data",
  "wows-toolkit-services",
  "wows-toolkit-viewmodel",
+ "wows_replays",
  "wowsunpack",
  "wt-translations",
  "zgui",

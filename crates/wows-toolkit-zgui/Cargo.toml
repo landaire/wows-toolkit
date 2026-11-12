@@ -22,6 +22,7 @@ wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
 wows-toolkit-services = { workspace = true }
+wows_replays = { workspace = true }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
