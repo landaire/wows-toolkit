@@ -1667,7 +1667,7 @@ fn build_row_menu(menu: PopupMenu, path: &std::path::Path, exists: bool, search:
         ))
         .item(PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).disabled(!exists).on_click(
             move |_event, _window, _cx| {
-                crate::replay_inspector::browser_view::reveal_in_file_manager(&reveal_path);
+                wows_toolkit_services::child_process::reveal_in_file_manager(&reveal_path);
             },
         ))
 }

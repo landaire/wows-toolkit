@@ -41,6 +41,7 @@ pub mod preview_dwell;
 pub mod proxy;
 pub mod query_bar;
 pub mod replay_export;
+pub mod replay_folders;
 pub mod search;
 pub mod search_results;
 pub mod search_settings;

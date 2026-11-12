@@ -190,35 +190,6 @@ fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &
     }
 }
 
-/// Opens the system file manager with `path` selected.
-///
-/// Best effort: a file manager that is not there, or refuses, leaves a log
-/// line rather than an error the listing would have to carry.
-pub(crate) fn reveal_in_file_manager(path: &std::path::Path) {
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("explorer");
-        command.arg(format!("/select,{}", path.display()));
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg("-R").arg(path);
-        command
-    };
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let mut command = {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path.parent().unwrap_or(path));
-        command
-    };
-
-    if let Err(err) = wows_toolkit_services::child_process::prepare(&mut command).spawn() {
-        tracing::warn!("replay listing: {} could not be shown in the file manager: {err}", path.display());
-    }
-}
-
 /// A row's height, in multiples of the theme's font size: the identity line,
 /// the smaller stats line under it, and a little space around both.
 const ROW_LINE_HEIGHTS: f32 = 2.8;
@@ -1258,25 +1229,7 @@ impl ReplayBrowser {
         let translated: Vec<ReplayLite> = self
             .files
             .iter()
-            .map(|raw| ReplayLite {
-                path: raw.path.clone(),
-                map_name: raw.listed.map_name.clone(),
-                identity: {
-                    let loaded = raw.listed.build.and_then(|build| self.build_cache.as_ref()?.loaded_build(build));
-                    let metadata = loaded.as_ref().map(|data| data.provider().as_ref()).or(provider);
-                    match metadata {
-                        Some(metadata) => listed_row_identity(&raw.listed, metadata),
-                        None => wows_toolkit_viewmodel::listing_row::RowIdentity {
-                            ship: raw.listed.ship_id.map(|id| id.to_string()).unwrap_or_else(|| "Spectator".to_owned()),
-                            map: raw.listed.map_name.clone(),
-                            scenario: raw.listed.scenario.clone(),
-                            mode: raw.listed.game_type.clone(),
-                            date_time: raw.listed.date_time.clone(),
-                        },
-                    }
-                },
-                stats: resolve_row_stats(None, self.summaries.get(&raw.path)),
-            })
+            .map(|raw| ReplayLite::from_scanned(raw, self.build_cache.as_ref(), provider, self.summaries.get(&raw.path)))
             .collect();
         // The hover text is assembled per replay rather than per node: a leaf
         // knows its path, and the tree nodes carry only what they draw.
@@ -2189,7 +2142,7 @@ impl Render for ReplayBrowser {
                     ))
                     .item(PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).on_click(
                         move |_event, _window, _cx| {
-                            reveal_in_file_manager(&reveal_path);
+                            wows_toolkit_services::child_process::reveal_in_file_manager(&reveal_path);
                         },
                     ))
                     // The game's own keyboard reference, read from whichever
@@ -2199,7 +2152,7 @@ impl Render for ReplayBrowser {
                             PopupMenuItem::new(t!("ui.replay.context.show_replay_controls").into_owned()).on_click(
                                 move |_event, window, cx| {
                                     let Some(build) = cache.newest_loaded() else { return };
-                                    match super::controls::read_scheme(build.vfs()) {
+                                    match wows_toolkit_viewmodel::controls::read_scheme(build.vfs()) {
                                         Some(groups) => super::controls::open(groups, window, cx),
                                         None => crate::toast::warn(
                                             t!("ui.replay.controls.unavailable").into_owned(),
