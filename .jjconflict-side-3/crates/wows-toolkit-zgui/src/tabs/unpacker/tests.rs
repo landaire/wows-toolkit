@@ -296,11 +296,13 @@ fn review(appearance: Appearance, name: &str) {
 }
 
 #[test]
+#[ignore = "draws on the graphics device; run by hand to review the tab"]
 fn review_unpacker_dark() {
     review(Appearance::Dark, "unpacker-dark");
 }
 
 #[test]
+#[ignore = "draws on the graphics device; run by hand to review the tab"]
 fn review_unpacker_light() {
     review(Appearance::Light, "unpacker-light");
 }
