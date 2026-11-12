@@ -84,6 +84,7 @@ use crate::shell::tabs::AppTab;
 use crate::tabs::search::bar::QueryBarProps;
 use crate::tabs::search::model::Search;
 use crate::tabs::search::model::Status;
+use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-search";
 
@@ -345,20 +346,6 @@ fn grid_sort(sort: SortSpec) -> ColumnSort {
     }
 }
 
-/// The band name the theme's personal rating tones are keyed by.
-fn rating_band(category: PersonalRatingCategory) -> &'static str {
-    match category {
-        PersonalRatingCategory::Bad => "bad",
-        PersonalRatingCategory::BelowAverage => "below-average",
-        PersonalRatingCategory::Average => "average",
-        PersonalRatingCategory::Good => "good",
-        PersonalRatingCategory::VeryGood => "very-good",
-        PersonalRatingCategory::Great => "great",
-        PersonalRatingCategory::Unicum => "unicum",
-        PersonalRatingCategory::SuperUnicum => "super-unicum",
-    }
-}
-
 fn outcome_tone(outcome: MatchOutcome) -> Option<&'static str> {
     match outcome {
         MatchOutcome::Win => Some("win"),
@@ -477,7 +464,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                         cell_text(&row.hit, sortable),
                         (sortable == SortColumn::Outcome).then(|| outcome_tone(row.hit.outcome)).flatten(),
                         (sortable == SortColumn::Pr)
-                            .then(|| row.hit.self_pr.map(|pr| rating_band(PersonalRatingCategory::from_pr(pr))))
+                            .then(|| row.hit.self_pr.map(|pr| rating_band_name(PersonalRatingCategory::from_pr(pr))))
                             .flatten(),
                     ),
                     ResultColumn::Ship => (row.ship.clone(), None, None),
