@@ -17,13 +17,19 @@ use wows_toolkit_viewmodel::palette::SeededSearch;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
+use zgui::task::Task;
 use zgui::task::blocking;
 use zgui::task::spawn_detached;
+use zgui::task::spawn_local;
 
 use crate::services::Services;
 use crate::shell::ReplayRequest;
@@ -121,6 +127,9 @@ fn version_rows(rows: &[VersionCount], query: &str, reindex: &dyn Fn(ReindexScop
 /// tab. A directory that is gone is marked once entering the mode has looked for it.
 pub fn replay_folders(shell: Shell, history: Signal<Vec<PathBuf>, LocalStorage>) -> ModeSpec {
     let missing = RwSignal::new_local(Vec::<PathBuf>::new());
+    let owner = Owner::current().expect("a mode is offered inside a component");
+    let checking = StoredValue::new_local(None::<Task>);
+    let checked = StoredValue::new(0_u64);
     let browse = PaletteRun::action(move || browse_folder(shell));
     let open =
         move |path: PathBuf| PaletteRun::action(move || shell.request_replay(ReplayRequest::OpenFolder(path.clone())));
@@ -130,12 +139,23 @@ pub fn replay_folders(shell: Shell, history: Signal<Vec<PathBuf>, LocalStorage>)
 
     let check = move || {
         let paths = history.get_untracked();
-        // Detached because it is started from a key press, which no component owns. Off the UI
-        // thread, since a directory on an offline share can take many seconds to answer.
-        spawn_detached(async move {
-            let gone: Vec<PathBuf> = blocking(move || paths.into_iter().filter(|path| !path.is_dir()).collect()).await;
-            missing.try_set(gone);
+        checked.update_value(|checked| *checked += 1);
+        let this = checked.get_value();
+        // Spawned under the offering scope rather than the key press that enters the mode, so
+        // the check ends with the offer. Off the UI thread, since a directory on an offline share
+        // can take many seconds to answer.
+        let task = owner.with(|| {
+            spawn_local(async move {
+                let gone: Vec<PathBuf> =
+                    blocking(move || paths.into_iter().filter(|path| !path.is_dir()).collect()).await;
+                if checked.try_get_value() == Some(this) {
+                    missing.try_set(gone);
+                }
+            })
         });
+        if let Some(Some(earlier)) = checking.try_update_value(|slot| slot.replace(task)) {
+            earlier.cancel();
+        }
     };
 
     ModeSpec { source: ModeSource::Local(Rc::new(filter)), on_enter: Some(Rc::new(check)) }
