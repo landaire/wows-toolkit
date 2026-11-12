@@ -50,7 +50,7 @@ impl App {
     /// Takes `settings` as loaded, without what applying them starts.
     /// Test-only.
     #[cfg(test)]
-    pub(crate) fn seed_settings_for_test(&mut self, settings: crate::settings::GpuiSettings) {
+    pub(crate) fn seed_settings_for_test(&mut self, settings: wows_toolkit_services::settings::StartupSettings) {
         self.settings = SettingsState::Loaded(Box::new(settings));
     }
 

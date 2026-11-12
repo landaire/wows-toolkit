@@ -255,8 +255,8 @@ pub struct Answered {
     pub locale: Option<String>,
 }
 
-impl From<&crate::settings::GpuiSettings> for Answered {
-    fn from(settings: &crate::settings::GpuiSettings) -> Self {
+impl From<&wows_toolkit_services::settings::StartupSettings> for Answered {
+    fn from(settings: &wows_toolkit_services::settings::StartupSettings) -> Self {
         Self {
             build_consent: settings.build_consent_shown,
             replay_consent: settings.replay_consent_shown,
@@ -280,7 +280,12 @@ pub enum Question {
 }
 
 /// Puts the pending question, if there is one.
-pub fn ask(app: &Entity<Toolkit>, settings: &crate::settings::GpuiSettings, window: &mut Window, cx: &mut App) {
+pub fn ask(
+    app: &Entity<Toolkit>,
+    settings: &wows_toolkit_services::settings::StartupSettings,
+    window: &mut Window,
+    cx: &mut App,
+) {
     match pending(&Answered::from(settings)) {
         Some(Question::BuildConsent) => ask_build_consent(app, window, cx),
         Some(Question::ReplayMigration) => ask_replay_migration(app, window, cx),

@@ -224,10 +224,61 @@ impl DataSharingMode {
     }
 }
 
+/// How large the interface is drawn, as a multiple of its unscaled size.
+/// Always inside [`ZoomFactor::MIN`] and [`ZoomFactor::MAX`].
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct ZoomFactor(f32);
+
+impl ZoomFactor {
+    /// The range the egui settings tab's slider offers.
+    pub const MIN: Self = Self(0.5);
+    pub const MAX: Self = Self(2.0);
+
+    /// A never-saved setting and the Reset button, as the egui app has it.
+    pub const DEFAULT: Self = Self(1.15);
+
+    /// Unscaled, which the reset shortcut returns to, as egui's own does.
+    pub const ACTUAL_SIZE: Self = Self(1.0);
+
+    /// Shortcut steps per unit of zoom: each step is a tenth.
+    const STEPS_PER_UNIT: f32 = 10.0;
+
+    /// How far from a step a factor may be and still count as on it: `1.1`
+    /// is `10.999999` tenths in `f32`.
+    const STEP_TOLERANCE: f32 = 1e-3;
+
+    /// `value` moved into the range.
+    pub fn new(value: f32) -> Self {
+        Self(value.clamp(Self::MIN.0, Self::MAX.0))
+    }
+
+    pub fn get(self) -> f32 {
+        self.0
+    }
+
+    /// The next step up. Steps land on tenths, so a factor set between them
+    /// by the slider rejoins the shortcut's sequence rather than carrying its
+    /// offset along.
+    pub fn zoomed_in(self) -> Self {
+        let steps = (self.0 * Self::STEPS_PER_UNIT + Self::STEP_TOLERANCE).floor() + 1.0;
+
+        Self::new(steps / Self::STEPS_PER_UNIT)
+    }
+
+    /// The next step down, on tenths as [`Self::zoomed_in`].
+    pub fn zoomed_out(self) -> Self {
+        let steps = (self.0 * Self::STEPS_PER_UNIT - Self::STEP_TOLERANCE).ceil() - 1.0;
+
+        Self::new(steps / Self::STEPS_PER_UNIT)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DataSharingMode;
     use super::ThemeChoice;
+    use super::ZoomFactor;
     use super::normalize_proxy_url;
 
     /// The stored form is what is already in the database, so reading it as
@@ -311,5 +362,18 @@ mod tests {
             assert!(!mode.label().is_empty());
             assert!(!mode.description().is_empty());
         }
+    }
+
+    #[test]
+    fn steps_land_on_tenths_and_stop_at_the_ends() {
+        assert_eq!(ZoomFactor::ACTUAL_SIZE.zoomed_in(), ZoomFactor::new(1.1));
+        assert_eq!(ZoomFactor::new(1.1).zoomed_in(), ZoomFactor::new(1.2));
+        assert_eq!(ZoomFactor::new(1.1).zoomed_out(), ZoomFactor::ACTUAL_SIZE);
+        assert_eq!(ZoomFactor::DEFAULT.zoomed_in(), ZoomFactor::new(1.2));
+        assert_eq!(ZoomFactor::DEFAULT.zoomed_out(), ZoomFactor::new(1.1));
+
+        assert_eq!(ZoomFactor::MAX.zoomed_in(), ZoomFactor::MAX);
+        assert_eq!(ZoomFactor::MIN.zoomed_out(), ZoomFactor::MIN);
+        assert_eq!(ZoomFactor::new(5.0), ZoomFactor::MAX);
     }
 }

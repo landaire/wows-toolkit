@@ -40,7 +40,6 @@ mod replay_renderer;
 mod runtime;
 mod search;
 mod search_pills;
-mod settings;
 mod settings_store;
 mod side_split;
 mod slider_field;
@@ -62,8 +61,8 @@ mod zoom;
 use app::App;
 use gpui_kit::component::Root;
 use gpui_kit::*;
-use settings::GpuiSettings;
 use wows_toolkit_replay_data::heap_profile;
+use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
@@ -175,7 +174,12 @@ fn main() {
                     // Before the database is read: the desktop's own
                     // preference, which is what the stored default resolves to
                     // anyway.
-                    theme::apply_egui_theme(ThemeChoice::default(), zoom::ZoomFactor::DEFAULT, window, cx);
+                    theme::apply_egui_theme(
+                        ThemeChoice::default(),
+                        wows_toolkit_viewmodel::settings::ZoomFactor::DEFAULT,
+                        window,
+                        cx,
+                    );
                     window_shell::remember(wows_toolkit_config::WindowKind::Main, window, cx);
                     let view = cx.new(|cx| App::new(window, cx));
                     app_entity = Some(view.clone());
@@ -189,7 +193,7 @@ fn main() {
 
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;
-                let settings = GpuiSettings::load(&pool).await;
+                let settings = StartupSettings::load(&pool).await;
                 let session = stats::load::SessionData::load(&pool, &settings.proxy_url).await;
                 // The pool comes back so settings edits have somewhere to go;
                 // the startup read would otherwise close it.
