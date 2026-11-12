@@ -208,7 +208,7 @@ pub fn shows_damage_shares<'a>(
 /// spans the whole row. A column with nothing to show takes no room.
 #[component]
 pub fn ExpandedRow(
-    columns: Rc<[ReplayColumn]>,
+    #[prop(into)] columns: Signal<Rc<[ReplayColumn]>, LocalStorage>,
     row: Arc<PlayerRow>,
     rows: Rows,
     #[prop(into)] debug: Signal<bool, LocalStorage>,
@@ -221,6 +221,7 @@ pub fn ExpandedRow(
             {move || {
                 let debug = debug.get();
                 columns
+                    .get()
                     .iter()
                     .filter(|column| has_column_detail(**column, &row, &rows, debug))
                     .map(|column| {
