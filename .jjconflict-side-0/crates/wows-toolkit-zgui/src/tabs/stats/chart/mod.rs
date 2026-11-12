@@ -12,6 +12,7 @@ mod tests;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
 use rust_i18n::t;
 use thiserror::Error;
@@ -89,6 +90,8 @@ use crate::tabs::stats::chart::model::ChartModel;
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::PlotElement;
 use crate::tabs::stats::chart::plot::ThemeColors;
+use crate::text_marks::Marks;
+use crate::text_marks::marks;
 
 const SHEET: &str = "wt-stats-chart";
 
@@ -637,7 +640,7 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
     let query = RwSignal::new_local(String::new());
     let counts = move || {
         model.with(|model| {
-            let selected = model.played.iter().filter(|(ship, _)| model.selected.contains(ship)).count();
+            let selected = model.played.iter().filter(|ship| model.selected.contains(&ship.ship_id)).count();
             (selected, model.played.len())
         })
     };
@@ -646,15 +649,15 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
         let (selected, total) = counts();
         t!("ui.stats.ship_selection_count", selected = selected, total = total).into_owned()
     };
+    let filter = Memo::new(move |_| FilterQuery::new(&query.get()));
     let visible = Memo::new(move |_| {
-        let needle = FilterQuery::new(&query.get());
-        model.with(|model| {
-            model
-                .played
-                .iter()
-                .filter(|(_, name)| needle.keeps(name))
-                .cloned()
-                .collect::<Vec<(GameParamId, String)>>()
+        filter.with(|filter| {
+            model.with(|model| {
+                model::visible_ships(&model.played, filter)
+                    .into_iter()
+                    .map(|ship| (ship.ship_id, ship.name.clone()))
+                    .collect::<Vec<(GameParamId, String)>>()
+            })
         })
     });
     let none_visible = Signal::derive_local(move || visible.with(Vec::is_empty));
@@ -664,10 +667,12 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
         settings.update(|settings| model::set_ships_selected(settings, &played, &ships, chosen));
     };
     let ship_row = move |(ship, name): (GameParamId, String)| {
+        let label = name.clone();
         view! {
             CheckRow(
                 checked = Signal::derive_local(move || model.with(|model| model.selected.contains(&ship))),
-                label = Signal::derive_local(move || name.clone()),
+                label = Signal::derive_local(move || label.clone()),
+                marks = Signal::derive_local(move || filter.with(|filter| marks(filter, &name))),
                 change = UnsyncCallback::new(move |_: bool| {
                     let played = model.with_untracked(|model| model.played.clone());
                     settings.update(|settings| model::toggle_ship(settings, &played, ship));
@@ -727,12 +732,13 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
     }
 }
 
-/// A checkbox and the words naming it, either of which toggles it.
+/// A checkbox and the words naming it, marked where `marks` says, either of which toggles it.
 #[component]
 fn CheckRow(
     #[prop(into)] checked: Signal<bool, LocalStorage>,
     #[prop(into, default = Signal::stored_local(false))] disabled: Signal<bool, LocalStorage>,
     #[prop(into)] label: Signal<String, LocalStorage>,
+    #[prop(into, default = Signal::stored_local(Marks::default()))] marks: Signal<Marks, LocalStorage>,
     change: UnsyncCallback<bool>,
     #[prop(into)] test_id: String,
 ) -> impl IntoView {
@@ -750,7 +756,7 @@ fn CheckRow(
                 if !disabled.get_untracked() {
                     change.run(!checked.get_untracked());
                 }
-            }) {{move || label.get()}}
+            }) {{move || view! { MarkedText(text = label.get(), ranges = marks.get()) }}}
         }
     }
 }

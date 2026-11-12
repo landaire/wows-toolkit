@@ -260,6 +260,8 @@ fn the_search_keeps_the_ships_whose_name_holds_it() {
 
     assert!(window.by_test_id(&format!("ship-toggle-{DES_MOINES}")).is_some());
     assert!(window.by_test_id(&format!("ship-toggle-{YAMATO}")).is_none());
+    let marked = window.texts_by_class(landaire_ui::MARK_CLASS);
+    assert!(!marked.is_empty() && marked.iter().all(|piece| piece == "Moines"), "{marked:?}");
 
     window.type_text("x");
     settle(&mut window);

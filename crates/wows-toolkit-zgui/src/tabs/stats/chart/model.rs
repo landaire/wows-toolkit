@@ -21,6 +21,8 @@ use wows_toolkit_viewmodel::stats::chart::ships_played;
 use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 
 /// Everything a chart draws and offers, derived from its settings and the tab's games.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +32,7 @@ pub(super) struct ChartModel {
     /// The filters the chart is drawn under: its own, or the tab's, with the tab's game limit.
     pub filters: StatsFilters,
     /// The ships the filtered games were played in, by name: what the ship picker lists.
-    pub played: Vec<(GameParamId, String)>,
+    pub played: Vec<PlayedShip>,
     /// The ships plotted.
     pub selected: Vec<GameParamId>,
     /// Every match group the scope holds, which an override can narrow to.
@@ -39,6 +41,14 @@ pub(super) struct ChartModel {
     pub series: Vec<ChartSeries>,
     /// The bars, empty in line mode.
     pub bars: Vec<ChartBar>,
+}
+
+/// A ship the picker offers, with its name folded for the search.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PlayedShip {
+    pub ship_id: GameParamId,
+    pub name: String,
+    pub key: FilterKey,
 }
 
 impl ChartModel {
@@ -58,6 +68,10 @@ impl ChartModel {
         let per_ship = filter_games_per_ship(games, &effective);
         let mut played = ships_played(&filter_games(games, &effective));
         played.sort_by(|left, right| left.1.cmp(&right.1));
+        let played: Vec<PlayedShip> = played
+            .into_iter()
+            .map(|(ship_id, name)| PlayedShip { ship_id, key: FilterKey::new(&name), name })
+            .collect();
         let selected = selection(settings, &played);
 
         let series = match settings.mode {
@@ -146,7 +160,7 @@ pub(super) fn toggle_own_mode(settings: &mut ChartSettings, mode: Option<&str>) 
 }
 
 /// Ticks or unticks `ship`, starting from the ships drawn when the reader has not picked any.
-pub(super) fn toggle_ship(settings: &mut ChartSettings, played: &[(GameParamId, String)], ship: GameParamId) {
+pub(super) fn toggle_ship(settings: &mut ChartSettings, played: &[PlayedShip], ship: GameParamId) {
     let mut selected = selection(settings, played);
     match selected.iter().position(|selected| *selected == ship) {
         Some(at) => {
@@ -160,7 +174,7 @@ pub(super) fn toggle_ship(settings: &mut ChartSettings, played: &[(GameParamId, 
 /// Adds or removes every ship in `ships` at once.
 pub(super) fn set_ships_selected(
     settings: &mut ChartSettings,
-    played: &[(GameParamId, String)],
+    played: &[PlayedShip],
     ships: &[GameParamId],
     chosen: bool,
 ) {
@@ -202,12 +216,18 @@ fn effective_filters(settings: &ChartSettings, tab: &StatsFilters) -> StatsFilte
 }
 
 /// The ships plotted: the reader's pick, or every ship played until there is one.
-fn selection(settings: &ChartSettings, played: &[(GameParamId, String)]) -> Vec<GameParamId> {
+fn selection(settings: &ChartSettings, played: &[PlayedShip]) -> Vec<GameParamId> {
     if selection_touched(settings) {
         return settings.selected_ships.iter().copied().map(GameParamId::from).collect();
     }
 
-    played.iter().map(|(id, _)| *id).collect()
+    played.iter().map(|ship| ship.ship_id).collect()
+}
+
+/// The ships the picker lists for `query`: all of them by name, or the matching ones best first
+/// while a search is typed.
+pub(super) fn visible_ships<'a>(played: &'a [PlayedShip], query: &FilterQuery) -> Vec<&'a PlayedShip> {
+    query.rank(played.iter(), |ship| &ship.key)
 }
 
 fn pick_ships(settings: &mut ChartSettings, ships: &[GameParamId]) {
@@ -254,7 +274,7 @@ mod tests {
     fn a_new_chart_draws_a_line_per_ship_played() {
         let model = ChartModel::new(&ChartSettings::default(), &session(), &StatsFilters::default(), None);
 
-        assert_eq!(model.played.iter().map(|(_, name)| name.as_str()).collect::<Vec<_>>(), ["Shimakaze", "Yamato"]);
+        assert_eq!(model.played.iter().map(|ship| ship.name.as_str()).collect::<Vec<_>>(), ["Shimakaze", "Yamato"]);
         assert_eq!(model.selected.len(), 2, "an untouched selection follows the games");
         assert_eq!(model.series.len(), 2);
         assert!(model.bars.is_empty());
@@ -335,7 +355,7 @@ mod tests {
     #[test]
     fn none_selects_no_ship_and_draws_nothing() {
         let played = ChartModel::new(&ChartSettings::default(), &session(), &StatsFilters::default(), None).played;
-        let ids: Vec<GameParamId> = played.iter().map(|(id, _)| *id).collect();
+        let ids: Vec<GameParamId> = played.iter().map(|ship| ship.ship_id).collect();
         let mut settings = ChartSettings::default();
 
         set_ships_selected(&mut settings, &played, &ids, false);
@@ -379,5 +399,39 @@ mod tests {
 
         assert_eq!(model.stat, ChartableStat::Damage);
         assert_eq!(settings.stat, ChartableStat::PersonalRating);
+    }
+
+    fn played(names: &[&str]) -> Vec<PlayedShip> {
+        names
+            .iter()
+            .zip(1u64..)
+            .map(|(name, ship_id)| PlayedShip {
+                ship_id: ship_id.into(),
+                name: name.to_string(),
+                key: FilterKey::new(name),
+            })
+            .collect()
+    }
+
+    fn names<'a>(ships: &[&'a PlayedShip]) -> Vec<&'a str> {
+        ships.iter().map(|ship| ship.name.as_str()).collect()
+    }
+
+    /// The picker lists every ship by name until a search is typed, then the matching ones best
+    /// first: initials find a ship, and a folded letter ("ss" for the sharp s) matches as the
+    /// reader would type it.
+    #[test]
+    fn the_ship_search_ranks_loose_matches() {
+        let played = played(&["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst", "Preussen"]);
+
+        let listed = visible_ships(&played, &FilterQuery::default());
+        assert_eq!(names(&listed), ["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst", "Preussen"]);
+
+        let listed = visible_ships(&played, &FilterQuery::new("fdg"));
+        assert_eq!(names(&listed), ["Friedrich der Grosse"]);
+
+        // The match at the start of a name outranks one inside a name.
+        let listed = visible_ships(&played, &FilterQuery::new("grosse"));
+        assert_eq!(names(&listed), ["Gro\u{df}er Kurf\u{fc}rst", "Friedrich der Grosse"]);
     }
 }
