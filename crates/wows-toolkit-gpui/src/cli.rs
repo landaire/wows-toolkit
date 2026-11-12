@@ -96,7 +96,7 @@ const SUBCOMMANDS: &[&str] = &["finalize-update", "help"];
 ///
 /// Recognised before clap, because a bare filesystem path is ambiguous with a
 /// subcommand name and resolving that inside clap's grammar would hide the
-/// contract. Syntactic only: `update::finalize` decides whether the path may
+/// contract. Syntactic only: `wows_toolkit_services::update::finalize` decides whether the path may
 /// actually be deleted.
 fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
     let [_program, single] = args else { return None };

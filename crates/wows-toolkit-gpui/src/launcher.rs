@@ -321,7 +321,7 @@ impl LauncherView {
     fn launch(&mut self, install: GameInstall, window: &mut Window, cx: &mut Context<Self>) {
         let Some(settings) = self.settings.as_ref() else { return };
         let launched = self.launcher.launch(&install, settings, self.safe_mode, |command| {
-            crate::child_process::prepare(command);
+            wows_toolkit_services::child_process::prepare(command);
         });
         if let Err(err) = launched {
             crate::toast::failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned(), window, cx);

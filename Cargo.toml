@@ -7,6 +7,7 @@ members = [
     "crates/wows-toolkit-gpui",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-toolkit-replay-data",
+    "crates/wows-toolkit-services",
     "crates/wows-toolkit-launcher",
     "crates/wows-core",
     "crates/wowsunpack",
@@ -64,6 +65,7 @@ wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
 wows-toolkit-replay-data = { path = "crates/wows-toolkit-replay-data" }
+wows-toolkit-services = { path = "crates/wows-toolkit-services" }
 wows-toolkit-launcher = { path = "crates/wows-toolkit-launcher" }
 wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
 wgc-install = { version = "0.1.0", path = "crates/wgc-install", default-features = false }
