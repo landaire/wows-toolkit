@@ -119,6 +119,7 @@ pub use crate::grid::GridStrings;
 pub use crate::grid::HeaderView;
 pub use crate::grid::Placement;
 pub use crate::grid::RowDetail;
+pub use crate::grid::RowGroups;
 pub use crate::grid::RowMenu;
 pub use crate::grid::RowMode;
 pub use crate::grid::Section;

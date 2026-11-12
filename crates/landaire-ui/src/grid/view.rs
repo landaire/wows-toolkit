@@ -161,13 +161,14 @@ where
     });
 
     let port = node_ref.unwrap_or_default();
-    let (detail, fixed, overscan) = match mode {
-        RowMode::Natural { detail } => (detail, None, 0),
-        RowMode::Fixed { height, overscan } => (None, Some(height), overscan),
+    let (detail, groups, fixed, overscan) = match mode {
+        RowMode::Natural { detail, groups } => (detail, groups, None, 0),
+        RowMode::Fixed { height, overscan } => (None, None, Some(height), overscan),
     };
     let row_key: Rc<dyn Fn(&T) -> K> = Rc::new(row_key);
-    let has_detail = detail.is_some();
-    let port_size = port.observe_border_size_while(move || has_detail);
+    // A detail region and a group heading stay as wide as the view while the columns scroll.
+    let follows_view = detail.is_some() || groups.is_some();
+    let port_size = port.observe_border_size_while(move || follows_view);
     let view_width = Signal::derive_local(move || {
         let scale = port.scale();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
@@ -212,6 +213,7 @@ where
         cursor: RwSignal::new_local(None),
         expanded: expanded.unwrap_or_else(|| RwSignal::new_local(HashSet::new())),
         detail,
+        groups,
         fixed,
         window,
         on_activate,
