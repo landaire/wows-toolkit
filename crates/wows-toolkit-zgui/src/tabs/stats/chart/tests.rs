@@ -177,6 +177,23 @@ fn unticking_a_ship_remembers_the_pick() {
     assert!(shown(&window, "chart-empty"), "no ship, nothing to plot");
 }
 
+/// The ship search marks the letters of each kept name it matched.
+#[test]
+fn the_ship_search_marks_the_matched_letters() {
+    let (mut window, _settings) =
+        open(ChartSettings::default(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    press(&mut window, "chart-ship-filter");
+    press(&mut window, "chart-ship-search");
+    window.type_text("dm");
+    window.advance(Duration::from_millis(50));
+
+    // The popover draws its content twice, so the pieces come in equal pairs.
+    let marked = window.texts_by_class(landaire_ui::MARK_CLASS);
+    assert!(!marked.is_empty() && marked.chunks(2).all(|pair| pair == ["D", "M"]), "{marked:?}");
+    assert!(window.by_test_id("chart-ship-3763255248").is_none(), "Yamato does not match");
+}
+
 #[test]
 fn a_restored_row_is_followed() {
     let (mut window, settings) =
