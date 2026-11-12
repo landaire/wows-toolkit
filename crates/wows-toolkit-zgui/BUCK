@@ -44,6 +44,7 @@ ZGUI_DEPS = [
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",
+    "//third-party/rust:syntect",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
