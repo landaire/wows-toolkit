@@ -28,6 +28,7 @@ use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_services::child_process::reveal_in_file_manager;
 use wows_toolkit_viewmodel::listing_row::hover_facts_for_match;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::search::game_mode_gap_applies;
@@ -81,6 +82,7 @@ use crate::shell::ReplayRequest;
 use crate::shell::Shell;
 use crate::shell::palette::TabRequest;
 use crate::shell::tabs::AppTab;
+use crate::tabs::replays::browser::files::copy_replay_files;
 use crate::tabs::search::bar::QueryBarProps;
 use crate::tabs::search::model::Search;
 use crate::tabs::search::model::Status;
@@ -582,6 +584,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
 /// longer on disk keeps its path to copy; the rest is greyed out under a line that says why.
 fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: impl Fn() + 'static) -> impl IntoView {
     let copied = path.display().to_string();
+    let file = path.clone();
     view! {
         Show(when = move || !exists) {
             MenuLabel {{t!("ui.search.open_missing").into_owned()}}
@@ -591,8 +594,17 @@ fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: im
             {t!("ui.search.open").into_owned()}
         }
         MenuSeparator()
+        MenuItem(
+            disabled = !exists,
+            on_select = UnsyncCallback::new(move |()| copy_replay_files(shell.toasts(), std::slice::from_ref(&file)))
+        ) {
+            {t!("ui.replay.context.copy_replay").into_owned()}
+        }
         MenuItem(on_select = UnsyncCallback::new(move |()| shell.copy_text(copied.clone()))) {
             {t!("ui.replay.context.copy_path").into_owned()}
+        }
+        MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| reveal_in_file_manager(&path))) {
+            {t!("ui.replay.context.show_in_explorer").into_owned()}
         }
     }
 }
