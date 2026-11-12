@@ -17,6 +17,7 @@ GPUI_DEPS = [
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wows-toolkit-icons:wows_toolkit_icons",
     "//third-party/rust:sys-locale",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",

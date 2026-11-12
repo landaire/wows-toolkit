@@ -55,6 +55,8 @@ wows-toolkit-services = { workspace = true }
 # The Launcher tab's state and background work, shared with the egui app, and
 # the launcher crates whose types the tab shows.
 wows-toolkit-launcher = { workspace = true }
+# The icon set, shared with the other desktop front end.
+wows-toolkit-icons = { workspace = true }
 wgc-auth = { workspace = true }
 wgc-catalog = { workspace = true }
 wgc-download = { workspace = true }
