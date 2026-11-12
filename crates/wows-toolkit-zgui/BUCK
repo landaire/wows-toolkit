@@ -19,8 +19,11 @@ ZGUI_DEPS = [
     "//crates/wows-toolkit-icons:wows_toolkit_icons",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-services:wows_toolkit_services",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+    "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:clap",
     "//third-party/rust:futures",
@@ -40,6 +43,7 @@ ZGUI_DEPS = [
     "//third-party/rust:zgui-ui-icons",
     "//third-party/rust:zgui-ui-primitives",
     "//third-party/rust:zgui-ui-tokens",
+    "//third-party/rust:zgui-image",
 ]
 
 # Not wows_toolkit_zgui_bin: the target name is a path component of every object file a release
@@ -63,6 +67,7 @@ _TEST_SUPPORT_VARIANTS = {
     "//crates/landaire-ui:landaire_ui": "//crates/landaire-ui:landaire_ui_test_support",
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
     "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
 }
 
 workspace_test(
@@ -75,7 +80,7 @@ workspace_test(
     # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
     # headlessly.
     deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS],
-    test_deps = ["//crates/wowsunpack:wowsunpack", "//third-party/rust:image", "//third-party/rust:tempfile"],
+    test_deps = ["//third-party/rust:image", "//third-party/rust:tempfile"],
     incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window. One thread per core wedges the run on a machine with many of them.
     run_env = {"RUST_TEST_THREADS": "4"},
