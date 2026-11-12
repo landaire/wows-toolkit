@@ -56,6 +56,8 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::reactive::provide_local_context;
 use zgui::reactive::use_local_context;
@@ -217,7 +219,7 @@ pub struct Shell {
     directory_stats: RwSignal<Vec<DirectoryStatsTab>, LocalStorage>,
     next_directory_stats: StoredValue<u64>,
     /// Every tab's chrome, made as the tab is first shown.
-    chrome: StoredValue<HashMap<TabKey, TabChrome>, LocalStorage>,
+    chrome: RwSignal<HashMap<TabKey, TabChrome>, LocalStorage>,
     /// The tabs shown at least once, which stay built while hidden.
     visited: RwSignal<Vec<TabKey>, LocalStorage>,
     held: RwSignal<Modifiers, LocalStorage>,
@@ -245,7 +247,7 @@ impl Shell {
             selected: RwSignal::new_local(first.value()),
             directory_stats: RwSignal::new_local(Vec::new()),
             next_directory_stats: StoredValue::new(0),
-            chrome: StoredValue::new_local(HashMap::new()),
+            chrome: RwSignal::new_local(HashMap::new()),
             visited: RwSignal::new_local(vec![first]),
             held: RwSignal::new_local(Modifiers::NONE),
             debug_mode: RwSignal::new_local(false),
@@ -382,7 +384,7 @@ impl Shell {
         let key = TabKey::DirectoryStats(id);
         self.directory_stats.update(|tabs| tabs.retain(|tab| tab.id != id));
         self.visited.update(|visited| visited.retain(|tab| *tab != key));
-        self.chrome.update_value(|chrome| {
+        self.chrome.update(|chrome| {
             chrome.remove(&key);
         });
         if self.selected_untracked() == Some(key) {
@@ -392,21 +394,22 @@ impl Shell {
 
     /// The chrome of `tab`, made the first time it is asked for.
     pub fn chrome_of(self, tab: TabKey) -> TabChrome {
-        if let Some(chrome) = self.chrome.with_value(|chrome| chrome.get(&tab).copied()) {
+        if let Some(chrome) = self.chrome.with_untracked(|chrome| chrome.get(&tab).copied()) {
             return chrome;
         }
 
         let chrome = TabChrome::new();
-        self.chrome.update_value(|all| {
+        self.chrome.update(|all| {
             all.insert(tab, chrome);
         });
         chrome
     }
 
-    /// The selected tab's chrome, once it has been built.
+    /// The selected tab's chrome, once it has been built. Reactive, so a reader sees a tab's
+    /// chrome once its page is first built.
     pub fn selected_chrome(self) -> Option<TabChrome> {
         let tab = self.selected()?;
-        self.chrome.with_value(|chrome| chrome.get(&tab).copied())
+        self.chrome.with(|chrome| chrome.get(&tab).copied())
     }
 
     /// The modifier keys held down in the window.
