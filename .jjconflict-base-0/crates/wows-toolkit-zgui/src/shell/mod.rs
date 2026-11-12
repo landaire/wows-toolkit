@@ -15,7 +15,7 @@ mod game_data_cache;
 mod menu;
 mod notices;
 pub mod palette;
-mod replay_index;
+pub mod replay_index;
 pub mod settings;
 mod startup;
 mod status_bar;
