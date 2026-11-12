@@ -51,10 +51,12 @@ wgc-download = { workspace = true }
 wgc-install = { workspace = true }
 # The process mitigations, applied before a window exists.
 wows-toolkit-hardening = { workspace = true }
-# Map art for the replay listing's thumbnails.
-wows_minimap_renderer = { workspace = true }
-# Copying replay files puts a file list on the clipboard, and a copied chart is an image. zgui's
-# clipboard carries neither.
+# Map art for the replay listing's thumbnails, and the replay renderer's draw commands.
+wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+# The replay renderer's collab session shapes and the art a peer sends.
+wt-collab-client = { workspace = true }
+# Copying replay files puts a file list on the clipboard, a copied chart is an image, and an exported
+# video is handed over as a file. zgui's clipboard carries none of these.
 arboard = "3.6.1"
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }

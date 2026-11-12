@@ -26,6 +26,7 @@ ZGUI_DEPS = [
     "//crates/wows-toolkit-services:wows_toolkit_services",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-client:wt_collab_client",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:arboard",
     "//third-party/rust:ciborium",
