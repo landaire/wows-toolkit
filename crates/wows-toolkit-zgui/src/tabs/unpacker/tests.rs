@@ -1,0 +1,311 @@
+//! The Unpacker tab driven in the headless shell, with its game data handed to its model.
+
+use std::io::Write as _;
+use std::time::Duration;
+
+use landaire_ui::Appearance;
+use landaire_ui::test_support::HeadlessOptions;
+use landaire_ui::test_support::HeadlessWindow;
+use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
+use wowsunpack::vfs::MemoryFS;
+use wowsunpack::vfs::VfsPath;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::WithUntracked;
+use zgui::vocab::Toggled;
+
+use crate::interaction_tests::REVIEW_SIZE;
+use crate::interaction_tests::open_shell;
+use crate::interaction_tests::review_options;
+use crate::interaction_tests::save_shot;
+use crate::interaction_tests::settle_in_real_time;
+use crate::tabs::unpacker::built_model;
+use crate::tabs::unpacker::model::UnpackerModel;
+use crate::tabs::unpacker::pane::BrowserSource;
+
+/// The shell, open on the Unpacker tab.
+struct UnpackerWindow {
+    window: HeadlessWindow,
+    model: UnpackerModel,
+}
+
+impl UnpackerWindow {
+    fn open(options: HeadlessOptions) -> Self {
+        let mut window = open_shell(options);
+        let tab = window.by_test_id("unpacker").expect("the strip has an Unpacker tab");
+        window.click(tab).expect("the tab can be pressed");
+        // The status bar misses a tab's toggles on the tab's first showing until the shell's
+        // `selected_chrome` tracks the chrome map; leaving and returning shows them.
+        for id in ["launcher", "unpacker"] {
+            let tab = window.by_test_id(id).expect("the strip has the tab");
+            window.click(tab).expect("the tab can be pressed");
+        }
+        settle_in_real_time(&mut window);
+        let model = built_model().expect("the Unpacker tab was built");
+        Self { window, model }
+    }
+
+    /// The tab with `vfs` in its package browser.
+    fn with_vfs(options: HeadlessOptions, vfs: VfsPath) -> Self {
+        let mut this = Self::open(options);
+        this.model.pkg.set_vfs(vfs);
+        this.settle();
+        this
+    }
+
+    fn settle(&mut self) {
+        self.window.advance(Duration::from_millis(400));
+    }
+
+    fn shown(&self, test_id: &str) -> bool {
+        self.window.by_test_id(test_id).is_some()
+    }
+
+    fn click(&mut self, test_id: &str) {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.click(element).unwrap_or_else(|err| panic!("{test_id} can be pressed: {err}"));
+        self.settle();
+    }
+
+    fn checked(&mut self, test_id: &str) -> Option<Toggled> {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.a11y(element).and_then(|state| state.checked)
+    }
+}
+
+fn options() -> HeadlessOptions {
+    HeadlessOptions::new(REVIEW_SIZE)
+}
+
+fn write(root: &VfsPath, path: &str, body: &str) {
+    root.join(path).unwrap().create_file().unwrap().write_all(body.as_bytes()).unwrap();
+}
+
+/// A package tree with one nested directory and two files, enough for the breadcrumbs and both
+/// kinds of queue control.
+fn fixture() -> VfsPath {
+    let root: VfsPath = MemoryFS::new().into();
+    root.join("content/gameplay").unwrap().create_dir_all().unwrap();
+    write(&root, "content/a.xml", "<a/>");
+    write(&root, "content/gameplay/b.xml", "<b/>");
+    root
+}
+
+#[test]
+fn an_empty_queue_refuses_its_actions_and_offers_no_cancel() {
+    let mut tab = UnpackerWindow::open(options());
+    assert!(!tab.shown("unpacker-cancel"), "cancel belongs to a run in progress");
+    for action in ["unpacker-extract", "unpacker-queue-clear-all"] {
+        tab.click(action);
+    }
+    assert!(tab.shown("unpacker-extract"), "the queue panel survives presses on its refused buttons");
+    assert!(tab.model.extract.with_untracked(|state| !state.is_busy()), "no run started");
+    assert!(tab.shown("unpacker-queue-empty"), "the empty queue says how to fill it");
+}
+
+#[test]
+fn the_queue_panel_holds_the_destination_beside_the_listing() {
+    let mut tab = UnpackerWindow::open(options());
+    tab.model.adopt_output_dir("C:/extracted".to_string());
+    tab.settle();
+    assert!(tab.shown("unpacker-queue-clear-all"), "the queue panel is open beside the listing");
+    let field = tab.window.by_test_id("unpacker-output-dir").expect("the destination is on the queue panel");
+    let value = tab.window.a11y(field).and_then(|state| state.value);
+    assert_eq!(value.as_deref(), Some("C:/extracted"), "the field shows the saved directory");
+}
+
+#[test]
+fn the_browsers_say_there_is_no_game_data_when_the_directory_is_unset() {
+    let tab = UnpackerWindow::open(options());
+    assert!(tab.shown("unpacker-pkg-empty"), "the package pane says why it is empty");
+    assert!(!tab.shown("unpacker-pkg-filter"), "the filter appears only once a VFS is loaded");
+}
+
+#[test]
+fn the_dock_opens_on_the_package_listing() {
+    let tab = UnpackerWindow::open(options());
+    let pkg = landaire_ui::PanelId::new(BrowserSource::Pkg.id_fragment());
+    let group = tab.model.dock.group_of(&pkg).expect("the package browser is docked");
+    assert_eq!(tab.model.dock.active_panel(group), Some(pkg), "the package browser is in front");
+    assert!(tab.shown("unpacker-pkg-pane"));
+}
+
+#[test]
+fn the_folder_tree_collapses_to_a_rail_and_expands_again() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    assert!(tab.shown("unpacker-pkg-filter"), "the tree sidebar is up once a VFS is loaded");
+    assert!(!tab.shown("unpacker-pkg-tree-rail"), "no rail while the sidebar is up");
+
+    tab.click("unpacker-pkg-tree-collapse");
+    assert!(!tab.model.pkg.sidebar_open.get_untracked(), "collapsing puts the sidebar away");
+    assert!(tab.shown("unpacker-pkg-tree-rail"), "the rail stands in for it");
+    assert!(tab.shown("unpacker-pkg-extract-listed"), "the listing stays when the sidebar goes");
+
+    tab.click("unpacker-pkg-tree-rail");
+    assert!(tab.model.pkg.sidebar_open.get_untracked(), "the rail brings the sidebar back");
+    assert!(!tab.shown("unpacker-pkg-tree-rail"), "and goes away with it");
+}
+
+#[test]
+fn the_status_bar_closes_the_queue_dock_and_opens_it_again() {
+    let mut tab = UnpackerWindow::open(options());
+    assert!(tab.shown("unpacker-queue-clear-all"), "the queue is up");
+    tab.click("unpacker-dock-toggle-right");
+    assert!(!tab.model.dock.is_region_open(landaire_ui::DockRegion::Right), "the toggle closes the queue dock");
+    tab.click("unpacker-dock-toggle-right");
+    assert!(tab.model.dock.is_region_open(landaire_ui::DockRegion::Right), "and opens it again");
+}
+
+#[test]
+fn revealing_a_file_selects_the_directory_it_is_in() {
+    let tab = UnpackerWindow::open(options());
+    let root: VfsPath = MemoryFS::new().into();
+    tab.model.pkg.reveal(&root.join("content/gameplay/a.xml").unwrap());
+    assert_eq!(tab.model.pkg.selected_dir.get_untracked(), "/content/gameplay");
+    // A file at the root belongs to the root, not to a directory named by the whole path.
+    tab.model.pkg.reveal(&root.join("top.txt").unwrap());
+    assert_eq!(tab.model.pkg.selected_dir.get_untracked(), ROOT_PATH);
+}
+
+#[test]
+fn the_breadcrumbs_follow_the_selected_directory_and_navigate() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    assert!(tab.shown("unpacker-pkg-crumb-0"), "the root crumb is always there");
+    assert!(!tab.shown("unpacker-pkg-crumb-1"), "the root has no deeper crumb");
+
+    tab.model.pkg.select_dir("/content/gameplay".to_string());
+    tab.settle();
+    assert!(tab.shown("unpacker-pkg-crumb-2"), "one crumb per level");
+
+    tab.click("unpacker-pkg-crumb-1");
+    assert_eq!(tab.model.pkg.selected_dir.get_untracked(), "/content", "a crumb navigates to its level");
+    assert!(!tab.shown("unpacker-pkg-crumb-2"), "and drops the level below it");
+}
+
+#[test]
+fn a_rows_queue_control_reports_and_changes_the_queue() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    tab.model.pkg.select_dir("/content".to_string());
+    tab.settle();
+    // Directories sort first, so row 0 is "gameplay" and row 1 "a.xml".
+    assert_ne!(tab.checked("unpacker-pkg-queue-1"), Some(Toggled::True), "nothing is queued yet");
+
+    tab.click("unpacker-pkg-queue-0");
+    tab.click("unpacker-pkg-queue-1");
+    let queued: Vec<String> =
+        tab.model.queue.with_untracked(|queue| queue.entries().iter().map(|path| path.as_str().to_string()).collect());
+    assert_eq!(queued, vec!["/content/gameplay", "/content/a.xml"], "the folder and the file are queued");
+    assert_eq!(tab.checked("unpacker-pkg-queue-1"), Some(Toggled::True), "the queued file reads as queued");
+    assert!(tab.shown("unpacker-queue-entry-1"), "the queue panel lists both");
+
+    tab.click("unpacker-queue-remove-0");
+    assert_eq!(tab.model.queue.with_untracked(|queue| queue.len()), 1, "a row's remove button takes it out");
+}
+
+#[test]
+fn a_filter_lists_matching_files_from_the_whole_tree() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let pane = tab.model.pkg;
+
+    pane.filter.set(".xml".to_string());
+    tab.settle();
+    let rows = pane.rows.with_untracked(|rows| rows.all());
+    let mut labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+    labels.sort_unstable();
+    assert_eq!(labels, vec!["/content/a.xml", "/content/gameplay/b.xml"], "matched at any depth");
+    assert!(rows.iter().all(|row| !row.is_dir && row.size.is_some()), "files only, each with its size");
+
+    pane.filter.set("gameplay".to_string());
+    tab.settle();
+    assert_eq!(pane.rows.with_untracked(|rows| rows.len()), 1, "the filter narrows to the nested file");
+
+    pane.filter.set(String::new());
+    tab.settle();
+    let cleared: Vec<String> = pane.rows.with_untracked(|rows| rows.all()).into_iter().map(|row| row.label).collect();
+    assert_eq!(cleared, vec!["content"], "clearing the filter goes back to the selected directory");
+}
+
+#[test]
+fn a_search_opens_a_results_panel_that_reveals_its_hits() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let files = tab.model.pkg.files().expect("the pane has a VFS");
+    tab.model.open_search(BrowserSource::Pkg, "<b".to_string(), String::new(), files);
+    settle_in_real_time(&mut tab.window);
+    assert!(tab.shown("unpacker-search-panel"), "the results open in the bottom dock");
+    assert!(tab.shown("unpacker-hit-0"), "the one hit is listed");
+    assert!(!tab.shown("unpacker-hit-1"));
+
+    tab.click("unpacker-dock-toggle-bottom");
+    assert!(
+        !tab.model.dock.is_region_open(landaire_ui::DockRegion::Bottom),
+        "the bottom dock has a toggle once it holds a search"
+    );
+}
+
+#[test]
+fn double_clicking_a_file_opens_it_in_a_viewer() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    tab.model.pkg.select_dir("/content".to_string());
+    tab.settle();
+    let row = tab.window.by_test_id("unpacker-pkg-row-1").expect("the file has a row");
+    tab.window.double_click(row).expect("the row can be pressed");
+    settle_in_real_time(&mut tab.window);
+    assert!(tab.shown("unpacker-viewer-text"), "the XML opens as text");
+}
+
+/// A listing as an install looks: nested directories, files of several kinds, some queued, a
+/// search with hits, and an open XML file.
+fn review_fixture() -> VfsPath {
+    let root: VfsPath = MemoryFS::new().into();
+    for dir in ["content/gameplay/common", "content/GameParams", "gui/maps", "gui/ship_icons", "scripts/entities"] {
+        root.join(dir).unwrap().create_dir_all().unwrap();
+    }
+    write(&root, "content/gameplay/common/ship_params.xml", SHIP_XML);
+    write(&root, "content/gameplay/common/consumables.json", "{\"engineBoost\": {\"workTime\": 60, \"reload\": 180}}");
+    write(&root, "content/GameParams.data", "binary");
+    write(&root, "gui/maps/00_CO_ocean.png", "png");
+    write(&root, "gui/ship_icons/PASD013.png", "png");
+    write(&root, "scripts/entities/Avatar.def", "<root/>");
+    write(&root, "readme.txt", "World of Warships resources");
+    for ix in 0..12 {
+        write(&root, &format!("content/gameplay/common/space_{ix:02}.xml"), "<space><name>ocean</name></space>");
+    }
+    root
+}
+
+const SHIP_XML: &str = "<?xml version=\"1.0\"?>\n<ship>\n  <!-- hull parameters -->\n  <hull name=\"A\" tier=\"10\">\n    <speed>35.5</speed>\n    <health>51300</health>\n  </hull>\n</ship>\n";
+
+fn review(appearance: Appearance, name: &str) {
+    let mut tab = UnpackerWindow::with_vfs(review_options(appearance), review_fixture());
+    let model = tab.model;
+    model.pkg.select_dir("/content/gameplay/common".to_string());
+    model.pkg.expanded.set(
+        ["/", "/content", "/content/gameplay"]
+            .into_iter()
+            .map(|dir| crate::tabs::unpacker::pane::DirKey(dir.to_string()))
+            .collect(),
+    );
+    model.adopt_output_dir("/home/reader/wows-extracted".to_string());
+    tab.settle();
+    let rows = model.pkg.rows.with_untracked(|rows| rows.all());
+    for entry in rows.iter().take(3) {
+        model.queue_path(entry.path.clone());
+    }
+    let files = model.pkg.files().expect("the pane has a VFS");
+    model.open_search(BrowserSource::Pkg, "ocean".to_string(), String::new(), files);
+    let ship = rows.iter().find(|row| row.label == "ship_params.xml").expect("the fixture has a ship file");
+    model.open_viewer(ship.path.clone());
+    model.dock.activate(&landaire_ui::PanelId::new(BrowserSource::Pkg.id_fragment())).expect("the pane is docked");
+    settle_in_real_time(&mut tab.window);
+    save_shot(&mut tab.window, name);
+}
+
+#[test]
+fn review_unpacker_dark() {
+    review(Appearance::Dark, "unpacker-dark");
+}
+
+#[test]
+fn review_unpacker_light() {
+    review(Appearance::Light, "unpacker-light");
+}

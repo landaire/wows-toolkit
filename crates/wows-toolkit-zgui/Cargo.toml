@@ -11,7 +11,8 @@ zgui = { workspace = true }
 zgui-ui = { workspace = true }
 zgui-ui-icons = { workspace = true }
 zgui-ui-tokens = { workspace = true }
-# In-memory pictures, such as nation flags read from the game files and map thumbnails.
+# In-memory pictures, such as nation flags read from the game files, map thumbnails and the
+# Unpacker's image previews.
 zgui-image = { workspace = true }
 # The placement a hover card is asked for.
 zgui-ui-primitives = { workspace = true }
@@ -26,7 +27,7 @@ wows-toolkit-replay-data = { workspace = true }
 # The replay's own types a player row and a loaded replay's panel carry.
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
-# The game's GUI assets: ship-class icons and nation flags.
+# The game's GUI assets: ship-class icons and nation flags, and the Unpacker tab's file system.
 wowsunpack = { workspace = true }
 wows-toolkit-services = { workspace = true }
 # The match export formats.
@@ -40,6 +41,8 @@ resvg = { version = "0.47", default-features = false }
 image = { workspace = true, features = ["png"] }
 # The game-data cache's maintenance.
 wows-data-mgr = { workspace = true, features = ["download"] }
+# The Unpacker viewer's syntax highlighting.
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
