@@ -7277,6 +7277,8 @@ version = "0.1.0"
 dependencies = [
  "thiserror 2.0.20",
  "zgui",
+ "zgui-ui",
+ "zgui-ui-icons",
  "zgui-ui-tokens",
 ]
 
@@ -18200,6 +18202,30 @@ dependencies = [
  "zgui-geom",
  "zgui-interned",
  "zgui-profile",
+]
+
+[[package]]
+name = "zgui-ui"
+version = "0.1.0"
+dependencies = [
+ "zgui",
+ "zgui-ui-icons",
+ "zgui-ui-primitives",
+ "zgui-ui-tokens",
+]
+
+[[package]]
+name = "zgui-ui-icons"
+version = "0.1.0"
+dependencies = [
+ "zgui",
+]
+
+[[package]]
+name = "zgui-ui-primitives"
+version = "0.1.0"
+dependencies = [
+ "zgui",
 ]
 
 [[package]]

@@ -14,4 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 thiserror.workspace = true
 zgui.workspace = true
+zgui-ui.workspace = true
+zgui-ui-icons.workspace = true
 zgui-ui-tokens.workspace = true
