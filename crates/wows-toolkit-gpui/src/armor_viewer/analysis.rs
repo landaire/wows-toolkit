@@ -795,7 +795,7 @@ mod tests {
     use crate::armor_viewer::catalog::NationGroup;
     use crate::armor_viewer::catalog::ShipCatalog;
     use crate::armor_viewer::catalog::ShipEntry;
-    use crate::armor_viewer::search_key::SearchKey;
+    use crate::armor_viewer::filter_fields::FilterFields;
     use crate::text_filter::FilterQuery;
     use gpui_kit::TestAppContext;
     use wows_toolkit_viewmodel::armor::penetration::Ifhe;
@@ -849,8 +849,7 @@ mod tests {
         let ship = |display_name: &str, tier: u32| ShipEntry {
             param_index: format!("P{display_name}"),
             display_name: display_name.to_string(),
-            search_name: display_name.to_lowercase(),
-            search_key: SearchKey::new(),
+            filter_fields: FilterFields::new(),
             tier,
         };
 

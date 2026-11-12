@@ -1,7 +1,7 @@
 //! The Model Viewer sidebar's model listing: the catalogue grouped into
 //! folders, gameplay models by nation, kind and sub-kind and every other model
-//! by the group the catalogue files it in, with every row's search text folded
-//! once so a search only runs substring tests.
+//! by the group the catalogue files it in, with every row's search texts
+//! folded once so a search only scores them.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -34,9 +34,11 @@ use wowsunpack::game_params::types::MountParam;
 use wowsunpack::game_types::GameParamId;
 
 use super::catalog::ShipCatalog;
+use super::filter_fields::FilterFields;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
-use super::search_key::SearchKey;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
 
 /// Every listed catalogue model, grouped for the tree.
 pub struct ModelTreeIndex {
@@ -86,7 +88,7 @@ pub struct ModelRow {
     /// The stem, then the GameParams entries that use the model. A search
     /// does not look at the directories a model sits in, which nearly every
     /// query would match.
-    pub search_key: SearchKey,
+    pub filter_fields: FilterFields,
     pub variants: Vec<VariantRow>,
     /// Whether the install ships its geometry; `None` when unknown.
     pub geometry: Option<GeometryAvailability>,
@@ -98,8 +100,8 @@ pub struct ModelRow {
 pub struct VariantRow {
     pub kind: ModelVariantKind,
     pub path: ModelPath,
-    /// Lowercased stem.
-    pub search_key: String,
+    /// The stem.
+    pub filter_key: FilterKey,
     /// A skin's own dead and section variants; empty for the other kinds.
     pub variants: Vec<VariantRow>,
     /// As [`ModelRow::geometry`].
@@ -117,8 +119,8 @@ pub enum ModelMatch {
 }
 
 impl ModelRow {
-    pub fn search(&self, query: &str) -> ModelMatch {
-        if self.search_key.matches(query) {
+    pub fn search(&self, query: &FilterQuery) -> ModelMatch {
+        if self.filter_fields.matches(query) {
             return ModelMatch::Name;
         }
 
@@ -131,11 +133,11 @@ impl ModelRow {
 }
 
 impl VariantRow {
-    pub fn matches(&self, query: &str) -> bool {
-        self.search_key.contains(query)
+    pub fn matches(&self, query: &FilterQuery) -> bool {
+        query.score(&self.filter_key).is_some()
     }
 
-    pub fn any_variant_matches(&self, query: &str) -> bool {
+    pub fn any_variant_matches(&self, query: &FilterQuery) -> bool {
         self.variants.iter().any(|variant| variant.matches(query))
     }
 }
@@ -145,7 +147,7 @@ impl VariantRow {
 /// Also the exteriors that swap each skin model in.
 #[derive(Default)]
 pub struct ModelReferences {
-    keys: HashMap<ModelPath, SearchKey>,
+    keys: HashMap<ModelPath, FilterFields>,
     skins: HashMap<ModelPath, Vec<SkinUse>>,
 }
 
@@ -166,10 +168,10 @@ impl ModelReferences {
     /// The references of the ships in `ships`, which are the ships the
     /// sidebar lists, and of every mount they carry on any hull.
     pub fn build(ships: &ShipCatalog, metadata: &GameMetadataProvider) -> Self {
-        let listed: HashMap<&str, &SearchKey> =
-            ships.ships().map(|ship| (ship.param_index.as_str(), &ship.search_key)).collect();
+        let listed: HashMap<&str, &FilterFields> =
+            ships.ships().map(|ship| (ship.param_index.as_str(), &ship.filter_fields)).collect();
         let mut references = Self::new();
-        let mut mount_keys: HashMap<GameParamId, SearchKey> = HashMap::new();
+        let mut mount_keys: HashMap<GameParamId, FilterFields> = HashMap::new();
         // Ships repeat their hull models and mounts across hulls and share
         // mounts with each other; each pairing is added once.
         let mut seen: HashSet<(&str, GameParamId)> = HashSet::new();
@@ -211,7 +213,7 @@ impl ModelReferences {
                     continue;
                 }
 
-                let key = mount_keys.entry(mount_param.id()).or_insert_with(|| mount_search_key(metadata, mount_param));
+                let key = mount_keys.entry(mount_param.id()).or_insert_with(|| mount_fields(metadata, mount_param));
                 references.insert(mount.model_path(), key);
             }
         }
@@ -243,7 +245,7 @@ impl ModelReferences {
 
     /// Adds `key`'s fields to model `model`'s. A path that is not a model
     /// names nothing the sidebar lists.
-    pub fn insert(&mut self, model: &str, key: &SearchKey) {
+    pub fn insert(&mut self, model: &str, key: &FilterFields) {
         let Ok(path) = ModelPath::parse(model) else {
             return;
         };
@@ -252,8 +254,8 @@ impl ModelReferences {
     }
 
     /// What `model` is found by: its stem, then its references.
-    pub fn model_key(&self, model: &ModelPath) -> SearchKey {
-        let mut key = SearchKey::new();
+    pub fn model_key(&self, model: &ModelPath) -> FilterFields {
+        let mut key = FilterFields::new();
         key.push(model.stem());
         if let Some(references) = self.keys.get(model) {
             key.extend(references);
@@ -267,7 +269,7 @@ impl ModelReferences {
 /// many ships carry it.
 pub struct PartKeys<'a> {
     references: &'a ModelReferences,
-    keys: HashMap<ModelPath, Arc<SearchKey>>,
+    keys: HashMap<ModelPath, Arc<FilterFields>>,
 }
 
 impl<'a> PartKeys<'a> {
@@ -275,7 +277,7 @@ impl<'a> PartKeys<'a> {
         Self { references, keys: HashMap::new() }
     }
 
-    fn key(&mut self, model: &ModelPath) -> Arc<SearchKey> {
+    fn key(&mut self, model: &ModelPath) -> Arc<FilterFields> {
         let references = self.references;
         let key = self.keys.entry(model.clone()).or_insert_with(|| Arc::new(references.model_key(model)));
 
@@ -327,8 +329,8 @@ pub struct ShipPartRows {
     /// Non-empty groups in [`MountGroup`] order.
     pub mounts: Vec<MountGroupRows>,
     pub misc: Vec<PartRow>,
-    /// Every part's search key once; ships repeat a mount many times.
-    keys: Vec<Arc<SearchKey>>,
+    /// Every part's search texts once; ships repeat a mount many times.
+    keys: Vec<Arc<FilterFields>>,
 }
 
 pub struct MountGroupRows {
@@ -339,8 +341,8 @@ pub struct MountGroupRows {
 /// The hull model or one of its sections.
 pub struct HullRow {
     pub model: ModelPath,
-    /// As [`ModelRow::search_key`].
-    pub search_key: Arc<SearchKey>,
+    /// As [`ModelRow::filter_fields`].
+    pub filter_fields: Arc<FilterFields>,
     /// As [`ModelRow::geometry`].
     pub geometry: Option<GeometryAvailability>,
 }
@@ -352,8 +354,8 @@ pub struct PartRow {
     /// its parent mount or hull section.
     pub node: String,
     pub model: ModelPath,
-    /// As [`ModelRow::search_key`].
-    pub search_key: Arc<SearchKey>,
+    /// As [`ModelRow::filter_fields`].
+    pub filter_fields: Arc<FilterFields>,
     /// As [`ModelRow::geometry`].
     pub geometry: Option<GeometryAvailability>,
 }
@@ -368,7 +370,7 @@ impl ShipPartRows {
                 key: ShipPartKey::Mount(mount.hp.clone()),
                 node: mount.hp.to_string(),
                 model: mount.model.clone(),
-                search_key: keys.key(&mount.model),
+                filter_fields: keys.key(&mount.model),
                 geometry: catalog.geometry(&mount.model),
             });
         }
@@ -380,7 +382,7 @@ impl ShipPartRows {
                 key: misc.key(),
                 node: misc_label(misc, listing.hull_sections.first()),
                 model: misc.model.clone(),
-                search_key: keys.key(&misc.model),
+                filter_fields: keys.key(&misc.model),
                 geometry: catalog.geometry(&misc.model),
             })
             .collect();
@@ -390,18 +392,18 @@ impl ShipPartRows {
             .iter()
             .map(|model| HullRow {
                 model: model.clone(),
-                search_key: keys.key(model),
+                filter_fields: keys.key(model),
                 geometry: catalog.geometry(model),
             })
             .collect();
 
         let mounts: Vec<MountGroupRows> =
             groups.into_iter().map(|(group, parts)| MountGroupRows { group, parts }).collect();
-        let mut unique_keys: Vec<Arc<SearchKey>> = hull
+        let mut unique_keys: Vec<Arc<FilterFields>> = hull
             .iter()
-            .map(|row| &row.search_key)
-            .chain(mounts.iter().flat_map(|group| &group.parts).map(|part| &part.search_key))
-            .chain(misc.iter().map(|part| &part.search_key))
+            .map(|row| &row.filter_fields)
+            .chain(mounts.iter().flat_map(|group| &group.parts).map(|part| &part.filter_fields))
+            .chain(misc.iter().map(|part| &part.filter_fields))
             .map(Arc::clone)
             .collect();
         unique_keys.sort_by_key(Arc::as_ptr);
@@ -415,7 +417,7 @@ impl ShipPartRows {
     }
 
     /// Whether `query` names any part.
-    pub fn any_matches(&self, query: &str) -> bool {
+    pub fn any_matches(&self, query: &FilterQuery) -> bool {
         self.keys.iter().any(|key| key.matches(query))
     }
 }
@@ -561,7 +563,7 @@ pub struct FortificationRow {
     /// The GameParams name, e.g. `PCBX001`.
     pub param_name: String,
     /// The name, GameParams name and id.
-    pub search_key: SearchKey,
+    pub filter_fields: FilterFields,
     /// Whether the install ships the hull's geometry; `None` when unknown.
     pub geometry: Option<GeometryAvailability>,
 }
@@ -584,10 +586,10 @@ pub fn list_fortifications(
             let kind_name = kind.translation_key().and_then(|key| metadata.localized_name_from_id(&key));
             let display_name = building_display_name(param.name(), metadata);
 
-            let mut search_key = SearchKey::new();
-            search_key.push(display_name.clone());
-            search_key.push(param.name());
-            search_key.push(building.id().to_string());
+            let mut filter_fields = FilterFields::new();
+            filter_fields.push(display_name.clone());
+            filter_fields.push(param.name());
+            filter_fields.push(building.id().to_string());
 
             // A building without a hull model has nothing to draw.
             let geometry = match building.model() {
@@ -601,7 +603,7 @@ pub fn list_fortifications(
                 kind_name,
                 display_name,
                 param_name: param.name().to_string(),
-                search_key,
+                filter_fields,
                 geometry,
             }
         })
@@ -647,9 +649,9 @@ pub fn list_all_ship_parts(
 
 /// What a mount is found by: the game's name for it, where it has one, and
 /// its GameParams index, name and id.
-fn mount_search_key(metadata: &GameMetadataProvider, param: &MountParam) -> SearchKey {
+fn mount_fields(metadata: &GameMetadataProvider, param: &MountParam) -> FilterFields {
     let name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}", param.name().to_uppercase()));
-    let mut key = SearchKey::new();
+    let mut key = FilterFields::new();
     if let Some(name) = metadata.localized_name_from_id(&name_key) {
         key.push(name);
     }
@@ -769,18 +771,24 @@ fn model_row(
 
     // A building model is also found by the `Building` params using it, and
     // by the names and ids of the buildings listed under it.
-    let mut search_key = references.model_key(entry.path());
+    let mut filter_fields = references.model_key(entry.path());
     for building in entry.building_params() {
-        search_key.push(building.name());
+        filter_fields.push(building.name());
     }
     let buildings = buildings.take(entry.path());
     for building in &buildings {
-        search_key.push(building.display_name.clone());
-        search_key.push(building.param_name.clone());
-        search_key.push(building.id.to_string());
+        filter_fields.push(building.display_name.clone());
+        filter_fields.push(building.param_name.clone());
+        filter_fields.push(building.id.to_string());
     }
 
-    ModelRow { path: entry.path().clone(), search_key, variants, geometry: catalog.geometry(entry.path()), buildings }
+    ModelRow {
+        path: entry.path().clone(),
+        filter_fields,
+        variants,
+        geometry: catalog.geometry(entry.path()),
+        buildings,
+    }
 }
 
 fn variant_row(
@@ -792,7 +800,7 @@ fn variant_row(
     VariantRow {
         kind: kind.clone(),
         path: path.clone(),
-        search_key: path.stem().to_lowercase(),
+        filter_key: FilterKey::new(path.stem()),
         variants,
         geometry: catalog.geometry(path),
     }

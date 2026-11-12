@@ -15926,7 +15926,6 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "twitch_api",
- "unidecode",
  "url",
  "walkdir",
  "web-time",

@@ -13,7 +13,7 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
-use super::search_key::SearchKey;
+use super::filter_fields::FilterFields;
 
 /// Pre-built catalog of all ships, organized for the tree selector.
 #[derive(Clone)]
@@ -64,11 +64,9 @@ pub enum HiddenReason {
 pub struct ShipEntry {
     pub param_index: String,
     pub display_name: String,
-    /// Lowercased, ASCII-folded display name for search matching.
-    pub search_name: String,
     /// The short and full names, GameParams index, name and id, which the
     /// Model Viewer sidebar finds the ship by.
-    pub search_key: SearchKey,
+    pub filter_fields: FilterFields,
     pub tier: u32,
 }
 
@@ -294,18 +292,17 @@ impl ShipCatalog {
 fn ship_entry(param: &wowsunpack::game_params::types::Param, tier: u32, metadata: &GameMetadataProvider) -> ShipEntry {
     let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
 
-    let search_name = unidecode::unidecode(&display_name).to_lowercase();
     let full_name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}_FULL", param.index()));
-    let mut search_key = SearchKey::new();
-    search_key.push(display_name.clone());
+    let mut filter_fields = FilterFields::new();
+    filter_fields.push(display_name.clone());
     if let Some(full_name) = metadata.localized_name_from_id(&full_name_key) {
-        search_key.push(full_name);
+        filter_fields.push(full_name);
     }
-    search_key.push(param.index());
-    search_key.push(param.name());
-    search_key.push(param.id().to_string());
+    filter_fields.push(param.index());
+    filter_fields.push(param.name());
+    filter_fields.push(param.id().to_string());
 
-    ShipEntry { param_index: param.index().to_string(), display_name, search_name, search_key, tier }
+    ShipEntry { param_index: param.index().to_string(), display_name, filter_fields, tier }
 }
 
 #[cfg(test)]
@@ -371,8 +368,7 @@ mod tests {
         let ship = |param_index: &str, display_name: &str, tier: u32| ShipEntry {
             param_index: param_index.into(),
             display_name: display_name.into(),
-            search_name: display_name.to_lowercase(),
-            search_key: SearchKey::new(),
+            filter_fields: FilterFields::new(),
             tier,
         };
         let mut ships = [ship("A", "Zeta", 5), ship("B", "Alpha", 3), ship("C", "Beta", 3)];

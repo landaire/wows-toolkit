@@ -73,16 +73,19 @@ use super::model_tree::SkinUse;
 use super::model_tree::list_all_ship_parts;
 use super::model_tree::list_fortifications;
 use super::model_tree::list_model_buildings;
-use super::search_key::fold;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
 use super::sidebar_tree::RowKind;
+use super::sidebar_tree::RowNote;
 use super::sidebar_tree::SearchMatches;
 use super::sidebar_tree::TreeSources;
 use super::sidebar_tree::build_tree;
 use super::sidebar_tree::model_building_row_id;
 use super::sidebar_tree::open_row_id;
 use super::viewport_view::OpeningLayer;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
+use crate::text_filter::highlighted_text;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
 /// starts the ship's background armor load in response.
@@ -184,24 +187,26 @@ enum Rebuild {
 struct RowContext {
     bundle: Arc<ArmorAssetsBundle>,
     row_info: Rc<HashMap<SharedString, RowKind>>,
-    notes: Rc<HashMap<SharedString, SharedString>>,
+    notes: Rc<HashMap<SharedString, RowNote>>,
     unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
     index: Option<Arc<ModelTreeIndex>>,
     hardpoints: Rc<HashSet<HardpointTarget>>,
+    /// The search the rows are listed for, which marks what it matched.
+    query: FilterQuery,
 }
 
 pub struct Sidebar {
     bundle: Option<Arc<ArmorAssetsBundle>>,
     search_state: Entity<InputState>,
-    /// The search as applied to the tree: ASCII-folded and lowercased.
-    query: String,
+    /// The search as applied to the tree.
+    query: FilterQuery,
     /// `query` matched against the listing; `None` when not searching.
     search: Option<SearchMatches>,
     tree_state: Entity<TreeState>,
     /// Rebuilt with the tree, never per render.
     row_info: Rc<HashMap<SharedString, RowKind>>,
     /// Dim text drawn after each row's name.
-    row_notes: Rc<HashMap<SharedString, SharedString>>,
+    row_notes: Rc<HashMap<SharedString, RowNote>>,
     /// The model rows the install cannot draw, drawn dimmed.
     row_unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
     /// What the comparison panes share. Owned by `ArmorViewerPane`; kept here
@@ -270,7 +275,7 @@ impl Sidebar {
         Self {
             bundle: None,
             search_state,
-            query: String::new(),
+            query: FilterQuery::default(),
             search: None,
             tree_state,
             row_info: Rc::new(HashMap::new()),
@@ -659,13 +664,13 @@ impl Sidebar {
 
         let InputEvent::Change = event else { return };
         let text = self.search_state.read(cx).value().to_string();
-        let query = fold(text.trim());
+        let query = FilterQuery::new(&text);
         if query == self.query {
             self._search_debounce = None;
             return;
         }
 
-        if query.is_empty() {
+        if !query.is_active() {
             self._search_debounce = None;
             self.apply_query(query, cx);
             return;
@@ -700,7 +705,7 @@ impl Sidebar {
     /// pause.
     fn apply_pending_query(&mut self, cx: &mut Context<Self>) {
         let text = self.search_state.read(cx).value().to_string();
-        let query = fold(text.trim());
+        let query = FilterQuery::new(&text);
         if query != self.query {
             self._search_debounce = None;
             self.apply_query(query, cx);
@@ -790,7 +795,7 @@ impl Sidebar {
         });
     }
 
-    fn apply_query(&mut self, query: String, cx: &mut Context<Self>) {
+    fn apply_query(&mut self, query: FilterQuery, cx: &mut Context<Self>) {
         self.query = query;
         self.search_expanded.clear();
         self.search_collapsed.clear();
@@ -799,7 +804,7 @@ impl Sidebar {
     }
 
     fn on_tree_event(&mut self, _tree_state: Entity<TreeState>, event: &TreeEvent, cx: &mut Context<Self>) {
-        let searching = !self.query.is_empty();
+        let searching = self.query.is_active();
         let expanded = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
         match event {
             TreeEvent::Expanded(id) => {
@@ -844,7 +849,7 @@ impl Sidebar {
             self.search = SearchMatches::from_query(&sources, &self.query, self.tiers);
         }
 
-        let searching = !self.query.is_empty();
+        let searching = self.query.is_active();
         let set = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
         let auto = rebuild == Rebuild::Rematch && searching;
         let mut expansion = Expansion { set, closed: &self.search_collapsed, auto };
@@ -996,7 +1001,7 @@ fn render_sidebar_item(
     window: &mut Window,
     cx: &mut App,
 ) -> ListItem {
-    let RowContext { bundle, row_info, notes, unavailable, index, hardpoints } = context;
+    let RowContext { bundle, row_info, notes, unavailable, index, hardpoints, query } = context;
     let index = index.as_deref();
     let item = entry.item();
     let kind = row_info.get(&item.id);
@@ -1055,14 +1060,24 @@ fn render_sidebar_item(
     let label = match kind {
         Some(RowKind::ShipPart { node: Some(node), model, .. }) => label
             .child(div().flex_none().whitespace_nowrap().text_color(cx.theme().muted_foreground).child(node.clone()))
-            .child(text().child(model.stem().to_string())),
+            .child(text().child(marked_text(query, model.stem().to_string()))),
         Some(RowKind::ModelsStatus) => {
             label.child(text().text_color(cx.theme().muted_foreground).child(item.label.clone()))
         }
+        Some(RowKind::Ship { display_name, .. }) => {
+            label.child(text().child(marked_ship_label(query, item.label.clone(), display_name)))
+        }
+        Some(RowKind::Model(_) | RowKind::ShipPart { node: None, .. } | RowKind::Building { .. }) => {
+            label.child(text().child(marked_text(query, item.label.clone())))
+        }
         _ => label.child(text().child(item.label.clone())),
     };
-    let label = match notes.get(&item.id) {
-        Some(note) => label.child(text().text_color(cx.theme().muted_foreground).child(note.clone())),
+    let note = notes.get(&item.id).map(|note| match note {
+        RowNote::Matched(text) => marked_text(query, text.clone()),
+        RowNote::Tag(text) => StyledText::new(text.clone()),
+    });
+    let label = match note {
+        Some(note) => label.child(text().text_color(cx.theme().muted_foreground).child(note)),
         None => label,
     };
     let missing = unavailable.get(&item.id).copied();
@@ -1130,6 +1145,28 @@ fn render_sidebar_item(
     }
 
     crate::ui::tree_row(list_item, cx)
+}
+
+/// `text` marked where the search matched it; plain outside a search.
+fn marked_text(query: &FilterQuery, text: impl Into<SharedString>) -> StyledText {
+    if !query.is_active() {
+        return StyledText::new(text);
+    }
+
+    query.marked(text)
+}
+
+/// A ship row's label, its tier and then its name, with only the name
+/// marked: the tier is not one of the texts a search finds a ship by.
+fn marked_ship_label(query: &FilterQuery, label: SharedString, display_name: &str) -> StyledText {
+    let Some(tier) = label.strip_suffix(display_name).map(str::len) else {
+        return marked_text(query, label);
+    };
+    let Some(ranges) = query.is_active().then(|| query.ranges(display_name)).flatten() else {
+        return StyledText::new(label);
+    };
+
+    highlighted_text(label, ranges.into_iter().map(|range| range.start + tier..range.end + tier).collect())
 }
 
 /// The right-click menu for one row.
@@ -1228,6 +1265,7 @@ impl Render for Sidebar {
                         ModelsState::Loading | ModelsState::Unavailable => None,
                     },
                     hardpoints: Rc::clone(&self.hardpoint_visibility),
+                    query: self.query.clone(),
                 };
                 let menu_entity = entity.clone();
                 let menu_row_info = Rc::clone(&self.row_info);
@@ -1305,6 +1343,7 @@ mod tests {
     use super::Rebuild;
     use super::ShipSelected;
     use super::Sidebar;
+    use crate::text_filter::FilterQuery;
 
     /// Ship assets over an empty store: the sidebar reads only the catalog and
     /// icons from the bundle.
@@ -1485,7 +1524,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_catalogue_model_row_offers_to_export_the_model(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
-        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query(FilterQuery::new("agm034"), cx)).expect("open");
         let turret = fixture::path(fixture::IOWA_TURRET);
         let row = row_index(&window, &model_row_id(&turret), cx).expect("the search lists the turret");
 
@@ -1497,7 +1536,7 @@ mod tests {
         let window = open_sidebar(cx);
         let selected = record::<ModelSelected>(&window, cx);
         let toggled = record::<HardpointsToggled>(&window, cx);
-        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query(FilterQuery::new("agm034"), cx)).expect("open");
         let turret = fixture::path(fixture::IOWA_TURRET);
         let row = row_index(&window, &model_row_id(&turret), cx).expect("the search lists the turret");
 
@@ -1529,7 +1568,7 @@ mod tests {
     #[gpui_kit::test]
     fn the_pane_drives_the_checkbox_state_and_the_highlighted_row(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
-        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query(FilterQuery::new("agm034"), cx)).expect("open");
         let turret = fixture::path(fixture::IOWA_TURRET);
         let row = row_index(&window, &model_row_id(&turret), cx).expect("the search lists the turret");
 
@@ -1676,6 +1715,82 @@ mod tests {
             .map(|(_, json)| json)
             .collect();
         assert_eq!(saved, ["true", "false"]);
+    }
+
+    /// Applies `query` and draws the rows it lists, recording what each
+    /// row's label marked.
+    fn draw_search(window: WindowHandle<Sidebar>, query: &str, cx: &mut TestAppContext) {
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query(FilterQuery::new(query), cx)).expect("open");
+        crate::text_filter::take_marks();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn a_ship_row_marks_the_name_it_was_found_by_and_not_its_tier(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+
+        draw_search(window, "iowa", cx);
+
+        assert!(row_index(&window, &ship_row_id(fixture::IOWA_INDEX), cx).is_some(), "Iowa is kept");
+        assert_eq!(crate::text_filter::marks_for("IX Iowa"), Some(std::iter::once(3..7).collect()));
+    }
+
+    #[gpui_kit::test]
+    fn a_part_row_marks_its_model_stem(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let mount = part_row_id(
+            &VehicleParamIndex::new(fixture::IOWA_INDEX),
+            &ShipPartKey::Mount(wowsunpack::export::hardpoint::HardpointName::new("HP_AGM_1")),
+        );
+
+        draw_search(window, "agm034", cx);
+
+        assert!(row_index(&window, &mount, cx).is_some(), "the search opens Iowa to its main battery");
+        assert_eq!(crate::text_filter::marks_for("AGM034_16in50_Mk7"), Some(std::iter::once(0..6).collect()));
+    }
+
+    #[gpui_kit::test]
+    fn a_model_row_and_a_variant_row_mark_their_stems(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+
+        draw_search(window, "lazarus", cx);
+        assert_eq!(crate::text_filter::marks_for("XD006_Lazarus_Director"), Some(std::iter::once(6..13).collect()));
+
+        draw_search(window, "halloween", cx);
+        let skin = model_row_id(&fixture::path(fixture::IOWA_SKIN));
+        assert!(row_index(&window, &skin, cx).is_some(), "the skin is listed under Iowa's hull");
+        assert_eq!(crate::text_filter::marks_for("ASB128_Iowa_Halloween"), Some(std::iter::once(12..21).collect()));
+        assert_eq!(crate::text_filter::marks_for("Skin"), None, "the skin tag is drawn plain, not as a match");
+    }
+
+    #[gpui_kit::test]
+    fn a_fortification_row_marks_its_name_or_the_field_it_was_found_by(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.fortifications = Arc::new(fixture::fortifications());
+                sidebar.rebuild_tree(Rebuild::Rematch, cx);
+            })
+            .expect("the window is open");
+        let fort = building_row_id(GameParamId::from(fixture::FORT_OF_THE_ISLES));
+
+        draw_search(window, "isles", cx);
+        assert!(row_index(&window, &fort, cx).is_some(), "the fort is kept");
+        assert_eq!(crate::text_filter::marks_for("Fort of the Isles"), Some(std::iter::once(12..17).collect()));
+
+        draw_search(window, "pcbx001", cx);
+        assert_eq!(crate::text_filter::marks_for("Fort of the Isles"), Some(Vec::new()), "the name did not match");
+        let note = Some(std::iter::once(0..7).collect());
+        assert_eq!(crate::text_filter::marks_for("PCBX001"), note, "the note names the match");
+    }
+
+    #[test]
+    fn a_ship_label_marks_a_folded_match_past_its_tier() {
+        crate::text_filter::take_marks();
+
+        let _ = super::marked_ship_label(&FilterQuery::new("smaland"), "X Sm\u{e5}land".into(), "Sm\u{e5}land");
+
+        assert_eq!(crate::text_filter::marks_for("X Sm\u{e5}land"), Some(std::iter::once(2..10).collect()));
     }
 
     #[gpui_kit::test]
@@ -1831,7 +1946,7 @@ mod tests {
     fn a_folder_closed_during_a_search_stays_closed_when_the_ship_parts_arrive(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
         let iowa = ship_row_id(fixture::IOWA_INDEX);
-        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query(FilterQuery::new("agm034"), cx)).expect("open");
         assert!(row_index(&window, &iowa, cx).is_some(), "the search opens the ship found by its parts");
 
         window
@@ -1857,7 +1972,7 @@ mod tests {
 
         window
             .update(cx, |sidebar, _window, cx| {
-                sidebar.apply_query("agm034".to_string(), cx);
+                sidebar.apply_query(FilterQuery::new("agm034"), cx);
 
                 // Matches for another query stand in for the stored ones, so a
                 // rebuild that matched "agm034" again would list the turret.
@@ -1871,7 +1986,7 @@ mod tests {
                         fortifications: &sidebar.fortifications,
                         hidden: &sidebar.hidden_reasons,
                     };
-                    SearchMatches::from_query(&sources, "yamato", TierRange::ALL)
+                    SearchMatches::from_query(&sources, &FilterQuery::new("yamato"), TierRange::ALL)
                 };
                 sidebar.search = stand_in;
 

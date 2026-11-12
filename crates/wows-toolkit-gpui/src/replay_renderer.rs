@@ -5530,8 +5530,7 @@ mod tests {
         let ship = |display_name: &str| ShipEntry {
             param_index: format!("P{display_name}"),
             display_name: display_name.to_string(),
-            search_name: display_name.to_lowercase(),
-            search_key: crate::armor_viewer::search_key::SearchKey::new(),
+            filter_fields: crate::armor_viewer::filter_fields::FilterFields::new(),
             tier: 10,
         };
         let catalog = ShipCatalog {
@@ -6599,8 +6598,7 @@ mod tests {
                 let ship = crate::armor_viewer::catalog::ShipEntry {
                     param_index: "PRSC610".to_string(),
                     display_name: "Moskva".to_string(),
-                    search_name: "moskva".to_string(),
-                    search_key: crate::armor_viewer::search_key::SearchKey::new(),
+                    filter_fields: crate::armor_viewer::filter_fields::FilterFields::new(),
                     tier: 10,
                 };
                 // Without game data loaded there is no param to resolve, so

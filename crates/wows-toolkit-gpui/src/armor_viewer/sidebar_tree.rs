@@ -36,6 +36,7 @@ use super::catalog::ShipEntry;
 use super::catalog::TierRange;
 use super::catalog::species_name;
 use super::catalog::tier_roman;
+use super::filter_fields::FilterFields;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
@@ -51,7 +52,7 @@ use super::model_tree::MountGroup;
 use super::model_tree::PartRow;
 use super::model_tree::ShipPartRows;
 use super::model_tree::VariantRow;
-use super::search_key::SearchKey;
+use crate::text_filter::FilterQuery;
 
 pub(super) const SEPARATOR_ID: &str = "armor-models-separator";
 const MODELS_STATUS_ID: &str = "armor-models-status";
@@ -135,19 +136,42 @@ impl Expansion<'_> {
 pub(super) struct BuiltTree {
     pub items: Vec<TreeItem>,
     pub rows: HashMap<SharedString, RowKind>,
-    /// Dim text drawn after a row's name: during a search, the field the row
-    /// was found by where it is not the row's own name; on a skin, that it is.
-    pub notes: HashMap<SharedString, SharedString>,
+    /// Dim text drawn after a row's name.
+    pub notes: HashMap<SharedString, RowNote>,
     /// Model rows the install cannot draw, drawn dimmed.
     pub unavailable: HashMap<SharedString, GeometryAvailability>,
+}
+
+/// Dim text drawn after a row's name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum RowNote {
+    /// During a search, the field the row was found by where it is not the
+    /// row's own name. Drawn marked where the search matched it.
+    Matched(SharedString),
+    /// What the row is, such as a skin or a ship normally hidden.
+    Tag(SharedString),
+}
+
+impl RowNote {
+    pub(super) fn text(&self) -> &SharedString {
+        match self {
+            Self::Matched(text) | Self::Tag(text) => text,
+        }
+    }
+}
+
+impl std::fmt::Display for RowNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.text())
+    }
 }
 
 /// What a search names, worked out once per query and per change to the
 /// listed ships or models. Opening or closing a folder during the search
 /// reuses it and tests no name again.
 pub(super) struct SearchMatches {
-    /// Lowercased and non-empty.
-    query: String,
+    /// Inactive when only the tiers narrow the listing.
+    query: FilterQuery,
     ships: ShipMatches,
     /// `None` until the model catalogue is listed.
     models: Option<ModelMatches>,
@@ -163,11 +187,11 @@ type ShipMatches = MatchGroup<MatchGroup<MatchGroup<ShipMatch>>>;
 type ModelMatches = MatchGroup<FolderMatches>;
 
 impl SearchMatches {
-    /// `None` for an empty `query` and every tier, which lists everything.
-    /// `query` is already folded. The tiers filter only ships; models are
-    /// filtered by the query alone.
-    pub(super) fn from_query(sources: &TreeSources<'_>, query: &str, tiers: TierRange) -> Option<Self> {
-        if query.is_empty() && tiers.is_all() {
+    /// `None` for an inactive `query` and every tier, which lists
+    /// everything. The tiers filter only ships; models are filtered by the
+    /// query alone.
+    pub(super) fn from_query(sources: &TreeSources<'_>, query: &FilterQuery, tiers: TierRange) -> Option<Self> {
+        if !query.is_active() && tiers.is_all() {
             return None;
         }
 
@@ -180,15 +204,15 @@ impl SearchMatches {
             .collect();
 
         let models = match sources.models {
-            ModelSection::Ready(index) if !query.is_empty() => {
+            ModelSection::Ready(index) if query.is_active() => {
                 Some(index.folders.iter().map(|folder| FolderMatches::new(folder, query)).collect())
             }
             ModelSection::Ready(_) | ModelSection::Loading | ModelSection::Unavailable => None,
         };
 
-        let fortifications = sources.fortifications.iter().map(|row| row.search_key.matches(query)).collect();
+        let fortifications = sources.fortifications.iter().map(|row| row.filter_fields.matches(query)).collect();
 
-        Some(Self { query: query.to_string(), ships, models, fortifications })
+        Some(Self { query: query.clone(), ships, models, fortifications })
     }
 }
 
@@ -201,7 +225,7 @@ pub(super) struct FolderMatches {
 
 impl FolderMatches {
     /// Folders nest at most three deep, so this recursion stays shallow.
-    fn new(folder: &ModelFolder, query: &str) -> Self {
+    fn new(folder: &ModelFolder, query: &FilterQuery) -> Self {
         let folders: Vec<FolderMatches> = folder.folders.iter().map(|folder| Self::new(folder, query)).collect();
         let models: Vec<ModelMatch> = folder.models.iter().map(|model| model.search(query)).collect();
         let count = folders.iter().map(MatchCount::match_count).sum::<usize>()
@@ -224,14 +248,14 @@ enum ShipMatch {
 fn ship_match(
     ship: &ShipEntry,
     ship_parts: &HashMap<VehicleParamIndex, ShipPartRows>,
-    query: &str,
+    query: &FilterQuery,
     tiers: TierRange,
 ) -> ShipMatch {
     if !tiers.contains(ship.tier) {
         return ShipMatch::Miss;
     }
 
-    if ship.search_key.matches(query) {
+    if ship.filter_fields.matches(query) {
         return ShipMatch::Name;
     }
 
@@ -555,7 +579,7 @@ fn variant_label(kind: &ModelVariantKind, path: &ModelPath) -> String {
 struct Builder<'q, 'e, 's, 'd> {
     search: Option<&'q SearchMatches>,
     rows: HashMap<SharedString, RowKind>,
-    notes: HashMap<SharedString, SharedString>,
+    notes: HashMap<SharedString, RowNote>,
     unavailable: HashMap<SharedString, GeometryAvailability>,
     expansion: &'e mut Expansion<'s>,
     sources: &'q TreeSources<'d>,
@@ -606,20 +630,20 @@ impl Builder<'_, '_, '_, '_> {
         self.leaf(MODELS_STATUS_ID.into(), label, RowKind::ModelsStatus).disabled(true)
     }
 
-    /// Records the field of `key` the search found row `id` by, unless it is
-    /// the first, which is the name the row shows.
-    fn note(&mut self, id: &SharedString, key: &SearchKey) {
-        let Some(search) = self.search else {
+    /// Records the field of `fields` the search found row `id` by best,
+    /// unless it is the first, which is the name the row shows.
+    fn note(&mut self, id: &SharedString, fields: &FilterFields) {
+        let Some(search) = self.search.filter(|search| search.query.is_active()) else {
             return;
         };
-        let Some(field) = key.matched_field(&search.query) else {
+        let Some(field) = fields.best(&search.query) else {
             return;
         };
-        if key.fields().next() == Some(field) {
+        if fields.fields().next() == Some(field) {
             return;
         }
 
-        self.notes.insert(id.clone(), field.to_string().into());
+        self.notes.insert(id.clone(), RowNote::Matched(field.to_string().into()));
     }
 
     /// Records row `id` as one the install cannot draw. An unknown
@@ -665,7 +689,7 @@ impl Builder<'_, '_, '_, '_> {
         const FORTIFICATIONS_ID: &str = "armor-fortifications";
 
         // The tiers do not filter buildings, so only a search counts them.
-        let searching = self.search.is_some_and(|search| !search.query.is_empty());
+        let searching = self.search.is_some_and(|search| search.query.is_active());
         let with_count = |label: String, count: usize| if searching { format!("{label} ({count})") } else { label };
         let label = with_count(t!("ui.armor.fortifications").into_owned(), rows.len());
         let wanted = self.opens_ships();
@@ -690,7 +714,7 @@ impl Builder<'_, '_, '_, '_> {
             display_name: row.display_name.clone(),
             param_name: row.param_name.clone(),
         };
-        self.note(&id, &row.search_key);
+        self.note(&id, &row.filter_fields);
         self.mark_geometry(&id, row.geometry);
 
         self.leaf(id, row.display_name.clone(), kind)
@@ -702,11 +726,11 @@ impl Builder<'_, '_, '_, '_> {
         let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
         let kind = RowKind::Ship { param_index: ship.param_index.clone(), display_name: ship.display_name.clone() };
         if found == Some(ShipMatch::Name) {
-            self.note(&id, &ship.search_key);
+            self.note(&id, &ship.filter_fields);
         }
         // A search note says more than the tag, which stands in otherwise.
         if let Some(reason) = self.sources.hidden.get(&ship.param_index) {
-            self.notes.entry(id.clone()).or_insert_with(|| hidden_reason_label(*reason).into());
+            self.notes.entry(id.clone()).or_insert_with(|| RowNote::Tag(hidden_reason_label(*reason).into()));
         }
 
         let vehicle = VehicleParamIndex::new(ship.param_index.clone());
@@ -718,7 +742,7 @@ impl Builder<'_, '_, '_, '_> {
         // A search that names only parts opens the ship to list them; one
         // that names the ship leaves its parts folded.
         let part_query = match found {
-            Some(ShipMatch::Parts) => self.search.map(|search| search.query.as_str()),
+            Some(ShipMatch::Parts) => self.search.map(|search| &search.query),
             Some(ShipMatch::Name | ShipMatch::Miss) | None => None,
         };
         let wanted = part_query.is_some() && self.opens_ship_parts();
@@ -727,12 +751,17 @@ impl Builder<'_, '_, '_, '_> {
 
     /// `query` lists only the parts it names, in opened folders; `None` lists
     /// every part.
-    fn ship_parts(&mut self, ship: &VehicleParamIndex, parts: &ShipPartRows, query: Option<&str>) -> Vec<TreeItem> {
-        let listed = |key: &SearchKey| query.is_none_or(|query| key.matches(query));
+    fn ship_parts(
+        &mut self,
+        ship: &VehicleParamIndex,
+        parts: &ShipPartRows,
+        query: Option<&FilterQuery>,
+    ) -> Vec<TreeItem> {
+        let listed = |fields: &FilterFields| query.is_none_or(|query| fields.matches(query));
         let wanted = query.is_some() && self.opens_ship_parts();
         let mut items = Vec::new();
 
-        let hull: Vec<&HullRow> = parts.hull.iter().filter(|row| listed(&row.search_key)).collect();
+        let hull: Vec<&HullRow> = parts.hull.iter().filter(|row| listed(&row.filter_fields)).collect();
         if !hull.is_empty() {
             let id: SharedString = format!("armor-part-{ship}-group-hull").into();
             items.push(self.folder(id, t!("ui.models.part.hull").into_owned(), RowKind::PartFolder, wanted, |b| {
@@ -741,7 +770,7 @@ impl Builder<'_, '_, '_, '_> {
         }
 
         for group in &parts.mounts {
-            let rows: Vec<&PartRow> = group.parts.iter().filter(|part| listed(&part.search_key)).collect();
+            let rows: Vec<&PartRow> = group.parts.iter().filter(|part| listed(&part.filter_fields)).collect();
             if rows.is_empty() {
                 continue;
             }
@@ -752,7 +781,7 @@ impl Builder<'_, '_, '_, '_> {
             }));
         }
 
-        let misc: Vec<&PartRow> = parts.misc.iter().filter(|part| listed(&part.search_key)).collect();
+        let misc: Vec<&PartRow> = parts.misc.iter().filter(|part| listed(&part.filter_fields)).collect();
         if !misc.is_empty() {
             let id: SharedString = format!("armor-part-{ship}-group-misc").into();
             items.push(self.folder(id, t!("ui.models.part.misc").into_owned(), RowKind::PartFolder, wanted, |b| {
@@ -767,7 +796,7 @@ impl Builder<'_, '_, '_, '_> {
         let part = ShipPartKey::HullSection(row.model.clone());
         let id = part_row_id(ship, &part);
         let kind = RowKind::ShipPart { ship: ship.clone(), part, model: row.model.clone(), node: None };
-        self.note(&id, &row.search_key);
+        self.note(&id, &row.filter_fields);
         self.mark_geometry(&id, row.geometry);
 
         self.leaf(id, row.model.stem().to_string(), kind)
@@ -781,7 +810,7 @@ impl Builder<'_, '_, '_, '_> {
             model: part.model.clone(),
             node: Some(part.node.as_str().to_string().into()),
         };
-        self.note(&id, &part.search_key);
+        self.note(&id, &part.filter_fields);
         self.mark_geometry(&id, part.geometry);
 
         self.leaf(id, format!("{} {}", part.node, part.model.stem()), kind)
@@ -823,7 +852,7 @@ impl Builder<'_, '_, '_, '_> {
         let kind = RowKind::Model(model.path.clone());
         self.mark_geometry(&id, model.geometry);
         if found == Some(ModelMatch::Name) {
-            self.note(&id, &model.search_key);
+            self.note(&id, &model.filter_fields);
         }
 
         if model.variants.is_empty() && model.buildings.is_empty() {
@@ -864,7 +893,8 @@ impl Builder<'_, '_, '_, '_> {
     /// Variants are tested here rather than in [`SearchMatches`]: only those
     /// of a model being drawn are, so the cost follows the rows built.
     fn variant_rows(&mut self, variants: &[VariantRow], show_all: bool) -> Vec<TreeItem> {
-        let query = self.search.map_or("", |search| search.query.as_str());
+        let listing = FilterQuery::default();
+        let query = self.search.map_or(&listing, |search| &search.query);
         let mut items = Vec::new();
         for variant in variants {
             let matches = variant.matches(query);
@@ -877,7 +907,7 @@ impl Builder<'_, '_, '_, '_> {
             let kind = RowKind::Model(variant.path.clone());
             self.mark_geometry(&id, variant.geometry);
             if variant.kind == ModelVariantKind::Skin {
-                self.notes.insert(id.clone(), t!("ui.models.variant.skin").into_owned().into());
+                self.notes.insert(id.clone(), RowNote::Tag(t!("ui.models.variant.skin").into_owned().into()));
             }
 
             if variant.variants.is_empty() {
@@ -966,6 +996,7 @@ pub(super) mod fixture {
     use super::super::catalog::NationGroup;
     use super::super::catalog::ShipCatalog;
     use super::super::catalog::ShipEntry;
+    use super::super::filter_fields::FilterFields;
     use super::super::model_refs::VehicleParamIndex;
     use super::super::model_tree::BuildingRow;
     use super::super::model_tree::FortificationRow;
@@ -973,7 +1004,6 @@ pub(super) mod fixture {
     use super::super::model_tree::ModelReferences;
     use super::super::model_tree::PartKeys;
     use super::super::model_tree::ShipPartRows;
-    use super::super::search_key::SearchKey;
 
     pub const IOWA_INDEX: &str = "PASB018";
     pub const IOWA: &str = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945.model";
@@ -998,13 +1028,12 @@ pub(super) mod fixture {
         ShipEntry {
             param_index: param_index.to_string(),
             display_name: short_name.to_string(),
-            search_name: short_name.to_lowercase(),
-            search_key: key(&[short_name, full_name, param_index, param_name, &id.to_string()]),
+            filter_fields: key(&[short_name, full_name, param_index, param_name, &id.to_string()]),
             tier,
         }
     }
 
-    fn key(fields: &[&str]) -> SearchKey {
+    fn key(fields: &[&str]) -> FilterFields {
         fields.iter().map(|field| field.to_string()).collect()
     }
 
@@ -1036,7 +1065,7 @@ pub(super) mod fixture {
     /// the guns.
     pub fn references(ships: &ShipCatalog) -> ModelReferences {
         let ship_key = |index: &str| {
-            ships.ships().find(|ship| ship.param_index == index).map(|ship| ship.search_key.clone()).expect("listed")
+            ships.ships().find(|ship| ship.param_index == index).map(|ship| ship.filter_fields.clone()).expect("listed")
         };
         let mut references = ModelReferences::new();
         references.insert(IOWA, &ship_key(IOWA_INDEX));
@@ -1108,7 +1137,7 @@ pub(super) mod fixture {
             kind_name: Some("Fort".to_string()),
             display_name: display_name.to_string(),
             param_name: param_name.to_string(),
-            search_key: key(&[display_name, param_name, &FORT_OF_THE_ISLES.to_string()]),
+            filter_fields: key(&[display_name, param_name, &FORT_OF_THE_ISLES.to_string()]),
             // Its hull is not installed.
             geometry: Some(GeometryAvailability::Absent),
         }]
@@ -1238,7 +1267,7 @@ mod tests {
             fortifications: &data.fortifications,
             hidden: &data.hidden,
         };
-        let search = SearchMatches::from_query(&sources, query, tiers);
+        let search = SearchMatches::from_query(&sources, &FilterQuery::new(query), tiers);
 
         build_tree(&sources, search.as_ref(), &mut Expansion { set, closed: &HashSet::new(), auto })
     }
@@ -1461,6 +1490,37 @@ mod tests {
 
         assert_eq!(built.notes.get(&skin).map(|note| note.to_string()).as_deref(), Some("Skin"));
         assert_eq!(built.notes.len(), 1, "outside a search only the skin row carries a note");
+    }
+
+    #[test]
+    fn a_search_folds_accents_case_and_punctuation_away() {
+        use super::super::catalog::ClassGroup;
+        use super::super::catalog::NationGroup;
+        use wowsunpack::game_params::types::Species;
+
+        let smaland = ShipEntry {
+            param_index: "PWSD110".to_string(),
+            display_name: "Sm\u{e5}land".to_string(),
+            filter_fields: ["Sm\u{e5}land", "PWSD110"].map(str::to_string).into_iter().collect(),
+            tier: 10,
+        };
+        let europe = NationGroup {
+            nation: "Europe".to_string(),
+            display_name: "Europe".to_string(),
+            classes: vec![ClassGroup { species: Species::Destroyer, ships: vec![smaland] }],
+        };
+        let data = Data { ships: ShipCatalog { nations: vec![europe], hidden: Vec::new() }, ..data() };
+
+        let built = build(&data, "SMALAND", &mut HashSet::new(), true);
+        assert!(built.rows.contains_key(&ship_row_id("PWSD110")), "the ring on the a folds away");
+
+        let built = build(&data, "406mm50", &mut HashSet::new(), true);
+        let turret = model_row_id(&fixture::path(fixture::IOWA_TURRET));
+        assert!(built.rows.contains_key(&turret), "the gun's name is found without its spaces and slash");
+        assert_eq!(
+            built.notes.get(&turret).map(|note| note.to_string()).as_deref(),
+            Some("406 mm/50 Mk.7 in a turret")
+        );
     }
 
     #[test]
@@ -1933,8 +1993,20 @@ mod tests {
         assert_eq!(index.building_hulls.len(), hulls, "every building with a hull model is listed under it");
 
         let data = Data { ships, index, parts, fortifications, hidden: HashMap::new() };
-        let queries =
-            ["", "a", "gun", "iowa", "agm", "pasb018", "south carolina", "406 mm/50", "pagm034", "4276041712"];
+        let queries = [
+            "",
+            "a",
+            "gun",
+            "iowa",
+            "agm",
+            "pasb018",
+            "south carolina",
+            "406 mm/50",
+            "pagm034",
+            "4276041712",
+            "smaland",
+            "bow patch",
+        ];
         for query in queries {
             let sources = TreeSources {
                 ships: &data.ships,
@@ -1944,7 +2016,7 @@ mod tests {
                 hidden: &data.hidden,
             };
             let started = Instant::now();
-            let matches = SearchMatches::from_query(&sources, query, TierRange::ALL);
+            let matches = SearchMatches::from_query(&sources, &FilterQuery::new(query), TierRange::ALL);
             eprintln!("[measured] {query:?}: matched in {:?}", started.elapsed());
             drop(matches);
 
@@ -1961,5 +2033,18 @@ mod tests {
             let built = build(&data, query, &mut HashSet::new(), true);
             assert!(built.rows.len() < 100, "{query:?} builds {} rows", built.rows.len());
         }
+
+        // What each keystroke of a typed search costs, matching and building.
+        let mut typed = String::new();
+        let mut slowest = std::time::Duration::ZERO;
+        for letter in "montana".chars() {
+            typed.push(letter);
+            let started = Instant::now();
+            let built = build(&data, &typed, &mut HashSet::new(), true);
+            let spent = started.elapsed();
+            slowest = slowest.max(spent);
+            eprintln!("[measured] keystroke {typed:?}: {} rows in {spent:?}", built.rows.len());
+        }
+        eprintln!("[measured] slowest keystroke {slowest:?}");
     }
 }
