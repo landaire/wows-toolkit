@@ -10,16 +10,20 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::view::AnyView;
 
 use crate::dock::layout::DockRegion;
 use crate::dock::layout::DockTarget;
+use crate::dock::layout::FoldingRegion;
 use crate::dock::layout::GroupId;
 use crate::dock::layout::Layout;
 use crate::dock::layout::PanelEntry;
 use crate::dock::layout::PanelId;
 use crate::dock::layout::PanelKind;
+use crate::dock::layout::RegionExtent;
+use crate::dock::layout::RegionLimits;
 use crate::dock::saved::RestoreReport;
 use crate::dock::saved::SavedLayout;
 use crate::error::DockError;
@@ -166,6 +170,21 @@ impl DockState {
         self.layout.with(|layout| layout.region(region).open)
     }
 
+    /// Gives `region` `extent` of room while it shows. The extent is saved with the layout.
+    pub fn set_region_extent(self, region: FoldingRegion, extent: RegionExtent) {
+        self.layout.update(|layout| layout.extents.set(region, extent));
+    }
+
+    pub fn region_extent(self, region: FoldingRegion) -> RegionExtent {
+        self.layout.with(|layout| layout.extents.get(region))
+    }
+
+    /// Keeps `region` within `limits` while it shows. Limits are not saved with the layout and
+    /// outlast a [`restore`](Self::restore).
+    pub fn set_region_limits(self, region: FoldingRegion, limits: RegionLimits) {
+        self.layout.update(|layout| layout.limits.set(region, limits));
+    }
+
     pub fn is_region_empty(self, region: DockRegion) -> bool {
         self.layout.with(|layout| layout.region(region).root.is_none())
     }
@@ -191,10 +210,11 @@ impl DockState {
     /// Puts the dock back as `saved` describes it. Panels whose kind has no factory, and second
     /// panels with an id already used, are left out and listed in the report.
     pub fn restore(self, saved: &SavedLayout) -> Result<RestoreReport, DockError> {
-        let (layout, skipped) = self
+        let (mut layout, skipped) = self
             .registry
             .try_with_value(|registry| Layout::restore(saved, |kind| registry.knows(kind)))
             .ok_or(DockError::Gone)?;
+        layout.limits = self.layout.try_with_untracked(|current| current.limits).ok_or(DockError::Gone)?;
 
         self.layout.set(layout);
         self.generation.update(|generation| generation.0 += 1);

@@ -56,6 +56,13 @@ pub struct ShareError {
     pub percent: f64,
 }
 
+/// A length that is negative or not finite.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[error("{pixels} is not a length of zero or more pixels")]
+pub struct LengthError {
+    pub pixels: f64,
+}
+
 /// Why a headless window could not be opened, driven or read back.
 #[cfg(feature = "test-support")]
 #[derive(Debug, thiserror::Error)]

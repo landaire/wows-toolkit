@@ -6,21 +6,27 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::CssLength;
 use landaire_ui::DockProps;
 use landaire_ui::DockRegion;
 use landaire_ui::DockState;
 use landaire_ui::DockTarget;
+use landaire_ui::FoldingRegion;
 use landaire_ui::PanelEntry;
 use landaire_ui::PanelFactory;
 use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
+use landaire_ui::RegionExtent;
+use landaire_ui::RegionLimits;
 use landaire_ui::SavedNode;
 use landaire_ui::SkipReason;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::vocab::Modifiers;
@@ -189,6 +195,76 @@ fn a_folded_region_comes_back_at_the_width_it_had() {
     window.advance(FRAME);
     let back = width(&window, "content-side").expect("the side panel is laid out again");
     assert!((back - side).abs() < 1.0, "came back at {back}, was {side}");
+}
+
+fn width_of(window: &HeadlessWindow, id: &str) -> Option<f32> {
+    let element = window.by_test_id(id)?;
+
+    window.bounds(element).map(|bounds| bounds.size.width.0)
+}
+
+fn pixels(length: f64) -> CssLength {
+    CssLength::new(length).expect("a length")
+}
+
+/// A center and a right region 500 pixels wide that may not be dragged under 280.
+fn chart_dock(state: DockState) {
+    state.add_panel(DockTarget::Region(DockRegion::Center), entry("main")).expect("adds");
+    state.add_panel(DockTarget::Region(DockRegion::Right), entry("chart")).expect("adds");
+    state.set_region_extent(FoldingRegion::Right, RegionExtent::Length(pixels(500.0)));
+    state.set_region_limits(FoldingRegion::Right, RegionLimits { min: Some(pixels(280.0)), max: None });
+}
+
+#[test]
+fn a_region_given_a_length_is_laid_out_at_it() {
+    let (mut window, state) = open(chart_dock);
+    window.advance(FRAME);
+
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 500.0).abs() < 1.0, "the chart is {chart} wide");
+
+    state.set_region_extent(FoldingRegion::Right, RegionExtent::Length(pixels(320.0)));
+    window.advance(FRAME);
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 320.0).abs() < 1.0, "a new extent reaches a drawn dock: the chart is {chart} wide");
+}
+
+#[test]
+fn a_region_dragged_past_its_least_stops_there_and_keeps_its_length() {
+    let (mut window, state) = open(chart_dock);
+    window.advance(FRAME);
+    let handle = window
+        .by_role(Role::Splitter)
+        .into_iter()
+        .filter_map(|handle| Some((handle, window.bounds(handle)?)))
+        .filter(|(_, bounds)| bounds.size.width.0 > 0.0)
+        .max_by(|(_, a), (_, b)| a.origin.x.0.total_cmp(&b.origin.x.0))
+        .map(|(handle, _)| handle)
+        .expect("the right region's divider shows");
+
+    window.drag(handle, Point::new(DevicePx(790.0), DevicePx(250.0)), 8).expect("the divider has a box");
+    window.advance(FRAME);
+
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 280.0).abs() < 1.0, "the chart is {chart} wide");
+    let RegionExtent::Length(saved) = state.dump().extents.right else {
+        panic!("a region given a length is saved as one");
+    };
+    assert!((saved.pixels() - 280.0).abs() < 1.0, "saved at {}", saved.pixels());
+}
+
+#[test]
+fn limits_outlast_a_restore() {
+    let (mut window, state) = open(chart_dock);
+    let mut saved = state.dump();
+    saved.extents.right = RegionExtent::Length(pixels(100.0));
+
+    state.restore(&saved).expect("the dock is alive");
+    window.advance(FRAME);
+    window.advance(FRAME);
+
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 280.0).abs() < 1.0, "the chart is {chart} wide");
 }
 
 #[test]
