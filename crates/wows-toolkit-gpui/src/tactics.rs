@@ -3222,6 +3222,7 @@ impl TacticsBoard {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    .capture_action(crate::text_filter::clear_on_escape(&self.ship_search))
                     .child(
                         gpui_kit::component::input::Input::new(&self.ship_search)
                             .id("tactics-ship-search")

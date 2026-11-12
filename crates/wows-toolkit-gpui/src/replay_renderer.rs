@@ -4226,6 +4226,7 @@ fn ship_chooser(
 ) -> AnyElement {
     v_flex()
         .gap_1()
+        .capture_action(crate::text_filter::clear_on_escape(search))
         .child(crate::ui::rule_h(cx))
         .child(
             div()
@@ -4554,7 +4555,12 @@ fn timeline_filter_bar(
                             });
                         }),
                 )
-                .child(div().flex_1().child(Input::new(search).small())),
+                .child(
+                    div()
+                        .flex_1()
+                        .capture_action(crate::text_filter::clear_on_escape(search))
+                        .child(Input::new(search).small()),
+                ),
         )
         .child(v_flex().gap_0().children((0..KIND_COUNT).map(|index| {
             let owner = panel.clone();

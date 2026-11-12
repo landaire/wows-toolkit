@@ -704,13 +704,18 @@ impl App {
                     .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.close_settings(window, cx))),
             );
 
-        let search = div().flex_none().px_4().pb_2().child(
-            Input::new(&self.settings_drawer.search)
-                .id("settings-search")
-                .small()
-                .cleanable(true)
-                .prefix(Icon::new(IconName::Search).small().text_color(crate::theme::text_dim())),
-        );
+        let search = div()
+            .flex_none()
+            .px_4()
+            .pb_2()
+            .capture_action(crate::text_filter::clear_on_escape(&self.settings_drawer.search))
+            .child(
+                Input::new(&self.settings_drawer.search)
+                    .id("settings-search")
+                    .small()
+                    .cleanable(true)
+                    .prefix(Icon::new(IconName::Search).small().text_color(crate::theme::text_dim())),
+            );
 
         let body = match &self.settings {
             SettingsState::Loading => v_flex()
@@ -1889,6 +1894,28 @@ mod tests {
             window.press("ctrl-,", cx);
         });
         step(cx, window, &|window, _cx| assert!(window.try_find(DRAWER).is_none(), "the shortcut shuts it as well"));
+    }
+
+    /// Escape in the search first clears what was typed, which puts every
+    /// setting back, and only shuts the drawer once the search is empty.
+    #[gpui_kit::test]
+    fn escape_clears_the_search_before_it_shuts_the_drawer(cx: &mut TestAppContext) {
+        let (window, _app) = open(cx);
+        hold_still(cx);
+
+        step(cx, window, &|window, cx| window.press("ctrl-,", cx));
+        step(cx, window, &|window, cx| window.input("results table", cx));
+        step(cx, window, &|window, cx| {
+            assert!(window.try_find(row(Setting::Language)).is_none(), "the search filters the settings");
+            window.press("escape", cx);
+        });
+        step(cx, window, &|window, cx| {
+            assert!(window.try_find(DRAWER).is_some(), "the drawer stays open");
+            assert!(window.try_find("settings-count").is_none(), "the search is empty");
+            assert!(window.try_find(row(Setting::Language)).is_some(), "and every setting is back");
+            window.press("escape", cx);
+        });
+        step(cx, window, &|window, _cx| assert!(window.try_find(DRAWER).is_none(), "the next Escape shuts it"));
     }
 
     #[gpui_kit::test]

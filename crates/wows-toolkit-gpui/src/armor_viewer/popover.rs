@@ -818,6 +818,7 @@ fn tree_field(id: &'static str, field: &Entity<InputState>, field_matches: Optio
 
     v_flex()
         .gap_1()
+        .capture_action(crate::text_filter::clear_on_escape(field))
         .child(Input::new(field).id(id).small().prefix(Icon::new(IconName::Search).small()).cleanable(true))
         .children(count.map(|count| {
             let said = SharedString::from(count);

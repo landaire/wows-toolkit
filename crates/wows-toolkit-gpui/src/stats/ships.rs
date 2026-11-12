@@ -535,6 +535,7 @@ impl Render for StatsShipsPanel {
                     .gap_2()
                     .items_center()
                     .p_2()
+                    .capture_action(crate::text_filter::clear_on_escape(&self.ship_search))
                     .child(Input::new(&self.ship_search).id("stats-ships-search").small().flex_1())
                     .when(!ship_query.is_empty(), |this| {
                         this.child(

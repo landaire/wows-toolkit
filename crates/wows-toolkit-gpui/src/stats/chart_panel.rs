@@ -834,6 +834,7 @@ impl StatsChartPanel {
                 .child(
                     h_flex()
                         .gap_1()
+                        .capture_action(crate::text_filter::clear_on_escape(&ship_search))
                         .child(Input::new(&ship_search).id(("chart-ship-search", id)).small().flex_1())
                         .when(!ship_query.is_empty(), |this| {
                             this.child(

@@ -1267,6 +1267,7 @@ impl Render for Sidebar {
 
         let search_row = h_flex()
             .capture_key_down(cx.listener(Self::on_search_key_down))
+            .capture_action(crate::text_filter::clear_on_escape(&self.search_state))
             .flex_none()
             .gap_1()
             .items_center()
@@ -1972,6 +1973,30 @@ mod tests {
         let yamato_model =
             fixture::path("content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model");
         assert_eq!(row_index(&window, &model_row_id(&yamato_model), cx), None, "nor a model not matching");
+    }
+
+    /// Escape in the search clears it, and the list is whole again.
+    #[gpui_kit::test]
+    fn escape_in_the_search_clears_it_and_lists_everything(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let japan: SharedString = "armor-nation-Japan".into();
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("armor-sidebar-search", cx);
+            window.input("iowa", cx);
+        })
+        .expect("the window is open");
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        assert_eq!(row_index(&window, &japan, cx), None, "the search hides a nation with nothing matching");
+
+        cx.simulate_keystrokes(window.into(), "escape");
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        let query = window.update(cx, |sidebar, _window, cx| sidebar.search_state.read(cx).value()).expect("open");
+        assert!(query.is_empty(), "Escape clears the search");
+        assert!(row_index(&window, &japan, cx).is_some(), "and the nation is listed again");
     }
 
     #[gpui_kit::test]

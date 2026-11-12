@@ -907,7 +907,8 @@ impl SearchView {
     /// Keyboard on the query bar: the dropdown's rows are walked with the
     /// arrows, taken with Enter, and dismissed with Escape. Enter with no row
     /// highlighted runs the query, which is what the bar does with no
-    /// dropdown open at all.
+    /// dropdown open at all. Escape with no dropdown open clears the typed
+    /// text, leaving the filters already taken as pills.
     fn on_bar_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.value_edit.is_some() {
             if event.keystroke.key == "escape" {
@@ -940,10 +941,20 @@ impl SearchView {
             // which is the recall the egui bar offers on Up.
             "up" => self.walk_history(1, window, cx),
             "down" => self.walk_history(-1, window, cx),
-            "escape" => {
+            "escape" if self.completions_open => {
                 self.completions_open = false;
                 self.completion_cursor = None;
                 cx.notify();
+            }
+            "escape" => {
+                if crate::text_filter::clear_focused(&self.query_input, window, cx) {
+                    // Recorded as built for, as `set_bar_text` does: an empty
+                    // box read back as typing would offer every suggestion.
+                    self.completions.clear();
+                    self.completion_source = String::new();
+                    cx.stop_propagation();
+                    cx.notify();
+                }
             }
             // Nothing left to erase in the box, so the key means the filter
             // before the caret. The egui bar reads it the same way.
@@ -2932,5 +2943,42 @@ mod tests {
         crate::text_filter::take_marks();
         cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
         assert_eq!(crate::text_filter::marks_for("Sm\u{e5}land_fan"), Some(std::iter::once(0..8).collect::<Vec<_>>()));
+    }
+
+    /// Escape in the query bar puts an open dropdown away first, then clears
+    /// the typed text without offering the dropdown again.
+    #[gpui_kit::test]
+    fn escape_closes_the_dropdown_and_then_clears_the_bar(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+        let view = window.entity(cx).expect("the window has a root view");
+        let bar = |cx: &mut TestAppContext| {
+            cx.update(|cx| {
+                let view = view.read(cx);
+                (view.query_input.read(cx).value().to_string(), view.completions_open)
+            })
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(SEARCH_QUERY_ID, cx);
+            window.input("dam", cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert_eq!(bar(cx), ("dam".to_string(), true), "typing offers completions");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.press("escape", cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert_eq!(bar(cx), ("dam".to_string(), false), "the first Escape closes the dropdown");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.press("escape", cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert_eq!(bar(cx), (String::new(), false), "the second clears the text and offers nothing");
     }
 }

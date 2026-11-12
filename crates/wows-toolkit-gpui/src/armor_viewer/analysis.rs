@@ -290,6 +290,7 @@ fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx
 
     v_flex()
         .gap_1()
+        .capture_action(crate::text_filter::clear_on_escape(&search))
         .child(Input::new(&search).id("armor-pen-search").small().w_full())
         .children(results)
         .into_any_element()

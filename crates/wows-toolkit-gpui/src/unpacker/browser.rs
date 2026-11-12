@@ -504,6 +504,7 @@ impl Render for BrowserPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
+            .capture_action(crate::text_filter::clear_on_escape(&self.filter_state))
             .child(crate::ui::panel_collapse_button(
                 SharedString::from(format!("unpacker-{fragment}-tree-collapse")),
                 crate::ui::PanelSide::Left,
@@ -533,6 +534,8 @@ impl Render for BrowserPanel {
             .py_1()
             .border_t_1()
             .border_color(border)
+            .capture_action(crate::text_filter::clear_on_escape(&self.search_state))
+            .capture_action(crate::text_filter::clear_on_escape(&self.path_filter_state))
             .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.unpacker.search_in_files").to_string()))
             .child(
                 h_flex().gap_1().items_center().child(Icon::new(IconName::Search)).child(

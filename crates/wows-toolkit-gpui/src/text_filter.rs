@@ -1,5 +1,5 @@
-//! Drawing a typed-text filter's matches. The matching itself is
-//! `wows_toolkit_viewmodel::text_filter`.
+//! Typed-text filters: drawing their matches, and the Escape that clears
+//! their fields. The matching itself is `wows_toolkit_viewmodel::text_filter`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,11 +7,17 @@ use std::ops::Deref;
 use std::ops::Range;
 use std::rc::Rc;
 
+use gpui_kit::App;
+use gpui_kit::Entity;
+use gpui_kit::Focusable as _;
 use gpui_kit::FontWeight;
 use gpui_kit::HighlightStyle;
 use gpui_kit::Hsla;
 use gpui_kit::SharedString;
 use gpui_kit::StyledText;
+use gpui_kit::Window;
+use gpui_kit::component::input::Escape;
+use gpui_kit::component::input::InputState;
 
 pub(crate) use wows_toolkit_viewmodel::text_filter::FilterKey;
 pub(crate) use wows_toolkit_viewmodel::text_filter::FilterQuery;
@@ -184,6 +190,35 @@ pub(crate) fn match_mark() -> Hsla {
     Hsla::from(gpui_kit::rgb(crate::theme::semantic().notice)).opacity(0.3)
 }
 
+/// An Escape handler for `capture_action` on an element around a filter or
+/// search `field`: Escape clears the field while it holds text. An empty
+/// field lets Escape through to what it does otherwise, such as closing the
+/// popover or drawer around it.
+///
+/// Taken in the capture phase because a popover or dialog around the field
+/// binds Escape too, and would close before a key listener heard it.
+pub(crate) fn clear_on_escape(field: &Entity<InputState>) -> impl Fn(&Escape, &mut Window, &mut App) + 'static {
+    let field = field.clone();
+    move |_, window, cx| {
+        if clear_focused(&field, window, cx) {
+            cx.stop_propagation();
+        }
+    }
+}
+
+/// Clears `field` when it has focus, is editable and holds text, through the
+/// field's own edit so its subscribers see the change and it can be undone.
+/// Reports whether it cleared.
+pub(crate) fn clear_focused(field: &Entity<InputState>, window: &mut Window, cx: &mut App) -> bool {
+    let state = field.read(cx);
+    if state.value().is_empty() || !state.is_editable() || !state.focus_handle(cx).is_focused(window) {
+        return false;
+    }
+
+    field.update(cx, |state, cx| state.clean(window, cx));
+    true
+}
+
 #[cfg(test)]
 thread_local! {
     /// Every marked label built since the last [`take_marks`], in order.
@@ -211,8 +246,81 @@ pub(crate) fn marks_for(text: &str) -> Option<Vec<Range<usize>>> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_kit::AppContext as _;
+    use gpui_kit::Entity;
+    use gpui_kit::InteractiveElement as _;
+    use gpui_kit::IntoElement;
+    use gpui_kit::KeyDownEvent;
+    use gpui_kit::ParentElement as _;
+    use gpui_kit::Render;
+    use gpui_kit::Styled as _;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::component::input::Input;
+    use gpui_kit::component::input::InputState;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt as _;
+
     use super::MATCH_CACHE_LIMIT;
     use super::MarkedQuery;
+
+    /// A field behind [`super::clear_on_escape`], inside an element that
+    /// counts the Escapes that reach it, standing for a popover or drawer
+    /// that closes on one.
+    struct Probe {
+        field: Entity<InputState>,
+        reached: Rc<Cell<usize>>,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _window: &mut gpui_kit::Window, _cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+            let reached = Rc::clone(&self.reached);
+            gpui_kit::div()
+                .size_full()
+                .on_key_down(move |event: &KeyDownEvent, _window, _cx| {
+                    if event.keystroke.key == "escape" {
+                        reached.set(reached.get() + 1);
+                    }
+                })
+                .child(
+                    gpui_kit::div()
+                        .capture_action(super::clear_on_escape(&self.field))
+                        .child(Input::new(&self.field).id("probe-field")),
+                )
+        }
+    }
+
+    /// Escape clears a field holding text and goes no further; on the empty
+    /// field it passes through to what is around it.
+    #[gpui_kit::test]
+    fn escape_clears_a_filled_field_and_passes_an_empty_one_on(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let reached = Rc::new(Cell::new(0));
+        let counted = Rc::clone(&reached);
+        let window = cx.open_window(size(px(400.), px(200.)), move |window, cx| {
+            let field = cx.new(|cx| InputState::new(window, cx));
+            let probe: gpui_kit::AnyView = cx.new(|_| Probe { field, reached: counted }).into();
+            gpui_kit::component::Root::new(probe, window, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("probe-field", cx);
+            window.input("deck", cx);
+            window.render_frame(cx);
+            window.press("escape", cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("probe-field").value(), Some(""), "Escape clears the field");
+            assert_eq!(reached.get(), 0, "and is not passed on");
+
+            window.press("escape", cx);
+            assert_eq!(reached.get(), 1, "Escape on the empty field is passed on");
+        })
+        .expect("the test window stays open");
+    }
 
     /// A held query drawn over ever new rows forgets what it remembered
     /// rather than growing, and still matches what it is asked about.

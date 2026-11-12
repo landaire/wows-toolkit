@@ -2860,67 +2860,70 @@ impl Render for PlayerTrackerView {
         // Not wrapping: a wrapped row does not grow its own height in this
         // layout, so a second line would be drawn over the table header
         // under it. The filter gives up width instead.
-        let toolbar =
-            crate::ui::toolbar(cx)
-                .child(
-                    crate::ui::boxed(PERIOD_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                        Select::new(&self.period_select)
-                            .id("tracker-period")
-                            .accessibility_label(t!("ui.player_tracker.time_period").to_string())
-                            .small()
-                            // The menu takes the width of the element the popup
-                            // is anchored to, which is the box this combo sits
-                            // in rather than the combo itself.
-                            .menu_width(PERIOD_COMBO_WIDTH),
-                    ),
-                )
-                .child(crate::ui::rule_v(cx))
-                .child(
-                    h_flex().gap_1().items_center().flex_none().child(Icon::new(IconName::Search)).child(
-                        div().w(FILTER_WIDTH).child(Input::new(&self.filter_input).id("tracker-filter").small()),
-                    ),
-                )
-                // The checkbox sits at the far end rather than beside the filter,
-                // so neither moves when the other changes size.
-                .child(div().flex_1().min_w(px(0.)))
-                // Offered whatever is docked: the tables count it and the
-                // roster's own Seen column follows it too.
-                .child(crate::ui::rule_v(cx))
-                // Re-reads the index, which is where the rows come from: the
-                // egui tracker's own "Populate Data From Replays" button
-                // (`ui/player_tracker/historical.rs:518`), whose aggregate this
-                // port reads straight from the index instead.
-                .child(
-                    Button::new("tracker-repopulate")
-                        .ghost()
+        let toolbar = crate::ui::toolbar(cx)
+            .child(
+                crate::ui::boxed(PERIOD_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                    Select::new(&self.period_select)
+                        .id("tracker-period")
+                        .accessibility_label(t!("ui.player_tracker.time_period").to_string())
                         .small()
-                        .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
-                        .tooltip(t!("ui.player_tracker.populate_from_replays").to_string())
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            let Some(pool) = crate::settings_store::pool(cx) else { return };
-                            this.refresh(pool, cx);
-                        })),
-                )
-                // Destructive, so it is confirmed: everything the tracker knows
-                // about every player goes, which is years of encounters.
-                .child(
-                    Button::new("tracker-clear")
-                        .ghost()
-                        .small()
-                        .child(crate::icons::icon(crate::icons::Glyph::Trash))
-                        .tooltip(t!("ui.player_tracker.clear_stats").to_string())
-                        .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear(window, cx))),
-                )
-                .child({
-                    let show = self.show_division_mates;
-                    Checkbox::new("tracker-show-division-mates")
-                        .label(t!("ui.player_tracker.show_division_mates").to_string())
-                        .checked(show)
-                        .tooltip(t!("ui.player_tracker.show_division_mates_hover").to_string())
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            this.set_show_division_mates(!show, cx);
-                        }))
-                });
+                        // The menu takes the width of the element the popup
+                        // is anchored to, which is the box this combo sits
+                        // in rather than the combo itself.
+                        .menu_width(PERIOD_COMBO_WIDTH),
+                ),
+            )
+            .child(crate::ui::rule_v(cx))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .flex_none()
+                    .capture_action(crate::text_filter::clear_on_escape(&self.filter_input))
+                    .child(Icon::new(IconName::Search))
+                    .child(div().w(FILTER_WIDTH).child(Input::new(&self.filter_input).id("tracker-filter").small())),
+            )
+            // The checkbox sits at the far end rather than beside the filter,
+            // so neither moves when the other changes size.
+            .child(div().flex_1().min_w(px(0.)))
+            // Offered whatever is docked: the tables count it and the
+            // roster's own Seen column follows it too.
+            .child(crate::ui::rule_v(cx))
+            // Re-reads the index, which is where the rows come from: the
+            // egui tracker's own "Populate Data From Replays" button
+            // (`ui/player_tracker/historical.rs:518`), whose aggregate this
+            // port reads straight from the index instead.
+            .child(
+                Button::new("tracker-repopulate")
+                    .ghost()
+                    .small()
+                    .child(crate::icons::icon(crate::icons::Glyph::RotateCcw))
+                    .tooltip(t!("ui.player_tracker.populate_from_replays").to_string())
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        let Some(pool) = crate::settings_store::pool(cx) else { return };
+                        this.refresh(pool, cx);
+                    })),
+            )
+            // Destructive, so it is confirmed: everything the tracker knows
+            // about every player goes, which is years of encounters.
+            .child(
+                Button::new("tracker-clear")
+                    .ghost()
+                    .small()
+                    .child(crate::icons::icon(crate::icons::Glyph::Trash))
+                    .tooltip(t!("ui.player_tracker.clear_stats").to_string())
+                    .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear(window, cx))),
+            )
+            .child({
+                let show = self.show_division_mates;
+                Checkbox::new("tracker-show-division-mates")
+                    .label(t!("ui.player_tracker.show_division_mates").to_string())
+                    .checked(show)
+                    .tooltip(t!("ui.player_tracker.show_division_mates_hover").to_string())
+                    .on_click(cx.listener(move |this, _event, _window, cx| {
+                        this.set_show_division_mates(!show, cx);
+                    }))
+            });
 
         v_flex()
             .id("tracker-root")

@@ -106,25 +106,15 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .border_color(border)
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
         .children(target)
-        .child({
-            // Escape clears what was typed, rather than only leaving the field.
-            let clear_input = filter_input.clone();
-            div()
-                .capture_key_down(move |event: &KeyDownEvent, window: &mut Window, cx: &mut App| {
-                    if event.keystroke.key != "escape" || clear_input.read(cx).value().is_empty() {
-                        return;
-                    }
-                    clear_input.update(cx, |state, cx| state.set_value("", window, cx));
-                    cx.stop_propagation();
-                })
-                .child(
-                    Input::new(&filter_input)
-                        .id("armor-options-filter")
-                        .small()
-                        .prefix(Icon::new(IconName::Search).small())
-                        .cleanable(true),
-                )
-        });
+        .child(
+            div().capture_action(crate::text_filter::clear_on_escape(&filter_input)).child(
+                Input::new(&filter_input)
+                    .id("armor-options-filter")
+                    .small()
+                    .prefix(Icon::new(IconName::Search).small())
+                    .cleanable(true),
+            ),
+        );
 
     let tools = popover::render_tools(viewport.read(cx), &viewport, &filter);
     // Nothing open yet keeps every section, each saying so; an open model
@@ -655,6 +645,32 @@ mod tests {
             assert!(window.try_find("armor-zone-filter-count").is_none(), "no count without a query");
             assert!(window.try_find(bow_deck).is_none(), "Bow is collapsed again");
             assert!(window.try_find(stern_deck).is_some(), "Stern is still open");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// Escape in a tree's field clears it and puts the tree back as the
+    /// reader left it.
+    #[gpui_kit::test]
+    fn escape_in_the_zone_filter_clears_it_and_restores_the_tree(cx: &mut TestAppContext) {
+        let window = open_tall(cx);
+        install(window, two_zone_scene(), &[OptionSection::Visibility], cx);
+        let bow_deck = "armor-vis-part-row-Bow-Bow_Deck";
+        let belt = "armor-vis-part-row-Bow-Bow_Belt";
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click("armor-zone-filter", cx);
+            window.input("deck", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(bow_deck).is_some(), "the filter opens Bow to show its deck");
+            assert!(window.try_find(belt).is_none(), "and hides the belt");
+
+            window.press("escape", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("armor-zone-filter-count").is_none(), "the field is empty");
+            assert!(window.try_find(bow_deck).is_none(), "Bow is collapsed again");
+            assert!(window.try_find("armor-vis-zone-row-Bow").is_some(), "every zone is back");
+            assert!(window.try_find("armor-vis-zone-row-Stern").is_some());
         })
         .expect("the test window stays open");
     }
