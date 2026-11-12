@@ -16801,6 +16801,7 @@ dependencies = [
  "wowsunpack",
  "wt-translations",
  "zgui",
+ "zgui-css",
  "zgui-image",
  "zgui-ui",
  "zgui-ui-icons",
