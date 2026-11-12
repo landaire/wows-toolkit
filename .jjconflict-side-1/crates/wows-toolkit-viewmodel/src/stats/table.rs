@@ -5,9 +5,15 @@
 //! enums: the egui app translates them and the port does not, and neither
 //! choice can be made here.
 
+use std::collections::BTreeMap;
+
+use wows_replays::types::GameParamId;
+
+use super::PerGameStat;
 use super::PerformanceInfo;
 use super::PrStats;
 use crate::formatting::separate_number;
+use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 
 /// Which statistic a row reports.
@@ -261,6 +267,84 @@ pub fn to_csv(rows: &[StatRow], column: impl Fn(Column) -> String, label: impl F
     out
 }
 
+/// One ship's games in view, as the Ships list shows and copies them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShipSummary {
+    pub ship_id: GameParamId,
+    pub ship: String,
+    pub performance: PerformanceInfo,
+    /// `None` without an expected-values table, or when no game rated.
+    pub rating: Option<PrStats>,
+    /// The collapsed line: name, record, win rate, and the rating when there is one.
+    pub header: String,
+    pub rows: Vec<StatRow>,
+}
+
+impl ShipSummary {
+    pub fn markdown(&self, column: impl Fn(Column) -> String, label: impl Fn(StatLabel) -> String) -> String {
+        to_markdown(&self.header, &self.rows, column, label)
+    }
+
+    pub fn csv(&self, column: impl Fn(Column) -> String, label: impl Fn(StatLabel) -> String) -> String {
+        to_csv(&self.rows, column, label)
+    }
+}
+
+/// One summary per ship in `games`, most recently played first, with the id breaking a tie.
+///
+/// Grouped by id, not by name: two ships can carry one display name, and a rating is scored
+/// against a single ship's expected values.
+pub fn ship_summaries(
+    games: &[&PerGameStat],
+    table: Option<&PersonalRatingData>,
+    locale: Option<&str>,
+) -> Vec<ShipSummary> {
+    let mut by_ship: BTreeMap<u64, Vec<&PerGameStat>> = BTreeMap::new();
+    for game in games {
+        by_ship.entry(game.ship_id.raw()).or_default().push(game);
+    }
+
+    let mut summaries: Vec<ShipSummary> = by_ship
+        .into_values()
+        .filter_map(|games| {
+            let first = games.first()?;
+            let performance = PerformanceInfo::from_games(&games);
+            let rating = table.and_then(|table| PrStats::from_games(&games, table));
+            let header = ship_header(&first.ship_name, &performance, rating.as_ref());
+            let rows = ship_rows(&performance, rating.as_ref(), locale);
+
+            Some(ShipSummary {
+                ship_id: first.ship_id,
+                ship: first.ship_name.clone(),
+                performance,
+                rating,
+                header,
+                rows,
+            })
+        })
+        .collect();
+    summaries.sort_by(|a, b| {
+        b.performance.last_played().cmp(a.performance.last_played()).then_with(|| a.ship_id.raw().cmp(&b.ship_id.raw()))
+    });
+
+    summaries
+}
+
+fn ship_header(ship: &str, performance: &PerformanceInfo, rating: Option<&PrStats>) -> String {
+    let record = if performance.draws() > 0 {
+        format!("{}W/{}L/{}D", performance.wins(), performance.losses(), performance.draws())
+    } else {
+        format!("{}W/{}L", performance.wins(), performance.losses())
+    };
+    // A summary exists only because a game made it, so there is always a win rate.
+    let win_rate = performance.win_rate().unwrap_or_default();
+
+    match rating {
+        Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average.pr),
+        None => format!("{ship} {record} ({win_rate:.0}%)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +508,77 @@ mod tests {
         let csv = to_csv(&rows, english_column, english);
         assert!(csv.starts_with(",Min,Max,Total,Average"));
         assert!(csv.contains("Damage,10,000,10,000,10,000,10,000"));
+    }
+
+    fn played(ship: &str, ship_id: u64, sort_key: &str, damage: u64, win: bool) -> PerGameStat {
+        PerGameStat {
+            ship_name: ship.to_string(),
+            ship_id: ship_id.into(),
+            sort_key: sort_key.to_string(),
+            is_win: win,
+            is_loss: !win,
+            ..game(damage, 1, 1_500)
+        }
+    }
+
+    fn summaries_of(games: &[PerGameStat], table: Option<&PersonalRatingData>) -> Vec<ShipSummary> {
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+        ship_summaries(&refs, table, Some("en"))
+    }
+
+    #[test]
+    fn each_ship_carries_its_record_and_the_newest_leads() {
+        let summaries = summaries_of(
+            &[
+                played("Yamato", 1, "2026-02-13 14:00:00", 100_000, true),
+                played("Yamato", 1, "2026-02-13 15:00:00", 50_000, false),
+                played("Shima", 2, "2026-02-13 16:00:00", 70_000, true),
+            ],
+            None,
+        );
+
+        let headers: Vec<&str> = summaries.iter().map(|summary| summary.header.as_str()).collect();
+        assert_eq!(headers, ["Shima 1W/0L (100%)", "Yamato 1W/1L (50%)"]);
+    }
+
+    #[test]
+    fn two_ships_sharing_a_name_stay_apart() {
+        let summaries = summaries_of(
+            &[
+                played("Mikasa", 1, "2026-02-13 14:00:00", 100_000, true),
+                played("Mikasa", 2, "2026-02-13 15:00:00", 50_000, false),
+            ],
+            None,
+        );
+
+        assert_eq!(summaries.len(), 2, "one summary per ship, not per name");
+    }
+
+    #[test]
+    fn a_rated_ship_leads_with_its_rating() {
+        let mut table = PersonalRatingData::new();
+        table.load_from_bytes(crate::personal_rating::EXPECTED_VALUES_FIXTURE).expect("the fixture parses");
+        // A ship the fixture carries expected values for.
+        let games = [played("Yamato", 3_374_266_064, "2026-02-13 14:00:00", 100_000, true)];
+
+        let unrated = summaries_of(&games, None);
+        assert_eq!(unrated[0].rows[0].label, StatLabel::Damage, "nothing rates without a table");
+
+        let summaries = summaries_of(&games, Some(&table));
+        assert_eq!(summaries[0].rows[0].label, StatLabel::PersonalRating);
+        assert!(summaries[0].header.contains(" - PR: "), "the header names the rating: {}", summaries[0].header);
+    }
+
+    #[test]
+    fn the_copy_writes_the_table_it_shows() {
+        let summaries = summaries_of(&[played("Yamato", 1, "2026-02-13 14:00:00", 100_000, true)], None);
+
+        let markdown = summaries[0].markdown(english_column, english);
+        assert!(markdown.starts_with("**Yamato 1W/0L (100%)**"), "the copy carries the header line");
+        assert!(markdown.contains("| Damage | 100,000 | 100,000 | 100,000 | **100,000** |"));
+
+        let csv = summaries[0].csv(english_column, english);
+        assert!(csv.starts_with(",Min,Max,Total,Average"));
+        assert!(csv.contains("Spotting Damage,10,000,10,000,10,000,10,000"));
     }
 }
