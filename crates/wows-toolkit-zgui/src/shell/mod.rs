@@ -102,6 +102,7 @@ use crate::shell::tabs::TabKey;
 use crate::shell::twitch::TwitchLink;
 use crate::shell::update::UpdateFlow;
 use crate::tabs::TabBodyProps;
+use crate::tabs::armor_viewer::library::ArmorLibrary;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
 use crate::window_shell::RememberGeometryProps;
@@ -261,6 +262,8 @@ pub struct Shell {
     pub tactics: TacticsHost,
     /// The window's collaborative session.
     pub collab: CollabHost,
+    /// The Armor Viewer's ship data, which the palette lists from any tab.
+    pub armor: ArmorLibrary,
     drop_scrim: DropScrimState,
     toasts: Toasts,
     services: Services,
@@ -291,6 +294,7 @@ impl Shell {
             dialogs: Dialogs::new(),
             tactics: TacticsHost::new(),
             collab: CollabHost::new(),
+            armor: ArmorLibrary::new(),
             drop_scrim: DropScrimState::new(),
             toasts,
             services,
@@ -593,6 +597,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     startup::begin(services, shell);
     shell.tactics.begin(services);
     shell.collab.begin(shell);
+    shell.armor.begin(services);
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);

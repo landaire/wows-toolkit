@@ -290,9 +290,10 @@ fn marked(window: &HeadlessWindow) -> Vec<String> {
     pieces
 }
 
-/// While nothing offers the ship list, ctrl+p on the Armor Viewer opens the root list.
+/// With no game data the ship list is still where ctrl+p on the Armor Viewer goes, and says why
+/// it is empty rather than falling back to the root list.
 #[test]
-fn ctrl_p_on_the_armor_viewer_without_a_ship_list_opens_the_root_list() {
+fn ctrl_p_on_the_armor_viewer_without_game_data_opens_the_ship_list() {
     let mut window = open_window(TestModes::default());
     shortcut(&mut window, 'k');
     window
@@ -302,8 +303,8 @@ fn ctrl_p_on_the_armor_viewer_without_a_ship_list_opens_the_root_list() {
     assert!(shown(&window, "tab-page-armor-viewer"));
 
     shortcut(&mut window, 'p');
-    assert!(shown(&window, ROOT), "ctrl+p opens the root list");
-    assert!(!shown(&window, BACK));
+    assert!(shown(&window, "palette-mode-armor-ships"), "ctrl+p opens the ship list");
+    assert!(!shown(&window, ROOT));
 }
 
 /// An answer to a query the reader has since changed is dropped, even when it arrives before
