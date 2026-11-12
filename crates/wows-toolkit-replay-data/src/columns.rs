@@ -595,7 +595,9 @@ pub fn markdown_table<'a>(rows: impl Iterator<Item = &'a PlayerRow>, columns: &[
         line(columns.iter().map(|col| markdown_cell(&col.label())).collect()),
         line(columns.iter().map(|_| "---".to_owned()).collect()),
     ];
-    lines.extend(rows.map(|row| line(columns.iter().map(|col| markdown_cell(&cell_value(row, *col, debug).text)).collect())));
+    lines.extend(
+        rows.map(|row| line(columns.iter().map(|col| markdown_cell(&cell_value(row, *col, debug).text)).collect())),
+    );
     lines.join("\n")
 }
 

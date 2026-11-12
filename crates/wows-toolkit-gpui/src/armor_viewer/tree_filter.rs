@@ -7,8 +7,8 @@ use std::rc::Rc;
 use gpui_kit::SharedString;
 use gpui_kit::StyledText;
 
-pub(crate) use wows_toolkit_armor::tree_filter::match_count;
 use wows_toolkit_armor::tree_filter::TextQuery;
+pub(crate) use wows_toolkit_armor::tree_filter::match_count;
 
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
