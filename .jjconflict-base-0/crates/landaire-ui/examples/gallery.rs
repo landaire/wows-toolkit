@@ -39,6 +39,11 @@ use zgui_ui::ButtonProps;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SwitchProps;
 
+use crate::chrome::ChromeProps;
+
+#[path = "gallery_parts/chrome.rs"]
+mod chrome;
+
 const SHEET: &str = css!(
     ".gallery { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: hidden;
                 font-size: var(--lui-font-size); font-family: var(--lui-font-family); }
@@ -125,6 +130,8 @@ fn Gallery(choice: ThemeChoice) -> impl IntoView {
                     box(class = "gallery__schemes") {{schemes}}
                     text(class = "gallery__section") {"Surfaces"}
                     Surfaces()
+                    text(class = "gallery__section") {"Chrome"}
+                    Chrome()
                 }
             }
         }
