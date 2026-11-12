@@ -373,7 +373,10 @@ fn a_folder_at_the_live_root_is_kept_out_of_the_live_source() {
     settle_in_real_time(&mut window);
     let id = folder_id(control, &root);
     settle_until(&mut window, "the source lookup ends", |_| {
-        control.work.sources.with_untracked(|sources| matches!(sources.get(&id), Some(FolderSourceState::Unavailable(_))))
+        control
+            .work
+            .sources
+            .with_untracked(|sources| matches!(sources.get(&id), Some(FolderSourceState::Unavailable(_))))
     });
 
     let refused = control.work.sources.with_untracked(|sources| match sources.get(&id) {

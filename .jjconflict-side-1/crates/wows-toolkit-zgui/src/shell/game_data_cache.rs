@@ -56,7 +56,7 @@ impl GameDataCacheJobs {
         self.state.with(CacheState::busy) || self.pruning.get()
     }
 
-    fn busy_untracked(self) -> bool {
+    pub fn busy_untracked(self) -> bool {
         self.state.with_untracked(CacheState::busy) || self.pruning.get_untracked()
     }
 

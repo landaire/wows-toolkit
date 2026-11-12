@@ -44,8 +44,10 @@ use wows_toolkit_replay_data::model::battle_title;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
+use wowsunpack::game_params::types::Species;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::ArcRwSignal;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
@@ -61,6 +63,7 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateUntracked;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
@@ -349,15 +352,33 @@ impl ReparseCause {
     }
 }
 
-/// What the panel's owner drives it through. `Copy`; make one per panel.
+/// What the panel's owner drives it through, and what the panel read. `Copy`; make one per panel
+/// in a scope that outlives the panel's view, so a view the dock builds again shows the battle
+/// without reading the file again.
 #[derive(Clone, Copy)]
 pub struct PanelControl {
     reparse: RwSignal<Option<(u64, ReparseCause)>, LocalStorage>,
+    state: RwSignal<LoadState, LocalStorage>,
+    /// The other recordings the battle is read through.
+    alts: RwSignal<Vec<PathBuf>, LocalStorage>,
+    /// The recording just added, on trial in the next read and only that one.
+    alt_on_trial: StoredValue<Option<PathBuf>>,
+    /// Whether the header's figures have counted up.
+    counted: StoredValue<bool>,
+    /// Why a read cut short with its view was asked for, owed by the next view.
+    owed: StoredValue<Option<ReparseCause>>,
 }
 
 impl PanelControl {
     pub fn new() -> Self {
-        Self { reparse: RwSignal::new_local(None) }
+        Self {
+            reparse: RwSignal::new_local(None),
+            state: RwSignal::new_local(LoadState::Loading),
+            alts: RwSignal::new_local(Vec::new()),
+            alt_on_trial: StoredValue::new(None),
+            counted: StoredValue::new(false),
+            owed: StoredValue::new(None),
+        }
     }
 
     /// Reads the replay again.
@@ -366,6 +387,42 @@ impl PanelControl {
             let next = asked.map_or(1, |(count, _)| count + 1);
             *asked = Some((next, cause));
         });
+    }
+
+    /// Lets go of the battle read, as the panel closes for good.
+    pub fn release(self) {
+        // Untracked: a view still up is going away this turn, and is not built again for it.
+        self.state.try_update_untracked(|state| *state = LoadState::Loading);
+        self.alts.try_update_untracked(Vec::clear);
+    }
+
+    /// Hands a read the view could not finish to the next view, with the recording it had on
+    /// trial. Called as a view is disposed of, when the control may be going too.
+    fn owe(self, cause: Option<ReparseCause>, trial: Option<PathBuf>) {
+        if trial.is_some() {
+            self.alt_on_trial.try_set_value(trial);
+        }
+        if let Some(cause) = cause {
+            self.owed.try_update_value(|owed| *owed = Some(owed.map_or(cause, |owed| owed.with(cause))));
+        }
+    }
+
+    /// Why the battle failed to read, when it did.
+    #[cfg(test)]
+    pub fn failure(self) -> Option<String> {
+        self.state.with_untracked(|state| match state {
+            LoadState::Failed(reason) => Some(reason.clone()),
+            LoadState::Loading | LoadState::Loaded(_) => None,
+        })
+    }
+
+    /// What the panel's tab says about its battle. Reactive.
+    pub fn title(self) -> PanelTitle {
+        self.state.with(|state| match state {
+            LoadState::Loading => PanelTitle::Reading,
+            LoadState::Loaded(loaded) => PanelTitle::Read { title: loaded.title.clone(), ship: loaded.ship.clone() },
+            LoadState::Failed(_) => PanelTitle::Failed,
+        })
     }
 }
 
@@ -390,6 +447,26 @@ pub struct ConstantsMismatched {
     pub version: Option<String>,
 }
 
+/// What a panel's tab says about its battle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PanelTitle {
+    Reading,
+    /// "{ship} - {map}", with the recording player's ship when the battle names it.
+    Read {
+        title: String,
+        ship: Option<TitleShip>,
+    },
+    Failed,
+}
+
+/// The recording player's ship, as its tab marks it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TitleShip {
+    /// The nation's name in the game params.
+    pub nation: Option<String>,
+    pub class: Species,
+}
+
 /// What the table slot is built with.
 #[derive(Clone)]
 pub struct PanelTable {
@@ -406,18 +483,18 @@ pub type TableSlot = Rc<dyn Fn(PanelTable) -> AnyView>;
 /// What the panel tells its owner.
 #[derive(Clone, Default)]
 pub struct PanelEvents {
-    /// The tab's title once the battle is read: "{ship} - {map}".
-    pub on_title: Option<UnsyncCallback<String>>,
     /// The Actions menu's "Render replay". The item is left out without it.
     pub on_render: Option<UnsyncCallback<RenderRequest>>,
     pub on_constants_mismatched: Option<UnsyncCallback<ConstantsMismatched>>,
 }
 
-/// A read battle and what its panels show.
+/// A read battle and what its panels show. Owned by no scope, so it outlives the view that read it.
 struct Loaded {
     title: String,
+    /// The recording player's ship, for the tab.
+    ship: Option<TitleShip>,
     battle_result: Option<BattleResult>,
-    model: RwSignal<Rc<ReplayReportModel>, LocalStorage>,
+    model: ArcRwSignal<Rc<ReplayReportModel>>,
     chat: Option<Rc<[ChatMessage]>>,
     raw_metadata: Rc<str>,
     raw_results: Option<Rc<str>>,
@@ -441,6 +518,13 @@ impl LoadState {
             _ => None,
         }
     }
+}
+
+/// A read under way, as the next view asks for it again when this one goes before it lands.
+#[derive(Clone)]
+struct Underway {
+    cause: Option<ReparseCause>,
+    trial: Option<PathBuf>,
 }
 
 /// Which branch of [`LoadState`] is up, so a re-read that lands does not rebuild the view twice.
@@ -496,7 +580,7 @@ pub fn ReplayPanel(
     let control = control.unwrap_or_default();
     let PanelSetup { path, columns: initial_columns, personal_rating: initial_rating } = setup;
 
-    let state = RwSignal::new_local(LoadState::Loading);
+    let state = control.state;
     // A test hands the panel a battle rather than a replay to parse.
     #[cfg(test)]
     if let Some(loaded) = tests::SEED.with(|seed| seed.borrow_mut().take()) {
@@ -507,20 +591,27 @@ pub fn ReplayPanel(
     let shown_side = RwSignal::new_local(SidePanel::None);
     let player_metadata: RwSignal<Option<Rc<str>>, LocalStorage> = RwSignal::new_local(None);
     let side_width = RwSignal::new_local(SIDE_PANEL_WIDTH);
-    let alts: RwSignal<Vec<PathBuf>, LocalStorage> = RwSignal::new_local(Vec::new());
-    let alt_on_trial: StoredValue<Option<PathBuf>> = StoredValue::new(None);
+    let alts = control.alts;
     let parsing = RwSignal::new_local(false);
     // A read asked for while another runs, folded into one follow-up read.
     let queued: StoredValue<Option<ReparseCause>> = StoredValue::new(None);
+    // The read under way, handed to the next view if this one goes first.
+    let underway: StoredValue<Option<Underway>> = StoredValue::new(None);
     // Work started from a menu or an effect runs under the panel, so it outlives them.
     let owner = StoredValue::new_local(Owner::current());
     let export_status: RwSignal<Option<String>, LocalStorage> = RwSignal::new_local(None);
-    let counted_once = StoredValue::new(false);
     let debug = Signal::derive_local(move || shell.debug_mode.get());
     let path = StoredValue::new(path);
     let columns_now = StoredValue::new(initial_columns);
     let rating_now = StoredValue::new(initial_rating);
     let events = StoredValue::new_local(events);
+
+    // A read cut short with this view, and any asked for behind it, fall to the next view.
+    on_cleanup_local(move || {
+        let Some(cut) = underway.try_get_value().flatten() else { return };
+        control.owe(cut.cause, cut.trial);
+        control.owe(queued.try_get_value().flatten(), None);
+    });
 
     // A debug viewer whose gate closes goes with it, so it is not left open with no way back.
     follow(move |_| {
@@ -568,12 +659,14 @@ pub fn ReplayPanel(
         let alts_now = alts.get_untracked();
         let rating = rating_now.get_value();
         // The recording just added is on trial in this read, and only this one.
-        let trial = alt_on_trial.get_value();
-        alt_on_trial.set_value(None);
+        let trial = control.alt_on_trial.get_value();
+        control.alt_on_trial.set_value(None);
+        underway.set_value(Some(Underway { cause, trial: trial.clone() }));
         parsing.set(true);
         spawn_in(owner.get_value(), async move {
             let _job = services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
             let result = blocking(move || parse_replay_with_alts(&primary, &alts_now, &cache, rating.as_deref())).await;
+            underway.set_value(None);
             parsing.set(false);
             apply_result(ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause }, result);
             if let Some(next) = queued.get_value() {
@@ -583,12 +676,18 @@ pub fn ReplayPanel(
         });
     };
 
-    // The first read waits for the game data; later ones come from the control.
+    // The first read waits for the game data; later ones come from the control. A view the dock
+    // builds again shows what was read, unless the view before it was cut off mid-read.
     let first_read = StoredValue::new(false);
     follow(move |_| {
         if services.game_data.cache().is_some() && !first_read.get_value() {
             first_read.set_value(true);
-            read(None);
+            let owed = control.owed.get_value();
+            control.owed.set_value(None);
+            let unread = state.with_untracked(|state| matches!(state, LoadState::Loading));
+            if unread || owed.is_some() {
+                read(owed);
+            }
         }
     });
     follow(move |previous: Option<()>| {
@@ -627,7 +726,7 @@ pub fn ReplayPanel(
                     if alts.with_untracked(|kept| kept.iter().any(|kept| same_file(kept, &alt))) {
                         return;
                     }
-                    alt_on_trial.set_value(Some(alt.clone()));
+                    control.alt_on_trial.set_value(Some(alt.clone()));
                     alts.update(|kept| kept.push(alt));
                     control.reparse(ReparseCause::AltPerspective);
                 }
@@ -676,8 +775,8 @@ pub fn ReplayPanel(
         StateKind::Loaded => {
             // The loaded view is built per battle read, from the latest one.
             let loaded = Signal::derive_local(move || state.get().loaded());
-            let run = !counted_once.get_value();
-            counted_once.set_value(true);
+            let run = !control.counted.get_value();
+            control.counted.set_value(true);
             let header = HeaderCx {
                 loaded,
                 side,
@@ -692,7 +791,8 @@ pub fn ReplayPanel(
             };
             let table_view = move || {
                 let loaded = loaded.get()?;
-                let model: Signal<Rc<ReplayReportModel>, LocalStorage> = loaded.model.into();
+                let read = ArcRwSignal::clone(&loaded.model);
+                let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || read.get());
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
                     let PlayerDetailCx { row, rows, columns } = cx;
@@ -766,9 +866,6 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) {
                 on_mismatch.run(ConstantsMismatched { build, version: Some(parsed.model.context.version.clone()) });
             }
             let loaded = loaded_state(parsed, columns_now.get_value(), rating_now.get_value());
-            if let Some(on_title) = events.with_value(|events| events.on_title) {
-                on_title.run(loaded.title.clone());
-            }
             if awaited_results && loaded.raw_results.is_some() {
                 shell.toasts().info(t!("ui.replay.results_arrived", battle = loaded.title.clone()).into_owned());
             }
@@ -833,14 +930,16 @@ fn loaded_from_model(
     export_stem: String,
     payloads: DebugPayloads,
 ) -> Loaded {
-    let ship = model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.as_str()).unwrap_or_default();
-    let title = battle_title(ship, &model.map);
+    let own = model.rows.iter().find(|row| row.is_self);
+    let title = battle_title(own.map(|row| row.ship_name.as_str()).unwrap_or_default(), &model.map);
+    let ship = own.map(|row| TitleShip { nation: row.ship_nation.clone(), class: row.ship_class });
     let chat = std::mem::take(&mut model.chat);
     Loaded {
         title,
+        ship,
         battle_result: model.battle_result,
         own_figures: OwnFigures::from_rows(&model.rows),
-        model: RwSignal::new_local(Rc::new(model)),
+        model: ArcRwSignal::new(Rc::new(model)),
         chat: (!chat.is_empty()).then(|| Rc::from(chat)),
         raw_metadata: Rc::from(payloads.raw_metadata),
         raw_results: payloads.raw_results.map(Rc::from),

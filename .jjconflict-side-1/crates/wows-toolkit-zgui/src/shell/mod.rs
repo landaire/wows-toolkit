@@ -186,13 +186,25 @@ const CSS: &str = css!(
     }"
 );
 
-/// What dropping files or a palette entry asks the replays tab to open. Queued until the replays
-/// tab takes it, which it does as it is built and whenever one arrives.
+/// What dropping files, a palette entry or another tab asks the replays tab to do. Queued until
+/// the replays tab takes it, which it does as it is built and whenever one arrives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayRequest {
     OpenReplay(PathBuf),
     /// Lists the directory in a folder tab of the replays tab.
     OpenFolder(PathBuf),
+    /// Plays the battle back on its minimap.
+    RenderReplay(PathBuf),
+    /// Renders the battle to a video in the background and puts the file on the clipboard.
+    RenderToClipboard(PathBuf),
+}
+
+impl ReplayRequest {
+    /// Whether the replays tab comes forward for it. A clipboard render reports through messages,
+    /// so the reader stays where they asked for it.
+    const fn shows_replays(&self) -> bool {
+        !matches!(self, Self::RenderToClipboard(_))
+    }
 }
 
 /// The palette and size the window draws in, seeded from the settings once they are read.
@@ -441,10 +453,14 @@ impl Shell {
         self.held.get()
     }
 
-    /// Asks the replays tab to open `request`, and shows it.
+    /// Asks the replays tab to carry out `request`, and shows it unless the request runs in the
+    /// background.
     pub fn request_replay(self, request: ReplayRequest) {
+        let shows = request.shows_replays();
         self.replay_requests.update(|requests| requests.push(request));
-        self.select(TabKey::App(AppTab::ReplayInspector));
+        if shows {
+            self.select(TabKey::App(AppTab::ReplayInspector));
+        }
     }
 
     /// Takes every waiting request, oldest first, subscribing to the next one.
