@@ -45,6 +45,8 @@ use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::columns::default_columns;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
@@ -52,8 +54,6 @@ use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
 use super::empty_map::sample_map;
-use super::load::GameDataCache;
-use super::load::GameDataStatus;
 use super::load::spawn_parse;
 use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
@@ -587,7 +587,7 @@ impl ReplayInspectorView {
             let wows_dir = PathBuf::from(&wows_dir);
             let dump_base = wows_toolkit_config::game_data_dump_base_with_override(&game_data_cache_dir);
             cx.background_spawn(async move {
-                super::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
+                wows_toolkit_replay_data::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
             })
             .detach();
         }
@@ -601,7 +601,7 @@ impl ReplayInspectorView {
         // rather than a build load, so the listing can say which version it is
         // waiting for while the load runs.
         self.game_data_status = GameDataStatus::Loading {
-            version: super::load::installed_version(std::path::Path::new(&wows_dir))
+            version: wows_toolkit_replay_data::install::installed_version(std::path::Path::new(&wows_dir))
                 .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
         };
         self.scan_install(wows_dir.clone(), cx);
@@ -1533,7 +1533,10 @@ impl ReplayInspectorView {
                 let parsed = {
                     let game_data = game_data.clone();
                     let path = path.clone();
-                    cx.background_spawn(async move { super::load::parse_replay(&path, &game_data, None) }).await
+                    cx.background_spawn(
+                        async move { wows_toolkit_replay_data::load::parse_replay(&path, &game_data, None) },
+                    )
+                    .await
                 };
                 let stat = match parsed {
                     Ok(parsed) => parsed.session_stat,

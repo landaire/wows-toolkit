@@ -63,10 +63,9 @@ wgc-install = { workspace = true }
 # list the settings tab offers.
 rust-i18n = { workspace = true }
 wt-translations = { workspace = true }
-# vfs-mmap: load.rs builds the game VFS directly from a live install
-# (wowsunpack::game_data::build_game_vfs_for_build) to run the background
-# replay parse; implies vfs + arc + parsing. rkyv: the on-disk GameParams
-# cache (game_params::cache), shared with the egui app's identical cache file.
+# vfs-mmap: the armor viewer and the unpacker build the game VFS directly from
+# a live install (wowsunpack::game_data::build_game_vfs_for_build); implies
+# vfs + arc + parsing. rkyv: the GameParams types the shared crates cache.
 # models: armor_viewer/assets.rs's ShipAssets (ship-export data: assets.bin,
 # camo DB).
 wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv", "models"] }
@@ -144,7 +143,7 @@ dhat = { version = "0.3", optional = true }
 [features]
 # Replaces the global allocator with dhat's and samples the live heap into
 # `dhat-markers.log`. Diagnostic only; never enabled for a release.
-dhat-heap = ["dep:dhat"]
+dhat-heap = ["dep:dhat", "wows-toolkit-replay-data/dhat-heap"]
 
 # A release build has no console, so `--help`, `--version` and a refused
 # argument are written to the parent's console or shown in a message box.

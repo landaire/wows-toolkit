@@ -25,6 +25,9 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
 use wows_replays::types::ArenaId;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
+use wows_toolkit_replay_data::load::decode_constants;
 use wows_toolkit_viewmodel::match_stats;
 use wows_toolkit_viewmodel::match_stats::MatchStatsError;
 use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
@@ -33,10 +36,6 @@ use wows_toolkit_viewmodel::match_stats::build_request;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-
-use crate::replay_inspector::GameDataCache;
-use crate::replay_inspector::LoadedGameData;
-use crate::replay_inspector::load::decode_constants;
 
 /// How often the replays directory is checked for a battle in progress.
 ///
@@ -420,8 +419,9 @@ mod tests {
 
 #[cfg(test)]
 mod scan_tests {
+    use wows_toolkit_replay_data::load::GameDataCache;
+
     use super::*;
-    use crate::replay_inspector::GameDataCache;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 
     /// Splits a real replay back into the two halves the game writes during a

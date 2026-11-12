@@ -23,11 +23,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 use crate::collab::ReplayId;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
-use crate::replay_inspector::GameDataCache;
 
 /// How often the frames the session has sent are looked for.
 ///

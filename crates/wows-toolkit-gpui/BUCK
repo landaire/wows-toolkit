@@ -6,7 +6,6 @@ buildscript = workspace_buildscript(
     package = "wows-toolkit-gpui",
     version = "1.0.5",
     rustc_flags = ["--cfg=wows_buck_build"],
-    env = {"EMBEDDED_CONSTANTS": "$(location //embedded_resources:constants_json)"},
 )
 
 GPUI_DEPS = [
@@ -100,6 +99,11 @@ workspace_binary(
     ),
 )
 
+# The shared crates' heap-sampling builds, which the dhat binary links instead.
+_DHAT_VARIANTS = {
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_dhat",
+}
+
 # The same binary with dhat's tracking allocator, for comparing this port's
 # live heap against the egui app's. Name kept short: it is a path component of
 # every object file, and the longest already sits near the 260 link.exe takes.
@@ -111,7 +115,7 @@ workspace_binary(
     crate_root = "src/main.rs",
     buildscript = buildscript,
     features = ["dhat-heap"],
-    deps = GPUI_DEPS + GPUI_PLATFORM_DEPS + ["//third-party/rust:dhat"],
+    deps = [_DHAT_VARIANTS.get(d, d) for d in GPUI_DEPS] + GPUI_PLATFORM_DEPS + ["//third-party/rust:dhat"],
     rustc_flags = os_select(
         macos = [],
         linux = LINUX_GUI_RUSTC_FLAGS,

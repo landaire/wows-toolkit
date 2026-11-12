@@ -15985,11 +15985,18 @@ dependencies = [
 name = "wows-toolkit-replay-data"
 version = "0.1.0"
 dependencies = [
+ "dhat",
  "escaper",
+ "gettext",
  "jiff",
  "rust-i18n 3.1.5",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "wows-battle-world",
+ "wows-data-mgr",
  "wows-replay-insights",
  "wows-toolkit-config",
  "wows-toolkit-viewmodel",

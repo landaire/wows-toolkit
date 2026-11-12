@@ -615,7 +615,7 @@ impl UnpackerView {
             let written = cx
                 .background_spawn(async move {
                     if format.is_minimal() {
-                        let params = crate::replay_inspector::load_game_params(&vfs, build.0)
+                        let params = wows_toolkit_replay_data::load::load_game_params(&vfs, build.0)
                             .map_err(|err| GameParamsDumpError::Decode(err.to_string()))?;
                         game_params::write_value(&params, &path, format)
                     } else {
