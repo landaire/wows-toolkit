@@ -77,6 +77,7 @@ use crate::tabs::replays::browser::thumbnails::Thumbnails;
 use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::LeafRow;
 use crate::tabs::replays::browser::tree::NodeKey;
+use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-replay-listing";
 
@@ -462,19 +463,6 @@ fn rating_style(category: PersonalRatingCategory) -> String {
         "color: var(--wt-pr-{band}-text, #{text:06x}); \
          background-color: color-mix(in srgb, var(--wt-pr-{band}-hue, #{hue:06x}) 18%, transparent);"
     )
-}
-
-const fn rating_band_name(category: PersonalRatingCategory) -> &'static str {
-    match category {
-        PersonalRatingCategory::Bad => "bad",
-        PersonalRatingCategory::BelowAverage => "below-average",
-        PersonalRatingCategory::Average => "average",
-        PersonalRatingCategory::Good => "good",
-        PersonalRatingCategory::VeryGood => "very-good",
-        PersonalRatingCategory::Great => "great",
-        PersonalRatingCategory::Unicum => "unicum",
-        PersonalRatingCategory::SuperUnicum => "super-unicum",
-    }
 }
 
 /// The menu a secondary click on `key` opens.
