@@ -1887,11 +1887,21 @@ fn extract_mounts(ship_data: &pickled::Dict, component_name: &str) -> Vec<MountP
 
             let mount_point =
                 MountPoint::with_armor(key_str.clone(), model_path, mount_armor, species, pitch_dead_zones)
-                    .with_miscs(misc_filter, custom_miscs);
+                    .with_miscs(misc_filter, custom_miscs)
+                    .with_param(read_mount_param(&mount_inner));
 
             Some(with_aiming(mount_point, &mount_inner))
         })
         .collect()
+}
+
+/// The `id`, `index` and `name` a mount carries from its own GameParams entry.
+fn read_mount_param(mount: &pickled::Dict) -> Option<MountParam> {
+    let id = *mount.get(&pk(keys::PARAM_ID))?.i64_ref()?;
+    let index = read_string(mount, keys::PARAM_INDEX)?;
+    let name = read_string(mount, keys::PARAM_NAME)?;
+
+    Some(MountParam::new(GameParamId::from(id), index, name))
 }
 
 /// Parse the trailing decimal digits of a hardpoint name.
@@ -4505,6 +4515,30 @@ mod camera_tests {
         assert_eq!(turret.can_fire_at(Degrees::new(-150.0)), Some(true));
         assert_eq!(turret.can_fire_at(Degrees::new(0.0)), Some(true));
         assert_eq!(turret.can_fire_at(Degrees::new(180.0)), Some(false));
+    }
+
+    #[test]
+    fn mounts_carry_their_own_game_params_entry() {
+        let artillery = dict(vec![
+            (
+                pk("HP_AGM_1"),
+                dict(vec![
+                    (pk("model"), sv("content/turret.model")),
+                    (pk("id"), iv(4258916336)),
+                    (pk("index"), sv("PAGM034")),
+                    (pk("name"), sv("PAGM034_16in50_Mk7")),
+                ]),
+            ),
+            (pk("HP_AGM_2"), dict(vec![(pk("model"), sv("content/turret.model"))])),
+        ]);
+        let ship_data: pickled::Dict = vec![(pk("A_Artillery"), artillery)].into_iter().collect();
+        let mounts = extract_mounts(&ship_data, "A_Artillery");
+        let mount = |name: &str| mounts.iter().find(|mount| mount.hp_name() == name).expect("mount parsed");
+
+        let expected =
+            MountParam::new(GameParamId::from(4258916336u64), "PAGM034".to_owned(), "PAGM034_16in50_Mk7".to_owned());
+        assert_eq!(mount("HP_AGM_1").param(), Some(&expected));
+        assert_eq!(mount("HP_AGM_2").param(), None);
     }
 
     /// Fixed tubes whose torpedoes turn after launch fire across the turn,

@@ -982,6 +982,9 @@ pub struct MountPoint {
     /// `"dock"` -> misc names). The armor viewer applies the `battle` preset.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "HashMap::is_empty"))]
     custom_miscs: HashMap<String, Vec<String>>,
+    /// The mount's own GameParams entry. `None` when the mount lists none.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    param: Option<MountParam>,
 }
 
 impl MountPoint {
@@ -999,6 +1002,7 @@ impl MountPoint {
             ammo: Vec::new(),
             misc_filter: Vec::new(),
             custom_miscs: HashMap::new(),
+            param: None,
         }
     }
 
@@ -1022,6 +1026,7 @@ impl MountPoint {
             ammo: Vec::new(),
             misc_filter: Vec::new(),
             custom_miscs: HashMap::new(),
+            param: None,
         }
     }
 
@@ -1030,6 +1035,16 @@ impl MountPoint {
         self.misc_filter = misc_filter;
         self.custom_miscs = custom_miscs;
         self
+    }
+
+    /// Attach the mount's own GameParams entry.
+    pub fn with_param(mut self, param: Option<MountParam>) -> Self {
+        self.param = param;
+        self
+    }
+
+    pub fn param(&self) -> Option<&MountParam> {
+        self.param.as_ref()
     }
 
     /// Attach aiming data: yaw limits, yaw dead zones, the start maneuver
@@ -1140,6 +1155,37 @@ impl MountPoint {
             let [yaw_min, yaw_max, pitch_min, _pitch_max] = *dz;
             (yaw_deg >= yaw_min && yaw_deg <= yaw_max).then_some(pitch_min)
         })
+    }
+}
+
+/// The GameParams entry a mount is built from, e.g. `PAGM034_16in50_Mk7`.
+/// The game translates gun and torpedo mounts under `IDS_<NAME>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct MountParam {
+    id: GameParamId,
+    /// e.g. `PAGM034`.
+    index: String,
+    /// e.g. `PAGM034_16in50_Mk7`.
+    name: String,
+}
+
+impl MountParam {
+    pub fn new(id: GameParamId, index: String, name: String) -> Self {
+        Self { id, index, name }
+    }
+
+    pub fn id(&self) -> GameParamId {
+        self.id
+    }
+
+    pub fn index(&self) -> &str {
+        &self.index
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
