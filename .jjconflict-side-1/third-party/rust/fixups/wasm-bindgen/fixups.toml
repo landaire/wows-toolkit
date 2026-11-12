@@ -1,0 +1,3 @@
+# Emits the wbg_diagnostic and wbg_reference_types cfgs from the rustc version
+# and the target's features.
+buildscript.run = true

@@ -42,11 +42,16 @@ use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
 use wows_toolkit_viewmodel::stats::chart::line_chart_series;
+use wows_toolkit_viewmodel::stats::chart::selectable_stats;
 use wows_toolkit_viewmodel::stats::chart::ships_played;
+use wows_toolkit_viewmodel::stats::chart::value_axis_label;
 use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
+use wows_toolkit_viewmodel::stats::plot::Plot;
+use wows_toolkit_viewmodel::stats::plot::PlotView;
+use wows_toolkit_viewmodel::stats::plot::image;
 
 use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
@@ -56,8 +61,6 @@ use crate::text_filter::TypedQuery;
 use crate::ui::selectable;
 
 use super::plot;
-use super::plot::PlotView;
-use super::plot_image;
 
 /// The settings menu's box. Wide enough for a ship name, and no wider than a
 /// menu needs to be; a session spanning dozens of ships scrolls rather than
@@ -320,17 +323,8 @@ impl StatsChartPanel {
     }
 
     /// Statistics this pane can plot.
-    ///
-    /// Personal rating is offered only once the expected-values table is
-    /// cached; without it there is nothing to rate against. Win rate and
-    /// personal rating carry no meaning for a single game, so a line plots
-    /// them only as a running figure -- the same rule the egui pane applies.
     fn selectable_stats(&self) -> Vec<ChartableStat> {
-        ChartableStat::ALL
-            .into_iter()
-            .filter(|stat| !stat.requires_personal_rating() || self.can_plot_personal_rating())
-            .filter(|stat| self.mode == ChartMode::Bar || stat.is_per_game() || self.running || self.combined)
-            .collect()
+        selectable_stats(self.mode, self.running, self.combined, self.can_plot_personal_rating())
     }
 
     /// The lines to draw, empty in bar mode.
@@ -359,8 +353,6 @@ impl StatsChartPanel {
         bar_chart_series(&ships, self.stat, &self.selected_ships, self.personal_rating.as_deref())
     }
 
-    /// What the value axis is called: the statistic, plus how it is being
-    /// read when that is not the raw per-game figure.
     /// Draws the chart again into an image and puts it on the clipboard.
     ///
     /// Drawn rather than captured: GPUI will not hand back a rendered window
@@ -387,7 +379,7 @@ impl StatsChartPanel {
             t!("ui.stats.axis_game").into_owned()
         };
         let value_label = self.value_label();
-        let plot = plot::Plot {
+        let plot = Plot {
             series: &series,
             bars: &bars,
             x_label: &x_label,
@@ -396,10 +388,9 @@ impl StatsChartPanel {
             view: self.view,
         };
 
-        let theme = cx.theme();
-        let colors = plot::Colors { axis: theme.border, grid: theme.border.opacity(0.4), text: theme.muted_foreground };
-
-        let Some((width, height, pixels)) = plot_image::render(&plot, colors, width, height) else {
+        let Some(image::PlotImage { width, height, rgba: pixels }) =
+            image::render(&plot, plot::colors(cx), image::DEFAULT_BACKGROUND, width, height)
+        else {
             crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
             return;
         };
@@ -418,13 +409,7 @@ impl StatsChartPanel {
     }
 
     fn value_label(&self) -> String {
-        if self.mode == ChartMode::Bar {
-            return t!("ui.stats.series_average", stat = self.stat.label()).into_owned();
-        }
-        if self.running || self.combined {
-            return t!("ui.stats.series_running", stat = self.stat.label()).into_owned();
-        }
-        self.stat.label().to_string()
+        value_axis_label(self.stat, self.mode, self.running, self.combined)
     }
 
     fn tab_title(&self) -> String {
@@ -537,7 +522,7 @@ impl StatsChartPanel {
 
     fn drag_view(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(last) = self.drag else { return };
-        self.view.drag(event.position.x - last.x, event.position.y - last.y);
+        self.view.drag((event.position.x - last.x).as_f32(), (event.position.y - last.y).as_f32());
         self.drag = Some(event.position);
         cx.notify();
     }
@@ -553,7 +538,7 @@ impl StatsChartPanel {
         if delta == 0.0 {
             return;
         }
-        self.view.zoom_about(if delta > 0.0 { 1.1 } else { 1.0 / 1.1 }, event.position);
+        self.view.wheel(delta, plot::plot_point(event.position));
         cx.notify();
     }
 
@@ -953,7 +938,7 @@ impl Render for StatsChartPanel {
             },
             move |bounds, _prepaint, window, cx| {
                 plot::paint(
-                    &plot::Plot {
+                    &Plot {
                         series: &series,
                         bars: &bars,
                         x_label: &x_label,

@@ -1,0 +1,23 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 10
+payload:
+  Position:
+    direction:
+      x: 0.000000000000000000000000000000000000000005605193857299268
+      y: 0
+      z: 0.000000000000000000000000000000000000000022422176727661398
+    is_on_ground: true
+    pid: 433444
+    position:
+      x: 714.1787109375
+      y: 0
+      z: -503.23028564453125
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: -0.22702915966510773
+    space_id: 0

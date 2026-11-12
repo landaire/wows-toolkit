@@ -1,0 +1,34 @@
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
+
+HARDENING_DEPS = [
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+# The policies, the module inventory and the text-service probe are all Windows
+# APIs; on every other platform this crate is the decision and the report alone.
+# Kept apart from the list above because the test target filters that list, and a
+# select cannot be iterated.
+HARDENING_PLATFORM_DEPS = os_select(
+    macos = [],
+    linux = [],
+    windows = ["//third-party/rust:windows-sys"],
+)
+
+workspace_library(
+    name = "wows_toolkit_hardening",
+    crate = "wows_toolkit_hardening",
+    package = "wows-toolkit-hardening",
+    version = "0.1.0",
+    deps = HARDENING_DEPS + HARDENING_PLATFORM_DEPS,
+)
+
+workspace_test(
+    name = "wows_toolkit_hardening_test",
+    crate = "wows_toolkit_hardening",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-hardening",
+    version = "0.1.0",
+    deps = HARDENING_DEPS + HARDENING_PLATFORM_DEPS + ["//third-party/rust:tempfile"],
+)

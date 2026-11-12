@@ -1,0 +1,129 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: resolved
+---
+- query: Schlieffen
+  ship: "T10 Schlieffen (PGSB210, TechTree)"
+  interpretations:
+    - input: Schlieffen
+      resolved: Schlieffen
+      kind: ship
+      method: variant
+      alternatives:
+        - "Schlieffen (co-op bot copy): T10 battleship, PGSB920"
+- query: Schlieffen co-op
+  ship: "T10 Schlieffen (PGSB920, CoopBot)"
+  interpretations:
+    - input: Schlieffen co-op
+      resolved: Schlieffen
+      kind: ship
+      method: variant
+      alternatives:
+        - "Schlieffen (tech tree ship): T10 battleship, PGSB210"
+- query: PGSB920
+  ship: "T10 Schlieffen (PGSB920, CoopBot)"
+  interpretations: []
+- query: Essex
+  ship: "T10 Essex (PASA020, TechTree)"
+  interpretations:
+    - input: Essex
+      resolved: Essex
+      kind: ship
+      method: variant
+      alternatives:
+        - "Essex (old) (old version): T9 aircraft_carrier, PASA013"
+        - "Essex (removed ship): T10 aircraft_carrier, PASA910"
+- query: Essex (old)
+  ship: "T9 Essex (old) (PASA013, Old)"
+  interpretations: []
+- query: old Essex
+  ship: "T9 Essex (old) (PASA013, Old)"
+  interpretations:
+    - input: old Essex
+      resolved: Essex (old)
+      kind: ship
+      method: variant
+      alternatives:
+        - "Essex (tech tree ship): T10 aircraft_carrier, PASA020"
+        - "Essex (removed ship): T10 aircraft_carrier, PASA910"
+- query: T9 Essex
+  ship: "T9 Essex (old) (PASA013, Old)"
+  interpretations:
+    - input: T9 Essex
+      resolved: Essex (old)
+      kind: ship
+      method: variant
+      alternatives:
+        - "Essex (tech tree ship): T10 aircraft_carrier, PASA020"
+        - "Essex (removed ship): T10 aircraft_carrier, PASA910"
+- query: Zao
+  ship: "T10 Zaō (PJSC034, TechTree)"
+  interpretations: []
+- query: "[Zao]"
+  ship: "T10 [Zaō] (PJSC934, ClanRental)"
+  interpretations: []
+- query: clan Zao
+  ship: "T10 [Zaō] (PJSC934, ClanRental)"
+  interpretations:
+    - input: clan Zao
+      resolved: "[Zaō]"
+      kind: ship
+      method: variant
+      alternatives:
+        - "Zaō (tech tree ship): T10 cruiser, PJSC034"
+- query: Vrijheid
+  ship: "T8 Vrijheid (PHSC708, Premium)"
+  interpretations:
+    - input: Vrijheid
+      resolved: Vrijheid
+      kind: ship
+      method: variant
+      alternatives:
+        - "Vrijheid (test ship): T10 cruiser, PHSC990"
+- query: test Vrijheid
+  ship: "T10 Vrijheid (PHSC990, Test)"
+  interpretations:
+    - input: test Vrijheid
+      resolved: Vrijheid
+      kind: ship
+      method: variant
+      alternatives:
+        - "Vrijheid (premium or special ship): T8 cruiser, PHSC708"
+- query: Kitakami
+  ship: "T10 Kitakami (PJSC610, Premium)"
+  interpretations:
+    - input: Kitakami
+      resolved: Kitakami
+      kind: ship
+      method: variant
+      alternatives:
+        - "Kitakami (removed ship): T10 cruiser, PJSC014"
+- query: old Kitakami
+  ship: "T10 Kitakami (PJSC014, Removed)"
+  interpretations:
+    - input: old Kitakami
+      resolved: Kitakami
+      kind: ship
+      method: variant
+      alternatives:
+        - "Kitakami (premium or special ship): T10 cruiser, PJSC610"
+- query: BA Montana
+  ship: "T10 BA Montana (PASB820, Premium)"
+  interpretations: []
+- query: Satsuma +
+  ship: "T11 Satsuma + (PJSB891, Unavailable)"
+  interpretations: []
+- query: Test Sub 1
+  ship: "T10 Test Sub 1 (PRSS999, Removed)"
+  interpretations: []
+- query: test sub
+  ship: "T10 Test Sub 1 (PRSS999, Removed)"
+  interpretations:
+    - input: test sub
+      resolved: Test Sub 1
+      kind: ship
+      method: partial
+- query: old Montana
+  error: "\"old Montana\" names Montana, which has no old version; leave out the qualifier or name the ship by its index"
+- query: T8 old Baltimore
+  error: "\"T8 old Baltimore\" names Baltimore (old), which is tier 9, not tier 8"

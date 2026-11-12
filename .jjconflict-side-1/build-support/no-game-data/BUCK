@@ -1,0 +1,5 @@
+filegroup(
+    name = "versions_toml",
+    srcs = ["versions.toml"],
+    visibility = ["PUBLIC"],
+)

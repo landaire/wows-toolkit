@@ -1,0 +1,12 @@
+# The scripts //ci runs.
+[
+    export_file(
+        name = script,
+        visibility = ["//ci/..."],
+    )
+    for script in [
+        "check-buck2-pins.py",
+        "check-publish-dependencies.py",
+        "lint.nu",
+    ]
+]
