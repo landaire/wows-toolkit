@@ -168,6 +168,8 @@ pub enum ModifierKey {
     /// Ctrl, or Cmd on macOS.
     Primary,
     Shift,
+    /// Alt, or Option on macOS.
+    Alt,
 }
 
 impl ModifierKey {
@@ -178,6 +180,8 @@ impl ModifierKey {
             Self::Primary if mac => "Cmd",
             Self::Primary => "Ctrl",
             Self::Shift => "Shift",
+            Self::Alt if mac => "Option",
+            Self::Alt => "Alt",
         }
     }
 
@@ -185,6 +189,7 @@ impl ModifierKey {
         match self {
             Self::Primary => modifiers.primary(),
             Self::Shift => modifiers.shift(),
+            Self::Alt => modifiers.alt(),
         }
     }
 }
