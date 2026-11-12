@@ -91,7 +91,7 @@ fn offer_test_modes(shell: Shell) {
 }
 
 /// Asks for a replay and opens it in the replays tab.
-fn open_replay_file(shell: Shell) {
+pub fn open_replay_file(shell: Shell) {
     let asked = wows_toolkit_services::dialog::pick_file(None, Some(wows_toolkit_services::dialog::REPLAYS));
     // Detached: the palette that asked has closed before the reader answers.
     spawn_detached(async move {

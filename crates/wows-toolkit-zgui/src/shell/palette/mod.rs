@@ -44,6 +44,7 @@ use crate::shell::Shell;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
 
+pub use crate::shell::palette::builtin::open_replay_file;
 pub use crate::shell::palette::view::CommandPaletteProps;
 
 /// One command of the root list.
@@ -522,7 +523,7 @@ impl Default for PaletteControl {
 
 /// Awaits a file dialog's answer. A dialog that could not be opened is logged and reported, and
 /// answers `None` like a dismissed one.
-async fn chosen(shell: Shell, asked: impl Future<Output = Answer>) -> Option<PathBuf> {
+pub(crate) async fn chosen(shell: Shell, asked: impl Future<Output = Answer>) -> Option<PathBuf> {
     // A closure rather than a match: off Linux the error type is empty, and an arm for it would be
     // an unreachable pattern.
     asked.await.unwrap_or_else(|err| {

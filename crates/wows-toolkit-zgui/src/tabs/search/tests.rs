@@ -32,7 +32,7 @@ pub(super) fn publish(search: Search) {
     BUILT.with(|built| built.set(Some(search)));
 }
 
-fn built() -> Search {
+pub(crate) fn built() -> Search {
     BUILT.with(Cell::get).expect("the Search tab was built")
 }
 

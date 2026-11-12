@@ -7,7 +7,7 @@
 mod bar;
 mod model;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::rc::Rc;
 

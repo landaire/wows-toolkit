@@ -81,6 +81,7 @@ use crate::shell::palette::modes;
 use crate::tabs::replays::browser::BrowserEvents;
 use crate::tabs::replays::browser::ReplayBrowserEvent;
 use crate::tabs::replays::browser::actions;
+use crate::tabs::replays::browser::actions::BrowserWork;
 use crate::tabs::replays::browser::header::ListingHeaderProps;
 use crate::tabs::replays::browser::listing::Listing;
 use crate::tabs::replays::browser::listing::ListingEvent;
@@ -332,6 +333,8 @@ pub struct BrowserControl {
     /// The look under way for each chosen tab's directory.
     checks: StoredValue<HashMap<FolderId, CheckId>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
+    /// The index passes, forced re-indexing and contributing.
+    pub(super) work: BrowserWork,
     shell: Shell,
 }
 
@@ -363,6 +366,7 @@ impl BrowserControl {
             next_check: StoredValue::new_local(0),
             checks: StoredValue::new_local(HashMap::new()),
             owner: StoredValue::new_local(Owner::current().expect("the control is made inside a component")),
+            work: BrowserWork::new(),
             shell,
         };
         control.follow_settings();
@@ -642,6 +646,8 @@ impl BrowserControl {
         }
         if present {
             actions::index_folder(self, id);
+        } else {
+            actions::folder_closed(self, id);
         }
     }
 
@@ -822,7 +828,6 @@ impl BrowserControl {
         if tab.pinned {
             self.save_pinned_folders();
         }
-        actions::folder_closed(self, id);
     }
 
     /// Reads the tab's directory again: a chosen one is looked for first.
@@ -990,11 +995,12 @@ pub(super) fn FolderPanels(control: BrowserControl, events: BrowserEvents) -> im
     install_stylesheet(SHEET, CSS);
     let motion = motion_preference();
     let notice = move || folder_notice(control);
-    let pane_events = StoredValue::new_local(events);
+    actions::adopt_events(control, events.clone());
+    let pane_events = StoredValue::new_local(events.clone());
 
     view! {
         column(class = "wt-browser", attr:data-testid = "replay-browser") {
-            ListingHeader(control = control)
+            ListingHeader(control = control, events = events)
             FolderStrip(control = control, motion = motion)
             column(class = "wt-folder-notice-host") {{notice}}
             for tab in move || control.folders.get(), key = |tab: &FolderTab| tab.id {

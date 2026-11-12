@@ -61,6 +61,9 @@ pub enum ReplayBrowserEvent {
     BuildsMissing(Vec<MissingBuild>),
     /// The reader asked which builds the listed replays need.
     CheckGameData(Vec<MissingBuild>),
+    /// A result mapping was imported for `build`, so the open replays read through it are worth
+    /// reading again.
+    ConstantsImported { build: u32 },
 }
 
 /// Where a listing sends what the reader asks of it.
