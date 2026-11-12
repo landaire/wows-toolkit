@@ -45,6 +45,9 @@ use wows_toolkit_viewmodel::stats::table as stats_table;
 
 use crate::icons;
 use crate::replay_inspector::icons::IconCache;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 const LABEL_COLUMN_WIDTH: Pixels = px(140.);
 const CELL_COLUMN_WIDTH: Pixels = px(110.);
@@ -66,6 +69,8 @@ struct ShipSection {
     /// name, which is not unique across ships.
     ship_id: GameParamId,
     ship: SharedString,
+    /// `ship` folded for the ship search.
+    ship_key: FilterKey,
     /// The collapsed line: record, win rate, and the rating when there is one.
     header: SharedString,
     performance: PerformanceInfo,
@@ -221,6 +226,7 @@ impl StatsShipsPanel {
                 ShipSection {
                     ship_id,
                     ship: SharedString::from(ship.to_string()),
+                    ship_key: FilterKey::new(ship),
                     markdown: SharedString::from(stats_table::to_markdown(
                         &header,
                         &rows,
@@ -325,14 +331,10 @@ impl Render for StatsShipsPanel {
         let border = cx.theme().border;
         let entity = cx.entity();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
-        let visible_sections: Vec<_> = self
-            .sections
-            .iter()
-            .filter(|section| {
-                normalized_query.is_empty() || super::normalize_ship_search(&section.ship).contains(&normalized_query)
-            })
-            .collect();
+        let filter = FilterQuery::new(&ship_query);
+        // The sections keep their chosen order; the search only narrows them.
+        let visible_sections: Vec<_> =
+            self.sections.iter().filter(|section| filter.score(&section.ship_key).is_some()).collect();
         let visible_count = visible_sections.len();
         let total_count = self.sections.len();
 
@@ -416,7 +418,7 @@ impl Render for StatsShipsPanel {
                                         .min_w_0()
                                         .flex_1()
                                         .gap_1()
-                                        .child(div().text_sm().truncate().child(section.ship.clone()))
+                                        .child(div().text_sm().truncate().child(filter.marked(section.ship.clone())))
                                         .child(record),
                                 ),
                         )
@@ -780,6 +782,50 @@ mod tests {
                 assert!(section.csv.contains("Spotting Damage,10,000,10,000,10,000,10,000"));
             })
             .expect("the test window stays open");
+    }
+
+    /// The search folds accents and skips letters inside a word, keeps the
+    /// sections in their order, and marks the letters it matched.
+    #[gpui_kit::test]
+    fn the_ship_search_matches_loosely_and_marks_the_names(cx: &mut TestAppContext) {
+        const SMALAND: u64 = 3;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
+        let games = [
+            game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
+            game("Scharnhorst", SHIMA, "2026-02-13 15:00:00", 70_000, 1, true),
+            game("Sm\u{e5}land", SMALAND, "2026-02-13 16:00:00", 50_000, 0, false),
+        ];
+        window
+            .update(cx, |panel, _window, cx| {
+                let refs: Vec<&PerGameStat> = games.iter().collect();
+                panel.set_games(&refs, cx);
+            })
+            .expect("the test window stays open");
+
+        let search = |query: &'static str, cx: &mut TestAppContext| {
+            window
+                .update(cx, |panel, window, cx| {
+                    panel.ship_search.update(cx, |state, cx| state.set_value(query, window, cx));
+                })
+                .expect("the test window stays open");
+            crate::text_filter::take_marks();
+            cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
+                .expect("the test window stays open");
+
+            crate::text_filter::take_marks()
+        };
+
+        let drawn = search("shrnhst", cx);
+        assert_eq!(drawn, vec![("Scharnhorst".to_string(), vec![0..1, 2..3, 4..7, 9..11])]);
+
+        let drawn = search("smaland", cx);
+        assert_eq!(drawn, vec![("Sm\u{e5}land".to_string(), std::iter::once(0..8).collect::<Vec<_>>())]);
+
+        let drawn = search("a", cx);
+        let names: Vec<&str> = drawn.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, vec!["Sm\u{e5}land", "Scharnhorst", "Yamato"], "the sections keep their order");
     }
 
     /// The expected-values table can land after the session; the sections

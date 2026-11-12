@@ -46,6 +46,9 @@ serde_json.workspace = true
 semver = "1.0"
 thiserror.workspace = true
 thousands = "0.2.0"
+# ASCII folding for typed-text filters, the version the gpui and egui apps
+# already pin.
+unidecode = "0.3"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }

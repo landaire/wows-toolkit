@@ -34,6 +34,8 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::search_pills::StructuralEdit;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
@@ -1101,12 +1103,19 @@ impl SearchView {
             return self.completions.clone();
         }
         let text = self.completion_source.clone();
+        // A player or ship lookup is narrowed by the typed value; a catalogue
+        // is offered entire, so nothing in it is marked.
+        let typed = match &self.value_request {
+            Some(ValueRequest::Players { needle } | ValueRequest::Ships { needle }) => FilterQuery::new(needle),
+            Some(ValueRequest::Sources | ValueRequest::Maps) | None => FilterQuery::default(),
+        };
         self.value_options
             .iter()
             .map(|option| crate::search_pills::Completion {
                 label: option.label.clone(),
                 context: "value".to_string(),
                 replacement: suggest::replace_active_value(&text, &option.token),
+                query: typed.clone(),
             })
             .collect()
     }
@@ -2034,7 +2043,7 @@ impl Render for SearchView {
                     .rounded(theme.radius)
                     .when(highlighted, |this| this.bg(accent))
                     .hover(|this| this.bg(accent))
-                    .child(div().text_sm().child(completion.label.clone()))
+                    .child(div().text_sm().child(completion.query.marked(completion.label.clone())))
                     .child(div().text_xs().text_color(muted).child(completion.context.clone()))
                     .on_click(cx.listener(move |this, _event, window, cx| {
                         this.take_completion(replacement.clone(), Offer::WhatFollows, window, cx);
@@ -2772,5 +2781,44 @@ mod tests {
             );
         })
         .expect("the window is open");
+    }
+
+    /// A completion row marks what the typed fragment matched, and a player
+    /// row marks what the typed value matched, accents folded.
+    #[gpui_kit::test]
+    fn a_completion_row_marks_the_letters_that_matched(cx: &mut TestAppContext) {
+        use super::FilterQuery;
+        use super::ValueOption;
+        use super::ValueRequest;
+        use crate::search_pills::Completion;
+
+        let window = open_with_one_hit(cx);
+        window
+            .update(cx, |view, _window, _cx| {
+                view.completions = vec![Completion {
+                    label: "Enemy damage".to_string(),
+                    context: "player".to_string(),
+                    replacement: "enemy.damage:".to_string(),
+                    query: FilterQuery::new("en dmg"),
+                }];
+                view.completions_open = true;
+            })
+            .expect("the window is open");
+
+        crate::text_filter::take_marks();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        assert_eq!(crate::text_filter::marks_for("Enemy damage"), Some(vec![0..2, 6..7, 8..9, 10..11]));
+
+        window
+            .update(cx, |view, _window, _cx| {
+                view.value_request = Some(ValueRequest::Players { needle: "smaland".to_string() });
+                view.value_options =
+                    vec![ValueOption { label: "Sm\u{e5}land_fan".to_string(), token: "1234".to_string() }];
+            })
+            .expect("the window is open");
+
+        crate::text_filter::take_marks();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        assert_eq!(crate::text_filter::marks_for("Sm\u{e5}land_fan"), Some(std::iter::once(0..8).collect::<Vec<_>>()));
     }
 }

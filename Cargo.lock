@@ -16005,6 +16005,7 @@ dependencies = [
  "thousands",
  "tokio",
  "tracing",
+ "unidecode",
  "windows-registry 0.6.1",
  "wows-replay-insights",
  "wows-toolkit-config",

@@ -1,12 +1,14 @@
 //! The command palette: everything the window can do, by name.
 //!
 //! Ports the egui app's `ui/command_palette.rs`, which opens on ctrl+k or
-//! ctrl+p. The root list is built once and `Command` filters it. Some root
+//! ctrl+p. The root list is built once and filtered here as the reader types,
+//! as is every second layer held in memory. Some root
 //! entries open a second layer (`ModeDialog`) that queries the replay index,
 //! filters the ship catalogue, lists the replay listing's game versions, or
 //! lists the recently opened replay directories as the reader types; Escape,
 //! or Backspace in an empty field, returns to the root.
 
+use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -19,6 +21,7 @@ use gpui_kit::IntoElement;
 use gpui_kit::KeyDownEvent;
 use gpui_kit::ParentElement as _;
 use gpui_kit::Render;
+use gpui_kit::SharedString;
 use gpui_kit::Styled as _;
 use gpui_kit::Subscription;
 use gpui_kit::Task;
@@ -51,10 +54,14 @@ use crate::armor_viewer::catalog::species_name;
 use crate::armor_viewer::catalog::tier_roman;
 use crate::force_reindex::ReindexScope;
 use crate::force_reindex::VersionCount;
+use crate::force_reindex::version_said;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::shown_path;
 use crate::runtime;
 use crate::settings_store;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::highlighted_text;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 /// What confirming an entry asks the window to do.
@@ -169,15 +176,15 @@ pub struct PaletteEntry {
 pub struct ArmorShipRow {
     param_index: String,
     display_name: String,
-    /// The name as `stats::normalize_ship_search` folds it.
-    search_name: String,
+    /// The display name folded for the filter.
+    key: FilterKey,
     /// The name with tier, class and nation, which is what the row shows.
     label: String,
 }
 
 impl ArmorShipRow {
     pub fn new(param_index: String, display_name: String, tier: u32, species: Species, nation: &str) -> Self {
-        let search_name = crate::stats::normalize_ship_search(&display_name);
+        let key = FilterKey::new(&display_name);
         let label = t!(
             "ui.palette.armor_ship_row",
             name = display_name,
@@ -186,7 +193,7 @@ impl ArmorShipRow {
             nation = nation
         )
         .into_owned();
-        Self { param_index, display_name, search_name, label }
+        Self { param_index, display_name, key, label }
     }
 }
 
@@ -209,52 +216,13 @@ pub fn armor_ship_rows(catalog: &ShipCatalog) -> Vec<ArmorShipRow> {
     rows
 }
 
-/// How closely a folded ship name matches the folded query. Ordered best
-/// first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ShipMatch {
-    Exact,
-    Prefix,
-    /// The query starts a later word of the name ("moines" in "des moines").
-    WordPrefix,
-    Contains,
-    /// The query's letters appear in order ("dsmns" in "des moines").
-    Subsequence,
-}
-
-fn ship_match(name: &str, needle: &str) -> Option<ShipMatch> {
-    if name == needle {
-        return Some(ShipMatch::Exact);
-    }
-    if name.starts_with(needle) {
-        return Some(ShipMatch::Prefix);
-    }
-    let mut found = name.match_indices(needle).peekable();
-    if found.peek().is_some() {
-        let word_start =
-            found.any(|(at, _)| name[..at].chars().next_back().is_some_and(|before| !before.is_alphanumeric()));
-        return Some(if word_start { ShipMatch::WordPrefix } else { ShipMatch::Contains });
-    }
-    let mut rest = name.chars();
-    let subsequence =
-        needle.chars().filter(|c| !c.is_whitespace()).all(|wanted| rest.by_ref().any(|have| have == wanted));
-    subsequence.then_some(ShipMatch::Subsequence)
-}
-
-/// The ship layer's rows for `query`: every ship when it is empty, else the
-/// matches, best first.
-pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntry> {
-    let needle = crate::stats::normalize_ship_search(query);
-    let mut matched: Vec<(ShipMatch, &ArmorShipRow)> = if needle.is_empty() {
-        rows.iter().map(|row| (ShipMatch::Exact, row)).collect()
-    } else {
-        rows.iter().filter_map(|row| ship_match(&row.search_name, &needle).map(|rank| (rank, row))).collect()
-    };
-    // Stable, so equal matches keep the catalogue's order.
-    matched.sort_by_key(|(rank, _)| *rank);
-    matched
+/// The ship layer's rows for `query`: every ship in catalogue order when it
+/// is inactive, else the matches by name, best first.
+pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &FilterQuery) -> Vec<PaletteEntry> {
+    query
+        .rank(rows, |row| &row.key)
         .into_iter()
-        .map(|(_, row)| PaletteEntry {
+        .map(|row| PaletteEntry {
             label: row.label.clone(),
             action: PaletteAction::ViewArmor {
                 param_index: row.param_index.clone(),
@@ -264,18 +232,20 @@ pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntr
         .collect()
 }
 
-/// The version layer's rows for `query`: every version, newest first, with
-/// the ones whose `major.minor.patch` does not contain the query left out.
-pub fn version_entries(rows: &[VersionCount], query: &str) -> Vec<PaletteEntry> {
-    let needle = query.trim();
-    rows.iter()
-        .map(|row| (crate::force_reindex::version_said(&row.version), row))
-        .filter(|(said, _)| said.contains(needle))
-        .map(|(said, row)| PaletteEntry {
+/// The version layer's rows for `query`: every version newest first when it
+/// is inactive, else the versions whose `major.minor.patch` matches, best
+/// first.
+pub fn version_entries(rows: &[VersionCount], query: &FilterQuery) -> Vec<PaletteEntry> {
+    let keyed = rows.iter().map(|row| {
+        let said = version_said(&row.version);
+        let entry = PaletteEntry {
             label: t!("ui.reindex.version_row", version = said, count = row.replays).into_owned(),
             action: PaletteAction::ForceReindex(ReindexScope::Version(row.version)),
-        })
-        .collect()
+        };
+        (FilterKey::new(&said), entry)
+    });
+
+    query.rank(keyed, |(key, _)| key).into_iter().map(|(_, entry)| entry).collect()
 }
 
 /// Whether a recent directory is still there, as far as the layer knows.
@@ -313,19 +283,17 @@ fn folder_label(path: &Path) -> String {
 }
 
 /// The directory layer's rows for `query`: "Browse..." first, then the
-/// recently opened directories whose name or path contains the query, in the
-/// order they were opened, most recent first.
-pub fn folder_entries(rows: &[FolderRow], query: &str) -> Vec<PaletteEntry> {
-    let needle = query.trim().to_lowercase();
+/// recently opened directories, most recent first when the query is
+/// inactive, else those whose shown path matches, best first.
+pub fn folder_entries(rows: &[FolderRow], query: &FilterQuery) -> Vec<PaletteEntry> {
     let browse =
         PaletteEntry { label: t!("ui.replay_folders.browse").into_owned(), action: PaletteAction::BrowseReplayFolder };
-    let recent = rows
-        .iter()
-        .filter(|row| needle.is_empty() || shown_path(&row.path).to_lowercase().contains(&needle))
-        .map(|row| PaletteEntry {
-            label: folder_label(&row.path),
-            action: PaletteAction::OpenReplayFolder(row.path.clone()),
-        });
+    let keyed = rows.iter().map(|row| {
+        let entry =
+            PaletteEntry { label: folder_label(&row.path), action: PaletteAction::OpenReplayFolder(row.path.clone()) };
+        (FilterKey::new(&shown_path(&row.path)), entry)
+    });
+    let recent = query.rank(keyed, |(key, _)| key).into_iter().map(|(_, entry)| entry);
 
     std::iter::once(browse).chain(recent).collect()
 }
@@ -333,17 +301,21 @@ pub fn folder_entries(rows: &[FolderRow], query: &str) -> Vec<PaletteEntry> {
 /// The directory layer's rows as the component draws them: the name, with
 /// the whole path dimmed after it, and the row dimmed and marked when the
 /// directory is gone.
-fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow]) -> Vec<CommandItem> {
+fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow], query: &FilterQuery) -> Vec<CommandItem> {
     entries
         .iter()
         .enumerate()
         .map(|(index, entry)| {
             let PaletteAction::OpenReplayFolder(path) = &entry.action else {
-                return CommandItem::new().label(entry.label.clone()).icon(IconName::FolderOpen);
+                return marked_item(entry, query, Some(IconName::FolderOpen));
             };
             let missing = rows.iter().any(|row| row.path == *path && row.presence == FolderPresence::Missing);
-            let name = entry.label.clone();
-            let shown = shown_path(path);
+            let name = SharedString::from(entry.label.clone());
+            let shown = SharedString::from(shown_path(path));
+            // The row is kept by its path; the name is marked where it also
+            // matches, and drawn unmarked otherwise.
+            let name_marks = query.ranges(&name).unwrap_or_default();
+            let shown_marks = query.ranges(&shown).unwrap_or_default();
             CommandItem::new().label(entry.label.clone()).child(move |_window, cx| {
                 let dim = crate::theme::text_dim();
                 h_flex()
@@ -353,7 +325,13 @@ fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow]) -> Vec<CommandItem
                     .items_center()
                     .when(missing, |row| row.opacity(0.5))
                     .child(crate::icons::icon(crate::icons::Glyph::Folder).text_color(dim))
-                    .child(div().flex_none().text_sm().text_color(cx.theme().foreground).child(name.clone()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(highlighted_text(name.clone(), name_marks.clone())),
+                    )
                     .when(missing, |row| {
                         row.child(
                             crate::icons::icon(crate::icons::Glyph::TriangleAlert)
@@ -362,7 +340,14 @@ fn folder_items(entries: &[PaletteEntry], rows: &[FolderRow]) -> Vec<CommandItem
                                 .text_color(cx.theme().warning),
                         )
                     })
-                    .child(div().min_w_0().truncate().text_xs().text_color(dim).child(shown.clone()))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(dim)
+                            .child(highlighted_text(shown.clone(), shown_marks.clone())),
+                    )
             })
         })
         .collect()
@@ -409,6 +394,8 @@ pub struct ModeDialog {
     mode: PaletteMode,
     source: ModeSource,
     entries: Rc<Vec<PaletteEntry>>,
+    /// The query `entries` were found for, which their rows mark.
+    query: FilterQuery,
     error: Option<String>,
     generation: u64,
     _query_task: Option<Task<()>>,
@@ -426,6 +413,7 @@ impl ModeDialog {
             mode,
             source,
             entries: Rc::default(),
+            query: FilterQuery::default(),
             error: None,
             generation: 0,
             _query_task: None,
@@ -496,10 +484,11 @@ impl ModeDialog {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.error = None;
+        self.query = FilterQuery::new(&needle);
 
         match &self.source {
             ModeSource::Ships(ShipList::Ready(rows)) => {
-                self.entries = Rc::new(armor_ship_entries(rows, &needle));
+                self.entries = Rc::new(armor_ship_entries(rows, &self.query));
                 cx.notify();
                 return;
             }
@@ -509,12 +498,12 @@ impl ModeDialog {
                 return;
             }
             ModeSource::Versions(rows) => {
-                self.entries = Rc::new(version_entries(rows, &needle));
+                self.entries = Rc::new(version_entries(rows, &self.query));
                 cx.notify();
                 return;
             }
             ModeSource::Folders(rows) => {
-                self.entries = Rc::new(folder_entries(rows, &needle));
+                self.entries = Rc::new(folder_entries(rows, &self.query));
                 cx.notify();
                 return;
             }
@@ -611,8 +600,8 @@ impl Render for ModeDialog {
             .placeholder(t!(self.mode.placeholder_key()).to_string())
             .max_h(px(400.))
             .items(match &self.source {
-                ModeSource::Folders(rows) => folder_items(&entries, rows),
-                _ => items(&entries),
+                ModeSource::Folders(rows) => folder_items(&entries, rows, &self.query),
+                _ => items(&entries, &self.query),
             })
             .header({
                 let owner = self.owner.clone();
@@ -793,10 +782,92 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries
 }
 
+/// The root list, filtered by the query typed into it.
+pub struct RootPalette {
+    entries: Vec<PaletteEntry>,
+    /// Each entry's label folded, in `entries` order.
+    keys: Vec<FilterKey>,
+
+    query: FilterQuery,
+    /// The entries `query` keeps, best first.
+    shown: Rc<Vec<PaletteEntry>>,
+}
+
+impl RootPalette {
+    pub fn new(entries: Vec<PaletteEntry>) -> Self {
+        let keys = entries.iter().map(|entry| FilterKey::new(&entry.label)).collect();
+        let shown = Rc::new(entries.clone());
+        Self { entries, keys, query: FilterQuery::default(), shown }
+    }
+
+    pub fn search(&mut self, typed: &str) {
+        self.query = FilterQuery::new(typed);
+        let kept = self.query.rank(self.entries.iter().zip(&self.keys), |(_, key)| *key);
+        self.shown = Rc::new(kept.into_iter().map(|(entry, _)| entry.clone()).collect());
+    }
+
+    pub fn shown(&self) -> Rc<Vec<PaletteEntry>> {
+        Rc::clone(&self.shown)
+    }
+
+    pub fn query(&self) -> &FilterQuery {
+        &self.query
+    }
+}
+
 /// The entries as the component's own items, in the same order, so an index
-/// into one is an index into the other.
-pub fn items(entries: &[PaletteEntry]) -> Vec<CommandItem> {
-    entries.iter().map(|entry| CommandItem::new().label(entry.label.clone())).collect()
+/// into one is an index into the other. Each row marks where `query`
+/// matched it.
+pub fn items(entries: &[PaletteEntry], query: &FilterQuery) -> Vec<CommandItem> {
+    entries.iter().map(|entry| marked_item(entry, query, None)).collect()
+}
+
+/// One entry's row: the label, marked where `query` matched the text the
+/// layer filtered on, and named by the label for accessibility.
+fn marked_item(entry: &PaletteEntry, query: &FilterQuery, icon: Option<IconName>) -> CommandItem {
+    let label = SharedString::from(entry.label.clone());
+    let marks = entry_marks(entry, query);
+
+    // The component re-measures every custom row each time the list is
+    // installed, so only a row with marks to draw is one.
+    if marks.is_empty() {
+        let item = CommandItem::new().label(label);
+        return match icon {
+            Some(icon) => item.icon(icon),
+            None => item,
+        };
+    }
+
+    CommandItem::new().label(label.clone()).child(move |_window, cx| {
+        let muted = cx.theme().muted_foreground;
+        h_flex()
+            .flex_1()
+            .gap_2()
+            .items_center()
+            .when_some(icon.clone(), |row, icon| row.child(Icon::new(icon).size_4().text_color(muted)))
+            .child(highlighted_text(label.clone(), marks.clone()))
+    })
+}
+
+/// The byte ranges of `entry.label` to mark for `query`. A layer that
+/// filters on part of the label (a ship's name, a version) marks only that
+/// part; the others mark the label itself.
+fn entry_marks(entry: &PaletteEntry, query: &FilterQuery) -> Vec<Range<usize>> {
+    let filtered = match &entry.action {
+        PaletteAction::ViewArmor { display_name, .. } => Some(display_name.clone()),
+        PaletteAction::ForceReindex(ReindexScope::Version(version)) => Some(version_said(version)),
+        _ => None,
+    };
+    // A row kept by a text other than the one marked draws unmarked.
+    let Some(filtered) = filtered else { return query.ranges(&entry.label).unwrap_or_default() };
+    let Some(offset) = entry.label.find(&filtered) else { return Vec::new() };
+
+    query
+        .ranges(&filtered)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|range| range.start + offset..range.end + offset)
+        .collect()
 }
 
 /// Rows one index-backed mode offers for the current query.
@@ -859,11 +930,16 @@ pub async fn mode_entries(
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::AppContext as _;
+    use gpui_kit::ParentElement as _;
+    use gpui_kit::test::TestWindowExt as _;
+
     use super::PaletteAction;
     use super::PaletteMode;
     use super::entries;
     use super::mode_entries;
     use crate::app::AppTab;
+    use crate::text_filter::FilterQuery;
 
     /// Every tab and the Settings drawer are reachable by name: the palette is
     /// the keyboard route to the tab strip and the gear beside it, so one
@@ -932,8 +1008,8 @@ mod tests {
         }
     }
 
-    /// Both forced re-index commands are on the root list, and the version
-    /// layer keeps the newest-first order it is given while it filters.
+    /// Both forced re-index commands are on the root list. The version layer
+    /// lists newest first until a query is typed, then the best match first.
     #[test]
     fn the_reindex_commands_are_offered_and_versions_filter_in_order() {
         use super::version_entries;
@@ -951,7 +1027,7 @@ mod tests {
             VersionCount { version: Version::base(13, 4, 0), replays: 7 },
         ];
         let chosen = |query: &str| -> Vec<Version> {
-            version_entries(&rows, query)
+            version_entries(&rows, &FilterQuery::new(query))
                 .into_iter()
                 .map(|entry| match entry.action {
                     PaletteAction::ForceReindex(ReindexScope::Version(version)) => version,
@@ -961,7 +1037,9 @@ mod tests {
         };
 
         assert_eq!(chosen(""), [Version::base(14, 3, 0), Version::base(14, 2, 1), Version::base(13, 4, 0)]);
-        assert_eq!(chosen(" 14."), [Version::base(14, 3, 0), Version::base(14, 2, 1)]);
+        assert_eq!(chosen("14.2"), [Version::base(14, 2, 1)]);
+        // A "4" that starts a component ranks above one inside "14".
+        assert_eq!(chosen("4"), [Version::base(13, 4, 0), Version::base(14, 3, 0), Version::base(14, 2, 1)]);
         assert!(chosen("15").is_empty());
     }
 
@@ -1013,7 +1091,8 @@ mod tests {
     }
 
     /// The ship search folds diacritics, lists the name's own prefix ahead of a
-    /// later word's, and still finds a name typed with letters left out.
+    /// later word's, and finds a name by its words' first letters or with
+    /// letters left out.
     #[test]
     fn ship_search_folds_and_ranks_names() {
         use super::ArmorShipRow;
@@ -1025,7 +1104,7 @@ mod tests {
             .map(|name| ArmorShipRow::new(name.to_lowercase(), name.to_owned(), 10, Species::Cruiser, "Nation"))
             .collect();
         let found = |query: &str| -> Vec<String> {
-            armor_ship_entries(&rows, query)
+            armor_ship_entries(&rows, &FilterQuery::new(query))
                 .into_iter()
                 .map(|entry| match entry.action {
                     PaletteAction::ViewArmor { display_name, .. } => display_name,
@@ -1035,9 +1114,186 @@ mod tests {
         };
 
         assert_eq!(found("").len(), rows.len(), "an empty search lists every ship");
-        assert_eq!(found("smal"), ["Sm\u{e5}land"]);
-        assert_eq!(found(" MO "), ["Moskva", "Des Moines", "Yamato"]);
+        assert_eq!(found("smaland"), ["Sm\u{e5}land"]);
+        assert_eq!(found(" MO "), ["Moskva", "Des Moines"]);
+        assert_eq!(found("dm"), ["Des Moines"]);
         assert_eq!(found("dsmns"), ["Des Moines"]);
         assert!(found("zzz").is_empty());
+    }
+
+    /// The root list folds its query and finds an entry by its words' first
+    /// letters, best match first.
+    #[test]
+    fn the_root_list_matches_loosely_and_ranks() {
+        use super::RootPalette;
+
+        let mut root = RootPalette::new(entries());
+        let shown =
+            |root: &RootPalette| -> Vec<String> { root.shown().iter().map(|entry| entry.label.clone()).collect() };
+
+        assert_eq!(shown(&root).len(), entries().len(), "nothing typed lists every entry");
+
+        root.search("games won");
+        assert_eq!(shown(&root), ["Games I won"]);
+
+        root.search("search");
+        let searches: Vec<String> =
+            shown(&root).into_iter().filter(|label| label.to_lowercase().contains("search")).collect();
+        assert_eq!(searches, ["Search players...", "Advanced search..."], "a label that starts with it ranks first");
+    }
+
+    /// The directory layer keeps "Browse..." first and ranks the recent
+    /// directories by how their path matches, folding diacritics.
+    #[test]
+    fn the_directory_layer_keeps_browse_first_and_ranks() {
+        use super::FolderRow;
+        use super::folder_entries;
+
+        let rows = [FolderRow::new("/r/Prism".into()), FolderRow::new("/r/Sm\u{e5}land games".into())];
+        let found = |query: &str| -> Vec<PaletteAction> {
+            folder_entries(&rows, &FilterQuery::new(query)).into_iter().map(|entry| entry.action).collect()
+        };
+        let open = |path: &str| PaletteAction::OpenReplayFolder(path.into());
+
+        assert_eq!(found(""), [PaletteAction::BrowseReplayFolder, open("/r/Prism"), open("/r/Sm\u{e5}land games")]);
+        assert_eq!(found("smaland"), [PaletteAction::BrowseReplayFolder, open("/r/Sm\u{e5}land games")]);
+        // A word that starts with the query ranks above one that holds it.
+        assert_eq!(found("sm"), [PaletteAction::BrowseReplayFolder, open("/r/Sm\u{e5}land games"), open("/r/Prism")]);
+        assert_eq!(found("zzz"), [PaletteAction::BrowseReplayFolder]);
+    }
+
+    /// Draws `window`, lets deferred work and spawned focus run, then draws
+    /// again.
+    fn settle(cx: &mut gpui_kit::TestAppContext, window: gpui_kit::WindowHandle<gpui_kit::component::Root>) {
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    /// Opens a second layer over `source`, lets `fill` set what it lists,
+    /// and draws it.
+    fn draw_layer(
+        cx: &mut gpui_kit::TestAppContext,
+        source: super::ModeSource,
+        fill: impl FnOnce(&mut super::ModeDialog, &mut gpui_kit::Window, &mut gpui_kit::Context<super::ModeDialog>)
+        + 'static,
+    ) {
+        use gpui_kit::component::WindowExt as _;
+        use gpui_kit::component::command::CommandState;
+
+        let (window, app) = crate::interaction_tests::open_app_in_root(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            let command = cx.new(|cx| CommandState::new(window, cx));
+            let layer = cx.new(|_| super::ModeDialog::new(command, app.downgrade(), PaletteMode::Players, source));
+            layer.update(cx, |layer, cx| fill(layer, window, cx));
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                let layer = layer.clone();
+                dialog.content(move |content, _window, _cx| content.child(layer.clone()))
+            });
+        })
+        .expect("the test window stays open");
+        crate::text_filter::take_marks();
+        settle(cx, window);
+    }
+
+    /// A ship row marks the matched letters of the name, not the tier or
+    /// nation text drawn after it.
+    #[gpui_kit::test]
+    fn a_ship_row_marks_the_matched_name(cx: &mut gpui_kit::TestAppContext) {
+        use super::ArmorShipRow;
+        use super::ModeSource;
+        use super::ShipList;
+        use crate::text_filter::marks_for;
+        use wowsunpack::game_params::types::Species;
+
+        let rows = vec![
+            ArmorShipRow::new("PASB018".into(), "Montana".into(), 10, Species::Battleship, "U.S.A."),
+            ArmorShipRow::new("PZSD109".into(), "Sm\u{e5}land".into(), 10, Species::Destroyer, "Europe"),
+        ];
+        let labels: Vec<String> = rows.iter().map(|row| row.label.clone()).collect();
+        draw_layer(cx, ModeSource::Ships(ShipList::Ready(rows.into())), |layer, window, cx| {
+            layer.search("smaland".into(), window, cx)
+        });
+
+        assert_eq!(marks_for(&labels[1]), Some(std::iter::once(0..8).collect()));
+        assert_eq!(marks_for(&labels[0]), None, "a ship that does not match is not drawn");
+    }
+
+    /// A version row marks the version, not its replay count.
+    #[gpui_kit::test]
+    fn a_version_row_marks_the_version(cx: &mut gpui_kit::TestAppContext) {
+        use super::ModeSource;
+        use crate::force_reindex::VersionCount;
+        use crate::text_filter::marks_for;
+        use wowsunpack::data::Version;
+
+        let rows = [
+            VersionCount { version: Version::base(14, 3, 0), replays: 4 },
+            VersionCount { version: Version::base(13, 4, 0), replays: 7 },
+        ];
+        draw_layer(cx, ModeSource::Versions(rows.into()), |layer, window, cx| layer.search("4".into(), window, cx));
+
+        assert_eq!(marks_for("13.4.0 -- 7 replay(s)"), Some(std::iter::once(3..4).collect()));
+        assert_eq!(marks_for("14.3.0 -- 4 replay(s)"), Some(std::iter::once(1..2).collect()));
+    }
+
+    /// A recent directory row marks both its name and its path.
+    #[gpui_kit::test]
+    fn a_directory_row_marks_its_name_and_path(cx: &mut gpui_kit::TestAppContext) {
+        use super::FolderRow;
+        use super::ModeSource;
+        use crate::text_filter::marks_for;
+
+        let rows = [FolderRow::new("/r/Sm\u{e5}land games".into())];
+        draw_layer(cx, ModeSource::Folders(rows.into()), |layer, window, cx| {
+            layer.search("smaland".into(), window, cx)
+        });
+
+        assert_eq!(marks_for("Sm\u{e5}land games"), Some(std::iter::once(0..8).collect()));
+        assert_eq!(marks_for("/r/Sm\u{e5}land games"), Some(std::iter::once(3..11).collect()));
+    }
+
+    /// A row the replay index returned for a player is marked where the typed
+    /// name matched it.
+    #[gpui_kit::test]
+    fn an_index_row_marks_the_typed_name(cx: &mut gpui_kit::TestAppContext) {
+        use super::ModeSource;
+        use super::PaletteEntry;
+        use crate::text_filter::marks_for;
+
+        draw_layer(cx, ModeSource::Index, |layer, _window, _cx| {
+            layer.entries = std::rc::Rc::new(vec![PaletteEntry {
+                label: "[KLAN] J\u{fc}rgen -- 3 match(es)".to_owned(),
+                action: PaletteAction::SearchFor("player:7".to_owned()),
+            }]);
+            layer.query = FilterQuery::new("jurgen");
+        });
+
+        assert_eq!(marks_for("[KLAN] J\u{fc}rgen -- 3 match(es)"), Some(std::iter::once(7..14).collect()));
+    }
+
+    /// Typing in the root list filters it here, by word-start letters the
+    /// component's own substring filter would miss, and marks the match.
+    #[gpui_kit::test]
+    fn the_root_list_marks_what_it_matched(cx: &mut gpui_kit::TestAppContext) {
+        use crate::text_filter::marks_for;
+        use gpui_kit::component::IndexPath;
+        use gpui_kit::test::TestWindowExt as _;
+
+        let (window, app) = crate::interaction_tests::open_app_in_root(cx);
+        cx.update_window(window.into(), |_, window, cx| app.update(cx, |app, cx| app.open_palette(window, cx)))
+            .expect("the test window stays open");
+        settle(cx, window);
+        cx.update_window(window.into(), |_, window, cx| window.input("games won", cx))
+            .expect("the test window stays open");
+        crate::text_filter::take_marks();
+        settle(cx, window);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            assert_eq!(window.find(IndexPath::new(0)).label(), Some("Games I won"));
+            assert!(window.try_find(IndexPath::new(1)).is_none(), "only the match is listed");
+        })
+        .expect("the test window stays open");
+        assert_eq!(marks_for("Games I won"), Some(vec![0..5, 8..11]));
     }
 }

@@ -41,6 +41,7 @@ pub mod search;
 pub mod settings;
 pub mod stats;
 pub mod tactics;
+pub mod text_filter;
 pub mod twitch;
 pub mod unpacker;
 pub mod update;

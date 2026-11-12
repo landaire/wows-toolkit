@@ -19,7 +19,6 @@ use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::searchable_list::SearchableListItem;
-use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::component::select::SelectState;
@@ -36,12 +35,21 @@ use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
+use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::WorldPos;
 
+use crate::armor_viewer::catalog::ShipCatalog;
+use crate::armor_viewer::catalog::ShipEntry;
+use crate::armor_viewer::catalog::tier_roman;
+use crate::filtered_select::FilteredItem;
+use crate::filtered_select::FilteredSelect;
 use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
 use crate::replay_inspector::GameDataCache;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///
@@ -102,13 +110,14 @@ impl SearchableListItem for MapItem {
     fn value(&self) -> &Self::Value {
         &self.key
     }
+}
 
-    fn matches(&self, query: &str) -> bool {
-        let query = query.trim().to_lowercase();
-        self.title.to_lowercase().contains(&query)
-            || self.choice.label.to_lowercase().contains(&query)
-            || self.choice.space.to_lowercase().contains(&query)
-            || self.choice.map_id.is_some_and(|id| id.to_string().contains(&query))
+impl FilteredItem for MapItem {
+    fn search_texts(&self) -> Vec<SharedString> {
+        let mut texts = vec![self.title(), self.choice.label.clone().into(), self.choice.space.clone().into()];
+        texts.extend(self.choice.map_id.map(|id| SharedString::from(id.to_string())));
+
+        texts
     }
 }
 
@@ -135,11 +144,9 @@ impl SearchableListItem for ModeItem {
     fn value(&self) -> &Self::Value {
         &self.key
     }
-
-    fn matches(&self, query: &str) -> bool {
-        self.label.to_lowercase().contains(&query.trim().to_lowercase())
-    }
 }
+
+impl FilteredItem for ModeItem {}
 
 /// A capture point on the board.
 ///
@@ -637,8 +644,65 @@ pub struct PlacedShip {
     friendly: bool,
 }
 
-/// How many ship matches the search offers at once.
-const SHIP_MATCHES: usize = 10;
+/// Every ship the build knows, each name folded once for the ship search.
+/// The tactics board and the replay viewport place ships by this search.
+pub(crate) struct ShipLookup {
+    ships: Vec<ShipChoice>,
+}
+
+struct ShipChoice {
+    species: Species,
+    ship: ShipEntry,
+    key: FilterKey,
+}
+
+impl ShipLookup {
+    pub(crate) fn new(catalog: &ShipCatalog) -> Self {
+        let ships = catalog
+            .nations
+            .iter()
+            .flat_map(|nation| nation.classes.iter())
+            .flat_map(|class| {
+                class.ships.iter().map(|ship| ShipChoice {
+                    species: class.species,
+                    ship: ship.clone(),
+                    key: FilterKey::new(&ship.display_name),
+                })
+            })
+            .collect();
+
+        Self { ships }
+    }
+
+    /// The ships whose names `query` matches, best first, with the class each
+    /// belongs to. Empty for a query with nothing in it: every ship at once
+    /// is not a choice.
+    pub(crate) fn find(&self, query: &FilterQuery) -> Vec<(Species, ShipEntry)> {
+        const SHIP_MATCHES: usize = 10;
+
+        if !query.is_active() {
+            return Vec::new();
+        }
+
+        query
+            .rank(&self.ships, |choice| &choice.key)
+            .into_iter()
+            .take(SHIP_MATCHES)
+            .map(|choice| (choice.species, choice.ship.clone()))
+            .collect()
+    }
+}
+
+/// A ship the search found: its tier, then its name marked where `query`
+/// matched it.
+pub(crate) fn ship_match_label(ship: &ShipEntry, query: &FilterQuery) -> Div {
+    h_flex().gap_1().child(tier_roman(ship.tier)).child(query.marked(ship.display_name.clone()))
+}
+
+/// What a ship search result is read out as.
+pub(crate) fn ship_match_name(ship: &ShipEntry) -> String {
+    format!("{} {}", tier_roman(ship.tier), ship.display_name)
+}
 
 /// How far a walk of the replay directory has got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -732,18 +796,19 @@ pub struct TacticsBoard {
     /// What is typed into the ship search, and what it matched. Placing a ship
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
-    matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
-    map_select: Entity<SelectState<SearchableVec<MapItem>>>,
+    ship_query: FilterQuery,
+    matched_ships: Vec<(Species, ShipEntry)>,
+    map_select: Entity<SelectState<FilteredSelect<MapItem>>>,
     _map_select_subscription: Subscription,
     map_picker_sync_needed: bool,
-    mode_select: Entity<SelectState<SearchableVec<ModeItem>>>,
+    mode_select: Entity<SelectState<FilteredSelect<ModeItem>>>,
     _mode_select_subscription: Subscription,
     mode_picker_sync_needed: bool,
     /// The ship the next placement is of, and whether it is on the reader's
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
     /// Every ship the build knows, built the first time one is looked up.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_lookup: Option<ShipLookup>,
     /// Which circles a placed ship shows. Every ship already on the board is
     /// given the same set, so two ships are compared on the same terms.
     range_filter: wt_collab_client::types::AnnotationRangeFilter,
@@ -789,12 +854,12 @@ impl TacticsBoard {
         cx: &mut Context<Self>,
     ) -> Self {
         let maps = maps(&layouts, game_data.as_ref());
-        let map_items = SearchableVec::new(map_items_for_picker(&maps));
+        let map_items = FilteredSelect::new(map_items_for_picker(&maps));
         let map_select = cx.new(|cx| SelectState::new(map_items, None, window, cx).searchable(true));
         let map_select_subscription = cx.subscribe_in(
             &map_select,
             window,
-            |this, _state, event: &SelectEvent<SearchableVec<MapItem>>, window, cx| {
+            |this, _state, event: &SelectEvent<FilteredSelect<MapItem>>, window, cx| {
                 let SelectEvent::Confirm(Some(key)) = event else { return };
                 let Some(map) = this.maps.iter().find(|map| MapChoiceKey::from(*map) == *key).cloned() else { return };
                 this.set_map(map, cx);
@@ -802,11 +867,11 @@ impl TacticsBoard {
             },
         );
         let mode_select =
-            cx.new(|cx| SelectState::new(SearchableVec::new(mode_items(&[])), None, window, cx).searchable(true));
+            cx.new(|cx| SelectState::new(FilteredSelect::new(mode_items(&[])), None, window, cx).searchable(true));
         let mode_select_subscription = cx.subscribe_in(
             &mode_select,
             window,
-            |this, _state, event: &SelectEvent<SearchableVec<ModeItem>>, window, cx| {
+            |this, _state, event: &SelectEvent<FilteredSelect<ModeItem>>, window, cx| {
                 let SelectEvent::Confirm(Some(key)) = event else { return };
                 match key {
                     Some(key) if this.mode.as_ref() != Some(key) => this.set_mode(key.clone(), cx),
@@ -831,8 +896,8 @@ impl TacticsBoard {
         });
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, gpui_kit::component::input::InputEvent::Change) {
-                let typed = state.read(cx).value().to_string();
-                this.matched_ships = this.matching_ships(&typed);
+                this.ship_query = FilterQuery::new(&state.read(cx).value());
+                this.matched_ships = this.matching_ships();
                 cx.notify();
             }
         });
@@ -844,6 +909,7 @@ impl TacticsBoard {
             scan_cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             version: None,
             ship_search,
+            ship_query: FilterQuery::default(),
             matched_ships: Vec::new(),
             map_select,
             _map_select_subscription: map_select_subscription,
@@ -852,7 +918,7 @@ impl TacticsBoard {
             _mode_select_subscription: mode_select_subscription,
             mode_picker_sync_needed: false,
             placing: None,
-            ship_catalog: None,
+            ship_lookup: None,
             range_filter: wt_collab_client::types::AnnotationRangeFilter::default(),
             _preset_name_subscription: preset_name_subscription,
             _ship_search_subscription: ship_search_subscription,
@@ -1170,7 +1236,7 @@ impl TacticsBoard {
     }
 
     fn sync_map_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let items = SearchableVec::new(map_items_for_picker(&self.maps));
+        let items = FilteredSelect::new(map_items_for_picker(&self.maps));
         let selected = self.map.as_ref().map(MapChoiceKey::from);
         self.map_select.update(cx, |state, cx| {
             state.set_items(items, window, cx);
@@ -1182,7 +1248,7 @@ impl TacticsBoard {
     }
 
     fn sync_mode_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let items = SearchableVec::new(mode_items(&self.modes));
+        let items = FilteredSelect::new(mode_items(&self.modes));
         let selected = self.mode.clone();
         self.mode_select.update(cx, |state, cx| {
             state.set_items(items, window, cx);
@@ -1895,42 +1961,27 @@ impl TacticsBoard {
     }
 
     /// Every ship the build knows, built the first time one is looked up.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
-        if let Some(catalog) = &self.ship_catalog {
-            return Some(std::rc::Rc::clone(catalog));
+    fn ships(&mut self) -> Option<&ShipLookup> {
+        if self.ship_lookup.is_none() {
+            let loaded = self.game_data.as_ref()?.newest_loaded()?;
+            self.ship_lookup = Some(ShipLookup::new(&ShipCatalog::build(loaded.provider())));
         }
-        let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
-        self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
-        Some(catalog)
+
+        self.ship_lookup.as_ref()
     }
 
-    /// The ships whose names match what has been typed.
+    /// The ships whose names match what has been typed, best first.
     ///
     /// Empty until something is typed: every ship at once is not a choice.
-    fn matching_ships(
-        &mut self,
-        typed: &str,
-    ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
-        let query = unidecode::unidecode(typed.trim()).to_lowercase();
-        if query.is_empty() {
+    fn matching_ships(&mut self) -> Vec<(Species, ShipEntry)> {
+        if !self.ship_query.is_active() {
             return Vec::new();
         }
-        let Some(catalog) = self.ships() else { return Vec::new() };
-        let mut found = Vec::new();
-        for nation in &catalog.nations {
-            for class in &nation.classes {
-                for ship in &class.ships {
-                    if ship.search_name.contains(&query) {
-                        found.push((class.species, ship.clone()));
-                        if found.len() >= SHIP_MATCHES {
-                            return found;
-                        }
-                    }
-                }
-            }
-        }
-        found
+
+        let query = self.ship_query.clone();
+        let Some(ships) = self.ships() else { return Vec::new() };
+
+        ships.find(&query)
     }
 
     /// Takes up the ship the reader picked, so the next click places it.
@@ -1958,6 +2009,7 @@ impl TacticsBoard {
         });
         self.adding = false;
         self.selected = None;
+        self.ship_query = FilterQuery::default();
         self.matched_ships.clear();
         self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
         cx.notify();
@@ -3212,11 +3264,8 @@ impl TacticsBoard {
                             |(index, (species, ship))| {
                                 let board = board.clone();
                                 Button::new(("tactics-ship-match", index))
-                                    .label(format!(
-                                        "{} {}",
-                                        crate::armor_viewer::catalog::tier_roman(ship.tier),
-                                        ship.display_name
-                                    ))
+                                    .accessibility_label(ship_match_name(&ship))
+                                    .child(ship_match_label(&ship, &self.ship_query))
                                     .compact()
                                     .w_full()
                                     .justify_start()
@@ -3889,5 +3938,114 @@ mod letterbox_tests {
     #[test]
     fn a_frame_with_no_extent_is_refused() {
         assert!(Letterbox::fitting(element(400., 200.), (0., 100.)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use gpui_kit::TestAppContext;
+    use gpui_kit::component::IndexPath;
+    use gpui_kit::component::searchable_list::SearchableListDelegate;
+    use wowsunpack::game_params::types::Species;
+
+    use super::FilteredSelect;
+    use super::MapChoice;
+    use super::MapChoiceKey;
+    use super::ShipLookup;
+    use super::map_items_for_picker;
+    use super::ship_match_label;
+    use crate::armor_viewer::catalog::ClassGroup;
+    use crate::armor_viewer::catalog::NationGroup;
+    use crate::armor_viewer::catalog::ShipCatalog;
+    use crate::armor_viewer::catalog::ShipEntry;
+    use crate::armor_viewer::search_key::SearchKey;
+    use crate::text_filter::FilterQuery;
+
+    fn ship(display_name: &str, tier: u32) -> ShipEntry {
+        ShipEntry {
+            param_index: format!("P{display_name}"),
+            display_name: display_name.to_string(),
+            search_name: display_name.to_lowercase(),
+            search_key: SearchKey::new(),
+            tier,
+        }
+    }
+
+    /// Ten ships with "ya" inside a word, and Yamato, which starts with it,
+    /// listed last.
+    fn catalog() -> ShipCatalog {
+        let mut ships: Vec<ShipEntry> = (1..=10).map(|number| ship(&format!("Hayate {number}"), 8)).collect();
+        ships.push(ship("Sm\u{e5}land", 10));
+        ships.push(ship("Yamato", 10));
+
+        ShipCatalog {
+            nations: vec![NationGroup {
+                nation: "japan".to_string(),
+                display_name: "Japan".to_string(),
+                classes: vec![ClassGroup { species: Species::Destroyer, ships }],
+            }],
+            hidden: Vec::new(),
+        }
+    }
+
+    fn found(lookup: &ShipLookup, typed: &str) -> Vec<String> {
+        lookup.find(&FilterQuery::new(typed)).into_iter().map(|(_, ship)| ship.display_name).collect()
+    }
+
+    #[test]
+    fn the_ship_search_ranks_before_it_cuts_the_list_short() {
+        let lookup = ShipLookup::new(&catalog());
+
+        let ranked = found(&lookup, "ya");
+        assert_eq!(ranked.len(), 10);
+        assert_eq!(ranked[0], "Yamato", "the best match is kept though it is listed last");
+        assert_eq!(ranked[1], "Hayate 1");
+    }
+
+    #[test]
+    fn the_ship_search_folds_accents_and_skips_letters() {
+        let lookup = ShipLookup::new(&catalog());
+
+        assert_eq!(found(&lookup, "smal"), ["Sm\u{e5}land"]);
+        assert_eq!(found(&lookup, "ymt"), ["Yamato"]);
+        assert!(found(&lookup, "ymtx").is_empty());
+        assert!(found(&lookup, " ").is_empty(), "nothing typed offers nothing");
+    }
+
+    #[test]
+    fn a_ship_match_is_drawn_marked_where_its_name_matched() {
+        crate::text_filter::take_marks();
+        let _ = ship_match_label(&ship("Yamato", 10), &FilterQuery::new("ymt"));
+
+        assert_eq!(crate::text_filter::marks_for("Yamato"), Some(vec![0..1, 2..3, 4..5]));
+    }
+
+    fn map(label: &str, map_id: u32, space: &str) -> MapChoice {
+        MapChoice { map_id: Some(map_id), space: space.to_string(), label: label.to_string() }
+    }
+
+    #[gpui_kit::test]
+    fn the_map_picker_finds_a_map_by_its_space_and_marks_its_name(cx: &mut TestAppContext) {
+        let maps = [
+            map("Okinawa", 33, "spaces/33_new_tierra"),
+            map("Hotspot", 16, "spaces/16_OC_bees_to_honey"),
+            map("Sea of Fortune", 45, "spaces/45_Zigzag"),
+        ];
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let mut picker = FilteredSelect::new(map_items_for_picker(&maps));
+            let first = IndexPath::default().row(0);
+
+            picker.perform_search("bees honey", window, cx).detach();
+            assert_eq!(picker.items_count(0), 1);
+            assert_eq!(picker.position(&MapChoiceKey::from(&maps[1])), Some(first));
+
+            picker.perform_search("sof", window, cx).detach();
+            assert_eq!(picker.items_count(0), 1);
+            crate::text_filter::take_marks();
+            let item = picker.item(first).expect("a match").clone();
+            assert!(picker.render_item(first, &item, false, window, cx).is_some());
+            assert_eq!(crate::text_filter::marks_for("Sea of Fortune"), Some(vec![0..1, 4..6]));
+        });
     }
 }

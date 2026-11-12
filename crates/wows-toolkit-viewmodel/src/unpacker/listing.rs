@@ -6,10 +6,16 @@
 //! rules have one implementation, and unit-testable against an in-memory
 //! filesystem rather than a game install.
 
+use std::cmp::Reverse;
+
 use wowsunpack::data::path_table::PathId;
 use wowsunpack::data::path_table::PathTable;
 use wowsunpack::vfs::VfsFileType;
 use wowsunpack::vfs::VfsPath;
+
+use crate::text_filter::FilterKeyTable;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MatchScore;
 
 /// One directory in the folder-tree sidebar. Built once when the VFS loads:
 /// re-walking `read_dir` per frame is what makes the listing slow.
@@ -47,6 +53,9 @@ pub struct FileList {
     /// lookup: under a physical-directory VFS that lookup is a `stat`.
     /// Absent for an entry the VFS lists but has no metadata for.
     sizes: Vec<Option<u64>>,
+    /// Each path folded once for the typed filter, which scores every file on
+    /// every keystroke. Row `n` is the path at `FileIndex(n)`.
+    keys: FilterKeyTable,
 }
 
 /// Prints what the list holds rather than its contents: it is carried by
@@ -59,7 +68,7 @@ impl std::fmt::Debug for FileList {
 
 impl FileList {
     pub fn new(root: VfsPath) -> Self {
-        Self { root, paths: PathTable::default(), sizes: Vec::new() }
+        Self { root, paths: PathTable::default(), sizes: Vec::new(), keys: FilterKeyTable::new() }
     }
 
     pub fn len(&self) -> usize {
@@ -118,6 +127,7 @@ impl FileList {
 
     fn push(&mut self, path: &str, size: Option<u64>) -> FileIndex {
         self.sizes.push(size);
+        self.keys.push(path);
         FileIndex(self.paths.push(path).index() as u32)
     }
 
@@ -145,9 +155,10 @@ pub const ROOT_PATH: &str = "/";
 /// full-list pass to produce a result nobody wanted.
 pub const MIN_FILTER_LEN: usize = 3;
 
-/// Whether `filter` is long enough to filter by.
+/// Whether `filter` filters the listing rather than leaving it to the
+/// selected directory.
 pub fn is_filtering(filter: &str) -> bool {
-    filter.len() >= MIN_FILTER_LEN
+    PathFilter::new(filter).is_some()
 }
 
 /// Which viewer a file opens in, decided by extension.
@@ -303,20 +314,53 @@ pub fn build_file_list(root: &VfsPath) -> FileList {
     out
 }
 
-/// Which files a path filter matches, as positions in `files`.
-///
-/// A filter containing a star is treated as a glob and matched against the
-/// whole path; anything else is a plain substring match. A star filter that
-/// does not parse as a glob falls back to the substring match, so a
-/// half-typed pattern keeps listing results instead of emptying the pane.
-///
-/// The glob runs with its default options, so a star spans path separators:
-/// "*.png" matches a file at any depth, not only at the root.
-pub fn filter_files(files: &FileList, filter: &str) -> Vec<FileIndex> {
-    let glob = filter.contains('*').then(|| glob::Pattern::new(filter).ok()).flatten();
-    match glob {
-        Some(glob) => files.iter().filter(|(_, path)| glob.matches(path)).map(|(index, _)| index).collect(),
-        None => files.iter().filter(|(_, path)| path.contains(filter)).map(|(index, _)| index).collect(),
+/// A path filter as typed.
+#[derive(Debug, Clone)]
+pub enum PathFilter {
+    /// A filter holding a star, matched as a glob against the whole path. The
+    /// glob runs with its default options, so a star spans path separators:
+    /// "*.png" matches a file at any depth, not only at the root.
+    Glob(glob::Pattern),
+    /// Any other filter, matched as typed text against the path.
+    Text(FilterQuery),
+}
+
+impl PathFilter {
+    /// `None` for text shorter than [`MIN_FILTER_LEN`], or with neither a
+    /// glob nor a letter or digit to match: such text would list every file.
+    ///
+    /// A star filter that does not parse as a glob is matched as text, so a
+    /// half-typed pattern keeps listing results instead of emptying the pane.
+    pub fn new(filter: &str) -> Option<Self> {
+        if filter.len() < MIN_FILTER_LEN {
+            return None;
+        }
+
+        if let Some(glob) = filter.contains('*').then(|| glob::Pattern::new(filter).ok()).flatten() {
+            return Some(Self::Glob(glob));
+        }
+
+        let query = FilterQuery::new(filter);
+
+        query.is_active().then_some(Self::Text(query))
+    }
+}
+
+/// Which files a path filter matches, as positions in `files`. Glob results
+/// keep the walk order; text results come best match first, ties in walk
+/// order.
+pub fn filter_files(files: &FileList, filter: &PathFilter) -> Vec<FileIndex> {
+    match filter {
+        PathFilter::Glob(glob) => files.iter().filter(|(_, path)| glob.matches(path)).map(|(index, _)| index).collect(),
+        PathFilter::Text(query) => {
+            let mut scored: Vec<(MatchScore, FileIndex)> = files
+                .indices()
+                .filter_map(|index| Some((query.score_at(&files.keys, index.0 as usize)?, index)))
+                .collect();
+            scored.sort_unstable_by_key(|&(score, index)| (Reverse(score), index));
+
+            scored.into_iter().map(|(_, index)| index).collect()
+        }
     }
 }
 
@@ -381,9 +425,13 @@ mod tests {
         paths
     }
 
+    fn matches_in_order(files: &FileList, filter: &str) -> Vec<String> {
+        let filter = PathFilter::new(filter).expect("the filter has something to match");
+        filter_files(files, &filter).into_iter().map(|index| files.path(index).to_string()).collect()
+    }
+
     fn sorted_matches(files: &FileList, filter: &str) -> Vec<String> {
-        let mut paths: Vec<String> =
-            filter_files(files, filter).into_iter().map(|index| files.path(index).to_string()).collect();
+        let mut paths = matches_in_order(files, filter);
         paths.sort();
         paths
     }
@@ -419,9 +467,59 @@ mod tests {
     }
 
     #[test]
+    fn a_filter_with_nothing_to_match_does_not_filter() {
+        assert!(!is_filtering("   "), "spaces fold to nothing");
+        assert!(!is_filtering("---"), "punctuation folds to nothing");
+        assert!(is_filtering("*?*"), "a glob is matched as written");
+        assert!(is_filtering("-a-"));
+    }
+
+    #[test]
     fn a_plain_filter_matches_anywhere_in_the_path() {
         let files = build_file_list(&fixture());
         assert_eq!(sorted_matches(&files, "content/"), vec!["/res/content/a.xml", "/res/content/b.png"]);
+    }
+
+    /// /res/maps/island.png, /res/maps/land_map.png, /res/ships/Smaland.xml
+    /// (ring on its a), /res/ships/Smolensk.xml
+    fn text_filter_fixture() -> FileList {
+        let root: VfsPath = MemoryFS::new().into();
+        root.join("res/maps").unwrap().create_dir_all().unwrap();
+        root.join("res/ships").unwrap().create_dir_all().unwrap();
+        for path in
+            ["res/maps/island.png", "res/maps/land_map.png", "res/ships/Sm\u{e5}land.xml", "res/ships/Smolensk.xml"]
+        {
+            root.join(path).unwrap().create_file().unwrap().write_all(b"x").unwrap();
+        }
+
+        build_file_list(&root)
+    }
+
+    #[test]
+    fn a_text_filter_folds_accents_case_and_punctuation() {
+        let files = text_filter_fixture();
+        assert_eq!(matches_in_order(&files, "Smaland"), vec!["/res/ships/Sm\u{e5}land.xml"], "Smolensk is dropped");
+        assert_eq!(
+            matches_in_order(&files, "land map"),
+            vec!["/res/maps/land_map.png"],
+            "the space finds the underscore"
+        );
+    }
+
+    #[test]
+    fn a_text_filter_takes_letters_from_the_start_of_each_word() {
+        let files = build_file_list(&fixture());
+        assert_eq!(matches_in_order(&files, "cont bpng"), vec!["/res/content/b.png"]);
+    }
+
+    #[test]
+    fn text_filter_results_come_best_match_first() {
+        let files = text_filter_fixture();
+        assert_eq!(
+            matches_in_order(&files, "land"),
+            vec!["/res/maps/land_map.png", "/res/maps/island.png", "/res/ships/Sm\u{e5}land.xml"],
+            "a word start first, then a match nearer the start of the path"
+        );
     }
 
     #[test]
@@ -431,11 +529,11 @@ mod tests {
     }
 
     #[test]
-    fn a_star_filter_that_is_not_a_valid_glob_falls_back_to_a_substring_match() {
+    fn a_star_filter_that_is_not_a_valid_glob_is_matched_as_text() {
         let files = build_file_list(&fixture());
-        let pattern = format!("a{}*", '[');
+        let pattern = format!("zeb{}*", '[');
         assert!(glob::Pattern::new(&pattern).is_err(), "an unclosed character class is not a valid pattern");
-        assert!(filter_files(&files, &pattern).is_empty(), "no path contains that literal text");
+        assert_eq!(sorted_matches(&files, &pattern), vec!["/res/Zebra.txt"]);
     }
 
     #[test]
@@ -515,8 +613,9 @@ mod tests {
     #[test]
     fn filter_result_rows_are_labelled_by_their_whole_path_and_carry_a_size() {
         let files = build_file_list(&fixture());
+        let filter = PathFilter::new("content/").expect("the filter has something to match");
         let rows: Vec<ListingEntry> =
-            filter_files(&files, "content/").into_iter().filter_map(|index| files.row(index)).collect();
+            filter_files(&files, &filter).into_iter().filter_map(|index| files.row(index)).collect();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.label.starts_with("/res/content/")));
         assert!(rows.iter().all(|row| !row.is_dir));

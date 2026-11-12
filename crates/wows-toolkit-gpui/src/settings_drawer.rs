@@ -12,6 +12,8 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
 
 use super::*;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// How wide the drawer is.
 const DRAWER_WIDTH: Pixels = px(440.);
@@ -280,12 +282,10 @@ impl Setting {
         )
     }
 
-    /// Whether the name or the description holds `needle`, which is already
-    /// lower case. An empty needle matches everything.
-    fn matches(self, needle: &str) -> bool {
-        needle.is_empty()
-            || self.title().to_lowercase().contains(needle)
-            || self.description().to_lowercase().contains(needle)
+    /// Whether the name or the description matches `query`. An inactive
+    /// query matches everything.
+    fn matches(self, query: &FilterQuery) -> bool {
+        query.keeps(&self.title()) || query.keeps(&self.description())
     }
 }
 
@@ -742,10 +742,10 @@ impl App {
     fn render_settings_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.measure_cache_once(cx);
 
-        let needle = self.settings_drawer.search.read(cx).value().trim().to_lowercase();
+        let query = FilterQuery::new(&self.settings_drawer.search.read(cx).value());
         let rows: Vec<Setting> = Setting::ALL
             .into_iter()
-            .filter(|setting| self.setting_present(*setting) && setting.matches(&needle))
+            .filter(|setting| self.setting_present(*setting) && setting.matches(&query))
             .collect();
         // A tile the search takes away never reports the pointer leaving it.
         if !rows.contains(&Setting::Theme) && self.theme_preview.take().is_some() {
@@ -762,7 +762,7 @@ impl App {
             children.push(settings_heading(section, drawn.is_empty()));
             drawn.push(Drawn::Heading(section));
             for (position, setting) in in_section.into_iter().enumerate() {
-                children.push(self.render_setting_row(setting, position == 0, position == last, window, cx));
+                children.push(self.render_setting_row(setting, &query, position == 0, position == last, window, cx));
                 drawn.push(Drawn::Row(setting));
             }
         }
@@ -774,7 +774,7 @@ impl App {
         self.scroll_settings_into_place(&drawn, window);
         self.settings_drawer.drawn = drawn;
 
-        let count = (!needle.is_empty()).then(|| {
+        let count = query.is_active().then(|| {
             let text = match rows.len() {
                 1 => t!("ui.settings.panel.count_one").into_owned(),
                 count => t!("ui.settings.panel.count", count = count).into_owned(),
@@ -915,6 +915,7 @@ impl App {
     fn render_setting_row(
         &self,
         setting: Setting,
+        query: &FilterQuery,
         first: bool,
         last: bool,
         window: &Window,
@@ -934,7 +935,7 @@ impl App {
                     .test_support()
                     .text_sm()
                     .font_weight(FontWeight::MEDIUM)
-                    .child(setting.title().into_owned()),
+                    .child(query.marked(setting.title().into_owned())),
             )
             .child(
                 div()
@@ -942,7 +943,7 @@ impl App {
                     .test_support()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(setting.description().into_owned()),
+                    .child(query.marked(setting.description().into_owned())),
             );
         let body = if setting.stacked() {
             v_flex().gap_2().child(text).children(control).into_any_element()
@@ -1938,10 +1939,21 @@ mod tests {
                 window.press("backspace", cx);
             }
             // A title, in another case than it is written in.
+            crate::text_filter::take_marks();
             window.input("RAW XP", cx);
             window.render_frame(cx);
             assert_eq!(window.find("settings-count").label(), Some("1 setting"));
             assert!(window.try_find(row(Setting::ShowRawXp)).is_some());
+            assert_eq!(
+                crate::text_filter::marks_for("Show Raw XP"),
+                Some(std::iter::once(5..11).collect()),
+                "the title marks the match"
+            );
+            assert_eq!(
+                crate::text_filter::marks_for("Add a raw XP column to the results table"),
+                Some(std::iter::once(6..12).collect()),
+                "so does the description"
+            );
 
             window.input("zzz", cx);
             window.render_frame(cx);

@@ -38,8 +38,6 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::tooltip::Tooltip;
-
-use super::options_filter::OptionsFilter;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -52,6 +50,8 @@ use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Species;
 
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 use crate::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
@@ -92,7 +92,7 @@ const CHECKBOX_BOX: Pixels = px(16.);
 pub(super) fn render_tools(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     // An open model keeps only the tools it has anything for; with nothing
     // open every tool is drawn, disabled.
@@ -122,11 +122,6 @@ pub(super) fn render_tools(
 /// leaves its column too narrow. The button's tooltip says what it does.
 fn tool_label(label: StyledText) -> impl IntoElement {
     div().id("armor-tool-label").test_support().min_w_0().text_ellipsis().child(label)
-}
-
-/// What a filter match is marked with.
-pub(super) fn mark() -> Hsla {
-    gpui_kit::Hsla::from(gpui_kit::rgb(crate::theme::semantic().notice)).opacity(0.3)
 }
 
 /// The viewport context menu's toggles, read from `entity` and its pane as
@@ -209,13 +204,13 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
 fn render_hidden_plates_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let showing = view.show_hidden_only();
     let has_armor = view.has_armor();
     let entity = entity.clone();
 
-    let label_text = filter.label(t!("ui.armor.show_hidden").to_string(), mark())?;
+    let label_text = filter.label(t!("ui.armor.show_hidden").to_string())?;
 
     Some(
         crate::ui::selectable(
@@ -246,7 +241,7 @@ fn render_hidden_plates_button(
 fn camera_rings_group(
     entity: &Entity<ViewportView>,
     snapshot: &DisplayPopoverSnapshot,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let rings = &snapshot.camera_rings;
@@ -290,7 +285,7 @@ fn camera_rings_group(
         .iter()
         .enumerate()
         .filter_map(|(ix, mode)| {
-            let label = filter.label(mode.clone(), mark())?;
+            let label = filter.label(mode.clone())?;
             let chosen = rings.mode.as_ref() == Some(mode);
             let entity = entity.clone();
             let rings = rings.clone();
@@ -383,7 +378,7 @@ fn perspective_rows(
     entity: &Entity<ViewportView>,
     perspective: &PerspectiveSettings,
     fov_slider: &Entity<SliderField>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Vec<AnyElement> {
     let toggled = entity.clone();
@@ -412,12 +407,12 @@ fn perspective_rows(
         ("armor-perspective-proj-center", t!("ui.armor.perspective_proj_center").into_owned(), LookMode::ThroughCenter),
     ];
     // The heading names the choice, so a match on it keeps both buttons.
-    let heading = filter.label(projection.clone(), mark());
-    let inner = if heading.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let heading = filter.label(projection.clone());
+    let inner = if heading.is_some() { FilterQuery::default() } else { filter.clone() };
     let buttons: Vec<AnyElement> = modes
         .into_iter()
         .filter_map(|(id, label, mode)| {
-            let label = inner.label(label, mark())?;
+            let label = inner.label(label)?;
             Some(look_mode_button(entity, id, label, mode, perspective.camera.look_mode))
         })
         .collect();
@@ -464,7 +459,7 @@ fn zoom_path_checkbox(
     rings: &CameraRingSettings,
     checked: bool,
     enabled: bool,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     apply: fn(&mut CameraRingSettings, bool),
 ) -> Option<AnyElement> {
     let entity = entity.clone();
@@ -486,7 +481,7 @@ fn filtered_checkbox(
     label: String,
     checked: bool,
     disabled: bool,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     on_click: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> Option<AnyElement> {
     let id: SharedString = id.into();
@@ -494,7 +489,7 @@ fn filtered_checkbox(
     if !filter.is_active() {
         return Some(checkbox.label(label).on_click(on_click).into_any_element());
     }
-    let marked = filter.label(label, mark())?;
+    let marked = filter.label(label)?;
 
     let on_click = std::rc::Rc::new(on_click);
     let from_label = std::rc::Rc::clone(&on_click);
@@ -519,11 +514,7 @@ fn filtered_checkbox(
 
 /// Rail toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
-fn render_gaps_button(
-    view: &ViewportView,
-    entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
-) -> Option<AnyElement> {
+fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>, filter: &FilterQuery) -> Option<AnyElement> {
     let gaps = view.gaps();
     let has_armor = view.has_armor();
     let entity = entity.clone();
@@ -534,7 +525,7 @@ fn render_gaps_button(
     // been looked at, is worth saying so quietly.
     let found = gaps.shown && gaps.count > 0;
 
-    let label_text = filter.label(label, mark())?;
+    let label_text = filter.label(label)?;
 
     Some(
         crate::ui::selectable(
@@ -564,7 +555,7 @@ fn render_gaps_button(
 fn render_splash_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
@@ -580,7 +571,7 @@ fn render_splash_button(
         t!("ui.armor.splash_no_data").into_owned()
     };
 
-    let label_text = filter.label(label, mark())?;
+    let label_text = filter.label(label)?;
 
     Some(
         crate::ui::selectable(
@@ -607,12 +598,12 @@ fn render_splash_button(
 fn render_splash_boxes_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let state = view.splash_state();
     let entity = entity.clone();
 
-    let label_text = filter.label(t!("ui.armor.splash_boxes").to_string(), mark())?;
+    let label_text = filter.label(t!("ui.armor.splash_boxes").to_string())?;
 
     Some(
         crate::ui::selectable(
@@ -642,12 +633,12 @@ fn render_splash_boxes_button(
 fn render_export_button(
     view: &ViewportView,
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let has_armor = view.current_armor.is_some();
     let click_entity = entity.clone();
 
-    let label_text = filter.label(t!("ui.replay.section_export").to_string(), mark())?;
+    let label_text = filter.label(t!("ui.replay.section_export").to_string())?;
 
     Some(
         Button::new("armor-export-trigger")
@@ -673,7 +664,7 @@ fn render_export_button(
 /// held across the click/hover closures built below).
 pub(crate) fn render_popover_content(
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
@@ -853,7 +844,7 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
 /// (`SidebarHighlightKey::HullMeshes`), shown or not, as egui does.
 pub(crate) fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (
@@ -1232,11 +1223,11 @@ fn render_hull_group_row(
     hull_visibility: &HashMap<String, bool>,
     expanded_hull_groups: &HashSet<String>,
     warn: Hsla,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
-    let title = filter.label(group.to_string(), mark());
+    let title = filter.label(group.to_string());
     // A match on the group keeps every mesh in it.
-    let mesh_filter = if title.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let mesh_filter = if title.is_some() { FilterQuery::default() } else { filter.clone() };
     let expanded = filter.is_active() || expanded_hull_groups.contains(group);
 
     let mut shown: Vec<String> = Vec::new();
@@ -1306,7 +1297,7 @@ fn render_hull_mesh_row(
     entity: &Entity<ViewportView>,
     name: &str,
     hull_visibility: &HashMap<String, bool>,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let visible = hull_visibility.get(name).copied().unwrap_or(false);
     let toggle_entity = entity.clone();
@@ -1386,7 +1377,7 @@ pub(crate) struct DisplayGroups {
 pub(crate) fn render_display_popover_content(
     entity: &Entity<ViewportView>,
     groups: &DisplayGroups,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     // The egui app draws none of this without a loaded hull
@@ -1467,7 +1458,7 @@ fn model_rows(
     groups: &DisplayGroups,
     snapshot: &DisplayPopoverSnapshot,
     armor: bool,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let display = snapshot.display;
@@ -1579,7 +1570,7 @@ fn model_rows(
 fn lighting_group(
     entity: &Entity<ViewportView>,
     snapshot: &DisplayPopoverSnapshot,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let lighting = &snapshot.lighting;
@@ -1611,7 +1602,7 @@ fn lighting_group(
     ]
     .into_iter()
     .filter_map(|(id, label, preset)| {
-        let label = filter.label(label, mark())?;
+        let label = filter.label(label)?;
         let entity = entity.clone();
         let button = Button::new(id).child(label).compact().disabled(off).on_click(move |_, window, cx| {
             entity.update(cx, |view, cx| view.set_lighting_preset(preset(), window, cx));
@@ -1650,13 +1641,13 @@ fn display_group(
     groups: &DisplayGroups,
     which: OptionSection,
     title: String,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
-    body: impl FnOnce(&OptionsFilter, &mut App) -> Option<AnyElement>,
+    body: impl FnOnce(&FilterQuery, &mut App) -> Option<AnyElement>,
 ) -> Option<AnyElement> {
-    let marked = filter.label(title.clone(), mark());
+    let marked = filter.label(title.clone());
     let (open, content) = if filter.is_active() {
-        let inner = if marked.is_some() { OptionsFilter::default() } else { filter.clone() };
+        let inner = if marked.is_some() { FilterQuery::default() } else { filter.clone() };
         let content = body(&inner, cx);
         if content.is_none() && marked.is_none() {
             return None;
@@ -1686,9 +1677,9 @@ fn labeled_color_row(
     label: String,
     picker: &Entity<gpui_kit::component::color_picker::ColorPickerState>,
     lighting_off: bool,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
-    let marked = filter.label(label.clone(), mark())?;
+    let marked = filter.label(label.clone())?;
     // Dimmed rather than taken away when the lighting is off: the colour it would
     // be lit in is still what this sets, and a row that vanished would read as a
     // setting that had gone.
@@ -1715,10 +1706,10 @@ pub(super) fn labeled_slider_row(
     label: String,
     field: &Entity<SliderField>,
     disabled: bool,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
 ) -> Option<AnyElement> {
-    let marked = filter.label(label, mark())?;
+    let marked = filter.label(label)?;
     field.update(cx, |field, cx| field.set_disabled(disabled, cx));
     let slider = field.read(cx).slider().clone();
     Some(
@@ -1782,16 +1773,16 @@ fn render_zone_row(
     warn: Hsla,
     show_zero_mm: bool,
     names: &TreeNames,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
 ) -> Option<AnyElement> {
     let zone_label = names.zone(&zone.name);
-    let title = filter.label(zone_label.clone(), mark());
+    let title = filter.label(zone_label.clone());
     // A match on the zone keeps every part in it; otherwise only the parts
     // that match are kept, under their zone.
-    let part_filter = if title.is_some() { OptionsFilter::default() } else { filter.clone() };
+    let part_filter = if title.is_some() { FilterQuery::default() } else { filter.clone() };
     let expanded = filter.is_active() || expanded_zones.contains(&zone.name);
     let parts: Vec<(&ZonePart, StyledText)> = if expanded {
-        zone.parts.iter().filter_map(|part| Some((part, part_filter.label(names.part(&part.name), mark())?))).collect()
+        zone.parts.iter().filter_map(|part| Some((part, part_filter.label(names.part(&part.name))?))).collect()
     } else {
         Vec::new()
     };

@@ -14,6 +14,8 @@ use crate::query_bar::label::outcome_label;
 use crate::query_bar::label::rating_label;
 use crate::query_bar::label::relation_label;
 use crate::query_bar::label::roster_field_label;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
 use wows_toolkit_config::index::query_ast::CmpOp;
 use wows_toolkit_config::index::query_ast::DivisionScope;
 use wows_toolkit_config::index::query_ast::Expr;
@@ -365,51 +367,20 @@ pub fn static_suggestions() -> Vec<Suggestion> {
     out
 }
 
-/// Indices into `all`, best first. Empty needle keeps declaration order.
-///
-/// Case-insensitive; a prefix match outranks a word-boundary match, which
-/// outranks a plain substring match; a label with none of the three is
-/// dropped. Ties keep declaration order, which `Vec::sort_by_key`'s
-/// stability gives for free since candidates are scored in that order.
+/// Indices into `all`, best first, ties in declaration order. A needle with
+/// no letter or digit keeps every suggestion in declaration order.
 pub fn rank(needle: &str, all: &[Suggestion]) -> Vec<usize> {
-    let needle = needle.trim();
-    if needle.is_empty() {
-        return (0..all.len()).collect();
-    }
-    let needle = needle.to_ascii_lowercase();
-    let mut scored: Vec<(usize, u8)> =
-        all.iter().enumerate().filter_map(|(i, s)| match_tier(&s.label, &needle).map(|tier| (i, tier))).collect();
-    scored.sort_by_key(|&(_, tier)| tier);
-    scored.into_iter().map(|(i, _)| i).collect()
+    let query = FilterQuery::new(needle);
+    let keys: Vec<FilterKey> = all.iter().map(|suggestion| FilterKey::new(&suggestion.label)).collect();
+
+    query.rank(keys.iter().enumerate(), |(_, key)| *key).into_iter().map(|(index, _)| index).collect()
 }
 
-/// Whether one row survives `needle`, scored the same way `rank` scores a
-/// suggestion label. A segment's list keeps its source's declaration order
-/// rather than re-sorting by tier, so this answers only whether a row stays.
-/// An empty needle keeps everything.
+/// Whether one row survives `needle`, by the rule `rank` keeps a suggestion
+/// by. A segment's list keeps its source's declaration order, so this
+/// answers only whether a row stays.
 pub fn matches(label: &str, needle: &str) -> bool {
-    let needle = needle.trim();
-    needle.is_empty() || match_tier(label, &needle.to_ascii_lowercase()).is_some()
-}
-
-/// 0 = the label starts with the needle; 1 = some word in the label does; 2 =
-/// the needle appears somewhere else in the label; `None` = no match at all.
-fn match_tier(label: &str, needle_lower: &str) -> Option<u8> {
-    let label_lower = label.to_ascii_lowercase();
-    if label_lower.starts_with(needle_lower) {
-        return Some(0);
-    }
-    if word_boundary_match(&label_lower, needle_lower) {
-        return Some(1);
-    }
-    if label_lower.contains(needle_lower) {
-        return Some(2);
-    }
-    None
-}
-
-fn word_boundary_match(label_lower: &str, needle_lower: &str) -> bool {
-    label_lower.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(needle_lower))
+    FilterQuery::new(needle).keeps(label)
 }
 
 /// What the bar needs the Search tab to fetch for the value editor it is
@@ -802,24 +773,29 @@ mod tests {
         );
     }
 
-    /// Every damage label in the real static set is scope-prefixed ("My
-    /// damage", "Ally damage", ...), so `a_prefix_match_outranks_a_mid_word_match`
-    /// can never see a true tier-0 hit: no label starts with "dam", so its
-    /// disjunct on "starts_with" never fires, and the test degrades to "a
-    /// damage suggestion is first" -- true even if word-boundary and
-    /// substring were scored the wrong way round. This test builds synthetic
-    /// suggestions that each hit exactly one tier for the same needle and
-    /// asserts the full order, so it fails if any two tiers are out of
-    /// order or collapsed together.
+    /// The real static set has no label starting with "dam", so this builds
+    /// suggestions that each match the same needle in a different place and
+    /// asserts the full order.
     #[test]
-    fn tiers_rank_prefix_above_word_boundary_above_substring() {
+    fn a_label_start_ranks_above_a_word_start_above_a_mid_word_match() {
         let suggestions = vec![
-            synthetic("substring", "Dislocation report"),
-            synthetic("word_boundary", "Ready the catapult"),
-            synthetic("prefix", "Catapult launch"),
+            synthetic("mid_word", "Dislocation report"),
+            synthetic("word_start", "Ready the catapult"),
+            synthetic("label_start", "Catapult launch"),
         ];
         let order = rank("cat", &suggestions);
-        assert_eq!(order, vec![2, 1, 0], "expected prefix, then word-boundary, then substring");
+        assert_eq!(order, vec![2, 1, 0], "expected label start, then word start, then mid-word");
+    }
+
+    #[test]
+    fn a_needle_matches_word_start_letters_and_folded_accents() {
+        let suggestions = vec![
+            synthetic("mine", "My damage"),
+            synthetic("enemy", "Enemy damage"),
+            synthetic("accented", "D\u{e9}g\u{e2}ts ennemis"),
+        ];
+        assert_eq!(rank("en dmg", &suggestions), vec![1], "letters from the start of each word");
+        assert_eq!(rank("degats", &suggestions), vec![2], "accents fold to ASCII");
     }
 
     fn synthetic(key: &'static str, label: &str) -> Suggestion {

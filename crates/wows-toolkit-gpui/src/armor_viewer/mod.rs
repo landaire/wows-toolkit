@@ -58,7 +58,6 @@ mod load_model;
 mod load_ship;
 pub mod model_refs;
 mod model_tree;
-mod options_filter;
 pub mod options_panel;
 pub mod pane;
 pub mod picking_ui;

@@ -106,6 +106,8 @@ use crate::replay_inspector::columns::PlayerColorKind;
 use crate::replay_inspector::columns::class_icon_tint;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 use crate::ui::selectable;
 
 const ROW_HEIGHT: Pixels = px(24.);
@@ -949,6 +951,11 @@ impl PlayerTrackerView {
         self.sync_rows(cx);
     }
 
+    /// The typed filter, folded once for every row it is tried on.
+    fn filter(&self) -> FilterQuery {
+        FilterQuery::new(&self.filter_text)
+    }
+
     /// The historical table's rows: the indexed players, joined to what the
     /// tracker recorded about the same accounts, so the counts and the
     /// division-mate toggle read the way the egui tracker's do.
@@ -956,7 +963,7 @@ impl PlayerTrackerView {
         visible_player_rows(
             &self.players,
             &self.tracked,
-            &self.filter_text,
+            &self.filter(),
             self.period.earliest(Timestamp::now()),
             self.show_division_mates,
             self.sort,
@@ -978,7 +985,7 @@ impl PlayerTrackerView {
             since,
             self.show_division_mates,
         );
-        visible_clans(rows, &self.filter_text, self.clan_sort)
+        visible_clans(rows, &self.filter(), self.clan_sort)
     }
 
     /// Hands the Search tab a query for every match this player was in.
@@ -1515,6 +1522,7 @@ impl PlayerTrackerView {
         let member_names: HashMap<AccountId, String> =
             self.tracked.iter().map(|(id, player)| (*id, player.last_name.clone())).collect();
         let editing_note = self.editing_note;
+        let filter = self.filter();
         let note_input = self.note_input.clone();
         let note_error = self.note_error.clone();
         let render_row = move |ix: usize, window: &mut Window, cx: &mut App| match sub_tab {
@@ -1550,14 +1558,20 @@ impl PlayerTrackerView {
                                     }
                                 },
                             ))
-                            .child(div().flex_1().min_w(px(0.)).text_sm().child(row.facet.latest_name.clone())),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .text_sm()
+                                    .child(filter.marked(row.facet.latest_name.clone())),
+                            ),
                     )
                     .child(
                         div()
                             .w(CLAN_COLUMN_WIDTH)
                             .text_sm()
                             .text_color(crate::theme::text_dim())
-                            .child(row.facet.clan.clone()),
+                            .child(filter.marked(row.facet.clan.clone())),
                     )
                     // Both counts are read in the tone the in-range one
                     // deserves: how often you have met someone lately is what
@@ -1649,7 +1663,7 @@ impl PlayerTrackerView {
                                     .min_w(px(0.))
                                     .text_sm()
                                     .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
-                                    .child(row.clan.clone()),
+                                    .child(filter.marked(row.clan.clone())),
                             ),
                     )
                     .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
@@ -3710,6 +3724,71 @@ mod clan_table_tests {
                 assert_eq!(tracker.panels[2].read(cx).list_len(), 0);
             })
             .expect("the window is open");
+    }
+
+    /// The filter folds accents and skips letters inside a word, and both
+    /// tables mark the letters it matched in the name and the tag.
+    #[gpui_kit::test]
+    fn the_filter_matches_loosely_and_marks_names_and_tags(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(700.)), PlayerTrackerView::new);
+
+        let mut tracked = HashMap::new();
+        let mut players = Vec::new();
+        for (account, name, clan) in [(7i64, "Bj\u{f6}rn_Ironside", "N\u{d8}RD"), (8, "Harvey635", "WTK")] {
+            let mut player = TrackedPlayer {
+                clan: clan.to_string(),
+                last_name: name.to_string(),
+                ..TrackedPlayer::new(AccountId(account))
+            };
+            player.arena_ids.insert(ArenaId::from(account));
+            player.timestamps.insert(at(account));
+            tracked.insert(AccountId(account), player);
+            players.push(PlayerFacet {
+                account_id: AccountId(account),
+                latest_name: name.to_string(),
+                clan: clan.to_string(),
+                match_count: 1,
+            });
+        }
+        window
+            .update(cx, |tracker, _window, cx| tracker.seed_players_and_notes(players, tracked, cx))
+            .expect("the window is open");
+
+        let draw = |typed: &'static str, cx: &mut TestAppContext| {
+            window
+                .update(cx, |tracker, _window, cx| {
+                    tracker.filter_text = typed.to_string();
+                    tracker.sync_rows(cx);
+                })
+                .expect("the window is open");
+            crate::text_filter::take_marks();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.render_frame(cx);
+            })
+            .expect("the window is open");
+        };
+
+        draw("bjorn", cx);
+        assert_eq!(crate::text_filter::marks_for("Bj\u{f6}rn_Ironside"), Some(std::iter::once(0..6).collect()));
+        assert_eq!(crate::text_filter::marks_for("N\u{d8}RD"), Some(Vec::new()), "kept by its name, the tag is plain");
+        assert_eq!(crate::text_filter::marks_for("Harvey635"), None, "the other player is filtered out");
+
+        draw("nord", cx);
+        assert_eq!(
+            crate::text_filter::marks_for("N\u{d8}RD"),
+            Some(std::iter::once(0..5).collect()),
+            "matched on the tag"
+        );
+        assert_eq!(crate::text_filter::marks_for("Bj\u{f6}rn_Ironside"), Some(Vec::new()));
+
+        window
+            .update(cx, |tracker, window, cx| tracker.set_sub_tab(SubTab::Clans, window, cx))
+            .expect("the window is open");
+        draw("nrd", cx);
+        assert_eq!(crate::text_filter::marks_for("N\u{d8}RD"), Some(vec![0..1, 3..5]), "letters skipped in the tag");
+        assert_eq!(crate::text_filter::marks_for("WTK"), None, "the other clan is filtered out");
     }
 
     /// A clans row opens on the members met from that clan.

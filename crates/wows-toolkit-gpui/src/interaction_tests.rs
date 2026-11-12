@@ -856,9 +856,15 @@ fn the_options_filter_keeps_only_the_matching_controls(cx: &mut TestAppContext) 
         assert!(window.try_find("armor-show-hidden").is_some());
 
         window.click("armor-options-filter", cx);
+        crate::text_filter::take_marks();
         window.input("pen ch", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-options-section-PenCheck").is_some(), "Pen Check matches");
+        assert_eq!(
+            crate::text_filter::marks_for("Pen Check"),
+            Some(std::iter::once(0..6).collect()),
+            "the section title marks what matched, with the space inside the run"
+        );
         assert!(window.try_find("armor-show-hidden").is_none(), "Show Hidden does not");
         assert!(
             window.try_find("armor-options-section-Display").is_none(),

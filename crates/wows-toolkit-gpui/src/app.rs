@@ -47,7 +47,6 @@ use std::rc::Rc;
 use crate::armor_viewer::ArmorViewerPane;
 use crate::game_data_cache;
 use crate::palette::PaletteAction;
-use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
@@ -2068,8 +2067,8 @@ impl App {
     /// Opens the command palette over the window.
     pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Built per opening so the labels follow the current locale.
-        let entries = Rc::new(crate::palette::entries());
-        self.open_palette_with(entries, window, cx);
+        let root = crate::palette::RootPalette::new(crate::palette::entries());
+        self.open_palette_with(Rc::new(std::cell::RefCell::new(root)), window, cx);
     }
 
     /// Fills the palette with one of the cascading modes and reopens it.
@@ -2137,8 +2136,13 @@ impl App {
         });
     }
 
-    /// Opens the palette over `entries`.
-    fn open_palette_with(&mut self, entries: Rc<Vec<PaletteEntry>>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the palette over `root`.
+    fn open_palette_with(
+        &mut self,
+        root: Rc<std::cell::RefCell<crate::palette::RootPalette>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Reaching for the palette while one is already up must not stack a
         // second over it. Closed rather than counted: a dialog can go by the
         // Escape key or a click outside it without this hearing, so a flag
@@ -2155,7 +2159,7 @@ impl App {
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
             let palette = palette.clone();
-            let entries = Rc::clone(&entries);
+            let root = Rc::clone(&root);
             let owner = owner.clone();
             let focus_on_mount = focus_on_mount.clone();
             dialog.close_button(false).p_0().content(move |content, window, cx| {
@@ -2167,18 +2171,29 @@ impl App {
                     });
                 }
                 let owner = owner.clone();
-                let taken = Rc::clone(&entries);
+                let shown = root.borrow().shown();
+                let items = crate::palette::items(&shown, root.borrow().query());
                 content.child(
                     Command::new(&palette)
                         .bordered(false)
                         // The command paints its own square background, which
                         // would show past the dialog's rounded corners.
                         .rounded(cx.theme().radius_lg)
+                        // Filtered here rather than by the component, which
+                        // matches by plain substring.
+                        .filterable(false)
                         .placeholder(t!("ui.palette.placeholder").to_string())
                         .max_h(px(400.))
-                        .items(crate::palette::items(&entries))
+                        .items(items)
+                        .on_query({
+                            let root = Rc::clone(&root);
+                            move |query, window, _cx| {
+                                root.borrow_mut().search(query);
+                                window.refresh();
+                            }
+                        })
                         .on_confirm(move |index_path, window, cx| {
-                            let Some(entry) = taken.get(index_path.row) else { return };
+                            let Some(entry) = shown.get(index_path.row) else { return };
                             let action = entry.action.clone();
                             let _ = owner.update(cx, |this, cx| this.run_palette_action(action, window, cx));
                             window.close_all_dialogs(cx);

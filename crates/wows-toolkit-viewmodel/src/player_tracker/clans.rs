@@ -13,6 +13,7 @@ use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::rows::ClanCorrection;
 
 use super::tracked::TrackedPlayer;
+use crate::text_filter::FilterQuery;
 
 /// One clan's encounter aggregates.
 #[derive(Debug, Clone)]
@@ -138,17 +139,15 @@ pub fn build_clan_breakdown(
     rows
 }
 
-/// The rows a clans table shows: those whose tag matches `needle`, in the
-/// order `sort` asks for.
+/// The rows a clans table shows: those whose tag matches `filter`, in the
+/// order `sort` asks for rather than by how well they matched.
 ///
 /// The tag breaks every tie so the order is total, and does not shuffle
 /// between refreshes when two clans carry the same counts.
-pub fn visible_clans(rows: Vec<ClanRow>, needle: &str, sort: super::ClanSort) -> Vec<ClanRow> {
+pub fn visible_clans(rows: Vec<ClanRow>, filter: &FilterQuery, sort: super::ClanSort) -> Vec<ClanRow> {
     use super::ClanSortColumn;
 
-    let needle = needle.to_lowercase();
-    let mut rows: Vec<ClanRow> =
-        rows.into_iter().filter(|row| needle.is_empty() || row.clan.to_lowercase().contains(&needle)).collect();
+    let mut rows: Vec<ClanRow> = rows.into_iter().filter(|row| filter.keeps(&row.clan)).collect();
 
     rows.sort_by(|a, b| {
         let ordering = match sort.column {
@@ -232,15 +231,41 @@ mod tests {
 
         let by_encounters = visible_clans(
             rows.clone(),
-            "",
+            &FilterQuery::default(),
             ClanSort { column: ClanSortColumn::Encounters, order: SortOrder::Descending },
         );
         let tags: Vec<&str> = by_encounters.iter().map(|row| row.clan.as_str()).collect();
         assert_eq!(tags, vec!["BBB", "AAA"], "the busiest clan leads");
 
-        let filtered =
-            visible_clans(rows, "aa", ClanSort { column: ClanSortColumn::Clan, order: SortOrder::Ascending });
+        let filtered = visible_clans(
+            rows,
+            &FilterQuery::new("aa"),
+            ClanSort { column: ClanSortColumn::Clan, order: SortOrder::Ascending },
+        );
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].clan, "AAA");
+    }
+
+    /// Separators in a tag are skipped, so "rng" finds "R_N_G" as well as
+    /// "RNG2", and the rows keep the chosen column's order.
+    #[test]
+    fn the_tag_filter_skips_separators_and_keeps_the_sort() {
+        let mut tracked = HashMap::new();
+        tracked.insert(AccountId(1), player("R_N_G", &[(1, 10), (2, 20), (3, 30)]));
+        tracked.insert(AccountId(2), player("RNG2", &[(4, 40)]));
+        tracked.insert(AccountId(3), player("-K-", &[(5, 50), (6, 60)]));
+        let rows = build_clan_breakdown(&tracked, &HashMap::new(), &[], None, false);
+        let by_encounters = ClanSort { column: ClanSortColumn::Encounters, order: SortOrder::Descending };
+
+        let tags = |typed: &str| -> Vec<String> {
+            visible_clans(rows.clone(), &FilterQuery::new(typed), by_encounters)
+                .into_iter()
+                .map(|row| row.clan)
+                .collect()
+        };
+
+        assert_eq!(tags("rng"), vec!["R_N_G", "RNG2"], "the busier clan first, though RNG2 matches as a run");
+        assert_eq!(tags("k"), vec!["-K-"]);
+        assert!(tags("xyz").is_empty());
     }
 }

@@ -617,8 +617,8 @@ impl ArmorViewerPane {
     }
 
     /// What the rail's filter field asks for.
-    pub(crate) fn options_filter(&self, cx: &App) -> super::options_filter::OptionsFilter {
-        super::options_filter::OptionsFilter::new(&self.options_filter.read(cx).value())
+    pub(crate) fn options_filter(&self, cx: &App) -> crate::text_filter::FilterQuery {
+        crate::text_filter::FilterQuery::new(&self.options_filter.read(cx).value())
     }
 
     /// Which of the rail's sections are expanded.

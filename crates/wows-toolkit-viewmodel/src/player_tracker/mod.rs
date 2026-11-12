@@ -36,6 +36,7 @@ pub fn encounter_severity(times_in_range: usize) -> EncounterSeverity {
 pub mod tracked;
 
 use crate::match_stats::Region;
+use crate::text_filter::FilterQuery;
 use jiff::Timestamp;
 use jiff::ToSpan;
 use serde::Deserialize;
@@ -221,22 +222,23 @@ impl Sort {
     }
 }
 
-/// Keeps the players whose name or clan contains `needle`, case-insensitively.
-/// An empty needle keeps everyone.
-pub fn matches_filter(player: &PlayerFacet, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    let needle = needle.to_lowercase();
-    player.latest_name.to_lowercase().contains(&needle) || player.clan.to_lowercase().contains(&needle)
+/// Keeps the players whose name or clan matches `filter`. An inactive filter
+/// keeps everyone.
+///
+/// Folds both texts on each call: the table rebuilds its rows from the
+/// unfiltered players on each draw, so there is no kept row to hold a folded
+/// key.
+pub fn matches_filter(player: &PlayerFacet, filter: &FilterQuery) -> bool {
+    filter.keeps(&player.latest_name) || filter.keeps(&player.clan)
 }
 
-/// The rows the table draws: filtered, then sorted.
+/// The rows the table draws: filtered, then sorted. The sort is the
+/// reader's, so a match's quality does not reorder the rows.
 ///
 /// Ties break on the account id so the order is stable between refreshes
 /// rather than reshuffling players with the same count.
-pub fn visible_players(players: &[PlayerFacet], needle: &str, sort: Sort) -> Vec<PlayerFacet> {
-    let mut rows: Vec<PlayerFacet> = players.iter().filter(|player| matches_filter(player, needle)).cloned().collect();
+pub fn visible_players(players: &[PlayerFacet], filter: &FilterQuery, sort: Sort) -> Vec<PlayerFacet> {
+    let mut rows: Vec<PlayerFacet> = players.iter().filter(|player| matches_filter(player, filter)).cloned().collect();
 
     rows.sort_by(|a, b| {
         let ordering = match sort.column {
@@ -268,8 +270,8 @@ pub struct PlayerRow {
     pub last_seen: Option<Timestamp>,
 }
 
-/// The historical table's rows: filtered by `needle`, joined to `tracked`,
-/// and sorted.
+/// The historical table's rows: filtered by `filter`, joined to `tracked`,
+/// and sorted in the reader's order.
 ///
 /// `since` is the period's resolved boundary and `show_division_mates` the
 /// toggle above the table. While the toggle is off, a player met inside the
@@ -281,14 +283,14 @@ pub struct PlayerRow {
 pub fn visible_player_rows(
     players: &[PlayerFacet],
     tracked: &HashMap<AccountId, tracked::TrackedPlayer>,
-    needle: &str,
+    filter: &FilterQuery,
     since: Option<Timestamp>,
     show_division_mates: bool,
     sort: Sort,
 ) -> Vec<PlayerRow> {
     let mut rows: Vec<PlayerRow> = players
         .iter()
-        .filter(|player| matches_filter(player, needle))
+        .filter(|player| matches_filter(player, filter))
         .filter_map(|facet| {
             let Some(player) = tracked.get(&facet.account_id) else {
                 return Some(PlayerRow {
@@ -399,7 +401,7 @@ mod tests {
         let rows = visible_player_rows(
             &[player(1, "Zeta", "ALPHA", 99)],
             &tracked,
-            "",
+            &FilterQuery::default(),
             Some(now - (24 * 7).hours()),
             false,
             Sort::default(),
@@ -413,8 +415,14 @@ mod tests {
 
     #[test]
     fn a_player_the_tracker_never_recorded_falls_back_to_the_indexed_count() {
-        let rows =
-            visible_player_rows(&[player(1, "Zeta", "ALPHA", 4)], &HashMap::new(), "", None, false, Sort::default());
+        let rows = visible_player_rows(
+            &[player(1, "Zeta", "ALPHA", 4)],
+            &HashMap::new(),
+            &FilterQuery::default(),
+            None,
+            false,
+            Sort::default(),
+        );
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].total_encounters, None, "there is no all-time figure to give");
@@ -427,8 +435,10 @@ mod tests {
         let tracked: HashMap<AccountId, tracked::TrackedPlayer> = [met(1, &[(1, true)])].into_iter().collect();
         let players = [player(1, "Zeta", "ALPHA", 1)];
 
-        assert!(visible_player_rows(&players, &tracked, "", None, false, Sort::default()).is_empty());
-        let shown = visible_player_rows(&players, &tracked, "", None, true, Sort::default());
+        assert!(
+            visible_player_rows(&players, &tracked, &FilterQuery::default(), None, false, Sort::default()).is_empty()
+        );
+        let shown = visible_player_rows(&players, &tracked, &FilterQuery::default(), None, true, Sort::default());
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].encounters_in_range, 1);
     }
@@ -439,13 +449,13 @@ mod tests {
             [met(1, &[(1, false)]), met(2, &[(2, false), (3, false), (4, false)])].into_iter().collect();
         let players = [player(1, "Zeta", "ALPHA", 1), player(2, "Alpha", "ZULU", 3)];
 
-        let by_count = visible_player_rows(&players, &tracked, "", None, false, Sort::default());
+        let by_count = visible_player_rows(&players, &tracked, &FilterQuery::default(), None, false, Sort::default());
         assert_eq!(by_count[0].facet.latest_name, "Alpha", "the most-met player leads");
 
         let by_last_seen = visible_player_rows(
             &players,
             &tracked,
-            "",
+            &FilterQuery::default(),
             None,
             false,
             Sort { column: SortColumn::LastEncountered, order: SortOrder::Descending },
@@ -475,28 +485,55 @@ mod tests {
     #[test]
     fn an_empty_filter_keeps_everyone_and_a_needle_matches_name_or_clan() {
         let players = sample();
-        assert_eq!(visible_players(&players, "", Sort::default()).len(), 3);
-        assert_eq!(visible_players(&players, "zulu", Sort::default()).len(), 1, "matched on clan");
-        assert_eq!(visible_players(&players, "mike", Sort::default()).len(), 1, "matched on name");
-        assert!(visible_players(&players, "nobody", Sort::default()).is_empty());
+        let visible = |typed: &str| visible_players(&players, &FilterQuery::new(typed), Sort::default()).len();
+        assert_eq!(visible(""), 3);
+        assert_eq!(visible("zulu"), 1, "matched on clan");
+        assert_eq!(visible("mike"), 1, "matched on name");
+        assert_eq!(visible("nobody"), 0);
     }
 
     #[test]
     fn the_filter_ignores_case_on_both_sides() {
         let players = sample();
-        assert_eq!(visible_players(&players, "ZETA", Sort::default()).len(), 1);
-        assert_eq!(visible_players(&players, "alpha", Sort::default()).len(), 2, "one name, one clan");
+        let visible = |typed: &str| visible_players(&players, &FilterQuery::new(typed), Sort::default()).len();
+        assert_eq!(visible("ZETA"), 1);
+        assert_eq!(visible("alpha"), 2, "one name, one clan");
+    }
+
+    /// Accents fold away, letters may start words or be skipped inside one,
+    /// and the rows keep the reader's sort rather than the match's quality.
+    #[test]
+    fn the_filter_folds_accents_matches_loosely_and_keeps_the_sort() {
+        let players = [
+            player(1, "Bj\u{f6}rn_Ironside", "N\u{d8}RD", 9),
+            player(2, "BigRedOne", "", 7),
+            player(3, "Zeta", "ALPHA", 5),
+        ];
+        let names = |typed: &str| -> Vec<String> {
+            visible_players(&players, &FilterQuery::new(typed), Sort::default())
+                .into_iter()
+                .map(|row| row.latest_name)
+                .collect()
+        };
+
+        assert_eq!(names("bjorn"), vec!["Bj\u{f6}rn_Ironside"], "the accent folds away");
+        assert_eq!(names("nord"), vec!["Bj\u{f6}rn_Ironside"], "the slashed O in the clan folds to O");
+        assert_eq!(names("b ironside"), vec!["Bj\u{f6}rn_Ironside"], "word starts across the underscore");
+        // "BigRedOne" matches "bi" better, from its first letter, but is met
+        // less often.
+        assert_eq!(names("bi"), vec!["Bj\u{f6}rn_Ironside", "BigRedOne"], "the most met first, as sorted");
+        assert!(names("xyz").is_empty());
     }
 
     #[test]
     fn encounters_sort_descending_by_default_so_the_most_met_lead() {
-        let rows = visible_players(&sample(), "", Sort::default());
+        let rows = visible_players(&sample(), &FilterQuery::default(), Sort::default());
         assert_eq!(rows.iter().map(|row| row.match_count).collect::<Vec<_>>(), vec![9, 9, 2]);
     }
 
     #[test]
     fn ties_break_on_the_account_so_the_order_does_not_reshuffle() {
-        let rows = visible_players(&sample(), "", Sort::default());
+        let rows = visible_players(&sample(), &FilterQuery::default(), Sort::default());
         let tied: Vec<i64> = rows.iter().filter(|row| row.match_count == 9).map(|row| row.account_id.raw()).collect();
         assert_eq!(tied, vec![2, 3], "the two nine-encounter players keep account order");
     }
@@ -504,7 +541,7 @@ mod tests {
     #[test]
     fn sorting_by_name_is_alphabetical_regardless_of_case() {
         let sort = Sort { column: SortColumn::Name, order: SortOrder::Ascending };
-        let rows = visible_players(&sample(), "", sort);
+        let rows = visible_players(&sample(), &FilterQuery::default(), sort);
         assert_eq!(rows.iter().map(|row| row.latest_name.as_str()).collect::<Vec<_>>(), vec!["alpha", "Mike", "Zeta"]);
     }
 

@@ -27,7 +27,6 @@ use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wowsunpack::game_params::types::ShellInfo;
 
 use super::legend::swatch_color;
-use super::options_filter::OptionsFilter;
 use super::pane::ArmorViewerPane;
 use super::pane::OptionSection;
 use super::popover::labeled_slider_row;
@@ -37,6 +36,7 @@ use super::viewport_view::CastShell;
 use super::viewport_view::Isolate;
 use super::viewport_view::ViewportView;
 use crate::slider_field::SliderField;
+use crate::text_filter::FilterQuery;
 
 /// How wide a marker is drawn.
 const MARKER_SIZE: Pixels = px(22.);
@@ -81,7 +81,7 @@ pub(super) fn render(
             t!("ui.armor.trajectory_range").into_owned(),
             &next_range,
             false,
-            &OptionsFilter::default(),
+            &FilterQuery::default(),
             cx,
         ))
         .child(ricochet);
@@ -363,7 +363,7 @@ fn render_editor(
             t!("ui.armor.trajectory_range").into_owned(),
             range,
             false,
-            &OptionsFilter::default(),
+            &FilterQuery::default(),
             cx,
         ))
         .child(render_arc_shell_picker(viewport, id, arc.shell.as_ref(), ships))

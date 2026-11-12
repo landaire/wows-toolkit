@@ -77,9 +77,11 @@ use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
+use wows_replay_insights::timeline::kind_index;
 use wows_replay_insights::timeline::kind_label_key;
 use wows_replay_insights::timeline::row_text;
 use wows_replay_insights::timeline::row_tone;
+use wows_replay_insights::timeline::searchable_text;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::TeamId;
@@ -88,6 +90,12 @@ use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
 
 use crate::replay_inspector::GameDataCache;
+use crate::tactics::ShipLookup;
+use crate::tactics::ship_match_label;
+use crate::tactics::ship_match_name;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// How many frames of a battle the track keeps.
 ///
@@ -282,10 +290,10 @@ pub struct ReplayRendererPanel {
     /// What has been typed into it, and what that matched. Recomputed as it
     /// is typed rather than while the popover is built, which happens over
     /// and over and cannot reach the catalogue mutably.
-    ship_query: String,
+    ship_query: FilterQuery,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
     /// Every ship the loaded build knows, built once when first asked for.
-    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    ship_lookup: Option<ShipLookup>,
     /// What the session held before each change this viewport made, newest
     /// last. Bounded: a session left open all evening must not grow a
     /// history of every stroke in it.
@@ -310,6 +318,8 @@ pub struct ReplayRendererPanel {
     menu_for: Option<ShipMenu>,
     /// Which of the battle's events the timeline shows.
     event_filter: TimelineFilter,
+    /// The filter's search, folded once each time it changes.
+    event_query: FilterQuery,
     /// The timeline's search box.
     event_search: Entity<InputState>,
     _event_search: Option<Subscription>,
@@ -322,6 +332,9 @@ pub struct ReplayRendererPanel {
     /// What happened in the battle, once the second walk has read it. Empty
     /// until then, which is what leaves the event controls refused.
     events: Vec<TimelineEvent>,
+    /// The texts the search reads of each of `events`, folded once when the
+    /// events are read.
+    event_keys: Vec<[FilterKey; 2]>,
     /// What each ship took, from the same walk. Keyed by the entity the
     /// frame's own ship commands carry, so a ship the reader points at is
     /// looked up directly.
@@ -471,15 +484,15 @@ impl ReplayRendererPanel {
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.ship_query = state.read(cx).value().to_string();
+                this.ship_query = FilterQuery::new(&state.read(cx).value());
                 this.matched_ships = this.matching_ships();
                 cx.notify();
             }
         });
         let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.event_filter.search = state.read(cx).value().to_string();
-                cx.notify();
+                let typed = state.read(cx).value().to_string();
+                this.set_event_filter(|filter| filter.search = typed, cx);
             }
         });
 
@@ -519,9 +532,9 @@ impl ReplayRendererPanel {
             turning: None,
             ship_search,
             _ship_search: Some(ship_search_subscription),
-            ship_query: String::new(),
+            ship_query: FilterQuery::default(),
             matched_ships: Vec::new(),
-            ship_catalog: None,
+            ship_lookup: None,
             history: Vec::new(),
             _collab_tick: None,
             game_data: None,
@@ -531,11 +544,13 @@ impl ReplayRendererPanel {
             ship_ranges: HashMap::new(),
             menu_for: None,
             event_filter: TimelineFilter::default(),
+            event_query: FilterQuery::default(),
             event_search,
             _event_search: Some(event_search_subscription),
             viewer_team: None,
             events_read: false,
             events: Vec::new(),
+            event_keys: Vec::new(),
             shots: HashMap::new(),
             armor_following: None,
             _events: None,
@@ -601,15 +616,15 @@ impl ReplayRendererPanel {
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.ship_query = state.read(cx).value().to_string();
+                this.ship_query = FilterQuery::new(&state.read(cx).value());
                 this.matched_ships = this.matching_ships();
                 cx.notify();
             }
         });
         let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.event_filter.search = state.read(cx).value().to_string();
-                cx.notify();
+                let typed = state.read(cx).value().to_string();
+                this.set_event_filter(|filter| filter.search = typed, cx);
             }
         });
         Self {
@@ -659,9 +674,9 @@ impl ReplayRendererPanel {
             turning: None,
             ship_search,
             _ship_search: Some(ship_search_subscription),
-            ship_query: String::new(),
+            ship_query: FilterQuery::default(),
             matched_ships: Vec::new(),
-            ship_catalog: None,
+            ship_lookup: None,
             history: Vec::new(),
             _collab_tick: None,
             game_data: None,
@@ -671,11 +686,13 @@ impl ReplayRendererPanel {
             ship_ranges: HashMap::new(),
             menu_for: None,
             event_filter: TimelineFilter::default(),
+            event_query: FilterQuery::default(),
             event_search,
             _event_search: Some(event_search_subscription),
             viewer_team: None,
             events_read: false,
             events: Vec::new(),
+            event_keys: Vec::new(),
             shots: HashMap::new(),
             armor_following: None,
             _events: None,
@@ -728,7 +745,7 @@ impl ReplayRendererPanel {
             let _ = this.update(cx, |this, cx| {
                 match read {
                     Ok((read, shots)) => {
-                        this.events = read.events;
+                        this.set_events(read.events);
                         this.viewer_team = read.viewer_team;
                         this.shots = shots;
                         this.events_read = true;
@@ -742,18 +759,32 @@ impl ReplayRendererPanel {
         }));
     }
 
+    /// Takes the battle's events, with the texts the timeline search reads of
+    /// each folded once here rather than on every keystroke.
+    fn set_events(&mut self, events: Vec<TimelineEvent>) {
+        self.event_keys = events
+            .iter()
+            .map(|event| {
+                let (first, second) = searchable_text(&event.kind);
+                [FilterKey::new(first), FilterKey::new(second)]
+            })
+            .collect();
+        self.events = events;
+    }
+
     /// A viewport with `events` already read, at the elapsed clocks given.
     #[cfg(test)]
     fn seed_events_for_test(&mut self, at: &[f32]) {
         use wows_replay_insights::timeline::TimelineEventKind;
         use wows_replays::types::ElapsedClock;
-        self.events = at
-            .iter()
-            .map(|seconds| TimelineEvent {
-                clock: ElapsedClock(*seconds),
-                kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
-            })
-            .collect();
+        self.set_events(
+            at.iter()
+                .map(|seconds| TimelineEvent {
+                    clock: ElapsedClock(*seconds),
+                    kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
+                })
+                .collect(),
+        );
     }
 
     /// Hands a viewport being built its end of the session.
@@ -1419,9 +1450,21 @@ impl ReplayRendererPanel {
             .collect()
     }
 
-    /// The events the filter admits, newest last.
+    /// The events the filter admits, newest last. A timeline is read in the
+    /// order things happened, so the search only drops events and never
+    /// reorders them.
     pub(crate) fn visible_events(&self) -> Vec<&TimelineEvent> {
-        self.events.iter().filter(|event| self.event_filter.matches(event)).collect()
+        let searching = self.event_query.is_active();
+
+        self.events
+            .iter()
+            .zip(&self.event_keys)
+            .filter(|(event, keys)| {
+                self.event_filter.kinds[kind_index(&event.kind)]
+                    && (!searching || self.event_query.best(keys.iter()).is_some())
+            })
+            .map(|(event, _)| event)
+            .collect()
     }
 
     /// Which of the battle's events the timeline shows.
@@ -1432,6 +1475,7 @@ impl ReplayRendererPanel {
     /// Changes which events the timeline shows.
     pub(crate) fn set_event_filter(&mut self, apply: impl FnOnce(&mut TimelineFilter), cx: &mut Context<Self>) {
         apply(&mut self.event_filter);
+        self.event_query = FilterQuery::new(&self.event_filter.search);
         cx.notify();
     }
 
@@ -2325,39 +2369,28 @@ impl ReplayRendererPanel {
 
     /// Every ship the loaded build knows, built the first time one is
     /// looked up rather than when the viewport opens.
-    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
-        if let Some(catalog) = &self.ship_catalog {
-            return Some(std::rc::Rc::clone(catalog));
+    fn ships(&mut self) -> Option<&ShipLookup> {
+        if self.ship_lookup.is_none() {
+            let loaded = self.game_data.as_ref()?.newest_loaded()?;
+            let catalog = crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider());
+            self.ship_lookup = Some(ShipLookup::new(&catalog));
         }
-        let loaded = self.game_data.as_ref()?.newest_loaded()?;
-        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
-        self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
-        Some(catalog)
+
+        self.ship_lookup.as_ref()
     }
 
-    /// The ships whose names match what has been typed, with the class each
-    /// belongs to. Empty until something is typed, since every ship at once
-    /// is not a choice.
+    /// The ships whose names match what has been typed, best first, with the
+    /// class each belongs to. Empty until something is typed, since every
+    /// ship at once is not a choice.
     fn matching_ships(&mut self) -> Vec<(wowsunpack::game_params::types::Species, ShipEntry)> {
-        let query = self.ship_query.trim().to_lowercase();
-        if query.is_empty() {
+        if !self.ship_query.is_active() {
             return Vec::new();
         }
-        let Some(catalog) = self.ships() else { return Vec::new() };
-        let mut found = Vec::new();
-        for nation in &catalog.nations {
-            for class in &nation.classes {
-                for ship in &class.ships {
-                    if ship.search_name.contains(&query) {
-                        found.push((class.species, ship.clone()));
-                        if found.len() >= SHIP_MATCHES {
-                            return found;
-                        }
-                    }
-                }
-            }
-        }
-        found
+
+        let query = self.ship_query.clone();
+        let Some(ships) = self.ships() else { return Vec::new() };
+
+        ships.find(&query)
     }
 
     /// Gives the picked ship an identity, which is what its ranges are read
@@ -2393,7 +2426,7 @@ impl ReplayRendererPanel {
                 config: Some(wt_collab_client::types::AnnotationShipConfig::new(param.id(), ship.display_name.clone())),
             },
         );
-        self.ship_query.clear();
+        self.ship_query = FilterQuery::default();
         self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
         self.draw_current(cx);
         cx.notify();
@@ -3240,9 +3273,6 @@ fn per_ship_allows(
     }
 }
 
-/// How many ships a search offers at once.
-const SHIP_MATCHES: usize = 10;
-
 /// How many changes back an undo can reach.
 const HISTORY_DEPTH: usize = 32;
 
@@ -4002,6 +4032,7 @@ fn tools_popover(
     let undoable = !view.history.is_empty();
     let picked_ship = picked_ship(view);
     let matches = view.matched_ships.clone();
+    let ship_query = view.ship_query.clone();
     let search = view.ship_search.clone();
 
     Popover::new("replay-renderer-tools")
@@ -4040,7 +4071,11 @@ fn tools_popover(
                             }),
                     )
                 })))
-                .children(picked_ship.clone().map(|named| ship_chooser(&owner, &search, named, matches.clone(), _cx)))
+                .children(
+                    picked_ship
+                        .clone()
+                        .map(|named| ship_chooser(&owner, &search, named, matches.clone(), &ship_query, _cx)),
+                )
                 .child(crate::ui::rule_h(_cx))
                 .child(species_row(&owner, &chosen, true))
                 .child(species_row(&owner, &chosen, false))
@@ -4186,6 +4221,7 @@ fn ship_chooser(
     search: &Entity<InputState>,
     named: Option<String>,
     matches: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
+    query: &FilterQuery,
     cx: &App,
 ) -> AnyElement {
     v_flex()
@@ -4201,7 +4237,8 @@ fn ship_chooser(
         .children(matches.into_iter().map(|(species, ship)| {
             let owner = panel.clone();
             Button::new(gpui_kit::SharedString::from(format!("replay-renderer-ship-{}", ship.param_index)))
-                .label(format!("{} {}", crate::armor_viewer::catalog::tier_roman(ship.tier), ship.display_name))
+                .accessibility_label(ship_match_name(&ship))
+                .child(ship_match_label(&ship, query))
                 .compact()
                 .on_click(move |_event, window, cx: &mut App| {
                     let ship = ship.clone();
@@ -4412,6 +4449,7 @@ fn timeline_popover(
     let read = view.events_are_read();
     let any_events = !view.events.is_empty();
     let filter = view.event_filter().clone();
+    let query = view.event_query.clone();
     let viewer_team = view.viewer_team;
     let search = view.event_search.clone();
     // Cloned out because the content closure runs after this render returns,
@@ -4466,7 +4504,7 @@ fn timeline_popover(
                 )
                 .child(timeline_filter_bar(&owner, &filter, &search))
                 .child(crate::ui::rule_h(cx))
-                .child(timeline_rows(&owner, rows, read, any_events))
+                .child(timeline_rows(&owner, rows, &query, read, any_events))
                 .into_any_element()
         })
         .into_any_element()
@@ -4532,10 +4570,13 @@ fn timeline_filter_bar(
         .into_any_element()
 }
 
-/// The filtered list, or what to say instead of one.
+/// The filtered list, or what to say instead of one. A row's label is marked
+/// where the search matched it; a row found by a player name its label does
+/// not carry is drawn unmarked.
 fn timeline_rows(
     panel: &Entity<ReplayRendererPanel>,
     rows: Vec<TimelineRow>,
+    query: &FilterQuery,
     read: bool,
     any_events: bool,
 ) -> AnyElement {
@@ -4569,7 +4610,7 @@ fn timeline_rows(
                 .hover(|style| style.bg(crate::theme::surface()))
                 .when(!row.hover.is_empty(), |row_div| row_div.tooltip(hover_lines(row.hover.clone().into())))
                 .child(div().flex_none().w(px(40.)).text_xs().text_color(crate::theme::text_dim()).child(mmss(row.at)))
-                .child(div().flex_1().text_xs().text_color(tone_color(row.tone)).child(row.label))
+                .child(div().flex_1().text_xs().text_color(tone_color(row.tone)).child(query.marked(row.label)))
                 .on_click(move |_event, window, cx: &mut App| {
                     owner.update(cx, |panel, cx| panel.go_to_event_at(at, window, cx));
                 })
@@ -5434,7 +5475,95 @@ mod tests {
                 panel.set_event_filter(|filter| filter.kinds = [true; KIND_COUNT], cx);
                 panel.set_event_filter(|filter| filter.search = "at 30".into(), cx);
                 assert_eq!(panel.visible_events().len(), 1, "the search looks through what a row says");
+
+                // Letters that each start a word, which a plain substring
+                // search does not find.
+                panel.set_event_filter(|filter| filter.search = "a30".into(), cx);
+                let kept: Vec<f32> = panel.visible_events().iter().map(|event| event.clock.seconds()).collect();
+                assert_eq!(kept, [30.0]);
+
+                panel.set_event_filter(|filter| filter.search = "t".into(), cx);
+                let kept: Vec<f32> = panel.visible_events().iter().map(|event| event.clock.seconds()).collect();
+                assert_eq!(kept, [10.0, 30.0, 60.0], "a timeline keeps the order things happened in");
             });
+        })
+        .expect("the window is open");
+    }
+
+    /// The timeline draws each row it kept marked where the search matched.
+    #[gpui_kit::test]
+    fn the_timeline_marks_what_the_search_matched(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport_in_root(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.seed_events_for_test(&[10.0, 30.0, 50.0]);
+                panel.events_read = true;
+                panel.set_event_filter(|filter| filter.search = "a30".into(), cx);
+            });
+            window.render_frame(cx);
+
+            crate::text_filter::take_marks();
+            window.click("replay-renderer-timeline-toggle", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("replay-renderer-timeline-row", 0usize)).is_some());
+            assert!(window.try_find(("replay-renderer-timeline-row", 1usize)).is_none(), "one row is kept");
+            assert_eq!(crate::text_filter::marks_for("at 30"), Some(vec![0..1, 3..5]));
+        })
+        .expect("the window is open");
+    }
+
+    /// The ship chooser offers the best named ship first and draws each
+    /// name marked where the search matched it.
+    #[gpui_kit::test]
+    fn the_ship_chooser_ranks_and_marks_the_ships_it_finds(cx: &mut TestAppContext) {
+        use wowsunpack::game_params::types::Species;
+
+        use crate::armor_viewer::catalog::ClassGroup;
+        use crate::armor_viewer::catalog::NationGroup;
+        use crate::armor_viewer::catalog::ShipCatalog;
+        use crate::armor_viewer::catalog::ShipEntry;
+        use crate::tactics::ShipLookup;
+        use crate::text_filter::FilterQuery;
+
+        let ship = |display_name: &str| ShipEntry {
+            param_index: format!("P{display_name}"),
+            display_name: display_name.to_string(),
+            search_name: display_name.to_lowercase(),
+            search_key: crate::armor_viewer::search_key::SearchKey::new(),
+            tier: 10,
+        };
+        let catalog = ShipCatalog {
+            nations: vec![NationGroup {
+                nation: "japan".to_string(),
+                display_name: "Japan".to_string(),
+                classes: vec![ClassGroup { species: Species::Destroyer, ships: vec![ship("Hayate"), ship("Yamato")] }],
+            }],
+            hidden: Vec::new(),
+        };
+        let names = |found: Vec<(Species, ShipEntry)>| -> Vec<String> {
+            found.into_iter().map(|(_, ship)| ship.display_name).collect()
+        };
+        let (window, panel) = viewport_in_root(cx, vec![0.0, 30.0]);
+
+        cx.update_window(window.into(), |_, _window, cx| {
+            panel.update(cx, |panel, _cx| {
+                panel.ship_lookup = Some(ShipLookup::new(&catalog));
+
+                panel.ship_query = FilterQuery::new("ya");
+                assert_eq!(names(panel.matching_ships()), ["Yamato", "Hayate"]);
+
+                panel.ship_query = FilterQuery::new("ymt");
+                panel.matched_ships = panel.matching_ships();
+                assert_eq!(names(panel.matched_ships.clone()), ["Yamato"]);
+            });
+
+            let search = panel.read(cx).ship_search.clone();
+            let matches = panel.read(cx).matched_ships.clone();
+            crate::text_filter::take_marks();
+            let _ = super::ship_chooser(&panel, &search, None, matches, &FilterQuery::new("ymt"), cx);
+            assert_eq!(crate::text_filter::marks_for("Yamato"), Some(vec![0..1, 2..3, 4..5]));
         })
         .expect("the window is open");
     }

@@ -48,13 +48,16 @@ use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
+use wows_toolkit_viewmodel::unpacker::listing::PathFilter;
 use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
 use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
 use wows_toolkit_viewmodel::unpacker::listing::filter_files;
-use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
+
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// Which VFS a pane browses. The two sources load differently -- the package
 /// VFS arrives with the build, assets.bin is parsed in the background -- so
@@ -116,6 +119,7 @@ enum Rows {
     Directory(Rc<Vec<ListingEntry>>),
     Filtered {
         files: Arc<FileList>,
+        filter: Rc<PathFilter>,
         matches: Rc<Vec<FileIndex>>,
     },
 }
@@ -136,7 +140,7 @@ impl Rows {
     fn row(&self, at: usize) -> Option<ListingEntry> {
         match self {
             Rows::Directory(rows) => rows.get(at).cloned(),
-            Rows::Filtered { files, matches } => files.row(*matches.get(at)?),
+            Rows::Filtered { files, matches, .. } => files.row(*matches.get(at)?),
         }
     }
 
@@ -145,6 +149,18 @@ impl Rows {
         match self {
             Rows::Directory(rows) => rows.as_ref().clone(),
             Rows::Filtered { .. } => (0..self.len()).filter_map(|at| self.row(at)).collect(),
+        }
+    }
+
+    /// The typed text a filter result matched, which its label is marked by.
+    /// A glob marks nothing.
+    fn query(&self) -> Option<&FilterQuery> {
+        match self {
+            Rows::Filtered { filter, .. } => match filter.as_ref() {
+                PathFilter::Text(query) => Some(query),
+                PathFilter::Glob(_) => None,
+            },
+            Rows::Directory(_) => None,
         }
     }
 }
@@ -339,15 +355,19 @@ impl BrowserPanel {
         self.tree_state.update(cx, |state, cx| state.set_items(vec![root], cx));
     }
 
-    /// Recomputes the listing: filter results while a long enough filter is
-    /// typed, otherwise the selected directory's own entries.
+    /// Recomputes the listing: filter results while a filter with something
+    /// to match is typed, otherwise the selected directory's own entries.
+    ///
+    /// Scored on the UI thread: one score per file over a table folded when
+    /// the list was built.
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
-        let rows = match &self.state {
-            PaneState::Ready(loaded) if is_filtering(&self.filter_text) => Rows::Filtered {
+        let rows = match (&self.state, PathFilter::new(&self.filter_text)) {
+            (PaneState::Ready(loaded), Some(filter)) => Rows::Filtered {
                 files: loaded.files.clone(),
-                matches: Rc::new(filter_files(&loaded.files, &self.filter_text)),
+                matches: Rc::new(filter_files(&loaded.files, &filter)),
+                filter: Rc::new(filter),
             },
-            PaneState::Ready(loaded) => Rows::Directory(Rc::new(directory_entries(
+            (PaneState::Ready(loaded), None) => Rows::Directory(Rc::new(directory_entries(
                 &loaded.vfs,
                 self.selected_dir.as_deref().unwrap_or(ROOT_PATH),
             ))),
@@ -571,7 +591,10 @@ impl Render for BrowserPanel {
                     .hover(|this| this.bg(hover_bg))
                     .child(queue_toggle(ix, path.clone(), is_dir, is_queued, entity.clone()))
                     .child(file_glyph(&row.label, is_dir))
-                    .child(div().flex_1().text_sm().truncate().child(row.label.clone()))
+                    .child(div().flex_1().text_sm().truncate().child(match rows.query() {
+                        Some(query) => query.marked(row.label.clone()).into_any_element(),
+                        None => row.label.clone().into_any_element(),
+                    }))
                     .child(div().w(SIZE_COLUMN_WIDTH).text_xs().text_color(dim).child(size))
                     .child(div().w(TYPE_COLUMN_WIDTH).text_xs().text_color(dim).child(row.type_label()))
                     .on_click(move |event, _window, cx| {
@@ -1015,8 +1038,33 @@ mod tests {
                 pane.rebuild_rows(cx);
                 let cleared: Vec<String> = pane.rows.all().into_iter().map(|row| row.label).collect();
                 assert_eq!(cleared, vec!["content"], "clearing the filter goes back to the selected directory");
+
+                pane.filter_text = "---".to_string();
+                pane.rebuild_rows(cx);
+                let unmatched: Vec<String> = pane.rows.all().into_iter().map(|row| row.label).collect();
+                assert_eq!(unmatched, vec!["content"], "a filter with nothing to match lists the directory");
             })
             .expect("the window is open");
+    }
+
+    /// A text filter takes letters from the start of each word, and the row
+    /// marks the letters it took.
+    #[gpui_kit::test]
+    fn a_filter_result_row_marks_the_letters_the_filter_matched(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+
+        window
+            .update(cx, |pane, _window, cx| {
+                pane.filter_text = "cont gp b".to_string();
+                pane.rebuild_rows(cx);
+                let labels: Vec<String> = pane.rows.all().into_iter().map(|row| row.label).collect();
+                assert_eq!(labels, vec!["/content/gameplay/b.xml"], "a.xml has no word starting with b");
+            })
+            .expect("the window is open");
+
+        crate::text_filter::take_marks();
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+        assert_eq!(crate::text_filter::marks_for("/content/gameplay/b.xml"), Some(vec![1..5, 9..10, 13..14, 18..19]));
     }
 
     #[gpui_kit::test]

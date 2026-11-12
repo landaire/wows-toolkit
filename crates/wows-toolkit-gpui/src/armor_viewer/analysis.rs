@@ -18,10 +18,6 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::input::NumberInput;
-use gpui_kit::component::searchable_list::SearchableListItem;
-use gpui_kit::component::searchable_list::SearchableVec;
-use gpui_kit::component::select::Select;
-use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -52,6 +48,9 @@ use super::catalog::ShipCatalog;
 use super::catalog::tier_roman;
 use super::pane::ArmorViewerPane;
 use super::viewport_view::ViewportView;
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// How far the search results run before they scroll, so they never push the
 /// ships being compared off the rail.
@@ -59,25 +58,6 @@ const RESULTS_MAX_HEIGHT: Pixels = px(150.);
 
 const SHELL_COLUMN_WIDTH: Pixels = px(120.);
 const PEN_COLUMN_WIDTH: Pixels = px(64.);
-
-/// One ship in the attacker combo.
-#[derive(Clone)]
-pub struct ShipItem {
-    label: SharedString,
-    param_index: SharedString,
-}
-
-impl SearchableListItem for ShipItem {
-    type Value = SharedString;
-
-    fn title(&self) -> SharedString {
-        self.label.clone()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.param_index
-    }
-}
 
 /// How many search results the list offers at once, as the egui panel does.
 /// Enough to find a ship by a few letters, few enough not to become the panel.
@@ -88,9 +68,8 @@ const SEARCH_RESULTS: usize = 10;
 pub struct CatalogEntry {
     pub param_index: String,
     pub display_name: String,
-    /// The name folded for searching: accents removed, lowercased, as the
-    /// egui selector folds it.
-    pub search_name: String,
+    /// The name folded once for the search.
+    pub key: FilterKey,
     pub tier: u32,
 }
 
@@ -150,27 +129,22 @@ impl PenetrationState {
             .map(|ship| CatalogEntry {
                 param_index: ship.param_index.clone(),
                 display_name: ship.display_name.clone(),
-                search_name: ship.search_name.clone(),
+                key: FilterKey::new(&ship.display_name),
                 tier: ship.tier,
             })
             .collect();
     }
 
-    /// The ships a search for `needle` offers, skipping those already added.
-    ///
-    /// Folded the same way the catalog folded its names, so a search without
-    /// accents still finds an accented ship.
-    pub fn matches(&self, needle: &str) -> Vec<&CatalogEntry> {
-        let needle = unidecode::unidecode(needle.trim()).to_lowercase();
-        if needle.is_empty() {
+    /// The ships `query` finds, best first, skipping those already added.
+    /// Empty for a query with nothing in it.
+    pub fn matches(&self, query: &FilterQuery) -> Vec<&CatalogEntry> {
+        if !query.is_active() {
             return Vec::new();
         }
-        self.catalog
-            .iter()
-            .filter(|entry| entry.search_name.contains(&needle))
-            .filter(|entry| !self.ships.iter().any(|ship| ship.param_index == entry.param_index))
-            .take(SEARCH_RESULTS)
-            .collect()
+
+        let addable = self.catalog.iter().filter(|entry| !self.holds(&entry.param_index));
+
+        query.rank(addable, |entry| &entry.key).into_iter().take(SEARCH_RESULTS).collect()
     }
 
     /// Whether `param_index` is already being compared.
@@ -285,22 +259,20 @@ pub fn render_section(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx
 fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
     let state = view.penetration();
     let search = state.search.clone();
-    let typed = search.read(cx).value();
-    let matches: Vec<(String, String, u32)> = state
-        .matches(&typed)
-        .into_iter()
-        .map(|entry| (entry.param_index.clone(), entry.display_name.clone(), entry.tier))
-        .collect();
+    let query = FilterQuery::new(&search.read(cx).value());
+    let matches = state.matches(&query);
     let results: Option<AnyElement> = (!matches.is_empty()).then(|| {
         v_flex()
             .id("armor-pen-results")
             .gap_0()
             .max_h(RESULTS_MAX_HEIGHT)
             .overflow_y_scroll()
-            .children(matches.into_iter().enumerate().map(|(ix, (param_index, name, tier))| {
+            .children(matches.into_iter().enumerate().map(|(ix, entry)| {
                 let pane = pane.clone();
+                let param_index = entry.param_index.clone();
                 Button::new(("armor-pen-add", ix))
-                    .label(format!("{} {}", tier_roman(tier), name))
+                    .accessibility_label(format!("{} {}", tier_roman(entry.tier), entry.display_name))
+                    .child(result_label(entry, &query))
                     .compact()
                     .w_full()
                     .on_click(move |_event, window, cx: &mut App| {
@@ -317,6 +289,12 @@ fn render_ship_search(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx
         .child(Input::new(&search).id("armor-pen-search").small().w_full())
         .children(results)
         .into_any_element()
+}
+
+/// A search result: the ship's tier, then its name marked where `query`
+/// matched it.
+fn result_label(entry: &CatalogEntry, query: &FilterQuery) -> Div {
+    h_flex().gap_1().child(tier_roman(entry.tier)).child(query.marked(entry.display_name.clone()))
 }
 
 /// What was fired at this ship, salvo by salvo.
@@ -809,12 +787,22 @@ fn pen_label(shell: &ShellInfo, ifhe: Ifhe) -> String {
 // `#[test]`.
 #[cfg(test)]
 mod tests {
+    use super::PenetrationState;
     use super::pen_label;
+    use super::result_label;
     use super::shell_label;
+    use crate::armor_viewer::catalog::ClassGroup;
+    use crate::armor_viewer::catalog::NationGroup;
+    use crate::armor_viewer::catalog::ShipCatalog;
+    use crate::armor_viewer::catalog::ShipEntry;
+    use crate::armor_viewer::search_key::SearchKey;
+    use crate::text_filter::FilterQuery;
+    use gpui_kit::TestAppContext;
     use wows_toolkit_viewmodel::armor::penetration::Ifhe;
     use wowsunpack::game_params::types::AmmoType;
     use wowsunpack::game_params::types::Millimeters;
     use wowsunpack::game_params::types::ShellInfo;
+    use wowsunpack::game_params::types::Species;
 
     fn shell(ammo_type: AmmoType, caliber: f32, he_pen_mm: Option<f32>, sap_pen_mm: Option<f32>) -> ShellInfo {
         ShellInfo {
@@ -855,5 +843,52 @@ mod tests {
         assert_eq!(pen_label(&shell(AmmoType::AP, 406.0, None, None), Ifhe::NotApplied), "-");
         // A shell the data has no figure for reads as absent, not as zero.
         assert_eq!(pen_label(&shell(AmmoType::HE, 152.0, None, None), Ifhe::Applied), "-");
+    }
+
+    fn catalog() -> ShipCatalog {
+        let ship = |display_name: &str, tier: u32| ShipEntry {
+            param_index: format!("P{display_name}"),
+            display_name: display_name.to_string(),
+            search_name: display_name.to_lowercase(),
+            search_key: SearchKey::new(),
+            tier,
+        };
+
+        ShipCatalog {
+            nations: vec![NationGroup {
+                nation: "usa".to_string(),
+                display_name: "U.S.A.".to_string(),
+                classes: vec![ClassGroup {
+                    species: Species::Battleship,
+                    ships: vec![ship("S. Carolina", 3), ship("Sm\u{e5}land", 10), ship("Iowa", 9)],
+                }],
+            }],
+            hidden: Vec::new(),
+        }
+    }
+
+    fn found(state: &PenetrationState, typed: &str) -> Vec<String> {
+        state.matches(&FilterQuery::new(typed)).into_iter().map(|entry| entry.display_name.clone()).collect()
+    }
+
+    #[gpui_kit::test]
+    fn the_attacker_search_folds_ranks_and_marks_its_results(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let mut state = PenetrationState::new(window, cx);
+            state.set_catalog(&catalog());
+
+            assert_eq!(found(&state, "i"), ["Iowa", "S. Carolina"], "a name starting with it ranks first");
+            assert_eq!(found(&state, "s carolina"), ["S. Carolina"]);
+            assert_eq!(found(&state, "smaland"), ["Sm\u{e5}land"]);
+            assert!(found(&state, " ").is_empty(), "nothing typed offers nothing");
+
+            let query = FilterQuery::new("smal");
+            let matches = state.matches(&query);
+            crate::text_filter::take_marks();
+            let _ = result_label(matches[0], &query);
+            assert_eq!(crate::text_filter::marks_for("Sm\u{e5}land"), Some(std::iter::once(0..5).collect()));
+        });
     }
 }

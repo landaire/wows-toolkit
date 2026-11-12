@@ -46,6 +46,9 @@ use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 
+use crate::text_filter::FilterKey;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 use crate::ui::selectable;
 
 use super::plot;
@@ -92,6 +95,13 @@ pub struct ChartSettings {
     pub selection_touched: bool,
 }
 
+/// A ship the picker offers, with its name folded for the search.
+struct PlayedShip {
+    ship_id: GameParamId,
+    name: SharedString,
+    key: FilterKey,
+}
+
 pub struct StatsChartPanel {
     id: ChartId,
     stat: ChartableStat,
@@ -114,9 +124,9 @@ pub struct StatsChartPanel {
     /// new chart does; `Some` is an override the reader set here.
     own_filters: Option<StatsFilters>,
     ships: Vec<(String, PerformanceInfo)>,
-    /// The ships the games were played in, in the order first played: what
-    /// the settings menu lists.
-    played: Vec<(GameParamId, String)>,
+    /// The ships the games were played in, by name: what the ship picker
+    /// lists.
+    played: Arc<[PlayedShip]>,
     ship_search: Entity<InputState>,
     _ship_search_subscription: Subscription,
     selected_ships: Vec<GameParamId>,
@@ -160,7 +170,7 @@ impl StatsChartPanel {
             tab_filters: StatsFilters::default(),
             own_filters: None,
             ships: Vec::new(),
-            played: Vec::new(),
+            played: Arc::from([]),
             ship_search,
             _ship_search_subscription: ship_search_subscription,
             selected_ships: Vec::new(),
@@ -321,13 +331,17 @@ impl StatsChartPanel {
         // tab's last N games for the session. Otherwise old ships remain
         // offered after the recent-games limit is enabled.
         let recent_games = filter_games(&self.all_games, &self.effective_filters());
-        self.played = ships_played(&recent_games);
+        let mut played = ships_played(&recent_games);
         // Listed by name: a long session's picker has no other order anyone
         // could look a ship up in.
-        self.played.sort_by(|left, right| left.1.cmp(&right.1));
+        played.sort_by(|left, right| left.1.cmp(&right.1));
         if !self.selection_touched {
-            self.selected_ships = self.played.iter().map(|(id, _)| *id).collect();
+            self.selected_ships = played.iter().map(|(id, _)| *id).collect();
         }
+        self.played = played
+            .into_iter()
+            .map(|(ship_id, name)| PlayedShip { ship_id, key: FilterKey::new(&name), name: SharedString::from(name) })
+            .collect();
         cx.notify();
     }
 
@@ -750,12 +764,12 @@ impl StatsChartPanel {
     fn ship_filter_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.id;
         let entity = cx.entity();
-        let played = self.played.clone();
+        let played = Arc::clone(&self.played);
         let ship_search = self.ship_search.clone();
         let ship_query = self.ship_search.read(cx).value().to_string();
-        let normalized_query = super::normalize_ship_search(&ship_query);
+        let filter = FilterQuery::new(&ship_query);
         let selected = self.selected_ships.clone();
-        let selected_count = played.iter().filter(|(ship_id, _)| selected.contains(ship_id)).count();
+        let selected_count = played.iter().filter(|ship| selected.contains(&ship.ship_id)).count();
         let total_count = played.len();
         let selection_count = t!("ui.stats.ship_selection_count", selected = selected_count, total = total_count);
         let accessibility_label = format!("{}: {selection_count}", t!("ui.stats.filter_ships"));
@@ -769,30 +783,24 @@ impl StatsChartPanel {
             .tooltip(t!("ui.stats.filter_ships").to_string())
             .accessibility_label(accessibility_label);
 
-        Popover::new(("chart-ship-filter-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
-            let visible: Vec<_> = played
-                .iter()
-                .filter(|(_, name)| {
-                    normalized_query.is_empty() || super::normalize_ship_search(name).contains(&normalized_query)
-                })
-                .cloned()
-                .collect();
-            let visible_ids: Vec<_> = visible.iter().map(|(ship_id, _)| *ship_id).collect();
-            let no_matches = !normalized_query.is_empty() && visible.is_empty();
+        Popover::new(("chart-ship-filter-menu", id)).trigger(trigger).content(move |_state, _window, cx| {
+            let visible = visible_ships(&played, &filter);
+            let visible_ids: Vec<_> = visible.iter().map(|ship| ship.ship_id).collect();
+            let no_matches = filter.is_active() && visible.is_empty();
             let has_visible = !visible_ids.is_empty();
             let all_ids = visible_ids.clone();
             let none_ids = visible_ids;
+            let foreground = cx.theme().foreground;
             let ship_rows: Vec<_> = visible
                 .iter()
-                .map(|(ship_id, name)| {
-                    let ship_id = *ship_id;
+                .map(|ship| {
+                    let ship_id = ship.ship_id;
                     let entity = entity.clone();
-                    Checkbox::new(SharedString::from(format!("chart-ship-{id}-{}", ship_id.raw())))
-                        .label(name.clone())
-                        .checked(selected.contains(&ship_id))
-                        .on_click(move |_checked, _window, cx| {
+                    ship_checkbox(id, ship, &filter, selected.contains(&ship_id), foreground).on_click(
+                        move |_checked, _window, cx| {
                             entity.update(cx, |this, cx| this.toggle_ship(ship_id, cx));
-                        })
+                        },
+                    )
                 })
                 .collect();
             let clear_search = entity.clone();
@@ -1036,9 +1044,32 @@ impl Render for StatsChartPanel {
     }
 }
 
+/// The ships the picker lists for `filter`: all of them by name, or the
+/// matching ones best first while a search is typed.
+fn visible_ships<'a>(played: &'a [PlayedShip], filter: &FilterQuery) -> Vec<&'a PlayedShip> {
+    filter.rank(played.iter(), |ship| &ship.key)
+}
+
+/// One ship's row in the picker, its name marked where `filter` matched.
+fn ship_checkbox(chart: ChartId, ship: &PlayedShip, filter: &FilterQuery, checked: bool, foreground: Hsla) -> Checkbox {
+    Checkbox::new(SharedString::from(format!("chart-ship-{chart}-{}", ship.ship_id.raw())))
+        .accessibility_label(ship.name.clone())
+        .child(div().text_color(foreground).child(filter.marked(ship.name.clone())))
+        .checked(checked)
+}
+
 #[cfg(test)]
 mod tests {
+    use gpui_kit::SharedString;
+
     use super::ChartSettings;
+    use super::PlayedShip;
+    use super::ship_checkbox;
+    use super::visible_ships;
+    use crate::text_filter::FilterKey;
+    use crate::text_filter::FilterQuery;
+    use crate::text_filter::marks_for;
+    use crate::text_filter::take_marks;
     use wows_toolkit_viewmodel::stats::DivisionFilter;
     use wows_toolkit_viewmodel::stats::GameLimit;
     use wows_toolkit_viewmodel::stats::StatsFilters;
@@ -1072,5 +1103,53 @@ mod tests {
         // A row written before a field existed still reads, on the defaults.
         let older: ChartSettings = serde_json::from_str("{}").expect("an empty row reads");
         assert_eq!(older, ChartSettings::default());
+    }
+
+    fn played(names: &[&str]) -> Vec<PlayedShip> {
+        names
+            .iter()
+            .zip(1u64..)
+            .map(|(name, ship_id)| PlayedShip {
+                ship_id: ship_id.into(),
+                name: SharedString::from(name.to_string()),
+                key: FilterKey::new(name),
+            })
+            .collect()
+    }
+
+    fn names(ships: &[&PlayedShip]) -> Vec<String> {
+        ships.iter().map(|ship| ship.name.to_string()).collect()
+    }
+
+    /// The picker lists every ship by name until a search is typed, then the
+    /// matching ones best first: initials find a ship, and a folded letter
+    /// ("ss" for the sharp s) matches as the reader would type it.
+    #[test]
+    fn the_ship_search_ranks_loose_matches() {
+        let played = played(&["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst", "Preussen"]);
+
+        let listed = visible_ships(&played, &FilterQuery::default());
+        assert_eq!(names(&listed), vec!["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst", "Preussen"]);
+
+        let listed = visible_ships(&played, &FilterQuery::new("fdg"));
+        assert_eq!(names(&listed), vec!["Friedrich der Grosse"]);
+
+        // The match at the start of a name outranks one inside a name.
+        let listed = visible_ships(&played, &FilterQuery::new("grosse"));
+        assert_eq!(names(&listed), vec!["Gro\u{df}er Kurf\u{fc}rst", "Friedrich der Grosse"]);
+    }
+
+    /// A row draws its name marked where the search matched it.
+    #[test]
+    fn a_ship_row_marks_the_matched_letters() {
+        let played = played(&["Friedrich der Grosse", "Gro\u{df}er Kurf\u{fc}rst"]);
+
+        take_marks();
+        let _row = ship_checkbox(0, &played[0], &FilterQuery::new("fdg"), true, gpui_kit::black());
+        assert_eq!(marks_for("Friedrich der Grosse"), Some(vec![0..1, 10..11, 14..15]));
+
+        take_marks();
+        let _row = ship_checkbox(0, &played[1], &FilterQuery::new("grosse"), true, gpui_kit::black());
+        assert_eq!(marks_for("Gro\u{df}er Kurf\u{fc}rst"), Some(std::iter::once(0..6).collect()));
     }
 }

@@ -32,6 +32,7 @@ use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry as FileEntry;
+use wows_toolkit_viewmodel::unpacker::listing::PathFilter;
 use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
 use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries as get_dir_entries;
@@ -1231,14 +1232,14 @@ fn render_folder_tree(
 
 /// Recompute the filtered file list for a browser pane if the filter text changed.
 fn recompute_filter(browser: &mut BrowserPane) {
-    if !is_filtering(&browser.filter) {
-        // Clear stale filtered results when filter is too short
+    let Some(filter) = PathFilter::new(&browser.filter) else {
+        // Clear stale results once the filter is too short or has nothing to match.
         if browser.filtered_file_list.is_some() {
             browser.filtered_file_list = None;
             browser.used_filter = None;
         }
         return;
-    }
+    };
 
     if browser.used_filter.as_deref() == Some(&browser.filter) {
         return; // already up to date
@@ -1246,7 +1247,7 @@ fn recompute_filter(browser: &mut BrowserPane) {
 
     let Some(files) = &browser.files else { return };
 
-    let matches = filter_files(files, &browser.filter);
+    let matches = filter_files(files, &filter);
     browser.filtered_file_list = Some(FilterResults { files: files.clone(), matches });
     browser.used_filter = Some(browser.filter.clone());
 }

@@ -27,10 +27,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::options_filter::OptionsFilter;
 use super::pane::ArmorViewerPane;
 use super::pane::OptionSection;
 use super::popover;
+use crate::text_filter::FilterQuery;
+use crate::text_filter::MarkedLabel;
 
 /// Fixed: the sections below are their own widths, so there is nothing for a
 /// drag handle to do but overflow or pad them.
@@ -201,13 +202,13 @@ fn section(
     pane: &Entity<ArmorViewerPane>,
     which: OptionSection,
     title: &str,
-    filter: &OptionsFilter,
+    filter: &FilterQuery,
     cx: &mut App,
-    body: impl FnOnce(&OptionsFilter, &mut App) -> Option<AnyElement>,
+    body: impl FnOnce(&FilterQuery, &mut App) -> Option<AnyElement>,
 ) -> Option<AnyElement> {
-    let marked = filter.label(title.to_string(), popover::mark());
+    let marked = filter.label(title.to_string());
     let (expanded, content) = if filter.is_active() {
-        let inner = if marked.is_some() { OptionsFilter::default() } else { filter.clone() };
+        let inner = if marked.is_some() { FilterQuery::default() } else { filter.clone() };
         let content = body(&inner, cx);
         if content.is_none() && marked.is_none() {
             return None;
