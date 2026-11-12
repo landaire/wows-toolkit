@@ -33,6 +33,7 @@ use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_replay_insights::cap_layout::CapLayout;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
+use wows_toolkit_replay_data::frame::BgraFrame;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
@@ -44,7 +45,6 @@ use crate::armor_viewer::catalog::ShipEntry;
 use crate::armor_viewer::catalog::tier_roman;
 use crate::filtered_select::FilteredItem;
 use crate::filtered_select::FilteredSelect;
-use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
 use crate::text_filter::FilterKey;
@@ -2622,14 +2622,14 @@ fn rasterise(
     // Over the zones, so a line drawn across one is not buried under it.
     commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
     match drawing.art {
-        Some(art) => crate::minimap_preview::render_map_art(
+        Some(art) => wows_toolkit_replay_data::minimap_preview::render_map_art(
             &format!("board-{}", drawing.board_id),
             art,
             game_data,
             view,
             &commands,
         ),
-        None => crate::minimap_preview::render_map(drawing.space, game_data, view, &commands),
+        None => wows_toolkit_replay_data::minimap_preview::render_map(drawing.space, game_data, view, &commands),
     }
 }
 
