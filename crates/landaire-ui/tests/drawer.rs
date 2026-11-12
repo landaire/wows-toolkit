@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use landaire_ui::DrawerProps;
+use landaire_ui::MotionPreference;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
@@ -27,12 +28,20 @@ use zgui_ui::ButtonProps;
 const SIZE: WindowSize = WindowSize { width: 600.0, height: 300.0 };
 const SETTLE: Duration = Duration::from_millis(400);
 
+/// What a test drives the drawer through.
+#[derive(Clone, Copy)]
+struct Controls {
+    open: RwSignal<bool, LocalStorage>,
+    motion: RwSignal<MotionPreference, LocalStorage>,
+}
+
 #[component]
-fn Covered(open: RwSignal<bool, LocalStorage>) -> impl IntoView {
+fn Covered(controls: Controls) -> impl IntoView {
+    let Controls { open, motion } = controls;
     let pressed = RwSignal::new_local(0_u32);
 
     view! {
-        ThemeRoot {
+        ThemeRoot(motion = motion) {
             box(style = "position: relative; width: 600px; height: 300px") {
                 Button(
                     a11y:label = move || format!("Behind {}", pressed.get()),
@@ -46,17 +55,18 @@ fn Covered(open: RwSignal<bool, LocalStorage>) -> impl IntoView {
     }
 }
 
-fn open_covered() -> (HeadlessWindow, RwSignal<bool, LocalStorage>) {
-    let signal = Rc::new(Cell::new(None));
-    let handed = Rc::clone(&signal);
+fn open_covered() -> (HeadlessWindow, Controls) {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
     let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
-        let open = RwSignal::new_local(false);
-        handed.set(Some(open));
-        view! { Covered(open = open) }
+        let controls =
+            Controls { open: RwSignal::new_local(false), motion: RwSignal::new_local(MotionPreference::Full) };
+        sent.set(Some(controls));
+        view! { Covered(controls = controls) }
     })
     .expect("opens");
 
-    (window, signal.get().expect("the view was built"))
+    (window, handed.get().expect("the view was built"))
 }
 
 fn focus_is_inside(window: &mut HeadlessWindow) -> bool {
@@ -68,7 +78,7 @@ fn focus_is_inside(window: &mut HeadlessWindow) -> bool {
 
 #[test]
 fn escape_closes_the_drawer_and_focus_stays_inside_while_open() {
-    let (mut window, open) = open_covered();
+    let (mut window, Controls { open, .. }) = open_covered();
     assert!(window.by_role(Role::Dialog).is_empty(), "a shut drawer builds nothing");
 
     open.set(true);
@@ -87,7 +97,7 @@ fn escape_closes_the_drawer_and_focus_stays_inside_while_open() {
 
 #[test]
 fn a_press_on_the_scrim_closes_the_drawer_without_reaching_what_it_covers() {
-    let (mut window, open) = open_covered();
+    let (mut window, Controls { open, .. }) = open_covered();
     open.set(true);
     window.advance(SETTLE);
 
@@ -99,4 +109,19 @@ fn a_press_on_the_scrim_closes_the_drawer_without_reaching_what_it_covers() {
 
     window.click(behind).expect("the button has a box");
     assert!(window.by_role_and_label(Role::Button, "Behind 1").is_some(), "with the drawer gone it takes presses");
+}
+
+#[test]
+fn reducing_motion_ends_a_close_under_way() {
+    let (mut window, Controls { open, motion }) = open_covered();
+    open.set(true);
+    window.advance(SETTLE);
+
+    open.set(false);
+    window.advance(Duration::from_millis(50));
+    assert!(!window.by_role(Role::Dialog).is_empty(), "the drawer is still sliding away");
+
+    motion.set(MotionPreference::Reduced);
+    window.advance(Duration::from_millis(17));
+    assert!(window.by_role(Role::Dialog).is_empty(), "the drawer is dropped at once");
 }

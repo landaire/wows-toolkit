@@ -297,7 +297,8 @@ pub fn CountUp(
 }
 
 /// `value` as [`CountUp`] shows it, for a caller that draws the count itself or derives
-/// something else from it. Called from a component's body.
+/// something else from it. Called from a component's body. A count under way when motion is
+/// reduced ends at its figure.
 pub fn count_up(value: Signal<u64, LocalStorage>) -> Signal<u64, LocalStorage> {
     let preference = motion_preference();
     let timers = Timers::current();
@@ -311,7 +312,7 @@ pub fn count_up(value: Signal<u64, LocalStorage>) -> Signal<u64, LocalStorage> {
             let from = shown.get_untracked();
             frame.borrow_mut().take();
 
-            let animate = to > from && preference.get_untracked() == MotionPreference::Full;
+            let animate = to > from && preference.get() == MotionPreference::Full;
             match timers.as_ref() {
                 Some(timers) if animate => {
                     count_frame(timers.clone(), Rc::clone(&frame), shown, Counting { from, to, started: None });
