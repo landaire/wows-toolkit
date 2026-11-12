@@ -153,20 +153,39 @@ impl<K> Clone for TreeMenu<K> {
     }
 }
 
-/// Asks the [`Tree`] it is given to bring a node into view.
+/// Asks the [`Tree`] it is given to bring a node into view, or to put its cursor there.
 pub struct TreeHandle<K: 'static> {
     request: RwSignal<Option<K>, LocalStorage>,
+    landing: RwSignal<Option<Landing<K>>, LocalStorage>,
+}
+
+/// A row the cursor is asked onto through a [`TreeHandle`].
+#[derive(Clone)]
+struct Landing<K> {
+    key: K,
+    focus: bool,
 }
 
 impl<K: 'static> TreeHandle<K> {
     /// A handle on no tree yet, belonging to the current reactive scope.
     pub fn new() -> Self {
-        Self { request: RwSignal::new_local(None) }
+        Self { request: RwSignal::new_local(None), landing: RwSignal::new_local(None) }
     }
 
     /// Expands the ancestors of `key` and scrolls its row into view.
     pub fn scroll_to_key(&self, key: K) {
         self.request.set(Some(key));
+    }
+
+    /// Makes the row of `key` the selection and the cursor, and scrolls it into view. A key no
+    /// visible row shows yet waits for the rows to change, until another key is asked for.
+    pub fn select_key(&self, key: K) {
+        self.landing.set(Some(Landing { key, focus: false }));
+    }
+
+    /// As [`Self::select_key`], and gives the tree the keyboard focus.
+    pub fn focus_key(&self, key: K) {
+        self.landing.set(Some(Landing { key, focus: true }));
     }
 }
 
@@ -253,9 +272,11 @@ where
     let port = NodeRef::new();
     let following = follow_model(state);
     let revealing = handle.map(|handle| follow_handle(state, handle, port, row_height));
+    let landing = handle.map(|handle| follow_landing(state, handle, port, row_height));
     on_cleanup_local(move || {
         drop(following);
         drop(revealing);
+        drop(landing);
     });
 
     let menu_target: RwSignal<Option<M::Key>, LocalStorage> = RwSignal::new_local(None);
@@ -792,6 +813,33 @@ fn follow_handle<M: TreeModel>(
             return;
         }
         state.expanded.update(move |set| set.extend(closed));
+    })
+}
+
+/// Puts the cursor on the rows asked for through `handle`.
+fn follow_landing<M: TreeModel>(
+    state: TreeState<M>,
+    handle: TreeHandle<M::Key>,
+    port: NodeRef,
+    row_height: Signal<RowHeight, LocalStorage>,
+) -> RenderEffect<()> {
+    RenderEffect::new(move |_| {
+        let Some(Landing { key, focus }) = handle.landing.get() else {
+            return;
+        };
+
+        // Read with tracking, so a request made with the model it lands in runs again once the
+        // rows follow that model.
+        let found = state.rows.with(|rows| rows.position(&key).map(|index| (index, rows.len())));
+        let Some((index, count)) = found else {
+            return;
+        };
+        handle.landing.set(None);
+        state.select_only(key);
+        bring_into_view(port, count, row_height.get_untracked(), index);
+        if focus {
+            port.focus();
+        }
     })
 }
 
