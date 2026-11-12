@@ -16606,6 +16606,7 @@ dependencies = [
  "wows-replay-insights",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
+ "wows-toolkit-icons",
  "wows-toolkit-launcher",
  "wows-toolkit-replay-data",
  "wows-toolkit-services",
@@ -16627,6 +16628,10 @@ dependencies = [
  "tracing",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "wows-toolkit-icons"
+version = "0.1.0"
 
 [[package]]
 name = "wows-toolkit-launcher"
