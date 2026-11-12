@@ -15,7 +15,6 @@ use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
 use wows_toolkit_replay_data::columns::ReplayColumn;
-use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use zgui::reactive::LocalStorage;
@@ -38,8 +37,8 @@ use zgui::view::AnyView;
 
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::shell::palette::ShipParamIndex;
-use crate::shell::palette::TabRequest;
+use crate::tabs::armor_viewer::library::FeedSource;
+use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::replays::constants::ResultMappings;
 use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelEvents;
@@ -383,7 +382,10 @@ impl ReplayWorkspace {
         let link = self.shell.collab.link().get_untracked();
         let session = self.under_tab(|| RendererSession::open(request, link));
         let shell = self.shell;
-        session.set_armor_listener(UnsyncCallback::new(move |asked: ArmorRequest| view_armor(shell, asked)));
+        let source = shell.armor.new_source();
+        session.set_armor_listener(UnsyncCallback::new(move |asked: ArmorRequest| {
+            view_armor(shell, session, source, asked)
+        }));
         self.renderers.update(|renderers| {
             renderers.insert(path.clone(), session);
         });
@@ -524,18 +526,17 @@ impl ReplayWorkspace {
     }
 }
 
-/// Carries a viewport's ask for an armor viewer to the Armor Viewer tab.
-fn view_armor(shell: Shell, asked: ArmorRequest) {
+/// Carries a viewport's ask for an armor viewer to the Armor Viewer tab. A salvo picked out of the
+/// viewer's incoming-fire log moves this viewport's playback.
+fn view_armor(shell: Shell, session: RendererSession, source: FeedSource, asked: ArmorRequest) {
     match asked {
-        ArmorRequest::Show(ShowArmor { target, .. }) => shell.palette.send(
-            shell,
-            TabRequest::ViewArmor {
-                param_index: ShipParamIndex(target.param_index),
-                display_name: target.display_name,
-            },
-        ),
-        // The Armor Viewer tab that would follow the ship is not built yet.
-        ArmorRequest::Followed(_) => {}
+        ArmorRequest::Show(shown) => {
+            let seek = UnsyncCallback::new(move |clock: wows_replays::types::GameClock| session.go_to_clock(clock));
+            shell.armor.send(ViewerFeed::Show { source, shown: Box::new(shown), seek: Some(seek) });
+            shell.select(crate::shell::tabs::TabKey::App(crate::shell::tabs::AppTab::ArmorViewer));
+        }
+        // Not shown: playback moving must not pull the reader to the viewer.
+        ArmorRequest::Followed(followed) => shell.armor.send(ViewerFeed::Followed { source, followed }),
     }
 }
 

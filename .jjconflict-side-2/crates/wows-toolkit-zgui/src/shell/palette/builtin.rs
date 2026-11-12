@@ -54,6 +54,15 @@ pub fn offer(shell: Shell) {
 
     palette.offer_mode(PaletteMode::Players, modes::players(services));
     palette.offer_mode(PaletteMode::MyShips, modes::my_ships(services));
+    // A test offers its own ship list in place of the catalogue.
+    #[cfg(test)]
+    let offers_ships = TEST_MODES.with_borrow(|modes| modes.ships.is_none());
+    #[cfg(not(test))]
+    let offers_ships = true;
+    if offers_ships {
+        let armor = shell.armor;
+        palette.offer_mode(PaletteMode::ArmorShips, modes::armor_ships(armor.ship_list(services), move || armor.want()));
+    }
 
     palette.offer(RootCommand::GamesIDiedIn, PaletteRun::Request(TabRequest::Search(GAMES_I_DIED_IN.to_owned())));
     palette.offer(RootCommand::GamesIWon, PaletteRun::Request(TabRequest::Search(GAMES_I_WON.to_owned())));

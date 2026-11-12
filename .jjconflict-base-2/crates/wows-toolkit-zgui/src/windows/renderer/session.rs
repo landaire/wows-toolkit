@@ -587,6 +587,12 @@ impl RendererSession {
         }
     }
 
+    /// Moves playback to the frame at game time `clock`.
+    pub fn go_to_clock(self, clock: GameClock) {
+        let Some(track) = self.track_untracked() else { return };
+        self.go_to(track.frame_at(clock.0));
+    }
+
     /// Moves playback `delta` seconds of game time from where it is.
     pub fn seek_by(self, delta: f32) {
         let Some(track) = self.track_untracked() else { return };

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use serde::Serialize;
 use sqlx::sqlite::SqlitePool;
 use tokio::runtime::Runtime;
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_services::settings_writer::PendingWrite;
 use wows_toolkit_services::settings_writer::SettingsWriter;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
@@ -119,10 +121,36 @@ impl Settings {
             return;
         };
 
-        let pending = writer.begin(key, json);
+        self.commit_detached(writer.begin(key, json));
+    }
+
+    /// Writes the armor viewer's defaults row, which is a table of its own rather than a key, and
+    /// keeps the snapshot in step with it. Saves of the row commit in the order they were made.
+    pub fn save_armor_defaults(self, row: ArmorViewerDefaultsRow) {
+        self.state.update(|state| {
+            if let SettingsState::Loaded(settings) = state {
+                settings.armor_defaults = Some(row.clone());
+            }
+        });
+
+        #[cfg(test)]
+        SAVED.with(|saved| saved.borrow_mut().push((ARMOR_DEFAULTS, format!("{row:?}"))));
+
+        let Some(writer) = self.writer.get_value() else {
+            tracing::warn!("settings: the armor viewer defaults were not saved because the database is not open");
+            return;
+        };
+
+        self.commit_detached(writer.begin_armor_defaults(row));
+    }
+
+    /// Commits `pending` once its turn comes, unless a newer save has overtaken it.
+    ///
+    /// Detached: a save must land even when the view that made it goes away first.
+    fn commit_detached(self, pending: PendingWrite) {
         let runtime = self.runtime.get_value();
-        // Detached: a save must land even when the view that made it goes away first.
         spawn_detached(async move {
+            let key = pending.key();
             let Some(write) = pending.turn().await else { return };
             match on_tokio(runtime, write.commit()).await {
                 Ok(Ok(())) => {}
@@ -138,6 +166,10 @@ impl Settings {
         self.writer.get_value().map(|writer| writer.pool().clone())
     }
 }
+
+/// What [`saved_for_test`] names a write of the armor viewer defaults row.
+#[cfg(test)]
+pub const ARMOR_DEFAULTS: &str = "armor_viewer_defaults";
 
 #[cfg(test)]
 thread_local! {
