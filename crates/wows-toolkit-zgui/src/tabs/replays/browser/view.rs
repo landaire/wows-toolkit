@@ -8,12 +8,12 @@ use std::rc::Rc;
 
 use landaire_ui::BranchClick;
 use landaire_ui::LeafLead;
+use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
 use landaire_ui::TreeStripes;
-use landaire_ui::RowHeight;
 use rust_i18n::t;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_icons::Glyph;
@@ -26,24 +26,24 @@ use wows_toolkit_viewmodel::personal_rating::chip_hue;
 use wows_toolkit_viewmodel::personal_rating::chip_text;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::Signal;
-use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
-use zgui::reactive::prelude::GetValue;
-use zgui::reactive::prelude::WithUntracked;
-use zgui::reactive::prelude::WithValue;
-use zgui::view::EventCx;
-use zgui::view::events;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::EventCx;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui_ui::AlertDialogActionProps;
 use zgui_ui::AlertDialogCancelProps;
@@ -62,8 +62,8 @@ use crate::icons::AppIconProps;
 use crate::preview::HoverPreview;
 use crate::preview::PreviewTarget;
 use crate::preview::card::HoverPreviewCardProps;
-use crate::services::Services;
 use crate::services::GameDataState;
+use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::replays::browser::BrowserEvents;
 use crate::tabs::replays::browser::ReplayBrowserEvent;
@@ -72,9 +72,9 @@ use crate::tabs::replays::browser::files;
 use crate::tabs::replays::browser::listing::Listing;
 use crate::tabs::replays::browser::listing::ListingSource;
 use crate::tabs::replays::browser::listing::ScanStatus;
-use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::thumbnails::Thumbnail;
 use crate::tabs::replays::browser::thumbnails::Thumbnails;
+use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::LeafRow;
 use crate::tabs::replays::browser::tree::NodeKey;
 
@@ -187,6 +187,7 @@ const CSS: &str = css!(
         font-size: 12px;
         font-weight: 700;
     }
+    .wt-row__part { white-space: pre; }
     .wt-row__stats {
         display: flex;
         align-items: center;
@@ -298,7 +299,11 @@ fn ScanLoading(listing: Listing) -> impl IntoView {
         _ => t!("ui.replay.scanning").into_owned(),
     };
     let fraction = move || {
-        listing.progress.get().filter(|progress| progress.total > 0).map(|progress| progress.done as f64 / progress.total as f64 * 100.0)
+        listing
+            .progress
+            .get()
+            .filter(|progress| progress.total > 0)
+            .map(|progress| progress.done as f64 / progress.total as f64 * 100.0)
     };
 
     view! {
@@ -314,7 +319,12 @@ fn ScanLoading(listing: Listing) -> impl IntoView {
 
 /// The rows, as a tree grouped the way the reader chose.
 #[component]
-fn ListingRows(listing: Listing, events: BrowserEvents, preview: HoverPreview, thumbnails: Thumbnails) -> impl IntoView {
+fn ListingRows(
+    listing: Listing,
+    events: BrowserEvents,
+    preview: HoverPreview,
+    thumbnails: Thumbnails,
+) -> impl IntoView {
     let shell = Shell::current();
     let model: Signal<Rc<BrowserTree>, LocalStorage> = listing.tree.into();
     let activate_events = events.clone();
@@ -347,7 +357,8 @@ fn ListingRows(listing: Listing, events: BrowserEvents, preview: HoverPreview, t
 fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row: TreeRow<NodeKey>) -> AnyView {
     match row.key {
         NodeKey::Group(id) => {
-            let label = move || listing.tree.with(|tree| tree.group(&id).map(|group| group.label.clone()).unwrap_or_default());
+            let label =
+                move || listing.tree.with(|tree| tree.group(&id).map(|group| group.label.clone()).unwrap_or_default());
             AnyView::new(view! {
                 row(class = "wt-row") {
                     box(class = "wt-row__edge")
@@ -407,7 +418,7 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         .stats
         .into_iter()
         .map(|part| match part {
-            LinePart::Text(text) => AnyView::new(view! { text {{text}} }),
+            LinePart::Text(text) => AnyView::new(view! { text(class = "wt-row__part") {{text}} }),
             LinePart::Glyph(glyph) => AnyView::new(view! { AppIcon(glyph = line_glyph(glyph)) }),
         })
         .collect();
@@ -470,7 +481,8 @@ const fn rating_band_name(category: PersonalRatingCategory) -> &'static str {
 fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey) -> AnyView {
     match key {
         NodeKey::Group(id) => {
-            let paths = listing.tree.with_untracked(|tree| tree.group(id).map(|group| group.paths.clone()).unwrap_or_default());
+            let paths =
+                listing.tree.with_untracked(|tree| tree.group(id).map(|group| group.paths.clone()).unwrap_or_default());
             if paths.is_empty() {
                 return AnyView::new(());
             }
@@ -500,11 +512,13 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
     let selection = listing.selected_paths();
     // Acting on the selection only when the row is part of it: a secondary click elsewhere acts
     // on that row alone.
-    let batch = if selection.len() > 1 && selection.iter().any(|selected| selected == path) { selection } else { Vec::new() };
+    let batch =
+        if selection.len() > 1 && selection.iter().any(|selected| selected == path) { selection } else { Vec::new() };
     let session = if batch.is_empty() { vec![path.to_path_buf()] } else { batch.clone() };
     let count = session.len();
     let path = path.to_path_buf();
-    let wows_dir = Services::current().settings.read_untracked(|settings| settings.wows_dir.clone()).filter(|dir| !dir.is_empty());
+    let wows_dir =
+        Services::current().settings.read_untracked(|settings| settings.wows_dir.clone()).filter(|dir| !dir.is_empty());
     let cache = Services::current().game_data.cache_untracked();
 
     let item = {
@@ -545,7 +559,10 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         }
     };
     let (set_label, add_label) = if count == 1 {
-        (t!("ui.replay.context.set_session_stats_one").into_owned(), t!("ui.replay.context.add_session_stats_one").into_owned())
+        (
+            t!("ui.replay.context.set_session_stats_one").into_owned(),
+            t!("ui.replay.context.add_session_stats_one").into_owned(),
+        )
     } else {
         (
             t!("ui.replay.context.set_session_stats_many", count = count).into_owned(),

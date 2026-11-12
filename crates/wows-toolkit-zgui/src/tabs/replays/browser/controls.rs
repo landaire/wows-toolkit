@@ -6,6 +6,8 @@ use rust_i18n::t;
 use wows_toolkit_viewmodel::controls::CommandGroup;
 use wows_toolkit_viewmodel::controls::ReplayCommand;
 use zgui::css;
+use zgui::reactive::StoredValue;
+use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
@@ -14,8 +16,8 @@ use zgui_ui::DialogContentProps;
 use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
 
-use crate::shell::Shell;
 use crate::shell::HostedDialogProps;
+use crate::shell::Shell;
 
 const SHEET: &str = "wt-replay-controls";
 
@@ -47,8 +49,7 @@ pub fn open(shell: Shell, groups: Vec<CommandGroup>) {
     let groups = Rc::new(groups);
     shell.dialogs.open(move |handle| {
         install_stylesheet(SHEET, CSS);
-        let groups = zgui::reactive::StoredValue::new_local(Rc::clone(&groups));
-        let listed = move || zgui::reactive::prelude::WithValue::with_value(&groups, |groups| groups.as_ref().clone());
+        let groups = StoredValue::new_local(Rc::clone(&groups));
         AnyView::new(view! {
             HostedDialog(handle = handle) {
                 DialogContent(class = "wt-controls", attr:data-testid = "replay-controls") {
@@ -56,7 +57,7 @@ pub fn open(shell: Shell, groups: Vec<CommandGroup>) {
                         DialogTitle {{t!("ui.replay.controls.window_title").into_owned()}}
                     }
                     column(class = "wt-controls__body") {
-                        for group in move || listed(), key = |group: &CommandGroup| group.title {
+                        for group in move || groups.with_value(|groups| groups.as_ref().clone()), key = |group: &CommandGroup| group.title {
                             column(class = "wt-controls__group") {
                                 text(class = "wt-controls__title") {{group.title.to_owned()}}
                                 for command in move || group.commands.clone(), key = |command: &ReplayCommand| command.label.clone() {

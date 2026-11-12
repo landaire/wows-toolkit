@@ -12,13 +12,16 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::replay_dir::DirChange;
+use wows_toolkit_replay_data::replay_dir::ScanProgress;
 use wows_toolkit_replay_data::replay_dir::read_replay;
 use wows_toolkit_replay_data::simulated_watch;
+use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
 use zgui::vocab::Modifiers;
 
 use super::folders::BrowserControl;
@@ -75,7 +78,9 @@ fn tabs(control: BrowserControl) -> Vec<(FolderSource, bool, FolderState)> {
 fn folder_id(control: BrowserControl, root: &Path) -> FolderId {
     control
         .folders
-        .with_untracked(|folders| folders.iter().find(|tab| tab.source == FolderSource::Chosen(root.to_path_buf())).map(|tab| tab.id))
+        .with_untracked(|folders| {
+            folders.iter().find(|tab| tab.source == FolderSource::Chosen(root.to_path_buf())).map(|tab| tab.id)
+        })
         .expect("the directory has a tab")
 }
 
@@ -84,7 +89,8 @@ fn listing(control: BrowserControl, root: &Path) -> Listing {
 }
 
 fn listed(listing: Listing) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = listing.files.with_untracked(|files| files.iter().map(|file| file.path.clone()).collect());
+    let mut paths: Vec<PathBuf> =
+        listing.files.with_untracked(|files| files.iter().map(|file| file.path.clone()).collect());
     paths.sort();
 
     paths
@@ -119,7 +125,7 @@ fn opening_a_folder_adds_or_selects_one_tab_and_the_install_stays_first() {
     assert_eq!(shown[1], (FolderSource::Chosen(root.clone()), false, FolderState::Listed));
     assert_eq!(control.selected.get_untracked(), folder_id(control, &root), "the opened folder is selected");
     assert_eq!(listed(listing(control, &root)).len(), 2, "both replays are listed");
-    assert_eq!(control.history.with_untracked(|history| history.folders().to_vec()), [root.clone()]);
+    assert_eq!(control.history.with_untracked(|history| history.folders().to_vec()), std::slice::from_ref(&root));
 
     control.open_folder(root.clone());
     settle_in_real_time(&mut window);
@@ -179,7 +185,10 @@ fn a_new_arrival_is_tagged_until_opened_or_left() {
     assert!(shown.arrivals.with_untracked(|arrivals| arrivals.contains(&left)), "and only its own");
 
     control.select_folder(FolderId::INSTALL);
-    assert!(shown.arrivals.with_untracked(std::collections::HashSet::is_empty), "leaving the listing takes the rest off");
+    assert!(
+        shown.arrivals.with_untracked(std::collections::HashSet::is_empty),
+        "leaving the listing takes the rest off"
+    );
 }
 
 #[test]
@@ -250,6 +259,181 @@ fn a_missing_pinned_folder_keeps_its_tab_and_can_be_unpinned() {
 
     assert!(control.tab(id).is_none(), "unpinning a missing folder closes its tab");
     assert_eq!(control.pinned_folders(), PinnedFolders(vec![kept]));
+}
+
+/// Takes `wows` as the game directory, without saving it.
+fn adopt_game_dir(control: BrowserControl, wows: &Path) {
+    let services = control.shell().services();
+    let pool = services.settings.pool().expect("the settings database is open");
+    let runtime = services.runtime().expect("the runtime is up");
+    let mut settings = runtime.block_on(StartupSettings::load(&pool));
+    settings.wows_dir = wows.display().to_string();
+    services.settings.adopt_unsaved(settings);
+}
+
+/// Runs frames for less than a landing ring takes, letting the watch's reports in.
+fn settle_briefly(window: &mut HeadlessWindow) {
+    for _ in 0..5 {
+        window.advance(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn a_superseded_scan_does_not_overwrite_the_current_progress() {
+    let (mut window, control) = open();
+    let (_dir, root) = replay_dir(1);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let shown = listing(control, &root);
+
+    shown.relist();
+    let superseded = shown.scan_generation();
+    shown.relist();
+    let shown_total = || shown.progress.with_untracked(|progress| progress.map(|progress| progress.total));
+    shown.show_scan_progress(superseded, ScanProgress { done: 7, total: 9 });
+    assert_ne!(shown_total(), Some(9), "the earlier scan's progress is dropped");
+
+    shown.show_scan_progress(shown.scan_generation(), ScanProgress { done: 7, total: 9 });
+    assert_eq!(shown_total(), Some(9), "the current scan's is shown");
+}
+
+#[test]
+fn a_chosen_folder_is_scanned_only_once_it_is_found() {
+    let (mut window, control) = open();
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let gone = dir.path().join("nowhere");
+    control.adopt_pinned_folders(PinnedFolders(vec![gone.clone()]));
+    settle_in_real_time(&mut window);
+
+    let id = folder_id(control, &gone);
+    assert_eq!(control.tab(id).map(|tab| tab.state), Some(FolderState::Missing));
+    assert_eq!(listing(control, &gone).directory.get_untracked(), None, "the missing directory was not scanned");
+    assert_eq!(simulated_watch::asked(&gone), 0, "nor watched");
+}
+
+#[test]
+fn landings_in_one_folder_share_one_wait_that_closing_it_drops() {
+    let (mut window, control) = open();
+    let (_busy_dir, busy) = replay_dir(0);
+    let (_quiet_dir, quiet) = replay_dir(0);
+    control.adopt_pinned_folders(PinnedFolders(vec![busy.clone(), quiet.clone()]));
+    settle_in_real_time(&mut window);
+    let busy_id = folder_id(control, &busy);
+    control.select_folder(folder_id(control, &quiet));
+
+    for name in &FIXTURES[..2] {
+        simulated_watch::report(&busy, DirChange::Appeared(root_copy(&busy, name)));
+    }
+    settle_briefly(&mut window);
+    let waiting = || {
+        control.pending_landings.with_value(|pending| {
+            pending.iter().map(|(id, landing)| (*id, landing.paths.len())).collect::<Vec<(FolderId, usize)>>()
+        })
+    };
+    assert_eq!(waiting(), [(busy_id, 2)], "both landings wait on one timer");
+
+    window.advance(LANDING_PULSE);
+    let badge = window.by_test_id(&format!("replay-folder-badge-{}", busy_id.raw())).expect("the count goes up");
+    assert_eq!(window.a11y(badge).and_then(|state| state.label), Some("2".to_owned()));
+    assert!(waiting().is_empty(), "the wait is dropped once it has counted");
+
+    simulated_watch::report(&busy, DirChange::Appeared(root_copy(&busy, FIXTURES[2])));
+    settle_briefly(&mut window);
+    assert_eq!(waiting(), [(busy_id, 1)]);
+    control.close_folder(busy_id);
+    assert!(waiting().is_empty(), "closing the folder drops its wait");
+}
+
+#[test]
+fn a_folder_folded_into_the_install_takes_its_watch_message_with_it() {
+    let (mut window, control) = open();
+    let (_dir, wows) = replay_dir(0);
+    let replays = wows.join("replays");
+    std::fs::create_dir(&replays).expect("the replays directory is made");
+    control.adopt_pinned_folders(PinnedFolders(vec![replays.clone()]));
+    settle_in_real_time(&mut window);
+    let id = folder_id(control, &replays);
+
+    simulated_watch::fail(&replays, "the share went away");
+    settle_briefly(&mut window);
+    assert!(window.by_class("zui-toast__action").is_some(), "the stopped watch is said, with a restart");
+
+    adopt_game_dir(control, &wows);
+    for _ in 0..20 {
+        if control.tab(id).is_none() {
+            break;
+        }
+        settle_briefly(&mut window);
+    }
+    assert!(control.tab(id).is_none(), "the install's tab takes the directory over");
+    window.advance(Duration::from_millis(400));
+    assert!(window.by_class("zui-toast__action").is_none(), "and the message about its watch goes with it");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_through_a_link_to_the_install_directory_selects_the_install() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let (_dir, wows) = replay_dir(0);
+    let replays = wows.join("replays");
+    std::fs::create_dir(&replays).expect("the replays directory is made");
+    adopt_game_dir(control, &wows);
+    settle_in_real_time(&mut window);
+    let link = wows.join("linked");
+    std::os::unix::fs::symlink(&replays, &link).expect("the link is made");
+
+    control.open_folder(link);
+    settle_in_real_time(&mut window);
+
+    assert_eq!(tabs(control).len(), 1, "no tab is added for the install's own directory");
+    assert_eq!(control.selected.get_untracked(), FolderId::INSTALL);
+    assert!(
+        control.history.with_untracked(|history| history.folders().is_empty()),
+        "nor is the install's directory kept as a recent one"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pinned_link_to_the_install_directory_is_unpinned_into_the_install() {
+    let (mut window, control) = open();
+    let (_dir, wows) = replay_dir(0);
+    let replays = wows.join("replays");
+    std::fs::create_dir(&replays).expect("the replays directory is made");
+    adopt_game_dir(control, &wows);
+    settle_in_real_time(&mut window);
+    let link = wows.join("linked");
+    std::os::unix::fs::symlink(&replays, &link).expect("the link is made");
+
+    control.adopt_pinned_folders(PinnedFolders(vec![link]));
+    settle_in_real_time(&mut window);
+
+    assert_eq!(tabs(control), [(FolderSource::Install, false, FolderState::Listed)], "the install is not pinned");
+    assert_eq!(control.pinned_folders(), PinnedFolders::default(), "and the alias is no longer kept");
+}
+
+#[test]
+fn a_former_install_directory_opens_as_a_folder_of_its_own() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let (_dir, wows) = replay_dir(0);
+    let replays = wows.join("replays");
+    std::fs::create_dir(&replays).expect("the replays directory is made");
+    adopt_game_dir(control, &wows);
+    settle_in_real_time(&mut window);
+
+    adopt_game_dir(control, Path::new(""));
+    settle_in_real_time(&mut window);
+    control.open_folder(replays.clone());
+    settle_in_real_time(&mut window);
+
+    let id = folder_id(control, &replays);
+    assert_eq!(control.selected.get_untracked(), id, "the directory has a tab of its own");
+    assert_eq!(control.tab(id).map(|tab| tab.state), Some(FolderState::Listed));
 }
 
 #[test]
@@ -324,7 +508,14 @@ fn a_rated_row_carries_its_rating_and_outcome() {
 fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
     let files = scanned(&FIXTURES);
     let summaries = HashMap::new();
-    let inputs = TreeInputs { files: &files, summaries: &summaries, cache: None, fallback: None, grouping: ReplayGrouping::Date, locale: None };
+    let inputs = TreeInputs {
+        files: &files,
+        summaries: &summaries,
+        cache: None,
+        fallback: None,
+        grouping: ReplayGrouping::Date,
+        locale: None,
+    };
     let tree = BrowserTree::build(&inputs);
 
     assert_eq!(tree.roots().len(), 3, "three battles on three days make three groups");
