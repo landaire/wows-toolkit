@@ -129,6 +129,12 @@ fn tool_label(label: StyledText) -> impl IntoElement {
     div().id("armor-tool-label").test_support().min_w_0().text_ellipsis().child(label)
 }
 
+/// A tool's label as `filter` marks it, kept when the filter matches the
+/// label or the tooltip that says what the tool does.
+fn tool_text(filter: &FilterQuery, label: String, tooltip: &str) -> Option<StyledText> {
+    if filter.keeps(&label) || filter.keeps(tooltip) { Some(filter.marked(label)) } else { None }
+}
+
 /// The viewport context menu's toggles, read from `entity` and its pane as
 /// the menu opens.
 pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportView>, cx: &App) -> PopupMenu {
@@ -215,7 +221,7 @@ fn render_hidden_plates_button(
     let has_armor = view.has_armor();
     let entity = entity.clone();
 
-    let label_text = filter.label(t!("ui.armor.show_hidden").to_string())?;
+    let label_text = tool_text(filter, t!("ui.armor.show_hidden").into_owned(), &t!("ui.armor.show_hidden_tooltip"))?;
 
     Some(
         crate::ui::selectable(
@@ -530,7 +536,7 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>, filter
     // been looked at, is worth saying so quietly.
     let found = gaps.shown && gaps.count > 0;
 
-    let label_text = filter.label(label)?;
+    let label_text = tool_text(filter, label, &t!("ui.armor.gaps_tooltip"))?;
 
     Some(
         crate::ui::selectable(
@@ -576,7 +582,7 @@ fn render_splash_button(
         t!("ui.armor.splash_no_data").into_owned()
     };
 
-    let label_text = filter.label(label)?;
+    let label_text = tool_text(filter, label, &tooltip)?;
 
     Some(
         crate::ui::selectable(
@@ -608,7 +614,7 @@ fn render_splash_boxes_button(
     let state = view.splash_state();
     let entity = entity.clone();
 
-    let label_text = filter.label(t!("ui.armor.splash_boxes").to_string())?;
+    let label_text = tool_text(filter, t!("ui.armor.splash_boxes").into_owned(), &t!("ui.armor.splash_tooltip"))?;
 
     Some(
         crate::ui::selectable(
@@ -642,8 +648,12 @@ fn render_export_button(
 ) -> Option<AnyElement> {
     let has_armor = view.current_armor.is_some();
     let click_entity = entity.clone();
+    let tooltip = match view.scene_features() {
+        Some(SceneFeatures { ship: false, .. }) => t!("ui.model_view.export_tooltip").into_owned(),
+        Some(_) | None => t!("ui.armor.export_tooltip").into_owned(),
+    };
 
-    let label_text = filter.label(t!("ui.replay.section_export").to_string())?;
+    let label_text = tool_text(filter, t!("ui.replay.section_export").into_owned(), &tooltip)?;
 
     Some(
         Button::new("armor-export-trigger")
@@ -651,10 +661,7 @@ fn render_export_button(
             .child(tool_label(label_text))
             .compact()
             .w_full()
-            .tooltip(match view.scene_features() {
-                Some(SceneFeatures { ship: false, .. }) => t!("ui.model_view.export_tooltip").to_string(),
-                Some(_) | None => t!("ui.armor.export_tooltip").to_string(),
-            })
+            .tooltip(tooltip)
             .disabled(!has_armor)
             .on_click(move |_, window, cx| {
                 click_entity.update(cx, |view, cx| view.open_export_confirm(window, cx));
@@ -980,11 +987,24 @@ pub(crate) fn render_hull_popover_content(
         })
         .collect();
     let field = tree_field("armor-part-filter", part_field, &field_query, &armor.hull_part_groups);
+    let upgrade =
+        (armor.hull_upgrade_names.len() > 1).then(|| render_hull_upgrade_row(entity, &armor, &selected_hull, filter));
+    let modules: Vec<AnyElement> = armor
+        .module_alternatives
+        .iter()
+        .filter(|(_, alternatives)| alternatives.len() > 1)
+        .filter_map(|(ct, alternatives)| {
+            render_module_alternative_row(entity, *ct, alternatives, selected_modules.get(ct), filter)
+        })
+        .collect();
+    let camo = (!armor.camo_scheme_infos.is_empty())
+        .then(|| render_camo_picker(entity, &armor, selected_camo, &expanded_camo_groups, filter))
+        .flatten();
+    let lod = (armor.hull_lod_count > 1).then(|| render_lod_row(entity, &armor, hull_lod, filter)).flatten();
 
-    // While filtering only what can be matched by name is drawn: the opaque
-    // switch and the hull groups. The selectors below choose a model rather
-    // than show or hide part of one. Only the rail's query drops the tree;
-    // its own field narrows the rows in it.
+    // While filtering every row that matches by name is drawn, without the
+    // bulk switches and dividers. Only the rail's query drops the tree; its
+    // own field narrows the rows in it.
     if filter.is_active() {
         let opaque = filtered_checkbox(
             "armor-hull-vis-opaque",
@@ -1001,7 +1021,8 @@ pub(crate) fn render_hull_popover_content(
             let tree = v_flex().id("armor-hull-visibility-tree").test_support().gap_1().children(groups);
             v_flex().gap_1().child(field).child(tree).into_any_element()
         });
-        let rows: Vec<AnyElement> = opaque.into_iter().chain(tree).collect();
+        let rows: Vec<AnyElement> =
+            opaque.into_iter().chain(upgrade.flatten()).chain(modules).chain(tree).chain(camo).chain(lod).collect();
         return (!rows.is_empty()).then(|| v_flex().w_full().gap_1().children(rows).into_any_element());
     }
 
@@ -1013,35 +1034,22 @@ pub(crate) fn render_hull_popover_content(
             },
         ),
     );
-    let mut col = v_flex().w_full().gap_2().child(header);
-
-    if armor.hull_upgrade_names.len() > 1 {
-        col = col.child(render_hull_upgrade_row(entity, &armor, &selected_hull));
-    }
-    for (ct, alternatives) in &armor.module_alternatives {
-        if alternatives.len() > 1 {
-            col = col.child(render_module_alternative_row(entity, *ct, alternatives, selected_modules.get(ct)));
-        }
-    }
 
     // The part tree comes before the camo and LOD pickers: it is what the
     // reader turns to most, and the camo list can run long. It has no scroll
     // of its own, so a wheel over it moves only the rail.
     let tree = v_flex().id("armor-hull-visibility-tree").test_support().gap_1().children(groups);
-    col = col.child(div().h(px(1.)).bg(border)).child(field).child(tree);
-
-    if !armor.camo_scheme_infos.is_empty() {
-        col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
-            entity,
-            &armor,
-            selected_camo,
-            &expanded_camo_groups,
-        ));
-    }
-
-    if armor.hull_lod_count > 1 {
-        col = col.child(render_lod_row(entity, &armor, hull_lod));
-    }
+    let col = v_flex()
+        .w_full()
+        .gap_2()
+        .child(header)
+        .children(upgrade.flatten())
+        .children(modules)
+        .child(div().h(px(1.)).bg(border))
+        .child(field)
+        .child(tree)
+        .children(camo.map(|camo| v_flex().gap_2().child(div().h(px(1.)).bg(border)).child(camo)))
+        .children(lod);
 
     Some(col.into_any_element())
 }
@@ -1057,14 +1065,20 @@ fn render_hull_upgrade_row(
     entity: &Entity<ViewportView>,
     armor: &LoadedShipArmor,
     selected_hull: &Option<String>,
-) -> AnyElement {
+    filter: &FilterQuery,
+) -> Option<AnyElement> {
     let stock_key = &armor.hull_upgrade_names[0].0;
-    let mut row = h_flex()
-        .gap_1()
-        .items_center()
-        .flex_wrap()
-        .child(div().text_sm().flex_none().child(t!("ui.armor.upgrade").to_string()));
-    for (key, label) in &armor.hull_upgrade_names {
+    let heading = t!("ui.armor.upgrade").into_owned();
+    let inner = within(filter, &heading);
+    let kept: Vec<&(String, String)> =
+        armor.hull_upgrade_names.iter().filter(|(_, label)| inner.keeps(label)).collect();
+    if kept.is_empty() {
+        return None;
+    }
+
+    let mut row =
+        h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child(filter.marked(heading)));
+    for (key, label) in kept {
         let is_selected = selected_hull.as_ref().map(|sel| sel == key).unwrap_or(key == stock_key);
         let toggle_entity = entity.clone();
         let toggle_key = key.clone();
@@ -1082,7 +1096,14 @@ fn render_hull_upgrade_row(
                 }),
         );
     }
-    row.into_any_element()
+
+    Some(row.into_any_element())
+}
+
+/// What a row's choices are filtered by: nothing when the row's heading
+/// matches, which keeps every choice in it, and `filter` otherwise.
+fn within(filter: &FilterQuery, heading: &str) -> FilterQuery {
+    if filter.keeps(heading) { FilterQuery::default() } else { filter.clone() }
 }
 
 /// One module-alternative selector row for component type `ct`: a "{ct}:"
@@ -1091,23 +1112,38 @@ fn render_hull_upgrade_row(
 /// different alternative overrides it (`ViewportView::select_module_alternative`,
 /// which triggers a reload). Ports the egui `selectable_label` row
 /// (`tab.rs:3178-3190`); `selected.is_none()` is treated as the first entry,
-/// matching the egui original's own fallback.
+/// matching the egui original's own fallback. While filtering, an
+/// alternative is kept when its label or its component name matches.
 fn render_module_alternative_row(
     entity: &Entity<ViewportView>,
     ct: ComponentType,
     alternatives: &[String],
     selected: Option<&String>,
-) -> AnyElement {
-    let mut row =
-        h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child(format!("{ct}:")));
+    filter: &FilterQuery,
+) -> Option<AnyElement> {
+    let heading = format!("{ct}:");
+    let inner = within(filter, &heading);
+    let mut kept = Vec::new();
     for (i, name) in alternatives.iter().enumerate() {
-        let is_selected = selected.map(|sel| sel == name).unwrap_or(i == 0);
         let letter = (b'A' + i as u8) as char;
+        let label = format!("{ct} {letter}");
+        if inner.keeps(&label) || inner.keeps(name) {
+            kept.push((i, name, label));
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+
+    let mut row =
+        h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child(filter.marked(heading)));
+    for (i, name, label) in kept {
+        let is_selected = selected.map(|sel| sel == name).unwrap_or(i == 0);
         let toggle_entity = entity.clone();
         let toggle_name = name.clone();
         row = row.child(
             Toggle::new(format!("armor-module-alt-{ct}-{i}"))
-                .label(format!("{ct} {letter}"))
+                .label(label)
                 .tooltip(name.clone())
                 .with_size(Size::XSmall)
                 .checked(is_selected)
@@ -1120,7 +1156,8 @@ fn render_module_alternative_row(
                 }),
         );
     }
-    row.into_any_element()
+
+    Some(row.into_any_element())
 }
 
 /// LOD selector row: a "LOD:" label followed by one selectable toggle per
@@ -1128,14 +1165,25 @@ fn render_module_alternative_row(
 /// egui original). Selecting a different level switches to it
 /// (`ViewportView::select_hull_lod`, which triggers a reload). Ports the egui
 /// `selectable_label` row (`tab.rs:3253-3264`).
-fn render_lod_row(entity: &Entity<ViewportView>, armor: &LoadedShipArmor, hull_lod: usize) -> AnyElement {
-    let mut row = h_flex()
-        .gap_1()
-        .items_center()
-        .flex_wrap()
-        .child(div().text_sm().flex_none().child(t!("ui.armor.lod").to_string()));
-    for i in 0..armor.hull_lod_count {
-        let label = if i == 0 { t!("ui.armor.lod_highest").into_owned() } else { i.to_string() };
+fn render_lod_row(
+    entity: &Entity<ViewportView>,
+    armor: &LoadedShipArmor,
+    hull_lod: usize,
+    filter: &FilterQuery,
+) -> Option<AnyElement> {
+    let heading = t!("ui.armor.lod").into_owned();
+    let inner = within(filter, &heading);
+    let kept: Vec<(usize, String)> = (0..armor.hull_lod_count)
+        .map(|i| (i, if i == 0 { t!("ui.armor.lod_highest").into_owned() } else { i.to_string() }))
+        .filter(|(_, label)| inner.keeps(label))
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+
+    let mut row =
+        h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child(filter.marked(heading)));
+    for (i, label) in kept {
         let is_selected = hull_lod == i;
         let toggle_entity = entity.clone();
         row = row.child(
@@ -1151,7 +1199,8 @@ fn render_lod_row(entity: &Entity<ViewportView>, armor: &LoadedShipArmor, hull_l
                 }),
         );
     }
-    row.into_any_element()
+
+    Some(row.into_any_element())
 }
 
 /// Camo picker: "Stock" (deselects the active camo) + ship-specific schemes
@@ -1159,34 +1208,41 @@ fn render_lod_row(entity: &Entity<ViewportView>, armor: &LoadedShipArmor, hull_l
 /// (each sorted by lowercased display name, skipped when empty). Ports the
 /// egui camo selector (`tab.rs:3196-3251`). The caller hides this entirely
 /// when `armor.camo_scheme_infos` is empty (old game versions carry no camo
-/// metadata).
+/// metadata). While filtering, only the schemes whose names match are kept,
+/// each group holding one open; `None` when none match.
 fn render_camo_picker(
     entity: &Entity<ViewportView>,
     armor: &LoadedShipArmor,
     selected_camo: Option<CamoSchemeId>,
     expanded_camo_groups: &HashSet<String>,
-) -> AnyElement {
-    let mut col = v_flex()
-        .id("armor-camo-picker")
-        .test_support()
-        .gap_1()
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.camouflage").to_string()));
+    filter: &FilterQuery,
+) -> Option<AnyElement> {
+    let heading = t!("ui.armor.camouflage").into_owned();
+    let inner = within(filter, &heading);
+    let mut rows: Vec<AnyElement> = Vec::new();
 
-    let none_entity = entity.clone();
-    col = col.child(
-        ListItem::new("armor-camo-none")
-            .selected(selected_camo.is_none())
-            .child(div().text_sm().child(t!("ui.armor.camo_none").to_string()))
-            .on_click(move |_, _window, cx| {
-                none_entity.update(cx, |view, cx| view.select_camo(None, cx));
-            }),
-    );
+    let none_label = t!("ui.armor.camo_none").into_owned();
+    if inner.keeps(&none_label) {
+        let none_entity = entity.clone();
+        rows.push(
+            ListItem::new("armor-camo-none")
+                .selected(selected_camo.is_none())
+                .child(div().text_sm().child(inner.marked(none_label)))
+                .on_click(move |_, _window, cx| {
+                    none_entity.update(cx, |view, cx| view.select_camo(None, cx));
+                })
+                .into_any_element(),
+        );
+    }
 
-    let mut ship_infos: Vec<&CamoSchemeInfo> =
-        armor.camo_scheme_infos.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
+    let mut ship_infos: Vec<&CamoSchemeInfo> = armor
+        .camo_scheme_infos
+        .iter()
+        .filter(|i| i.origin == CamoOrigin::ShipSpecific && inner.keeps(&i.display_name))
+        .collect();
     ship_infos.sort_by_key(|i| i.display_name.to_lowercase());
     for info in &ship_infos {
-        col = col.child(render_camo_row(entity, info, selected_camo));
+        rows.push(render_camo_row(entity, info, selected_camo, &inner));
     }
 
     for (origin, label) in [
@@ -1194,30 +1250,49 @@ fn render_camo_picker(
         (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
         (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
     ] {
-        let mut group: Vec<&CamoSchemeInfo> = armor.camo_scheme_infos.iter().filter(|i| i.origin == origin).collect();
+        let label = t!(label).into_owned();
+        let group_filter = within(&inner, &label);
+        let mut group: Vec<&CamoSchemeInfo> = armor
+            .camo_scheme_infos
+            .iter()
+            .filter(|i| i.origin == origin && group_filter.keeps(&i.display_name))
+            .collect();
         if group.is_empty() {
             continue;
         }
         group.sort_by_key(|i| i.display_name.to_lowercase());
-        col = col.child(render_camo_group(entity, &t!(label), &group, selected_camo, expanded_camo_groups));
+        let filtering = filter.is_active();
+        rows.push(render_camo_group(entity, &label, &group, selected_camo, expanded_camo_groups, &inner, filtering));
+    }
+    if rows.is_empty() {
+        return None;
     }
 
-    col.into_any_element()
+    Some(
+        v_flex()
+            .id("armor-camo-picker")
+            .test_support()
+            .gap_1()
+            .child(div().text_sm().font_weight(FontWeight::BOLD).child(filter.marked(heading)))
+            .children(rows)
+            .into_any_element(),
+    )
 }
 
-/// One selectable camo-scheme row. Ports one `selectable_label` iteration of
-/// `tab.rs:3216`/`3243`.
+/// One selectable camo-scheme row, its name marked where `filter` matched.
+/// Ports one `selectable_label` iteration of `tab.rs:3216`/`3243`.
 fn render_camo_row(
     entity: &Entity<ViewportView>,
     info: &CamoSchemeInfo,
     selected_camo: Option<CamoSchemeId>,
+    filter: &FilterQuery,
 ) -> AnyElement {
     let id = info.id;
     let is_selected = selected_camo == Some(id);
     let toggle_entity = entity.clone();
     ListItem::new(format!("armor-camo-{}", id.0))
         .selected(is_selected)
-        .child(div().text_sm().child(info.display_name.clone()))
+        .child(div().text_sm().child(filter.marked(info.display_name.clone())))
         .on_click(move |_, _window, cx| {
             toggle_entity.update(cx, |view, cx| view.select_camo(Some(id), cx));
         })
@@ -1226,15 +1301,20 @@ fn render_camo_row(
 
 /// One collapsible camo-origin group header row + (if expanded) its scheme
 /// rows, scroll-clamped to match egui's own per-group `ScrollArea::max_height(240.0)`.
-/// Ports the `CollapsingState` block (`tab.rs:3234-3250`).
+/// Ports the `CollapsingState` block (`tab.rs:3234-3250`). Held open, with
+/// its caret inert, while the rail is `filtering`, whether or not `filter`
+/// still narrows its rows.
 fn render_camo_group(
     entity: &Entity<ViewportView>,
     label: &str,
     infos: &[&CamoSchemeInfo],
     selected_camo: Option<CamoSchemeId>,
     expanded_camo_groups: &HashSet<String>,
+    filter: &FilterQuery,
+    filtering: bool,
 ) -> AnyElement {
-    let expanded = expanded_camo_groups.contains(label);
+    let expanded = filtering || expanded_camo_groups.contains(label);
+    let row_filter = within(filter, label);
 
     let expand_entity = entity.clone();
     let expand_label = label.to_string();
@@ -1242,8 +1322,10 @@ fn render_camo_group(
         .id(format!("armor-camo-group-expand-{label}"))
         .flex_none()
         .child(crate::motion::DisclosureChevron::new(viewport_caret_id(entity, "camo", label), expanded))
-        .on_click(move |_, _window, cx| {
-            expand_entity.update(cx, |view, cx| view.toggle_camo_group_expanded(expand_label.clone(), cx));
+        .when(!filtering, |chevron| {
+            chevron.on_click(move |_, _window, cx| {
+                expand_entity.update(cx, |view, cx| view.toggle_camo_group_expanded(expand_label.clone(), cx));
+            })
         });
 
     let header = h_flex()
@@ -1251,13 +1333,13 @@ fn render_camo_group(
         .gap_1()
         .items_center()
         .child(chevron)
-        .child(div().text_sm().child(label.to_string()));
+        .child(div().text_sm().child(filter.marked(label.to_string())));
 
     let mut column = v_flex().gap_1().child(header);
     if expanded {
         let mut inner = v_flex().gap_1();
         for info in infos {
-            inner = inner.child(render_camo_row(entity, info, selected_camo));
+            inner = inner.child(render_camo_row(entity, info, selected_camo, &row_filter));
         }
         let body = div()
             .id(format!("armor-camo-group-scroll-{label}"))

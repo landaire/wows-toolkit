@@ -42,6 +42,41 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     let position = view.active_pane_position(cx);
     let border = cx.theme().border;
     let accent = cx.theme().primary;
+    // The controls of the trajectory and pen check panels, which a filter
+    // finds by these names and then shows whole.
+    const TRAJECTORY_LABELS: [&str; 17] = [
+        "ui.armor.continue_ricochet",
+        "ui.armor.trajectory_next_cast",
+        "ui.armor.trajectory_range",
+        "ui.armor.trajectory_add_ship",
+        "ui.armor.trajectory_add_ship_tooltip",
+        "ui.armor.trajectory_ship",
+        "ui.armor.trajectory_select_ship",
+        "ui.armor.trajectory_shell",
+        "ui.armor.trajectory_select_shell",
+        "ui.armor.trajectory_ship_tooltip",
+        "ui.armor.trajectory_shell_tooltip",
+        "ui.armor.trajectory_clear",
+        "ui.armor.arc_isolate_plates",
+        "ui.armor.arc_isolate_plates_tooltip",
+        "ui.armor.arc_isolate_zones",
+        "ui.armor.arc_isolate_zones_tooltip",
+        "ui.armor.arc_delete",
+    ];
+    const PEN_CHECK_LABELS: [&str; 12] = [
+        "ui.armor.pen.ifhe",
+        "ui.armor.pen.ifhe_tooltip",
+        "ui.armor.pen.clear_all",
+        "ui.armor.pen.remove",
+        "ui.armor.pen.search_hint",
+        "ui.armor.pen.use_for_trajectory",
+        "ui.armor.pen.firing_ship_tooltip",
+        "ui.armor.realtime.incoming_fire",
+        "ui.armor.realtime.attacker_filter",
+        "ui.armor.realtime.all_enemies",
+        "ui.armor.realtime.show_secondaries",
+        "ui.armor.realtime.seek_to_salvo",
+    ];
 
     // Which pane these act on. With a comparison split open it is named in
     // the accent its border is drawn in.
@@ -69,13 +104,25 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .border_color(border)
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.options").to_string()))
         .children(target)
-        .child(
-            Input::new(&filter_input)
-                .id("armor-options-filter")
-                .small()
-                .prefix(Icon::new(IconName::Search).small())
-                .cleanable(true),
-        );
+        .child({
+            // Escape clears what was typed, rather than only leaving the field.
+            let clear_input = filter_input.clone();
+            div()
+                .capture_key_down(move |event: &KeyDownEvent, window: &mut Window, cx: &mut App| {
+                    if event.keystroke.key != "escape" || clear_input.read(cx).value().is_empty() {
+                        return;
+                    }
+                    clear_input.update(cx, |state, cx| state.set_value("", window, cx));
+                    cx.stop_propagation();
+                })
+                .child(
+                    Input::new(&filter_input)
+                        .id("armor-options-filter")
+                        .small()
+                        .prefix(Icon::new(IconName::Search).small())
+                        .cleanable(true),
+                )
+        });
 
     let tools = popover::render_tools(viewport.read(cx), &viewport, &filter);
     // Nothing open yet keeps every section, each saying so; an open model
@@ -127,8 +174,10 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 &filter,
                 cx,
                 |filter, cx| {
-                    // Nothing in it is a setting a filter could find.
-                    (!filter.is_active()).then(|| super::trajectory_panel::render(view, pane, &viewport, cx))
+                    // Its controls are named here rather than filtered one by
+                    // one: a match on any shows the panel whole.
+                    keeps_any(filter, &TRAJECTORY_LABELS)
+                        .then(|| super::trajectory_panel::render(view, pane, &viewport, cx))
                 },
             ),
             section(
@@ -138,7 +187,9 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 t!("ui.armor.pen_check").as_ref(),
                 &filter,
                 cx,
-                |filter, cx| (!filter.is_active()).then(|| super::analysis::render_section(view, pane, cx)),
+                |filter, cx| {
+                    keeps_any(filter, &PEN_CHECK_LABELS).then(|| super::analysis::render_section(view, pane, cx))
+                },
             ),
             section(
                 view,
@@ -238,6 +289,11 @@ fn section(
             .children(content.map(|content| div().id(body_id).test_support().pl_1().child(content)))
             .into_any_element(),
     )
+}
+
+/// Whether `filter` keeps any of the labels the translation `keys` name.
+fn keeps_any(filter: &FilterQuery, keys: &[&str]) -> bool {
+    !filter.is_active() || keys.iter().any(|key| filter.keeps(&t!(*key)))
 }
 
 /// How deep a folding head sits in the rail.
@@ -643,6 +699,64 @@ mod tests {
             window.render_frame(cx);
             assert!(window.try_find("armor-vis-part-row-Stern-Stern_Deck").is_some());
             assert!(window.try_find("armor-vis-zone-row-Bow").is_none(), "Bow does not match the rail's filter");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// The rail's filter finds a camouflage, a zone and a slider, each in a
+    /// collapsed section it opens to show it, and Escape clears the filter
+    /// and puts every section back as it was.
+    #[gpui_kit::test]
+    fn the_rail_filter_opens_the_section_holding_a_match_and_escape_restores_the_rail(cx: &mut TestAppContext) {
+        let window = open_tall(cx);
+        let mut scene = two_zone_scene();
+        let camo = |id: usize, name: &str, origin: CamoOrigin| CamoSchemeInfo {
+            id: CamoSchemeId(id),
+            display_name: name.to_string(),
+            raw_name: name.to_lowercase(),
+            origin,
+            use_color_scheme: false,
+            uv_transforms: HashMap::new(),
+        };
+        scene.camo_scheme_infos =
+            vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)];
+        install(window, scene, &[], cx);
+        let roll = rust_i18n::t!("ui.armor.roll").into_owned();
+        let bodies = [OptionSection::Visibility, OptionSection::Hull, OptionSection::Display]
+            .map(|which| format!("armor-options-body-{which:?}"));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            assert!(bodies.iter().all(|body| window.try_find(body.clone()).is_none()), "every section starts closed");
+
+            let mut find = |query: &str, check: &dyn Fn(&Window)| {
+                window.click("armor-options-filter", cx);
+                window.input(query, cx);
+                // Typing draws a frame a key; only the last is checked.
+                crate::text_filter::take_marks();
+                window.render_frame(cx);
+                check(window);
+
+                window.press("escape", cx);
+                window.render_frame(cx);
+                assert!(
+                    bodies.iter().all(|body| window.try_find(body.clone()).is_none()),
+                    "Escape after {query:?} puts the sections back closed"
+                );
+            };
+            find("ocean wave", &|window| {
+                assert!(window.try_find("armor-options-body-Hull").is_some(), "the hull section opens");
+                assert!(crate::text_filter::marks_for("Ocean Wave").is_some(), "the camouflage is drawn marked");
+                assert!(crate::text_filter::marks_for("Default").is_none(), "the other camouflage is not drawn");
+            });
+            find("stern", &|window| {
+                assert!(window.try_find("armor-options-body-Visibility").is_some(), "the armor section opens");
+                assert!(window.try_find("armor-vis-zone-row-Stern").is_some());
+                assert!(window.try_find("armor-vis-zone-row-Bow").is_none());
+            });
+            find("roll", &|window| {
+                assert!(window.try_find("armor-options-body-Display").is_some(), "the display section opens");
+                assert!(crate::text_filter::marks_for(&roll).is_some(), "the roll slider is drawn marked");
+            });
         })
         .expect("the test window stays open");
     }
