@@ -508,6 +508,37 @@ pub fn AppRoot(
     }
 }
 
+/// The main window's contexts and theme around `children` alone, for a component's tests.
+#[cfg(test)]
+#[component]
+pub(crate) fn ShellHarness(theme: ThemeChoice, children: zgui::view::Children) -> impl IntoView {
+    Services::provide(None);
+    let appearance = Appearance::new();
+    appearance.theme.set(theme);
+    provide_local_context(appearance);
+    let choice = Signal::derive_local(move || palette_choice(appearance.shown_theme()));
+    let shown = Signal::derive_local(move || appearance.shown_theme());
+
+    view! {
+        ThemeRoot(choice = choice) {
+            SemanticTokens(choice = shown)
+            ToastHost {
+                HarnessShell(appearance = appearance) {{children.into_view_once()}}
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[component]
+fn HarnessShell(appearance: Appearance, children: zgui::view::Children) -> impl IntoView {
+    let services = Services::current();
+    let toasts = Toasts::current().expect("HarnessShell is placed inside ToastHost");
+    provide_local_context(Shell::new(services, appearance, toasts, None));
+
+    view! { column(style = "width: 100%; height: 100%") {{children.into_view_once()}} }
+}
+
 /// The shell itself, inside the window's message host.
 #[component]
 fn ShellFrame(appearance: Appearance) -> impl IntoView {

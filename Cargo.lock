@@ -16757,7 +16757,9 @@ dependencies = [
 name = "wows-toolkit-zgui"
 version = "1.0.5"
 dependencies = [
+ "ciborium",
  "clap",
+ "csv",
  "futures",
  "humansize",
  "image",
