@@ -14,12 +14,18 @@ use std::rc::Rc;
 use landaire_ui::BranchClick;
 use landaire_ui::CardSurfaceProps;
 use landaire_ui::CollapseButtonProps;
+use landaire_ui::ColorPickerProps;
 use landaire_ui::ColumnAlign;
 use landaire_ui::ColumnId;
 use landaire_ui::ColumnLayout;
 use landaire_ui::ColumnSizing;
 use landaire_ui::ColumnSort;
 use landaire_ui::ColumnWidth;
+use landaire_ui::DockProps;
+use landaire_ui::DockRegion;
+use landaire_ui::DockState;
+use landaire_ui::DockTarget;
+use landaire_ui::Edge;
 use landaire_ui::ExpandRailProps;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
@@ -27,12 +33,23 @@ use landaire_ui::GridSelectionMode;
 use landaire_ui::IndentGuidesProps;
 use landaire_ui::IndentWidth;
 use landaire_ui::LeafLead;
+use landaire_ui::NumberInputProps;
+use landaire_ui::NumberPattern;
+use landaire_ui::NumberRange;
 use landaire_ui::OverlaySurfaceProps;
+use landaire_ui::PanelEntry;
+use landaire_ui::PanelFactory;
+use landaire_ui::PanelId;
+use landaire_ui::PanelKind;
+use landaire_ui::PanelRegistry;
 use landaire_ui::PanelSide;
+use landaire_ui::Rgb;
 use landaire_ui::RowHeight;
 use landaire_ui::RowMode;
 use landaire_ui::Scheme;
 use landaire_ui::Selection;
+use landaire_ui::SliderFieldProps;
+use landaire_ui::SliderRange;
 use landaire_ui::SortDirection;
 use landaire_ui::StripedRowsProps;
 use landaire_ui::TABULAR_CLASS;
@@ -92,7 +109,13 @@ const SHEET: &str = css!(
      .gallery__node-label { padding-left: 4px; }
      .gallery__dim { color: var(--lui-color-text-dim); }
      .gallery__controls { display: flex; flex-direction: row; gap: 8px; align-items: center; }
-     .gallery__grid { display: flex; width: 560px; height: 236px; border: 1px solid var(--lui-color-border); }"
+     .gallery__grid { display: flex; width: 560px; height: 236px; border: 1px solid var(--lui-color-border); }
+     .gallery__inputs { width: 300px; }
+     .gallery__field-label { width: 56px; flex: none; color: var(--lui-color-text-dim); }
+     .gallery__number { width: 110px; }
+     .gallery__slider { flex: 1 1 auto; }
+     .gallery__dock { display: flex; width: 860px; height: 230px; border: 1px solid var(--lui-color-border); }
+     .gallery__panel { padding: 4px 12px; color: var(--lui-color-text); }"
 );
 
 fn main() -> ExitCode {
@@ -162,6 +185,8 @@ fn Gallery(choice: ThemeChoice) -> impl IntoView {
                     TreeSample()
                     text(class = "gallery__section") {"Grid"}
                     GridSample()
+                    text(class = "gallery__section") {"Inputs and dock"}
+                    InputsAndDock()
                 }
             }
         }
@@ -528,4 +553,82 @@ fn sorted(mut rows: Vec<Process>, sort: Option<&ColumnSort>) -> Vec<Process> {
     });
 
     rows
+}
+
+/// Each value input, and a dock with a split center, a left region and a bottom region.
+#[component]
+fn InputsAndDock() -> impl IntoView {
+    let count = RwSignal::new_local(25.0);
+    let opacity = RwSignal::new_local(0.6);
+    let tint = RwSignal::new_local(Rgb::new(0x3b82f6));
+    let presets = [0xe5484d, 0xf76b15, 0xffc53d, 0x46a758, 0x3b82f6, 0x8e4ec6, 0xffffff, 0x000000]
+        .into_iter()
+        .map(Rgb::new)
+        .collect::<Vec<_>>();
+    let dock = sample_dock();
+
+    view! {
+        row(class = "gallery__surfaces") {
+            column(class = "gallery__column gallery__inputs") {
+                row(class = "gallery__controls") {
+                    text(class = "gallery__field-label") {"Count"}
+                    NumberInput(
+                        class = "gallery__number",
+                        value = count,
+                        range = NumberRange::new(1.0).with_min(0.0).with_max(100.0),
+                        pattern = NumberPattern::Digits,
+                        label = "Count"
+                    )
+                }
+                row(class = "gallery__controls") {
+                    text(class = "gallery__field-label") {"Opacity"}
+                    SliderField(
+                        class = "gallery__slider",
+                        value = opacity,
+                        range = SliderRange::new(0.0, 1.0, 0.05),
+                        reset_to = 1.0,
+                        label = "Opacity"
+                    )
+                }
+                row(class = "gallery__controls") {
+                    text(class = "gallery__field-label") {"Tint"}
+                    ColorPicker(value = tint, presets = presets, label = "Tint")
+                }
+            }
+            box(class = "gallery__dock") {
+                Dock(state = dock)
+            }
+        }
+    }
+}
+
+fn sample_dock() -> DockState {
+    let kind = PanelKind::new("text");
+    let mut registry = PanelRegistry::new();
+    registry.register(
+        kind.clone(),
+        PanelFactory::new(
+            |id: &PanelId| id.as_str().to_owned(),
+            |id: &PanelId| {
+                let line = format!("{} content", id.as_str());
+                AnyView::new(view! { box(class = "gallery__panel") {{line}} })
+            },
+        ),
+    );
+    let dock = DockState::new(registry);
+    let entry = |id: &str| PanelEntry::new(PanelId::new(id), kind.clone());
+
+    let added = (|| {
+        dock.add_panel(DockTarget::Region(DockRegion::Left), PanelEntry { closable: false, ..entry("Files") })?;
+        let main = dock
+            .add_panel(DockTarget::Region(DockRegion::Center), PanelEntry { closable: false, ..entry("Overview") })?;
+        dock.add_panel(DockTarget::Group(main), entry("Table"))?;
+        dock.add_panel(DockTarget::Group(main), entry("Notes"))?;
+        dock.activate(&PanelId::new("Overview"))?;
+        dock.add_panel(DockTarget::Beside { group: main, edge: Edge::Right }, entry("Preview"))?;
+        dock.add_panel(DockTarget::Region(DockRegion::Bottom), entry("Log"))
+    })();
+    added.expect("every sample panel has a registered kind and its own id");
+
+    dock
 }

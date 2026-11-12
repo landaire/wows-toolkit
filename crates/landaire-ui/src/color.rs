@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::error::HexColorError;
+
 /// An opaque sRGB color, packed as `0xRRGGBB`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Rgb(u32);
@@ -19,6 +21,28 @@ impl Rgb {
 
     pub const fn from_channels(red: u8, green: u8, blue: u8) -> Self {
         Self(((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
+    }
+
+    /// Reads hex text as [`Display`](fmt::Display) writes it: `#rrggbb`, or the short `#rgb`, with
+    /// or without the `#`, in either case, with surrounding space ignored.
+    pub fn parse(text: &str) -> Result<Self, HexColorError> {
+        let text = text.trim();
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        let mut nibbles = Vec::with_capacity(6);
+        for (position, character) in digits.chars().enumerate() {
+            let Some(nibble) = character.to_digit(16) else {
+                return Err(HexColorError::NotHex { position });
+            };
+            nibbles.push(nibble);
+        }
+
+        let nibbles = match nibbles.len() {
+            6 => nibbles,
+            3 => nibbles.iter().flat_map(|&nibble| [nibble, nibble]).collect(),
+            length => return Err(HexColorError::Length { length }),
+        };
+
+        Ok(Self(nibbles.iter().fold(0, |packed, nibble| (packed << 4) | nibble)))
     }
 
     pub const fn packed(self) -> u32 {

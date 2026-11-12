@@ -6,6 +6,7 @@ LANDAIRE_UI_DEPS = [
     "//third-party/rust:zgui",
     "//third-party/rust:zgui-ui",
     "//third-party/rust:zgui-ui-icons",
+    "//third-party/rust:zgui-ui-primitives",
     "//third-party/rust:zgui-ui-tokens",
 ]
 

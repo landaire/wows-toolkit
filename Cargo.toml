@@ -128,6 +128,7 @@ sys-locale = "0.3"
 zgui = { path = "../zgui-wows/crates/zgui" }
 zgui-ui = { path = "../zgui-wows/crates/zgui-ui" }
 zgui-ui-icons = { path = "../zgui-wows/crates/zgui-ui-icons" }
+zgui-ui-primitives = { path = "../zgui-wows/crates/zgui-ui-primitives" }
 zgui-ui-tokens = { path = "../zgui-wows/crates/zgui-ui-tokens" }
 zgui-platform-headless = { path = "../zgui-wows/crates/zgui-platform-headless" }
 zgui-render-wgpu = { path = "../zgui-wows/crates/zgui-render-wgpu" }

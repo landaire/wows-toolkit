@@ -7288,6 +7288,7 @@ dependencies = [
  "zgui-testkit-scene",
  "zgui-ui",
  "zgui-ui-icons",
+ "zgui-ui-primitives",
  "zgui-ui-tokens",
 ]
 
