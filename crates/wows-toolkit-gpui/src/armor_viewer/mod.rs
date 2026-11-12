@@ -64,6 +64,7 @@ pub mod pane;
 pub mod picking_ui;
 pub mod popover;
 pub mod realtime;
+mod scene_load;
 pub mod sidebar;
 mod sidebar_tree;
 pub mod splash;

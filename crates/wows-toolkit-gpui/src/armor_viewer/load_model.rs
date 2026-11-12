@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use gpui_kit::App;
 use gpui_kit::AppContext;
@@ -39,7 +40,6 @@ use wowsunpack::game_types::GameParamId;
 
 use super::assets::ModelAssets;
 use super::camo::RgbaTexture;
-use super::hull_picking::HullPickIndex;
 use super::hull_picking::MeshSource;
 use super::load_ship::ArmorThickness;
 use super::load_ship::ArmorZones;
@@ -55,6 +55,10 @@ use super::load_ship::scene_bounds;
 use super::model_refs::ShipPartKey;
 use super::model_refs::ShipPartRef;
 use super::model_refs::VehicleParamIndex;
+use super::scene_load::FirstStage;
+use super::scene_load::LoadCancel;
+use super::scene_load::LoadCancelled;
+use super::scene_load::RestJob;
 
 /// Longest texture edge decoded for display. The viewport has no use for the
 /// 4096 hull atlases at full size, and each costs 64 MiB as RGBA.
@@ -71,13 +75,16 @@ pub enum ModelSceneError {
     Load { path: ModelPath, report: Report<ModelLoadError> },
     #[error("building {building} is not an armored building of this build")]
     UnknownBuilding { building: GameParamId },
+    #[error(transparent)]
+    Cancelled(#[from] LoadCancelled),
 }
 
 impl ModelSceneError {
     pub(crate) fn problem(&self) -> ProblemReason {
         let report = match self {
             Self::Load { report, .. } => report,
-            Self::UnknownBuilding { .. } => return ProblemReason::ModelUnreadable,
+            // A cancelled load was superseded, so nothing shows its outcome.
+            Self::UnknownBuilding { .. } | Self::Cancelled(_) => return ProblemReason::ModelUnreadable,
         };
         match report.current_context() {
             ModelLoadError::GeometryAbsent { .. } => ProblemReason::GeometryAbsent,
@@ -102,15 +109,27 @@ pub enum SceneLoadError {
     Ship(#[from] super::load_ship::ShipLoadError),
     #[error(transparent)]
     Model(#[from] ModelSceneError),
+    #[error(transparent)]
+    Cancelled(#[from] LoadCancelled),
 }
 
 impl SceneLoadError {
     /// What the viewport tells the reader in place of the scene.
     pub(crate) fn problem(&self) -> ProblemReason {
         match self {
-            Self::Ship(_) => ProblemReason::ShipUnreadable,
+            // A cancelled load was superseded, so nothing shows its outcome.
+            Self::Ship(_) | Self::Cancelled(_) => ProblemReason::ShipUnreadable,
             Self::Model(error) => error.problem(),
         }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        matches!(
+            self,
+            Self::Cancelled(_)
+                | Self::Ship(super::load_ship::ShipLoadError::Cancelled(_))
+                | Self::Model(ModelSceneError::Cancelled(_))
+        )
     }
 }
 
@@ -333,15 +352,17 @@ pub(crate) fn building_has_armor(models: &ModelAssets, request: &ModelLoadReques
     Some(building.hull_has_armor() || building.mounts().iter().any(|mount| mount.has_armor()))
 }
 
-/// Loads `request` from `models`, resolving armor thickness from `metadata`.
-/// Synchronous and CPU/IO-bound; callers run it off the UI thread.
+/// The first stage of loading `request` from `models`, resolving armor
+/// thickness from `metadata`. Synchronous and CPU/IO-bound; callers run it
+/// off the UI thread.
 pub(crate) fn load_model_scene(
     models: &ModelAssets,
     metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
-) -> Result<LoadedShipArmor, ModelSceneError> {
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ModelSceneError> {
     if let Some(building) = request.from_building {
-        return load_building_scene(models, request, building);
+        return load_building_scene(models, request, building, cancel);
     }
 
     let options = display_options(request.lod);
@@ -349,6 +370,7 @@ pub(crate) fn load_model_scene(
         .library
         .load_model(&request.path, &options)
         .map_err(|report| ModelSceneError::Load { path: request.path.clone(), report })?;
+    cancel.checkpoint()?;
 
     let (meshes, thickness, thickness_choices) = match thickness_ref(&models.mount_armor, metadata, request) {
         Some(source) => {
@@ -404,7 +426,8 @@ fn load_building_scene(
     models: &ModelAssets,
     request: &ModelLoadRequest,
     building: GameParamId,
-) -> Result<LoadedShipArmor, ModelSceneError> {
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ModelSceneError> {
     let entry = models.buildings.building(building).ok_or(ModelSceneError::UnknownBuilding { building })?;
     let options = display_options(request.lod);
     let hull = models
@@ -422,6 +445,7 @@ fn load_building_scene(
     textures.extend(hull.materials);
 
     for mount in entry.mounts() {
+        cancel.checkpoint()?;
         let Some(node) = hull.hardpoints.iter().find(|hardpoint| hardpoint.name == *mount.hardpoint()) else {
             tracing::warn!(
                 "model viewer: {} has no node {} for its mount {}",
@@ -511,8 +535,9 @@ impl HullTextures {
     }
 }
 
-/// One model's scene, with the ship-only data empty. `sources` holds one
-/// entry per mesh of `hull_meshes`.
+/// One model's scene, with the ship-only data empty, and the job that
+/// builds its hover-picking index. `sources` holds one entry per mesh of
+/// `hull_meshes`.
 fn model_scene(
     subject: ModelSubject,
     meshes: Vec<InteractiveArmorMesh>,
@@ -520,13 +545,12 @@ fn model_scene(
     sources: Vec<MeshSource>,
     hull_textures: HullTextures,
     lods: SceneLods,
-) -> LoadedShipArmor {
+) -> FirstStage {
     let bounds = scene_bounds(&meshes, &hull_meshes);
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
-    let hull_pick = HullPickIndex::build(&hull_meshes, sources);
     let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
 
-    LoadedShipArmor {
+    let scene = LoadedShipArmor {
         display_name: subject.path.stem().to_string(),
         subject: SceneSubject::Model(subject),
         species: None,
@@ -537,7 +561,7 @@ fn model_scene(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
-        hull_pick,
+        hull_pick: OnceLock::new(),
         hull_textures: hull_textures.textures,
         hull_alpha: hull_textures.alpha,
         hull_lod_count: lods.count,
@@ -546,12 +570,14 @@ fn model_scene(
         loaded_hull: None,
         module_alternatives: Vec::new(),
         camera_trajectories: Vec::new(),
-        camo_scheme_infos: Vec::new(),
-        camo_source: None,
+        camo_scheme_infos: OnceLock::new(),
+        camo_source: OnceLock::new(),
         splash_data: None,
         splash_box_groups: Vec::new(),
         hit_locations: None,
-    }
+    };
+
+    FirstStage { scene, rest: vec![RestJob::Pick(sources)] }
 }
 
 /// Greys out plates whose thickness no ship gives.
@@ -564,14 +590,15 @@ fn paint_unknown_thickness(meshes: &mut [InteractiveArmorMesh]) {
     }
 }
 
-/// Kicks off a model load on the background executor.
-pub fn spawn_load_model_scene(
+/// Kicks off the first stage of a model load on the background executor.
+pub(crate) fn spawn_load_model_scene(
     models: Arc<ModelAssets>,
     bundle: Arc<super::assets::ArmorAssetsBundle>,
     request: ModelLoadRequest,
+    cancel: LoadCancel,
     cx: &App,
-) -> Task<Result<LoadedShipArmor, ModelSceneError>> {
-    cx.background_spawn(async move { load_model_scene(&models, bundle.assets.metadata(), &request) })
+) -> Task<Result<FirstStage, ModelSceneError>> {
+    cx.background_spawn(async move { load_model_scene(&models, bundle.assets.metadata(), &request, &cancel) })
 }
 
 /// Writes `request`'s model to `path` as a GLB with its textures, hardpoints
@@ -699,8 +726,18 @@ pub(crate) mod fixtures {
         vec![MeshSource { model: Some(path.clone()), part: None }; count]
     }
 
-    /// A one-triangle model with no armor and `hardpoints`.
-    pub(crate) fn model_scene(path: ModelPath, hardpoints: Vec<Hardpoint>) -> LoadedShipArmor {
+    /// `first` with its background stage run.
+    pub(crate) fn finished(first: FirstStage) -> LoadedShipArmor {
+        let FirstStage { scene, rest } = first;
+        for job in rest {
+            job.run(&scene, &LoadCancel::new()).expect("a fixture's background job runs");
+        }
+
+        scene
+    }
+
+    /// The first stage of [`model_scene`]'s load, its background stage not run.
+    pub(crate) fn model_first_stage(path: ModelPath, hardpoints: Vec<Hardpoint>) -> FirstStage {
         let sources = sources(&path, 1);
         let subject = ModelSubject {
             path,
@@ -720,6 +757,11 @@ pub(crate) mod fixtures {
         )
     }
 
+    /// A one-triangle model with no armor and `hardpoints`.
+    pub(crate) fn model_scene(path: ModelPath, hardpoints: Vec<Hardpoint>) -> LoadedShipArmor {
+        finished(model_first_stage(path, hardpoints))
+    }
+
     /// A one-triangle model carrying one plate of unknown thickness.
     pub(crate) fn armored_model_scene(path: ModelPath) -> LoadedShipArmor {
         let sources = sources(&path, 1);
@@ -731,14 +773,14 @@ pub(crate) mod fixtures {
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
         };
-        super::model_scene(
+        finished(super::model_scene(
             subject,
             vec![armor_mesh()],
             vec![hull_mesh()],
             sources,
             HullTextures::default(),
             SceneLods { count: 2, shown: 0 },
-        )
+        ))
     }
 
     /// A model with no armor drawn from `hull` alone, authored with
@@ -754,7 +796,7 @@ pub(crate) mod fixtures {
             thickness_choices: Vec::new(),
         };
         let lods = SceneLods { count: lod_count, shown: 0 };
-        super::model_scene(subject, Vec::new(), hull, sources, HullTextures::default(), lods)
+        finished(super::model_scene(subject, Vec::new(), hull, sources, HullTextures::default(), lods))
     }
 }
 
@@ -771,6 +813,15 @@ mod tests {
     use wowsunpack::game_types::GameParamId;
 
     use super::*;
+
+    /// Both stages of loading `request`.
+    fn load_finished(
+        models: &ModelAssets,
+        metadata: &GameMetadataProvider,
+        request: &ModelLoadRequest,
+    ) -> Result<LoadedShipArmor, ModelSceneError> {
+        load_model_scene(models, metadata, request, &LoadCancel::new()).map(fixtures::finished)
+    }
 
     fn ship_with_hull_armor(armor: Option<ArmorMap>) -> GameMetadataProvider {
         let vehicle = Vehicle::builder()
@@ -879,8 +930,8 @@ mod tests {
         let Some((models, metadata)) = real_models() else { return };
         let turret = catalogued(&models, "AGM034_16in50_Mk7");
 
-        let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(turret.clone(), None))
-            .expect("the turret loads");
+        let scene =
+            load_finished(&models, &metadata, &ModelLoadRequest::new(turret.clone(), None)).expect("the turret loads");
 
         let model = scene.model().expect("a model scene");
         assert!(!scene.hull_meshes.is_empty(), "it has meshes");
@@ -904,11 +955,11 @@ mod tests {
         let harpoon = catalogued(&models, "API2001_RGM_84_Harpoon");
         let medallion = catalogued(&models, "RM626_Volga_Fleet_Medallion");
 
-        let Err(error) = load_model_scene(&models, &metadata, &ModelLoadRequest::new(harpoon, None)) else {
+        let Err(error) = load_finished(&models, &metadata, &ModelLoadRequest::new(harpoon, None)) else {
             panic!("the Harpoon loads");
         };
         let placeholder =
-            load_model_scene(&models, &metadata, &ModelLoadRequest::new(medallion, None)).expect("the medallion loads");
+            load_finished(&models, &metadata, &ModelLoadRequest::new(medallion, None)).expect("the medallion loads");
 
         assert_eq!(error.problem(), ProblemReason::GeometryAbsent);
         assert_eq!(placeholder.emptiness(), Some(EmptyScene::Invisible));
@@ -922,7 +973,7 @@ mod tests {
         let Some((models, metadata)) = real_models() else { return };
         let plane = catalogued(&models, "AAF014_Curtiss_TS1_float");
 
-        let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(plane, None)).expect("the TS-1 loads");
+        let scene = load_finished(&models, &metadata, &ModelLoadRequest::new(plane, None)).expect("the TS-1 loads");
 
         let disc = scene.hull_meshes.iter().find(|mesh| mesh.name == "discShape").expect("a propeller disc");
         let disc_material = disc.mfm_path.as_ref().expect("a material");
@@ -945,7 +996,7 @@ mod tests {
             let building = building.unwrap_or_else(|| panic!("{prefix} is an armored building"));
             let hull = building.model().expect("the fort names a hull").clone();
 
-            load_model_scene(&models, &metadata, &ModelLoadRequest::for_building(hull, building.id()))
+            load_finished(&models, &metadata, &ModelLoadRequest::for_building(hull, building.id()))
         };
 
         let Err(absent) = fort("PCBX001") else {

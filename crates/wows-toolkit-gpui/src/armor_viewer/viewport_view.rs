@@ -89,6 +89,13 @@ use crate::armor_viewer::model_refs::OpenTarget;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
+use crate::armor_viewer::scene_load::FirstStage;
+use crate::armor_viewer::scene_load::LoadCancel;
+use crate::armor_viewer::scene_load::LoadSlot;
+use crate::armor_viewer::scene_load::RestJob;
+use crate::armor_viewer::scene_load::RestJobError;
+use crate::armor_viewer::scene_load::RestPiece;
+use crate::armor_viewer::scene_load::SharedLoad;
 use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
 use crate::armor_viewer::upload_hull;
@@ -703,6 +710,13 @@ pub(crate) struct LightingSliders {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LoadGeneration(u64);
 
+/// A load the pane started into one viewport, and the flag that stops it.
+#[derive(Clone, Debug)]
+pub(crate) struct OpeningLoad {
+    pub(crate) generation: LoadGeneration,
+    pub(crate) cancel: LoadCancel,
+}
+
 /// Which kinds of option the scene on screen has anything for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SceneFeatures {
@@ -787,6 +801,9 @@ pub struct ViewportView {
     /// picking) waits on it.
     last_bounds: Option<Bounds<Pixels>>,
     drag: Option<DragState>,
+    /// Where the pointer last moved over the view, so a hover can be picked
+    /// again when the picking index lands under a still pointer.
+    last_pointer: Option<Point<Pixels>>,
     gizmo_hover: Option<(Axis, bool)>,
     /// Whether the currently-held left button went down inside the gizmo box,
     /// so a same-press release decides between a drag-orbit and a snap click.
@@ -814,6 +831,13 @@ pub struct ViewportView {
     scene_problem: Option<SceneProblem>,
     /// The latest load the pane started into this viewport.
     load_generation: LoadGeneration,
+    /// The first stage of the load the pane started into this viewport.
+    opening_load: LoadSlot,
+    /// The first stage of the reload running for the scene shown.
+    reload_load: LoadSlot,
+    /// The background stage finishing the scene shown, shared with every
+    /// viewport showing it.
+    rest_load: Option<Arc<SharedLoad>>,
     /// The armor currently displayed, kept (beyond the initial upload) so a
     /// visibility change can re-upload without reloading the ship. `pub(crate)`
     /// so `popover.rs` can read it while building the popover's tree.
@@ -1162,6 +1186,7 @@ impl ViewportView {
             model_hull_opaque: true,
             last_bounds: None,
             drag: None,
+            last_pointer: None,
             gizmo_hover: None,
             gizmo_press_in_box: false,
             animating: false,
@@ -1174,6 +1199,9 @@ impl ViewportView {
             ship_loading: None,
             scene_problem: None,
             load_generation: LoadGeneration::default(),
+            opening_load: LoadSlot::default(),
+            reload_load: LoadSlot::default(),
+            rest_load: None,
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
             perspective: PerspectiveSettings::default(),
@@ -1491,13 +1519,6 @@ impl ViewportView {
         self.scene_source = Some(source);
     }
 
-    /// The currently displayed armor, if any. `pane.rs`'s Compare-clone
-    /// (Milestone 5 Task 9c) reads this to hand the SAME immutable `Arc` to a
-    /// newly split pane, rather than re-exporting the ship.
-    pub(crate) fn current_armor(&self) -> Option<Arc<LoadedShipArmor>> {
-        self.current_armor.clone()
-    }
-
     /// The scene last handed to this pane: the one waiting for GPUI's device,
     /// which is newer than the one on screen, or else the one on screen.
     pub(crate) fn shown(&self) -> Option<&Arc<LoadedShipArmor>> {
@@ -1636,7 +1657,16 @@ impl ViewportView {
     /// frames the new ship. While GPUI's device is unavailable, stashes
     /// `armor` in `pending_armor` instead; `sync_gpu` uploads it once the
     /// device is back. `layer` picks what is in view once it is up.
+    ///
+    /// Bumps `reload_generation` and cancels any reload in flight against
+    /// the scene replaced, so `apply_reload_result`'s generation guard
+    /// discards its result, whether or not the device is there.
     pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut Context<Self>) {
+        self.reload_generation += 1;
+        self.reload_load.cancel();
+        // What the background stage of the scene replaced would still add is
+        // of no use now.
+        self.rest_load = None;
         if self.scene().is_some() {
             self.upload_armor_now(armor, layer, cx);
             self.pending_armor = None;
@@ -1660,18 +1690,11 @@ impl ViewportView {
     /// visual no-op the first time when `hull_all_visible` is `false`, but
     /// exercises the same path a later hull-visibility toggle uses). Callers
     /// must have already checked `self.gpu` is `Ready`; a no-op otherwise.
-    ///
-    /// Also bumps `reload_generation`, invalidating any reload still in
-    /// flight against the *previous* ship: that reload's background task
-    /// already captured the pre-bump value, so `apply_reload_result`'s
-    /// generation guard discards its result instead of overwriting this
-    /// (possibly different) ship's freshly uploaded armor.
     fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut Context<Self>) {
         if self.scene().is_none() {
             return;
         }
         let layer = layer.for_scene(&armor);
-        self.reload_generation += 1;
         self.plate_visibility.clear();
         self.hull_mesh_ids.clear();
         self.expanded_hull_groups.clear();
@@ -2502,33 +2525,112 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Starts a load into this pane, naming it while it runs. A result lands
-    /// only while its generation is still the latest one this pane started,
-    /// so a newer selection here supersedes it and one in another pane does
-    /// not.
-    pub(crate) fn begin_load(&mut self, name: SharedString, cx: &mut Context<Self>) -> LoadGeneration {
+    /// Starts a load into this pane, naming it while it runs, and cancels
+    /// the first stage of the one before. A result lands only while its
+    /// generation is still the latest one this pane started, so a newer
+    /// selection here supersedes it and one in another pane does not.
+    pub(crate) fn begin_load(&mut self, name: SharedString, cx: &mut Context<Self>) -> OpeningLoad {
         self.load_generation = LoadGeneration(self.load_generation.0 + 1);
+        let cancel = self.opening_load.start();
         self.scene_problem = None;
         self.set_ship_loading(Some(name), cx);
 
-        self.load_generation
+        OpeningLoad { generation: self.load_generation, cancel }
     }
 
     pub(crate) fn is_current_load(&self, generation: LoadGeneration) -> bool {
         self.load_generation == generation
     }
 
-    /// Supersedes the load in flight, if any, so its result is dropped.
-    /// Whether one was in flight.
+    /// Cancels the load in flight, if any, so it stops and its result is
+    /// dropped. Whether one was in flight.
     pub(crate) fn cancel_load(&mut self, cx: &mut Context<Self>) -> bool {
         if self.ship_loading.is_none() {
             return false;
         }
 
         self.load_generation = LoadGeneration(self.load_generation.0 + 1);
+        self.opening_load.cancel();
         self.set_ship_loading(None, cx);
 
         true
+    }
+
+    /// Runs the background stage of `scene`, which this viewport has just
+    /// been given to show. Each job stores its piece in the scene as it
+    /// lands, and every viewport of the pane showing the scene then takes it
+    /// up. Cancelled once no viewport shows the scene.
+    pub(crate) fn start_scene_rest(&mut self, scene: Arc<LoadedShipArmor>, rest: Vec<RestJob>, cx: &mut Context<Self>) {
+        let run = SharedLoad::start();
+        let cancel = run.cancel_flag().clone();
+        self.rest_load = Some(run);
+        for job in rest {
+            let piece = job.piece();
+            let job_scene = Arc::clone(&scene);
+            let job_cancel = cancel.clone();
+            let ran = cx.background_spawn(async move { job.run(&job_scene, &job_cancel) });
+            let scene = Arc::clone(&scene);
+            // Through the pane rather than this viewport, which may have
+            // closed while another still shows the scene.
+            let pane = self.pane.clone();
+            cx.spawn(async move |this, cx| {
+                match ran.await {
+                    Ok(()) => {}
+                    Err(RestJobError::Cancelled(_)) => return,
+                    Err(e) => {
+                        tracing::warn!("armor viewer: {} lacks its {piece:?}: {e}", scene.display_name);
+                        return;
+                    }
+                }
+                let viewports = cx.update(|cx| match pane.as_ref().and_then(WeakEntity::upgrade) {
+                    Some(pane) => pane.read(cx).viewports(cx),
+                    None => this.upgrade().into_iter().collect(),
+                });
+                for viewport in viewports {
+                    viewport.update(cx, |view, cx| view.take_up_rest(&scene, piece, cx));
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// The background stage of the scene shown, for a viewport that is
+    /// given the same scene to hold too.
+    pub(crate) fn scene_rest(&self) -> Option<Arc<SharedLoad>> {
+        self.rest_load.clone()
+    }
+
+    /// Holds `run`, the background stage of the scene just shown here, which
+    /// another viewport started.
+    pub(crate) fn share_scene_rest(&mut self, run: Arc<SharedLoad>) {
+        self.rest_load = Some(run);
+    }
+
+    /// Takes up `piece` of `scene`, when it is the scene shown.
+    fn take_up_rest(&mut self, scene: &Arc<LoadedShipArmor>, piece: RestPiece, cx: &mut Context<Self>) {
+        // A scene still waiting for the device reads every piece landed so
+        // far once it is uploaded.
+        if !self.current_armor.as_ref().is_some_and(|shown| Arc::ptr_eq(shown, scene)) {
+            return;
+        }
+
+        match piece {
+            // A pointer resting on the hull while the index was built hovers
+            // it now, as a move there would.
+            RestPiece::Pick => self.hover_again(),
+            // Read by the next draw of the camo picker.
+            RestPiece::Camo => {}
+        }
+        cx.notify();
+    }
+
+    /// Picks the hover again where the pointer last moved over the view.
+    fn hover_again(&mut self) {
+        let Some(at) = self.last_pointer else { return };
+        let over_view = self.last_bounds.is_some_and(|bounds| bounds.contains(&at));
+        if over_view && self.drag.is_none() && self.camera_is_free() {
+            self.update_plate_hover(at);
+        }
     }
 
     /// Shows `problem` in place of the scene. The scene stays loaded, so the
@@ -2554,6 +2656,8 @@ impl ViewportView {
     fn clear_scene(&mut self) {
         // A reload in flight was for the scene going away.
         self.reload_generation += 1;
+        self.reload_load.cancel();
+        self.rest_load = None;
         self.current_armor = None;
         self.pending_armor = None;
         self.scene_source = None;
@@ -2751,6 +2855,7 @@ impl ViewportView {
         if !self.is_gpu_ready() {
             return;
         }
+        self.last_pointer = Some(event.position);
         let pointer = point_to_vec2(event.position);
         let hover = self.gizmo_rect().and_then(|r| gizmo::hit_test(r, &self.viewport.camera, pointer));
         let hover_changed = hover != self.gizmo_hover;
@@ -3291,14 +3396,15 @@ impl ViewportView {
     fn pick_mesh(&self, armor: &LoadedShipArmor, pointer: Vec2, rect: ViewRect) -> Option<MeshHit> {
         let (origin, direction) = self.viewport.screen_to_model_ray(pointer, rect)?;
 
-        armor.hull_pick.pick(origin, direction, &self.hull_shown)
+        armor.hull_pick_index()?.pick(origin, direction, &self.hull_shown)
     }
 
     /// Hovers the mesh `hit` names, rebuilding the highlight only when the
     /// hovered mesh name changed. Returns whether the caller should
     /// `cx.notify()`.
     fn set_mesh_hover(&mut self, armor: &LoadedShipArmor, hit: MeshHit, cursor: Point<Pixels>) -> bool {
-        let (Some(mesh), Some(source)) = (armor.hull_meshes.get(hit.mesh.get()), armor.hull_pick.source(hit.mesh))
+        let (Some(mesh), Some(source)) =
+            (armor.hull_meshes.get(hit.mesh.get()), armor.hull_pick_index().and_then(|pick| pick.source(hit.mesh)))
         else {
             return self.clear_mesh_hover();
         };
@@ -4119,6 +4225,7 @@ impl ViewportView {
     /// correctness, deviation).
     pub(crate) fn reload_ship(&mut self, cx: &mut Context<Self>) {
         let Some(source) = self.scene_source.clone() else { return };
+        let cancel = self.reload_load.start();
         let task = match source {
             SceneSource::Ship { bundle, param_index, display_name } => {
                 let options = match load_ship::build_reload_options(
@@ -4135,28 +4242,35 @@ impl ViewportView {
                         return;
                     }
                 };
-                let task = spawn_reload_ship_armor(bundle, param_index, options, cx);
+                let task = spawn_reload_ship_armor(bundle, param_index, options, cancel.clone(), cx);
                 cx.background_spawn(async move { task.await.map_err(SceneLoadError::from) })
             }
             SceneSource::Model { bundle, models, request } => {
                 let request = ModelLoadRequest { lod: self.hull_lod, ..request };
-                let task = load_model::spawn_load_model_scene(models, bundle, request, cx);
+                let task = load_model::spawn_load_model_scene(models, bundle, request, cancel.clone(), cx);
                 cx.background_spawn(async move { task.await.map_err(SceneLoadError::from) })
             }
         };
 
         // The scheme is carried by name across the reload and recomposited
         // with it, off the UI thread, so the reloaded hull is never shown
-        // stock first.
-        let camo = self.selected_camo.map(|id| {
-            let infos = self.current_armor.as_ref().map(|armor| armor.camo_scheme_infos.clone()).unwrap_or_default();
-            (id, infos)
-        });
+        // stock first. The reloaded scheme list is read before the reload
+        // lands rather than left to the background stage, so a scheme picked
+        // meanwhile is found in it too.
+        let shown_schemes = self.current_armor.as_ref().map(|armor| armor.camo_schemes().to_vec()).unwrap_or_default();
+        let camo = self.selected_camo.map(|id| (id, shown_schemes));
         let task = cx.background_spawn(async move {
-            let armor = task.await?;
-            let camo = camo.map(|(was, infos)| reload_camo(was, &infos, &armor));
+            let FirstStage { scene, mut rest } = task.await?;
+            if let Some(at) = rest.iter().position(|job| job.piece() == RestPiece::Camo) {
+                match rest.remove(at).run(&scene, &cancel) {
+                    Ok(()) => {}
+                    Err(RestJobError::Cancelled(cancelled)) => return Err(SceneLoadError::from(cancelled)),
+                    Err(e) => tracing::warn!("armor viewer: {} lacks its camouflage: {e}", scene.display_name),
+                }
+            }
+            let camo = camo.map(|(was, infos)| reload_camo(was, &infos, &scene));
 
-            Ok(ReloadedScene { armor, camo })
+            Ok(ReloadedScene { armor: scene, camo, rest })
         });
 
         self.reload_generation += 1;
@@ -4310,8 +4424,9 @@ impl ViewportView {
         if generation != self.reload_generation {
             return;
         }
-        let ReloadedScene { armor, camo } = match result {
+        let ReloadedScene { armor, camo, rest } = match result {
             Ok(reloaded) => reloaded,
+            Err(e) if e.is_cancelled() => return,
             Err(e) => {
                 tracing::error!("armor viewer: failed to reload: {e}");
                 if let Some(shown) = &self.current_armor {
@@ -4326,9 +4441,8 @@ impl ViewportView {
         // A scheme picked while the reload ran replaces the one it carried,
         // and is found by name in the reloaded scene once that is shown.
         let picked_since = (camo_generation != self.camo_generation).then(|| {
-            let old_infos: &[CamoSchemeInfo] =
-                self.current_armor.as_ref().map(|old| old.camo_scheme_infos.as_slice()).unwrap_or(&[]);
-            self.selected_camo.and_then(|id| remap_camo_selection(old_infos, &armor.camo_scheme_infos, id))
+            let old_infos: &[CamoSchemeInfo] = self.current_armor.as_ref().map(|old| old.camo_schemes()).unwrap_or(&[]);
+            self.selected_camo.and_then(|id| remap_camo_selection(old_infos, armor.camo_schemes(), id))
         });
         // Keyed by the pre-reload ids, which are no longer valid indices
         // into the new `camo_scheme_infos` list -- a stale-keyed hit here
@@ -4379,8 +4493,9 @@ impl ViewportView {
             tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", armor.display_name);
             SceneProblem { subject: armor.display_name.clone().into(), reason: ProblemReason::Empty(empty) }
         });
-        self.current_armor = Some(armor);
+        self.current_armor = Some(Arc::clone(&armor));
         self.reupload_current_armor(cx);
+        self.start_scene_rest(armor, rest, cx);
         if let Some(picked) = picked_since {
             self.select_camo(picked, cx);
         }
@@ -4839,11 +4954,13 @@ fn remap_camo_selection(
     new_infos.iter().find(|i| &i.display_name == name).map(|i| i.id)
 }
 
-/// A reloaded scene, with the camo that was selected composited onto it.
+/// A reloaded scene, with the camo that was selected composited onto it and
+/// the background jobs that finish it.
 struct ReloadedScene {
     armor: LoadedShipArmor,
     /// `None` when no scheme was selected.
     camo: Option<ReloadedCamo>,
+    rest: Vec<RestJob>,
 }
 
 /// The scheme selected before a reload, found again in the reloaded scene.
@@ -4857,7 +4974,7 @@ struct ReloadedCamo {
 /// Finds `was` in `armor` by its name in `old_infos`, and composites it.
 /// Decodes and composites full-size textures, so it runs off the UI thread.
 fn reload_camo(was: CamoSchemeId, old_infos: &[CamoSchemeInfo], armor: &LoadedShipArmor) -> ReloadedCamo {
-    let now = remap_camo_selection(old_infos, &armor.camo_scheme_infos, was);
+    let now = remap_camo_selection(old_infos, armor.camo_schemes(), was);
     let decode = match now {
         Some(id) => decode_active_camo(id, None, armor),
         None => CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() },
@@ -4928,7 +5045,7 @@ struct CamoDecode {
 fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
     let (textures, decoded) = match cached {
         Some(t) => (t, None),
-        None => match armor.camo_source.as_ref().map(|source| source.decode(id)) {
+        None => match armor.camo_texture_source().map(|source| source.decode(id)) {
             None => {
                 tracing::warn!("camo scheme {id:?} asked of a model with no camouflage; rendering as stock");
                 return CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
@@ -4946,7 +5063,7 @@ fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, arm
             }
         },
     };
-    let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
+    let info = armor.camo_schemes().iter().find(|i| i.id == id);
     let (uv, use_color_scheme) = match info {
         Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
         None => {
@@ -5405,7 +5522,7 @@ mod tests {
                 .expect("a model path");
         let mut armor = crate::armor_viewer::load_model::fixtures::model_scene(path, Vec::new());
         armor.camo_scheme_infos =
-            vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)];
+            vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)].into();
 
         let reloaded = super::reload_camo(CamoSchemeId(0), &old, &armor);
 
@@ -5606,8 +5723,10 @@ mod real_model_tests {
 
         let mut marked = 0;
         for path in paths {
-            let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(path.clone(), None))
-                .expect("the model loads");
+            let cancel = crate::armor_viewer::scene_load::LoadCancel::new();
+            let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(path.clone(), None), &cancel)
+                .expect("the model loads")
+                .scene;
             let shown = ShownLayers { armor: true, hull: true };
             let rect = ViewRect::new(0.0, 0.0, 1200.0, 700.0);
             let mut camera = opening_camera(&scene, shown, 1200.0 / 700.0);

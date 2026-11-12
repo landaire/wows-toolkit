@@ -1003,7 +1003,7 @@ pub(crate) fn render_hull_popover_content(
             render_module_alternative_row(entity, *ct, alternatives, selected_modules.get(ct), filter)
         })
         .collect();
-    let camo = (!armor.camo_scheme_infos.is_empty())
+    let camo = (!armor.camo_schemes().is_empty())
         .then(|| render_camo_picker(entity, &armor, selected_camo, &expanded_camo_groups, filter))
         .flatten();
     let lod = (armor.hull_lod_count > 1).then(|| render_lod_row(entity, &armor, hull_lod, filter)).flatten();
@@ -1242,7 +1242,7 @@ fn render_camo_picker(
     }
 
     let mut ship_infos: Vec<&CamoSchemeInfo> = armor
-        .camo_scheme_infos
+        .camo_schemes()
         .iter()
         .filter(|i| i.origin == CamoOrigin::ShipSpecific && inner.keeps(&i.display_name))
         .collect();
@@ -1258,11 +1258,8 @@ fn render_camo_picker(
     ] {
         let label = t!(label).into_owned();
         let group_filter = within(&inner, &label);
-        let mut group: Vec<&CamoSchemeInfo> = armor
-            .camo_scheme_infos
-            .iter()
-            .filter(|i| i.origin == origin && group_filter.keeps(&i.display_name))
-            .collect();
+        let mut group: Vec<&CamoSchemeInfo> =
+            armor.camo_schemes().iter().filter(|i| i.origin == origin && group_filter.keeps(&i.display_name)).collect();
         if group.is_empty() {
             continue;
         }

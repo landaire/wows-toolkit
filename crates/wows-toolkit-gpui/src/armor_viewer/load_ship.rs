@@ -31,11 +31,19 @@
 //! and `module_alternatives` are cheap to derive alongside a load/reload (same
 //! source data, no extra ship export), so they are populated for the hull
 //! popover's selectors (`popover.rs`) to consume directly.
+//!
+//! **Stages.** A load returns a [`FirstStage`]: the scene with everything
+//! the opening view draws, and the background jobs (`scene_load::RestJob`)
+//! that add the hover-picking index and the camo list once it is on screen.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use wowsunpack::game_params::types::HitLocation;
 
 use gpui_kit::App;
@@ -58,7 +66,9 @@ use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
+use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::ship_parts::ShipPart;
+use wowsunpack::export::texture::TextureLod;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::CameraTrajectory;
@@ -74,6 +84,10 @@ use super::hull_picking::HullPickIndex;
 use super::hull_picking::MeshSource;
 use super::model_refs::ShipPartRef;
 use super::model_refs::VehicleParamIndex;
+use super::scene_load::FirstStage;
+use super::scene_load::LoadCancel;
+use super::scene_load::LoadCancelled;
+use super::scene_load::RestJob;
 use super::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
@@ -133,8 +147,8 @@ pub enum ShipLoadError {
     ArmorMeshes(String),
     #[error("failed to build hull meshes: {0}")]
     HullMeshes(String),
-    #[error("failed to resolve camouflage textures: {0}")]
-    CamoSource(String),
+    #[error(transparent)]
+    Cancelled(#[from] LoadCancelled),
 }
 
 /// Reasons a GLB export failed.
@@ -253,8 +267,9 @@ pub struct LoadedShipArmor {
     /// Hull visual meshes. Loaded for Milestone 4; not displayed by `upload.rs` yet.
     pub hull_meshes: Vec<InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    /// `hull_meshes` placed in model space for hover picking.
-    pub hull_pick: HullPickIndex,
+    /// `hull_meshes` placed in model space for hover picking. Built by the
+    /// background stage of the load; unset until it lands.
+    pub(crate) hull_pick: OnceLock<HullPickIndex>,
     /// Decoded hull textures, keyed by `.mfm` path.
     pub hull_textures: super::camo::TexturesByPart,
     /// The alpha mode of each hull material that tests or blends alpha, by
@@ -271,11 +286,14 @@ pub struct LoadedShipArmor {
     /// The orbits the game's own camera rides, by mode name. Empty for a ship
     /// whose GameParams name none.
     pub camera_trajectories: Vec<(String, CameraTrajectory)>,
-    /// Camo scheme metadata for the picker (`popover.rs`); no textures decoded.
-    pub camo_scheme_infos: Vec<CamoSchemeInfo>,
-    /// Decodes a scheme's textures on demand when one is selected. `None`
-    /// for a model, which has no camouflage of its own.
-    pub camo_source: Option<CamoTextureSource>,
+    /// Camo scheme metadata for the picker (`popover.rs`); no textures
+    /// decoded. Read by the background stage of a ship load; never set for a
+    /// model, which has no camouflage of its own.
+    pub(crate) camo_scheme_infos: OnceLock<Vec<CamoSchemeInfo>>,
+    /// Decodes a scheme's textures on demand when one is selected. Set
+    /// before `camo_scheme_infos`, so a scheme that can be picked can be
+    /// decoded.
+    pub(crate) camo_source: OnceLock<CamoTextureSource>,
     /// The splash boxes this hull ships with. `None` for a hull carrying no
     /// splash file, which the splash mode reports rather than drawing an
     /// empty burst over.
@@ -291,6 +309,21 @@ impl LoadedShipArmor {
     /// Bounding-box center in model space.
     pub fn center(&self) -> Vec3 {
         (self.bounds.0 + self.bounds.1) * 0.5
+    }
+
+    /// The hover-picking index, once the background stage has built it.
+    pub(crate) fn hull_pick_index(&self) -> Option<&HullPickIndex> {
+        self.hull_pick.get()
+    }
+
+    /// The camo schemes the picker offers. Empty until the background stage
+    /// reads them, and for a model.
+    pub(crate) fn camo_schemes(&self) -> &[CamoSchemeInfo] {
+        self.camo_scheme_infos.get().map_or(&[], Vec::as_slice)
+    }
+
+    pub(crate) fn camo_texture_source(&self) -> Option<&CamoTextureSource> {
+        self.camo_source.get()
     }
 
     pub fn is_ship(&self) -> bool {
@@ -495,16 +528,18 @@ fn reload_load_options(
     }
 }
 
-/// Loads a ship's armor model. Ports `armor_viewer::common::load_ship_armor`
-/// verbatim, minus the splash-data/hit-location/camera-trajectory branches
-/// (see the module doc for why this v1 struct omits them).
+/// The first stage of a ship load: everything the opening view draws. The
+/// hover-picking index and the camouflage list are left to the background
+/// jobs returned with it. Ports
+/// `armor_viewer::common::load_ship_armor`.
 fn load_ship_armor(
     param_index: &str,
     vehicle: &Vehicle,
     species: Option<Species>,
     ship_assets: &ShipAssets,
     options: ShipLoadOptions,
-) -> Result<LoadedShipArmor, ShipLoadError> {
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ShipLoadError> {
     let export_options = ShipExportOptions {
         lod: options.lod,
         hull: options.selected_hull.clone(),
@@ -516,6 +551,7 @@ fn load_ship_armor(
     let ctx = ship_assets
         .load_ship_from_vehicle(vehicle, &export_options)
         .map_err(|e| ShipLoadError::ShipExport(format!("{e:?}")))?;
+    cancel.checkpoint()?;
 
     let meshes = ctx.interactive_armor_meshes().map_err(|e| ShipLoadError::ArmorMeshes(format!("{e:?}")))?;
 
@@ -525,42 +561,22 @@ fn load_ship_armor(
     let hit_locations = ctx.hit_locations().cloned();
 
     let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
+    cancel.checkpoint()?;
 
     let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| ShipLoadError::HullMeshes(format!("{e:?}")))?;
     let bounds = scene_bounds(&meshes, &hull_meshes);
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
-    let hull_pick = HullPickIndex::build(&hull_meshes, MeshSource::for_ship(&hull_meshes, ctx.parts()));
+    cancel.checkpoint()?;
 
-    let mut hull_textures = HashMap::new();
-    let mut hull_alpha = HashMap::new();
-    for (mfm, albedo) in ctx.hull_base_albedos(&hull_meshes) {
-        let (w, h) = (albedo.image.width(), albedo.image.height());
-        if albedo.alpha != AlphaMode::Opaque {
-            hull_alpha.insert(mfm.clone(), albedo.alpha);
-        }
-        hull_textures.insert(mfm, super::camo::RgbaTexture::new(w, h, albedo.image.into_raw()));
-    }
+    let albedos = decode_hull_albedos(&ctx, &hull_meshes, export_options.texture_lod, cancel)?;
 
     let hull_lod_count = ctx.hull_lod_count();
+    let pick_sources = MeshSource::for_ship(&hull_meshes, ctx.parts());
+    let parts = ctx.parts().to_vec();
+    let rest = vec![RestJob::Pick(pick_sources), RestJob::Camo(Arc::new(ctx))];
 
-    let camo_source = ctx.camo_texture_source().map_err(|e| ShipLoadError::CamoSource(format!("{e:?}")))?;
-    let mut camo_scheme_infos = camo_source.scheme_infos();
-    {
-        let mut counts: HashMap<String, u32> = HashMap::new();
-        for info in &mut camo_scheme_infos {
-            let n = counts.entry(info.display_name.clone()).or_insert(0);
-            *n += 1;
-            if *n > 1 {
-                info.display_name = format!("{} ({})", info.display_name, *n);
-            }
-        }
-    }
-
-    Ok(LoadedShipArmor {
-        subject: SceneSubject::Ship(ShipSubject {
-            vehicle_param_index: VehicleParamIndex::new(param_index),
-            parts: ctx.parts().to_vec(),
-        }),
+    let scene = LoadedShipArmor {
+        subject: SceneSubject::Ship(ShipSubject { vehicle_param_index: VehicleParamIndex::new(param_index), parts }),
         display_name: options.display_name,
         species,
         meshes,
@@ -570,21 +586,100 @@ fn load_ship_armor(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
-        hull_pick,
-        hull_textures,
-        hull_alpha,
+        hull_pick: OnceLock::new(),
+        hull_textures: albedos.textures,
+        hull_alpha: albedos.alpha,
         hull_lod_count,
         hull_lod: options.lod,
         hull_upgrade_names: options.hull_upgrade_names,
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
-        camo_scheme_infos,
-        camo_source: Some(camo_source),
+        camo_scheme_infos: OnceLock::new(),
+        camo_source: OnceLock::new(),
         splash_data,
         splash_box_groups,
         hit_locations,
-    })
+    };
+
+    Ok(FirstStage { scene, rest })
+}
+
+/// Each hull material's stock albedo, and the alpha mode of those that are
+/// not opaque, by `.mfm` path.
+#[derive(Default)]
+struct HullAlbedos {
+    textures: super::camo::TexturesByPart,
+    alpha: HashMap<String, AlphaMode>,
+}
+
+/// Decodes the stock albedo of each material `hull_meshes` names, once per
+/// material and on several threads: it is the largest part of the first
+/// stage.
+fn decode_hull_albedos(
+    ctx: &ShipModelContext,
+    hull_meshes: &[InteractiveHullMesh],
+    lod: TextureLod,
+    cancel: &LoadCancel,
+) -> Result<HullAlbedos, LoadCancelled> {
+    // Decoding is mostly file reads behind one archive and BC decode; past a
+    // few threads the reads serialize.
+    const MOST_WORKERS: usize = 8;
+
+    // The first mesh naming a material picks its `.mfm` id, as
+    // `ShipModelContext::hull_base_albedos` does.
+    let mut seen = HashSet::new();
+    let materials: Vec<(&str, u64)> = hull_meshes
+        .iter()
+        .filter_map(|mesh| mesh.mfm_path.as_deref().map(|path| (path, mesh.mfm_path_id)))
+        .filter(|(path, _)| seen.insert(*path))
+        .collect();
+
+    let reader = ctx.material_reader();
+    let session = match reader.open() {
+        Ok(session) => session,
+        Err(report) => {
+            tracing::warn!("armor viewer: the hull materials cannot be read, so the hull draws untextured: {report}");
+            return Ok(HullAlbedos::default());
+        }
+    };
+
+    let half_the_cores = std::thread::available_parallelism().map_or(1, |cores| cores.get() / 2);
+    let workers = half_the_cores.clamp(1, MOST_WORKERS).min(materials.len());
+    let next = AtomicUsize::new(0);
+    let decoded: Vec<Vec<(String, super::camo::RgbaTexture, AlphaMode)>> = std::thread::scope(|scope| {
+        let decode = || {
+            let mut out = Vec::new();
+            while let Some(&(path, mfm_path_id)) = materials.get(next.fetch_add(1, Ordering::Relaxed)) {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                let Some(albedo) = session.albedo(path, mfm_path_id, lod) else { continue };
+                let (width, height) = (albedo.image.width(), albedo.image.height());
+                let texture = super::camo::RgbaTexture::new(width, height, albedo.image.into_raw());
+                out.push((path.to_string(), texture, albedo.alpha));
+            }
+
+            out
+        };
+        let handles: Vec<_> = (0..workers).map(|_| scope.spawn(decode)).collect();
+
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+            .collect()
+    });
+    cancel.checkpoint()?;
+
+    let mut albedos = HullAlbedos::default();
+    for (path, texture, alpha) in decoded.into_iter().flatten() {
+        if alpha != AlphaMode::Opaque {
+            albedos.alpha.insert(path.clone(), alpha);
+        }
+        albedos.textures.insert(path, texture);
+    }
+
+    Ok(albedos)
 }
 
 /// An armor mesh set's zones, the materials in each, and each material's
@@ -670,17 +765,19 @@ fn resolve_species(ship_assets: &ShipAssets, param_index: &str) -> Option<Specie
     param.species().and_then(|species| species.known()).copied()
 }
 
-/// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
-/// default-hull armor model at [`DEFAULT_LOD`]. Synchronous and CPU/IO-bound;
-/// callers run it off the UI thread (see [`spawn_load_ship_armor`]).
+/// Resolves `param_index`'s `Vehicle` from `ship_assets`, then runs the first
+/// stage of a load of its default-hull armor model at [`DEFAULT_LOD`].
+/// Synchronous and CPU/IO-bound; callers run it off the UI thread (see
+/// [`spawn_load_ship_armor`]).
 pub(crate) fn load_ship_armor_by_param(
     ship_assets: &ShipAssets,
     param_index: &str,
     display_name: &str,
-) -> Result<LoadedShipArmor, ShipLoadError> {
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
     let options = default_load_options(&vehicle, display_name, DEFAULT_LOD);
-    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
+    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options, cancel)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
@@ -693,9 +790,10 @@ fn load_ship_armor_with_options(
     ship_assets: &ShipAssets,
     param_index: &str,
     options: ShipLoadOptions,
-) -> Result<LoadedShipArmor, ShipLoadError> {
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
-    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
+    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options, cancel)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets` and builds the
@@ -773,17 +871,19 @@ pub(crate) fn export_ship_glb(
     Ok(())
 }
 
-/// Kicks off a ship's armor load on the background executor. `bundle` is the
-/// Armor Viewer's already-loaded [`ArmorAssetsBundle`](super::assets::ArmorAssetsBundle)
-/// (shared `Arc`, cheap to clone into the background task); this never
-/// triggers a second game-data or `ShipAssets` load.
-pub fn spawn_load_ship_armor(
+/// Kicks off the first stage of a ship's armor load on the background
+/// executor. `bundle` is the Armor Viewer's already-loaded
+/// [`ArmorAssetsBundle`](super::assets::ArmorAssetsBundle) (shared `Arc`,
+/// cheap to clone into the background task); this never triggers a second
+/// game-data or `ShipAssets` load.
+pub(crate) fn spawn_load_ship_armor(
     bundle: Arc<super::assets::ArmorAssetsBundle>,
     param_index: String,
     display_name: String,
+    cancel: LoadCancel,
     cx: &App,
-) -> Task<Result<LoadedShipArmor, ShipLoadError>> {
-    cx.background_spawn(async move { load_ship_armor_by_param(&bundle.assets, &param_index, &display_name) })
+) -> Task<Result<FirstStage, ShipLoadError>> {
+    cx.background_spawn(async move { load_ship_armor_by_param(&bundle.assets, &param_index, &display_name, &cancel) })
 }
 
 /// Kicks off a background reload of `param_index`'s armor under `options` --
@@ -793,13 +893,14 @@ pub fn spawn_load_ship_armor(
 /// [`build_reload_options`]) instead of getting the always-default load;
 /// `bundle` is the same shared `ArmorAssetsBundle`, so this never triggers a
 /// second game-data or `ShipAssets` load either.
-pub fn spawn_reload_ship_armor(
+pub(crate) fn spawn_reload_ship_armor(
     bundle: Arc<super::assets::ArmorAssetsBundle>,
     param_index: String,
     options: ShipLoadOptions,
+    cancel: LoadCancel,
     cx: &App,
-) -> Task<Result<LoadedShipArmor, ShipLoadError>> {
-    cx.background_spawn(async move { load_ship_armor_with_options(&bundle.assets, &param_index, options) })
+) -> Task<Result<FirstStage, ShipLoadError>> {
+    cx.background_spawn(async move { load_ship_armor_with_options(&bundle.assets, &param_index, options, &cancel) })
 }
 
 /// Reports a finished export: what was written and how large it is, or why it
@@ -969,8 +1070,9 @@ mod tests {
             .next()
             .expect("expected at least one ship in the real catalog");
 
-        let armor = load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name)
-            .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index));
+        let armor = load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name, &LoadCancel::new())
+            .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index))
+            .scene;
 
         assert!(!armor.meshes.is_empty(), "expected at least one armor mesh");
         assert!(!armor.zones.is_empty(), "expected at least one armor zone");
@@ -1028,8 +1130,9 @@ mod tests {
             .flat_map(|class| &class.ships)
             .find(|ship| ship.display_name.contains("Iowa"))
             .expect("expected Iowa in the real catalog");
-        let armor = load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name)
-            .unwrap_or_else(|e| panic!("failed to load armor for {}: {e}", ship.display_name));
+        let armor = load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name, &LoadCancel::new())
+            .unwrap_or_else(|e| panic!("failed to load armor for {}: {e}", ship.display_name))
+            .scene;
 
         let mut turrets: Vec<(String, f32)> = armor
             .hull_meshes
@@ -1109,5 +1212,80 @@ mod tests {
             out_path.display(),
             bytes.len()
         );
+    }
+
+    /// Needs a local game install: the first stage of a ship load holds all
+    /// the opening view draws -- every mount, every hull mesh and the stock
+    /// albedo of every material -- and the background stage adds only the
+    /// picking index and the camo list. Prints how long
+    /// each stage took. Run as
+    /// `load_ship_armor_against_a_real_install_produces_a_renderable_model`
+    /// documents.
+    #[test]
+    #[ignore = "needs a local game install; see the doc comment for the run command"]
+    fn the_first_stage_holds_the_whole_opening_view() {
+        use std::time::Instant;
+
+        use super::super::model_refs::ShipPartKey;
+
+        let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
+            .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+        let available =
+            wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
+        let build = *available.last().expect("expected at least one installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the VFS");
+        let metadata = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
+                .expect("failed to build GameMetadataProvider from the VFS"),
+        );
+        let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
+            .expect("failed to load ShipAssets from the VFS");
+
+        // Sete de Setembro and Iowa.
+        for param_index in ["PVSB710", "PASB018"] {
+            let started = Instant::now();
+            let FirstStage { scene, rest } =
+                load_ship_armor_by_param(&ship_assets, param_index, param_index, &LoadCancel::new())
+                    .unwrap_or_else(|e| panic!("failed to load {param_index}: {e}"));
+            let first_stage = started.elapsed();
+
+            let ship = scene.ship().expect("a ship scene");
+            for part in &ship.parts {
+                let ShipPartKey::Mount(hp) = &part.key else { continue };
+                let drawn = scene.hull_meshes.iter().any(|mesh| mesh.part.as_ref() == Some(&part.key));
+                assert!(drawn, "{param_index}: mount {} is drawn by the first stage", hp.as_str());
+            }
+
+            let vehicle = resolve_vehicle(&ship_assets, param_index).expect("the ship resolves");
+            let ctx = ship_assets
+                .load_ship_from_vehicle(&vehicle, &ShipExportOptions { textures: false, ..Default::default() })
+                .expect("the ship loads");
+            let mut every_albedo: Vec<String> = ctx.hull_base_albedos(&scene.hull_meshes).into_keys().collect();
+            let mut first_albedos: Vec<String> = scene.hull_textures.keys().cloned().collect();
+            every_albedo.sort();
+            first_albedos.sort();
+            assert_eq!(first_albedos, every_albedo, "{param_index}: the first stage decodes every stock albedo");
+            assert!(scene.hull_pick_index().is_none() && scene.camo_schemes().is_empty());
+
+            let (hull_meshes, armor_meshes) = (scene.hull_meshes.len(), scene.meshes.len());
+            let started = Instant::now();
+            for job in rest {
+                job.run(&scene, &LoadCancel::new()).unwrap_or_else(|e| panic!("{param_index}: {e}"));
+            }
+            let background_stage = started.elapsed();
+
+            assert_eq!((scene.hull_meshes.len(), scene.meshes.len()), (hull_meshes, armor_meshes));
+            assert_eq!(scene.hull_textures.len(), first_albedos.len());
+            assert!(scene.hull_pick_index().is_some(), "{param_index}: picking lands");
+            assert!(!scene.camo_schemes().is_empty(), "{param_index}: the camo list lands");
+
+            println!("{param_index}: first stage {first_stage:?}, background stage {background_stage:?}");
+        }
     }
 }

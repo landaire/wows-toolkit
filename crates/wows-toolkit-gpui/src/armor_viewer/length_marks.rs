@@ -420,8 +420,10 @@ mod tests {
             &ship_assets,
             &iowa.param_index,
             &iowa.display_name,
+            &crate::armor_viewer::scene_load::LoadCancel::new(),
         )
-        .expect("Iowa loads");
+        .expect("Iowa loads")
+        .scene;
 
         let marks = LengthMarks::new(armor.bounds, 0.).expect("marks");
         eprintln!("Iowa bounds {:?}: {:?} long, {:?} wide", armor.bounds, marks.length(), marks.beam());

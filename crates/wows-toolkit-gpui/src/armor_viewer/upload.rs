@@ -688,8 +688,10 @@ mod tests {
             &ship_assets,
             &ship.param_index,
             &ship.display_name,
+            &crate::armor_viewer::scene_load::LoadCancel::new(),
         )
-        .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index));
+        .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index))
+        .scene;
 
         let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
         let size = TargetSize::new(512, 512).expect("a nonzero size");

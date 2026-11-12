@@ -112,6 +112,7 @@ use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
+use super::scene_load::FirstStage;
 use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
@@ -798,21 +799,28 @@ impl ArmorViewerPane {
         cx: &mut Context<Self>,
     ) {
         let active = self.dock.read(cx).active_viewport();
+        // The scene shown, pending upload or not, so it pairs with the
+        // background stage the source holds for it.
         let clone_source = {
             let source = active.read(cx);
-            source
-                .current_armor()
-                .map(|armor| (armor, source.camera(), source.synced_settings(), source.scene_source()))
+            source.shown().cloned().map(|armor| {
+                (armor, source.camera(), source.synced_settings(), source.scene_source(), source.scene_rest())
+            })
         };
 
         let viewport = self.fresh_viewport(window, cx);
 
-        if let Some((armor, camera, synced, scene_source)) = clone_source {
+        if let Some((armor, camera, synced, scene_source, rest)) = clone_source {
             viewport.update(cx, |view, cx| {
                 if let Some(source) = scene_source {
                     view.set_scene_source(source);
                 }
                 view.show_armor(armor, self.opening_layer, cx);
+                // The copy holds the background stage too, so it runs on if
+                // the pane copied from closes first.
+                if let Some(run) = rest {
+                    view.share_scene_rest(run);
+                }
                 view.set_camera(camera, cx);
                 view.apply_synced(&synced, cx);
             });
@@ -1118,15 +1126,20 @@ impl ArmorViewerPane {
         let target_viewport = self.dock.read(cx).active_viewport();
 
         let display_name = request.path.stem().to_string();
-        let generation = target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.into(), cx));
+        let opening = target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.into(), cx));
         cx.notify();
 
-        let task = spawn_load_model_scene(Arc::clone(&models), Arc::clone(&bundle), request.clone(), cx);
+        let task =
+            spawn_load_model_scene(Arc::clone(&models), Arc::clone(&bundle), request.clone(), opening.cancel, cx);
         let source = SceneSource::Model { bundle, models, request };
+        // Weak, so a pane closed meanwhile is released and its load cancelled.
+        let target_viewport = target_viewport.downgrade();
         cx.spawn(async move |this, cx| {
             let result = task.await;
-            let _ = this
-                .update(cx, |this, cx| this.apply_model_load_result(generation, source, target_viewport, result, cx));
+            let _ = this.update(cx, |this, cx| {
+                let Some(target_viewport) = target_viewport.upgrade() else { return };
+                this.apply_model_load_result(opening.generation, source, target_viewport, result, cx);
+            });
         })
         .detach();
     }
@@ -1136,7 +1149,7 @@ impl ArmorViewerPane {
         generation: LoadGeneration,
         source: SceneSource,
         target_viewport: Entity<ViewportView>,
-        result: Result<LoadedShipArmor, ModelSceneError>,
+        result: Result<FirstStage, ModelSceneError>,
         cx: &mut Context<Self>,
     ) {
         // A newer selection in the same pane superseded this load.
@@ -1145,7 +1158,7 @@ impl ArmorViewerPane {
         }
         let display_name = source.display_name().to_string();
         let outcome = match result {
-            Ok(scene) => drawable_scene(scene),
+            Ok(first) => drawable_scene(first),
             Err(e) => {
                 tracing::error!("model viewer: failed to load {display_name}: {e}");
                 Err(e.problem())
@@ -1155,15 +1168,22 @@ impl ArmorViewerPane {
         target_viewport.update(cx, |viewport, cx| {
             viewport.set_ship_loading(None, cx);
             match outcome {
-                Ok(scene) => {
+                Ok(FirstStage { scene, rest }) => {
                     viewport.set_scene_source(source);
-                    viewport.show_armor(Arc::new(scene), layer, cx);
+                    let scene = Arc::new(scene);
+                    viewport.show_armor(Arc::clone(&scene), layer, cx);
+                    viewport.start_scene_rest(scene, rest, cx);
                 }
                 Err(reason) => viewport.fail_load(SceneProblem { subject: display_name.into(), reason }, cx),
             }
         });
         self.push_open_target(cx);
         cx.notify();
+    }
+
+    /// Every viewport of the dock.
+    pub(crate) fn viewports(&self, cx: &App) -> Vec<Entity<ViewportView>> {
+        self.dock.read(cx).panes().to_vec()
     }
 
     /// Tells the sidebar what the active pane shows, so its row is marked.
@@ -1515,15 +1535,19 @@ impl ArmorViewerPane {
 
         // The viewport shows nothing until a ship arrives, so it says what it
         // is waiting for rather than inviting a selection already made.
-        let generation =
-            target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.clone().into(), cx));
+        let opening = target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.clone().into(), cx));
+        let generation = opening.generation;
         cx.notify();
 
-        let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
+        let task =
+            spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), opening.cancel, cx);
         let started = StartedLoad { viewport: target_viewport.entity_id(), generation };
+        // Weak, so a pane closed meanwhile is released and its load cancelled.
+        let target_viewport = target_viewport.downgrade();
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
+                let Some(target_viewport) = target_viewport.upgrade() else { return };
                 this.apply_ship_load_result(generation, param_index, display_name, bundle, target_viewport, result, cx)
             });
         })
@@ -1540,7 +1564,7 @@ impl ArmorViewerPane {
         display_name: String,
         bundle: Arc<ArmorAssetsBundle>,
         target_viewport: Entity<ViewportView>,
-        result: Result<LoadedShipArmor, ShipLoadError>,
+        result: Result<FirstStage, ShipLoadError>,
         cx: &mut Context<Self>,
     ) {
         if !target_viewport.read(cx).is_current_load(generation) {
@@ -1549,14 +1573,14 @@ impl ArmorViewerPane {
             return;
         }
         let outcome = match result {
-            Ok(armor) => drawable_scene(armor),
+            Ok(first) => drawable_scene(first),
             Err(e) => {
                 tracing::error!("armor viewer: failed to load {display_name}: {e}");
                 Err(ProblemReason::ShipUnreadable)
             }
         };
         match outcome {
-            Ok(armor) => {
+            Ok(FirstStage { scene, rest }) => {
                 self.ship_loaded = true;
                 let comparing = self.incoming.is_about(&param_index);
                 let load = StartedLoad { viewport: target_viewport.entity_id(), generation };
@@ -1573,7 +1597,9 @@ impl ArmorViewerPane {
                         param_index,
                         display_name: display_name.clone(),
                     });
-                    viewport.show_armor(Arc::new(armor), self.opening_layer, cx);
+                    let scene = Arc::new(scene);
+                    viewport.show_armor(Arc::clone(&scene), self.opening_layer, cx);
+                    viewport.start_scene_rest(scene, rest, cx);
                     // After the armor, because showing it starts the ship
                     // again and would drop them.
                     if let Some(hits) = hits {
@@ -1824,12 +1850,13 @@ fn is_ship_already_loaded(loaded_param_index: Option<&str>, requested_param_inde
     loaded_param_index == Some(requested_param_index)
 }
 
-/// `scene` when it has something to draw, else why it has nothing.
-fn drawable_scene(scene: LoadedShipArmor) -> Result<LoadedShipArmor, ProblemReason> {
-    match scene.emptiness() {
-        None => Ok(scene),
+/// `first` when its scene has something to draw, else why it has nothing.
+/// The background stage adds no geometry, so the first stage decides.
+fn drawable_scene(first: FirstStage) -> Result<FirstStage, ProblemReason> {
+    match first.scene.emptiness() {
+        None => Ok(first),
         Some(empty) => {
-            tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", scene.display_name);
+            tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", first.scene.display_name);
             Err(ProblemReason::Empty(empty))
         }
     }
@@ -1896,6 +1923,7 @@ mod tests {
     use crate::armor_viewer::load_ship::LoadedShipArmor;
     use crate::armor_viewer::load_ship::ShipLoadError;
     use crate::armor_viewer::model_refs::HardpointTarget;
+    use crate::armor_viewer::scene_load::FirstStage;
     use crate::armor_viewer::sidebar_tree::fixture;
     use crate::armor_viewer::viewport_view::ViewportView;
     use crate::replay_inspector::icons::IconCache;
@@ -1913,7 +1941,7 @@ mod tests {
     /// which shows a model beforehand. Returns the pane and what it says.
     fn land_ship_load(
         cx: &mut TestAppContext,
-        result: Result<LoadedShipArmor, ShipLoadError>,
+        result: Result<FirstStage, ShipLoadError>,
     ) -> (Entity<ViewportView>, Option<SceneProblem>) {
         rust_i18n::set_locale("en");
         cx.update(gpui_kit::init);
@@ -1926,10 +1954,10 @@ mod tests {
                 let layer = pane.opening_layer();
                 let viewport = pane.active_viewport(cx);
                 viewport.update(cx, |view, cx| view.show_armor(shown, layer, cx));
-                let generation = viewport.update(cx, |view, cx| view.begin_load("Iowa".into(), cx));
+                let opening = viewport.update(cx, |view, cx| view.begin_load("Iowa".into(), cx));
 
                 pane.apply_ship_load_result(
-                    generation,
+                    opening.generation,
                     "PASB028".to_string(),
                     "Iowa".to_string(),
                     bundle(),
@@ -1939,7 +1967,7 @@ mod tests {
                 );
 
                 let view = viewport.read(cx);
-                assert!(view.current_armor().is_none(), "the model shown before is not passed off as the ship");
+                assert!(view.shown().is_none(), "the model shown before is not passed off as the ship");
                 assert!(view.open_target().is_none(), "the sidebar marks nothing");
 
                 let problem = view.scene_problem().cloned();
@@ -1960,7 +1988,8 @@ mod tests {
     #[gpui_kit::test]
     fn a_ship_with_nothing_to_draw_says_so_in_its_pane(cx: &mut TestAppContext) {
         let path = ModelPath::parse("content/gameplay/usa/misc/AM001/AM001.model").expect("a model path");
-        let (_, problem) = land_ship_load(cx, Ok(fixtures::hull_scene(path, Vec::new(), 1)));
+        let scene = fixtures::hull_scene(path, Vec::new(), 1);
+        let (_, problem) = land_ship_load(cx, Ok(FirstStage { scene, rest: Vec::new() }));
 
         let reason = ProblemReason::Empty(EmptyScene::Meshless);
         assert_eq!(problem, Some(SceneProblem { subject: "Iowa".into(), reason }));
@@ -1995,17 +2024,162 @@ mod tests {
                 let viewport = pane.active_viewport(cx);
                 viewport.update(cx, |view, cx| view.show_armor(scene, layer, cx));
                 let other = viewport.update(cx, |view, cx| view.begin_load("AGM058".into(), cx));
-                let load = StartedLoad { viewport: viewport.entity_id(), generation: other };
+                let load = StartedLoad { viewport: viewport.entity_id(), generation: other.generation };
                 pane.pending_hits = Some(PendingHits { param_index: "PASC001".into(), load, hits: Vec::new() });
 
                 pane.open_model(turret, None, cx);
 
                 assert!(pane.pending_hits.is_none(), "the cancelled load's replay hits are put away");
 
-                assert!(!viewport.read(cx).is_current_load(other), "the other load no longer lands");
+                assert!(!viewport.read(cx).is_current_load(other.generation), "the other load no longer lands");
+                assert!(other.cancel.is_cancelled(), "and stops");
                 assert!(!viewport.update(cx, |view, cx| view.cancel_load(cx)), "nothing is loading");
             })
             .expect("the test window stays open");
+    }
+
+    /// A second selection in a pane stops the first load, and the first
+    /// load's scene does not replace what is shown when it lands anyway.
+    #[gpui_kit::test]
+    fn a_superseded_load_is_cancelled_and_never_applied(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let shown = Arc::new(fixtures::model_scene(turret.clone(), Vec::new()));
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                let viewport = pane.active_viewport(cx);
+                viewport.update(cx, |view, cx| view.show_armor(Arc::clone(&shown), layer, cx));
+                let first = viewport.update(cx, |view, cx| view.begin_load("Iowa".into(), cx));
+                let second = viewport.update(cx, |view, cx| view.begin_load("Yamato".into(), cx));
+
+                assert!(first.cancel.is_cancelled(), "the first load stops");
+                assert!(!second.cancel.is_cancelled(), "the second runs on");
+
+                let landed = fixtures::model_first_stage(turret, Vec::new());
+                pane.apply_ship_load_result(
+                    first.generation,
+                    "PASB018".to_string(),
+                    "Iowa".to_string(),
+                    bundle(),
+                    viewport.clone(),
+                    Ok(landed),
+                    cx,
+                );
+
+                // The landed scene would have named the ship it was loaded from.
+                assert_eq!(viewport.read(cx).shown_ship_name(), None, "the superseded load's scene is not shown");
+            })
+            .expect("the test window stays open");
+    }
+
+    /// Closing a pane stops the load running into it.
+    #[gpui_kit::test]
+    fn closing_a_pane_cancels_its_load(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+
+        let opening = window
+            .update(cx, |pane, window, cx| {
+                let kept = pane.active_viewport(cx);
+                let closing = pane.fresh_viewport(window, cx);
+                pane.dock.update(cx, |dock, cx| dock.add_pane(closing.clone(), cx));
+                let opening = closing.update(cx, |view, cx| view.begin_load("Iowa".into(), cx));
+                pane.dock.update(cx, |dock, cx| dock.reset_to(kept, cx));
+
+                opening
+            })
+            .expect("the test window stays open");
+        cx.run_until_parked();
+
+        assert!(opening.cancel.is_cancelled());
+    }
+
+    /// A scene's background stage stores its pieces in the scene shown.
+    #[gpui_kit::test]
+    fn the_background_stage_lands_in_the_scene(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let FirstStage { scene, rest } = fixtures::model_first_stage(turret, Vec::new());
+        let scene = Arc::new(scene);
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                pane.active_viewport(cx).update(cx, |view, cx| {
+                    view.show_armor(Arc::clone(&scene), layer, cx);
+                    view.start_scene_rest(Arc::clone(&scene), rest, cx);
+                });
+            })
+            .expect("the test window stays open");
+        assert!(scene.hull_pick_index().is_none(), "the first stage leaves picking to the second");
+        cx.run_until_parked();
+
+        assert!(scene.hull_pick_index().is_some(), "the picking index has landed in the scene shown");
+    }
+
+    /// Showing another scene stops the background stage of the one before,
+    /// which then stores nothing.
+    #[gpui_kit::test]
+    fn a_replaced_scene_s_background_stage_stores_nothing(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let FirstStage { scene, rest } = fixtures::model_first_stage(turret.clone(), Vec::new());
+        let replaced = Arc::new(scene);
+        let next = Arc::new(fixtures::model_scene(turret, Vec::new()));
+
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                pane.active_viewport(cx).update(cx, |view, cx| {
+                    view.show_armor(Arc::clone(&replaced), layer, cx);
+                    view.start_scene_rest(Arc::clone(&replaced), rest, cx);
+                    view.show_armor(Arc::clone(&next), layer, cx);
+                });
+            })
+            .expect("the test window stays open");
+        cx.run_until_parked();
+
+        assert!(replaced.hull_pick_index().is_none());
+    }
+
+    /// A copy of a pane holds the background stage of the scene it shows,
+    /// which then lands even after the pane it was copied from closes.
+    #[gpui_kit::test]
+    fn a_copied_scene_finishes_after_its_first_pane_closes(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let FirstStage { scene, rest } = fixtures::model_first_stage(turret, Vec::new());
+        let scene = Arc::new(scene);
+
+        let closed = window
+            .update(cx, |pane, window, cx| {
+                let layer = pane.opening_layer();
+                let first = pane.active_viewport(cx);
+                first.update(cx, |view, cx| {
+                    view.show_armor(Arc::clone(&scene), layer, cx);
+                    view.start_scene_rest(Arc::clone(&scene), rest, cx);
+                });
+                let run = first.read(cx).scene_rest().expect("the first pane runs the background stage");
+                let copy = pane.fresh_viewport(window, cx);
+                copy.update(cx, |view, cx| {
+                    view.show_armor(Arc::clone(&scene), layer, cx);
+                    view.share_scene_rest(run);
+                });
+                pane.dock.update(cx, |dock, cx| dock.reset_to(copy, cx));
+
+                first.downgrade()
+            })
+            .expect("the test window stays open");
+        cx.run_until_parked();
+
+        assert!(closed.upgrade().is_none(), "the first pane is closed");
+        assert!(scene.hull_pick_index().is_some());
     }
 
     /// Opening a model puts away hits a replay asked to show on a ship.
