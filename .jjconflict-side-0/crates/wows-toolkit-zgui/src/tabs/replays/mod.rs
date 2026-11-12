@@ -3,11 +3,28 @@
 pub mod panel;
 pub mod table;
 
+use std::rc::Rc;
+
 use zgui::component;
 use zgui::view;
+use zgui::view::AnyView;
 use zgui::view::IntoView;
+
+use crate::tabs::replays::panel::PanelTable;
+use crate::tabs::replays::panel::TableSlot;
+use crate::tabs::replays::table::PlayerTableProps;
 
 #[component]
 pub fn ReplaysTab() -> impl IntoView {
     view! { box(class = "wt-tab-empty", attr:data-testid = "replays-tab") }
+}
+
+/// The slot a [`ReplayPanel`](panel::ReplayPanel) draws its battle's [`PlayerTable`](table::PlayerTable) in.
+pub fn player_table_slot() -> TableSlot {
+    Rc::new(|table: PanelTable| {
+        let PanelTable { model, debug, detail, on_view_raw_json } = table;
+        AnyView::new(view! {
+            PlayerTable(model = model, debug = debug, detail = detail, on_view_raw_json = on_view_raw_json)
+        })
+    })
 }
