@@ -6,8 +6,9 @@
 //! `preferences.xml`'s `<last_server_version>` node when that subdirectory
 //! exists on disk (`task/replays.rs::load_wows_files`, the
 //! `available_builds`/`latest_build` selection dropped -- this module only
-//! needs the replays directory, not a loaded game build). `resolve_replays_dir`
-//! ports that lookup; `scan_replay_files` then lists `*.wowsreplay` files
+//! needs the replays directory, not a loaded game build).
+//! `wows_toolkit_replay_data::install::resolve_replays_dir` ports that lookup;
+//! `scan_replay_files` then lists `*.wowsreplay` files
 //! (skipping `temp.wowsreplay`, matching `task/replays.rs::replay_filepaths`)
 //! and reads each one's header via `ReplayFile::meta_from_file` -- plaintext
 //! metadata only, no packet decryption/decompression, so this is safe to run
@@ -65,6 +66,9 @@ use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
 use wows_toolkit_replay_data::columns::BattleOutcome;
 use wows_toolkit_replay_data::columns::ColorRole;
+use wows_toolkit_replay_data::install::resolve_replays_dir;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
@@ -87,8 +91,6 @@ use crate::supervision::NextStep;
 use crate::supervision::PanicReport;
 use crate::supervision::RestartPolicy;
 
-use super::load::GameDataCache;
-use super::load::GameDataStatus;
 use super::map_thumbnails::MapSpace;
 use super::map_thumbnails::MapThumbnails;
 use super::map_thumbnails::Thumbnail;
@@ -681,9 +683,9 @@ impl ReplayBrowser {
                     return;
                 }
                 this.summaries = summaries;
-                crate::heap_profile::mark("summaries.loaded");
+                wows_toolkit_replay_data::heap_profile::mark("summaries.loaded");
                 this.rebuild_tree(cx);
-                crate::heap_profile::mark("summaries.tree");
+                wows_toolkit_replay_data::heap_profile::mark("summaries.tree");
                 cx.notify();
             });
         })
@@ -772,9 +774,9 @@ impl ReplayBrowser {
                 this.scan_progress = None;
                 this.status = if files.is_empty() { ScanStatus::Empty(directory.clone()) } else { ScanStatus::Loaded };
                 this.files = files;
-                crate::heap_profile::mark("scan.files");
+                wows_toolkit_replay_data::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
-                crate::heap_profile::mark("scan.tree");
+                wows_toolkit_replay_data::heap_profile::mark("scan.tree");
                 this.watch_replays_dir(directory, generation, walked, cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
@@ -1003,9 +1005,9 @@ impl ReplayBrowser {
                 this.status =
                     if files.is_empty() { ScanStatus::Empty(replays_dir.clone()) } else { ScanStatus::Loaded };
                 this.files = files;
-                crate::heap_profile::mark("scan.files");
+                wows_toolkit_replay_data::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
-                crate::heap_profile::mark("scan.tree");
+                wows_toolkit_replay_data::heap_profile::mark("scan.tree");
                 this.watch_replays_dir(replays_dir, generation, walked, cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
@@ -2402,41 +2404,6 @@ impl Render for ReplayBrowser {
     }
 }
 
-/// Resolves the replays directory for `wows_dir`: `{wows_dir}/replays`,
-/// overridden by a build-specific subdirectory when `preferences.xml` names
-/// one and it exists on disk. Ports the relevant slice of
-/// `task/replays.rs::load_wows_files` (`mod.rs:342-375`); the
-/// `available_builds` gate and the (functionally redundant -- both loop
-/// entries were the identical path) double directory-existence check in the
-/// original are both dropped as out of scope for a directory-only lookup.
-pub(crate) fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
-    let default_dir = wows_dir.join("replays");
-
-    let Some(version_str) =
-        std::fs::read_to_string(wows_dir.join("preferences.xml")).ok().and_then(|data| last_server_version(&data))
-    else {
-        return default_dir;
-    };
-    let Some(version) = Version::try_from_client_exe(&version_str) else {
-        return default_dir;
-    };
-
-    let versioned_dir = default_dir.join(format!("{}.{}.{}.0", version.major, version.minor, version.patch));
-    if versioned_dir.exists() { versioned_dir } else { default_dir }
-}
-
-/// Reads the `<last_server_version>...</last_server_version>` node out of a
-/// WoWs `preferences.xml`'s raw contents. Ports
-/// `task/replays.rs::current_build_from_preferences`.
-pub(super) fn last_server_version(data: &str) -> Option<String> {
-    const OPEN: &str = "<last_server_version>";
-    const CLOSE: &str = "</last_server_version>";
-    let start = data.find(OPEN)?;
-    let end_of_node = data[start..].find(CLOSE)?;
-    let version_str = &data[start + OPEN.len()..start + end_of_node];
-    Some(version_str.trim().to_string())
-}
-
 /// What a scan read of a directory.
 struct ScannedDir {
     files: Vec<RawReplay>,
@@ -2980,7 +2947,10 @@ mod tests {
             .update(cx, |browser, _window, cx| {
                 let old = PathBuf::from("old.wowsreplay");
                 // The popup is drawn beside its row, so the row is listed.
-                browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+                browser.set_game_data(
+                    &wows_toolkit_replay_data::load::GameDataStatus::Failed("no install in a test".to_owned()),
+                    cx,
+                );
                 browser.seed_listing_for_test(old.clone(), cx);
                 browser.seed_failed_preview_for_test(old, said);
                 cx.notify();
@@ -3085,7 +3055,7 @@ mod tests {
         ];
 
         // A directory that is not an install, so only the cache can answer.
-        let cache = super::GameDataCache::new(PathBuf::from("G:/does-not-exist"))
+        let cache = wows_toolkit_replay_data::load::GameDataCache::new(PathBuf::from("G:/does-not-exist"))
             .with_cache_dir(&cache_dir.path().to_string_lossy());
 
         let missing = super::missing_builds(&files, &cache);
@@ -3157,7 +3127,10 @@ mod tests {
             .update(cx, |browser, _window, cx| {
                 let a = PathBuf::from("a.wowsreplay");
                 // The popup is drawn beside its row, so the row is listed.
-                browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+                browser.set_game_data(
+                    &wows_toolkit_replay_data::load::GameDataStatus::Failed("no install in a test".to_owned()),
+                    cx,
+                );
                 browser.seed_listing_for_test(a.clone(), cx);
                 browser.seed_dwelling_preview_for_test(a);
                 cx.notify();
@@ -3226,7 +3199,10 @@ mod tests {
         let b = PathBuf::from("b.wowsreplay");
         let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
         browser.update(cx, |browser, cx| {
-            browser.set_game_data(&super::GameDataStatus::Failed("no install in a test".to_owned()), cx);
+            browser.set_game_data(
+                &wows_toolkit_replay_data::load::GameDataStatus::Failed("no install in a test".to_owned()),
+                cx,
+            );
             browser.seed_listing_for_test(a.clone(), cx);
             browser.seed_listing_for_test(b.clone(), cx);
         });
@@ -3330,8 +3306,6 @@ mod tests {
     }
 
     use super::is_finished_replay;
-    use super::last_server_version;
-    use super::resolve_replays_dir;
     use std::path::Path;
 
     #[test]
@@ -3426,41 +3400,5 @@ mod tests {
             }
         };
         assert_eq!(stopped, Some(WatchStopCause::DirectoryGone));
-    }
-
-    #[test]
-    fn last_server_version_reads_the_node_contents() {
-        let xml = "<preferences><clientOptions><last_server_version>13, 11, 0, 12668706</last_server_version></clientOptions></preferences>";
-        assert_eq!(last_server_version(xml).as_deref(), Some("13, 11, 0, 12668706"));
-    }
-
-    #[test]
-    fn last_server_version_is_none_when_the_node_is_absent() {
-        assert_eq!(last_server_version("<preferences></preferences>"), None);
-    }
-
-    #[test]
-    fn resolve_replays_dir_falls_back_to_the_default_when_no_preferences_file_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-no-prefs");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        assert_eq!(resolve_replays_dir(&dir), dir.join("replays"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn resolve_replays_dir_prefers_the_versioned_subdir_when_it_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-versioned");
-        let _ = std::fs::remove_dir_all(&dir);
-        let versioned = dir.join("replays").join("13.11.0.0");
-        std::fs::create_dir_all(&versioned).unwrap();
-        std::fs::write(dir.join("preferences.xml"), "<last_server_version>13, 11, 0, 12668706</last_server_version>")
-            .unwrap();
-
-        assert_eq!(resolve_replays_dir(&dir), versioned);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

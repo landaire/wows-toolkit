@@ -14,16 +14,27 @@ path = "src/lib.rs"
 [features]
 # Row and battle-report fixtures, for the tests of crates that render the model.
 test-support = []
+# Samples the live heap at named points of the game-data load. Enabled by a
+# front end that installs dhat's allocator.
+dhat-heap = ["dep:dhat"]
 
 [dependencies]
+dhat = { version = "0.3", optional = true }
 # HTML entities in game chat, which the chat model decodes.
 escaper = "0.1.1"
+# The game's own translation catalogs.
+gettext = { workspace = true }
 jiff = { workspace = true }
 # The column hovers are user-facing strings. `i18n!` generates its lookup per
 # crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+wows-battle-world = { workspace = true }
+# Builds the game-data cache holds, and the auto-dump that writes them.
+wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 # The damage-mix kinds take the replay renderer's armament colours.
 wows_minimap_renderer = { workspace = true, features = ["rendering"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
@@ -34,5 +45,6 @@ wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv
 wt-translations = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3"
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 wows-toolkit-viewmodel = { workspace = true, features = ["test-support"] }

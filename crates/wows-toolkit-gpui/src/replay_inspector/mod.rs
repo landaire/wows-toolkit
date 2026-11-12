@@ -38,14 +38,12 @@ pub use browser_view::ReplayBrowserEvent;
 pub use chat::ChatPanel;
 pub use debug_view::RawJsonPanel;
 pub use icons::IconCache;
-pub use load::GameDataCache;
-pub use load::GameDataStatus;
-pub use load::LoadedGameData;
-pub use load::ReplayLoadError;
-pub use load::load_game_params;
 pub use load::spawn_parse;
 pub use load::spawn_startup_preload;
 pub use panel::ReplayPanel;
 pub use table::PlayerTable;
 pub use view::InspectorSettings;
 pub use view::ReplayInspectorView;
+
+// Removed once armor viewer and replay renderer import from the shared crate.
+pub use wows_toolkit_replay_data::load::GameDataCache;

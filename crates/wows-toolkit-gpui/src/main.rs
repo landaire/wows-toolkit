@@ -23,7 +23,6 @@ mod first_run;
 mod force_reindex;
 mod frame_texture;
 mod game_data_cache;
-mod heap_profile;
 mod http;
 mod icons;
 #[cfg(test)]
@@ -70,6 +69,7 @@ use app::App;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 use settings::GpuiSettings;
+use wows_toolkit_replay_data::heap_profile;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));

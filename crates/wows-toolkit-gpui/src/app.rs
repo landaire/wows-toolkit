@@ -43,13 +43,13 @@ use gpui_kit::*;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rust_i18n::t;
 use std::rc::Rc;
+use wows_toolkit_replay_data::load::GameDataStatus;
 
 use crate::armor_viewer::ArmorViewerPane;
 use crate::game_data_cache;
 use crate::palette::PaletteAction;
 use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
-use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
@@ -1987,7 +1987,7 @@ impl App {
         if wows_dir.is_empty() {
             return None;
         }
-        Some(crate::replay_inspector::browser_view::resolve_replays_dir(std::path::Path::new(&wows_dir)))
+        Some(wows_toolkit_replay_data::install::resolve_replays_dir(std::path::Path::new(&wows_dir)))
     }
 
     /// The version the install is on, which is what a ship's ranges are read
@@ -1997,7 +1997,7 @@ impl App {
         if wows_dir.is_empty() {
             return None;
         }
-        crate::replay_inspector::load::installed_version(std::path::Path::new(&wows_dir))
+        wows_toolkit_replay_data::install::installed_version(std::path::Path::new(&wows_dir))
     }
 
     /// Opens a tactics board in a window of its own.

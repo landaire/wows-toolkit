@@ -1,16 +1,29 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "replay_data_build",
+    crate = "wows_toolkit_replay_data",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    env = {"EMBEDDED_CONSTANTS": "$(location //embedded_resources:constants_json)"},
+)
 
 REPLAY_DATA_COMMON_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:escaper",
+    "//third-party/rust:gettext",
     "//third-party/rust:jiff",
     "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
 ]
 
 REPLAY_DATA_DEPS = REPLAY_DATA_COMMON_DEPS + [
@@ -30,7 +43,19 @@ workspace_library(
     crate = "wows_toolkit_replay_data",
     package = "wows-toolkit-replay-data",
     version = "0.1.0",
+    buildscript = buildscript,
     deps = REPLAY_DATA_DEPS,
+)
+
+# The heap-sampling build, for a front end built with dhat's allocator.
+workspace_library(
+    name = "wows_toolkit_replay_data_dhat",
+    crate = "wows_toolkit_replay_data",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    features = ["dhat-heap"],
+    buildscript = buildscript,
+    deps = REPLAY_DATA_DEPS + ["//third-party/rust:dhat"],
 )
 
 # Row and battle-report fixtures, for the tests of crates that render the model.
@@ -40,6 +65,7 @@ workspace_library(
     package = "wows-toolkit-replay-data",
     version = "0.1.0",
     features = ["test-support"],
+    buildscript = buildscript,
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
 )
 
@@ -50,5 +76,7 @@ workspace_test(
     package = "wows-toolkit-replay-data",
     version = "0.1.0",
     features = ["test-support"],
+    buildscript = buildscript,
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
+    test_deps = ["//third-party/rust:tempfile"],
 )

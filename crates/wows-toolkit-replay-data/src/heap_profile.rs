@@ -15,8 +15,10 @@
 //! written; `HeapStats::get` needs no symbolization and is where the totals
 //! come from.
 //!
-//! Build with `--features dhat-heap`, run, then read `dhat-markers.log`. Both
-//! functions compile to nothing without it, so call sites need no `cfg`.
+//! A front end built with its `dhat-heap` feature installs dhat's allocator and
+//! enables the feature of the same name here; run it, then read
+//! `dhat-markers.log`. Both functions compile to nothing without it, so call
+//! sites need no `cfg`.
 //! `DHAT_TRIM` sets the retained backtrace depth and `DHAT_RUN_SECS` how long
 //! to let the app settle before the first timed sample.
 

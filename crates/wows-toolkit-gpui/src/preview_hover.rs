@@ -23,6 +23,7 @@ use gpui_kit::Context;
 use gpui_kit::Render;
 use gpui_kit::SharedString;
 use gpui_kit::Task;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
 
@@ -30,7 +31,6 @@ use crate::frame_texture::FrameTexture;
 use crate::minimap_preview::FRAME_INTERVAL;
 use crate::minimap_preview::PreviewEdge;
 use crate::minimap_preview::PreviewFrames;
-use crate::replay_inspector::GameDataCache;
 
 /// A baked preview and where it is in its loop.
 struct Shown {

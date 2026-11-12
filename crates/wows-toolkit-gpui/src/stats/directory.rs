@@ -40,14 +40,14 @@ use gpui_kit::component::v_flex;
 use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder as _;
 use rust_i18n::t;
+use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetGames;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetProgress;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetSkips;
 use wowsunpack::data::Version;
 
-use crate::replay_inspector::load::GameDataCache;
-use crate::replay_inspector::load::ReplayLoadError;
 use crate::replay_inspector::view::ReplayInspectorView;
 
 use super::view::StatsScope;
@@ -470,7 +470,7 @@ fn read_header_version(path: &Path) -> Option<Version> {
 
 /// Parses one replay and reads the recording player's game off it.
 fn read_game(path: &Path, game_data: &GameDataCache) -> GameRead {
-    let parsed = match crate::replay_inspector::load::parse_replay(path, game_data, None) {
+    let parsed = match wows_toolkit_replay_data::load::parse_replay(path, game_data, None) {
         Ok(parsed) => parsed,
         Err(ReplayLoadError::UnsupportedVersion { .. }) => return GameRead::MissingBuild,
         Err(err) => {

@@ -13,12 +13,11 @@ use std::path::PathBuf;
 use gpui_kit::App;
 use gpui_kit::AppContext as _;
 use gpui_kit::Task;
+use wows_toolkit_replay_data::shareable::Shareable;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::upload::RAW_REPLAYS_URL;
 use wows_toolkit_viewmodel::upload::ReplayUploadAction;
-use wows_toolkit_viewmodel::upload::ResultsScan;
 use wows_toolkit_viewmodel::upload::SHIP_BUILDS_URL;
-use wows_toolkit_viewmodel::upload::build_tracker::BuildTrackerPayload;
 use wows_toolkit_viewmodel::upload::decide_upload_action;
 use wows_toolkit_viewmodel::upload::is_eligible_game_type;
 use wows_toolkit_viewmodel::upload::raw_replay_snapshot_state;
@@ -37,24 +36,6 @@ pub enum Outcome {
     Waiting,
     /// The service could not be reached. Not recorded, so it is tried again.
     Failed(String),
-}
-
-/// What a decision needs to know about the parsed battle.
-///
-/// Taken as plain data rather than the report itself: the decision is shared and
-/// must not depend on either app's own types.
-pub struct Shareable {
-    /// `ReplayMeta::gameType`, which says whether the service takes this battle.
-    pub game_type: String,
-    pub version: wowsunpack::data::Version,
-    /// Whether the recording player's ship is positively known not to be a test
-    /// ship. Uncertainty is `false`, which keeps the file off `/api/replays`.
-    pub self_confirmed_non_test: bool,
-    /// Whether the packet stream carried an end-of-battle marker.
-    pub results: ResultsScan,
-    /// The per-player build payloads, for the build-data mode. Empty is nothing
-    /// to send.
-    pub builds: Vec<BuildTrackerPayload>,
 }
 
 /// Whether the sent-replay ledger decides what is skipped.
@@ -213,18 +194,4 @@ async fn record(pool: &sqlx::sqlite::SqlitePool, path: &str) -> Outcome {
         // again and the service will see it twice.
         Err(err) => Outcome::Failed(format!("sent, but the ledger was not written: {err}")),
     }
-}
-
-/// Whether the recording player's ship is positively not a test ship.
-///
-/// Any doubt is `false`: an unknown ship keeps the whole file off the service,
-/// which is the rule `decide_upload_action` documents.
-pub fn self_is_not_a_test_ship(report: &wows_battle_world::report::BattleReport) -> bool {
-    report
-        .players()
-        .iter()
-        .find(|player| player.relation().is_self())
-        .and_then(|player| player.vehicle().vehicle())
-        .map(|vehicle| !vehicle.is_test_ship())
-        .unwrap_or(false)
 }

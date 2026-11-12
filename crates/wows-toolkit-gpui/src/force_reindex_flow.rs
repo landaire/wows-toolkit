@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use wows_toolkit_replay_data::load::GameDataCache;
+
 use super::*;
 use crate::force_reindex::Confirm;
 use crate::force_reindex::Fetchable;
@@ -11,7 +13,6 @@ use crate::force_reindex::Release;
 use crate::replay_index::IndexProgress;
 use crate::replay_index::ScopedReplay;
 use crate::replay_index::SourceScope;
-use crate::replay_inspector::GameDataCache;
 
 /// A run's downloads, fetched one release at a time so Stop takes effect
 /// between them.

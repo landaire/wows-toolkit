@@ -11,8 +11,7 @@ use gpui_kit::RenderImage;
 use image::Frame;
 use image::RgbImage;
 use image::RgbaImage;
-
-use super::load::GameDataCache;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// The edge a thumbnail is scaled to, in physical pixels: twice the edge it
 /// is drawn at, so it stays sharp on a scale-two display.

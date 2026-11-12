@@ -44,6 +44,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 use jiff::Timestamp;
 use sqlx::sqlite::SqlitePool;
@@ -100,9 +102,7 @@ use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
 
-use crate::replay_inspector::GameDataCache;
 use crate::replay_inspector::IconCache;
-use crate::replay_inspector::LoadedGameData;
 use crate::replay_inspector::player_colors::class_icon_tint;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
@@ -793,7 +793,7 @@ impl PlayerTrackerView {
         self.clan_state = LoadState::Loading;
         cx.spawn(async move |this, cx| {
             let found = runtime::spawn(cx, async move {
-                crate::heap_profile::mark("clan_inputs.begin");
+                wows_toolkit_replay_data::heap_profile::mark("clan_inputs.begin");
                 // Scoped to the live source. Unscoped, both queries walk every
                 // indexed source, so a directory opened once through "Open
                 // Replay Directory" keeps costing the clans table a full scan
@@ -803,9 +803,9 @@ impl PlayerTrackerView {
                     ..Default::default()
                 };
                 let latest = query::distinct_players(&pool, &filter).await?;
-                crate::heap_profile::mark("clan_inputs.players");
+                wows_toolkit_replay_data::heap_profile::mark("clan_inputs.players");
                 let corrections = query::clan_history_corrections(&pool, &filter).await?;
-                crate::heap_profile::mark("clan_inputs.corrections");
+                wows_toolkit_replay_data::heap_profile::mark("clan_inputs.corrections");
                 Ok::<_, wows_toolkit_config::index::rows::IndexError>((latest, corrections))
             })
             .await;
@@ -2947,10 +2947,10 @@ mod tests {
     use gpui_kit::test::TestAppContextExt;
     use gpui_kit::test::TestWindowExt;
     use std::time::Duration;
+    use wows_toolkit_replay_data::load::GameDataCache;
 
     use super::PlayerTrackerView;
     use super::SubTab;
-    use crate::replay_inspector::GameDataCache;
     use jiff::Timestamp;
     use wows_replays::types::AccountId;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;

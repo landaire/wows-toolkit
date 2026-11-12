@@ -17,11 +17,11 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_toolkit_replay_data::install::resolve_replays_dir;
 
 use super::*;
 use crate::replay_inspector::browser_view::WatchState;
 use crate::replay_inspector::browser_view::WatchStopCause;
-use crate::replay_inspector::browser_view::resolve_replays_dir;
 use crate::supervision::NextStep;
 use crate::supervision::RestartPolicy;
 use crate::toast::Level;

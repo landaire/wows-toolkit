@@ -3171,7 +3171,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(replays.path().to_path_buf(), game_data, window, cx);
         })
         .expect("the test window stays open");
@@ -3185,7 +3185,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
 
     window
         .update(cx, |app, window, cx| {
-            let game_data = crate::replay_inspector::load::GameDataCache::without_install();
+            let game_data = wows_toolkit_replay_data::load::GameDataCache::without_install();
             app.open_directory_stats_reading(alias.clone(), game_data, window, cx);
         })
         .expect("the test window stays open");
@@ -3224,8 +3224,8 @@ fn browser_row(row: usize) -> (&'static str, usize) {
 /// rooted there all the same.
 #[gpui_kit::test]
 fn a_forced_reindex_of_chosen_rows_reads_exactly_those_rows(cx: &mut TestAppContext) {
-    use crate::replay_inspector::GameDataStatus;
     use wows_toolkit_config::index::unindexable::Unindexable;
+    use wows_toolkit_replay_data::load::GameDataStatus;
 
     let (window, app) = open_app_in_root(cx);
     let pool = open_index(cx);
@@ -3326,7 +3326,7 @@ fn a_forced_reindex_of_chosen_rows_reads_exactly_those_rows(cx: &mut TestAppCont
 /// replay count, and choosing one asks first with the count and the dates.
 #[gpui_kit::test]
 fn the_palette_offers_versions_newest_first_and_asks_before_reindexing(cx: &mut TestAppContext) {
-    use crate::replay_inspector::GameDataStatus;
+    use wows_toolkit_replay_data::load::GameDataStatus;
 
     let (window, app) = open_app_in_root(cx);
     open_index(cx);

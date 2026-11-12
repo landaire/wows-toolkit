@@ -15,10 +15,15 @@ pub fn set_locale(code: &str) {
 pub mod browser_tree;
 pub mod columns;
 pub mod damage_mix;
+pub mod error;
+pub mod heap_profile;
+pub mod install;
 pub mod links;
+pub mod load;
 pub mod model;
 #[cfg(any(test, feature = "test-support"))]
 pub mod sample;
+pub mod shareable;
 pub mod sort;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
