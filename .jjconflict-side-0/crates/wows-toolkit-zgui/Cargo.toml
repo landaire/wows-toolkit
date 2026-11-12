@@ -82,5 +82,7 @@ wows-toolkit-services = { workspace = true, features = ["test-support"] }
 # The sample replay and fabricated rows the player table and replay panel tests draw.
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 tempfile = "3"
+# Timestamps for the Search tab's sample results.
+jiff = { workspace = true }
 # Test frames are built from RGB images.
 image = { workspace = true }
