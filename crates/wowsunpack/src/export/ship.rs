@@ -54,11 +54,25 @@ use super::gltf_export;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
+use super::gltf_export::negate_z_transform;
+use super::hardpoint::HardpointName;
+use super::hardpoint::ModelSpaceHardpoints;
 use super::hardpoint::mat4_mul;
 use super::hardpoint::mesh_to_node_space;
+use super::hardpoint::model_extenders;
+use super::model_catalog::ModelPath;
 use super::model_library::ModelLibrary;
 use super::model_library::ModelLibraryError;
 use super::part_group::PartGroup;
+use super::ship_parts::MISC_NODE_PREFIX;
+use super::ship_parts::MiscParent;
+use super::ship_parts::ShipPart;
+use super::ship_parts::ShipPartKey;
+use super::ship_parts::misc_name_from_node;
+use super::ship_parts::mount_has_misc_selection;
+use super::ship_parts::mount_shows_misc;
+use super::ship_parts::select_hull_mount_points;
+use super::ship_parts::split_compound_hp;
 use super::size_estimate;
 use super::texture;
 
@@ -463,19 +477,29 @@ impl ShipAssets {
 
         // Load turret/mount models from GameParams.
         let mount_points: Vec<MountPoint> = vehicle
-            .and_then(|v| self.select_hull_mount_points(v, options.hull.as_deref(), &options.module_overrides))
+            .and_then(|v| select_hull_mount_points(v, options.hull.as_deref(), &options.module_overrides))
             .unwrap_or_default();
 
         let loaded = self.load_mounts(&db, &self_id_index, &mount_points, &hull_parts)?;
         let turret_models = loaded.turret_models;
         let mounts = loaded.mounts;
 
-        // Load misc parts (propellers, boats, deck fittings) from the hull's skeleton
-        // extenders and place them at their `MP_` node transforms.
-        let skel_ext_paths = self.find_skel_ext_paths(&db, &self_id_index, &info.model_dir);
-        let hull_skel_exts = self.load_skeleton_extenders(&db, &self_id_index, &skel_ext_paths);
+        // Load misc parts (propellers, boats, deck fittings) from the skeleton extenders
+        // the hull section and mount models name, and place them at their `MP_` nodes.
+        let model_leaves = ModelLeaves::new(&db);
+        let hull = HullSections::new(&hull_parts, &visual_paths, &db, &self_id_index, &model_leaves);
         let (misc_models, miscs) =
-            self.collect_miscs(&db, &self_id_index, &hull_skel_exts, &hull_parts, &mounts, &turret_models);
+            self.collect_miscs(&db, &self_id_index, &model_leaves, &hull, &mounts, &turret_models);
+
+        let parts = ShipPartSources {
+            hull: &hull,
+            turret_models: &turret_models,
+            turret_model_index: &loaded.turret_model_index,
+            mounts: &mounts,
+            misc_models: &misc_models,
+            miscs: &miscs,
+        }
+        .parts(&db, &self_id_index, &model_leaves);
 
         // Resolve material-based camouflage schemes (ship-specific + universal + expendable).
         let ship_index = self.find_ship_index(&info.model_dir);
@@ -500,6 +524,7 @@ impl ShipAssets {
             mounts,
             misc_models,
             miscs,
+            parts,
             info,
             options: options.clone(),
             mat_camo_schemes,
@@ -817,71 +842,6 @@ impl ShipAssets {
         Ok(result)
     }
 
-    /// Scan paths_storage for `.skel_ext` files in a directory matching the name.
-    ///
-    /// Returns `(sub_name, full_path)` pairs. Both the per-section `<Section>.skel_ext`
-    /// and `<Section>_ep.skel_ext` files are returned; misc (`MP_`) nodes live in the
-    /// former, effect (`EP_`) nodes in the latter, so callers scan node prefixes rather
-    /// than relying on the filename.
-    fn find_skel_ext_paths(
-        &self,
-        db: &PrototypeDatabase<'_>,
-        self_id_index: &HashMap<u64, usize>,
-        model_dir: &str,
-    ) -> Vec<(String, String)> {
-        let needle = format!("/{model_dir}/");
-        let mut result = Vec::new();
-
-        for (i, entry) in db.paths_storage.iter().enumerate() {
-            if !entry.name.ends_with(".skel_ext") {
-                continue;
-            }
-            let full_path = db.reconstruct_path(i, self_id_index);
-            if full_path.contains(&needle) {
-                let sub_name = entry.name.strip_suffix(".skel_ext").unwrap_or(&entry.name).to_string();
-                result.push((sub_name, full_path));
-            }
-        }
-
-        result.sort_by(|a, b| a.0.cmp(&b.0));
-        result
-    }
-
-    /// Resolve and parse a ship's skeleton-extender records.
-    ///
-    /// Skips (with a warning) any extender that fails to resolve or parse rather than
-    /// aborting the whole ship load.
-    fn load_skeleton_extenders(
-        &self,
-        db: &PrototypeDatabase<'_>,
-        self_id_index: &HashMap<u64, usize>,
-        skel_ext_paths: &[(String, String)],
-    ) -> Vec<skeleton_extender::SkeletonExtender> {
-        let mut result = Vec::new();
-        for (sub_name, _) in skel_ext_paths {
-            let suffix = format!("{sub_name}.skel_ext");
-            let location = match db.resolve_path(&suffix, self_id_index) {
-                Ok((loc, _)) => loc,
-                Err(e) => {
-                    eprintln!("Warning: could not resolve skel_ext '{suffix}': {e}");
-                    continue;
-                }
-            };
-            let record = match db.get_prototype_data(location, skeleton_extender::SKELETON_EXTENDER_ITEM_SIZE) {
-                Ok(data) => data,
-                Err(e) => {
-                    eprintln!("Warning: could not read skel_ext '{suffix}': {e}");
-                    continue;
-                }
-            };
-            match skeleton_extender::parse_skeleton_extender(record) {
-                Ok(ext) => result.push(ext),
-                Err(e) => eprintln!("Warning: could not parse skel_ext '{suffix}': {e}"),
-            }
-        }
-        result
-    }
-
     /// Resolve (and deduplicate) a misc model by name, loading and validating its
     /// geometry so downstream render/export paths cannot fail on it.
     ///
@@ -891,6 +851,7 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
+        model_leaves: &ModelLeaves<'_>,
         misc_name: &str,
         node_name: &str,
         acc: &mut MiscModelSet,
@@ -899,6 +860,11 @@ impl ShipAssets {
             return Some(idx);
         }
         if acc.load_failed.contains(misc_name) {
+            return None;
+        }
+        // The game finds a misc by its `.model`; a visual without one is not a misc.
+        if model_leaves.position(misc_name).is_none() {
+            acc.load_failed.insert(misc_name.to_string());
             return None;
         }
         // Misc models resolve by leaf `<miscName>.visual`, exactly like turret mounts;
@@ -939,8 +905,8 @@ impl ShipAssets {
         &self,
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
-        hull_skel_exts: &[skeleton_extender::SkeletonExtender],
-        hull_parts: &[OwnedSubModel],
+        model_leaves: &ModelLeaves<'_>,
+        hull: &HullSections<'_>,
         mounts: &[ResolvedMount],
         turret_models: &[OwnedSubModel],
     ) -> (Vec<OwnedSubModel>, Vec<ResolvedMisc>) {
@@ -950,8 +916,15 @@ impl ShipAssets {
         // Hull miscs: every MP_ node shows (HullMiscsController applies no filter).
         // Zip the three index-aligned arrays so a corrupt record with mismatched lengths
         // truncates to the shortest rather than panicking on `[i]`.
-        for ext in hull_skel_exts {
-            for ((&name_id, &parent_id), matrix) in ext.name_ids.iter().zip(&ext.parent_name_ids).zip(&ext.matrices) {
+        let hull_extenders = hull
+            .parts
+            .iter()
+            .zip(&hull.models)
+            .filter_map(|(part, section)| Some((section.as_ref()?, model_leaves.extenders(db, &part.name))));
+        for (section, extenders) in hull_extenders {
+            let nodes =
+                extenders.iter().flat_map(|ext| ext.name_ids.iter().zip(&ext.parent_name_ids).zip(&ext.matrices));
+            for ((&name_id, &parent_id), matrix) in nodes {
                 let Some(node_name) = db.strings.get_string_by_id(name_id) else {
                     continue;
                 };
@@ -959,14 +932,16 @@ impl ShipAssets {
                     continue;
                 }
                 let misc_name = misc_name_from_node(node_name);
-                let Some(model_idx) = self.resolve_misc_model(db, self_id_index, &misc_name, node_name, &mut acc)
-                else {
+                let resolved =
+                    self.resolve_misc_model(db, self_id_index, model_leaves, &misc_name, node_name, &mut acc);
+                let Some(model_idx) = resolved else {
                     continue;
                 };
                 let parent_name = db.strings.get_string_by_id(parent_id);
-                let transform = compose_misc_transform(parent_name, &matrix.0, hull_parts, &db.strings);
+                let transform = compose_misc_transform(parent_name, &matrix.0, hull.parts, &db.strings);
                 placements.push(ResolvedMisc {
-                    node_name: node_name.to_string(),
+                    node: HardpointName::new(node_name),
+                    parent: MiscParent::HullSection(section.clone()),
                     misc_model_index: model_idx,
                     transform: Some(transform),
                 });
@@ -975,21 +950,15 @@ impl ShipAssets {
 
         // Mount miscs: the mount model's own MP_ nodes, whitelisted by miscFilter or by
         // the battle-preset customMiscs. Skeleton extenders are loaded once per model.
-        let mut turret_skel_exts: HashMap<String, Vec<skeleton_extender::SkeletonExtender>> = HashMap::new();
+        let mut turret_skel_exts: HashMap<usize, Vec<skeleton_extender::SkeletonExtender>> = HashMap::new();
         for mount in mounts {
-            let has_battle_customs = mount.custom_miscs.contains_key(MISC_PRESET_BATTLE);
-            if mount.misc_filter.is_empty() && !has_battle_customs {
+            if !mount_has_misc_selection(&mount.misc_filter, &mount.custom_miscs) {
                 continue;
             }
             let turret = &turret_models[mount.turret_model_index];
-            let exts = turret_skel_exts.entry(turret.name.clone()).or_insert_with(|| {
-                let paths = self.find_skel_ext_paths(db, self_id_index, &turret.name);
-                self.load_skeleton_extenders(db, self_id_index, &paths)
-            });
-
-            let whitelist: HashSet<&str> = mount.misc_filter.iter().map(String::as_str).collect();
-            let battle_customs: HashSet<&str> =
-                mount.custom_miscs.get(MISC_PRESET_BATTLE).into_iter().flatten().map(String::as_str).collect();
+            let exts = turret_skel_exts
+                .entry(mount.turret_model_index)
+                .or_insert_with(|| model_leaves.extenders(db, &turret.name));
 
             // Snapshot the parsed extenders so `self` is free for resolve_misc_model.
             let nodes: Vec<(String, u32, [f32; 16])> = exts
@@ -1003,11 +972,12 @@ impl ShipAssets {
 
             for (node_name, parent_id, local_matrix) in nodes {
                 let misc_name = misc_name_from_node(&node_name);
-                if !whitelist.contains(node_name.as_str()) && !battle_customs.contains(misc_name.as_str()) {
+                if !mount_shows_misc(&mount.misc_filter, &mount.custom_miscs, &node_name, &misc_name) {
                     continue;
                 }
-                let Some(model_idx) = self.resolve_misc_model(db, self_id_index, &misc_name, &node_name, &mut acc)
-                else {
+                let resolved =
+                    self.resolve_misc_model(db, self_id_index, model_leaves, &misc_name, &node_name, &mut acc);
+                let Some(model_idx) = resolved else {
                     continue;
                 };
                 // Position the misc in the turret model's own space (compose through its
@@ -1023,7 +993,8 @@ impl ShipAssets {
                     compose_misc_transform(parent_name, &local_matrix, std::slice::from_ref(turret), &db.strings);
                 let transform = mat4_mul(&mount.armor_transform, &local);
                 placements.push(ResolvedMisc {
-                    node_name: format!("{node_name} [{}]", mount.hp_name),
+                    node: HardpointName::new(node_name),
+                    parent: MiscParent::Mount(HardpointName::new(mount.hp_name.as_str())),
                     misc_model_index: model_idx,
                     transform: Some(transform),
                 });
@@ -1031,44 +1002,6 @@ impl ShipAssets {
         }
 
         (acc.models, placements)
-    }
-
-    /// Select mount points for the chosen hull upgrade, with optional module overrides.
-    fn select_hull_mount_points(
-        &self,
-        vehicle: &crate::game_params::types::Vehicle,
-        hull_selection: Option<&str>,
-        module_overrides: &std::collections::HashMap<crate::game_params::keys::ComponentType, String>,
-    ) -> Option<Vec<MountPoint>> {
-        let upgrades = vehicle.hull_upgrades()?;
-        let mut sorted: Vec<_> = upgrades.iter().collect();
-        sorted.sort_by_key(|(k, _)| (*k).clone());
-
-        let selected = if let Some(sel) = hull_selection {
-            sorted
-                .iter()
-                .find(|(name, _)| *name == sel || name.to_lowercase().contains(&sel.to_lowercase()))
-                .or_else(|| {
-                    let prefix = format!("{sel}_");
-                    sorted.iter().find(|(_, config)| {
-                        config
-                            .component_name(keys::ComponentType::Hull)
-                            .map(|n| n.starts_with(&prefix))
-                            .unwrap_or(false)
-                    })
-                })
-                .copied()
-        } else {
-            sorted.first().copied()
-        };
-
-        selected.map(|(_, config)| {
-            if module_overrides.is_empty() {
-                config.all_mount_points().cloned().collect()
-            } else {
-                config.mount_points_with_overrides(module_overrides).cloned().collect()
-            }
-        })
     }
 
     /// Load turret models and build mount resolution data.
@@ -1257,6 +1190,8 @@ pub struct ShipModelContext {
     misc_models: Vec<OwnedSubModel>,
     /// Misc-part placements: one per `MP_` skeleton node.
     miscs: Vec<ResolvedMisc>,
+    /// Every hull section, mount and misc placement with its hardpoints.
+    parts: Vec<ShipPart>,
     info: ShipInfo,
     options: ShipExportOptions,
     mat_camo_schemes: Vec<MatCamoScheme>,
@@ -1366,6 +1301,13 @@ impl ShipModelContext {
     /// Hull part names (sub-model names).
     pub fn hull_part_names(&self) -> Vec<&str> {
         self.hull_parts.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    /// Every hull section, then every mount, then every misc placement, with
+    /// placements and hardpoints in ship space. Keys match
+    /// [`ModelLibrary::list_ship_parts`] for the same hull and overrides.
+    pub fn parts(&self) -> &[ShipPart] {
+        &self.parts
     }
 
     /// Number of mounted components (turrets, AA, etc.).
@@ -1520,7 +1462,7 @@ impl ShipModelContext {
             let mut meshes = gltf_export::collect_hull_meshes(&part.visual, geom, &db, lod, damaged, None)?;
             for mesh in &mut meshes {
                 mesh.transform = misc.transform.map(gltf_export::negate_z_transform);
-                mesh.name = format!("{} [{}]", mesh.name, misc.node_name);
+                mesh.name = format!("{} [{}]", mesh.name, misc.label());
                 mesh.group = PartGroup::Misc;
             }
             result.extend(meshes);
@@ -1662,7 +1604,7 @@ impl ShipModelContext {
                 let misc_geom = &misc_geoms[misc.misc_model_index];
 
                 sub_models.push(SubModel {
-                    name: format!("{} ({})", misc.node_name, misc_data.name),
+                    name: format!("{} ({})", misc.label(), misc_data.name),
                     visual: &misc_data.visual,
                     geometry: misc_geom,
                     transform: misc.transform,
@@ -2078,66 +2020,55 @@ struct MiscModelSet {
 
 /// A misc-part placement: one instance of a misc model at a skeleton `MP_` node.
 struct ResolvedMisc {
-    /// Full skeleton node name, e.g. "MP_BM509_Liferaft_type_20_10ft.001".
-    node_name: String,
+    /// Skeleton node name, e.g. "MP_BM509_Liferaft_type_20_10ft.001".
+    node: HardpointName,
+    parent: MiscParent,
     /// Index into [`ShipModelContext::misc_models`].
     misc_model_index: usize,
     /// Ship-space transform (column-major 4x4).
     transform: Option<[f32; 16]>,
 }
 
-/// Skeleton node-name prefix marking a misc part (propeller, boat, deck fitting).
-/// Style-variant miscs use `SP_` and are out of scope.
-const MISC_NODE_PREFIX: &str = "MP_";
-
-/// The `customMiscs` preset key the game shows in battle (`MiscPresets.battle`);
-/// the armor viewer renders the battle configuration, excluding `dock`-only extras.
-const MISC_PRESET_BATTLE: &str = "battle";
-
-/// Derive the misc model name from a `MP_` skeleton node name.
-///
-/// Faithfully mirrors the game's `MiscFinder.__findMiscsForNodes`: split on `_` and
-/// drop the first segment (the `MP` prefix), then remove a trailing instance suffix.
-/// A `.NNN` suffix (a dot followed by three digits, matched anywhere) drops the last
-/// dot-segment; otherwise a legacy `INDEX_<n>` ending drops the last two `_` segments.
-/// E.g. both `MP_BM509_Liferaft_type_20_10ft.001` and
-/// `MP_BM509_Liferaft_type_20_10ft_INDEX_1` yield `BM509_Liferaft_type_20_10ft`.
-fn misc_name_from_node(node_name: &str) -> String {
-    let mut segments = node_name.split('_');
-    segments.next(); // drop the `MP` prefix segment
-    let rest: String = segments.collect::<Vec<_>>().join("_");
-
-    if contains_dot_three_digits(&rest) {
-        if let Some(pos) = rest.rfind('.') {
-            return rest[..pos].to_string();
-        }
-    } else if ends_with_legacy_index(&rest) {
-        let segs: Vec<&str> = rest.split('_').collect();
-        if segs.len() >= 2 {
-            return segs[..segs.len() - 2].join("_");
+impl ResolvedMisc {
+    /// The node name followed by its parent part, which tells apart the nodes
+    /// hull sections and mounts repeat.
+    fn label(&self) -> String {
+        match &self.parent {
+            MiscParent::Mount(mount) => format!("{} [{mount}]", self.node),
+            MiscParent::HullSection(section) => format!("{} [{}]", self.node, section.stem()),
         }
     }
-    rest
 }
 
-/// Whether `s` contains a `.` immediately followed by at least three ASCII digits
-/// (the game's `.*?\.(\d\d\d)` instance-suffix pattern).
-fn contains_dot_three_digits(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    bytes
-        .iter()
-        .enumerate()
-        .any(|(i, &b)| b == b'.' && bytes.get(i + 1..i + 4).is_some_and(|d| d.iter().all(u8::is_ascii_digit)))
+/// The hull parts of a ship with the `.model` each is keyed by.
+struct HullSections<'a> {
+    parts: &'a [OwnedSubModel],
+    /// Aligned with `parts`. `None` for a visual the store holds no model beside.
+    models: Vec<Option<ModelPath>>,
 }
 
-/// Whether `s` ends with `INDEX_<digits>` (the game's `^.*INDEX_\d+$` legacy pattern).
-fn ends_with_legacy_index(s: &str) -> bool {
-    match s.rfind("INDEX_") {
-        Some(pos) => {
-            let tail = &s[pos + "INDEX_".len()..];
-            !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit())
-        }
-        None => false,
+impl<'a> HullSections<'a> {
+    /// `visual_paths` holds `(sub_name, visual path)` for every hull visual found.
+    fn new(
+        parts: &'a [OwnedSubModel],
+        visual_paths: &[(String, String)],
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        model_leaves: &ModelLeaves<'_>,
+    ) -> Self {
+        let paths: HashMap<&str, &str> =
+            visual_paths.iter().map(|(name, path)| (name.as_str(), path.as_str())).collect();
+        let models = parts
+            .iter()
+            .map(|part| {
+                let model = sibling_model_path(paths.get(part.name.as_str())?)?;
+                let stored = db.reconstruct_path(model_leaves.position(&part.name)?, self_id_index);
+
+                (stored == model.as_str()).then_some(model)
+            })
+            .collect();
+
+        Self { parts, models }
     }
 }
 
@@ -2162,6 +2093,157 @@ fn compose_misc_transform(
         }
     }
     *local
+}
+
+/// What [`ShipModelContext::parts`] is built from, borrowed during the load.
+struct ShipPartSources<'a> {
+    hull: &'a HullSections<'a>,
+    turret_models: &'a [OwnedSubModel],
+    /// GameParams model path to index into `turret_models`.
+    turret_model_index: &'a HashMap<String, usize>,
+    mounts: &'a [ResolvedMount],
+    misc_models: &'a [OwnedSubModel],
+    miscs: &'a [ResolvedMisc],
+}
+
+impl ShipPartSources<'_> {
+    fn parts(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+        model_leaves: &ModelLeaves<'_>,
+    ) -> Vec<ShipPart> {
+        let mut parts = Vec::with_capacity(self.hull.parts.len() + self.mounts.len() + self.miscs.len());
+
+        let hull_visuals: Vec<&VisualPrototype> = self.hull.parts.iter().map(|part| &part.visual).collect();
+        for (part, model) in self.hull.parts.iter().zip(&self.hull.models) {
+            // A part is keyed by its model path; a visual path that names none cannot be keyed.
+            let Some(model) = model else {
+                continue;
+            };
+            let hardpoints = model_space_hardpoints(db, model_leaves, part, &hull_visuals);
+            parts.push(ShipPart {
+                key: ShipPartKey::HullSection(model.clone()),
+                model: Some(model.clone()),
+                group: PartGroup::Hull,
+                placement: None,
+                hardpoints: hardpoints.placed(None),
+            });
+        }
+
+        let mut turret_paths: Vec<Option<ModelPath>> = vec![None; self.turret_models.len()];
+        for (path, &idx) in self.turret_model_index {
+            if let Some(slot) = turret_paths.get_mut(idx) {
+                *slot = ModelPath::parse(path).ok();
+            }
+        }
+        let turret_hardpoints: Vec<ModelSpaceHardpoints> = self
+            .turret_models
+            .iter()
+            .map(|turret| model_space_hardpoints(db, model_leaves, turret, &[&turret.visual]))
+            .collect();
+        for mount in self.mounts {
+            let idx = mount.turret_model_index;
+            parts.push(ShipPart {
+                key: ShipPartKey::Mount(HardpointName::new(mount.hp_name.as_str())),
+                model: turret_paths[idx].clone(),
+                group: PartGroup::from_mount_species(mount.species),
+                placement: Some(negate_z_transform(mount.armor_transform)),
+                hardpoints: turret_hardpoints[idx].placed(Some(&mount.armor_transform)),
+            });
+        }
+
+        let misc_paths: Vec<Option<ModelPath>> = self
+            .misc_models
+            .iter()
+            .map(|misc| {
+                let position = model_leaves.position(&misc.name)?;
+                ModelPath::parse(&db.reconstruct_path(position, self_id_index)).ok()
+            })
+            .collect();
+        let misc_hardpoints: Vec<ModelSpaceHardpoints> = self
+            .misc_models
+            .iter()
+            .map(|misc| model_space_hardpoints(db, model_leaves, misc, &[&misc.visual]))
+            .collect();
+        for misc in self.miscs {
+            let idx = misc.misc_model_index;
+            parts.push(ShipPart {
+                key: ShipPartKey::Misc { node: misc.node.clone(), parent: misc.parent.clone() },
+                model: misc_paths[idx].clone(),
+                group: PartGroup::Misc,
+                placement: misc.transform.map(negate_z_transform),
+                hardpoints: misc_hardpoints[idx].placed(misc.transform.as_ref()),
+            });
+        }
+
+        parts
+    }
+}
+
+/// Every `.model` entry by stem, the first in store order winning, as the
+/// loader's name lookups resolve them.
+struct ModelLeaves<'d> {
+    positions: HashMap<&'d str, usize>,
+}
+
+impl<'d> ModelLeaves<'d> {
+    fn new(db: &'d PrototypeDatabase<'_>) -> Self {
+        let mut positions = HashMap::new();
+        for (position, entry) in db.paths_storage.iter().enumerate() {
+            if let Some(stem) = entry.name.strip_suffix(".model") {
+                positions.entry(stem).or_insert(position);
+            }
+        }
+
+        Self { positions }
+    }
+
+    fn position(&self, stem: &str) -> Option<usize> {
+        self.positions.get(stem).copied()
+    }
+
+    /// The prototype of the model named `stem`, when its record reads.
+    fn prototype(&self, db: &PrototypeDatabase<'_>, stem: &str) -> Option<model::ModelPrototype> {
+        const MODEL_BLOB_INDEX: usize = 3;
+
+        let entry = db.paths_storage.get(self.position(stem)?)?;
+        let location = db.decode_r2p_value(db.lookup_r2p(entry.self_id)?).ok()?;
+        if location.blob_index != MODEL_BLOB_INDEX {
+            return None;
+        }
+        let record = db.get_prototype_data(location, model::MODEL_ITEM_SIZE).ok()?;
+
+        model::parse_model(record).ok()
+    }
+
+    /// The skeleton extenders the model named `stem` attaches, as the game
+    /// attaches them; empty when it has none or its record does not read.
+    fn extenders(&self, db: &PrototypeDatabase<'_>, stem: &str) -> Vec<skeleton_extender::SkeletonExtender> {
+        self.prototype(db, stem).map(|model| model_extenders(db, &model)).unwrap_or_default()
+    }
+}
+
+/// The `.model` beside a `.visual`.
+fn sibling_model_path(visual_path: &str) -> Option<ModelPath> {
+    let stem = visual_path.strip_suffix(".visual")?;
+
+    ModelPath::parse(&format!("{stem}.model")).ok()
+}
+
+/// The `HP_` nodes of `part`'s visual and the `MP_`/`EP_` nodes of its
+/// model's skeleton extenders, whose parents are looked up in `parent_visuals`.
+fn model_space_hardpoints(
+    db: &PrototypeDatabase<'_>,
+    model_leaves: &ModelLeaves<'_>,
+    part: &OwnedSubModel,
+    parent_visuals: &[&VisualPrototype],
+) -> ModelSpaceHardpoints {
+    let mut hardpoints = ModelSpaceHardpoints::new();
+    hardpoints.add_visual(&part.visual, &db.strings);
+    hardpoints.add_extenders(&model_leaves.extenders(db, &part.name), parent_visuals, &db.strings);
+
+    hardpoints
 }
 
 /// Pre-resolved material-based camouflage scheme (owned data, no lifetimes).
@@ -2305,22 +2387,8 @@ fn resolve_compound_hp(
     turret_models: &[OwnedSubModel],
     strings: &assets_bin::StringsSection<'_>,
 ) -> Option<([f32; 16], Option<[f32; 16]>)> {
-    // Find the longest hull HP name that is a proper prefix of hp_name with
-    // a '_' separator. This avoids partial matches like HP_AG matching HP_AGM_3.
-    let mut best_parent: Option<(&str, &[f32; 16])> = None;
-    for (hull_hp, xform) in hp_transforms {
-        if hp_name.len() > hull_hp.len()
-            && hp_name.starts_with(hull_hp.as_str())
-            && hp_name.as_bytes()[hull_hp.len()] == b'_'
-            && best_parent.is_none_or(|(bp, _)| hull_hp.len() > bp.len())
-        {
-            best_parent = Some((hull_hp.as_str(), xform));
-        }
-    }
-    let (parent_hp, parent_xform) = best_parent?;
-
-    // Extract child HP name: everything after "parent_"
-    let child_hp = &hp_name[parent_hp.len() + 1..];
+    let (parent_hp, child_hp) = split_compound_hp(hp_name, hp_transforms.keys().map(String::as_str))?;
+    let parent_xform = hp_transforms.get(parent_hp)?;
 
     // Find the parent turret model via the hp_to_model_path mapping.
     let &parent_model_path = hp_to_model_path.get(parent_hp)?;
@@ -2433,38 +2501,6 @@ pub fn export_ship_glb(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn misc_name_strips_prefix_and_dot_index() {
-        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft"), "BM509_Liferaft_type_20_10ft");
-        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft.001"), "BM509_Liferaft_type_20_10ft");
-        // Only the last dot-segment is dropped when a `.NNN` group is present.
-        assert_eq!(misc_name_from_node("MP_Foo.001.999"), "Foo.001");
-    }
-
-    #[test]
-    fn misc_name_strips_legacy_index() {
-        assert_eq!(misc_name_from_node("MP_BM509_Liferaft_type_20_10ft_INDEX_1"), "BM509_Liferaft_type_20_10ft");
-        assert_eq!(misc_name_from_node("MP_BM800_Ventilators_mushroom_INDEX_16"), "BM800_Ventilators_mushroom");
-    }
-
-    #[test]
-    fn misc_name_keeps_non_instance_suffixes() {
-        // A two-digit dotted tail is not the `.NNN` instance pattern.
-        assert_eq!(misc_name_from_node("MP_Foo.01"), "Foo.01");
-        // `INDEX_` with a non-numeric tail is not the legacy pattern.
-        assert_eq!(misc_name_from_node("MP_Foo_INDEX_x"), "Foo_INDEX_x");
-        // Propeller shares the same rule.
-        assert_eq!(misc_name_from_node("MP_CM003_Propeller5_L"), "CM003_Propeller5_L");
-    }
-
-    #[test]
-    fn contains_dot_three_digits_matches_game_pattern() {
-        assert!(contains_dot_three_digits("Foo.001"));
-        assert!(contains_dot_three_digits("Foo.0012")); // >=3 digits after the dot
-        assert!(!contains_dot_three_digits("Foo.01"));
-        assert!(!contains_dot_three_digits("Foo_1"));
-    }
 
     /// The whole correctness argument for skipping the meshopt decode:
     /// `gltf_export::primitive_summary_from_metadata` (what `model_summary`

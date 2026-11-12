@@ -101,6 +101,9 @@ pub struct ModelLibrary {
     assets: SharedPrototypeDatabase,
     self_id_index: HashMap<u64, usize>,
     model_index: ModelPathIndex,
+    /// Model by file stem, the first in store order winning, as the ship
+    /// loader resolves misc models by name.
+    models_by_stem: HashMap<String, ModelPath>,
     catalog: ModelCatalog,
 }
 
@@ -119,7 +122,38 @@ impl ModelLibrary {
         let catalog =
             ModelCatalog::from_paths(model_index.paths().cloned(), &model_catalog::peculiarity_models(metadata));
 
-        Ok(Self { vfs, assets, self_id_index, model_index, catalog })
+        let mut first_by_stem: HashMap<&str, (usize, &ModelPath)> = HashMap::new();
+        for path in model_index.paths() {
+            let Some(position) = model_index.position(path) else {
+                continue;
+            };
+            let slot = first_by_stem.entry(path.stem()).or_insert((position, path));
+            if position < slot.0 {
+                *slot = (position, path);
+            }
+        }
+        let models_by_stem =
+            first_by_stem.into_iter().map(|(stem, (_, path))| (stem.to_string(), path.clone())).collect();
+
+        Ok(Self { vfs, assets, self_id_index, model_index, models_by_stem, catalog })
+    }
+
+    pub(crate) fn db(&self) -> PrototypeDatabase<'_> {
+        self.assets.db()
+    }
+
+    /// The model named `stem`, as the ship loader resolves misc models by name.
+    pub(crate) fn model_by_stem(&self, stem: &str) -> Option<&ModelPath> {
+        self.models_by_stem.get(stem)
+    }
+
+    /// The skeleton extenders of the model at `path`, empty when it has none
+    /// or its record does not read.
+    pub(crate) fn model_extenders(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Vec<SkeletonExtender> {
+        match self.read_model_prototype(db, path) {
+            Ok(model) => model_extenders(db, &model),
+            Err(_) => Vec::new(),
+        }
     }
 
     pub fn catalog(&self) -> &ModelCatalog {
@@ -138,15 +172,8 @@ impl ModelLibrary {
         options: &ModelLoadOptions,
     ) -> Result<LoadedModel, Report<ModelLoadError>> {
         let db = &self.assets.db();
-
-        let sections = self.catalog.entry(path).into_iter().flat_map(ModelEntry::sections);
-        let part_paths: Vec<&ModelPath> = std::iter::once(path).chain(sections).collect();
-        let group = self.catalog.owning_entry(path).map_or(PartGroup::Other, ModelEntry::part_group);
-
-        let mut sources = Vec::with_capacity(part_paths.len());
-        for part_path in part_paths {
-            sources.push(self.read_part(db, part_path)?);
-        }
+        let sources = self.read_parts(db, path)?;
+        let group = self.part_group(path);
 
         let mut parts = Vec::with_capacity(sources.len());
         let mut meshes = Vec::new();
@@ -181,14 +208,7 @@ impl ModelLibrary {
             });
         }
 
-        let visuals: Vec<&VisualPrototype> = sources.iter().map(|s| &s.visual).collect();
-        let mut hardpoints = ModelSpaceHardpoints::new();
-        for visual in &visuals {
-            hardpoints.add_visual(visual, &db.strings);
-        }
-        for source in &sources {
-            hardpoints.add_extenders(&source.extenders, &visuals, &db.strings);
-        }
+        let hardpoints = model_hardpoints(db, &sources);
 
         let mut materials = BTreeMap::new();
         for mesh in &meshes {
@@ -202,32 +222,33 @@ impl ModelLibrary {
             materials.insert(mfm_path.clone(), material);
         }
 
-        Ok(LoadedModel { path: path.clone(), parts, meshes, materials, hardpoints: hardpoints.placed(None), armor })
+        Ok(LoadedModel { path: path.clone(), parts, meshes, materials, hardpoints, armor })
+    }
+
+    /// The model itself, then every section the catalogue lists for it.
+    fn read_parts(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        path: &ModelPath,
+    ) -> Result<Vec<PartSource>, Report<ModelLoadError>> {
+        let sections = self.catalog.entry(path).into_iter().flat_map(ModelEntry::sections);
+        let part_paths: Vec<&ModelPath> = std::iter::once(path).chain(sections).collect();
+
+        let mut sources = Vec::with_capacity(part_paths.len());
+        for part_path in part_paths {
+            sources.push(self.read_part(db, part_path)?);
+        }
+
+        Ok(sources)
+    }
+
+    fn part_group(&self, path: &ModelPath) -> PartGroup {
+        self.catalog.owning_entry(path).map_or(PartGroup::Other, ModelEntry::part_group)
     }
 
     fn read_part(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Result<PartSource, Report<ModelLoadError>> {
-        const VISUAL_BLOB_INDEX: usize = 1;
-
         let model = self.read_model_prototype(db, path)?;
-
-        let visual_id = model.visual_resource_id;
-        if visual_id == 0 {
-            return Err(Report::new(ModelLoadError::MissingVisual { path: path.clone() }));
-        }
-        let visual_error = || ModelLoadError::VisualRecord { path: path.clone(), visual_id };
-        let visual_location = db.lookup_r2p(visual_id).ok_or_else(|| Report::new(visual_error()))?;
-        let visual_location = db.decode_r2p_value(visual_location).context_with(visual_error)?;
-        if visual_location.blob_index != VISUAL_BLOB_INDEX {
-            return Err(Report::new(visual_error()));
-        }
-        let visual_record =
-            db.get_prototype_data(visual_location, visual::VISUAL_ITEM_SIZE).context_with(visual_error)?;
-        let visual = visual::parse_visual(visual_record).context_with(visual_error)?;
-        let visual_path = self
-            .self_id_index
-            .get(&visual_id)
-            .map(|&position| db.reconstruct_path(position, &self.self_id_index))
-            .ok_or_else(|| Report::new(visual_error()))?;
+        let (visual_path, visual) = self.read_visual(db, path, &model)?;
 
         let geometry_id = visual.merged_geometry_path_id;
         let geometry_path = self
@@ -250,6 +271,44 @@ impl ModelLibrary {
         let extenders = model_extenders(db, &model);
 
         Ok(PartSource { model_path: path.clone(), visual_path, visual, geometry_path, geometry_bytes, extenders })
+    }
+
+    /// The visual record `model` names, with its path. Reads no geometry.
+    fn read_visual(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        path: &ModelPath,
+        model: &ModelPrototype,
+    ) -> Result<(String, VisualPrototype), Report<ModelLoadError>> {
+        const VISUAL_BLOB_INDEX: usize = 1;
+
+        let visual_id = model.visual_resource_id;
+        if visual_id == 0 {
+            return Err(Report::new(ModelLoadError::MissingVisual { path: path.clone() }));
+        }
+        let visual_error = || ModelLoadError::VisualRecord { path: path.clone(), visual_id };
+        let visual_location = db.lookup_r2p(visual_id).ok_or_else(|| Report::new(visual_error()))?;
+        let visual_location = db.decode_r2p_value(visual_location).context_with(visual_error)?;
+        if visual_location.blob_index != VISUAL_BLOB_INDEX {
+            return Err(Report::new(visual_error()));
+        }
+        let visual_record =
+            db.get_prototype_data(visual_location, visual::VISUAL_ITEM_SIZE).context_with(visual_error)?;
+        let visual = visual::parse_visual(visual_record).context_with(visual_error)?;
+        let visual_path = self
+            .self_id_index
+            .get(&visual_id)
+            .map(|&position| db.reconstruct_path(position, &self.self_id_index))
+            .ok_or_else(|| Report::new(visual_error()))?;
+
+        Ok((visual_path, visual))
+    }
+
+    /// The visual of the model at `path`, `None` when either record does not read.
+    pub(crate) fn model_visual(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Option<VisualPrototype> {
+        let model = self.read_model_prototype(db, path).ok()?;
+
+        self.read_visual(db, path, &model).ok().map(|(_, visual)| visual)
     }
 
     fn read_model_prototype(
@@ -485,6 +544,21 @@ struct PartSource {
     geometry_path: String,
     geometry_bytes: Vec<u8>,
     extenders: Vec<SkeletonExtender>,
+}
+
+/// The `HP_` nodes of every part's visual and the `MP_`/`EP_` nodes of their
+/// skeleton extenders, in the model's right-handed node space.
+fn model_hardpoints(db: &PrototypeDatabase<'_>, sources: &[PartSource]) -> Vec<Hardpoint> {
+    let visuals: Vec<&VisualPrototype> = sources.iter().map(|s| &s.visual).collect();
+    let mut hardpoints = ModelSpaceHardpoints::new();
+    for visual in &visuals {
+        hardpoints.add_visual(visual, &db.strings);
+    }
+    for source in sources {
+        hardpoints.add_extenders(&source.extenders, &visuals, &db.strings);
+    }
+
+    hardpoints.placed(None)
 }
 
 /// The texture at `source`, decoded when asked, or `None` when the VFS lacks

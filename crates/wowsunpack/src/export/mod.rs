@@ -24,6 +24,8 @@ pub mod part_group;
 #[cfg(feature = "models")]
 pub mod ship;
 #[cfg(feature = "models")]
+pub mod ship_parts;
+#[cfg(feature = "models")]
 pub mod size_estimate;
 #[cfg(feature = "models")]
 pub mod texture;
