@@ -1,5 +1,10 @@
 use std::time::Duration;
 
+use zgui::reactive::LocalStorage;
+use zgui::reactive::Signal;
+use zgui::reactive::provide_local_context;
+use zgui::reactive::use_local_context;
+
 /// The attribute on the window's root element that zeroes every motion token.
 ///
 /// The style engine has no `prefers-reduced-motion` media feature, so the preference is written
@@ -83,3 +88,22 @@ impl CubicBezier {
 
 /// The custom property every movement's easing is read from.
 pub const EASE_PROPERTY: &str = "--lui-motion-ease";
+
+/// The preference a [`ThemeRoot`](crate::ThemeRoot) applies, published to everything inside it.
+#[derive(Clone, Copy)]
+struct MotionContext(Signal<MotionPreference, LocalStorage>);
+
+/// Publishes `preference` to the scopes below the calling one.
+pub(crate) fn provide_motion_preference(preference: Signal<MotionPreference, LocalStorage>) {
+    provide_local_context(MotionContext(preference));
+}
+
+/// The motion preference of the enclosing [`ThemeRoot`](crate::ThemeRoot), for movement a style
+/// sheet cannot express. Outside one, motion is allowed, which is what a window with no
+/// preference applied shows.
+///
+/// Read it in a component's body: a listener runs outside the scope the context is found through.
+pub fn motion_preference() -> Signal<MotionPreference, LocalStorage> {
+    use_local_context::<MotionContext>()
+        .map_or_else(|| Signal::stored_local(MotionPreference::Full), |context| context.0)
+}

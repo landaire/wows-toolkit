@@ -24,6 +24,7 @@ use zgui::view::install_stylesheet;
 use zgui_ui_tokens::ColorScheme;
 use zgui_ui_tokens::ThemeProviderProps;
 
+use crate::motion;
 use crate::motion::MotionPreference;
 use crate::motion::REDUCED_MOTION_ATTRIBUTE;
 use crate::scheme::ThemeChoice;
@@ -50,6 +51,7 @@ pub fn ThemeRoot(
     children: Children,
 ) -> impl IntoView {
     install_stylesheet(surface::SHEET, surface::CSS);
+    motion::provide_motion_preference(motion);
 
     let sheet = Stylesheet::install(SHEET, &tokens::lui_sheet(choice.get_untracked()));
     let installed = RenderEffect::new(move |previous: Option<()>| {
