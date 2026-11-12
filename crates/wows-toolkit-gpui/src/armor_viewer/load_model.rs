@@ -363,7 +363,7 @@ pub(crate) fn export_model_glb(
         texture_lod: options.texture_lod,
         textures: options.textures,
         contents: options.contents,
-        hardpoints: true,
+        hardpoints: options.hardpoints,
     };
 
     let file = std::fs::File::create(path)
