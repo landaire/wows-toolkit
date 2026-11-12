@@ -9,6 +9,8 @@ use wows_toolkit_services::settings::StartupSettings;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Set;
+use zgui::task::blocking;
+use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
 
 use crate::i18n::LanguageCode;
@@ -28,6 +30,7 @@ pub const STUCK_WOWS_DIR: &str = "wows-dir";
 /// Reads the settings, and applies them when they land. Called once, from the shell's body.
 pub fn begin(services: Services, shell: Shell) {
     announce_game_data(services, shell);
+    maintain_game_data_cache(services);
 
     let loaded = services.on_tokio(async move {
         let pool = wows_toolkit_config::open_db().await?;
@@ -98,6 +101,7 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
     if check_for_updates {
         update::check_for_update(services, shell, Asked::AtStartup);
     }
+    shell.restart_twitch_poll();
 }
 
 /// Puts up the message that stays until the game directory is fixed, with a way to fix it.
@@ -132,4 +136,23 @@ fn announce_game_data(services: Services, shell: Shell) {
         finished
     });
     on_cleanup_local(move || drop(announcing));
+}
+
+/// Tidies the game data cache once a session, as soon as a cache directory is set.
+fn maintain_game_data_cache(services: Services) {
+    let maintaining = RenderEffect::new(move |maintained: Option<bool>| {
+        // Returns before reading the settings, so the effect stops running once it has started the
+        // work.
+        if maintained == Some(true) {
+            return true;
+        }
+        let base = services
+            .settings
+            .read(|settings| wows_toolkit_services::game_data_cache::base(&settings.game_data_cache_dir))
+            .flatten();
+        let Some(base) = base else { return false };
+        spawn_detached(blocking(move || wows_toolkit_services::game_data_cache::maintain(&base)));
+        true
+    });
+    on_cleanup_local(move || drop(maintaining));
 }

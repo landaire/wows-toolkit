@@ -38,6 +38,8 @@ jiff = { workspace = true }
 # GPUI rosters draw them, and shown through an image element.
 resvg = { version = "0.47", default-features = false }
 image = { workspace = true, features = ["png"] }
+# The game-data cache's maintenance.
+wows-data-mgr = { workspace = true, features = ["download"] }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
@@ -53,9 +55,10 @@ wt-translations = { workspace = true }
 clap = { workspace = true }
 # Only to install the process-wide crypto provider at startup; see `main`.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 humansize = "2.1.3"

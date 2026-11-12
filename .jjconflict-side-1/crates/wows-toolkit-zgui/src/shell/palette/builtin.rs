@@ -1,6 +1,7 @@
 //! What the shell offers on the palette itself: the commands whose work it or the shared services
 //! can do without a tab.
 
+use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::task::spawn_detached;
@@ -46,6 +47,8 @@ pub fn offer(shell: Shell) {
     palette.offer(RootCommand::GamesIWon, PaletteRun::Request(TabRequest::Search(GAMES_I_WON.to_owned())));
 
     palette.offer(RootCommand::OpenReplayFile, PaletteRun::action(move || open_replay_file(shell)));
+    palette
+        .offer(RootCommand::IndexAllReplays, PaletteRun::action(move || shell.build_replay_index(IndexMode::FillGaps)));
     palette.offer(RootCommand::CopyLatestLog, PaletteRun::action(move || crash::copy_latest_log(shell)));
     palette.offer(RootCommand::CopyBugReportInfo, PaletteRun::action(move || crash::copy_bug_report_info(shell)));
 
@@ -95,7 +98,10 @@ fn open_replay_file(shell: Shell) {
         let Some(file) = chosen(shell, asked).await else { return };
         // What the settings drawer reports as the current replay: the one the reader named, which
         // is what the egui app writes here too.
-        shell.services().settings.save(keys::CURRENT_REPLAY_PATH, &file);
+        shell.services().settings.edit(keys::CURRENT_REPLAY_PATH, |settings| {
+            settings.current_replay_path = file.clone();
+            file.clone()
+        });
         shell.request_replay(ReplayRequest::OpenReplay(file));
     });
 }
