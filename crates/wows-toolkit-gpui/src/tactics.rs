@@ -1033,8 +1033,9 @@ impl TacticsBoard {
                 // walk holds a copy taken when the board opened, and writing all
                 // of it would put those rows back over anything written since.
                 for layout in &fresh {
-                    if let Err(err) =
-                        runtime.handle().block_on(crate::cap_layout_store::save_layout_to_db(&pool, layout))
+                    if let Err(err) = runtime
+                        .handle()
+                        .block_on(wows_toolkit_replay_data::cap_layout_store::save_layout_to_db(&pool, layout))
                     {
                         tracing::warn!("tactics: a capture layout was not saved: {err}");
                     }

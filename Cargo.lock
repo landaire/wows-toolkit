@@ -15984,6 +15984,7 @@ dependencies = [
  "filetime",
  "gettext",
  "jiff",
+ "rkyv",
  "rust-i18n 3.1.5",
  "serde",
  "serde_json",
