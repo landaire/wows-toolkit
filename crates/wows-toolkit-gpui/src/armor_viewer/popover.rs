@@ -1893,7 +1893,7 @@ struct TreeNames {
 impl TreeNames {
     fn zone(&self, name: &str) -> String {
         match &self.bundle {
-            Some(bundle) => super::catalog::translate_name(bundle.assets.metadata(), name),
+            Some(bundle) => wows_toolkit_armor::catalog::translate_name(bundle.assets.metadata(), name),
             None => name.to_owned(),
         }
     }
@@ -1902,7 +1902,9 @@ impl TreeNames {
     /// still loading.
     fn part(&self, key: &str) -> String {
         match &self.bundle {
-            Some(bundle) => super::catalog::translate_material_key(bundle.assets.metadata(), key, self.species),
+            Some(bundle) => {
+                wows_toolkit_armor::catalog::translate_material_key(bundle.assets.metadata(), key, self.species)
+            }
             None => key.to_owned(),
         }
     }

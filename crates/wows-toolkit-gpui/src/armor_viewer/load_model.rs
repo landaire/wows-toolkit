@@ -52,15 +52,15 @@ use super::load_ship::SceneSubject;
 use super::load_ship::ThicknessSource;
 use super::load_ship::build_hull_part_groups;
 use super::load_ship::scene_bounds;
-use super::model_refs::ShipPartKey;
-use super::model_refs::ShipPartRef;
-use super::model_refs::VehicleParamIndex;
 use super::scene_load::FirstStage;
 use super::scene_load::LoadCancel;
 use super::scene_load::LoadCancelled;
 use super::scene_load::RestJob;
 use super::surface_maps::SurfaceMapsByPart;
 use super::surface_maps::model_surface_textures;
+use wows_toolkit_armor::model_refs::ShipPartKey;
+use wows_toolkit_armor::model_refs::ShipPartRef;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
 
 /// Longest texture edge decoded for display. The viewport has no use for the
 /// 4096 hull atlases at full size, and each costs 64 MiB as RGBA.

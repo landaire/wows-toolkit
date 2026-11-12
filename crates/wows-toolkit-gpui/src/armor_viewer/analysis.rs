@@ -44,8 +44,6 @@ use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::incoming::group_incoming;
 
-use super::catalog::ShipCatalog;
-use super::catalog::tier_roman;
 use super::pane::ArmorViewerPane;
 use super::viewport_view::ViewportView;
 use crate::text_filter::FilterKey;
@@ -53,6 +51,8 @@ use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
 use crate::text_filter::TypedQuery;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::tier_roman;
 
 /// How far the search results run before they scroll, so they never push the
 /// ships being compared off the rail.
@@ -796,13 +796,13 @@ mod tests {
     use super::pen_label;
     use super::result_label;
     use super::shell_label;
-    use crate::armor_viewer::catalog::ClassGroup;
-    use crate::armor_viewer::catalog::NationGroup;
-    use crate::armor_viewer::catalog::ShipCatalog;
-    use crate::armor_viewer::catalog::ShipEntry;
-    use crate::armor_viewer::filter_fields::FilterFields;
     use crate::text_filter::FilterQuery;
     use gpui_kit::TestAppContext;
+    use wows_toolkit_armor::catalog::ClassGroup;
+    use wows_toolkit_armor::catalog::NationGroup;
+    use wows_toolkit_armor::catalog::ShipCatalog;
+    use wows_toolkit_armor::catalog::ShipEntry;
+    use wows_toolkit_armor::filter_fields::FilterFields;
     use wows_toolkit_viewmodel::armor::penetration::Ifhe;
     use wowsunpack::game_params::types::AmmoType;
     use wowsunpack::game_params::types::Millimeters;

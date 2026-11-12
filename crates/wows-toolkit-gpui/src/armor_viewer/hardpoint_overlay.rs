@@ -11,7 +11,7 @@ use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::load_ship::LoadedShipArmor;
-use super::model_refs::HardpointTarget;
+use wows_toolkit_armor::model_refs::HardpointTarget;
 
 /// The markers of every hardpoint target that belongs to one scene.
 #[derive(Default)]
@@ -219,8 +219,8 @@ mod tests {
     use super::*;
     use crate::armor_viewer::load_model::fixtures;
     use crate::armor_viewer::load_ship::SceneSubject;
-    use crate::armor_viewer::model_refs::ShipPartRef;
-    use crate::armor_viewer::model_refs::VehicleParamIndex;
+    use wows_toolkit_armor::model_refs::ShipPartRef;
+    use wows_toolkit_armor::model_refs::VehicleParamIndex;
 
     fn hardpoint(name: &str, at: [f32; 3]) -> Hardpoint {
         let mut transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];

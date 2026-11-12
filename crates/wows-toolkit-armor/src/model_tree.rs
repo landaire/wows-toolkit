@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use rust_i18n::t;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::building_armor::BuildingArmorIndex;
 use wowsunpack::export::model_catalog::BuildingKind;
@@ -33,12 +36,10 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::MountParam;
 use wowsunpack::game_types::GameParamId;
 
-use super::catalog::ShipCatalog;
-use super::filter_fields::FilterFields;
-use super::model_refs::ShipPartKey;
-use super::model_refs::VehicleParamIndex;
-use crate::text_filter::FilterKey;
-use crate::text_filter::FilterQuery;
+use crate::catalog::ShipCatalog;
+use crate::filter_fields::FilterFields;
+use crate::model_refs::ShipPartKey;
+use crate::model_refs::VehicleParamIndex;
 
 /// Every listed catalogue model, grouped for the tree.
 pub struct ModelTreeIndex {
@@ -829,6 +830,83 @@ fn same_nation(directory: &str, ship_nation: &str) -> bool {
         "uk" => folded == "unitedkingdom",
         _ => folded == directory,
     }
+}
+
+pub fn model_kind_label(kind: ModelKind) -> String {
+    let key = match kind {
+        ModelKind::Ship => "ui.models.kind.ship",
+        ModelKind::Gun => "ui.models.kind.gun",
+        ModelKind::Director => "ui.models.kind.director",
+        ModelKind::Finder => "ui.models.kind.finder",
+        ModelKind::Radar => "ui.models.kind.radar",
+        ModelKind::Catapult => "ui.models.kind.catapult",
+        ModelKind::Aircraft => "ui.models.kind.aircraft",
+        ModelKind::Projectile => "ui.models.kind.projectile",
+        ModelKind::Misc => "ui.models.kind.misc",
+        ModelKind::Cap => "ui.models.kind.cap",
+        ModelKind::Other => "ui.models.kind.other",
+    };
+
+    t!(key).into_owned()
+}
+
+pub fn model_sub_kind_label(sub_kind: &ModelSubKind) -> String {
+    let key = match sub_kind {
+        ModelSubKind::Battleship => "ui.models.sub_kind.battleship",
+        ModelSubKind::Cruiser => "ui.models.sub_kind.cruiser",
+        ModelSubKind::Destroyer => "ui.models.sub_kind.destroyer",
+        ModelSubKind::AircraftCarrier => "ui.models.sub_kind.aircraft_carrier",
+        ModelSubKind::Submarine => "ui.models.sub_kind.submarine",
+        ModelSubKind::Auxiliary => "ui.models.sub_kind.auxiliary",
+        ModelSubKind::MainBattery => "ui.models.sub_kind.main_battery",
+        ModelSubKind::SecondaryBattery => "ui.models.sub_kind.secondary_battery",
+        ModelSubKind::AntiAircraft => "ui.models.sub_kind.anti_aircraft",
+        ModelSubKind::TorpedoTubes => "ui.models.sub_kind.torpedo_tubes",
+        ModelSubKind::DepthChargeLauncher => "ui.models.sub_kind.depth_charge_launcher",
+        ModelSubKind::MissileLauncher => "ui.models.sub_kind.missile_launcher",
+        ModelSubKind::SearchRadar => "ui.models.sub_kind.search_radar",
+        ModelSubKind::FireControlRadar => "ui.models.sub_kind.fire_control_radar",
+        ModelSubKind::Fighter => "ui.models.sub_kind.fighter",
+        ModelSubKind::Bomber => "ui.models.sub_kind.bomber",
+        ModelSubKind::DiveBomber => "ui.models.sub_kind.dive_bomber",
+        ModelSubKind::Scout => "ui.models.sub_kind.scout",
+        ModelSubKind::Torpedo => "ui.models.sub_kind.torpedo",
+        ModelSubKind::Bomb => "ui.models.sub_kind.bomb",
+        ModelSubKind::Rocket => "ui.models.sub_kind.rocket",
+        ModelSubKind::DepthCharge => "ui.models.sub_kind.depth_charge",
+        ModelSubKind::Mine => "ui.models.sub_kind.mine",
+        ModelSubKind::Missile => "ui.models.sub_kind.missile",
+        ModelSubKind::Jato => "ui.models.sub_kind.jato",
+        ModelSubKind::Shell => "ui.models.sub_kind.shell",
+        ModelSubKind::Misc(category) => return misc_category_label(*category),
+        // The directory name is the only name the game gives it.
+        ModelSubKind::Unrecognized(directory) => return directory.clone(),
+    };
+
+    t!(key).into_owned()
+}
+
+fn misc_category_label(category: MiscCategory) -> String {
+    let key = match category {
+        MiscCategory::Crane => "ui.models.misc.crane",
+        MiscCategory::Anchor => "ui.models.misc.anchor",
+        MiscCategory::DeckFitting => "ui.models.misc.deck_fitting",
+        MiscCategory::Instrument => "ui.models.misc.instrument",
+        MiscCategory::Propeller => "ui.models.misc.propeller",
+        MiscCategory::Searchlight => "ui.models.misc.searchlight",
+        MiscCategory::Boat => "ui.models.misc.boat",
+        MiscCategory::Flag => "ui.models.misc.flag",
+        MiscCategory::Insignia => "ui.models.misc.insignia",
+        MiscCategory::Railing => "ui.models.misc.railing",
+        MiscCategory::Hatch => "ui.models.misc.hatch",
+        MiscCategory::Ventilation => "ui.models.misc.ventilation",
+        MiscCategory::Antenna => "ui.models.misc.antenna",
+        MiscCategory::Weapon => "ui.models.misc.weapon",
+        MiscCategory::Stowage => "ui.models.misc.stowage",
+        MiscCategory::Other => "ui.models.misc.other",
+    };
+
+    t!(key).into_owned()
 }
 
 #[cfg(test)]

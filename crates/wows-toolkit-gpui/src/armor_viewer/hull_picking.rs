@@ -38,7 +38,7 @@ use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::load_ship::transform_normal;
 use super::picking_ui::HighlightOrigin;
-use super::sidebar_tree::model_sub_kind_label;
+use wows_toolkit_armor::model_tree::model_sub_kind_label;
 
 /// A mesh's position in `LoadedShipArmor::hull_meshes`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

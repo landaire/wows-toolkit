@@ -40,9 +40,6 @@ use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::WorldPos;
 
-use crate::armor_viewer::catalog::ShipCatalog;
-use crate::armor_viewer::catalog::ShipEntry;
-use crate::armor_viewer::catalog::tier_roman;
 use crate::filtered_select::FilteredItem;
 use crate::filtered_select::FilteredSelect;
 use crate::frame_texture::FrameTexture;
@@ -51,6 +48,9 @@ use crate::text_filter::FilterKey;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::ShipEntry;
+use wows_toolkit_armor::catalog::tier_roman;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///
@@ -1990,7 +1990,7 @@ impl TacticsBoard {
     fn pick_ship(
         &mut self,
         species: wowsunpack::game_params::types::Species,
-        ship: &crate::armor_viewer::catalog::ShipEntry,
+        ship: &wows_toolkit_armor::catalog::ShipEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3957,12 +3957,12 @@ mod filter_tests {
     use super::ShipLookup;
     use super::map_items_for_picker;
     use super::ship_match_label;
-    use crate::armor_viewer::catalog::ClassGroup;
-    use crate::armor_viewer::catalog::NationGroup;
-    use crate::armor_viewer::catalog::ShipCatalog;
-    use crate::armor_viewer::catalog::ShipEntry;
-    use crate::armor_viewer::filter_fields::FilterFields;
     use crate::text_filter::FilterQuery;
+    use wows_toolkit_armor::catalog::ClassGroup;
+    use wows_toolkit_armor::catalog::NationGroup;
+    use wows_toolkit_armor::catalog::ShipCatalog;
+    use wows_toolkit_armor::catalog::ShipEntry;
+    use wows_toolkit_armor::filter_fields::FilterFields;
 
     fn ship(display_name: &str, tier: u32) -> ShipEntry {
         ShipEntry {

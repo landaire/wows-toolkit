@@ -13,7 +13,7 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
-use super::filter_fields::FilterFields;
+use crate::filter_fields::FilterFields;
 
 /// Pre-built catalog of all ships, organized for the tree selector.
 #[derive(Clone)]
@@ -405,7 +405,7 @@ mod tests {
     /// ```text
     /// WOWS_ARMOR_VIEWER_TEST_GAME_DIR="E:\WoWs\World_of_Warships" \
     /// WOWS_ARMOR_VIEWER_TEST_VERSION="15, 6, 0, 12830008" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
+    /// cargo test -p wows-toolkit-armor -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
     /// ```
     ///
     /// Mirrors `replay_inspector::model`'s equivalent real-provider test.

@@ -83,14 +83,14 @@ use wows_toolkit_armor::viewport::types::Vec3;
 
 use super::hull_picking::HullPickIndex;
 use super::hull_picking::MeshSource;
-use super::model_refs::ShipPartRef;
-use super::model_refs::VehicleParamIndex;
 use super::scene_load::FirstStage;
 use super::scene_load::LoadCancel;
 use super::scene_load::LoadCancelled;
 use super::scene_load::RestJob;
 use super::surface_maps::SurfaceMapsByPart;
 use super::upload::DisplaySettings;
+use wows_toolkit_armor::model_refs::ShipPartRef;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
 
 /// Which plate a triangle belongs to.
 ///
@@ -1078,7 +1078,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1139,7 +1139,7 @@ mod tests {
         );
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1200,7 +1200,7 @@ mod tests {
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
             .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
         let ship = catalog
             .nations
             .iter()
@@ -1243,7 +1243,7 @@ mod tests {
     fn the_first_stage_holds_the_whole_opening_view() {
         use std::time::Instant;
 
-        use super::super::model_refs::ShipPartKey;
+        use wows_toolkit_armor::model_refs::ShipPartKey;
 
         let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
             .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");

@@ -59,22 +59,6 @@ use wowsunpack::game_types::GameParamId;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
-use super::catalog::HiddenReason;
-use super::catalog::ShipCatalog;
-use super::catalog::TierRange;
-use super::catalog::tier_roman;
-use super::model_refs::HardpointTarget;
-use super::model_refs::OpenTarget;
-use super::model_refs::ShipPartRef;
-use super::model_refs::VehicleParamIndex;
-use super::model_tree::FortificationRow;
-use super::model_tree::ModelReferences;
-use super::model_tree::ModelTreeIndex;
-use super::model_tree::ShipPartRows;
-use super::model_tree::SkinUse;
-use super::model_tree::list_all_ship_parts;
-use super::model_tree::list_fortifications;
-use super::model_tree::list_model_buildings;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
 use super::sidebar_tree::RowKind;
@@ -91,6 +75,22 @@ use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
 use crate::text_filter::highlighted_text;
+use wows_toolkit_armor::catalog::HiddenReason;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::TierRange;
+use wows_toolkit_armor::catalog::tier_roman;
+use wows_toolkit_armor::model_refs::HardpointTarget;
+use wows_toolkit_armor::model_refs::OpenTarget;
+use wows_toolkit_armor::model_refs::ShipPartRef;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
+use wows_toolkit_armor::model_tree::FortificationRow;
+use wows_toolkit_armor::model_tree::ModelReferences;
+use wows_toolkit_armor::model_tree::ModelTreeIndex;
+use wows_toolkit_armor::model_tree::ShipPartRows;
+use wows_toolkit_armor::model_tree::SkinUse;
+use wows_toolkit_armor::model_tree::list_all_ship_parts;
+use wows_toolkit_armor::model_tree::list_fortifications;
+use wows_toolkit_armor::model_tree::list_model_buildings;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
 /// starts the ship's background armor load in response.
@@ -1348,14 +1348,6 @@ mod tests {
     use crate::replay_inspector::icons::IconCache;
 
     use super::super::assets::ArmorAssetsBundle;
-    use super::super::catalog::TierRange;
-    use super::super::model_refs::HardpointTarget;
-    use super::super::model_refs::OpenTarget;
-    use super::super::model_refs::ShipPartKey;
-    use super::super::model_refs::ShipPartRef;
-    use super::super::model_refs::VehicleParamIndex;
-    use super::super::model_tree::ModelBuildings;
-    use super::super::model_tree::ModelTreeIndex;
     use super::super::sidebar_tree::ModelSection;
     use super::super::sidebar_tree::RowKind;
     use super::super::sidebar_tree::SearchMatches;
@@ -1374,6 +1366,14 @@ mod tests {
     use super::ShipSelected;
     use super::Sidebar;
     use crate::text_filter::FilterQuery;
+    use wows_toolkit_armor::catalog::TierRange;
+    use wows_toolkit_armor::model_refs::HardpointTarget;
+    use wows_toolkit_armor::model_refs::OpenTarget;
+    use wows_toolkit_armor::model_refs::ShipPartKey;
+    use wows_toolkit_armor::model_refs::ShipPartRef;
+    use wows_toolkit_armor::model_refs::VehicleParamIndex;
+    use wows_toolkit_armor::model_tree::ModelBuildings;
+    use wows_toolkit_armor::model_tree::ModelTreeIndex;
 
     /// Ship assets over an empty store: the sidebar reads only the catalog and
     /// icons from the bundle.

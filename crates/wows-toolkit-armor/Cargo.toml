@@ -20,9 +20,16 @@ bytemuck = { workspace = true }
 nalgebra = "0.34"
 # The headless test device's adapter and device requests.
 pollster = { version = "0.4", optional = true }
+# `i18n!` generates its lookup per crate; the catalog behind it is parsed once
+# per process (see `wt_translations::backend`).
+rust-i18n = { workspace = true }
 # The lighting settings a host persists.
 serde = { workspace = true }
 thiserror = { workspace = true }
+tracing = "0.1"
+# The typed-text filter matching shared with the other listings.
+wows-toolkit-viewmodel = { workspace = true }
+wt-translations = { workspace = true }
 # The wgpu instance GPUI's renderer uses, so a host can pass its own device in.
 wgpu = { workspace = true }
 # The ray-triangle test the picking shares with the armor export.

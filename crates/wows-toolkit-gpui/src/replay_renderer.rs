@@ -24,7 +24,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::armor_viewer::catalog::ShipEntry;
 use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
@@ -59,6 +58,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
+use wows_toolkit_armor::catalog::ShipEntry;
 
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -2372,7 +2372,7 @@ impl ReplayRendererPanel {
     fn ships(&mut self) -> Option<&ShipLookup> {
         if self.ship_lookup.is_none() {
             let loaded = self.game_data.as_ref()?.newest_loaded()?;
-            let catalog = crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider());
+            let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(loaded.provider());
             self.ship_lookup = Some(ShipLookup::new(&catalog));
         }
 
@@ -5526,17 +5526,17 @@ mod tests {
     fn the_ship_chooser_ranks_and_marks_the_ships_it_finds(cx: &mut TestAppContext) {
         use wowsunpack::game_params::types::Species;
 
-        use crate::armor_viewer::catalog::ClassGroup;
-        use crate::armor_viewer::catalog::NationGroup;
-        use crate::armor_viewer::catalog::ShipCatalog;
-        use crate::armor_viewer::catalog::ShipEntry;
         use crate::tactics::ShipLookup;
         use crate::text_filter::MarkedQuery;
+        use wows_toolkit_armor::catalog::ClassGroup;
+        use wows_toolkit_armor::catalog::NationGroup;
+        use wows_toolkit_armor::catalog::ShipCatalog;
+        use wows_toolkit_armor::catalog::ShipEntry;
 
         let ship = |display_name: &str| ShipEntry {
             param_index: format!("P{display_name}"),
             display_name: display_name.to_string(),
-            filter_fields: crate::armor_viewer::filter_fields::FilterFields::new(),
+            filter_fields: wows_toolkit_armor::filter_fields::FilterFields::new(),
             tier: 10,
         };
         let catalog = ShipCatalog {
@@ -6601,10 +6601,10 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                let ship = crate::armor_viewer::catalog::ShipEntry {
+                let ship = wows_toolkit_armor::catalog::ShipEntry {
                     param_index: "PRSC610".to_string(),
                     display_name: "Moskva".to_string(),
-                    filter_fields: crate::armor_viewer::filter_fields::FilterFields::new(),
+                    filter_fields: wows_toolkit_armor::filter_fields::FilterFields::new(),
                     tier: 10,
                 };
                 // Without game data loaded there is no param to resolve, so

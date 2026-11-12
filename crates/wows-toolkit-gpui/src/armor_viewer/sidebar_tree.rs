@@ -29,30 +29,32 @@ use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::GameParamId;
 
-use super::catalog::HiddenReason;
-use super::catalog::NationGroup;
-use super::catalog::ShipCatalog;
-use super::catalog::ShipEntry;
-use super::catalog::TierRange;
-use super::catalog::species_name;
-use super::catalog::tier_roman;
-use super::filter_fields::FilterFields;
-use super::model_refs::OpenTarget;
-use super::model_refs::ShipPartKey;
-use super::model_refs::VehicleParamIndex;
-use super::model_tree::BuildingRow;
-use super::model_tree::FolderName;
-use super::model_tree::FortificationRow;
-use super::model_tree::HullRow;
-use super::model_tree::ModelFolder;
-use super::model_tree::ModelMatch;
-use super::model_tree::ModelRow;
-use super::model_tree::ModelTreeIndex;
-use super::model_tree::MountGroup;
-use super::model_tree::PartRow;
-use super::model_tree::ShipPartRows;
-use super::model_tree::VariantRow;
 use crate::text_filter::FilterQuery;
+use wows_toolkit_armor::catalog::HiddenReason;
+use wows_toolkit_armor::catalog::NationGroup;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::ShipEntry;
+use wows_toolkit_armor::catalog::TierRange;
+use wows_toolkit_armor::catalog::species_name;
+use wows_toolkit_armor::catalog::tier_roman;
+use wows_toolkit_armor::filter_fields::FilterFields;
+use wows_toolkit_armor::model_refs::OpenTarget;
+use wows_toolkit_armor::model_refs::ShipPartKey;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
+use wows_toolkit_armor::model_tree::BuildingRow;
+use wows_toolkit_armor::model_tree::FolderName;
+use wows_toolkit_armor::model_tree::FortificationRow;
+use wows_toolkit_armor::model_tree::HullRow;
+use wows_toolkit_armor::model_tree::ModelFolder;
+use wows_toolkit_armor::model_tree::ModelMatch;
+use wows_toolkit_armor::model_tree::ModelRow;
+use wows_toolkit_armor::model_tree::ModelTreeIndex;
+use wows_toolkit_armor::model_tree::MountGroup;
+use wows_toolkit_armor::model_tree::PartRow;
+use wows_toolkit_armor::model_tree::ShipPartRows;
+use wows_toolkit_armor::model_tree::VariantRow;
+use wows_toolkit_armor::model_tree::model_kind_label;
+use wows_toolkit_armor::model_tree::model_sub_kind_label;
 
 pub(super) const SEPARATOR_ID: &str = "armor-models-separator";
 const MODELS_STATUS_ID: &str = "armor-models-status";
@@ -416,87 +418,10 @@ pub(super) fn part_row_id(ship: &VehicleParamIndex, part: &ShipPartKey) -> Share
     }
 }
 
-pub(super) fn model_kind_label(kind: ModelKind) -> String {
-    let key = match kind {
-        ModelKind::Ship => "ui.models.kind.ship",
-        ModelKind::Gun => "ui.models.kind.gun",
-        ModelKind::Director => "ui.models.kind.director",
-        ModelKind::Finder => "ui.models.kind.finder",
-        ModelKind::Radar => "ui.models.kind.radar",
-        ModelKind::Catapult => "ui.models.kind.catapult",
-        ModelKind::Aircraft => "ui.models.kind.aircraft",
-        ModelKind::Projectile => "ui.models.kind.projectile",
-        ModelKind::Misc => "ui.models.kind.misc",
-        ModelKind::Cap => "ui.models.kind.cap",
-        ModelKind::Other => "ui.models.kind.other",
-    };
-
-    t!(key).into_owned()
-}
-
-pub(super) fn model_sub_kind_label(sub_kind: &ModelSubKind) -> String {
-    let key = match sub_kind {
-        ModelSubKind::Battleship => "ui.models.sub_kind.battleship",
-        ModelSubKind::Cruiser => "ui.models.sub_kind.cruiser",
-        ModelSubKind::Destroyer => "ui.models.sub_kind.destroyer",
-        ModelSubKind::AircraftCarrier => "ui.models.sub_kind.aircraft_carrier",
-        ModelSubKind::Submarine => "ui.models.sub_kind.submarine",
-        ModelSubKind::Auxiliary => "ui.models.sub_kind.auxiliary",
-        ModelSubKind::MainBattery => "ui.models.sub_kind.main_battery",
-        ModelSubKind::SecondaryBattery => "ui.models.sub_kind.secondary_battery",
-        ModelSubKind::AntiAircraft => "ui.models.sub_kind.anti_aircraft",
-        ModelSubKind::TorpedoTubes => "ui.models.sub_kind.torpedo_tubes",
-        ModelSubKind::DepthChargeLauncher => "ui.models.sub_kind.depth_charge_launcher",
-        ModelSubKind::MissileLauncher => "ui.models.sub_kind.missile_launcher",
-        ModelSubKind::SearchRadar => "ui.models.sub_kind.search_radar",
-        ModelSubKind::FireControlRadar => "ui.models.sub_kind.fire_control_radar",
-        ModelSubKind::Fighter => "ui.models.sub_kind.fighter",
-        ModelSubKind::Bomber => "ui.models.sub_kind.bomber",
-        ModelSubKind::DiveBomber => "ui.models.sub_kind.dive_bomber",
-        ModelSubKind::Scout => "ui.models.sub_kind.scout",
-        ModelSubKind::Torpedo => "ui.models.sub_kind.torpedo",
-        ModelSubKind::Bomb => "ui.models.sub_kind.bomb",
-        ModelSubKind::Rocket => "ui.models.sub_kind.rocket",
-        ModelSubKind::DepthCharge => "ui.models.sub_kind.depth_charge",
-        ModelSubKind::Mine => "ui.models.sub_kind.mine",
-        ModelSubKind::Missile => "ui.models.sub_kind.missile",
-        ModelSubKind::Jato => "ui.models.sub_kind.jato",
-        ModelSubKind::Shell => "ui.models.sub_kind.shell",
-        ModelSubKind::Misc(category) => return misc_category_label(*category),
-        // The directory name is the only name the game gives it.
-        ModelSubKind::Unrecognized(directory) => return directory.clone(),
-    };
-
-    t!(key).into_owned()
-}
-
 fn hidden_reason_label(reason: HiddenReason) -> String {
     let key = match reason {
         HiddenReason::ClanRental => "ui.armor.hidden_ship.clan_rental",
         HiddenReason::OtherClass => "ui.armor.hidden_ship.other_class",
-    };
-
-    t!(key).into_owned()
-}
-
-fn misc_category_label(category: MiscCategory) -> String {
-    let key = match category {
-        MiscCategory::Crane => "ui.models.misc.crane",
-        MiscCategory::Anchor => "ui.models.misc.anchor",
-        MiscCategory::DeckFitting => "ui.models.misc.deck_fitting",
-        MiscCategory::Instrument => "ui.models.misc.instrument",
-        MiscCategory::Propeller => "ui.models.misc.propeller",
-        MiscCategory::Searchlight => "ui.models.misc.searchlight",
-        MiscCategory::Boat => "ui.models.misc.boat",
-        MiscCategory::Flag => "ui.models.misc.flag",
-        MiscCategory::Insignia => "ui.models.misc.insignia",
-        MiscCategory::Railing => "ui.models.misc.railing",
-        MiscCategory::Hatch => "ui.models.misc.hatch",
-        MiscCategory::Ventilation => "ui.models.misc.ventilation",
-        MiscCategory::Antenna => "ui.models.misc.antenna",
-        MiscCategory::Weapon => "ui.models.misc.weapon",
-        MiscCategory::Stowage => "ui.models.misc.stowage",
-        MiscCategory::Other => "ui.models.misc.other",
     };
 
     t!(key).into_owned()
@@ -991,20 +916,20 @@ pub(super) mod fixture {
     use wowsunpack::game_params::types::Species;
     use wowsunpack::game_types::GameParamId;
 
-    use super::super::catalog::ClassGroup;
-    use super::super::catalog::HiddenReason;
-    use super::super::catalog::HiddenShip;
-    use super::super::catalog::NationGroup;
-    use super::super::catalog::ShipCatalog;
-    use super::super::catalog::ShipEntry;
-    use super::super::filter_fields::FilterFields;
-    use super::super::model_refs::VehicleParamIndex;
-    use super::super::model_tree::BuildingRow;
-    use super::super::model_tree::FortificationRow;
-    use super::super::model_tree::ModelBuildings;
-    use super::super::model_tree::ModelReferences;
-    use super::super::model_tree::PartKeys;
-    use super::super::model_tree::ShipPartRows;
+    use wows_toolkit_armor::catalog::ClassGroup;
+    use wows_toolkit_armor::catalog::HiddenReason;
+    use wows_toolkit_armor::catalog::HiddenShip;
+    use wows_toolkit_armor::catalog::NationGroup;
+    use wows_toolkit_armor::catalog::ShipCatalog;
+    use wows_toolkit_armor::catalog::ShipEntry;
+    use wows_toolkit_armor::filter_fields::FilterFields;
+    use wows_toolkit_armor::model_refs::VehicleParamIndex;
+    use wows_toolkit_armor::model_tree::BuildingRow;
+    use wows_toolkit_armor::model_tree::FortificationRow;
+    use wows_toolkit_armor::model_tree::ModelBuildings;
+    use wows_toolkit_armor::model_tree::ModelReferences;
+    use wows_toolkit_armor::model_tree::PartKeys;
+    use wows_toolkit_armor::model_tree::ShipPartRows;
 
     pub const IOWA_INDEX: &str = "PASB018";
     pub const IOWA: &str = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945.model";
@@ -1207,8 +1132,8 @@ mod tests {
     use wowsunpack::export::model_catalog::CatalogLinks;
     use wowsunpack::export::model_catalog::ModelCatalog;
 
-    use super::super::model_tree::ModelBuildings;
     use super::*;
+    use wows_toolkit_armor::model_tree::ModelBuildings;
 
     struct Data {
         ships: ShipCatalog,
@@ -1243,7 +1168,7 @@ mod tests {
             })
         });
         let catalog = ModelCatalog::from_paths(guns, &CatalogLinks::default());
-        let references = super::super::model_tree::ModelReferences::new();
+        let references = wows_toolkit_armor::model_tree::ModelReferences::new();
         let index =
             ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
 
@@ -1495,8 +1420,8 @@ mod tests {
 
     #[test]
     fn a_search_folds_accents_case_and_punctuation_away() {
-        use super::super::catalog::ClassGroup;
-        use super::super::catalog::NationGroup;
+        use wows_toolkit_armor::catalog::ClassGroup;
+        use wows_toolkit_armor::catalog::NationGroup;
         use wowsunpack::game_params::types::Species;
 
         let smaland = ShipEntry {
@@ -1878,7 +1803,7 @@ mod tests {
             .into_iter()
             .map(|nation| fixture::path(&format!("content/gameplay/{nation}/gun/main/AGM0001_Gun/AGM0001_Gun.model")));
         let catalog = ModelCatalog::from_paths(guns, &CatalogLinks::default());
-        let references = super::super::model_tree::ModelReferences::new();
+        let references = wows_toolkit_armor::model_tree::ModelReferences::new();
         let index =
             ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
         let data = Data { ships, index, parts: HashMap::new(), fortifications: Vec::new(), hidden: HashMap::new() };
@@ -1923,8 +1848,8 @@ mod tests {
         use wowsunpack::game_data::AssetsBin;
         use wowsunpack::game_params::provider::GameMetadataProvider;
 
-        use super::super::model_tree::ModelReferences;
-        use super::super::model_tree::list_all_ship_parts;
+        use wows_toolkit_armor::model_tree::ModelReferences;
+        use wows_toolkit_armor::model_tree::list_all_ship_parts;
 
         let Some(dir) = std::env::var_os("WOWS_DIR").map(std::path::PathBuf::from) else {
             eprintln!("skipped: WOWS_DIR is not set");
@@ -1959,8 +1884,9 @@ mod tests {
 
         let started = Instant::now();
         let buildings = wowsunpack::export::building_armor::BuildingArmorIndex::build(&metadata, &library);
-        let fortifications = super::super::model_tree::list_fortifications(&buildings, library.catalog(), &metadata);
-        let model_buildings = super::super::model_tree::list_model_buildings(&buildings, &metadata);
+        let fortifications =
+            wows_toolkit_armor::model_tree::list_fortifications(&buildings, library.catalog(), &metadata);
+        let model_buildings = wows_toolkit_armor::model_tree::list_model_buildings(&buildings, &metadata);
         eprintln!(
             "[measured] {} buildings, {} fortifications in {:?}",
             buildings.buildings().len(),

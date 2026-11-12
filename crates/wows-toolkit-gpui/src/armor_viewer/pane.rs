@@ -81,14 +81,14 @@ use super::load_model::ModelSceneError;
 use super::load_model::ProblemReason;
 use super::load_model::SceneProblem;
 use super::load_model::spawn_load_model_scene;
-use super::model_refs::HardpointTarget;
-use super::model_refs::ShipPartRef;
 use super::sidebar::BuildingSelected;
 use super::sidebar::ExportCatalogModelRequested;
 use super::sidebar::HardpointsToggled;
 use super::sidebar::ModelSelected;
 use super::viewport_view::SceneSource;
 use wows_replays::types::EntityId;
+use wows_toolkit_armor::model_refs::HardpointTarget;
+use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::game_types::GameParamId;
@@ -158,7 +158,7 @@ enum ModelsState {
 pub(crate) enum CatalogStatus<'a> {
     /// Not loaded yet; it arrives once the build's assets have been read.
     Pending,
-    Ready(&'a crate::armor_viewer::catalog::ShipCatalog),
+    Ready(&'a wows_toolkit_armor::catalog::ShipCatalog),
     Failed(&'a str),
 }
 
@@ -533,7 +533,7 @@ impl ArmorViewerPane {
     }
 
     /// The catalogue of ships this pane can open, once it has loaded.
-    pub(crate) fn catalog(&self) -> Option<&crate::armor_viewer::catalog::ShipCatalog> {
+    pub(crate) fn catalog(&self) -> Option<&wows_toolkit_armor::catalog::ShipCatalog> {
         match self.catalog_status() {
             CatalogStatus::Ready(catalog) => Some(catalog),
             CatalogStatus::Pending | CatalogStatus::Failed(_) => None,
@@ -1092,7 +1092,7 @@ impl ArmorViewerPane {
             return;
         };
         let active = self.dock.read(cx).active_viewport();
-        if active.read(cx).open_target() == Some(super::model_refs::OpenTarget::Building(building)) {
+        if active.read(cx).open_target() == Some(wows_toolkit_armor::model_refs::OpenTarget::Building(building)) {
             if self.cancel_load(&active, cx) {
                 self.forget_incoming();
             }
@@ -1120,7 +1120,8 @@ impl ArmorViewerPane {
     /// already shown there keeps it, cancelling any load started since.
     pub(crate) fn open_model(&mut self, model: ModelPath, from_ship: Option<ShipPartRef>, cx: &mut Context<Self>) {
         let active = self.dock.read(cx).active_viewport();
-        let wanted = super::model_refs::OpenTarget::Model { model: model.clone(), from_ship: from_ship.clone() };
+        let wanted =
+            wows_toolkit_armor::model_refs::OpenTarget::Model { model: model.clone(), from_ship: from_ship.clone() };
         if active.read(cx).open_target().as_ref() == Some(&wanted) {
             // The cancelled load may have been a replay's, whose log is not
             // about the scene that stays.
@@ -1954,11 +1955,11 @@ mod tests {
     use crate::armor_viewer::load_ship::EmptyScene;
     use crate::armor_viewer::load_ship::LoadedShipArmor;
     use crate::armor_viewer::load_ship::ShipLoadError;
-    use crate::armor_viewer::model_refs::HardpointTarget;
     use crate::armor_viewer::scene_load::FirstStage;
     use crate::armor_viewer::sidebar_tree::fixture;
     use crate::armor_viewer::viewport_view::ViewportView;
     use crate::replay_inspector::icons::IconCache;
+    use wows_toolkit_armor::model_refs::HardpointTarget;
 
     /// Ship assets over an empty store: a load result lands without reading it.
     fn bundle() -> Arc<ArmorAssetsBundle> {
