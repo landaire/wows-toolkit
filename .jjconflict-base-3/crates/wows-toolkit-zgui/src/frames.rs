@@ -29,7 +29,6 @@ use zgui::surface::SurfaceInvalidator;
 use zgui::surface::SurfaceRenderCx;
 use zgui::surface::SurfaceRenderer;
 use zgui::surface::wgpu;
-use zgui::view::Attrs;
 use zgui::view::Classes;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
@@ -101,8 +100,8 @@ impl FrameSink {
         self.0.hand_over(None);
     }
 
-    /// The size of the newest frame, which a pointer is read against. `None` after [`Self::clear`]
-    /// and before the first frame.
+    /// The size of the newest frame. `None` after [`Self::clear`] and before the first frame.
+    #[cfg(test)]
     pub fn frame_size(&self) -> Option<FrameSize> {
         self.0.latest().frame.as_ref().map(FrameSize::of)
     }
@@ -180,20 +179,11 @@ struct Taken {
 ///
 /// The element fills its container unless `class` sizes it.
 #[component]
-pub fn FrameView(
-    sink: FrameSink,
-    #[prop(into, optional)] class: Classes,
-    #[prop(attrs)] attrs: Attrs,
-) -> impl IntoView {
+pub fn FrameView(sink: FrameSink, #[prop(into, optional)] class: Classes) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let renderer = FrameRenderer { slot: FrameSlot::new(Arc::clone(&sink.0)), device: None };
 
-    surface()
-        .class(SHEET)
-        .class(class)
-        .attrs(attrs)
-        .renderer_with_invalidator(renderer, &sink.0.invalidator)
-        .into_view()
+    surface().class(SHEET).class(class).renderer_with_invalidator(renderer, &sink.0.invalidator).into_view()
 }
 
 /// What zgui calls to fill the element.
@@ -633,8 +623,8 @@ mod tests {
             let sink = shown.clone();
             view! {
                 box(style:padding = "20px") {
-                    box(style:width = "160px", style:height = "80px") {
-                        FrameView(sink = sink, attr:data-testid = "frame")
+                    box(style:width = "160px", style:height = "80px", attr:data-testid = "frame") {
+                        FrameView(sink = sink)
                     }
                 }
             }

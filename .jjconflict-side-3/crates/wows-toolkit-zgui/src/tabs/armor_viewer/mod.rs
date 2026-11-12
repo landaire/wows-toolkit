@@ -113,7 +113,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
     };
     let models = Signal::derive_local(move || match library.models() {
         ModelsState::NotStarted | ModelsState::Loading => ModelsSource::Loading,
-        ModelsState::Failed(_) => ModelsSource::Unavailable,
+        ModelsState::Failed => ModelsSource::Unavailable,
         ModelsState::Ready(models) => ModelsSource::Ready(Arc::clone(&models.library)),
     });
     let common = Signal::derive_local(move || workspace.common());

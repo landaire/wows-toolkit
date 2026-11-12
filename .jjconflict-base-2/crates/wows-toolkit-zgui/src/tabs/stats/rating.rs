@@ -5,7 +5,6 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use zgui::component;
 use zgui::css;
 use zgui::view;
-use zgui::view::Attrs;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 
@@ -35,19 +34,14 @@ fn tint(category: PersonalRatingCategory) -> String {
 
 /// `text` on a tint of `category`'s hue, in its text colour.
 #[component]
-pub(super) fn RatingChip(
-    #[prop(into)] text: String,
-    category: PersonalRatingCategory,
-    #[prop(attrs)] attrs: Attrs,
-) -> impl IntoView {
+pub(super) fn RatingChip(#[prop(into)] text: String, category: PersonalRatingCategory) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
 
     view! {
         text(
             class = "wt-rating-chip",
             style:color = text_color(category),
-            style:background-color = tint(category),
-            {..attrs}
+            style:background-color = tint(category)
         ) {{text}}
     }
 }

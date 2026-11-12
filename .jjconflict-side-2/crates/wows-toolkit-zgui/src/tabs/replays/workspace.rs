@@ -275,16 +275,14 @@ impl ReplayWorkspace {
     }
 
     /// The replays open, in no order.
+    #[cfg(test)]
     pub fn open_replays(self) -> Vec<PathBuf> {
         self.replays.with_untracked(|replays| replays.keys().cloned().collect())
     }
 
+    #[cfg(test)]
     pub fn open_renderers(self) -> Vec<PathBuf> {
         self.renderers.with_untracked(|renderers| renderers.keys().cloned().collect())
-    }
-
-    pub fn open_watched(self) -> Vec<WatchId> {
-        self.watched.with_untracked(|watched| watched.keys().copied().collect())
     }
 
     /// Whether anything shows in the dock's middle. Reactive.

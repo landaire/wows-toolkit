@@ -64,7 +64,8 @@ pub enum ModelsState {
     NotStarted,
     Loading,
     Ready(Arc<ModelAssets>),
-    Failed(String),
+    /// The reason is logged where the build fails.
+    Failed,
 }
 
 /// Names the replay viewport a feed came from, so the viewer follows only the playback it shows.
@@ -132,14 +133,6 @@ impl ArmorLibrary {
         }
     }
 
-    pub fn bundle(self) -> BundleState {
-        self.bundle.get()
-    }
-
-    pub fn bundle_untracked(self) -> BundleState {
-        self.bundle.get_untracked()
-    }
-
     /// The loaded ship data, tracked.
     pub fn ready(self) -> Option<Arc<ArmorBundle>> {
         self.bundle.with(|bundle| match bundle {
@@ -162,7 +155,7 @@ impl ArmorLibrary {
     pub fn models_ready_untracked(self) -> Option<Arc<ModelAssets>> {
         match self.models.get_untracked() {
             ModelsState::Ready(models) => Some(models),
-            ModelsState::NotStarted | ModelsState::Loading | ModelsState::Failed(_) => None,
+            ModelsState::NotStarted | ModelsState::Loading | ModelsState::Failed => None,
         }
     }
 
@@ -253,7 +246,7 @@ impl ArmorLibrary {
                 Ok(models) => self.models.set(ModelsState::Ready(Arc::new(models))),
                 Err(err) => {
                     tracing::error!("model viewer: failed to build the model library: {err}");
-                    self.models.set(ModelsState::Failed(err.to_string()));
+                    self.models.set(ModelsState::Failed);
                 }
             }
         });

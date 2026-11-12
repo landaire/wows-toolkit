@@ -165,7 +165,6 @@ pub struct PanelToggle {
 /// A modifier key that switches a view to an alternate reading while held.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModifierKey {
-    Alt,
     /// Ctrl, or Cmd on macOS.
     Primary,
     Shift,
@@ -176,8 +175,6 @@ impl ModifierKey {
     pub const fn label(self) -> &'static str {
         let mac = cfg!(target_os = "macos");
         match self {
-            Self::Alt if mac => "Option",
-            Self::Alt => "Alt",
             Self::Primary if mac => "Cmd",
             Self::Primary => "Ctrl",
             Self::Shift => "Shift",
@@ -186,7 +183,6 @@ impl ModifierKey {
 
     pub const fn is_down(self, modifiers: zgui::vocab::Modifiers) -> bool {
         match self {
-            Self::Alt => modifiers.alt(),
             Self::Primary => modifiers.primary(),
             Self::Shift => modifiers.shift(),
         }

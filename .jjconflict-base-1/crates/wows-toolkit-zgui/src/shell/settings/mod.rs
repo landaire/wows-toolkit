@@ -278,12 +278,6 @@ impl SettingsDrawerControl {
         self.open.set(true);
     }
 
-    /// Opens the drawer with `section` at the top of the list.
-    pub fn open_at_section(self, section: SettingsSection) {
-        self.jump.set(Some(SettingsTarget::Section(section)));
-        self.open.set(true);
-    }
-
     pub fn close(self) {
         if self.open.get_untracked() {
             self.open.set(false);

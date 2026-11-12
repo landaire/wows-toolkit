@@ -533,10 +533,12 @@ impl Search {
         self.redo.update_value(Vec::clear);
     }
 
+    #[cfg(test)]
     pub fn can_undo(self) -> bool {
         self.undo.with_value(|undo| !undo.is_empty())
     }
 
+    #[cfg(test)]
     pub fn can_redo(self) -> bool {
         self.redo.with_value(|redo| !redo.is_empty())
     }
@@ -1018,12 +1020,6 @@ impl Search {
         if let Some(failed) = self.save_error.get_untracked() {
             self.save_field(failed.field, failed.value);
         }
-    }
-
-    /// The selection anchor and focus, for a test.
-    #[cfg(test)]
-    pub fn selection_focus_for_test(self) -> Option<NodePath> {
-        self.selection_focus.get_value()
     }
 }
 

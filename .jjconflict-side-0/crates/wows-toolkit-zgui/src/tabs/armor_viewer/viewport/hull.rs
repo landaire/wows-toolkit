@@ -750,10 +750,6 @@ impl ArmorViewportState {
         self.update(|this, cx| this.select_module_alternative(ct, name, cx));
     }
 
-    pub fn reload_ship(self) {
-        self.update(|this, cx| this.reload_ship(cx));
-    }
-
     pub fn set_thickness_source(self, mount: MountRef) {
         self.update(|this, cx| this.set_thickness_source(mount, cx));
     }

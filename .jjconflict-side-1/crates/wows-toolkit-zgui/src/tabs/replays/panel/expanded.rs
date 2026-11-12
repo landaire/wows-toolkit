@@ -47,8 +47,6 @@ use zgui_ui::TooltipTriggerProps;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
-use crate::shell::tabs::ModeHint;
-use crate::shell::tabs::ModifierKey;
 
 const SHEET: &str = "wt-replay-expanded";
 
@@ -154,10 +152,6 @@ enum DamageDirection {
     Received,
 }
 
-/// The mode Alt puts the damage breakdowns in, for the tab's status bar while a row showing damage
-/// shares is open (see [`shows_damage_shares`]).
-pub const SHARE_MODE: ModeHint = ModeHint { key: ModifierKey::Alt, name_key: "ui.replay.damage_share.mode" };
-
 /// The rows a table shows, shared by every row's detail.
 pub type Rows = Arc<[PlayerRow]>;
 
@@ -185,23 +179,6 @@ pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRo
         }
         _ => false,
     }
-}
-
-/// Whether Alt changes anything on screen: some row among `open`, the rows showing their detail,
-/// lists damage shares under one of `columns`.
-pub fn shows_damage_shares<'a>(
-    open: impl IntoIterator<Item = &'a PlayerRow>,
-    columns: impl IntoIterator<Item = ReplayColumn>,
-    debug: bool,
-) -> bool {
-    let damage_shown =
-        columns.into_iter().any(|col| matches!(col, ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage));
-
-    damage_shown
-        && open.into_iter().any(|row| {
-            let shown = !row.should_hide_stats() || debug;
-            shown && row.damage_interactions.as_ref().is_some_and(|interactions| !interactions.is_empty())
-        })
 }
 
 /// Every column's detail for `row`, side by side in `columns` order, for a table whose detail

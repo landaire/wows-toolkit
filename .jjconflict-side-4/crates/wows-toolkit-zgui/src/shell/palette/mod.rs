@@ -34,6 +34,7 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
+#[cfg(test)]
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
@@ -404,6 +405,7 @@ impl PaletteControl {
         self.opening.get().map(|opening| opening.layer)
     }
 
+    #[cfg(test)]
     fn layer_untracked(self) -> Option<Layer> {
         self.opening.get_untracked().map(|opening| opening.layer)
     }

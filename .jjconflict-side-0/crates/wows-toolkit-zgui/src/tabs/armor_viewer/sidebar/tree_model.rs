@@ -90,11 +90,6 @@ impl SidebarTree {
     pub fn first_openable(&self) -> Option<RowId> {
         self.listed().into_iter().find(|id| self.kind(id).is_some_and(RowKind::opens_on_its_own)).cloned()
     }
-
-    #[cfg(test)]
-    pub fn notes(&self) -> &HashMap<RowId, RowNote> {
-        &self.notes
-    }
 }
 
 impl TreeModel for SidebarTree {

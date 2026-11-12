@@ -255,15 +255,12 @@ pub struct MatchState {
     pub splash: Option<usize>,
 }
 
-/// What the viewport's context menu offers from the tab: the rail and the pen check.
+/// What the viewport's context menu offers from the tab: the rail and the quick toggles.
 pub fn pane_menu(workspace: ArmorWorkspace, viewport: ArmorViewportState) -> PaneMenu {
-    use zgui::reactive::Signal;
     use zgui::reactive::UnsyncCallback;
 
     PaneMenu {
-        options_open: Signal::derive_local(move || workspace.options_open.get()),
         toggle_options: UnsyncCallback::new(move |()| workspace.toggle_options()),
-        open_pen_check: UnsyncCallback::new(move |()| workspace.open_section(OptionSection::PenCheck)),
         quick_toggles: UnsyncCallback::new(move |()| quick_toggles(workspace, viewport)),
     }
 }

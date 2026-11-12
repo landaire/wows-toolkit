@@ -79,7 +79,6 @@ use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
-use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
@@ -341,10 +340,6 @@ impl RendererSession {
     /// Whether the session's state is still there to read.
     pub fn is_open(self) -> bool {
         self.run.try_with_value(|_| ()).is_some()
-    }
-
-    pub fn request(self) -> RenderRequest {
-        self.run.with_value(|run| run.request.clone())
     }
 
     pub fn title(self) -> String {
@@ -1056,11 +1051,6 @@ impl RendererSession {
         }
     }
 
-    /// Whether the armor viewer can be opened on `entity_id`: its hits were read.
-    pub fn has_armor_for(self, entity_id: EntityId) -> bool {
-        self.events.with(|events| events.shots().contains_key(&entity_id))
-    }
-
     fn follow_armor(self) {
         let Some(track) = self.track_untracked() else { return };
         let clock = GameClock(track.seconds_at(self.playback.with_untracked(Playback::at)));
@@ -1365,12 +1355,6 @@ impl RendererSession {
     /// Records that the viewport has a window to itself.
     pub fn mark_popped_out(self) {
         self.popped_out.set(true);
-    }
-
-    /// Whether the session's frames are what the rest of a collab session watches. Reactive.
-    pub fn is_shared(self) -> bool {
-        let _ = self.collab_frame.get();
-        self.run.with_value(|run| run.shared)
     }
 }
 

@@ -3,23 +3,19 @@
 //! The egui app's Incoming Fire panel (`replay/realtime_armor_viewer.rs`). Empty for a ship opened
 //! from the catalogue, which nobody was shooting at.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
 use rust_i18n::t;
-use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::analyzer::decoder::HitType;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
-use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::replay_render::armor::IncomingContext;
 use wows_toolkit_viewmodel::armor::health_strip::HealthStrip;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
 use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::incoming::group_incoming;
-use wowsunpack::game_params::types::ShellInfo;
 use zgui::canvas::zgui_color::Color;
 use zgui::component;
 use zgui::css;
@@ -111,15 +107,6 @@ impl IncomingFire {
     /// Whether the log is about `param_index`'s ship.
     pub fn is_about(&self, param_index: &str) -> bool {
         self.victim.as_deref() == Some(param_index)
-    }
-
-    /// What a viewer showing `param_index`'s ship should compare, where it is the ship the log is
-    /// about.
-    pub fn to_compare(
-        &self,
-        param_index: Option<&str>,
-    ) -> Option<(Vec<PreExtractedHit>, HashMap<GameParamId, ShellInfo>)> {
-        self.is_about(param_index?).then(|| (self.context.taken.clone(), self.context.shells.clone()))
     }
 
     fn is_empty(&self) -> bool {
