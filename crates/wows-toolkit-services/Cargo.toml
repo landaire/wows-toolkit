@@ -37,7 +37,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", 
 # The chat poll behind the roster's possible-stream-sniper chip. Same version
 # and features as the egui app, so the two resolve one Twitch client.
 twitch_api = { version = "0.7.2", features = ["helix", "client", "reqwest"] }
-wows-data-mgr = { workspace = true }
+wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-hardening = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
