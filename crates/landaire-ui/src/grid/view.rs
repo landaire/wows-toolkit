@@ -15,6 +15,7 @@ use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
@@ -52,6 +53,7 @@ use crate::grid::state::GridStrings;
 use crate::grid::state::MenuTarget;
 use crate::grid::state::Pins;
 use crate::grid::state::RowMenu;
+use crate::grid::state::RowMenuHandle;
 use crate::grid::style;
 use crate::motion::motion_preference;
 
@@ -109,6 +111,9 @@ pub fn Grid<T, K, F>(
     /// The items of the menu a row opens, for that row.
     #[prop(optional)]
     row_menu: Option<RowMenu<K>>,
+    /// Opens the row menu from outside the grid and tells which row's menu is open.
+    #[prop(optional)]
+    row_menu_handle: Option<RowMenuHandle<K>>,
     /// Told the text a copy produces. Without it the text goes to the clipboard.
     #[prop(optional)]
     on_copy: Option<UnsyncCallback<String>>,
@@ -264,6 +269,50 @@ where
         drop(reconciling);
     });
 
+    let menu_open = RwSignal::new_local(false);
+    // A menu for a row that is gone has nothing left to act on.
+    let closing = {
+        let positions = cx.positions;
+        let menu_target = cx.menu_target;
+        RenderEffect::new(move |_| {
+            let gone = positions.with(|positions| {
+                menu_target.with_untracked(
+                    |target| matches!(target, Some(MenuTarget::Row(key)) if !positions.contains_key(key)),
+                )
+            });
+            if gone && menu_open.get_untracked() {
+                menu_open.set(false);
+            }
+        })
+    };
+    on_cleanup_local(move || drop(closing));
+    if let Some(handle) = row_menu_handle {
+        let opener = {
+            let cx = Rc::clone(&cx);
+            move |key: K, anchor: NodeRef| {
+                if cx.row_menu.is_none() || !cx.positions.with_untracked(|positions| positions.contains_key(&key)) {
+                    return;
+                }
+                cx.target_row(&key);
+                header::open_menu_at(anchor, MenuTarget::Row(key), &cx);
+            }
+        };
+        handle.attach(Rc::new(opener));
+        let menu_target = cx.menu_target;
+        let telling = RenderEffect::new(move |_| {
+            let open = menu_open.get();
+            let row = menu_target.with(|target| match target {
+                Some(MenuTarget::Row(key)) if open => Some(key.clone()),
+                _ => None,
+            });
+            handle.set_open_row(row);
+        });
+        on_cleanup_local(move || {
+            drop(telling);
+            handle.detach();
+        });
+    }
+
     let instant = cx.instant;
     let tracks = {
         let cx = Rc::clone(&cx);
@@ -341,7 +390,7 @@ where
             {..attrs},
             class = class
         ) {
-            ContextMenu {
+            ContextMenu(open = menu_open) {
                 ContextMenuTrigger {
                     {region()}
                 }

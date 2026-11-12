@@ -12,13 +12,16 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
 use zgui::runtime::clipboard::Clipboards;
 use zgui::view::AnyView;
 use zgui::view::FrameHandle;
@@ -51,6 +54,67 @@ use crate::surface::RowHeight;
 
 /// Builds the items of the menu a row opens, for that row's key.
 pub type RowMenu<K> = Rc<dyn Fn(K) -> AnyView>;
+
+type RowMenuOpener<K> = Rc<dyn Fn(K, NodeRef)>;
+
+/// Opens a grid's row menu from outside the grid, such as from a button inside a cell, and tells
+/// which row's menu is open. Given to the grid as `row_menu_handle`.
+pub struct RowMenuHandle<K: 'static> {
+    opener: StoredValue<Option<RowMenuOpener<K>>, LocalStorage>,
+    open_row: RwSignal<Option<K>, LocalStorage>,
+}
+
+impl<K: 'static> Clone for RowMenuHandle<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K: 'static> Copy for RowMenuHandle<K> {}
+
+impl<K: Clone + 'static> RowMenuHandle<K> {
+    pub fn new() -> Self {
+        Self { opener: StoredValue::new_local(None), open_row: RwSignal::new_local(None) }
+    }
+
+    /// Opens `key`'s row menu at the bottom-left corner of `anchor`, selecting the row as a right
+    /// press on it does. Does nothing before the grid is built or once it is gone.
+    pub fn open(self, key: K, anchor: NodeRef) {
+        let opener = self.opener.with_value(Clone::clone);
+        if let Some(opener) = opener {
+            opener(key, anchor);
+        }
+    }
+
+    /// The row whose menu is open, if one is.
+    pub fn open_row(self) -> Option<K> {
+        self.open_row.get()
+    }
+
+    pub(crate) fn attach(self, opener: Rc<dyn Fn(K, NodeRef)>) {
+        self.opener.set_value(Some(opener));
+    }
+
+    pub(crate) fn detach(self) {
+        self.opener.set_value(None);
+        self.open_row.set(None);
+    }
+
+    pub(crate) fn set_open_row(self, key: Option<K>)
+    where
+        K: PartialEq,
+    {
+        if self.open_row.with_untracked(|open| *open != key) {
+            self.open_row.set(key);
+        }
+    }
+}
+
+impl<K: Clone + 'static> Default for RowMenuHandle<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// The words a grid shows of its own, in its header menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -424,6 +488,15 @@ where
 
         let current = self.sort.get_untracked();
         on_sort.run(ColumnSort::after_press(current.as_ref(), id));
+    }
+
+    /// Makes `key` the row a menu acts on, as a right press on it does: the keyboard moves to it,
+    /// and it becomes the selection unless it is already part of it.
+    pub(crate) fn target_row(&self, key: &K) {
+        if !self.selection.with_untracked(|selection| selection.contains(key)) {
+            self.press_row(key, Modifiers::NONE);
+        }
+        self.cursor.set(Some(key.clone()));
     }
 
     /// Selects `key` the way a press with `modifiers` held does.

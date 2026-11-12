@@ -19,6 +19,7 @@ use landaire_ui::MotionPreference;
 use landaire_ui::RowGroups;
 use landaire_ui::RowHeight;
 use landaire_ui::RowMenu;
+use landaire_ui::RowMenuHandle;
 use landaire_ui::RowMode;
 use landaire_ui::SortDirection;
 use landaire_ui::ThemeRootProps;
@@ -229,6 +230,101 @@ fn the_menu_key_opens_the_row_menu_at_the_start_of_the_row() {
         item_box.origin.x.0
     );
     assert!(item_box.origin.y.0 >= row_box.origin.y.0 + row_box.size.height.0, "the menu opens under the row");
+}
+
+#[test]
+fn a_row_menu_handle_opens_a_row_menu_from_code_and_tells_it_is_open() {
+    type Given = Option<(RowMenuHandle<u32>, NodeRef)>;
+    let handles: Rc<Cell<Given>> = Rc::new(Cell::new(None));
+    let given = Rc::clone(&handles);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        let handle = RowMenuHandle::new();
+        let anchor = NodeRef::new();
+        given.set(Some((handle, anchor)));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; flex-direction: column; width: 420px; height: 300px") {
+                    box(node_ref = anchor, style = "height: 20px") {}
+                    Grid(
+                        rows = RwSignal::new_local(items(4)),
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        row_menu = row_menu,
+                        row_menu_handle = handle,
+                        selection_mode = GridSelectionMode::Multiple,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let (handle, anchor) = handles.get().expect("the grid was built");
+    assert_eq!(handle.open_row(), None);
+
+    handle.open(2, anchor);
+    window.advance(Duration::from_millis(300));
+
+    window.by_role_and_label(Role::MenuItem, "Open 2").expect("the row menu is open");
+    assert_eq!(handle.open_row(), Some(2));
+    let row = window.by_role(Role::Row)[3];
+    assert_eq!(window.a11y(row).and_then(|state| state.selected), Some(true), "the row is selected");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+    assert_eq!(handle.open_row(), None, "a closed menu leaves no row open");
+}
+
+#[test]
+fn a_row_menu_handle_ignores_a_missing_row_and_closes_when_its_row_goes() {
+    type Given = Option<(RowMenuHandle<u32>, NodeRef, RwSignal<Vec<Item>, LocalStorage>)>;
+    let handles: Rc<Cell<Given>> = Rc::new(Cell::new(None));
+    let given = Rc::clone(&handles);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        let handle = RowMenuHandle::new();
+        let anchor = NodeRef::new();
+        let rows = RwSignal::new_local(items(4));
+        given.set(Some((handle, anchor, rows)));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; flex-direction: column; width: 420px; height: 300px") {
+                    box(node_ref = anchor, style = "height: 20px") {}
+                    Grid(
+                        rows = rows,
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        row_menu = row_menu,
+                        row_menu_handle = handle,
+                        selection_mode = GridSelectionMode::Multiple,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let (handle, anchor, rows) = handles.get().expect("the grid was built");
+
+    handle.open(9, anchor);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role_and_label(Role::MenuItem, "Open 9").is_none(), "no menu for a missing row");
+    assert_eq!(handle.open_row(), None);
+    let selected = window
+        .by_role(Role::Row)
+        .into_iter()
+        .filter(|&row| window.a11y(row).and_then(|state| state.selected) == Some(true))
+        .count();
+    assert_eq!(selected, 0, "a missing row selects nothing");
+
+    handle.open(2, anchor);
+    window.advance(Duration::from_millis(300));
+    assert_eq!(handle.open_row(), Some(2));
+
+    rows.set(items(4).into_iter().filter(|item| item.id != 2).collect());
+    window.advance(Duration::from_millis(300));
+    assert_eq!(handle.open_row(), None, "the menu closes with its row");
 }
 
 #[test]
