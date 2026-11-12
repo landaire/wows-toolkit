@@ -23,12 +23,15 @@ wows-toolkit-icons = { workspace = true }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
-# The replay's own types a player row carries: account ids, relations and connection notes.
-wows_replays = { workspace = true }
-wows-replay-insights = { workspace = true }
+# The replay's own types a player row and a loaded replay's panel carry.
+wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 # The game's GUI assets: ship-class icons and nation flags.
 wowsunpack = { workspace = true }
 wows-toolkit-services = { workspace = true }
+# The match export formats.
+ciborium = "0.2"
+csv = "1"
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
@@ -76,7 +79,7 @@ landaire-ui = { workspace = true, features = ["test-support"] }
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
-# The sample replay the player table tests draw.
+# The sample replay and fabricated rows the player table and replay panel tests draw.
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # Test frames are built from RGB images.
