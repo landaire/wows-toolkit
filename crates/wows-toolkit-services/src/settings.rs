@@ -150,8 +150,7 @@ impl StartupSettings {
             }
         };
         // Absent until the reader turns it off, and armor is the default.
-        let model_show_armor =
-            queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true);
+        let model_show_armor = queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true);
         // Absent until the reader chooses a mode, and always is the default.
         let model_xray_highlight =
             queries::get_setting::<XrayHighlight>(pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT).await.unwrap_or_default();

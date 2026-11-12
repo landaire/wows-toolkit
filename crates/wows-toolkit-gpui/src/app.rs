@@ -2107,13 +2107,9 @@ impl App {
         use wows_toolkit_viewmodel::palette::PaletteMode;
 
         let source = match mode {
-            PaletteMode::ArmorShips => {
-                crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
-            }
+            PaletteMode::ArmorShips => crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx)),
             PaletteMode::Players => crate::palette::ModeSource::index(IndexList::Players),
-            PaletteMode::MyShips => {
-                crate::palette::ModeSource::index(IndexList::MyShips)
-            }
+            PaletteMode::MyShips => crate::palette::ModeSource::index(IndexList::MyShips),
             PaletteMode::ReindexVersions => {
                 let candidates = self.listed_reindex_candidates(cx);
                 crate::palette::ModeSource::Versions(
@@ -2453,7 +2449,8 @@ impl App {
         self.watch_live_matches(&wows_dir, proxy_url, cx);
         let game_data = self.replay_inspector.read(cx).game_data();
         self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
-        let opening_layer = crate::armor_viewer::viewport_view::OpeningLayer::from_show_armor(settings.model_show_armor);
+        let opening_layer =
+            crate::armor_viewer::viewport_view::OpeningLayer::from_show_armor(settings.model_show_armor);
         let xray_highlight = settings.model_xray_highlight;
         self.armor_pane.update(cx, |pane, cx| {
             pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx);

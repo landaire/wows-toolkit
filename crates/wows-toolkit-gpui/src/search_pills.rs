@@ -26,15 +26,15 @@ use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
 use wows_toolkit_viewmodel::query_bar::label::SegmentRole;
+use wows_toolkit_viewmodel::query_bar::picker;
 #[cfg(test)]
 pub use wows_toolkit_viewmodel::query_bar::picker::choices;
 use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::select::Selection;
+use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
-use wows_toolkit_viewmodel::query_bar::picker;
-use wows_toolkit_viewmodel::query_bar::suggest;
 
 pub use wows_toolkit_viewmodel::query_bar::picker::EditablePart;
 pub use wows_toolkit_viewmodel::query_bar::picker::StructuralEdit;
