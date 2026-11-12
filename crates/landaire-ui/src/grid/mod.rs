@@ -33,5 +33,6 @@ pub use crate::grid::sort::ColumnSort;
 pub use crate::grid::sort::SortDirection;
 pub use crate::grid::state::GridStrings;
 pub use crate::grid::state::RowMenu;
+pub use crate::grid::state::RowMenuHandle;
 pub use crate::grid::view::Grid;
 pub use crate::grid::view::GridProps;
