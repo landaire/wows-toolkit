@@ -9,6 +9,7 @@ use std::sync::LazyLock;
 use wowsunpack::export::model_catalog::BuildingKind;
 use wowsunpack::export::model_catalog::BuildingParamRef;
 use wowsunpack::export::model_catalog::CatalogLinks;
+use wowsunpack::export::model_catalog::GeometryAvailability;
 use wowsunpack::export::model_catalog::MiscCategory;
 use wowsunpack::export::model_catalog::ModelCatalog;
 use wowsunpack::export::model_catalog::ModelGroup;
@@ -18,6 +19,10 @@ use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_catalog::ModelPathIndex;
 use wowsunpack::export::model_catalog::ModelSubKind;
 use wowsunpack::export::model_catalog::ModelVariantKind;
+use wowsunpack::export::model_library::ModelLoadError;
+use wowsunpack::export::model_library::ModelLoadOptions;
+use wowsunpack::export::model_library::TextureDecode;
+use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::models::assets_bin;
 
@@ -218,4 +223,60 @@ fn misc_models_fall_into_named_categories() {
     }
     let other = categories.get(&MiscCategory::Other).map_or(0, Vec::len);
     assert!(other * 4 < total, "{other} of {total} misc models are unclassified");
+}
+
+/// Availability matches what a load finds: a model marked present loads its
+/// geometry, and one marked absent fails for that reason.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn geometry_availability_matches_loads() {
+    let dir =
+        std::env::var_os("WOWS_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"E:\WoWs\World_of_Warships"));
+    if !dir.join("bin").is_dir() {
+        eprintln!("skipped: no install at {}", dir.display());
+        return;
+    }
+    let assets = ShipAssets::from_game_dir(&dir).expect("ship assets");
+    let started = std::time::Instant::now();
+    let library = assets.model_library().expect("model library");
+    eprintln!("[measured] model library with geometry availability built in {:?}", started.elapsed());
+    let catalog = library.catalog();
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in catalog.entries() {
+        *counts.entry(format!("{:?}", catalog.geometry(entry.path()))).or_insert(0) += 1;
+    }
+    eprintln!("{counts:#?}");
+    assert!(catalog.entries().iter().all(|entry| catalog.geometry(entry.path()).is_some()), "every entry is resolved");
+
+    let options = ModelLoadOptions { textures: TextureDecode::None, ..ModelLoadOptions::default() };
+    let mut checked = 0usize;
+    for entry in catalog.entries().iter().step_by(97) {
+        let expected = catalog.geometry(entry.path()).expect("resolved");
+        let outcome = library.load_model(entry.path(), &options);
+        match expected {
+            GeometryAvailability::Present => {
+                if let Err(error) = &outcome {
+                    let context = error.current_context();
+                    assert!(
+                        !matches!(context, ModelLoadError::GeometryAbsent { .. } | ModelLoadError::NoGeometry { .. }),
+                        "{} is marked present: {error}",
+                        entry.path()
+                    );
+                }
+            }
+            GeometryAvailability::Absent => {
+                let error = outcome.err().unwrap_or_else(|| panic!("{} is marked absent but loads", entry.path()));
+                assert!(matches!(error.current_context(), ModelLoadError::GeometryAbsent { .. }), "{error}");
+            }
+            GeometryAvailability::NoGeometry => {
+                let error = outcome.err().unwrap_or_else(|| panic!("{} has no geometry but loads", entry.path()));
+                assert!(matches!(error.current_context(), ModelLoadError::NoGeometry { .. }), "{error}");
+            }
+        }
+        checked += 1;
+    }
+    eprintln!("{checked} sampled loads agree");
+    let fort = path("content/location/gameplay/building/LYB015/LYB015.model");
+    assert_eq!(catalog.geometry(&fort), Some(GeometryAvailability::Absent));
 }

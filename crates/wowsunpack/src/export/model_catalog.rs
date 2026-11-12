@@ -814,6 +814,17 @@ impl ModelGroupKind {
         [Self::Gameplay, Self::Building, Self::Character, Self::Location, Self::Port, Self::Style, Self::Other];
 }
 
+/// Whether the install ships the geometry a model's visual names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum GeometryAvailability {
+    Present,
+    /// The visual names a geometry file the installed packages do not hold.
+    Absent,
+    /// The visual names no geometry, as placeholder models do.
+    NoGeometry,
+}
+
 /// How a variant relates to its base model.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -911,6 +922,8 @@ pub struct ModelCatalog {
     /// Dead and section variant path to the index of its base entry.
     variant_owner: HashMap<ModelPath, usize>,
     group_counts: BTreeMap<ModelGroupKind, usize>,
+    /// Per model path; empty until [`Self::with_geometry`].
+    geometry: HashMap<ModelPath, GeometryAvailability>,
 }
 
 impl ModelCatalog {
@@ -1024,7 +1037,7 @@ impl ModelCatalog {
             *group_counts.entry(entry.group.kind()).or_insert(0) += 1;
         }
 
-        Self { entries, entry_index, variant_owner, group_counts }
+        Self { entries, entry_index, variant_owner, group_counts, geometry: HashMap::new() }
     }
 
     /// Every base model, skins included, sorted by path.
@@ -1052,6 +1065,27 @@ impl ModelCatalog {
     /// Number of base models per top-level folder, skins included.
     pub fn count_by_group(&self) -> &BTreeMap<ModelGroupKind, usize> {
         &self.group_counts
+    }
+
+    /// Attach the geometry availability of each model path.
+    pub fn with_geometry(mut self, geometry: HashMap<ModelPath, GeometryAvailability>) -> Self {
+        self.geometry = geometry;
+        self
+    }
+
+    /// Whether `path` can be drawn. A base model loads with its hull sections,
+    /// so it takes the first part, in load order, that is not present. `None`
+    /// when the availability of a part before that is unknown.
+    pub fn geometry(&self, path: &ModelPath) -> Option<GeometryAvailability> {
+        let sections = self.entry(path).into_iter().flat_map(ModelEntry::sections);
+        for part in std::iter::once(path).chain(sections) {
+            let availability = *self.geometry.get(part)?;
+            if availability != GeometryAvailability::Present {
+                return Some(availability);
+            }
+        }
+
+        Some(GeometryAvailability::Present)
     }
 }
 
@@ -1671,5 +1705,30 @@ mod tests {
         let categories: Vec<String> =
             stems.iter().map(|stem| format!("{stem} | {:?}", MiscCategory::classify(stem))).collect();
         insta::assert_debug_snapshot!(categories);
+    }
+
+    #[test]
+    fn a_base_model_is_as_available_as_its_least_available_section() {
+        let hull = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945.model";
+        let bow = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_Bow.model";
+        let stern = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_Stern.model";
+        let house = "content/location/building/city/LBC176/LBC176.model";
+        let unknown = "content/location/building/city/LBC177/LBC177.model";
+        let cruiser = "content/gameplay/usa/ship/cruiser/ASC011_Helena_1944/ASC011_Helena_1944.model";
+        let cruiser_bow = "content/gameplay/usa/ship/cruiser/ASC011_Helena_1944/ASC011_Helena_1944_Bow.model";
+        let geometry = HashMap::from([
+            (path(hull), GeometryAvailability::Present),
+            (path(bow), GeometryAvailability::Present),
+            (path(stern), GeometryAvailability::Absent),
+            (path(house), GeometryAvailability::NoGeometry),
+            (path(cruiser), GeometryAvailability::Present),
+        ]);
+        let catalog = catalog(&[hull, bow, stern, house, unknown, cruiser, cruiser_bow], &[]).with_geometry(geometry);
+
+        assert_eq!(catalog.geometry(&path(hull)), Some(GeometryAvailability::Absent), "the stern is absent");
+        assert_eq!(catalog.geometry(&path(bow)), Some(GeometryAvailability::Present), "a section stands alone");
+        assert_eq!(catalog.geometry(&path(house)), Some(GeometryAvailability::NoGeometry));
+        assert_eq!(catalog.geometry(&path(unknown)), None);
+        assert_eq!(catalog.geometry(&path(cruiser)), None, "a section of unknown availability");
     }
 }

@@ -159,19 +159,7 @@ fn parse_visual_header(input: &mut &[u8]) -> WResult<VisualHeader> {
 /// extending to the end of the blob (so relptrs can resolve into OOL data).
 /// The first `VISUAL_ITEM_SIZE` bytes are the fixed record fields.
 pub fn parse_visual(record_data: &[u8]) -> Result<VisualPrototype, Report<VisualError>> {
-    if record_data.len() < VISUAL_ITEM_SIZE {
-        return Err(Report::new(VisualError::DataTooShort {
-            offset: 0,
-            need: VISUAL_ITEM_SIZE,
-            have: record_data.len(),
-        }));
-    }
-
-    let hdr = {
-        let input = &mut &record_data[..];
-        parse_visual_header(input)
-            .map_err(|e: ErrMode<ContextError>| Report::new(VisualError::ParseError(format!("header: {e}"))))?
-    };
+    let hdr = parse_fixed_fields(record_data)?;
 
     let base = 0usize;
     let nodes_count = hdr.nodes_count as usize;
@@ -233,6 +221,26 @@ pub fn parse_visual(record_data: &[u8]) -> Result<VisualPrototype, Report<Visual
         render_sets,
         lods,
     })
+}
+
+/// The geometry id of a VisualPrototype record, read from its fixed fields
+/// alone, for a caller that needs no nodes or render sets.
+pub fn parse_merged_geometry_path_id(record_data: &[u8]) -> Result<u64, Report<VisualError>> {
+    Ok(parse_fixed_fields(record_data)?.merged_geometry_path_id)
+}
+
+fn parse_fixed_fields(record_data: &[u8]) -> Result<VisualHeader, Report<VisualError>> {
+    if record_data.len() < VISUAL_ITEM_SIZE {
+        return Err(Report::new(VisualError::DataTooShort {
+            offset: 0,
+            need: VISUAL_ITEM_SIZE,
+            have: record_data.len(),
+        }));
+    }
+
+    let input = &mut &record_data[..];
+    parse_visual_header(input)
+        .map_err(|e: ErrMode<ContextError>| Report::new(VisualError::ParseError(format!("header: {e}"))))
 }
 
 // ---------------------------------------------------------------------------

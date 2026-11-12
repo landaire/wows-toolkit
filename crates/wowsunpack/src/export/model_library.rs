@@ -44,6 +44,7 @@ use super::hardpoint::ModelSpaceHardpoints;
 use super::hardpoint::mesh_to_node_space;
 use super::hardpoint::model_extenders;
 use super::model_catalog;
+use super::model_catalog::GeometryAvailability;
 use super::model_catalog::ModelCatalog;
 use super::model_catalog::ModelEntry;
 use super::model_catalog::ModelPath;
@@ -52,6 +53,9 @@ use super::part_group::PartGroup;
 use super::ship::ExportContents;
 use super::texture;
 use super::texture::TextureLod;
+
+/// The geometry id with every bit set stands for no geometry; no path carries it.
+const NO_GEOMETRY: u64 = u64::MAX;
 
 /// Why a [`ModelLibrary`] could not be built.
 #[derive(Debug, Error)]
@@ -167,7 +171,8 @@ pub struct ModelLibrary {
 
 impl ModelLibrary {
     /// Parses `assets.bin` once and keeps it parsed, indexes every `.model`,
-    /// then groups the gameplay models with the skin links of `metadata`.
+    /// groups them with the GameParams links of `metadata`, and records
+    /// whether the install ships each model's geometry.
     pub fn new(
         vfs: VfsPath,
         assets_bin_bytes: Arc<Vec<u8>>,
@@ -195,7 +200,40 @@ impl ModelLibrary {
         let models_by_stem =
             first_by_stem.into_iter().map(|(stem, (_, path))| (stem.to_string(), path.clone())).collect();
 
-        Ok(Self { vfs, assets, self_id_index, model_index, models_by_stem, catalog })
+        let mut library = Self { vfs, assets, self_id_index, model_index, models_by_stem, catalog };
+        let geometry = library.all_geometry_availability();
+        library.catalog = std::mem::take(&mut library.catalog).with_geometry(geometry);
+
+        Ok(library)
+    }
+
+    /// [`Self::geometry_availability`] of every model, spread over half the
+    /// cores: one visual header and one VFS lookup per model add up across
+    /// the whole store.
+    fn all_geometry_availability(&self) -> HashMap<ModelPath, GeometryAvailability> {
+        let paths: Vec<&ModelPath> = self.model_index.paths().collect();
+        let threads = std::thread::available_parallelism().map_or(1, |count| (count.get() / 2).max(1));
+        let chunk_len = paths.len().div_ceil(threads).max(1);
+
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = paths
+                .chunks(chunk_len)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        let db = self.assets.db();
+                        chunk
+                            .iter()
+                            .filter_map(|&path| Some((path.clone(), self.geometry_availability(&db, path)?)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+                .collect()
+        })
     }
 
     pub(crate) fn db(&self) -> PrototypeDatabase<'_> {
@@ -488,9 +526,6 @@ impl ModelLibrary {
     }
 
     fn read_part(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Result<PartSource, Report<ModelLoadError>> {
-        // The id with every bit set stands for no geometry; no path carries it.
-        const NO_GEOMETRY: u64 = u64::MAX;
-
         let model = self.read_model_prototype(db, path)?;
         let (visual_path, visual) = self.read_visual(db, path, &model)?;
 
@@ -507,7 +542,7 @@ impl ModelLibrary {
             })?;
         let read_error = || ModelLoadError::GeometryRead { path: geometry_path.clone() };
         let geometry_file = self.vfs.join(&geometry_path).context_with(read_error)?;
-        if !geometry_file.is_file().context_with(read_error)? {
+        if !geometry_present(&geometry_file).context_with(read_error)? {
             return Err(Report::new(ModelLoadError::GeometryAbsent { path: geometry_path.clone() }));
         }
         let mut geometry_bytes = Vec::new();
@@ -522,6 +557,23 @@ impl ModelLibrary {
         Ok(PartSource { model_path: path.clone(), visual_path, visual, geometry_path, geometry_bytes, extenders })
     }
 
+    /// Whether the install ships the geometry `path`'s visual names, without
+    /// reading it. `None` when the model or visual record does not read or
+    /// the geometry id names no path.
+    fn geometry_availability(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Option<GeometryAvailability> {
+        let model = self.read_model_prototype(db, path).ok()?;
+        let record = self.visual_record(db, path, &model).ok()?;
+        let geometry_id = visual::parse_merged_geometry_path_id(record).ok()?;
+        if geometry_id == NO_GEOMETRY {
+            return Some(GeometryAvailability::NoGeometry);
+        }
+        let &position = self.self_id_index.get(&geometry_id)?;
+        let geometry_path = db.reconstruct_path(position, &self.self_id_index);
+        let present = self.vfs.join(&geometry_path).and_then(|file| geometry_present(&file)).ok()?;
+
+        Some(if present { GeometryAvailability::Present } else { GeometryAvailability::Absent })
+    }
+
     /// The visual record `model` names, with its path. Reads no geometry.
     fn read_visual(
         &self,
@@ -529,6 +581,26 @@ impl ModelLibrary {
         path: &ModelPath,
         model: &ModelPrototype,
     ) -> Result<(String, VisualPrototype), Report<ModelLoadError>> {
+        let visual_id = model.visual_resource_id;
+        let visual_error = || ModelLoadError::VisualRecord { path: path.clone(), visual_id };
+        let visual_record = self.visual_record(db, path, model)?;
+        let visual = visual::parse_visual(visual_record).context_with(visual_error)?;
+        let visual_path = self
+            .self_id_index
+            .get(&visual_id)
+            .map(|&position| db.reconstruct_path(position, &self.self_id_index))
+            .ok_or_else(|| Report::new(visual_error()))?;
+
+        Ok((visual_path, visual))
+    }
+
+    /// The bytes of the visual record `model` names, from its fixed fields on.
+    fn visual_record<'db>(
+        &self,
+        db: &'db PrototypeDatabase<'_>,
+        path: &ModelPath,
+        model: &ModelPrototype,
+    ) -> Result<&'db [u8], Report<ModelLoadError>> {
         const VISUAL_BLOB_INDEX: usize = 1;
 
         let visual_id = model.visual_resource_id;
@@ -541,16 +613,8 @@ impl ModelLibrary {
         if visual_location.blob_index != VISUAL_BLOB_INDEX {
             return Err(Report::new(visual_error()));
         }
-        let visual_record =
-            db.get_prototype_data(visual_location, visual::VISUAL_ITEM_SIZE).context_with(visual_error)?;
-        let visual = visual::parse_visual(visual_record).context_with(visual_error)?;
-        let visual_path = self
-            .self_id_index
-            .get(&visual_id)
-            .map(|&position| db.reconstruct_path(position, &self.self_id_index))
-            .ok_or_else(|| Report::new(visual_error()))?;
 
-        Ok((visual_path, visual))
+        db.get_prototype_data(visual_location, visual::VISUAL_ITEM_SIZE).context_with(visual_error)
     }
 
     /// The visual of the model at `path`, `None` when either record does not read.
@@ -881,6 +945,12 @@ fn load_texture(vfs: &VfsPath, source: TextureSource, decode: bool, lod: Texture
     Some(MaterialTexture { source, image: Some(image) })
 }
 
+/// Whether `file` exists and holds data. Packages list some geometry with no
+/// data, which is as absent as an unlisted path.
+fn geometry_present(file: &VfsPath) -> vfs::VfsResult<bool> {
+    Ok(file.is_file()? && file.metadata()?.len > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -891,5 +961,18 @@ mod tests {
 
         shareable::<ModelLibrary>();
         shareable::<LoadedModel>();
+    }
+
+    #[test]
+    fn zero_length_geometry_is_absent() {
+        let root = VfsPath::new(vfs::MemoryFS::new());
+        let empty = root.join("empty.geometry").unwrap();
+        empty.create_file().unwrap();
+        let filled = root.join("filled.geometry").unwrap();
+        filled.create_file().unwrap().write_all(&[1]).unwrap();
+
+        assert!(!geometry_present(&empty).unwrap());
+        assert!(geometry_present(&filled).unwrap());
+        assert!(!geometry_present(&root.join("missing.geometry").unwrap()).unwrap());
     }
 }
