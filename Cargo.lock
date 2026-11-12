@@ -16009,6 +16009,7 @@ name = "wows-toolkit-services"
 version = "0.1.0"
 dependencies = [
  "ashpd",
+ "ciborium",
  "futures",
  "jiff",
  "reqwest 0.12.28",
@@ -16028,6 +16029,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-viewmodel",
+ "wows_replays",
  "zip",
 ]
 

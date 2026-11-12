@@ -17,6 +17,8 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+# The stats-service request body.
+ciborium = { workspace = true }
 # The update download reports its progress over a channel.
 futures = "0.3"
 jiff = { workspace = true }
@@ -41,6 +43,8 @@ wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-hardening = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
+# The live roster the stats lookup is asked about.
+wows_replays = { workspace = true }
 # The release archive the update is read out of.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 

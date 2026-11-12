@@ -21,6 +21,7 @@ pub mod force_reindex;
 pub mod heap_profile;
 pub mod install;
 pub mod links;
+pub mod live_match;
 pub mod load;
 pub mod model;
 pub mod paths;
