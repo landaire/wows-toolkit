@@ -47,6 +47,10 @@ use gpui_kit::div;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::px;
 use rust_i18n::t;
+use wows_toolkit_replay_data::force_reindex::ReindexScope;
+use wows_toolkit_replay_data::force_reindex::VersionCount;
+use wows_toolkit_replay_data::force_reindex::version_said;
+use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::name_lookup::PlayerLookup;
 use wows_toolkit_viewmodel::name_lookup::ShipLookup;
 use wowsunpack::game_params::types::Species;
@@ -57,11 +61,7 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::armor_viewer::ShipCatalog;
 use crate::armor_viewer::catalog::species_name;
 use crate::armor_viewer::catalog::tier_roman;
-use crate::force_reindex::ReindexScope;
-use crate::force_reindex::VersionCount;
-use crate::force_reindex::version_said;
 use crate::replay_inspector::ReplayInspectorView;
-use crate::replay_inspector::view::shown_path;
 use crate::runtime;
 use crate::settings_store;
 use crate::text_filter::FilterKey;
@@ -1056,9 +1056,10 @@ mod tests {
     /// lists newest first until a query is typed, then the best match first.
     #[test]
     fn the_reindex_commands_are_offered_and_versions_filter_in_order() {
+        use wows_toolkit_replay_data::force_reindex::ReindexScope;
+        use wows_toolkit_replay_data::force_reindex::VersionCount;
+
         use super::version_entries;
-        use crate::force_reindex::ReindexScope;
-        use crate::force_reindex::VersionCount;
         use wowsunpack::data::Version;
 
         let offered: Vec<PaletteAction> = entries().into_iter().map(|entry| entry.action).collect();
@@ -1292,10 +1293,11 @@ mod tests {
     /// A version row marks the version, not its replay count.
     #[gpui_kit::test]
     fn a_version_row_marks_the_version(cx: &mut gpui_kit::TestAppContext) {
-        use super::ModeSource;
-        use crate::force_reindex::VersionCount;
-        use crate::text_filter::marks_for;
+        use wows_toolkit_replay_data::force_reindex::VersionCount;
         use wowsunpack::data::Version;
+
+        use super::ModeSource;
+        use crate::text_filter::marks_for;
 
         let rows = [
             VersionCount { version: Version::base(14, 3, 0), replays: 4 },

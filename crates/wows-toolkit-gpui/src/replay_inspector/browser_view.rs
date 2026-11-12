@@ -66,9 +66,12 @@ use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
 use wows_toolkit_replay_data::columns::BattleOutcome;
 use wows_toolkit_replay_data::columns::ColorRole;
+use wows_toolkit_replay_data::force_reindex::Confirm;
+use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
 use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
@@ -83,10 +86,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::translations::translate_map_name;
 
-use crate::force_reindex::Confirm;
-use crate::force_reindex::ReindexCandidate;
 use crate::preview_hover::PreviewHover;
-use crate::replay_index::SourceScope;
 use crate::supervision::NextStep;
 use crate::supervision::PanicReport;
 use crate::supervision::RestartPolicy;
@@ -797,7 +797,7 @@ impl ReplayBrowser {
             let Some(build) = file.listed.build else { continue };
             let entry = builds.entry(build).or_default();
             if entry.is_none() {
-                *entry = file.version.as_ref().map(crate::force_reindex::version_said);
+                *entry = file.version.as_ref().map(wows_toolkit_replay_data::force_reindex::version_said);
             }
         }
         builds.into_iter().collect()
@@ -1974,9 +1974,10 @@ impl Render for ReplayBrowser {
                 .p_2()
                 .gap_1()
                 .child(
-                    div()
-                        .text_sm()
-                        .child(t!("ui.replay.no_replays_in", folder = super::view::shown_path(directory)).into_owned()),
+                    div().text_sm().child(
+                        t!("ui.replay.no_replays_in", folder = wows_toolkit_replay_data::paths::shown_path(directory))
+                            .into_owned(),
+                    ),
                 )
                 .child(
                     div()
@@ -2509,7 +2510,7 @@ fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuil
         let entry = counted.entry(build).or_insert_with(|| MissingBuild { build, version: None, replays: 0 });
         entry.replays += 1;
         if entry.version.is_none() {
-            entry.version = file.version.as_ref().map(crate::force_reindex::version_said);
+            entry.version = file.version.as_ref().map(wows_toolkit_replay_data::force_reindex::version_said);
         }
     }
 

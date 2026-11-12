@@ -369,7 +369,7 @@ pub fn load_game_params(vfs: &VfsPath, build: u32) -> Result<Vec<Param>, ReplayL
 type BuildSlot = OnceLock<Result<Arc<LoadedGameData>, ReplayLoadError>>;
 
 /// Lazily loads and caches each installed build's game data, keyed by build
-/// number, so repeated [`spawn_parse`] calls for replays on the same build
+/// number, so repeated [`parse_replay`] calls for replays on the same build
 /// never reload that build's whole game VFS. Cheap to clone (an `Arc` around
 /// a lock); share one instance across every replay-inspector view that opens
 /// replays.
@@ -1097,7 +1097,7 @@ fn pretty_json_or_raw(raw: &str) -> String {
 /// `personal_rating` is the expected-values table the per-row PR column is
 /// computed against; absent until it has been downloaded, in which case the
 /// column stays empty until [`ReplayReportModel::populate_personal_ratings`]
-/// is applied later (see `panel.rs::ReplayPanel::set_personal_rating`).
+/// is applied later, once the table has been fetched.
 pub fn parse_replay(
     path: &Path,
     game_data: &GameDataCache,
@@ -1494,7 +1494,7 @@ dumped_at = "2026-01-01T00:00:00Z"
     /// Parses a real replay against a real game install. Needs local game
     /// data + a replay recorded on an installed build, which cannot be
     /// cheaply fabricated (see `model.rs`'s equivalent ignored test). Exercises
-    /// the exact `GameDataCache` path `spawn_parse` uses in production: the
+    /// the exact `GameDataCache` path a front end's parse uses in production: the
     /// build is resolved from the replay's own `clientVersionFromExe`, not
     /// supplied by the test, so this also proves the per-build resolution
     /// works against a real install. Run with:
