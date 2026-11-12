@@ -24,6 +24,7 @@ use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::UpdateValue;
@@ -235,6 +236,8 @@ pub struct SettingsDrawerControl {
     /// Whether the game directory in the field is one an install could be in. The field says so,
     /// and the gear that opens the drawer carries the mark.
     pub wows_dir_invalid: RwSignal<bool, LocalStorage>,
+    /// Advanced by each look at a game directory, so an earlier answer arriving late is dropped.
+    wows_dir_check: StoredValue<WowsDirCheck>,
 }
 
 impl SettingsDrawerControl {
@@ -243,7 +246,20 @@ impl SettingsDrawerControl {
             open: RwSignal::new_local(false),
             jump: RwSignal::new_local(None),
             wows_dir_invalid: RwSignal::new_local(false),
+            wows_dir_check: StoredValue::new(WowsDirCheck::default()),
         }
+    }
+
+    /// Starts a look at a game directory, replacing any still out.
+    pub fn begin_wows_dir_check(self) -> WowsDirCheck {
+        self.wows_dir_check.update_value(|check| check.0 += 1);
+
+        self.wows_dir_check.get_value()
+    }
+
+    /// Whether `check` is the latest look, `None` once the shell is gone.
+    pub fn is_latest_wows_dir_check(self, check: WowsDirCheck) -> Option<bool> {
+        self.wows_dir_check.try_get_value().map(|latest| latest == check)
     }
 
     pub fn is_open(self) -> bool {
@@ -287,6 +303,10 @@ impl Default for SettingsDrawerControl {
         Self::new()
     }
 }
+
+/// Names one look at a game directory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WowsDirCheck(u64);
 
 /// The glyph a section's heading and its button in the strip carry.
 pub const fn section_glyph(section: SettingsSection) -> Glyph {

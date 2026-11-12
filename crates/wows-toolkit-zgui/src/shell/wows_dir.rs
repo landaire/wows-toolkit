@@ -13,6 +13,8 @@ impl Shell {
     /// A directory that holds no install is refused with the message that stays up until it is
     /// fixed, as the egui field refuses it: adopted, it would empty every tab that reads it.
     pub fn apply_wows_dir(self, path: String) {
+        // Supersedes a look at the startup directory still out.
+        self.settings_drawer.begin_wows_dir_check();
         let invalid = startup::is_wows_dir_invalid(&path);
         self.settings_drawer.wows_dir_invalid.set(invalid);
         if invalid {
