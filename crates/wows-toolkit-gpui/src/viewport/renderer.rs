@@ -467,9 +467,9 @@ struct MipLevel {
     pixels: Vec<u8>,
 }
 
-/// The level below `pixels`: each texel the mean of the 2x2 block above it,
-/// the last row or column repeated where a dimension is odd. Averaged in the
-/// stored sRGB encoding.
+/// The level below `pixels`: each texel the mean of the 2x2 block above it.
+/// Where a dimension is odd its last row or column is dropped, except at
+/// 1 texel, which is repeated. Averaged in the stored sRGB encoding.
 fn halve(pixels: &[u8], width: u32, height: u32) -> MipLevel {
     let out_width = (width / 2).max(1) as usize;
     let out_height = (height / 2).max(1) as usize;
