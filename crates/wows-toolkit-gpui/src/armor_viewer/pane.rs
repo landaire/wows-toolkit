@@ -218,6 +218,10 @@ pub struct ArmorViewerPane {
     option_sections: OptionSectionsOpen,
     /// What the rail's filter field holds.
     options_filter: Entity<gpui_kit::component::input::InputState>,
+    /// The armor zone tree's own filter field.
+    zone_filter: Entity<gpui_kit::component::input::InputState>,
+    /// The hull part tree's own filter field.
+    part_filter: Entity<gpui_kit::component::input::InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -366,14 +370,15 @@ impl ArmorViewerPane {
         let pen = PenetrationState::new(window, cx);
         let pen_search_sub =
             cx.subscribe(&pen.search, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| cx.notify());
-        let options_filter = cx.new(|cx| {
-            gpui_kit::component::input::InputState::new(window, cx)
-                .placeholder(t!("ui.armor.filter_options").into_owned())
-        });
-        let options_filter_sub = cx
-            .subscribe(&options_filter, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| {
-                cx.notify()
-            });
+        let filter_field = |placeholder: String, window: &mut Window, cx: &mut Context<Self>| {
+            let field = cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx).placeholder(placeholder));
+            let sub =
+                cx.subscribe(&field, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| cx.notify());
+            (field, sub)
+        };
+        let (options_filter, options_filter_sub) = filter_field(t!("ui.armor.filter_options").into_owned(), window, cx);
+        let (zone_filter, zone_filter_sub) = filter_field(t!("ui.armor.filter_zones").into_owned(), window, cx);
+        let (part_filter, part_filter_sub) = filter_field(t!("ui.armor.filter_parts").into_owned(), window, cx);
 
         Self {
             sidebar,
@@ -399,9 +404,13 @@ impl ArmorViewerPane {
             sidebar_width: cx.new(|_| SideWidth::new(SIDEBAR_WIDTH, SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)),
             option_sections: OptionSectionsOpen::default(),
             options_filter,
+            zone_filter,
+            part_filter,
             _subscriptions: vec![
                 pen_search_sub,
                 options_filter_sub,
+                zone_filter_sub,
+                part_filter_sub,
                 ship_selected_sub,
                 compare_split_sub,
                 export_requested_sub,
@@ -619,6 +628,16 @@ impl ArmorViewerPane {
     /// What the rail's filter field asks for.
     pub(crate) fn options_filter(&self, cx: &App) -> crate::text_filter::FilterQuery {
         crate::text_filter::FilterQuery::new(&self.options_filter.read(cx).value())
+    }
+
+    /// The armor zone tree's own filter field.
+    pub(crate) fn zone_filter_input(&self) -> &Entity<gpui_kit::component::input::InputState> {
+        &self.zone_filter
+    }
+
+    /// The hull part tree's own filter field.
+    pub(crate) fn part_filter_input(&self) -> &Entity<gpui_kit::component::input::InputState> {
+        &self.part_filter
     }
 
     /// Which of the rail's sections are expanded.

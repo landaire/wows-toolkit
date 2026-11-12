@@ -1637,6 +1637,10 @@ loading_named_ship = "Loading %{ship}..."
 rendering = "Rendering..."
 options = "Options"
 filter_options = "Filter options..."
+filter_zones = "Filter zones..."
+filter_parts = "Filter parts..."
+tree_matches = "Matches: %{count}"
+tree_no_matches = "No matches"
 no_matching_options = "No options match the filter"
 
 # -- Armor Viewer: penetration checker --

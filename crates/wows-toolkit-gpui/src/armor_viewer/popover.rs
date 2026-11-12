@@ -31,6 +31,8 @@ use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::button::Toggle;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::menu::PopupMenu;
@@ -64,6 +66,9 @@ use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
 use super::options_panel::HeadDepth;
 use super::options_panel::folding_head;
+use super::tree_filter::RowFilter;
+use super::tree_filter::TreeFilter;
+use super::tree_filter::match_count;
 use super::viewport_view::SceneFeatures;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
@@ -481,7 +486,7 @@ fn filtered_checkbox(
     label: String,
     checked: bool,
     disabled: bool,
-    filter: &FilterQuery,
+    filter: &impl RowFilter,
     on_click: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> Option<AnyElement> {
     let id: SharedString = id.into();
@@ -489,7 +494,7 @@ fn filtered_checkbox(
     if !filter.is_active() {
         return Some(checkbox.label(label).on_click(on_click).into_any_element());
     }
-    let marked = filter.label(label)?;
+    let marked = filter.row_label(label)?;
 
     let on_click = std::rc::Rc::new(on_click);
     let from_label = std::rc::Rc::clone(&on_click);
@@ -661,10 +666,12 @@ fn render_export_button(
 /// Builds the popover's whole tree from a snapshot of `entity`'s current
 /// state, read once up front (see the module doc: the `.content()` closure
 /// re-runs on every open-render, so this clone is cheap and short-lived, not
-/// held across the click/hover closures built below).
+/// held across the click/hover closures built below). `zone_field` is the
+/// tree's own filter field.
 pub(crate) fn render_popover_content(
     entity: &Entity<ViewportView>,
     filter: &FilterQuery,
+    zone_field: &Entity<InputState>,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
@@ -731,6 +738,19 @@ pub(crate) fn render_popover_content(
         zone_tooltip: t!("ui.armor.zone_toggle_tooltip", key = ModifierKey::Secondary.label(cx)).into_owned().into(),
     };
 
+    let field_query = FilterQuery::new(&zone_field.read(cx).value());
+    let labels: Vec<(String, Vec<String>)> = armor
+        .zone_part_plates
+        .iter()
+        .map(|zone| (names.zone(&zone.name), zone.parts.iter().map(|part| names.part(&part.name)).collect()))
+        .collect();
+    // Only the rail's query drops the section; the tree's own field narrows
+    // the rows under it.
+    if filter.is_active() && match_count(filter, &labels) == 0 {
+        return None;
+    }
+
+    let tree_filter = TreeFilter::new(filter.clone(), field_query.clone());
     let zones: Vec<AnyElement> = armor
         .zone_part_plates
         .iter()
@@ -745,13 +765,10 @@ pub(crate) fn render_popover_content(
                 warn,
                 show_zero_mm,
                 &names,
-                filter,
+                &tree_filter,
             )
         })
         .collect();
-    if zones.is_empty() && filter.is_active() {
-        return None;
-    }
     let tree = v_flex().gap_1().children(zones);
 
     let scroll_area =
@@ -767,9 +784,40 @@ pub(crate) fn render_popover_content(
             // The bulk switches act on every plate, not only the ones a filter
             // left showing, so they are put away while one is typed.
             .when(!filter.is_active(), |this| this.child(header).child(div().h(px(1.)).bg(border)))
+            .child(tree_field("armor-zone-filter", zone_field, &field_query, &labels))
             .child(div().relative().max_h(px(360.)).child(scroll_area).child(Scrollbar::vertical(&scroll)))
             .into_any_element(),
     )
+}
+
+/// A tree's own filter field, and under it how many of the tree's rows the
+/// field matched by name while something is typed in it. `labels` are the
+/// tree's groups with the rows under each, as drawn.
+fn tree_field(
+    id: &'static str,
+    field: &Entity<InputState>,
+    query: &FilterQuery,
+    labels: &[(String, Vec<String>)],
+) -> AnyElement {
+    let count = query.is_active().then(|| match match_count(query, labels) {
+        0 => t!("ui.armor.tree_no_matches").into_owned(),
+        count => t!("ui.armor.tree_matches", count = count).into_owned(),
+    });
+
+    v_flex()
+        .gap_1()
+        .child(Input::new(field).id(id).small().prefix(Icon::new(IconName::Search).small()).cleanable(true))
+        .children(count.map(|count| {
+            let said = SharedString::from(count);
+            div()
+                .id(SharedString::from(format!("{id}-count")))
+                .test_support()
+                .aria_label(said.clone())
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(said)
+        }))
+        .into_any_element()
 }
 
 /// Which ship a model's plate thickness is read from, with a picker for any
@@ -845,6 +893,7 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
 pub(crate) fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
     filter: &FilterQuery,
+    part_field: &Entity<InputState>,
     cx: &mut App,
 ) -> Option<AnyElement> {
     let (
@@ -921,17 +970,21 @@ pub(crate) fn render_hull_popover_content(
             },
         ));
 
+    let field_query = FilterQuery::new(&part_field.read(cx).value());
+    let tree_filter = TreeFilter::new(filter.clone(), field_query.clone());
     let groups: Vec<AnyElement> = armor
         .hull_part_groups
         .iter()
         .filter_map(|(group, names)| {
-            render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn, filter)
+            render_hull_group_row(entity, group, names, &hull_visibility, &expanded_hull_groups, warn, &tree_filter)
         })
         .collect();
+    let field = tree_field("armor-part-filter", part_field, &field_query, &armor.hull_part_groups);
 
     // While filtering only what can be matched by name is drawn: the opaque
     // switch and the hull groups. The selectors below choose a model rather
-    // than show or hide part of one.
+    // than show or hide part of one. Only the rail's query drops the tree;
+    // its own field narrows the rows in it.
     if filter.is_active() {
         let opaque = filtered_checkbox(
             "armor-hull-vis-opaque",
@@ -944,7 +997,11 @@ pub(crate) fn render_hull_popover_content(
                 opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
             },
         );
-        let rows: Vec<AnyElement> = opaque.into_iter().chain(groups).collect();
+        let tree = (match_count(filter, &armor.hull_part_groups) > 0).then(|| {
+            let tree = v_flex().id("armor-hull-visibility-tree").test_support().gap_1().children(groups);
+            v_flex().gap_1().child(field).child(tree).into_any_element()
+        });
+        let rows: Vec<AnyElement> = opaque.into_iter().chain(tree).collect();
         return (!rows.is_empty()).then(|| v_flex().w_full().gap_1().children(rows).into_any_element());
     }
 
@@ -971,7 +1028,7 @@ pub(crate) fn render_hull_popover_content(
     // reader turns to most, and the camo list can run long. It has no scroll
     // of its own, so a wheel over it moves only the rail.
     let tree = v_flex().id("armor-hull-visibility-tree").test_support().gap_1().children(groups);
-    col = col.child(div().h(px(1.)).bg(border)).child(tree);
+    col = col.child(div().h(px(1.)).bg(border)).child(field).child(tree);
 
     if !armor.camo_scheme_infos.is_empty() {
         col = col.child(div().h(px(1.)).bg(border)).child(render_camo_picker(
@@ -1223,11 +1280,11 @@ fn render_hull_group_row(
     hull_visibility: &HashMap<String, bool>,
     expanded_hull_groups: &HashSet<String>,
     warn: Hsla,
-    filter: &FilterQuery,
+    filter: &TreeFilter,
 ) -> Option<AnyElement> {
-    let title = filter.label(group.to_string());
-    // A match on the group keeps every mesh in it.
-    let mesh_filter = if title.is_some() { FilterQuery::default() } else { filter.clone() };
+    let matched = filter.row_label(group.to_string()).is_some();
+    // A query the group matches keeps every mesh in it.
+    let mesh_filter = filter.below(group);
     let expanded = filter.is_active() || expanded_hull_groups.contains(group);
 
     let mut shown: Vec<String> = Vec::new();
@@ -1240,13 +1297,18 @@ fn render_hull_group_row(
             }
         }
     }
-    if filter.is_active() && shown.is_empty() && title.is_none() {
+    if filter.is_active() && shown.is_empty() && !matched {
         return None;
     }
 
-    // While filtering, the group box reads and sets only the meshes listed
-    // under it.
-    let acted_on = if filter.is_active() { shown } else { names.to_vec() };
+    // While the rail's query is typed, the group box reads and sets only the
+    // meshes it keeps; the tree's own field only narrows what is shown.
+    let acted_on: Vec<String> = if filter.narrows() {
+        let rail = filter.rail_only().below(group);
+        names.iter().filter(|name| rail.keeps(name)).cloned().collect()
+    } else {
+        names.to_vec()
+    };
     let all_on = hull_group_all_on(hull_visibility, &acted_on);
     let any_on = hull_group_any_on(hull_visibility, &acted_on);
     let state = TriState::from_all_any(all_on, any_on);
@@ -1277,7 +1339,7 @@ fn render_hull_group_row(
             })
         });
 
-    let title = title.unwrap_or_else(|| StyledText::new(group.to_string()));
+    let title = filter.marked(group.to_string());
     let header = hoverable_row(
         format!("armor-hull-vis-group-row-{group}"),
         entity,
@@ -1297,7 +1359,7 @@ fn render_hull_mesh_row(
     entity: &Entity<ViewportView>,
     name: &str,
     hull_visibility: &HashMap<String, bool>,
-    filter: &FilterQuery,
+    filter: &TreeFilter,
 ) -> Option<AnyElement> {
     let visible = hull_visibility.get(name).copied().unwrap_or(false);
     let toggle_entity = entity.clone();
@@ -1773,29 +1835,30 @@ fn render_zone_row(
     warn: Hsla,
     show_zero_mm: bool,
     names: &TreeNames,
-    filter: &FilterQuery,
+    filter: &TreeFilter,
 ) -> Option<AnyElement> {
     let zone_label = names.zone(&zone.name);
-    let title = filter.label(zone_label.clone());
-    // A match on the zone keeps every part in it; otherwise only the parts
-    // that match are kept, under their zone.
-    let part_filter = if title.is_some() { FilterQuery::default() } else { filter.clone() };
+    let matched = filter.row_label(zone_label.clone()).is_some();
+    // A query the zone matches keeps every part in it; the others keep only
+    // the parts that match them, under their zone.
+    let part_filter = filter.below(&zone_label);
     let expanded = filter.is_active() || expanded_zones.contains(&zone.name);
     let parts: Vec<(&ZonePart, StyledText)> = if expanded {
-        zone.parts.iter().filter_map(|part| Some((part, part_filter.label(names.part(&part.name))?))).collect()
+        zone.parts.iter().filter_map(|part| Some((part, part_filter.row_label(names.part(&part.name))?))).collect()
     } else {
         Vec::new()
     };
-    if filter.is_active() && parts.is_empty() && title.is_none() {
+    if filter.is_active() && parts.is_empty() && !matched {
         return None;
     }
 
-    // While filtering, the zone box reads and sets only the parts listed
-    // under it.
-    let acted_on = if filter.is_active() {
+    // While the rail's query is typed, the zone box reads and sets only the
+    // parts it keeps; the tree's own field only narrows what is shown.
+    let acted_on = if filter.narrows() {
+        let rail = filter.rail_only().below(&zone_label);
         Cow::Owned(ArmorZone {
             name: zone.name.clone(),
-            parts: parts.iter().map(|(part, _)| (*part).clone()).collect(),
+            parts: zone.parts.iter().filter(|part| rail.keeps(&names.part(&part.name))).cloned().collect(),
         })
     } else {
         Cow::Borrowed(zone)
@@ -1827,7 +1890,7 @@ fn render_zone_row(
             })
         });
 
-    let title = title.unwrap_or_else(|| StyledText::new(zone_label));
+    let title = filter.marked(zone_label);
 
     // The egui viewer says the same on hover of the zone's name
     // (`tab.rs:4512`).
@@ -2068,13 +2131,17 @@ fn hoverable_row(
     let enter_entity = entity.clone();
     let leave_entity = entity.clone();
     let enter_key = key.clone();
-    div().id(id).child(content).on_hover(move |hovered, _window, cx| {
-        if *hovered {
-            enter_entity.update(cx, |view, cx| view.set_sidebar_hover(enter_key.clone(), cx));
-        } else {
-            leave_entity.update(cx, |view, cx| view.clear_sidebar_hover_if(&key, cx));
-        }
-    })
+    div()
+        .id(id)
+        .child(content)
+        .on_hover(move |hovered, _window, cx| {
+            if *hovered {
+                enter_entity.update(cx, |view, cx| view.set_sidebar_hover(enter_key.clone(), cx));
+            } else {
+                leave_entity.update(cx, |view, cx| view.clear_sidebar_hover_if(&key, cx));
+            }
+        })
+        .test_support()
 }
 
 /// Keys a caret by the viewport whose expanded sets it shows, so switching

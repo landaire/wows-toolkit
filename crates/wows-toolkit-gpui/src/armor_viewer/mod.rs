@@ -69,6 +69,7 @@ mod sidebar_tree;
 pub mod splash;
 pub mod trajectory;
 mod trajectory_panel;
+mod tree_filter;
 pub mod upload;
 pub mod upload_hull;
 pub mod viewport_view;

@@ -147,7 +147,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
                 t!("ui.armor.armor_options").as_ref(),
                 &filter,
                 cx,
-                |filter, cx| popover::render_popover_content(&visibility, filter, cx),
+                |filter, cx| popover::render_popover_content(&visibility, filter, view.zone_filter_input(), cx),
             ),
         ]
     } else {
@@ -155,7 +155,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
     };
     let mesh_sections = [
         section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), &filter, cx, |filter, cx| {
-            popover::render_hull_popover_content(&hull, filter, cx)
+            popover::render_hull_popover_content(&hull, filter, view.part_filter_input(), cx)
         }),
         section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), &filter, cx, |filter, cx| {
             popover::render_display_popover_content(&display, &groups, filter, cx)
@@ -297,7 +297,9 @@ mod tests {
     use wowsunpack::export::model_catalog::ModelPath;
 
     use crate::armor_viewer::load_model::fixtures;
+    use crate::armor_viewer::load_ship::ArmorZone;
     use crate::armor_viewer::load_ship::LoadedShipArmor;
+    use crate::armor_viewer::load_ship::ZonePart;
     use crate::armor_viewer::pane::ArmorViewerPane;
     use crate::armor_viewer::pane::OptionSection;
 
@@ -319,6 +321,16 @@ mod tests {
             window.render_frame(cx);
         })
         .expect("the test window stays open");
+
+        window
+    }
+
+    /// The pane with its rail up, tall enough that an open tree is in view
+    /// below the tools.
+    fn open_tall(cx: &mut TestAppContext) -> WindowHandle<ArmorViewerPane> {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1600.), px(2400.)), ArmorViewerPane::new);
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
 
         window
     }
@@ -445,7 +457,8 @@ mod tests {
 
     /// Gives the active pane `scene` and opens `sections`. The test window has
     /// no GPU, so a shown scene would wait for one; the rail reads only the
-    /// scene itself.
+    /// scene itself. Every other rail section is closed, so the ones asked
+    /// for are in view.
     fn install(
         window: WindowHandle<ArmorViewerPane>,
         scene: LoadedShipArmor,
@@ -458,6 +471,18 @@ mod tests {
                     view.current_armor = Some(Arc::new(scene));
                     cx.notify();
                 });
+                const SECTIONS: [OptionSection; 5] = [
+                    OptionSection::Trajectory,
+                    OptionSection::PenCheck,
+                    OptionSection::Visibility,
+                    OptionSection::Hull,
+                    OptionSection::Display,
+                ];
+                for section in SECTIONS {
+                    if pane.option_sections_open().is_open(section) {
+                        pane.toggle_option_section(section, cx);
+                    }
+                }
                 for section in sections {
                     pane.open_option_section(*section, cx);
                 }
@@ -489,6 +514,135 @@ mod tests {
             let group = window.find("armor-options-group-Lighting").bounds();
             assert!(inside_across(display, group), "the lighting head at {group:?} is inside {display:?}");
             assert_eq!(group.right(), display.right(), "the lighting head reaches the section's edge");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// A model with two armor zones and two hull part groups.
+    fn two_zone_scene() -> LoadedShipArmor {
+        let part = |name: &str, plate: i32| ZonePart { name: name.to_string(), plates: vec![plate] };
+        let mut scene = fixtures::armored_model_scene(turret());
+        scene.zone_part_plates = vec![
+            ArmorZone { name: "Bow".to_string(), parts: vec![part("Bow_Belt", 1000), part("Bow_Deck", 250)] },
+            ArmorZone { name: "Stern".to_string(), parts: vec![part("Stern_Deck", 250)] },
+        ];
+        scene.hull_part_groups = vec![
+            ("Hull".to_string(), vec!["Hull_Fore".to_string(), "Hull_Aft".to_string()]),
+            ("Main Battery".to_string(), vec!["Turret_A".to_string()]),
+        ];
+
+        scene
+    }
+
+    /// Opens `zone` in the active viewport's armor tree, as a click on its
+    /// caret does.
+    fn expand_zone(window: WindowHandle<ArmorViewerPane>, zone: &str, cx: &mut TestAppContext) {
+        window
+            .update(cx, |pane, _window, cx| {
+                pane.active_viewport(cx).update(cx, |view, cx| view.toggle_zone_expanded(zone.to_string(), cx))
+            })
+            .expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    /// Deletes what was typed into the focused field, a key at a time.
+    fn erase(typed: &str, window: &mut Window, cx: &mut gpui_kit::App) {
+        window.press("end", cx);
+        for _ in typed.chars() {
+            window.press("backspace", cx);
+        }
+        window.render_frame(cx);
+    }
+
+    /// The zone tree's field keeps the parts it matches, each under its zone
+    /// opened to show it, counts them, and says when nothing matched;
+    /// clearing it brings back the zones open as they were left.
+    #[gpui_kit::test]
+    fn the_zone_filter_shows_matches_under_their_zones_and_clearing_restores_the_tree(cx: &mut TestAppContext) {
+        let window = open_tall(cx);
+        install(window, two_zone_scene(), &[OptionSection::Visibility], cx);
+        expand_zone(window, "Stern", cx);
+        let (bow, stern) = ("armor-vis-zone-row-Bow", "armor-vis-zone-row-Stern");
+        let belt = "armor-vis-part-row-Bow-Bow_Belt";
+        let bow_deck = "armor-vis-part-row-Bow-Bow_Deck";
+        let stern_deck = "armor-vis-part-row-Stern-Stern_Deck";
+
+        cx.update_window(window.into(), |_, window, cx| {
+            assert!(window.try_find(bow_deck).is_none(), "Bow starts collapsed");
+            assert!(window.try_find(stern_deck).is_some(), "Stern was opened");
+
+            window.click("armor-zone-filter", cx);
+            crate::text_filter::take_marks();
+            window.input("deck", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(bow_deck).is_some(), "a match in a collapsed zone is shown");
+            assert!(window.try_find(stern_deck).is_some());
+            assert!(window.try_find(belt).is_none(), "the belt does not match");
+            assert!(window.try_find(bow).is_some() && window.try_find(stern).is_some(), "each match keeps its zone");
+            let marked = crate::text_filter::marks_for("Bow_Deck");
+            assert_eq!(marked, Some(std::iter::once(4..8).collect()), "the match is marked");
+            let count = rust_i18n::t!("ui.armor.tree_matches", count = 2);
+            assert_eq!(window.find("armor-zone-filter-count").label(), Some(&*count));
+
+            window.input("zzz", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(bow).is_none() && window.try_find(stern).is_none(), "nothing is left");
+            let none = rust_i18n::t!("ui.armor.tree_no_matches");
+            assert_eq!(window.find("armor-zone-filter-count").label(), Some(&*none));
+
+            erase("deckzzz", window, cx);
+            assert!(window.try_find("armor-zone-filter-count").is_none(), "no count without a query");
+            assert!(window.try_find(bow_deck).is_none(), "Bow is collapsed again");
+            assert!(window.try_find(stern_deck).is_some(), "Stern is still open");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// The part tree's field keeps the meshes it matches under their group,
+    /// drops groups with none, and clearing it closes the groups again.
+    #[gpui_kit::test]
+    fn the_part_filter_shows_matches_under_their_groups_and_clearing_restores_the_tree(cx: &mut TestAppContext) {
+        let window = open_tall(cx);
+        install(window, two_zone_scene(), &[OptionSection::Hull], cx);
+        let (hull, battery) = ("armor-hull-vis-group-row-Hull", "armor-hull-vis-group-row-Main Battery");
+        let (fore, aft) = ("armor-hull-vis-mesh-row-Hull_Fore", "armor-hull-vis-mesh-row-Hull_Aft");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            assert!(window.try_find(aft).is_none(), "groups start collapsed");
+
+            window.click("armor-part-filter", cx);
+            crate::text_filter::take_marks();
+            window.input("aft", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(hull).is_some() && window.try_find(aft).is_some(), "the match under its group");
+            assert!(window.try_find(fore).is_none() && window.try_find(battery).is_none(), "the rest is dropped");
+            assert_eq!(crate::text_filter::marks_for("Hull_Aft"), Some(std::iter::once(5..8).collect()));
+            let count = rust_i18n::t!("ui.armor.tree_matches", count = 1);
+            assert_eq!(window.find("armor-part-filter-count").label(), Some(&*count));
+
+            erase("aft", window, cx);
+            assert!(window.try_find(aft).is_none(), "the group is collapsed again");
+            assert!(window.try_find(battery).is_some(), "every group is back");
+        })
+        .expect("the test window stays open");
+    }
+
+    /// The rail's own filter narrows a tree together with the tree's field:
+    /// a row is kept when both match it or a row under it.
+    #[gpui_kit::test]
+    fn the_rail_filter_and_a_tree_field_narrow_together(cx: &mut TestAppContext) {
+        let window = open_tall(cx);
+        install(window, two_zone_scene(), &[OptionSection::Visibility], cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click("armor-options-filter", cx);
+            window.input("stern", cx);
+            window.render_frame(cx);
+            window.click("armor-zone-filter", cx);
+            window.input("deck", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("armor-vis-part-row-Stern-Stern_Deck").is_some());
+            assert!(window.try_find("armor-vis-zone-row-Bow").is_none(), "Bow does not match the rail's filter");
         })
         .expect("the test window stays open");
     }
