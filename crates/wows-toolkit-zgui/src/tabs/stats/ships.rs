@@ -13,6 +13,7 @@ use landaire_ui::ColumnSort;
 use landaire_ui::ColumnWidth;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
+use landaire_ui::MarkedTextProps;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
 use landaire_ui::SortDirection;
@@ -27,6 +28,7 @@ use wows_toolkit_viewmodel::stats::table::Column;
 use wows_toolkit_viewmodel::stats::table::ShipSummary;
 use wows_toolkit_viewmodel::stats::table::StatLabel;
 use wows_toolkit_viewmodel::stats::table::ship_summaries;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_params::types::GameParamProvider;
 use zgui::component;
@@ -84,6 +86,7 @@ use crate::tabs::stats::overview::optional_number;
 use crate::tabs::stats::overview::optional_percent;
 use crate::tabs::stats::rating;
 use crate::tabs::stats::ships::detail::ShipDetailProps;
+use crate::text_marks::marks;
 
 const SHEET: &str = "wt-stats-ships";
 
@@ -241,11 +244,15 @@ fn sorted(mut rows: Vec<ShipRow>, sort: Option<&ColumnSort>) -> Vec<ShipRow> {
     rows
 }
 
-/// The ships whose name matches `query`, every ship for an inactive one.
-fn matching(summaries: &[ShipRow], query: &str) -> Vec<ShipRow> {
-    let query = FilterQuery::new(query);
-
-    summaries.iter().filter(|summary| query.keeps(&summary.ship)).cloned().collect()
+/// The ships whose name matches `filter`, in the order given: the search only narrows the list.
+/// `keys` holds each ship's name folded, in the same order.
+fn matching(summaries: &[ShipRow], keys: &[FilterKey], filter: &FilterQuery) -> Vec<ShipRow> {
+    summaries
+        .iter()
+        .zip(keys)
+        .filter(|(_, key)| filter.score(key).is_some())
+        .map(|(summary, _)| Arc::clone(summary))
+        .collect()
 }
 
 /// A column heading in the reader's own language.
@@ -270,6 +277,8 @@ struct ShipsCx {
     clipboard: StoredValue<Option<Clipboards>, LocalStorage>,
     art: GameArt,
     services: Services,
+    /// The ship search, which marks each name where it matched.
+    filter: Memo<FilterQuery>,
 }
 
 impl ShipsCx {
@@ -328,6 +337,11 @@ pub fn StatsShips(
             .map(Arc::new)
             .collect::<Vec<_>>()
     });
+    let keys = Memo::new(move |_| {
+        summaries.with(|summaries| summaries.iter().map(|summary| FilterKey::new(&summary.ship)).collect::<Vec<_>>())
+    });
+    let query = RwSignal::new_local(String::new());
+    let filter = Memo::new(move |_| FilterQuery::new(&query.get()));
 
     let cx = ShipsCx {
         expanded: RwSignal::new_local(HashSet::new()),
@@ -337,11 +351,12 @@ pub fn StatsShips(
         clipboard: StoredValue::new_local(try_use_clipboard()),
         art: GameArt::new(),
         services,
+        filter,
     };
-    let query = RwSignal::new_local(String::new());
     let sort: RwSignal<Option<ColumnSort>, LocalStorage> = RwSignal::new_local(None);
     let rows = Signal::derive_local(move || {
-        let shown = summaries.with(|summaries| matching(summaries, &query.get()));
+        let shown =
+            summaries.with(|summaries| keys.with(|keys| filter.with(|filter| matching(summaries, keys, filter))));
         sort.with(|sort| sorted(shown, sort.as_ref()))
     });
 
@@ -536,6 +551,8 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         AnyView::new(view! { text(style:color = color) {{text}} })
     });
     let wins = format!("{}W", performance.wins());
+    let name = row.ship.clone();
+    let filter = cx.filter;
     let losses = format!("{}L", performance.losses());
     let header = row.header.clone();
 
@@ -560,7 +577,10 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
             {flag}
             {class}
             column(class = "wt-stats-ship__text") {
-                text(class = "wt-stats-ship__name") {{row.ship.clone()}}
+                {move || {
+                    let ranges = filter.with(|filter| marks(filter, &name));
+                    view! { MarkedText(class = "wt-stats-ship__name", text = name.clone(), ranges = ranges) }
+                }}
                 row(class = "wt-stats-ship__record", class = TABULAR_CLASS) {
                     text(class = "wt-stats-ship__win") {{wins}}
                     text(class = "wt-stats-ship__loss") {{losses}}
