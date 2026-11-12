@@ -26,6 +26,7 @@ pub use crate::services::game_data::GameData;
 pub use crate::services::game_data::GameDataRequest;
 pub use crate::services::game_data::GameDataState;
 pub use crate::services::jobs::Job;
+pub use crate::services::jobs::JobHandle;
 pub use crate::services::jobs::Jobs;
 pub use crate::services::jobs::Progress;
 pub use crate::services::settings::Settings;
