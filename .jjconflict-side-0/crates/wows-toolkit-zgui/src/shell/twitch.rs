@@ -22,6 +22,7 @@ use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::spawn_detached;
 
+use crate::services::on_tokio;
 use crate::shell::Shell;
 
 /// The message key a credential Twitch refused stays up under until it is replaced.
@@ -124,6 +125,8 @@ impl Shell {
             return;
         };
         let Some(pool) = services.settings.pool() else { return };
+        // Taken now: the detached poll can outlive the services once the window closes.
+        let runtime = services.runtime();
 
         let who = token.username().to_owned();
         twitch.status.set(TwitchStatus::Checking);
@@ -142,7 +145,7 @@ impl Shell {
             };
 
             let channel = request.channel;
-            let opened = services.on_tokio(async move { Session::open(&token, &channel, client).await }).await;
+            let opened = on_tokio(runtime.clone(), async move { Session::open(&token, &channel, client).await }).await;
             let session = match opened {
                 Ok(Ok(session)) => Arc::new(session),
                 Ok(Err(err)) => {
@@ -163,7 +166,8 @@ impl Shell {
                 let polling = Arc::clone(&session);
                 let pool = pool.clone();
                 let polled =
-                    services.on_tokio(async move { polling.poll_once(&pool, jiff::Timestamp::now()).await }).await;
+                    on_tokio(runtime.clone(), async move { polling.poll_once(&pool, jiff::Timestamp::now()).await })
+                        .await;
                 match polled {
                     Ok(Ok(seen)) => tracing::debug!("twitch: recorded {seen} chat observation(s)"),
                     // A poll that fails says nothing about the next one: the channel may simply
@@ -174,7 +178,7 @@ impl Shell {
 
                 // Built inside the runtime: a tokio timer made outside one panics.
                 let interval = wows_toolkit_services::twitch::poll_interval();
-                if services.on_tokio(async move { tokio::time::sleep(interval).await }).await.is_err() {
+                if on_tokio(runtime.clone(), async move { tokio::time::sleep(interval).await }).await.is_err() {
                     return;
                 }
             }
@@ -244,8 +248,9 @@ impl Shell {
     /// credential goes stale on its own schedule, and nothing else on screen would show it.
     fn twitch_refused(self) {
         self.twitch.status.set(TwitchStatus::Refused);
+        let Some(toasts) = self.try_toasts() else { return };
         let open = self.settings_drawer;
-        self.toasts().show(
+        toasts.show(
             Notice::warn(t!("ui.messages.twitch_token_invalid").into_owned())
                 .keyed(ToastKey::new(STUCK_TWITCH_TOKEN))
                 .sticky()

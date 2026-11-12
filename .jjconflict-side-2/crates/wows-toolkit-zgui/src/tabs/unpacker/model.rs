@@ -44,6 +44,7 @@ use wows_toolkit_viewmodel::unpacker::viewer;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 use wowsunpack::vfs::VfsPath;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetUntracked;
@@ -114,6 +115,8 @@ pub struct UnpackerModel {
     pub searches: StoredValue<HashMap<PanelId, SearchResults>, LocalStorage>,
     pub viewers: StoredValue<HashMap<PanelId, ViewerDoc>, LocalStorage>,
     next_panel: StoredValue<u64, LocalStorage>,
+    /// The tab's scope, for work asked for from a menu or panel that can close before it ends.
+    owner: StoredValue<Option<Owner>, LocalStorage>,
 }
 
 impl UnpackerModel {
@@ -140,6 +143,7 @@ impl UnpackerModel {
             searches: StoredValue::new_local(HashMap::new()),
             viewers: StoredValue::new_local(HashMap::new()),
             next_panel: StoredValue::new_local(0),
+            owner: StoredValue::new_local(Owner::current()),
         }
     }
 
@@ -148,6 +152,19 @@ impl UnpackerModel {
             BrowserSource::Pkg => self.pkg,
             BrowserSource::AssetsBin => self.assets,
         }
+    }
+
+    /// Runs `build` in the tab's scope: what it makes lives, and what it spawns runs, as long as
+    /// the tab rather than the control that asked.
+    fn in_tab<R>(self, build: impl FnOnce() -> R) -> R {
+        match self.owner.with_value(Clone::clone) {
+            Some(owner) => owner.with(build),
+            None => build(),
+        }
+    }
+
+    fn spawn(self, work: impl Future<Output = ()> + 'static) {
+        self.in_tab(|| spawn_local(work));
     }
 
     /// Adopts the saved output directory. A save of the value already held changes nothing, so an
@@ -178,7 +195,7 @@ impl UnpackerModel {
 
     pub fn browse_for_output_dir(self) {
         let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.unpacker.extraction_output"));
-        spawn_local(async move {
+        self.spawn(async move {
             let Some(picked) = chosen(self.shell, asked).await else { return };
             self.store_output_dir(picked.to_string_lossy().into_owned());
         });
@@ -233,7 +250,7 @@ impl UnpackerModel {
         self.pkg.set_loading();
         self.assets.set_loading();
         let services = self.services;
-        spawn_local(async move {
+        self.spawn(async move {
             let job = services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
             let loaded = blocking(move || load_package_vfs(&source).map_err(|err| err.to_string())).await;
             if !current() {
@@ -321,7 +338,7 @@ impl UnpackerModel {
             )
         });
         let services = self.services;
-        spawn_local(async move {
+        self.spawn(async move {
             let job = services.jobs.start(Job { name: t!("ui.unpacker.counting_files").into_owned(), progress: None });
             while let Some(mut progress) = progress_rx.next().await {
                 // A fast run reports faster than a frame; only the newest report is drawn.
@@ -349,7 +366,7 @@ impl UnpackerModel {
             tracing::warn!("unpacker: the search query {query:?} could not be compiled");
             return;
         };
-        let results = SearchResults::new(query, source);
+        let results = self.in_tab(|| SearchResults::new(query, source));
         let id = self.next_panel_id("search");
         self.searches.update_value(|searches| {
             searches.insert(id.clone(), results);
@@ -375,7 +392,7 @@ impl UnpackerModel {
             );
         });
         let services = self.services;
-        spawn_local(async move {
+        self.spawn(async move {
             let job = services.jobs.start(Job { name: results.title(), progress: None });
             // Drained in batches: a broad query matches faster than the screen can be drawn.
             while let Some(first) = rx.next().await {
@@ -450,7 +467,7 @@ impl UnpackerModel {
     }
 
     fn show_viewer(self, title: String, content: ViewerContent) {
-        let doc = ViewerDoc::open(title, content);
+        let doc = self.in_tab(|| ViewerDoc::open(title, content));
         let id = self.next_panel_id("viewer");
         self.viewers.update_value(|viewers| {
             viewers.insert(id.clone(), doc);
@@ -471,7 +488,7 @@ impl UnpackerModel {
             &format!("{stem}.json"),
             None,
         );
-        spawn_local(async move {
+        self.spawn(async move {
             let Some(target) = chosen(self.shell, asked).await else { return };
             let written = blocking(move || {
                 let json = viewer::decode_to_json(&path).map_err(|err| err.to_string())?;
@@ -493,7 +510,7 @@ impl UnpackerModel {
         };
         let asked = wows_toolkit_services::dialog::save_file(Some("Save game parameters"), &request.file_name(), None);
         let services = self.services;
-        spawn_local(async move {
+        self.spawn(async move {
             let Some(path) = chosen(self.shell, asked).await else { return };
             self.dump_status.set(Some("Writing...".to_string()));
             let _job =

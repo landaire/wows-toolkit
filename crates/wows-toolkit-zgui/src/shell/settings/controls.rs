@@ -769,6 +769,9 @@ fn WowsDirectory(shell: Shell) -> impl IntoView {
         let asked = wows_toolkit_services::dialog::pick_folder("World of Warships directory");
         spawn_detached(async move {
             let Some(picked) = shell.chosen_path(asked).await else { return };
+            if shell.is_unmounted() {
+                return;
+            }
             let path = picked.to_string_lossy().into_owned();
             value.try_set(path.clone());
             shell.apply_wows_dir(path);
@@ -821,6 +824,9 @@ fn CacheDirectory(shell: Shell) -> impl IntoView {
         let asked = wows_toolkit_services::dialog::pick_folder("Game data cache directory");
         spawn_detached(async move {
             let Some(picked) = shell.chosen_path(asked).await else { return };
+            if shell.is_unmounted() {
+                return;
+            }
             let path = picked.to_string_lossy().into_owned();
             value.try_set(path.clone());
             adopt(path);

@@ -320,6 +320,16 @@ impl Shell {
         self.toasts
     }
 
+    /// Whether the shell has been unmounted, for work that can finish after its window has closed.
+    pub fn is_unmounted(self) -> bool {
+        self.held.try_get_untracked().is_none()
+    }
+
+    /// The window's messages, or `None` once the shell has been unmounted.
+    pub fn try_toasts(self) -> Option<Toasts> {
+        (!self.is_unmounted()).then_some(self.toasts)
+    }
+
     /// The process's services, for a method called from a listener, where no context is found.
     pub fn services(self) -> Services {
         self.services

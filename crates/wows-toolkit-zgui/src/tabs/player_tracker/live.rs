@@ -119,7 +119,7 @@ pub struct LiveModel {
     pub class_icons: RwSignal<HashMap<ClassIconKey, ImageBytes>, LocalStorage>,
     class_icons_asked: StoredValue<HashSet<ClassIconKey>>,
     metadata_build: StoredValue<Option<u32>>,
-    /// The tab's scope, so a draw asked for by a roster that is rebuilt still lands.
+    /// The tab's scope, which the model's work is spawned into so it ends with the tab.
     owner: StoredValue<Owner, LocalStorage>,
     /// Account ids, realms and clans the packet scan recovered.
     pub identities: RwSignal<Option<LiveIdentities>, LocalStorage>,
@@ -212,7 +212,13 @@ impl LiveModel {
             self.class_icons
                 .update(|icons| icons.extend(drawn.into_iter().map(|(key, png)| (key, ImageBytes::new(png)))));
         };
-        self.owner.with_value(|owner| owner.with(|| spawn_local(work)));
+        self.spawn(work);
+    }
+
+    /// Spawns `work` into the tab's task set. Battle work is started from inside the watch task,
+    /// where no owner is current, so a plain spawn would outlive the tab and read freed signals.
+    fn spawn(self, work: impl Future<Output = ()> + 'static) -> Task {
+        self.owner.with_value(|owner| owner.with(|| spawn_local(work)))
     }
 
     /// Starts watching `config`'s replays directory, replacing any watch already running.
@@ -293,7 +299,7 @@ impl LiveModel {
         self.stats.set(StatsState::Scanning);
         let game_data = config.game_data.clone();
         let config = config.clone();
-        let task = spawn_local(async move {
+        let task = self.spawn(async move {
             let loaded = blocking(move || game_data.get_or_load_build(build)).await;
             if self.started_at() != Some(started_at) {
                 return;
@@ -318,7 +324,7 @@ impl LiveModel {
     /// Looks up which of the battle's players the index has met, all-time, by name.
     fn look_up_met_before(self, services: Services, started_at: Timestamp, names: Vec<String>) {
         let Some(pool) = services.settings.pool() else { return };
-        spawn_local(async move {
+        self.spawn(async move {
             let found = services.on_tokio(async move { query::accounts_named(&pool, &names).await }).await;
             if self.started_at() != Some(started_at) {
                 return;
@@ -341,7 +347,7 @@ impl LiveModel {
         let Some(pool) = services.settings.pool() else { return };
         let start = started_at.as_second() + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
         let end = started_at.as_second() + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
-        let task = spawn_local(async move {
+        let task = self.spawn(async move {
             let mut first = true;
             loop {
                 if !std::mem::replace(&mut first, false) {
@@ -420,7 +426,7 @@ impl LiveModel {
         self.stats.set(StatsState::Scanning);
         let source = LiveSource::in_dir(&config.replay_dir);
         let game_data = config.game_data.clone();
-        let task = spawn_local(async move {
+        let task = self.spawn(async move {
             // Dropped with this task, which stops the retries between attempts.
             let cancel = ScanCancel::default();
             let cancelled = Arc::clone(&cancel.0);
@@ -483,7 +489,7 @@ impl LiveModel {
 
         // The proxy as the settings hold it; `http::client` decides what an unset one means.
         let proxy_url = services.settings.read_untracked(|settings| settings.proxy_url.clone()).unwrap_or_default();
-        let task = spawn_local(async move {
+        let task = self.spawn(async move {
             let fetched = services.on_tokio(async move { fetch_stats(USER_AGENT, &state, &proxy_url).await }).await;
             if self.started_at() != Some(started_at) {
                 return;

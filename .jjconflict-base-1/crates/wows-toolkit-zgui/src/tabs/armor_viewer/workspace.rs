@@ -284,6 +284,13 @@ impl ArmorWorkspace {
         Pane { id, viewport, owner }
     }
 
+    /// Runs `work` in the tab's scope, so a load asked for from a row's menu is not cancelled as
+    /// the menu closes.
+    fn spawn(self, work: impl Future<Output = ()> + 'static) {
+        let owner = self.owner.with_value(Clone::clone);
+        owner.with(|| spawn_local(work));
+    }
+
     /// Closes pane `id`. The last pane is emptied rather than removed, since a viewer with no
     /// viewport would draw nothing.
     pub fn close_pane(self, id: PaneId) {
@@ -656,7 +663,7 @@ impl ArmorWorkspace {
         let cancel = opening.cancel;
         let services = self.services;
 
-        spawn_local(async move {
+        self.spawn(async move {
             let _job = services.jobs.start(Job {
                 name: t!("ui.armor.loading_named_ship", ship = display_name).into_owned(),
                 progress: None,
@@ -704,7 +711,7 @@ impl ArmorWorkspace {
         let cancel = opening.cancel;
         let services = self.services;
 
-        spawn_local(async move {
+        self.spawn(async move {
             let _job = services.jobs.start(Job {
                 name: t!("ui.armor.loading_named_ship", ship = display_name).into_owned(),
                 progress: None,

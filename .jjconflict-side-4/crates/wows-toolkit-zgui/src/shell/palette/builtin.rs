@@ -125,6 +125,9 @@ pub fn open_replay_file(shell: Shell) {
     // Detached: the palette that asked has closed before the reader answers.
     spawn_detached(async move {
         let Some(file) = chosen(shell, asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         // What the settings drawer reports as the current replay: the one the reader named, which
         // is what the egui app writes here too.
         shell.services().settings.edit(keys::CURRENT_REPLAY_PATH, |settings| {

@@ -152,6 +152,8 @@ fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, arm
 /// Reports a finished export: what was written and how large it is, or why it was not. The
 /// destination is logged rather than shown: the reader chose it in the save dialog.
 fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlbError>, ship: &str) {
+    // The window can close while the file is written.
+    let toasts = shell.try_toasts();
     match written {
         Ok((path, size)) => {
             tracing::info!("armor viewer: exported {ship} to {}", path.display());
@@ -161,11 +163,15 @@ fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlb
                 }
                 None => t!("ui.armor.export.exported", ship = ship).into_owned(),
             };
-            shell.toasts().ok(message);
+            if let Some(toasts) = toasts {
+                toasts.ok(message);
+            }
         }
         Err(err) => {
             tracing::error!("armor viewer: failed to export {ship}: {err}");
-            shell.toasts().failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
+            if let Some(toasts) = toasts {
+                toasts.failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
+            }
         }
     }
 }
