@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use sqlx::SqlitePool;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
@@ -32,8 +33,11 @@ use wows_toolkit_viewmodel::query_bar::suggest::ValueRequest;
 use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::search::try_resolve_ship_name;
+use wows_toolkit_viewmodel::search_results::NameList;
 use wows_toolkit_viewmodel::search_results::RESULT_LIMIT;
-use wows_toolkit_viewmodel::search_results::look_up_values;
+use wows_toolkit_viewmodel::search_results::ValueNames;
+use wows_toolkit_viewmodel::search_results::look_up_maps;
+use wows_toolkit_viewmodel::search_results::look_up_sources;
 use wows_toolkit_viewmodel::search_settings;
 use wows_toolkit_viewmodel::search_settings::SEARCH_SETTINGS_KEY;
 use wows_toolkit_viewmodel::search_settings::SavedSearch;
@@ -55,6 +59,7 @@ use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
 use crate::services::Services;
+use crate::services::TokioError;
 
 /// How many structural edits can be stepped back through.
 const UNDO_DEPTH: usize = 64;
@@ -145,6 +150,12 @@ struct HistoryWalk {
     started_from: String,
 }
 
+/// The names a player or ship field ranks, read for one list.
+struct FieldNames {
+    list: NameList,
+    names: Arc<ValueNames>,
+}
+
 /// The Search tab's state, as one `Copy` handle.
 #[derive(Clone, Copy)]
 pub(crate) struct Search {
@@ -174,6 +185,10 @@ pub(crate) struct Search {
     pub value_options: RwSignal<Vec<ValueOption>, LocalStorage>,
     pub value_lookup_running: RwSignal<bool, LocalStorage>,
     value_asked: StoredValue<u64>,
+    /// The names the caret's player or ship field ranks, read once while it stays in that field.
+    value_names: StoredValue<Option<FieldNames>, LocalStorage>,
+    /// Counts visits to a player or ship field, with the list the current one ranks.
+    value_field: StoredValue<(u64, Option<NameList>)>,
     pub value_edit: RwSignal<Option<ValueEdit>, LocalStorage>,
     pub value_text: RwSignal<String, LocalStorage>,
     pub value_error: RwSignal<bool, LocalStorage>,
@@ -227,6 +242,8 @@ impl Search {
             value_options: RwSignal::new_local(Vec::new()),
             value_lookup_running: RwSignal::new_local(false),
             value_asked: StoredValue::new(0),
+            value_names: StoredValue::new_local(None),
+            value_field: StoredValue::new((0, None)),
             value_edit: RwSignal::new_local(None),
             value_text: RwSignal::new_local(String::new()),
             value_error: RwSignal::new_local(false),
@@ -270,7 +287,8 @@ impl Search {
         if options.is_empty() {
             return self.completions.get();
         }
-        picker::value_completions(&self.completion_source.get(), &options)
+        self.value_request
+            .with_value(|request| picker::value_completions(&self.completion_source.get(), request.as_ref(), &options))
     }
 
     /// Runs `work` in the tab's scope, so it is cancelled with the tab wherever it was started.
@@ -288,7 +306,9 @@ impl Search {
         if options.is_empty() {
             return self.completions.get_untracked();
         }
-        picker::value_completions(&self.completion_source.get_untracked(), &options)
+        self.value_request.with_value(|request| {
+            picker::value_completions(&self.completion_source.get_untracked(), request.as_ref(), &options)
+        })
     }
 
     /// Replaces the box's text. `Offer::Nothing` also records it as what the completions were last
@@ -338,7 +358,8 @@ impl Search {
     }
 
     /// Asks the index for the values the caret's field takes, when it takes any, once the caret
-    /// has sat still for a moment.
+    /// has sat still for a moment. A player or ship field's names are read once and ranked for
+    /// each value typed into it.
     fn refresh_value_options(self, text: &str) {
         let request = suggest::value_request_for(text);
         if self.value_request.with_value(|asked| *asked == request) {
@@ -348,6 +369,15 @@ impl Search {
         self.value_options.set(Vec::new());
         self.value_pause.set_value(None);
         self.value_asked.update_value(|asked| *asked += 1);
+        // Leaving a player or ship field ends its visit, and the names read for it.
+        let list = request.as_ref().and_then(name_list);
+        if self.value_field.with_value(|(_, held)| *held != list) {
+            self.value_names.set_value(None);
+            self.value_field.update_value(|(visit, held)| {
+                *visit += 1;
+                *held = list;
+            });
+        }
         let Some(request) = request else {
             self.value_lookup_running.set(false);
             return;
@@ -356,23 +386,15 @@ impl Search {
 
         self.value_lookup_running.set(true);
         let asked = self.value_asked.get_value();
-        let services = self.services;
         let send = move || {
             self.spawn(async move {
-                let found = services
-                    .on_tokio(async move {
-                        let request = request;
-                        look_up_values(&pool, &request).await
-                    })
-                    .await;
+                let options = self.look_up_values(pool, request).await;
                 // The caret has moved on to another field since.
                 if self.value_asked.get_value() != asked {
                     return;
                 }
                 self.value_lookup_running.set(false);
-                if let Ok(options) = found {
-                    self.value_options.set(options);
-                }
+                self.value_options.set(options);
             });
         };
         let timer = self
@@ -382,6 +404,53 @@ impl Search {
             Some(timer) => self.value_pause.set_value(Some(timer)),
             None => send(),
         }
+    }
+
+    /// The values `request` offers. A failed lookup offers nothing and is logged: the bar still
+    /// works without completions.
+    async fn look_up_values(self, pool: SqlitePool, request: ValueRequest) -> Vec<ValueOption> {
+        let services = self.services;
+        let (list, needle) = match request {
+            ValueRequest::Players { needle } => (NameList::Players, needle),
+            ValueRequest::Ships { needle } => (NameList::Ships, needle),
+            ValueRequest::Maps => return finished(services.on_tokio(async move { look_up_maps(&pool).await }).await),
+            ValueRequest::Sources => {
+                return finished(services.on_tokio(async move { look_up_sources(&pool).await }).await);
+            }
+        };
+        let Some(names) = self.field_names(list, pool).await else { return Vec::new() };
+
+        finished(services.on_tokio(async move { names.options(&needle) }).await)
+    }
+
+    /// The names `list` ranks: those held for the caret's field, or a read of them made now and
+    /// held while the caret stays in a field of that list.
+    async fn field_names(self, list: NameList, pool: SqlitePool) -> Option<Arc<ValueNames>> {
+        let held = self
+            .value_names
+            .with_value(|held| held.as_ref().filter(|held| held.list == list).map(|held| Arc::clone(&held.names)));
+        if held.is_some() {
+            return held;
+        }
+
+        let started = self.value_field.with_value(|(visit, _)| *visit);
+        let names = match self.services.on_tokio(async move { list.load(&pool).await }).await {
+            Ok(Ok(names)) => Arc::new(names),
+            Ok(Err(err)) => {
+                tracing::warn!(?list, %err, "search: the name lookup failed");
+                return None;
+            }
+            Err(err) => {
+                tracing::warn!(?list, %err, "search: the name lookup did not finish");
+                return None;
+            }
+        };
+        // A read that outlived its field visit is not kept for a later one.
+        if self.value_field.with_value(|(visit, _)| *visit == started) {
+            self.value_names.set_value(Some(FieldNames { list, names: Arc::clone(&names) }));
+        }
+
+        Some(names)
     }
 
     /// Enter in the box: the query runs, is remembered, and the typed term becomes a pill.
@@ -956,4 +1025,21 @@ impl Search {
     pub fn selection_focus_for_test(self) -> Option<NodePath> {
         self.selection_focus.get_value()
     }
+}
+
+/// Which names `request` ranks; none for a field whose values are offered entire.
+fn name_list(request: &ValueRequest) -> Option<NameList> {
+    match request {
+        ValueRequest::Players { .. } => Some(NameList::Players),
+        ValueRequest::Ships { .. } => Some(NameList::Ships),
+        ValueRequest::Maps | ValueRequest::Sources => None,
+    }
+}
+
+/// The values a lookup on the runtime found; none, logged, when it did not finish.
+fn finished(read: Result<Vec<ValueOption>, TokioError>) -> Vec<ValueOption> {
+    read.unwrap_or_else(|err| {
+        tracing::warn!(%err, "search: the value lookup did not finish");
+        Vec::new()
+    })
 }
