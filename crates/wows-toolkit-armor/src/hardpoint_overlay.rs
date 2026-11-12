@@ -7,18 +7,18 @@ use std::collections::HashSet;
 use wowsunpack::export::hardpoint::Hardpoint;
 use wowsunpack::export::hardpoint::HardpointKind;
 
-use wows_toolkit_armor::viewport::types::Vec3;
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::types::Vec3;
+use crate::viewport::types::Vertex;
 
-use super::load_ship::LoadedShipArmor;
-use wows_toolkit_armor::model_refs::HardpointTarget;
+use crate::load_ship::LoadedShipArmor;
+use crate::model_refs::HardpointTarget;
 
 /// The markers of every hardpoint target that belongs to one scene.
 #[derive(Default)]
-pub(crate) struct HardpointMarkers {
-    pub(crate) vertices: Vec<Vertex>,
-    pub(crate) indices: Vec<u32>,
-    pub(crate) labels: Vec<HardpointLabel>,
+pub struct HardpointMarkers {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+    pub labels: Vec<HardpointLabel>,
 }
 
 impl HardpointMarkers {
@@ -26,7 +26,7 @@ impl HardpointMarkers {
     /// or ship draws nothing here. `world_per_pixel` is how much of the scene
     /// one pixel spans where the camera looks, which sets the smallest size
     /// a marker is drawn at.
-    pub(crate) fn for_scene(scene: &LoadedShipArmor, targets: &HashSet<HardpointTarget>, world_per_pixel: f32) -> Self {
+    pub fn for_scene(scene: &LoadedShipArmor, targets: &HashSet<HardpointTarget>, world_per_pixel: f32) -> Self {
         let mut markers = Self::default();
         let size = MarkerSize::new(scene.bounds, world_per_pixel);
 
@@ -86,9 +86,9 @@ impl HardpointMarkers {
 /// One marked hardpoint's name and where it sits in model space, for the
 /// label painted over the scene.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct HardpointLabel {
-    pub(crate) name: String,
-    pub(crate) position: [f32; 3],
+pub struct HardpointLabel {
+    pub name: String,
+    pub position: [f32; 3],
 }
 
 /// How large each piece of a marker is drawn, in scene units.
@@ -217,10 +217,10 @@ mod tests {
     use wowsunpack::export::ship_parts::ShipPartKey;
 
     use super::*;
-    use crate::armor_viewer::load_model::fixtures;
-    use crate::armor_viewer::load_ship::SceneSubject;
-    use wows_toolkit_armor::model_refs::ShipPartRef;
-    use wows_toolkit_armor::model_refs::VehicleParamIndex;
+    use crate::load_model::fixtures;
+    use crate::load_ship::SceneSubject;
+    use crate::model_refs::ShipPartRef;
+    use crate::model_refs::VehicleParamIndex;
 
     fn hardpoint(name: &str, at: [f32; 3]) -> Hardpoint {
         let mut transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];

@@ -58,35 +58,35 @@ use wows_toolkit_armor::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
-use super::load_model::MountRef;
-use super::load_ship::ArmorThickness;
-use super::load_ship::ArmorZone;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::PlateKey;
-use super::load_ship::ZonePart;
 use super::options_panel::HeadDepth;
 use super::options_panel::folding_head;
 use super::tree_filter::RowFilter;
 use super::tree_filter::TreeFilter;
 use super::tree_filter::match_count;
 use super::viewport_view::SceneFeatures;
+use wows_toolkit_armor::load_model::MountRef;
+use wows_toolkit_armor::load_ship::ArmorThickness;
+use wows_toolkit_armor::load_ship::ArmorZone;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
 use super::viewport_view::CameraRingSettings;
 use super::viewport_view::PerspectiveSettings;
 use super::viewport_view::ViewportView;
-use super::visibility::SidebarHighlightKey;
-use super::visibility::TriState;
-use super::visibility::hull_group_all_on;
-use super::visibility::hull_group_any_on;
-use super::visibility::part_any_plate_hidden;
-use super::visibility::part_on;
-use super::visibility::plate_explicitly_hidden;
-use super::visibility::zone_all_on;
-use super::visibility::zone_any_on;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::pane::OptionSection;
 use crate::status_bar::ModifierKey;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
+use wows_toolkit_armor::visibility::TriState;
+use wows_toolkit_armor::visibility::hull_group_all_on;
+use wows_toolkit_armor::visibility::hull_group_any_on;
+use wows_toolkit_armor::visibility::part_any_plate_hidden;
+use wows_toolkit_armor::visibility::part_on;
+use wows_toolkit_armor::visibility::plate_explicitly_hidden;
+use wows_toolkit_armor::visibility::zone_all_on;
+use wows_toolkit_armor::visibility::zone_any_on;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
@@ -1476,7 +1476,7 @@ fn render_hull_mesh_row(
 /// Taken as a snapshot so no borrow of the view is held while the rows below
 /// are built.
 struct DisplayPopoverSnapshot {
-    display: super::upload::DisplaySettings,
+    display: wows_toolkit_armor::upload::DisplaySettings,
     lighting: LightingSettings,
     marker_slider: Entity<SliderField>,
     /// Whether any impact marker is drawn, since a marker control with nothing
@@ -1610,7 +1610,7 @@ fn model_rows(
     cx: &mut App,
 ) -> Option<AnyElement> {
     let display = snapshot.display;
-    let setting = |apply: fn(&mut super::upload::DisplaySettings, bool)| {
+    let setting = |apply: fn(&mut wows_toolkit_armor::upload::DisplaySettings, bool)| {
         let entity = entity.clone();
         move |checked: &bool, _window: &mut Window, cx: &mut App| {
             let checked = *checked;

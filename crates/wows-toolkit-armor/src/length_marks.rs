@@ -7,11 +7,11 @@ use rust_i18n::t;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-use wows_toolkit_armor::viewport::types::Vec3;
+use crate::viewport::types::Vec3;
 
 /// The unit a distance is written in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LengthUnit {
+pub enum LengthUnit {
     Meters,
     Centimeters,
 }
@@ -32,16 +32,16 @@ impl LengthUnit {
 
 /// A distance as it is written: a number of `unit` to `decimals` places.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Reading {
-    pub(crate) value: f32,
-    pub(crate) unit: LengthUnit,
-    pub(crate) decimals: usize,
+pub struct Reading {
+    pub value: f32,
+    pub unit: LengthUnit,
+    pub decimals: usize,
 }
 
 impl Reading {
     /// `distance` in the unit `scale` calls for, to as many places as a
     /// step of `scale` needs to read exactly.
-    pub(crate) fn of(distance: Meters, scale: Meters) -> Self {
+    pub fn of(distance: Meters, scale: Meters) -> Self {
         let unit = LengthUnit::for_scale(scale);
         let step = scale.value() * unit.per_metre();
         let decimals = if step >= 1. { 0 } else { (-step.log10()).ceil() as usize };
@@ -50,17 +50,17 @@ impl Reading {
     }
 
     /// An overall size, to a tenth of its unit.
-    pub(crate) fn of_size(size: Meters) -> Self {
+    pub fn of_size(size: Meters) -> Self {
         let unit = LengthUnit::for_scale(size);
 
         Self { value: size.value() * unit.per_metre(), unit, decimals: 1 }
     }
 
-    pub(crate) fn number(&self) -> String {
+    pub fn number(&self) -> String {
         format!("{:.*}", self.decimals, self.value)
     }
 
-    pub(crate) fn text(&self) -> String {
+    pub fn text(&self) -> String {
         let value = self.number();
         match self.unit {
             LengthUnit::Meters => t!("ui.armor.length_metres", value = value).into_owned(),
@@ -72,18 +72,18 @@ impl Reading {
 /// One heavier line: where it crosses its axis in model space, and how far
 /// that is from where the axis is counted from.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Mark {
-    pub(crate) at: f32,
-    pub(crate) distance: Meters,
+pub struct Mark {
+    pub at: f32,
+    pub distance: Meters,
 }
 
 /// A distance written over the scene beside the grid, at `position` in
 /// model space, as strong as the grid is there.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct LengthLabel<'a> {
-    pub(crate) text: &'a str,
-    pub(crate) position: Vec3,
-    pub(crate) opacity: f32,
+pub struct LengthLabel<'a> {
+    pub text: &'a str,
+    pub position: Vec3,
+    pub opacity: f32,
 }
 
 /// The marks on the grid under a model with model-space `bounds`, on the
@@ -94,7 +94,7 @@ pub(crate) struct LengthLabel<'a> {
 /// Across X they count from the -X side. One spacing serves both, so the
 /// cells stay square.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LengthMarks {
+pub struct LengthMarks {
     low: Vec3,
     high: Vec3,
     plane_y: f32,
@@ -103,7 +103,7 @@ pub(crate) struct LengthMarks {
 
 impl LengthMarks {
     /// `None` for bounds with no extent on the plane to measure.
-    pub(crate) fn new(bounds: (Vec3, Vec3), plane_y: f32) -> Option<Self> {
+    pub fn new(bounds: (Vec3, Vec3), plane_y: f32) -> Option<Self> {
         let (low, high) = bounds;
         let finite = [low.x, low.z, high.x, high.z, plane_y].into_iter().all(f32::is_finite);
         if !finite || high.x < low.x || high.z < low.z {
@@ -116,30 +116,30 @@ impl LengthMarks {
         Some(Self { low, high, plane_y, spacing })
     }
 
-    pub(crate) fn spacing(&self) -> Meters {
+    pub fn spacing(&self) -> Meters {
         self.spacing
     }
 
-    pub(crate) fn bounds(&self) -> (Vec3, Vec3) {
+    pub fn bounds(&self) -> (Vec3, Vec3) {
         (self.low, self.high)
     }
 
-    pub(crate) fn plane_y(&self) -> f32 {
+    pub fn plane_y(&self) -> f32 {
         self.plane_y
     }
 
     /// The size along Z, bow to stern on a ship.
-    pub(crate) fn length(&self) -> Meters {
+    pub fn length(&self) -> Meters {
         meters(self.high.z - self.low.z)
     }
 
     /// The size across X.
-    pub(crate) fn beam(&self) -> Meters {
+    pub fn beam(&self) -> Meters {
         meters(self.high.x - self.low.x)
     }
 
     /// The marks along Z, from the stern forward.
-    pub(crate) fn along_length(&self) -> Vec<Mark> {
+    pub fn along_length(&self) -> Vec<Mark> {
         (0..=self.length_steps())
             .map(|step| self.step_distance(step))
             .map(|distance| Mark { at: self.high.z - distance.to_ship_model().value(), distance })
@@ -147,7 +147,7 @@ impl LengthMarks {
     }
 
     /// The marks across X, from the -X side.
-    pub(crate) fn across_beam(&self) -> Vec<Mark> {
+    pub fn across_beam(&self) -> Vec<Mark> {
         (0..=self.beam_steps())
             .map(|step| self.step_distance(step))
             .map(|distance| Mark { at: self.low.x + distance.to_ship_model().value(), distance })
@@ -155,12 +155,12 @@ impl LengthMarks {
     }
 
     /// How many whole steps of the spacing fit along the length.
-    pub(crate) fn length_steps(&self) -> u32 {
+    pub fn length_steps(&self) -> u32 {
         self.steps(self.length())
     }
 
     /// How many whole steps of the spacing fit across the beam.
-    pub(crate) fn beam_steps(&self) -> u32 {
+    pub fn beam_steps(&self) -> u32 {
         self.steps(self.beam())
     }
 
@@ -179,7 +179,7 @@ impl LengthMarks {
 /// A grid's marks with their distances written out in one language, so that
 /// a frame only picks the sides nearer the camera and projects them.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct MarkLabels {
+pub struct MarkLabels {
     marks: LengthMarks,
     /// The language `texts` are written in.
     locale: String,
@@ -192,7 +192,7 @@ pub(crate) struct MarkLabels {
 
 impl MarkLabels {
     /// `marks` written in the language in use.
-    pub(crate) fn new(marks: LengthMarks) -> Self {
+    pub fn new(marks: LengthMarks) -> Self {
         let along = marks.along_length();
         let across = marks.across_beam();
         let texts = (0..=marks.length_steps().max(marks.beam_steps()))
@@ -202,12 +202,12 @@ impl MarkLabels {
         Self { marks, locale: rust_i18n::locale().to_string(), along, across, texts }
     }
 
-    pub(crate) fn marks(&self) -> &LengthMarks {
+    pub fn marks(&self) -> &LengthMarks {
         &self.marks
     }
 
     /// Whether the texts are in the language in use.
-    pub(crate) fn is_current(&self) -> bool {
+    pub fn is_current(&self) -> bool {
         *rust_i18n::locale() == *self.locale
     }
 
@@ -215,7 +215,7 @@ impl MarkLabels {
     /// the length marks along the nearer side, the beam marks across the
     /// nearer end. `nearer(a, b)` says whether `a` on the plane is nearer the
     /// camera than `b`; `opacity` is how strong the grid is at a point.
-    pub(crate) fn labels(
+    pub fn labels(
         &self,
         nearer: impl Fn(Vec3, Vec3) -> bool,
         opacity: impl Fn(Vec3) -> f32,
@@ -252,7 +252,7 @@ fn meters(units: f32) -> Meters {
 /// The least of 1, 2 or 5 times a power of ten metres that cuts `longest`
 /// into no more than 15 steps. The next spacing up is at most 2.5 times
 /// larger, so there are always more than 6.
-pub(crate) fn mark_spacing(longest: Meters) -> Option<Meters> {
+pub fn mark_spacing(longest: Meters) -> Option<Meters> {
     const MOST_STEPS: f32 = 15.;
 
     let longest = longest.value();
@@ -408,7 +408,7 @@ mod tests {
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build, AssetsBin::Overlay).expect("game vfs");
         let metadata = Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("game params"));
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
-        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
         let iowa = catalog
             .nations
             .iter()
@@ -416,11 +416,11 @@ mod tests {
             .flat_map(|class| &class.ships)
             .find(|ship| ship.param_index == "PASB018")
             .expect("Iowa in the catalogue");
-        let armor = crate::armor_viewer::load_ship::load_ship_armor_by_param(
+        let armor = crate::load_ship::load_ship_armor_by_param(
             &ship_assets,
             &iowa.param_index,
             &iowa.display_name,
-            &crate::armor_viewer::scene_load::LoadCancel::new(),
+            &crate::scene_load::LoadCancel::new(),
         )
         .expect("Iowa loads")
         .scene;

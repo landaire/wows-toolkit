@@ -70,23 +70,23 @@ use crate::viewport::device::SharedSceneDevice;
 use gpui_kit::component::WindowExt as _;
 
 use super::assets::ArmorAssetsBundle;
-use super::assets::ArmorAssetsError;
-use super::assets::ModelAssets;
-use super::assets::ModelLibraryLoadError;
 use super::assets::spawn_build_model_library;
 use super::assets::spawn_load_armor_assets;
+use super::assets::spawn_load_model_scene;
 use super::dock::ViewportDock;
-use super::load_model::ModelLoadRequest;
-use super::load_model::ModelSceneError;
-use super::load_model::ProblemReason;
-use super::load_model::SceneProblem;
-use super::load_model::spawn_load_model_scene;
 use super::sidebar::BuildingSelected;
 use super::sidebar::ExportCatalogModelRequested;
 use super::sidebar::HardpointsToggled;
 use super::sidebar::ModelSelected;
 use super::viewport_view::SceneSource;
 use wows_replays::types::EntityId;
+use wows_toolkit_armor::assets::ArmorAssetsError;
+use wows_toolkit_armor::assets::ModelAssets;
+use wows_toolkit_armor::assets::ModelLibraryLoadError;
+use wows_toolkit_armor::load_model::ModelLoadRequest;
+use wows_toolkit_armor::load_model::ModelSceneError;
+use wows_toolkit_armor::load_model::ProblemReason;
+use wows_toolkit_armor::load_model::SceneProblem;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
@@ -103,16 +103,12 @@ use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
 use wows_toolkit_viewmodel::settings::keys;
 
 use super::analysis::PenetrationState;
+use super::assets::spawn_load_ship_armor;
 use super::dock::DockEvent;
 use super::dock::PanePosition;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
-use super::load_ship;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::ShipLoadError;
-use super::load_ship::spawn_load_ship_armor;
 use super::options_panel;
-use super::scene_load::FirstStage;
 use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
@@ -124,6 +120,10 @@ use super::viewport_view::OpeningLayer;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
 use super::xray::XrayHighlight;
+use wows_toolkit_armor::load_ship;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::ShipLoadError;
+use wows_toolkit_armor::scene_load::FirstStage;
 use wowsunpack::game_params::types::Millimeters;
 
 /// The status strip above the split. Fixed, so what it says never moves the
@@ -1456,13 +1456,15 @@ impl ArmorViewerPane {
                         export_dialog::ExportTarget::Ship { param_index, .. } => {
                             load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path)
                         }
-                        export_dialog::ExportTarget::Model { request, models } => super::load_model::export_model_glb(
-                            &models,
-                            assets.assets.metadata(),
-                            &request,
-                            &options,
-                            &path,
-                        ),
+                        export_dialog::ExportTarget::Model { request, models } => {
+                            wows_toolkit_armor::load_model::export_model_glb(
+                                &models,
+                                assets.assets.metadata(),
+                                &request,
+                                &options,
+                                &path,
+                            )
+                        }
                     };
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
@@ -1473,7 +1475,8 @@ impl ArmorViewerPane {
                 })
                 .await;
 
-            let _ = this.update_in(cx, |_this, window, cx| load_ship::report_export(written, &ship, window, cx));
+            let _ =
+                this.update_in(cx, |_this, window, cx| super::export_dialog::report_export(written, &ship, window, cx));
         })
         .detach();
     }
@@ -1949,17 +1952,17 @@ mod tests {
     use super::other_pane_indices;
     use super::take_pending_hits;
     use crate::armor_viewer::assets::ArmorAssetsBundle;
-    use crate::armor_viewer::load_model::ProblemReason;
-    use crate::armor_viewer::load_model::SceneProblem;
-    use crate::armor_viewer::load_model::fixtures;
-    use crate::armor_viewer::load_ship::EmptyScene;
-    use crate::armor_viewer::load_ship::LoadedShipArmor;
-    use crate::armor_viewer::load_ship::ShipLoadError;
-    use crate::armor_viewer::scene_load::FirstStage;
     use crate::armor_viewer::sidebar_tree::fixture;
     use crate::armor_viewer::viewport_view::ViewportView;
     use crate::replay_inspector::icons::IconCache;
+    use wows_toolkit_armor::load_model::ProblemReason;
+    use wows_toolkit_armor::load_model::SceneProblem;
+    use wows_toolkit_armor::load_model::fixtures;
+    use wows_toolkit_armor::load_ship::EmptyScene;
+    use wows_toolkit_armor::load_ship::LoadedShipArmor;
+    use wows_toolkit_armor::load_ship::ShipLoadError;
     use wows_toolkit_armor::model_refs::HardpointTarget;
+    use wows_toolkit_armor::scene_load::FirstStage;
 
     /// Ship assets over an empty store: a load result lands without reading it.
     fn bundle() -> Arc<ArmorAssetsBundle> {

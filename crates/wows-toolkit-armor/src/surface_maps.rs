@@ -13,16 +13,16 @@ use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::surface_maps::SurfaceMaps;
 use wowsunpack::export::texture::TextureLod;
 
-use super::camo::RgbaTexture;
-use super::scene_load::LoadCancel;
-use super::scene_load::LoadCancelled;
+use crate::camo::RgbaTexture;
+use crate::scene_load::LoadCancel;
+use crate::scene_load::LoadCancelled;
 
 /// One material's surface maps, as stored: normal X and Y in R and G, gloss
 /// in R and metalness in G of the metal-gloss map.
 #[derive(Debug)]
-pub(crate) struct SurfaceTextures {
-    pub(crate) normal: Option<RgbaTexture>,
-    pub(crate) metal_gloss: Option<RgbaTexture>,
+pub struct SurfaceTextures {
+    pub normal: Option<RgbaTexture>,
+    pub metal_gloss: Option<RgbaTexture>,
 }
 
 impl SurfaceTextures {
@@ -37,11 +37,11 @@ impl SurfaceTextures {
 }
 
 /// Surface maps by `.mfm` path, as hull albedos are keyed.
-pub(crate) type SurfaceMapsByPart = HashMap<String, SurfaceTextures>;
+pub type SurfaceMapsByPart = HashMap<String, SurfaceTextures>;
 
 /// Decodes the surface maps of each material `hull_meshes` names, once per
 /// material and on several threads, stopping early when `cancel` is set.
-pub(crate) fn decode_ship_surface_maps(
+pub fn decode_ship_surface_maps(
     ctx: &ShipModelContext,
     hull_meshes: &[InteractiveHullMesh],
     lod: TextureLod,
@@ -101,7 +101,7 @@ pub(crate) fn decode_ship_surface_maps(
 
 /// Takes the decoded surface maps out of `material`. `None` when neither was
 /// decoded, which needs `TextureDecode::AllMaps`.
-pub(crate) fn model_surface_textures(material: &mut ModelMaterial) -> Option<SurfaceTextures> {
+pub fn model_surface_textures(material: &mut ModelMaterial) -> Option<SurfaceTextures> {
     let texture = |map: Option<MaterialTexture>| {
         let image = map?.image?;
 

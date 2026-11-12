@@ -1,56 +1,40 @@
-//! Uploads a [`LoadedShipArmor`] into a [`Viewport3D`]. Ports the egui app's
-//! `upload_armor_to_viewport` (`armor_viewer/ui/tab.rs:1147-1335`), the
-//! camera-framing half of `init_armor_viewport` (`tab.rs:1445-1495`), and (as
-//! of Milestone 3 Task 6) the plain-triangle-visibility half of `pane.
-//! plate_visibility` filtering the egui original applies at the same call
-//! sites (`tab.rs:1178-1184`, `4025-4028`). [`upload_armor_to_viewport`] is
-//! the initial-load path (uploads + frames the camera, matching
-//! `init_armor_viewport`); [`reupload_armor_plates`] is the click-to-hide
-//! re-upload path added by that same task -- it shares the mesh-building
-//! logic via [`upload_armor_meshes`] but leaves the camera untouched, so
-//! toggling a plate's visibility does not reset the user's view.
+//! Uploads a [`LoadedShipArmor`]'s armor plates into a [`Viewport3D`] and
+//! frames the camera on it. Ports the egui app's `upload_armor_to_viewport`
+//! (`armor_viewer/ui/tab.rs:1147-1335`) and the camera-framing half of
+//! `init_armor_viewport` (`tab.rs:1445-1495`).
 //!
-//! **v1 scope.** Armor meshes only -- hull meshes are uploaded separately by
-//! `upload_hull.rs` (Milestone 4 Task 8a), which shares this module's
-//! `Viewport3D` but tracks its own mesh id list so a hull-only change never
-//! runs this module's (comparatively expensive) armor rebuild. Camo and the
-//! part-level display toggles are Milestone 4 Task 8b/8c. Camera-orbit-ellipse
-//! and ship-center overlays are likewise out of scope (their toggles do not
-//! exist yet). `show_hidden_only` is still a fixed v1 default (no pane UI for
-//! it yet). [`DisplaySettings`] (Task 7b's display-settings popover,
-//! `popover.rs`) makes `show_plate_edges`/
-//! `show_zero_mm`/`armor_opacity` user-mutable, each through
-//! `ViewportView::mutate_display_settings` (re-uploads armor); `hull_opaque`
-//! (Task 8a) lives on the same struct for persistence symmetry with
-//! `ArmorViewerDefaultsRow`, but is mutated through the hull-only
-//! `ViewportView::set_hull_opaque` instead, so toggling it never triggers this
-//! module's armor rebuild. `part_visibility` and `plate_visibility`
-//! (Milestone 3 Task 7's armor-visibility popover) are likewise both
-//! user-mutable.
+//! [`upload_armor_to_viewport`] is the initial-load path: it uploads and
+//! frames the camera. [`reupload_armor_plates`] rebuilds the plates after a
+//! visibility or display change and leaves the camera alone, so the view does
+//! not reset. Both share [`upload_armor_meshes`].
+//!
+//! Hull meshes are uploaded by `upload_hull.rs` into the same `Viewport3D`
+//! under their own mesh ids, so a hull-only change never runs the armor
+//! rebuild. [`DisplaySettings`] is mutated by the host: armor fields re-upload
+//! the plates, while `hull_opaque` re-uploads only the hull.
 
 use std::collections::HashMap;
 
-use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
-use wows_toolkit_armor::viewport::camera::ArcballCamera;
-use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
-use wows_toolkit_armor::viewport::renderer::Viewport3D;
-use wows_toolkit_armor::viewport::types::MeshId;
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::camera::ArcballCamera;
+use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::MeshId;
+use crate::viewport::types::Vertex;
 
-use super::load_ship::ArmorTriangleTooltip;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::PlateKey;
-use super::load_ship::transform_normal;
-use super::visibility::VisibilityFilter;
-use super::visibility::part_on;
+use crate::load_ship::ArmorTriangleTooltip;
+use crate::load_ship::LoadedShipArmor;
+use crate::load_ship::PlateKey;
+use crate::load_ship::transform_normal;
+use crate::visibility::VisibilityFilter;
+use crate::visibility::part_on;
 
-/// The v1 display-settings subset (Task 7b's display-settings popover,
-/// `popover.rs`): plate edges, zero-mm plate filtering, and per-vertex armor
+/// The display settings that shape the armor upload: plate edges, zero-mm
+/// plate filtering, and per-vertex armor
 /// opacity. Threaded through every mesh upload alongside
 /// [`VisibilityFilter`]; changing any field re-uploads the armor since all of
 /// them affect geometry (edge outlines, per-vertex alpha, and which triangles
@@ -61,11 +45,10 @@ pub struct DisplaySettings {
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
     /// Whether hull meshes render fully opaque with depth writes (like armor
-    /// plates) rather than semi-transparent behind them. Task 8's hull upload
-    /// (`upload_hull.rs`) reads this for `hull_alpha`/`hull_layer`; mutated
-    /// through `ViewportView::set_hull_opaque` rather than
-    /// `mutate_display_settings`, since a hull-only change should re-upload
-    /// only the hull, not the (potentially much larger) armor mesh set.
+    /// plates) rather than semi-transparent behind them. The hull upload
+    /// (`upload_hull.rs`) reads this for `hull_alpha`/`hull_layer`; a change
+    /// to it re-uploads only the hull, not the (potentially much larger)
+    /// armor mesh set.
     pub hull_opaque: bool,
     /// A cross at the model's own origin, which is where the game measures the
     /// ship from rather than where its middle looks to be.
@@ -127,14 +110,14 @@ const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// Skip an armor triangle whose thickness rounds to (effectively) 0mm, unless
 /// `show_zero_mm` is on. Matches the egui app's own `0.05` epsilon.
-pub(crate) fn is_zero_mm(thickness_mm: f32) -> bool {
+pub fn is_zero_mm(thickness_mm: f32) -> bool {
     thickness_mm.abs() < 0.05
 }
 
 /// Derives a triangle's [`PlateKey`] (zone, material_name, thickness rounded
 /// to tenths of mm). Matches the egui app's own inline key derivation at
 /// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
-pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
+pub fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
     PlateKey {
         zone: info.zone.clone(),
         material_name: info.material.name().to_owned(),
@@ -148,9 +131,9 @@ pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
 /// `visibility.plate` (which stores only explicitly-hidden plate keys --
 /// absent means visible; see `visibility.rs`'s module doc for why the two
 /// maps use opposite boolean senses). Shared by the main mesh loop, plate
-/// boundary edges, and the hover/sidebar highlights (`picking_ui.rs`) so all
+/// boundary edges, and the hover/sidebar highlights (`plate_picking.rs`) so all
 /// of them treat a hidden part/plate identically.
-pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, show_zero_mm: bool) -> bool {
+pub fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityFilter, show_zero_mm: bool) -> bool {
     if !show_zero_mm && is_zero_mm(info.thickness_mm) {
         return false;
     }
@@ -171,7 +154,7 @@ pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityF
 /// shared by [`upload_armor_to_viewport`] (initial load, frames the camera
 /// afterward) and [`reupload_armor_plates`] (visibility-toggle re-upload,
 /// which must NOT move the camera). Returns the per-mesh triangle tooltip
-/// data for hover/click picking (`picking_ui.rs`).
+/// data for hover/click picking (`plate_picking.rs`).
 fn upload_armor_meshes(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
@@ -643,14 +626,14 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry
     /// ```
     #[test]
     #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]
     fn upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry() {
-        use wows_toolkit_armor::viewport::headless::HeadlessDevice;
-        use wows_toolkit_armor::viewport::headless::SRGB_TARGET;
-        use wows_toolkit_armor::viewport::types::TargetSize;
+        use crate::viewport::headless::HeadlessDevice;
+        use crate::viewport::headless::SRGB_TARGET;
+        use crate::viewport::types::TargetSize;
 
         let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
             .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
@@ -673,7 +656,7 @@ mod tests {
             wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, std::sync::Arc::clone(&metadata))
                 .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
+        let catalog = crate::catalog::ShipCatalog::build(&metadata);
         // A battleship tends to have the richest armor scheme (many distinct
         // plates/zones), which best exercises the plate-boundary-edge path.
         let ship = catalog
@@ -685,11 +668,11 @@ mod tests {
             .next()
             .expect("expected at least one battleship in the real catalog");
 
-        let armor = crate::armor_viewer::load_ship::load_ship_armor_by_param(
+        let armor = crate::load_ship::load_ship_armor_by_param(
             &ship_assets,
             &ship.param_index,
             &ship.display_name,
-            &crate::armor_viewer::scene_load::LoadCancel::new(),
+            &crate::scene_load::LoadCancel::new(),
         )
         .unwrap_or_else(|e| panic!("failed to load armor for {} ({}): {e}", ship.display_name, ship.param_index))
         .scene;
@@ -713,7 +696,7 @@ mod tests {
         assert!(total_triangles > 0, "expected at least one uploaded armor triangle");
 
         // Hiding one real plate and re-uploading (the click-to-hide path,
-        // `picking_ui.rs`) should drop exactly that plate's triangles and
+        // `plate_picking.rs`) should drop exactly that plate's triangles and
         // nothing else, without moving the camera.
         let tooltip_key = |t: &ArmorTriangleTooltip| PlateKey {
             zone: t.zone.clone(),

@@ -4,10 +4,9 @@
 //! set. Ports the egui app's `upload_hull_meshes_to_viewport`
 //! (`armor_viewer/ui/tab.rs:1339-1442`).
 //!
-//! **Camo compositing (Milestone 4 Task 8b).** The active camo's decoded
+//! **Camo compositing.** The active camo's decoded
 //! textures/UV transforms are not carried on `armor` (an `Arc<LoadedShipArmor>`
-//! is never mutated once loaded) -- `ViewportView` owns that state
-//! (`selected_camo`/`active_camo_textures`/`active_camo_uvs`) and passes it in
+//! is never mutated once loaded): the host owns that state and passes it in
 //! as parameters here on every hull upload. A stem present in
 //! `active_camo_textures` takes precedence over `armor.hull_textures`'s base
 //! albedo for that mesh; empty maps (no camo selected) reproduce Task 8a's
@@ -20,28 +19,27 @@
 
 use std::collections::HashMap;
 
-use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::material_alpha::AlphaMode;
 
-use wows_toolkit_armor::viewport::renderer::AlbedoUv;
-use wows_toolkit_armor::viewport::renderer::GpuPipeline;
-use wows_toolkit_armor::viewport::renderer::LAYER_DEFAULT;
-use wows_toolkit_armor::viewport::renderer::LAYER_HULL;
-use wows_toolkit_armor::viewport::renderer::MaterialBinding;
-use wows_toolkit_armor::viewport::renderer::TextureEncoding;
-use wows_toolkit_armor::viewport::renderer::TextureImage;
-use wows_toolkit_armor::viewport::renderer::Viewport3D;
-use wows_toolkit_armor::viewport::tangents::vertex_tangents;
-use wows_toolkit_armor::viewport::types::MeshId;
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::renderer::AlbedoUv;
+use crate::viewport::renderer::GpuPipeline;
+use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::LAYER_HULL;
+use crate::viewport::renderer::MaterialBinding;
+use crate::viewport::renderer::TextureEncoding;
+use crate::viewport::renderer::TextureImage;
+use crate::viewport::renderer::Viewport3D;
+use crate::viewport::tangents::vertex_tangents;
+use crate::viewport::types::MeshId;
+use crate::viewport::types::Vertex;
 
-use super::camo::RgbaTexture;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::transform_normal;
-use super::surface_maps::SurfaceTextures;
+use crate::camo::RgbaTexture;
+use crate::load_ship::LoadedShipArmor;
+use crate::load_ship::transform_normal;
+use crate::surface_maps::SurfaceTextures;
 
 /// Hull-mesh brightness boost for a mesh with no texture; the lighting
 /// shader multiplies this base by `(flat + key*halfLambert)`. Matches the
@@ -65,7 +63,7 @@ const LUMA_SAMPLE_STRIDE: usize = 37;
 /// Extracts the file stem (no directory, no `.mfm` extension) from an mfm
 /// path, for matching a hull mesh's texture against `active_camo_textures`'s
 /// keys. Ports `armor_viewer::common::mfm_stem` verbatim.
-pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
+pub fn mfm_stem(mfm_path: &str) -> &str {
     let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
     base.strip_suffix(".mfm").unwrap_or(base)
 }
@@ -79,7 +77,7 @@ pub(crate) fn mfm_stem(mfm_path: &str) -> &str {
 /// (e.g. a camo with light stripes on a dark base); keying off the P95 bright
 /// pixels caps the boost by the brightest regions directly, so they do not
 /// saturate to white while dark textures still get boosted.
-pub(crate) fn tex_brightness(rgba: &[u8]) -> f32 {
+pub fn tex_brightness(rgba: &[u8]) -> f32 {
     let mut lumas: Vec<f32> = rgba
         .as_chunks::<4>()
         .0
@@ -116,7 +114,7 @@ struct MaterialKey {
 /// and shared by every mesh using it. Valid for one device, one scene and one
 /// active camo: clear it when any of them changes.
 #[derive(Default)]
-pub(crate) struct HullTextureCache {
+pub struct HullTextureCache {
     albedos: HashMap<TextureKey, UploadedAlbedo>,
     /// By `.mfm` path.
     surface_maps: HashMap<String, UploadedSurfaceMaps>,
@@ -124,20 +122,16 @@ pub(crate) struct HullTextureCache {
 }
 
 impl HullTextureCache {
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.albedos.clear();
         self.surface_maps.clear();
         self.materials.clear();
     }
 
     /// Drops the active camo's textures, keeping the materials' own.
-    pub(crate) fn forget_camo(&mut self) {
+    pub fn forget_camo(&mut self) {
         self.albedos.retain(|key, _| matches!(key, TextureKey::Base(_)));
         self.materials.retain(|key, _| matches!(key.albedo, TextureKey::Base(_)));
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.materials.len()
     }
 
     fn upload_albedo(
@@ -217,7 +211,7 @@ fn upload(
 /// egui app's own default). `hull_opaque` selects the alpha/layer: opaque
 /// hulls draw depth-written on [`LAYER_DEFAULT`] like armor plates,
 /// translucent ones draw on [`LAYER_HULL`] (no depth write, behind armor).
-/// `active_camo_textures`/`active_camo_uvs` are `ViewportView`'s decoded
+/// `active_camo_textures`/`active_camo_uvs` are the host's decoded
 /// active-camo state (see the module doc); pass empty maps for base albedo
 /// only. A textured mesh whose material has surface maps draws them under
 /// whichever albedo it shows.
@@ -239,7 +233,7 @@ pub fn upload_hull_meshes(
     hull_mesh_ids: &mut Vec<MeshId>,
     hull_visibility: &HashMap<String, bool>,
     hull_opaque: bool,
-    active_camo_textures: &super::camo::TexturesByPart,
+    active_camo_textures: &crate::camo::TexturesByPart,
     active_camo_uvs: &HashMap<String, UvTransform>,
     texture_cache: &mut HullTextureCache,
 ) {

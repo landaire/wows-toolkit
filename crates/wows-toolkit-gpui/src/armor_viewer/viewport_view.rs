@@ -49,64 +49,66 @@ use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
 use super::analysis::SimAgreement;
+use super::assets::spawn_reload_ship_armor;
 use super::depth_cues;
-use super::gaps;
-use super::length_marks::LengthMarks;
-use super::length_marks::MarkLabels;
-use super::length_marks::Reading;
-use super::trajectory;
-use super::trajectory::ArcColor;
-use super::trajectory::ArcId;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
-use crate::armor_viewer::assets::ModelAssets;
-use crate::armor_viewer::camo::build_active_camo;
-use crate::armor_viewer::hardpoint_overlay;
-use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
-use crate::armor_viewer::hull_picking;
-use crate::armor_viewer::hull_picking::HighlightChange;
-use crate::armor_viewer::hull_picking::HoverTarget;
-use crate::armor_viewer::hull_picking::HullMeshIndex;
-use crate::armor_viewer::hull_picking::MeshHit;
-use crate::armor_viewer::hull_picking::MeshTooltip;
 use crate::armor_viewer::legend::swatch_color;
-use crate::armor_viewer::load_model;
-use crate::armor_viewer::load_model::ModelLoadRequest;
-use crate::armor_viewer::load_model::MountRef;
-use crate::armor_viewer::load_model::ProblemReason;
-use crate::armor_viewer::load_model::SceneLoadError;
-use crate::armor_viewer::load_model::SceneProblem;
-use crate::armor_viewer::load_ship;
-use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
-use crate::armor_viewer::load_ship::LoadedShipArmor;
-use crate::armor_viewer::load_ship::PlateKey;
-use crate::armor_viewer::load_ship::SceneSubject;
-use crate::armor_viewer::load_ship::ShipLoadError;
-use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
-use crate::armor_viewer::scene_load::FirstStage;
-use crate::armor_viewer::scene_load::LoadCancel;
-use crate::armor_viewer::scene_load::LoadSlot;
-use crate::armor_viewer::scene_load::RestJob;
-use crate::armor_viewer::scene_load::RestJobError;
-use crate::armor_viewer::scene_load::RestPiece;
-use crate::armor_viewer::scene_load::SharedLoad;
-use crate::armor_viewer::upload;
-use crate::armor_viewer::upload::upload_armor_to_viewport;
-use crate::armor_viewer::upload_hull;
-use crate::armor_viewer::upload_hull::HullTextureCache;
-use crate::armor_viewer::visibility;
-use crate::armor_viewer::visibility::SidebarHighlightKey;
-use crate::armor_viewer::visibility::VisibilityFilter;
-use crate::armor_viewer::visibility::VisibilitySnapshot;
-use crate::armor_viewer::visibility::VisibilityUndoStack;
 use crate::armor_viewer::xray::XrayHighlight;
 use crate::armor_viewer::xray::XrayHighlightView;
+use wows_toolkit_armor::assets::ModelAssets;
 use wows_toolkit_armor::camera_rings;
+use wows_toolkit_armor::camo::build_active_camo;
+use wows_toolkit_armor::gaps;
+use wows_toolkit_armor::hardpoint_overlay;
+use wows_toolkit_armor::hardpoint_overlay::HardpointMarkers;
+use wows_toolkit_armor::hull_picking;
+use wows_toolkit_armor::hull_picking::HighlightChange;
+use wows_toolkit_armor::hull_picking::HoverTarget;
+use wows_toolkit_armor::hull_picking::HullMeshIndex;
+use wows_toolkit_armor::hull_picking::MeshHit;
+use wows_toolkit_armor::hull_picking::MeshTooltip;
+use wows_toolkit_armor::length_marks::LengthMarks;
+use wows_toolkit_armor::length_marks::MarkLabels;
+use wows_toolkit_armor::length_marks::Reading;
+use wows_toolkit_armor::load_model;
+use wows_toolkit_armor::load_model::ModelLoadRequest;
+use wows_toolkit_armor::load_model::MountRef;
+use wows_toolkit_armor::load_model::ProblemReason;
+use wows_toolkit_armor::load_model::SceneLoadError;
+use wows_toolkit_armor::load_model::SceneProblem;
+use wows_toolkit_armor::load_ship;
+use wows_toolkit_armor::load_ship::ArmorTriangleTooltip;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::load_ship::SceneSubject;
+use wows_toolkit_armor::load_ship::ShipLoadError;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
+use wows_toolkit_armor::plate_picking;
+use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::scene_load::LoadCancel;
+use wows_toolkit_armor::scene_load::LoadSlot;
+use wows_toolkit_armor::scene_load::RestJob;
+use wows_toolkit_armor::scene_load::RestJobError;
+use wows_toolkit_armor::scene_load::RestPiece;
+use wows_toolkit_armor::scene_load::SharedLoad;
 use wows_toolkit_armor::splash;
+use wows_toolkit_armor::trajectory;
+use wows_toolkit_armor::trajectory::ArcColor;
+use wows_toolkit_armor::trajectory::ArcId;
+use wows_toolkit_armor::upload;
+use wows_toolkit_armor::upload::upload_armor_to_viewport;
+use wows_toolkit_armor::upload_hull;
+use wows_toolkit_armor::upload_hull::HullTextureCache;
+use wows_toolkit_armor::visibility;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
+use wows_toolkit_armor::visibility::VisibilityFilter;
+use wows_toolkit_armor::visibility::VisibilitySnapshot;
+use wows_toolkit_armor::visibility::VisibilityUndoStack;
+use wows_toolkit_armor::waterline_grid;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -2018,7 +2020,7 @@ impl ViewportView {
     ///
     /// A no-op while the lock is off, and while the ship names no orbit to lock
     /// onto: there is nothing to put the eye on.
-    fn apply_perspective(&mut self, device: &wgpu::Device, armor: &super::load_ship::LoadedShipArmor) {
+    fn apply_perspective(&mut self, device: &wgpu::Device, armor: &LoadedShipArmor) {
         self.aim_perspective(Some(device), armor.bounds);
     }
 
@@ -2771,8 +2773,10 @@ impl ViewportView {
         if let Some(written) = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks) {
             let eye = camera.eye_position();
             let marks = written.marks();
-            let labels = written
-                .labels(|a, b| (a - eye).norm() < (b - eye).norm(), |position| depth_cues::grid_fade(marks, position));
+            let labels = written.labels(
+                |a, b| (a - eye).norm() < (b - eye).norm(),
+                |position| waterline_grid::grid_fade(marks, position),
+            );
             for label in labels {
                 let Some(at) = camera.project_to_screen(label.position, rect).filter(|at| rect.contains(*at)) else {
                     continue;
@@ -3443,8 +3447,8 @@ impl ViewportView {
         let pointer = point_to_vec2(position);
         let hit = self.viewport.pick(pointer, rect);
         let plate =
-            hit.as_ref().and_then(|h| picking_ui::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
-                let key = picking_ui::plate_key_of(tooltip);
+            hit.as_ref().and_then(|h| plate_picking::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
+                let key = plate_picking::plate_key_of(tooltip);
                 (key, tooltip.clone())
             });
         let (key, tooltip) = match HoverTarget::resolve(plate, || self.pick_mesh(&armor, pointer, rect)) {
@@ -3519,7 +3523,7 @@ impl ViewportView {
             scene.device(),
             &armor.hull_meshes,
             &names,
-            picking_ui::HighlightOrigin::ViewHover,
+            plate_picking::HighlightOrigin::ViewHover,
         );
         let [name] = names;
         self.mesh_highlight = Some((name, mesh_id));
@@ -3620,7 +3624,7 @@ impl ViewportView {
     }
 
     /// Replaces the hover-highlight overlay mesh with one for `key`, via
-    /// `picking_ui::upload_plate_highlight`. A no-op (leaves no highlight) if
+    /// `plate_picking::upload_plate_highlight`. A no-op (leaves no highlight) if
     /// the GPU device isn't ready or there is no armor loaded, which should
     /// not happen in practice since `update_plate_hover` already checked both.
     fn rebuild_hover_highlight(&mut self, key: &PlateKey) {
@@ -3635,14 +3639,14 @@ impl ViewportView {
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
-        let mesh_id = picking_ui::upload_plate_highlight(
+        let mesh_id = plate_picking::upload_plate_highlight(
             &mut self.viewport,
             scene.device(),
             &armor,
             key,
             visibility,
             show_zero_mm,
-            picking_ui::HighlightOrigin::ViewHover,
+            plate_picking::HighlightOrigin::ViewHover,
         );
         self.hover_highlight = Some((key.clone(), mesh_id));
         self.viewport.mark_dirty();
@@ -3650,7 +3654,7 @@ impl ViewportView {
 
     /// Replaces the row-hover highlight mesh for `key`, always drawn through
     /// what is in front of it whatever the x-ray setting, via
-    /// `picking_ui::upload_zone_highlight`/`upload_part_highlight`/
+    /// `plate_picking::upload_zone_highlight`/`upload_part_highlight`/
     /// `upload_plate_highlight`. A no-op (leaves no highlight) if the GPU
     /// device isn't ready or there is no armor loaded. Also used by
     /// `reupload_current_armor` to rebuild an already-active sidebar
@@ -3668,7 +3672,7 @@ impl ViewportView {
         };
         let show_zero_mm = self.show_zero_mm();
         let mesh_id = match &key {
-            SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
+            SidebarHighlightKey::Zone(zone) => plate_picking::upload_zone_highlight(
                 &mut self.viewport,
                 scene.device(),
                 &armor,
@@ -3676,7 +3680,7 @@ impl ViewportView {
                 visibility,
                 show_zero_mm,
             ),
-            SidebarHighlightKey::Part(zone, part) => picking_ui::upload_part_highlight(
+            SidebarHighlightKey::Part(zone, part) => plate_picking::upload_part_highlight(
                 &mut self.viewport,
                 scene.device(),
                 &armor,
@@ -3685,21 +3689,21 @@ impl ViewportView {
                 visibility,
                 show_zero_mm,
             ),
-            SidebarHighlightKey::Plate(pk) => picking_ui::upload_plate_highlight(
+            SidebarHighlightKey::Plate(pk) => plate_picking::upload_plate_highlight(
                 &mut self.viewport,
                 scene.device(),
                 &armor,
                 pk,
                 visibility,
                 show_zero_mm,
-                picking_ui::HighlightOrigin::Row,
+                plate_picking::HighlightOrigin::Row,
             ),
             SidebarHighlightKey::HullMeshes(names) => hull_picking::upload_hull_highlight(
                 &mut self.viewport,
                 scene.device(),
                 &armor.hull_meshes,
                 names,
-                picking_ui::HighlightOrigin::Row,
+                plate_picking::HighlightOrigin::Row,
             ),
         };
         self.sidebar_highlight = Some((key, mesh_id));
@@ -4026,12 +4030,12 @@ impl ViewportView {
         if self.length_marks.as_ref().map(MarkLabels::marks) != marks.as_ref() {
             self.length_marks = marks.map(MarkLabels::new);
         }
-        let layers = depth_cues::GridLayers {
+        let layers = waterline_grid::GridLayers {
             lines: self.display_settings.show_grid,
             marks: self.display_settings.show_length_marks,
         };
         if let Some(written) = self.length_marks.as_ref() {
-            depth_cues::upload_waterline_grid(&mut self.viewport, device, written.marks(), layers);
+            waterline_grid::upload_waterline_grid(&mut self.viewport, device, written.marks(), layers);
         }
 
         if self.display_settings.show_ship_center {
@@ -4084,7 +4088,7 @@ impl ViewportView {
                 .mesh_triangle_info
                 .iter()
                 .flat_map(|(_, tooltips)| tooltips)
-                .any(|t| picking_ui::plate_key_of(t) == hover.key);
+                .any(|t| plate_picking::plate_key_of(t) == hover.key);
             if still_visible {
                 self.rebuild_hover_highlight(&hover.key);
             } else {
@@ -4326,7 +4330,7 @@ impl ViewportView {
             }
             SceneSource::Model { bundle, models, request } => {
                 let request = ModelLoadRequest { lod: self.hull_lod, ..request };
-                let task = load_model::spawn_load_model_scene(models, bundle, request, cancel.clone(), cx);
+                let task = super::assets::spawn_load_model_scene(models, bundle, request, cancel.clone(), cx);
                 cx.background_spawn(async move { task.await.map_err(SceneLoadError::from) })
             }
         };
@@ -4469,7 +4473,8 @@ impl ViewportView {
                 })
                 .await;
 
-            let _ = this.update_in(cx, |_this, window, cx| load_ship::report_export(written, &ship, window, cx));
+            let _ =
+                this.update_in(cx, |_this, window, cx| super::export_dialog::report_export(written, &ship, window, cx));
         })
         .detach();
     }
@@ -4821,7 +4826,10 @@ impl Render for ViewportView {
         let mesh_tooltip_overlay = self.hovered_mesh.as_ref().filter(|_| self.hovered_ring.is_none()).map(|hover| {
             let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
             deferred(
-                anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(hover.tooltip.element(cx)),
+                anchored()
+                    .position(anchor_pos)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(picking_ui::mesh_tooltip_element(&hover.tooltip, cx)),
             )
             .with_priority(0)
             .into_any_element()
@@ -5111,7 +5119,7 @@ impl CamoTextureCache {
 
 /// Per-hull-part composited camo textures, keyed as
 /// [`upload_hull::upload_hull_meshes`] expects.
-type CamoTextures = super::camo::TexturesByPart;
+type CamoTextures = wows_toolkit_armor::camo::TexturesByPart;
 
 /// One scheme's decoded and composited textures.
 struct CamoDecode {
@@ -5479,12 +5487,12 @@ mod tests {
     use super::remap_camo_selection;
     use super::vec2_to_point;
     use super::view_rect_from_bounds;
-    use crate::armor_viewer::upload::DisplaySettings;
     use gpui_kit::Bounds;
     use gpui_kit::MouseButton;
     use gpui_kit::point;
     use gpui_kit::px;
     use gpui_kit::size;
+    use wows_toolkit_armor::upload::DisplaySettings;
     use wows_toolkit_armor::viewport::types::LightingSettings;
     use wowsunpack::export::camo_textures::CamoSchemeId;
     use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -5610,7 +5618,7 @@ mod tests {
         let path =
             wowsunpack::export::model_catalog::ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model")
                 .expect("a model path");
-        let mut armor = crate::armor_viewer::load_model::fixtures::model_scene(path, Vec::new());
+        let mut armor = wows_toolkit_armor::load_model::fixtures::model_scene(path, Vec::new());
         armor.camo_scheme_infos =
             vec![scheme(0, "Camo B", CamoOrigin::Universal), scheme(1, "Camo A", CamoOrigin::ShipSpecific)].into();
 
@@ -5696,10 +5704,10 @@ mod opening_visibility_tests {
 
     #[test]
     fn an_armored_model_opens_on_the_chosen_layer() {
-        let mut scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
-        if let crate::armor_viewer::load_ship::SceneSubject::Model(model) = &mut scene.subject {
+        let mut scene = wows_toolkit_armor::load_model::fixtures::armored_model_scene(turret());
+        if let wows_toolkit_armor::load_ship::SceneSubject::Model(model) = &mut scene.subject {
             model.thickness =
-                crate::armor_viewer::load_ship::ArmorThickness::Ship(crate::armor_viewer::load_ship::ThicknessSource {
+                wows_toolkit_armor::load_ship::ArmorThickness::Ship(wows_toolkit_armor::load_ship::ThicknessSource {
                     vehicle_param_index: wows_toolkit_armor::model_refs::VehicleParamIndex::new("PASC001".to_string()),
                     display_name: "Iowa".to_string(),
                     hp: wowsunpack::export::hardpoint::HardpointName::new("HP_AGM_1"),
@@ -5712,14 +5720,14 @@ mod opening_visibility_tests {
 
     #[test]
     fn a_model_with_armor_of_unknown_thickness_opens_on_its_meshes() {
-        let scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+        let scene = wows_toolkit_armor::load_model::fixtures::armored_model_scene(turret());
 
         assert_eq!(OpeningLayer::Armor.for_scene(&scene), OpeningLayer::Mesh);
     }
 
     #[test]
     fn a_model_without_armor_opens_on_its_meshes_and_shows_them() {
-        let scene = crate::armor_viewer::load_model::fixtures::model_scene(turret(), Vec::new());
+        let scene = wows_toolkit_armor::load_model::fixtures::model_scene(turret(), Vec::new());
         let layer = OpeningLayer::Armor.for_scene(&scene);
 
         assert_eq!(layer, OpeningLayer::Mesh);
@@ -5744,7 +5752,7 @@ mod opening_visibility_tests {
     /// drawn fits the view, and a hidden layer reaching further is ignored.
     #[test]
     fn a_model_is_framed_on_the_layers_drawn() {
-        let mut scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+        let mut scene = wows_toolkit_armor::load_model::fixtures::armored_model_scene(turret());
         for position in &mut scene.meshes[0].positions {
             *position = position.map(|axis| axis * 100.0);
         }
@@ -5962,10 +5970,10 @@ mod real_model_tests {
 
     use super::ShownLayers;
     use super::opening_camera;
-    use crate::armor_viewer::assets::ModelAssets;
-    use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
-    use crate::armor_viewer::load_model::ModelLoadRequest;
-    use crate::armor_viewer::load_model::load_model_scene;
+    use wows_toolkit_armor::assets::ModelAssets;
+    use wows_toolkit_armor::hardpoint_overlay::HardpointMarkers;
+    use wows_toolkit_armor::load_model::ModelLoadRequest;
+    use wows_toolkit_armor::load_model::load_model_scene;
     use wows_toolkit_armor::model_refs::HardpointTarget;
     use wows_toolkit_armor::viewport::types::Vec3;
     use wows_toolkit_armor::viewport::types::ViewRect;
@@ -6002,7 +6010,7 @@ mod real_model_tests {
 
         let mut marked = 0;
         for path in paths {
-            let cancel = crate::armor_viewer::scene_load::LoadCancel::new();
+            let cancel = wows_toolkit_armor::scene_load::LoadCancel::new();
             let scene = load_model_scene(&models, &metadata, &ModelLoadRequest::new(path.clone(), None), &cancel)
                 .expect("the model loads")
                 .scene;

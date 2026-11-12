@@ -346,12 +346,12 @@ mod tests {
     use wowsunpack::export::gltf_export::CamoOrigin;
     use wowsunpack::export::model_catalog::ModelPath;
 
-    use crate::armor_viewer::load_model::fixtures;
-    use crate::armor_viewer::load_ship::ArmorZone;
-    use crate::armor_viewer::load_ship::LoadedShipArmor;
-    use crate::armor_viewer::load_ship::ZonePart;
     use crate::armor_viewer::pane::ArmorViewerPane;
     use crate::armor_viewer::pane::OptionSection;
+    use wows_toolkit_armor::load_model::fixtures;
+    use wows_toolkit_armor::load_ship::ArmorZone;
+    use wows_toolkit_armor::load_ship::LoadedShipArmor;
+    use wows_toolkit_armor::load_ship::ZonePart;
 
     /// The rail's tool buttons.
     const TOOLS: [&str; 5] = [

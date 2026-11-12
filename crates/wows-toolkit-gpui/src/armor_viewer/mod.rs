@@ -1,39 +1,20 @@
-//! GPUI Armor Viewer tab. `viewport_view` owns the 3D viewport: gpui_kit mouse
-//! and key input drives the copied `viewport_3d` arcball camera, an
-//! on-demand (dirty-gated) render on GPUI's own device fills a texture GPUI
-//! samples directly, and a gpui-native overlay reimplements the navigation
-//! gizmo on top of it.
-//! `catalog` builds the ship selector's nation/class/ship listing from the
-//! loaded `GameMetadataProvider`; `assets` loads the shared `ShipAssets`
-//! (ship-export data) plus the catalog and its nation-flag/class-icon cache
-//! on the background executor. `sidebar` lists the ships, their parts and
-//! every catalogue model in one searchable tree (`sidebar_tree` builds it from
-//! `model_tree`'s grouped listing) and emits selection events;
-//! `load_ship` loads one ship's armor model on the background executor;
-//! `upload` uploads a loaded ship's armor meshes into a `Viewport3D`. `pane`
-//! ties all of the above into the single-pane tab `app.rs` mounts: sidebar on
-//! the left, the 3D viewport on the right, wired so picking a ship loads and
-//! displays its armor. `picking_ui` adds CPU plate picking on top: hover
-//! highlight + thickness tooltip, and click/context-menu plate visibility
-//! toggles; `hull_picking` hovers the meshes the same way where no plate is
-//! hit. `visibility` holds the zone/part/plate override maps' shared
-//! types (`VisibilityFilter`, undo/redo snapshot stack, sidebar-highlight
-//! key) plus the tri-state tree's pure derivation logic; `popover` builds the
-//! options rail's tools and the armor-visibility tree on top of it,
-//! plus (Milestone 4 Task 8a) the hull-visibility popover's tree, backed by
-//! `upload_hull`'s hull-only mesh upload (kept separate from `upload`'s armor
-//! upload so a hull-only change never rebuilds the armor mesh set).
-//! `viewport_view.rs` owns the actual `part_visibility`/`plate_visibility`/
-//! `hull_visibility`/`selected_camo`/undo-stack state and wires all of the
-//! above into the mouse and key handlers. `camo` (Milestone 4 Task 8b) is the
-//! pure pixel-math camo compositor (`build_active_camo`) that bakes a decoded
-//! camo scheme against the hull's base albedo; `popover`'s hull popover adds
-//! the camo picker on top of it. Hull upgrade-LOD reload (M4 Task 8c) is a
-//! later milestone. `dock` (M5 Task 9b) lays out one or more panes itself
-//! (no `DockArea`/`TabPanel` chrome, see its module doc); the sidebar's
-//! "Compare" button (`CompareSplit`) adds a pane, and a ship selection routes
-//! to the dock's active pane. Camera-mirror/settings-sync across panes (M5
-//! Task 9c) is not implemented yet.
+//! GPUI Armor Viewer tab, hosting the scene logic and viewport engine of
+//! `wows_toolkit_armor`. `viewport_view` owns the 3D viewport: gpui_kit mouse
+//! and key input drives the arcball camera, an on-demand (dirty-gated) render
+//! on GPUI's own device fills a texture GPUI samples directly, and a
+//! gpui-native overlay draws the navigation gizmo, labels, tooltips
+//! (`picking_ui`) and depth cues (`depth_cues`) on top of it. It also owns the
+//! visibility, camouflage and undo state and wires it into the mouse and key
+//! handlers.
+//! `assets` runs the armor crate's synchronous loaders on the background
+//! executor and decodes the catalog's nation flags and class icons. `sidebar`
+//! lists the ships, their parts and every catalogue model in one searchable
+//! tree (`sidebar_tree` builds it) and emits selection events. `popover`
+//! builds the options rail's tools and the armor and hull visibility trees.
+//! `pane` ties these into one pane: sidebar on the left, viewport on the
+//! right. `dock` lays out one or more panes itself (see its module doc); the
+//! sidebar's "Compare" button (`CompareSplit`) adds a pane, and a ship
+//! selection routes to the dock's active pane.
 #![allow(dead_code)]
 // Re-exports below are the module's public surface; not everything is
 // consumed outside its own file yet (some are reserved for a later
@@ -42,39 +23,23 @@
 
 pub mod analysis;
 pub mod assets;
-pub(crate) mod camo;
 mod depth_cues;
 pub mod dock;
 mod export_dialog;
-mod gaps;
-mod hardpoint_overlay;
-mod hull_picking;
 pub mod legend;
-mod length_marks;
-mod load_model;
-mod load_ship;
 pub mod options_panel;
 pub mod pane;
 pub mod picking_ui;
 pub mod popover;
-mod scene_load;
 pub mod sidebar;
 mod sidebar_tree;
-mod surface_maps;
-pub mod trajectory;
 mod trajectory_panel;
 mod tree_filter;
-pub mod upload;
-pub mod upload_hull;
 pub mod viewport_view;
-pub mod visibility;
 pub mod xray;
 
 pub use assets::ArmorAssetsBundle;
-pub use assets::ArmorAssetsError;
 pub use assets::spawn_load_armor_assets;
-pub use load_ship::LoadedShipArmor;
-pub use load_ship::ShipLoadError;
 pub use pane::ArmorViewerPane;
 pub use sidebar::CompareSplit;
 pub use sidebar::ShipSelected;
