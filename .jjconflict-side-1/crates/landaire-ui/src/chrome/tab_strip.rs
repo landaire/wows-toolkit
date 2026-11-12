@@ -334,24 +334,26 @@ pub fn TabStripTab(
 }
 
 /// Reports where the tab called `value` is laid out to its strip while it is the selected one,
-/// and brings it into view as it becomes selected.
+/// and brings it into view once it is laid out after becoming selected, the first selection too.
 fn report_bounds(tabs: TabsContext, strip: StripContext, value: String) {
     let trigger = tabs.trigger_of(&value);
     let name = value.clone();
     let observed = trigger.observe_border_box_while(move || tabs.is_selected(&name));
 
-    let reporting = RenderEffect::new(move |was_selected: Option<bool>| {
-        let selected = tabs.is_selected(&value);
-        if !selected {
+    // Whether this selection of the tab has been scrolled into view.
+    let reporting = RenderEffect::new(move |scrolled: Option<bool>| {
+        if !tabs.is_selected(&value) {
             return false;
         }
 
-        if was_selected == Some(false) {
+        let Some(bounds) = observed.get() else {
+            return false;
+        };
+
+        if scrolled != Some(true) {
             trigger.scroll_to(ScrollTarget::IntoView, ScrollBehavior::Instant);
         }
-        if let Some(bounds) = observed.get() {
-            strip.selected.set(Some(SelectedTab { value: value.clone(), bounds }));
-        }
+        strip.selected.set(Some(SelectedTab { value: value.clone(), bounds }));
 
         true
     });

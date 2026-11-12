@@ -133,3 +133,36 @@ fn closing_a_tab_does_not_choose_it() {
     assert_eq!(controls.closed.get_untracked(), 1, "the tab was asked to close");
     assert_eq!(controls.value.get_untracked(), "alpha", "the selection stayed where it was");
 }
+
+#[component]
+fn Crowded() -> impl IntoView {
+    let value = RwSignal::new_local("eighth".to_owned());
+
+    view! {
+        ThemeRoot {
+            TabStrip(value = value, label = "Sections") {
+                TabStripTab(value = "first") {"First section"}
+                TabStripTab(value = "second") {"Second section"}
+                TabStripTab(value = "third") {"Third section"}
+                TabStripTab(value = "fourth") {"Fourth section"}
+                TabStripTab(value = "fifth") {"Fifth section"}
+                TabStripTab(value = "sixth") {"Sixth section"}
+                TabStripTab(value = "seventh") {"Seventh section"}
+                TabStripTab(value = "eighth") {"Eighth section"}
+            }
+        }
+    }
+}
+
+#[test]
+fn a_tab_selected_from_the_start_is_scrolled_into_view() {
+    let narrow = WindowSize { width: 300.0, height: 120.0 };
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(narrow), || view! { Crowded() }).expect("opens");
+    window.advance(SETTLE);
+
+    let eighth = *tabs(&mut window).last().expect("the tabs are announced");
+    let bounds = window.bounds(eighth).expect("the tab has a box");
+    let (left, right) = (bounds.origin.x.0, bounds.origin.x.0 + bounds.size.width.0);
+    assert!(left >= 0.0 && right <= narrow.width, "the selected tab is in view at {left}..{right}");
+    assert_eq!(underline(&window), under(&window, eighth), "its underline is under it");
+}
