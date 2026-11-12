@@ -16754,6 +16754,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-zgui"
+version = "1.0.5"
+dependencies = [
+ "clap",
+ "futures",
+ "humansize",
+ "landaire-ui",
+ "rootcause",
+ "rust-i18n 3.1.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wgc-auth",
+ "wgc-catalog",
+ "wgc-download",
+ "wgc-install",
+ "windows-sys 0.61.2",
+ "winresource",
+ "wows-toolkit-config",
+ "wows-toolkit-hardening",
+ "wows-toolkit-icons",
+ "wows-toolkit-launcher",
+ "wows-toolkit-replay-data",
+ "wows-toolkit-services",
+ "wows-toolkit-viewmodel",
+ "wt-translations",
+ "zgui",
+ "zgui-ui",
+ "zgui-ui-icons",
+ "zgui-ui-tokens",
+]
+
+[[package]]
 name = "wows_minimap_renderer"
 version = "0.41.0"
 dependencies = [
