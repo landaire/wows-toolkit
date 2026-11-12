@@ -16544,11 +16544,15 @@ dependencies = [
  "bytemuck",
  "nalgebra",
  "pollster 0.4.0",
+ "rust-i18n 3.1.5",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
  "wgpu",
+ "wows-toolkit-viewmodel",
  "wowsunpack",
+ "wt-translations",
 ]
 
 [[package]]

@@ -43,7 +43,7 @@ use crate::replay_inspector::icons::IconCache;
 use crate::replay_inspector::icons::decode_ship_class_svg;
 use crate::replay_inspector::load::LoadedGameData;
 
-use super::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::ShipCatalog;
 
 /// Class-icon tint: the replay table tints ship-class icons by team/division
 /// color (`replay_inspector::columns::class_icon_tint`), but the armor

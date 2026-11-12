@@ -1,0 +1,130 @@
+[package]
+name = "wowsunpack"
+description = "Utility for interacting with World of Warships game assets"
+version = "0.47.1"
+repository = "https://github.com/landaire/wows-toolkit"
+documentation = "https://docs.rs/wowsunpack/"
+# Integration tests need a real game install, so they cannot run from the
+# published crate and only add weight to it.
+exclude = ["BUCK", "tests/"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "wowsunpack"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wowsunpack"
+path = "src/main.rs"
+required-features = ["bin"]
+
+[[bin]]
+name = "dhat_parse"
+path = "src/bin/dhat_parse.rs"
+required-features = ["dhat-heap"]
+
+[dependencies]
+wows-core = { workspace = true }
+clap = { workspace = true, optional = true }
+flate2 = { workspace = true }
+rootcause = { workspace = true }
+memmap2 = { version = "0.9", optional = true }
+thiserror = { workspace = true }
+rayon = { version = "1.12", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+csv = { version = "1.4", optional = true }
+glob = { workspace = true, optional = true }
+pickled = { workspace = true, optional = true }
+winnow = { workspace = true, optional = true }
+paste = { workspace = true, optional = true }
+roxmltree = { workspace = true, optional = true }
+tracing = { workspace = true }
+itertools = { workspace = true, optional = true }
+gettext = { workspace = true, optional = true }
+convert_case = { workspace = true, optional = true }
+regex = { version = "1.13.1", optional = true }
+indicatif = { workspace = true, optional = true, features = ["rayon"] }
+thread_local = { version = "1.1.10", optional = true }
+rkyv = { workspace = true, optional = true }
+bon = { workspace = true, optional = true }
+meshopt-rs = { version = "0.1.2", optional = true }
+gltf-json = { version = "1", optional = true, features = ["KHR_materials_variants", "KHR_texture_transform"] }
+gltf = { version = "1", optional = true, features = ["KHR_materials_variants"] }
+half = { version = "2", optional = true }
+image_dds = { workspace = true, optional = true, features = ["ddsfile", "image"] }
+image = { workspace = true, optional = true, features = ["png"] }
+unidecode = { version = "0.3", optional = true }
+vfs = { version = "0.13", optional = true }
+async-trait = { version = "0.1", optional = true }
+async-std = { version = "1.13", optional = true }
+futures = { version = "0.3", optional = true }
+ciborium = { workspace = true, optional = true }
+dhat = { version = "0.3", optional = true }
+rustc-hash = "2.1.3"
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+arc = ["wows-core/arc"]
+serde = ["dep:serde", "wows-core/serde"]
+rkyv = ["dep:rkyv", "wows-core/rkyv"]
+json = ["dep:serde_json", "serde"]
+# Core parsing/processing: sans-io. Gates pickled, winnow, roxmltree, etc. and
+# the modules that use them. Compiles for wasm32 (no memmap2, no filesystem VFS).
+# Without this feature, only lightweight type modules are available (game_types, recognized, error).
+parsing = [
+    "dep:pickled",
+    "dep:winnow",
+    "dep:paste",
+    "dep:roxmltree",
+    "dep:gettext",
+    "dep:bon",
+    "dep:convert_case",
+    "dep:itertools",
+    "wows-core/parsing",
+]
+# VFS abstraction over IDX/PKG archives. Pure Rust, wasm-compatible. Bring your
+# own `Prime` source: BytesPkgSource (in-memory) always, MmapPkgSource via vfs-mmap.
+vfs = ["arc", "dep:vfs", "parsing"]
+# Memory-mapped PKG file source (MmapPkgSource, pkg.rs). Native only; uses memmap2.
+vfs-mmap = ["vfs", "dep:memmap2"]
+async_vfs = ["vfs/async-vfs", "arc", "vfs", "dep:futures", "dep:async-std", "dep:async-trait"]
+models = [
+    "dep:gltf-json",
+    "dep:gltf",
+    "dep:half",
+    "dep:image_dds",
+    "dep:image",
+    "dep:unidecode",
+    "dep:meshopt-rs",
+    "vfs",
+]
+bin = [
+    "dep:clap",
+    "dep:csv",
+    "dep:glob",
+    "dep:rayon",
+    "dep:regex",
+    "dep:indicatif",
+    "dep:thread_local",
+    "cbor",
+    "models",
+    "arc",
+    "json",
+    "vfs-mmap",
+]
+default = ["bin"]
+cbor = ["dep:ciborium", "serde"]
+# Heap-profile the GameParams parse path with dhat. Enables the `dhat_parse`
+# binary; pair with the `profiling` cargo profile. Off by default.
+dhat-heap = ["dep:dhat", "vfs-mmap", "rkyv"]

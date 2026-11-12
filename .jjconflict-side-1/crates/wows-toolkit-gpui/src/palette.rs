@@ -60,9 +60,6 @@ use wowsunpack::game_params::types::Species;
 use crate::app::App;
 use crate::app::AppTab;
 use crate::armor_viewer::ArmorViewerPane;
-use crate::armor_viewer::ShipCatalog;
-use crate::armor_viewer::catalog::species_name;
-use crate::armor_viewer::catalog::tier_roman;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::runtime;
 use crate::settings_store;
@@ -71,6 +68,9 @@ use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedQuery;
 use crate::text_filter::highlighted_text;
 use crate::text_filter::no_ranges;
+use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::catalog::species_name;
+use wows_toolkit_armor::catalog::tier_roman;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 /// What confirming an entry asks the window to do.

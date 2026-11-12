@@ -408,7 +408,7 @@ mod tests {
         let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build, AssetsBin::Overlay).expect("game vfs");
         let metadata = Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("game params"));
         let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
         let iowa = catalog
             .nations
             .iter()

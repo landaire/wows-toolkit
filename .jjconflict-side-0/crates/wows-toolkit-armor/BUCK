@@ -1,11 +1,15 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
 ARMOR_DEPS = [
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
     "//third-party/rust:bytemuck",
     "//third-party/rust:nalgebra",
+    "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
     "//third-party/rust:wgpu",
 ]
 
