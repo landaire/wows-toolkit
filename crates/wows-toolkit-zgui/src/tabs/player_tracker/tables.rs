@@ -6,6 +6,7 @@
 //! established install's thousands of players.
 
 use jiff::Timestamp;
+use landaire_ui::MarkedTextProps;
 use landaire_ui::RowIndex;
 use landaire_ui::TABULAR_CLASS;
 use rust_i18n::t;
@@ -61,6 +62,7 @@ use crate::shell::Shell;
 use crate::tabs::player_tracker::model::LoadState;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::model::table_status;
+use crate::text_marks::marks;
 
 /// A row's height before it opens; the estimate a list gives a row it has not measured.
 pub const ROW_HEIGHT: f32 = 24.0;
@@ -317,6 +319,8 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
     let tone = severity(row.encounters_in_range);
     let name = row.facet.latest_name.clone();
     let clan = row.facet.clan.clone();
+    // Kept by its name or its tag; whichever the filter did not match is drawn plain.
+    let (name_marks, clan_marks) = model.query.with_untracked(|query| (marks(query, &name), marks(query, &clan)));
 
     view! {
         column(
@@ -332,9 +336,9 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
                         open = open,
                         on_toggle = move || model.toggle_player_expanded(account)
                     )
-                    text(class = "wt-tracker-truncate") {{name}}
+                    MarkedText(class = "wt-tracker-truncate", text = name, ranges = name_marks)
                 }
-                text(class = "wt-tracker-col--clan wt-tracker-dim") {{clan}}
+                MarkedText(class = "wt-tracker-col--clan wt-tracker-dim", text = clan, ranges = clan_marks)
                 text(class = "wt-tracker-col--count", class = TABULAR_CLASS, attr:data-severity = tone.clone()) {{count_text(row.total_encounters)}}
                 text(class = "wt-tracker-col--range", class = TABULAR_CLASS, attr:data-severity = tone) {{separate_number(row.encounters_in_range as i64, None)}}
                 LastSeen(at = row.last_seen)
@@ -528,6 +532,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
     let sightings_hover = t!("ui.player_tracker.clan_sightings_hover", range = row.sightings_in_range).into_owned();
     let sightings = separate_number(row.sightings as i64, None);
     let members = row.members.clone();
+    let tag_marks = model.query.with_untracked(|query| marks(query, &tag));
 
     view! {
         column(
@@ -543,7 +548,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
                         open = open,
                         on_toggle = move || model.toggle_clan_expanded(toggle_tag.clone())
                     )
-                    text(class = "wt-tracker-truncate", attr:data-severity = tone.clone()) {{tag.clone()}}
+                    MarkedText(class = "wt-tracker-truncate", attr:data-severity = tone.clone(), text = tag.clone(), ranges = tag_marks)
                 }
                 text(class = "wt-tracker-col--members", class = TABULAR_CLASS) {{row.members.len().to_string()}}
                 text(class = "wt-tracker-col--count", class = TABULAR_CLASS) {{separate_number(row.matches as i64, None)}}
