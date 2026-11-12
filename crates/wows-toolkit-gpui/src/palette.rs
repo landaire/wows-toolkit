@@ -44,6 +44,9 @@ use rust_i18n::t;
 use wows_toolkit_replay_data::force_reindex::ReindexScope;
 use wows_toolkit_replay_data::force_reindex::VersionCount;
 use wows_toolkit_replay_data::paths::shown_path;
+use wows_toolkit_viewmodel::palette::PaletteMode;
+use wows_toolkit_viewmodel::palette::ShipSearchKey;
+use wows_toolkit_viewmodel::palette::rank_ships;
 use wowsunpack::game_params::types::Species;
 
 use crate::app::App;
@@ -100,63 +103,6 @@ pub enum PaletteAction {
     ForceReindex(ReindexScope),
 }
 
-/// Which cascading list the palette is showing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteMode {
-    /// Players the index has seen, most met first.
-    Players,
-    /// Ships the reader has played, most played first.
-    MyShips,
-    /// Every ship in the loaded build, to open in the Armor Viewer.
-    ArmorShips,
-    /// The game versions the listing holds, to force a re-index of one.
-    ReindexVersions,
-    /// "Browse..." and the directories most recently opened, to open one in
-    /// the listing.
-    ReplayFolders,
-}
-
-impl PaletteMode {
-    /// The modes the root list leads into from its searches. The version list
-    /// is offered beside the other re-index command instead.
-    pub const ALL: [PaletteMode; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
-
-    /// What the root entry that enters this mode is called.
-    pub const fn label_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.search_players",
-            Self::MyShips => "ui.palette.my_matches_in_ship",
-            Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
-            Self::ReindexVersions => "ui.reindex.palette_by_version",
-            Self::ReplayFolders => "ui.replay.open_directory",
-        }
-    }
-
-    /// What the layer is called in its header, after the root's name.
-    pub const fn title_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_title",
-            Self::MyShips => "ui.palette.my_ships_title",
-            Self::ArmorShips => "ui.palette.armor_ships_title",
-            Self::ReindexVersions => "ui.reindex.versions_title",
-            Self::ReplayFolders => "ui.replay_folders.recent_title",
-        }
-    }
-
-    pub const fn placeholder_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_placeholder",
-            Self::MyShips => "ui.palette.my_ships_placeholder",
-            Self::ArmorShips => "ui.palette.armor_ships_placeholder",
-            Self::ReindexVersions => "ui.reindex.versions_placeholder",
-            Self::ReplayFolders => "ui.replay_folders.recent_placeholder",
-        }
-    }
-}
-
-/// Maximum rows returned by one cascading index query.
-pub const MODE_LIMIT: i64 = 50;
-
 /// One entry: what it is called and what it does.
 #[derive(Clone)]
 pub struct PaletteEntry {
@@ -169,15 +115,15 @@ pub struct PaletteEntry {
 pub struct ArmorShipRow {
     param_index: String,
     display_name: String,
-    /// The name as `stats::normalize_ship_search` folds it.
-    search_name: String,
+    /// The display name folded for the search.
+    key: ShipSearchKey,
     /// The name with tier, class and nation, which is what the row shows.
     label: String,
 }
 
 impl ArmorShipRow {
     pub fn new(param_index: String, display_name: String, tier: u32, species: Species, nation: &str) -> Self {
-        let search_name = crate::stats::normalize_ship_search(&display_name);
+        let key = ShipSearchKey::new(&display_name);
         let label = t!(
             "ui.palette.armor_ship_row",
             name = display_name,
@@ -186,7 +132,7 @@ impl ArmorShipRow {
             nation = nation
         )
         .into_owned();
-        Self { param_index, display_name, search_name, label }
+        Self { param_index, display_name, key, label }
     }
 }
 
@@ -209,52 +155,12 @@ pub fn armor_ship_rows(catalog: &ShipCatalog) -> Vec<ArmorShipRow> {
     rows
 }
 
-/// How closely a folded ship name matches the folded query. Ordered best
-/// first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ShipMatch {
-    Exact,
-    Prefix,
-    /// The query starts a later word of the name ("moines" in "des moines").
-    WordPrefix,
-    Contains,
-    /// The query's letters appear in order ("dsmns" in "des moines").
-    Subsequence,
-}
-
-fn ship_match(name: &str, needle: &str) -> Option<ShipMatch> {
-    if name == needle {
-        return Some(ShipMatch::Exact);
-    }
-    if name.starts_with(needle) {
-        return Some(ShipMatch::Prefix);
-    }
-    let mut found = name.match_indices(needle).peekable();
-    if found.peek().is_some() {
-        let word_start =
-            found.any(|(at, _)| name[..at].chars().next_back().is_some_and(|before| !before.is_alphanumeric()));
-        return Some(if word_start { ShipMatch::WordPrefix } else { ShipMatch::Contains });
-    }
-    let mut rest = name.chars();
-    let subsequence =
-        needle.chars().filter(|c| !c.is_whitespace()).all(|wanted| rest.by_ref().any(|have| have == wanted));
-    subsequence.then_some(ShipMatch::Subsequence)
-}
-
 /// The ship layer's rows for `query`: every ship when it is empty, else the
 /// matches, best first.
 pub fn armor_ship_entries(rows: &[ArmorShipRow], query: &str) -> Vec<PaletteEntry> {
-    let needle = crate::stats::normalize_ship_search(query);
-    let mut matched: Vec<(ShipMatch, &ArmorShipRow)> = if needle.is_empty() {
-        rows.iter().map(|row| (ShipMatch::Exact, row)).collect()
-    } else {
-        rows.iter().filter_map(|row| ship_match(&row.search_name, &needle).map(|rank| (rank, row))).collect()
-    };
-    // Stable, so equal matches keep the catalogue's order.
-    matched.sort_by_key(|(rank, _)| *rank);
-    matched
+    rank_ships(rows, query, |row| &row.key)
         .into_iter()
-        .map(|(_, row)| PaletteEntry {
+        .map(|row| PaletteEntry {
             label: row.label.clone(),
             action: PaletteAction::ViewArmor {
                 param_index: row.param_index.clone(),
@@ -808,53 +714,24 @@ pub async fn mode_entries(
     pool: &sqlx::sqlite::SqlitePool,
     needle: &str,
 ) -> Result<Vec<PaletteEntry>, String> {
-    use wows_toolkit_config::index::query;
-    use wows_toolkit_viewmodel::query_bar::seed;
+    use wows_toolkit_viewmodel::palette;
 
-    match mode {
-        PaletteMode::Players => query::search_players(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|player| {
-                        let named = match player.clan.as_str() {
-                            "" => player.latest_name.clone(),
-                            clan => format!("[{clan}] {}", player.latest_name),
-                        };
-                        PaletteEntry {
-                            label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
-                            action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                                &seed::matches_with_player(player.account_id),
-                            )),
-                        }
-                    })
-                    .collect()
-            })
-            .map_err(|err| format!("The indexed players could not be read: {err}")),
-        PaletteMode::MyShips => query::search_self_ships(pool, needle, MODE_LIMIT)
-            .await
-            .map(|found| {
-                found
-                    .into_iter()
-                    .map(|ship| PaletteEntry {
-                        label: format!(
-                            "{} -- {}",
-                            ship.ship_name,
-                            t!("ui.palette.matches_found", count = ship.match_count)
-                        ),
-                        action: PaletteAction::SearchFor(wows_toolkit_config::index::query_text::print_query(
-                            &seed::my_matches_in_ship(ship.ship_id),
-                        )),
-                    })
-                    .collect()
-            })
-            .map_err(|err| format!("The indexed ships could not be read: {err}")),
+    let found = match mode {
+        PaletteMode::Players => palette::player_searches(pool, needle).await,
+        PaletteMode::MyShips => palette::ship_searches(pool, needle).await,
         // Read from the loaded build rather than the index: armor is a property of
         // the ship, not of anything the reader has played. The versions and the
         // recent directories are the listing's, read when the layer opens.
-        PaletteMode::ArmorShips | PaletteMode::ReindexVersions | PaletteMode::ReplayFolders => Ok(Vec::new()),
-    }
+        PaletteMode::ArmorShips | PaletteMode::ReindexVersions | PaletteMode::ReplayFolders => return Ok(Vec::new()),
+    };
+
+    found
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| PaletteEntry { label: row.label, action: PaletteAction::SearchFor(row.query) })
+                .collect()
+        })
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(test)]

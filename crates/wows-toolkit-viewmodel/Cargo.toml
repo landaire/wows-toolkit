@@ -46,6 +46,8 @@ serde_json.workspace = true
 semver = "1.0"
 thiserror.workspace = true
 thousands = "0.2.0"
+# Folding ship names for the palette's ship search.
+unidecode = "0.3"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }

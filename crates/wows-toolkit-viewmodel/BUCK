@@ -25,6 +25,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:thiserror",
     "//third-party/rust:thousands",
     "//third-party/rust:tracing",
+    "//third-party/rust:unidecode",
 ]
 
 # The cfg(windows) dependency section of Cargo.toml: the Windows proxy
