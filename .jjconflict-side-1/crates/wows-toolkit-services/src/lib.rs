@@ -14,3 +14,4 @@ pub mod settings_writer;
 pub mod supervision;
 pub mod twitch;
 pub mod update;
+pub mod upload;

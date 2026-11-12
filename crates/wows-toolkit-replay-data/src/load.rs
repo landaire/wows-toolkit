@@ -70,6 +70,7 @@ use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
+use wows_toolkit_viewmodel::upload::Shareable;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_data::AssetsBin;
@@ -83,7 +84,6 @@ use crate::error::AltRefusal;
 use crate::error::ReplayLoadError;
 use crate::install::installed_version;
 use crate::model::ReplayReportModel;
-use crate::shareable::Shareable;
 
 /// Path to the versioned GameParams cache for `build`, matching the egui
 /// app's `game_params_bin_path` (`util/game_params.rs`) exactly -- same file

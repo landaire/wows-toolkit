@@ -106,7 +106,7 @@ pub enum PaletteAction {
     /// has confirmed it.
     RefreshPersistedData,
     /// Contribute every listed battle, as the data-sharing setting asks.
-    ContributeAllReplays(crate::upload::LedgerUse),
+    ContributeAllReplays(wows_toolkit_services::upload::LedgerUse),
     /// Take a result mapping the reader points at as the loaded build's.
     ImportConstants,
     /// Read the listed replays in scope again and rewrite their index entries,
@@ -822,11 +822,11 @@ pub fn entries() -> Vec<PaletteEntry> {
     });
     entries.push(PaletteEntry {
         label: t!("ui.palette.send_all_replays").into_owned(),
-        action: PaletteAction::ContributeAllReplays(crate::upload::LedgerUse::Consult),
+        action: PaletteAction::ContributeAllReplays(wows_toolkit_services::upload::LedgerUse::Consult),
     });
     entries.push(PaletteEntry {
         label: t!("ui.palette.send_all_replays_again").into_owned(),
-        action: PaletteAction::ContributeAllReplays(crate::upload::LedgerUse::Ignore),
+        action: PaletteAction::ContributeAllReplays(wows_toolkit_services::upload::LedgerUse::Ignore),
     });
     entries.push(PaletteEntry {
         label: t!("ui.replay.copy_latest_log").into_owned(),
@@ -1141,7 +1141,7 @@ mod tests {
     /// service lost it. The egui palette offers the same two.
     #[test]
     fn both_bulk_contributions_are_offered() {
-        let offered: Vec<crate::upload::LedgerUse> = entries()
+        let offered: Vec<wows_toolkit_services::upload::LedgerUse> = entries()
             .iter()
             .filter_map(|entry| match entry.action {
                 PaletteAction::ContributeAllReplays(ledger) => Some(ledger),
@@ -1149,8 +1149,8 @@ mod tests {
             })
             .collect();
 
-        assert!(offered.contains(&crate::upload::LedgerUse::Consult));
-        assert!(offered.contains(&crate::upload::LedgerUse::Ignore));
+        assert!(offered.contains(&wows_toolkit_services::upload::LedgerUse::Consult));
+        assert!(offered.contains(&wows_toolkit_services::upload::LedgerUse::Ignore));
     }
 
     /// Labels are what the reader searches, so an empty one is unreachable.
