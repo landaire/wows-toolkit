@@ -631,7 +631,7 @@ pub struct App {
     cache_dir_input: Entity<InputState>,
     /// The game-data cache: what is there, what is stale, and what job is
     /// running against it.
-    cache: game_data_cache::CacheState,
+    cache: wows_toolkit_services::game_data_cache::CacheState,
     /// What finished jobs have to say, until a draw says it. A list rather than
     /// one message: two jobs can finish between draws, and the first of them is
     /// not worth less than the second.
@@ -924,7 +924,7 @@ impl App {
             wows_dir_input,
             proxy_input,
             cache_dir_input,
-            cache: game_data_cache::CacheState::default(),
+            cache: wows_toolkit_services::game_data_cache::CacheState::default(),
             pending_missing_builds: Vec::new(),
             download_offer_open: false,
             offered_builds: std::collections::BTreeSet::new(),
@@ -1108,10 +1108,10 @@ impl App {
         let mut jobs: Vec<crate::status_bar::Job> = Vec::new();
         if let Some(job) = self.cache.running {
             let named = match job {
-                game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
-                game_data_cache::CacheJob::Validating => t!("ui.app.status_cache_validating"),
-                game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
-                game_data_cache::CacheJob::Planning => t!("ui.app.status_cache_planning"),
+                wows_toolkit_services::game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
+                wows_toolkit_services::game_data_cache::CacheJob::Validating => t!("ui.app.status_cache_validating"),
+                wows_toolkit_services::game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
+                wows_toolkit_services::game_data_cache::CacheJob::Planning => t!("ui.app.status_cache_planning"),
             };
             jobs.push(crate::status_bar::Job {
                 name: named.into_owned().into(),
@@ -1365,11 +1365,11 @@ impl App {
             cx,
             move |this, outcome, cx| {
                 let plan = match outcome {
-                    game_data_cache::CacheOutcome::Planned { plan } => Some(plan),
+                    wows_toolkit_services::game_data_cache::CacheOutcome::Planned { plan } => Some(plan),
                     // Failed planning leaves every build disabled until a retry
                     // can establish which downloads are available.
                     outcome => {
-                        if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
+                        if let wows_toolkit_services::game_data_cache::CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
                         }
                         this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
@@ -1558,8 +1558,7 @@ impl App {
             &cx.entity(),
             cx,
             |this, outcome, cx| {
-                let fetched =
-                    matches!(&outcome, game_data_cache::CacheOutcome::Downloaded { fetched, .. } if *fetched > 0);
+                let fetched = matches!(&outcome, wows_toolkit_services::game_data_cache::CacheOutcome::Downloaded { fetched, .. } if *fetched > 0);
                 this.cache_job_finished(outcome, cx);
                 // What the listing could not read, it can now: which replays
                 // have a preview and which builds are missing are both decided as
@@ -2924,7 +2923,7 @@ impl App {
     /// Where the cache is, as the settings currently point.
     fn cache_base(&self) -> Option<PathBuf> {
         let settings = self.settings()?;
-        game_data_cache::base(&settings.game_data_cache_dir)
+        wows_toolkit_services::game_data_cache::base(&settings.game_data_cache_dir)
     }
 
     fn proxy_url(&self) -> String {
@@ -2936,9 +2935,13 @@ impl App {
     /// A clean check or validation is what lets the next check stop at the
     /// tip, so the commit is saved only when nothing needs doing; saving it
     /// after a run that found work would skip the re-check.
-    fn cache_job_finished(&mut self, outcome: game_data_cache::CacheOutcome, cx: &mut Context<Self>) {
+    fn cache_job_finished(
+        &mut self,
+        outcome: wows_toolkit_services::game_data_cache::CacheOutcome,
+        cx: &mut Context<Self>,
+    ) {
         match outcome {
-            game_data_cache::CacheOutcome::Checked { tip, updates } => {
+            wows_toolkit_services::game_data_cache::CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
                 // A clean result said nothing at all before: the spinner stopped
                 // and the reader was left to guess. The egui app reports both
@@ -2953,7 +2956,7 @@ impl App {
                     self.remember_cache_tip(tip, cx);
                 }
             }
-            game_data_cache::CacheOutcome::Validated { tip, repair } => {
+            wows_toolkit_services::game_data_cache::CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
                 self.job_said.push(if clean {
                     JobReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
@@ -2965,7 +2968,7 @@ impl App {
                     self.remember_cache_tip(tip, cx);
                 }
             }
-            game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
+            wows_toolkit_services::game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
                 if fetched > 0 {
                     // What was fetched is no longer stale or damaged, and the
                     // cache is a different size than it was.
@@ -2984,8 +2987,8 @@ impl App {
             }
             // The offer that asked for a plan reads it itself; nothing else asks
             // for one.
-            game_data_cache::CacheOutcome::Planned { .. } => {}
-            game_data_cache::CacheOutcome::Failed(reason) => {
+            wows_toolkit_services::game_data_cache::CacheOutcome::Planned { .. } => {}
+            wows_toolkit_services::game_data_cache::CacheOutcome::Failed(reason) => {
                 self.job_said.push(JobReport::failed(reason));
             }
         }
