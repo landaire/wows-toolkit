@@ -1,7 +1,11 @@
 //! The session Stats tab, and the body a directory stats tab shares with it.
 
+mod art;
 mod chart;
 mod overview;
+#[cfg(test)]
+mod panel_tests;
+mod rating;
 mod ships;
 
 use std::sync::Arc;
