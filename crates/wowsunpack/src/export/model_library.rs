@@ -1,5 +1,6 @@
 //! Loads any catalogued `.model` on its own: meshes per render set, the
-//! textures their materials reference, hardpoints and raw armor.
+//! textures their materials reference, hardpoints and raw armor; and writes
+//! one as a GLB.
 //!
 //! Everything a load returns sits in the model's node space, right-handed
 //! (Z negated) like [`InteractiveHullMesh`] positions, so meshes, hardpoints
@@ -7,7 +8,9 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
+use std::io::Write;
 use std::sync::Arc;
 
 use rootcause::Report;
@@ -30,8 +33,11 @@ use crate::models::visual::VisualPrototype;
 
 use super::camo_composite::RgbaImageData;
 use super::gltf_export;
+use super::gltf_export::HardpointSet;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::InteractiveHullMesh;
+use super::gltf_export::SubModel;
+use super::gltf_export::TextureSet;
 use super::gltf_export::negate_z_transform;
 use super::hardpoint::Hardpoint;
 use super::hardpoint::ModelSpaceHardpoints;
@@ -43,6 +49,7 @@ use super::model_catalog::ModelEntry;
 use super::model_catalog::ModelPath;
 use super::model_catalog::ModelPathIndex;
 use super::part_group::PartGroup;
+use super::ship::ExportContents;
 use super::texture;
 use super::texture::TextureLod;
 
@@ -93,6 +100,46 @@ pub struct ModelLoadOptions {
     pub damaged: bool,
     pub texture_lod: TextureLod,
     pub textures: TextureDecode,
+}
+
+/// What [`ModelLibrary::export_glb`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelExportOptions {
+    /// Mesh LOD (0 = most detailed), clamped to each part's deepest.
+    pub lod: usize,
+    /// Write the destroyed state (crack geometry) instead of the intact one.
+    pub damaged: bool,
+    pub texture_lod: TextureLod,
+    /// Embed albedo textures.
+    pub textures: bool,
+    pub contents: ExportContents,
+    /// Write one empty node per hardpoint.
+    pub hardpoints: bool,
+}
+
+/// The GameParams armor maps that give a model's armor plates thickness.
+/// Without either map every plate reads 0 mm.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModelArmorMaps<'a> {
+    /// The hull `armor` map, the fallback for plates the mount map lacks.
+    pub hull: Option<&'a ArmorMap>,
+    /// A mount's own `armor` map, checked first.
+    pub mount: Option<&'a ArmorMap>,
+}
+
+/// Why a model could not be exported.
+#[derive(Debug, Error)]
+pub enum ModelExportError {
+    #[error("{path} could not be read for export")]
+    Load { path: ModelPath },
+    #[error("geometry {path} could not be parsed")]
+    GeometryParse { path: String },
+    #[error("the render sets of {visual_path} could not be read")]
+    RenderSets { visual_path: String },
+    #[error("the albedo of {mfm_path} could not be encoded")]
+    TextureEncode { mfm_path: String },
+    #[error("the GLB of {path} could not be written")]
+    Write { path: ModelPath },
 }
 
 /// The shared, once-built index every model load and lookup goes through.
@@ -225,6 +272,72 @@ impl ModelLibrary {
         Ok(LoadedModel { path: path.clone(), parts, meshes, materials, hardpoints, armor })
     }
 
+    /// Writes `path` with its sections as a GLB: one mesh node per part with
+    /// albedo textures, the armor split by zone with thickness from `armor`
+    /// when `contents` asks for it, and one empty node per hardpoint, named as
+    /// the node, when `hardpoints` asks for them. Reads the VFS and encodes
+    /// textures, so run it off the UI thread.
+    pub fn export_glb(
+        &self,
+        path: &ModelPath,
+        options: &ModelExportOptions,
+        armor: ModelArmorMaps<'_>,
+        writer: &mut impl Write,
+    ) -> Result<(), Report<ModelExportError>> {
+        let db = &self.assets.db();
+        let sources = self.read_parts(db, path).context_with(|| ModelExportError::Load { path: path.clone() })?;
+        let group = self.part_group(path);
+
+        let mut geometries = Vec::with_capacity(sources.len());
+        for source in &sources {
+            let geometry = geometry::parse_geometry(&source.geometry_bytes)
+                .context_with(|| ModelExportError::GeometryParse { path: source.geometry_path.clone() })?;
+            geometries.push(geometry);
+        }
+
+        let sub_models: Vec<SubModel<'_>> = sources
+            .iter()
+            .zip(&geometries)
+            .map(|(source, geometry)| SubModel {
+                name: source.model_path.stem().to_string(),
+                visual: &source.visual,
+                geometry,
+                transform: mesh_to_node_space(&source.visual, &db.strings),
+                group,
+                barrel_pitch: None,
+            })
+            .collect();
+
+        let textures = if options.textures && options.contents.includes_mesh() {
+            self.export_textures(db, &sources, &geometries, options)?
+        } else {
+            TextureSet::empty()
+        };
+
+        let mut armor_meshes = Vec::new();
+        if options.contents.includes_armor() {
+            for armor_model in geometries.iter().flat_map(|geometry| &geometry.armor_models) {
+                armor_meshes.extend(gltf_export::armor_sub_models_by_zone(armor_model, armor.hull, armor.mount));
+            }
+        }
+
+        let hardpoints = if options.hardpoints { model_hardpoints(db, &sources) } else { Vec::new() };
+        let hardpoint_sets = [HardpointSet { name: path.stem().to_string(), hardpoints: &hardpoints }];
+
+        gltf_export::export_ship_glb(
+            &sub_models,
+            &armor_meshes,
+            db,
+            options.contents,
+            options.lod,
+            &textures,
+            options.damaged,
+            &hardpoint_sets,
+            writer,
+        )
+        .context_with(|| ModelExportError::Write { path: path.clone() })
+    }
+
     /// The model itself, then every section the catalogue lists for it.
     fn read_parts(
         &self,
@@ -244,6 +357,66 @@ impl ModelLibrary {
 
     fn part_group(&self, path: &ModelPath) -> PartGroup {
         self.catalog.owning_entry(path).map_or(PartGroup::Other, ModelEntry::part_group)
+    }
+
+    /// Albedo PNGs by material stem, as the GLB writer keys them, for the
+    /// materials of the render sets the export writes at `options`' LOD and
+    /// damage state. A material without an albedo the VFS holds stays
+    /// untextured.
+    fn export_textures(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        sources: &[PartSource],
+        geometries: &[geometry::MergedGeometry<'_>],
+        options: &ModelExportOptions,
+    ) -> Result<TextureSet, Report<ModelExportError>> {
+        let mut written = HashSet::new();
+        for (source, geometry) in sources.iter().zip(geometries) {
+            // A part clamps a deep LOD request to its own deepest, as the writer does.
+            let Some(lod) = source.visual.lods.get(options.lod).or_else(|| source.visual.lods.last()) else {
+                continue;
+            };
+            let summary = gltf_export::primitive_summary_from_metadata(
+                &source.visual,
+                geometry,
+                db,
+                &self.self_id_index,
+                lod,
+                options.damaged,
+            )
+            .context_with(|| ModelExportError::RenderSets { visual_path: source.visual_path.clone() })?;
+            written.extend(summary.mfm_stems);
+        }
+
+        let load_options = ModelLoadOptions {
+            texture_lod: options.texture_lod,
+            textures: TextureDecode::Albedo,
+            ..ModelLoadOptions::default()
+        };
+        let mut textures = TextureSet::empty();
+
+        let render_sets = sources.iter().flat_map(|source| &source.visual.render_sets);
+        for mfm_path_id in render_sets.map(|render_set| render_set.material_mfm_path_id) {
+            let Some(&position) = self.self_id_index.get(&mfm_path_id) else {
+                continue;
+            };
+            let leaf = &db.paths_storage[position].name;
+            let stem = leaf.strip_suffix(".mfm").unwrap_or(leaf);
+            if !written.contains(stem) || textures.base.contains_key(stem) {
+                continue;
+            }
+
+            let mfm_path = db.reconstruct_path(position, &self.self_id_index);
+            let material = self.resolve_material(db, &mfm_path, mfm_path_id, &load_options);
+            let Some(image) = material.albedo.and_then(|albedo| albedo.image) else {
+                continue;
+            };
+            let png =
+                encode_png(image).context_with(|| ModelExportError::TextureEncode { mfm_path: mfm_path.clone() })?;
+            textures.base.insert(stem.to_string(), png);
+        }
+
+        Ok(textures)
     }
 
     fn read_part(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Result<PartSource, Report<ModelLoadError>> {
@@ -547,18 +720,45 @@ struct PartSource {
 }
 
 /// The `HP_` nodes of every part's visual and the `MP_`/`EP_` nodes of their
-/// skeleton extenders, in the model's right-handed node space.
+/// skeleton extenders, in the model's right-handed node space. Sections reuse
+/// node names (each end of a hull has its own bollards), so each part keeps
+/// its own; a node the ship model and a section both carry at the same place
+/// is kept once.
 fn model_hardpoints(db: &PrototypeDatabase<'_>, sources: &[PartSource]) -> Vec<Hardpoint> {
     let visuals: Vec<&VisualPrototype> = sources.iter().map(|s| &s.visual).collect();
-    let mut hardpoints = ModelSpaceHardpoints::new();
-    for visual in &visuals {
-        hardpoints.add_visual(visual, &db.strings);
-    }
+    let mut hardpoints: Vec<Hardpoint> = Vec::new();
     for source in sources {
-        hardpoints.add_extenders(&source.extenders, &visuals, &db.strings);
+        let mut part = ModelSpaceHardpoints::new();
+        part.add_visual(&source.visual, &db.strings);
+        part.add_extenders(&source.extenders, &visuals, &db.strings);
+        for hardpoint in part.placed(None) {
+            if !hardpoints.contains(&hardpoint) {
+                hardpoints.push(hardpoint);
+            }
+        }
     }
 
-    hardpoints.placed(None)
+    hardpoints
+}
+
+#[derive(Debug, Error)]
+enum PngEncodeError {
+    #[error("{pixels} bytes do not fill a {width}x{height} RGBA image")]
+    Dimensions { width: u32, height: u32, pixels: usize },
+    #[error("the PNG encoder failed")]
+    Encode,
+}
+
+fn encode_png(image: RgbaImageData) -> Result<Vec<u8>, Report<PngEncodeError>> {
+    let RgbaImageData { width, height, pixels } = image;
+    let pixel_bytes = pixels.len();
+    let buffer = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| Report::new(PngEncodeError::Dimensions { width, height, pixels: pixel_bytes }))?;
+
+    let mut png = std::io::Cursor::new(Vec::new());
+    buffer.write_to(&mut png, image::ImageFormat::Png).context(PngEncodeError::Encode)?;
+
+    Ok(png.into_inner())
 }
 
 /// The texture at `source`, decoded when asked, or `None` when the VFS lacks

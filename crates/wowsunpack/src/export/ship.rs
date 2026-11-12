@@ -51,6 +51,7 @@ use super::camouflage;
 use super::camouflage::CamouflageDb;
 use super::camouflage::UvTransform;
 use super::gltf_export;
+use super::gltf_export::HardpointSet;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
@@ -1646,6 +1647,12 @@ impl ShipModelContext {
             }
         }
 
+        let hardpoint_sets: Vec<HardpointSet<'_>> = self
+            .parts
+            .iter()
+            .map(|part| HardpointSet { name: part.key.label(), hardpoints: &part.hardpoints })
+            .collect();
+
         gltf_export::export_ship_glb(
             &sub_models,
             &armor_meshes,
@@ -1654,6 +1661,7 @@ impl ShipModelContext {
             self.options.lod,
             &texture_set,
             self.options.damaged,
+            &hardpoint_sets,
             writer,
         )
         .context("Failed to export ship GLB")?;

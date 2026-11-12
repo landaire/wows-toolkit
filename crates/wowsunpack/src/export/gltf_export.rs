@@ -3414,6 +3414,14 @@ pub struct BarrelPitch {
     pub barrel_bone_indices: Vec<u8>,
 }
 
+/// The hardpoints of one part, written as empty nodes under a node named
+/// `name` inside the scene's `Hardpoints` node.
+pub struct HardpointSet<'a> {
+    pub name: String,
+    /// Right-handed, in the scene's space.
+    pub hardpoints: &'a [super::hardpoint::Hardpoint],
+}
+
 /// The LoD a sub-model actually renders at. Parts author shallower ladders than
 /// the hull, so a deep request clamps into each part's own ladder; `None` means
 /// the part authors no LoD at all and there is nothing to clamp to.
@@ -3426,6 +3434,7 @@ fn clamped_lod(requested: usize, authored: usize) -> Option<usize> {
 /// Each sub-model becomes a separate selectable object in Blender.
 /// `texture_set` contains base albedo + camo variant PNGs for material textures.
 /// `armor_models` are added as additional untextured semi-transparent meshes.
+/// `hardpoint_sets` become empty nodes named as the hardpoints.
 #[allow(clippy::too_many_arguments)]
 pub fn export_ship_glb(
     sub_models: &[SubModel<'_>],
@@ -3435,6 +3444,7 @@ pub fn export_ship_glb(
     lod: usize,
     texture_set: &TextureSet,
     damaged: bool,
+    hardpoint_sets: &[HardpointSet<'_>],
     writer: &mut impl Write,
 ) -> Result<(), Report<ExportError>> {
     let mut root = json::Root {
@@ -3551,6 +3561,33 @@ pub fn export_ship_glb(
             ..Default::default()
         });
         scene_nodes.push(parent);
+    }
+
+    let mut hardpoint_parents = Vec::new();
+    for set in hardpoint_sets.iter().filter(|set| !set.hardpoints.is_empty()) {
+        let empties = set
+            .hardpoints
+            .iter()
+            .map(|hardpoint| {
+                root.push(json::Node {
+                    name: Some(hardpoint.name.to_string()),
+                    matrix: Some(hardpoint.transform),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        hardpoint_parents.push(root.push(json::Node {
+            children: Some(empties),
+            name: Some(set.name.clone()),
+            ..Default::default()
+        }));
+    }
+    if !hardpoint_parents.is_empty() {
+        scene_nodes.push(root.push(json::Node {
+            children: Some(hardpoint_parents),
+            name: Some("Hardpoints".to_string()),
+            ..Default::default()
+        }));
     }
 
     // Pad binary data to 4-byte alignment.
