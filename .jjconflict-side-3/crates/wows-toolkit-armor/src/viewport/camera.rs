@@ -300,8 +300,6 @@ impl ArcballCamera {
     }
 }
 
-// --- Conversion helpers between [[f32; 4]; 4] (col-major) and nalgebra Matrix4 ---
-
 /// Convert our column-major `[[f32; 4]; 4]` into a `Matrix4<f32>`.
 /// Our layout: `m[col][row]`, nalgebra stores column-major internally
 /// but its `new()` constructor takes arguments in **row-major** order,
