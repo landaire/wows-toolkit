@@ -6,6 +6,7 @@
 //! a message.
 
 mod about;
+pub mod collab;
 mod crash;
 mod dialogs;
 mod drop;
@@ -80,6 +81,7 @@ use zgui::vocab::Modifiers;
 use crate::i18n::LanguageCode;
 use crate::icons::AppIconProps;
 use crate::services::Services;
+use crate::shell::collab::CollabHost;
 use crate::shell::dialogs::DialogHostProps;
 use crate::shell::drop::DropIntent;
 use crate::shell::drop::DropScrimProps;
@@ -246,6 +248,8 @@ pub struct Shell {
     pub dialogs: Dialogs,
     /// The tactics board's window, the layouts it starts from and the session it joins.
     pub tactics: TacticsHost,
+    /// The window's collaborative session.
+    pub collab: CollabHost,
     drop_scrim: DropScrimState,
     toasts: Toasts,
     services: Services,
@@ -275,6 +279,7 @@ impl Shell {
             palette: PaletteControl::new(),
             dialogs: Dialogs::new(),
             tactics: TacticsHost::new(),
+            collab: CollabHost::new(),
             drop_scrim: DropScrimState::new(),
             toasts,
             services,
@@ -572,6 +577,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
 
     startup::begin(services, shell);
     shell.tactics.begin(services);
+    shell.collab.begin(shell);
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);

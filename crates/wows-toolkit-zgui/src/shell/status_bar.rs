@@ -35,6 +35,7 @@ use crate::icons::AppIconProps;
 use crate::services::Job;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::collab::SessionControlProps;
 use crate::shell::tabs::ModeHint;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::panel_glyph;
@@ -106,6 +107,7 @@ pub fn ShellStatusBar(shell: Shell) -> impl IntoView {
                 for toggle in move || toggles().into_iter().filter(|toggle| toggle.side != PanelSide::Right).collect::<Vec<_>>(), key = |toggle: &PanelToggle| toggle.test_id {
                     StatusPanelToggle(toggle = toggle)
                 }
+                SessionControl(shell = shell)
             }
             {move || mode().map(|mode| view! { ModeIndicator(mode = mode) }.into_view())}
             StatusBarEnd(slot) {
