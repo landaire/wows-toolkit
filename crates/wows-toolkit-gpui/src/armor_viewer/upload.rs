@@ -673,7 +673,7 @@ mod tests {
             wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, std::sync::Arc::clone(&metadata))
                 .expect("failed to load ShipAssets from the VFS");
 
-        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(&metadata);
         // A battleship tends to have the richest armor scheme (many distinct
         // plates/zones), which best exercises the plate-boundary-edge path.
         let ship = catalog

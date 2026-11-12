@@ -1,8 +1,7 @@
 //! The texts a Model Viewer sidebar row is found by.
 
 use wows_toolkit_viewmodel::text_filter::FilterKeyTable;
-
-use crate::text_filter::FilterQuery;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 
 /// A row's texts, each folded once so that a query typed only scores them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
