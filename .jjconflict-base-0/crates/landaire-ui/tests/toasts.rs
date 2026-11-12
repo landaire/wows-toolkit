@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::MotionPreference;
 use landaire_ui::Notice;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
@@ -23,6 +24,7 @@ use zgui::vocab::Role;
 const SIZE: WindowSize = WindowSize { width: 640.0, height: 400.0 };
 /// Long enough for a message to finish arriving or leaving.
 const MOVE: Duration = Duration::from_millis(1000);
+const FRAME: Duration = Duration::from_millis(17);
 
 /// Hands the window's messages to the test.
 #[component]
@@ -32,13 +34,13 @@ fn Grab(handed: Rc<Cell<Option<Toasts>>>) -> impl IntoView {
     view! { box() }
 }
 
-fn open_host() -> (HeadlessWindow, Toasts) {
+fn open_host(motion: MotionPreference) -> (HeadlessWindow, Toasts) {
     let handed = Rc::new(Cell::new(None));
     let sent = Rc::clone(&handed);
     let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
         let sent = Rc::clone(&sent);
         view! {
-            ThemeRoot {
+            ThemeRoot(motion = motion) {
                 ToastHost {
                     Grab(handed = sent)
                 }
@@ -59,7 +61,7 @@ fn messages(window: &mut HeadlessWindow) -> Vec<String> {
 
 #[test]
 fn a_keyed_message_replaces_the_last_one_about_its_key_and_is_withdrawn_by_it() {
-    let (mut window, toasts) = open_host();
+    let (mut window, toasts) = open_host(MotionPreference::Full);
     let key = ToastKey::new("worker");
 
     toasts.show(Notice::warn("Worker stopped").keyed(key.clone()));
@@ -80,7 +82,7 @@ fn a_keyed_message_replaces_the_last_one_about_its_key_and_is_withdrawn_by_it() 
 
 #[test]
 fn a_sticky_message_stays_until_it_is_withdrawn() {
-    let (mut window, toasts) = open_host();
+    let (mut window, toasts) = open_host(MotionPreference::Full);
     let key = ToastKey::new("setup");
 
     toasts.show(Notice::warn("Choose a directory").keyed(key.clone()).sticky());
@@ -91,4 +93,31 @@ fn a_sticky_message_stays_until_it_is_withdrawn() {
     withdraw_everywhere(&key);
     window.advance(MOVE);
     assert!(messages(&mut window).is_empty(), "withdrawing it from every window took it down");
+}
+
+/// How many animations the message and its slot run a frame after `toasts` puts one up.
+fn moving_after_show(motion: MotionPreference) -> usize {
+    let (mut window, toasts) = open_host(motion);
+
+    toasts.ok("Saved");
+    window.advance(FRAME);
+    let toast = window.by_class("zui-toast").expect("the message is built");
+    let slot = window.by_class("zui-toast__slot").expect("the message has a slot");
+
+    window.running_animations(toast) + window.running_animations(slot)
+}
+
+#[test]
+fn reduced_motion_puts_a_message_up_and_takes_it_down_without_moving_it() {
+    assert!(moving_after_show(MotionPreference::Full) > 0, "with motion allowed the message slides in");
+    assert_eq!(moving_after_show(MotionPreference::Reduced), 0, "with motion reduced it appears in place");
+
+    let (mut window, toasts) = open_host(MotionPreference::Reduced);
+    let key = ToastKey::new("saved");
+    toasts.show(Notice::ok("Saved").keyed(key.clone()));
+    window.advance(FRAME);
+    toasts.withdraw(&key);
+    // The toaster looks for a running exit a few frames after it starts; a full exit takes 400ms.
+    window.advance(Duration::from_millis(100));
+    assert!(messages(&mut window).is_empty(), "with motion reduced a message leaves without moving");
 }
