@@ -30,6 +30,9 @@ ZGUI_DEPS = [
     "//third-party/rust:clap",
     "//third-party/rust:futures",
     "//third-party/rust:humansize",
+    "//third-party/rust:image",
+    "//third-party/rust:jiff",
+    "//third-party/rust:resvg",
     "//third-party/rust:rootcause",
     "//third-party/rust:rust-i18n",
     "//third-party/rust:rustls",
@@ -41,11 +44,11 @@ ZGUI_DEPS = [
     "//third-party/rust:tracing",
     "//third-party/rust:windows-sys",
     "//third-party/rust:zgui",
+    "//third-party/rust:zgui-image",
     "//third-party/rust:zgui-ui",
     "//third-party/rust:zgui-ui-icons",
     "//third-party/rust:zgui-ui-primitives",
     "//third-party/rust:zgui-ui-tokens",
-    "//third-party/rust:zgui-image",
 ]
 
 # Not wows_toolkit_zgui_bin: the target name is a path component of every object file a release
@@ -82,7 +85,7 @@ workspace_test(
     # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
     # headlessly.
     deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS],
-    test_deps = ["//third-party/rust:image", "//third-party/rust:jiff", "//third-party/rust:tempfile"],
+    test_deps = ["//third-party/rust:tempfile"],
     incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window. One thread per core wedges the run on a machine with many of them.
     run_env = {"RUST_TEST_THREADS": "4"},
