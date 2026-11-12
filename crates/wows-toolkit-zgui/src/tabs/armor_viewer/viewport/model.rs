@@ -8,6 +8,9 @@ use std::rc::Weak;
 use std::sync::Arc;
 use std::time::Instant;
 
+use wows_replay_insights::timeline::PreExtractedHit;
+use wows_replays::types::GameParamId;
+use wows_replays::types::ShotId;
 use wows_toolkit_armor::camera_rings;
 use wows_toolkit_armor::hardpoint_overlay;
 use wows_toolkit_armor::hull_picking::HullMeshIndex;
@@ -44,9 +47,6 @@ use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShellInfo;
-use wows_replays::types::GameParamId;
-use wows_replays::types::ShotId;
-use wows_replay_insights::timeline::PreExtractedHit;
 
 use super::types::CameraRingSettings;
 use super::types::CastShell;
@@ -67,8 +67,8 @@ pub(super) const DEFAULT_CAST_RANGE: Km = Km::new(10.0);
 pub(super) enum GpuState {
     /// The pipeline is compiling, or the device is lost and not yet replaced.
     Waiting,
-    /// Weak: the device registry holds the device, and drops it, with the mesh buffers made on
-    /// it, as soon as zgui retires it.
+    /// Weak: the renderer drawing this viewport holds the device, and lets go of it, with the mesh
+    /// buffers made on it, once zgui has moved to a new generation.
     Ready(Weak<SceneDevice>),
     Failed(String),
 }
@@ -228,6 +228,8 @@ pub struct ViewportModel {
     /// Whether the held primary button went down inside the gizmo box, so a release decides
     /// between an orbit and a snap.
     pub(super) gizmo_press_in_box: bool,
+    /// The primary press before the current one, which tells a double-click.
+    pub(super) last_press: Option<super::input::LastPress>,
     /// Movement keys held down, which move the camera every frame while any is.
     pub(super) held_keys: HashSet<MoveKey>,
     /// A scene handed over while there was no device. Uploaded once there is one.
@@ -391,6 +393,7 @@ impl ViewportModel {
             last_pointer: None,
             gizmo_hover: None,
             gizmo_press_in_box: false,
+            last_press: None,
             held_keys: HashSet::new(),
             pending_armor: None,
             mesh_seed: MeshSeed::default(),
