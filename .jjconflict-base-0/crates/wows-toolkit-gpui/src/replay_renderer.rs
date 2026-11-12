@@ -24,10 +24,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
-use crate::minimap_preview::SharedPreviewRenderer;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -59,6 +57,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 use wows_toolkit_armor::catalog::ShipEntry;
+use wows_toolkit_replay_data::frame::BgraFrame;
+use wows_toolkit_replay_data::minimap_preview::SharedPreviewRenderer;
 
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -89,13 +89,13 @@ use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
 
-use crate::replay_inspector::GameDataCache;
 use crate::tactics::ShipLookup;
 use crate::tactics::ship_match_label;
 use crate::tactics::ship_match_name;
 use crate::text_filter::FilterKey;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
+use wows_toolkit_replay_data::load::GameDataCache;
 
 /// How many frames of a battle the track keeps.
 ///
@@ -264,10 +264,10 @@ pub struct ReplayRendererPanel {
     /// not sent again.
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
-    collab: crate::collab::CollabLink,
+    collab: wows_toolkit_services::collab::CollabLink,
     /// What this playback is called in a session, so a peer can ask to watch
     /// this one rather than another window.
-    replay_id: crate::collab::ReplayId,
+    replay_id: wows_toolkit_services::collab::ReplayId,
     /// Whether the session has been told this playback is open. Said once, and
     /// again if a session starts after it was opened.
     shared: bool,
@@ -522,8 +522,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wows_toolkit_services::collab::CollabLink::default(),
+            replay_id: wows_toolkit_services::collab::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -664,8 +664,8 @@ impl ReplayRendererPanel {
             hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
-            collab: crate::collab::CollabLink::default(),
-            replay_id: crate::collab::ReplayId::fresh(),
+            collab: wows_toolkit_services::collab::CollabLink::default(),
+            replay_id: wows_toolkit_services::collab::ReplayId::fresh(),
             shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
@@ -740,8 +740,11 @@ impl ReplayRendererPanel {
     /// replay, and the viewport is worth showing before it finishes.
     fn start_event_scan(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
         self._events = Some(cx.spawn(async move |this, cx| {
-            let read =
-                cx.background_spawn(async move { crate::minimap_preview::extract_events(&path, &game_data) }).await;
+            let read = cx
+                .background_spawn(async move {
+                    wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)
+                })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 match read {
                     Ok((read, shots)) => {
@@ -788,13 +791,13 @@ impl ReplayRendererPanel {
     }
 
     /// Hands a viewport being built its end of the session.
-    pub fn seed_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn seed_collab(&mut self, link: wows_toolkit_services::collab::CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
         self.follow_collab(cx);
     }
 
     /// Hands this viewport a session to talk to, or takes one away.
-    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    pub fn set_collab(&mut self, link: wows_toolkit_services::collab::CollabLink, cx: &mut Context<Self>) {
         // What was drawn before stays on the map: a session starting under an
         // open viewport hears about it as though it had just been drawn, and one
         // ending leaves it where the reader can still see it.
@@ -904,7 +907,7 @@ impl ReplayRendererPanel {
                     let mut png = Vec::new();
                     art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok().map(|()| png)
                 });
-            link.announce_replay(crate::collab::SharedReplay {
+            link.announce_replay(wows_toolkit_services::collab::SharedReplay {
                 replay_id,
                 replay_name,
                 map_label: wows_toolkit_viewmodel::tactics::naming::pretty_map_name(&space),
@@ -1669,7 +1672,7 @@ impl ReplayRendererPanel {
     /// is not a layer but a wider canvas. The renderer for one is kept, so
     /// switching back and forth costs nothing after the first time.
     fn follow_layout(&mut self, cx: &mut Context<Self>) {
-        let wanted = crate::minimap_preview::layout_for(&self.options);
+        let wanted = wows_toolkit_replay_data::minimap_preview::layout_for(&self.options);
         if wanted == self.layout {
             return;
         }
@@ -1679,7 +1682,7 @@ impl ReplayRendererPanel {
             self.options.show_stats_panel = false;
             return;
         };
-        match crate::minimap_preview::renderer_for_replay(&self.path, &game_data, wanted) {
+        match wows_toolkit_replay_data::minimap_preview::renderer_for_replay(&self.path, &game_data, wanted) {
             Ok((renderer, origin)) => {
                 self.layout = wanted;
                 self.renderer = Some(renderer);
@@ -1943,9 +1946,11 @@ impl ReplayRendererPanel {
         // The clipboard needs a file, not a place to put one, so it is not
         // asked for.
         let asked: Option<_> = match target {
-            ExportTarget::File => {
-                Some(crate::dialog::save_file(Some(&t!("ui.replay.renderer.export_video")), &suggested, Some(MP4)))
-            }
+            ExportTarget::File => Some(wows_toolkit_services::dialog::save_file(
+                Some(&t!("ui.replay.renderer.export_video")),
+                &suggested,
+                Some(MP4),
+            )),
             ExportTarget::Clipboard => None,
         };
 
@@ -3402,7 +3407,7 @@ fn playback_options() -> RenderOptions {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
     #[error(transparent)]
-    Preview(#[from] crate::minimap_preview::PreviewError),
+    Preview(#[from] wows_toolkit_replay_data::minimap_preview::PreviewError),
 }
 
 /// Walks `path`'s battle once, keeping every frame's draw commands and the
@@ -3416,7 +3421,7 @@ fn bake(
     game_data: &GameDataCache,
     cancel: &AtomicBool,
 ) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked = crate::minimap_preview::bake_track(
+    let baked = wows_toolkit_replay_data::minimap_preview::bake_track(
         path,
         alts,
         game_data,
@@ -3573,7 +3578,8 @@ fn temporary_output(name: &str) -> Option<PathBuf> {
 }
 
 /// The file an export writes.
-const MP4: crate::dialog::Filter = crate::dialog::Filter { label: "MP4", extensions: &["mp4"] };
+const MP4: wows_toolkit_services::dialog::Filter =
+    wows_toolkit_services::dialog::Filter { label: "MP4", extensions: &["mp4"] };
 
 /// Rasterises a baked track and encodes it to `output`.
 ///
@@ -5049,7 +5055,7 @@ mod tests {
         let batch = cx.update(|cx| {
             super::batch_export(
                 paths,
-                crate::replay_inspector::load::GameDataCache::new(dir.path().to_path_buf()),
+                wows_toolkit_replay_data::load::GameDataCache::new(dir.path().to_path_buf()),
                 dir.path().to_path_buf(),
                 wows_minimap_renderer::SavedRenderOptions::default(),
                 report,
@@ -5605,7 +5611,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         use super::DrawCommand;
-        use crate::replay_inspector::GameDataCache;
+        use wows_toolkit_replay_data::load::GameDataCache;
 
         let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
         let game_dir =
@@ -5613,7 +5619,7 @@ mod tests {
 
         let cache = GameDataCache::new(PathBuf::from(game_dir));
         let cancel = AtomicBool::new(false);
-        let baked = crate::minimap_preview::bake_track(
+        let baked = wows_toolkit_replay_data::minimap_preview::bake_track(
             std::path::Path::new(&replay),
             &[],
             &cache,
@@ -5952,9 +5958,9 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_secs(5));
-        crate::collab::push_ping_aged(&state, [20.0, 20.0], Duration::ZERO);
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        wows_toolkit_services::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_secs(5));
+        wows_toolkit_services::collab::push_ping_aged(&state, [20.0, 20.0], Duration::ZERO);
+        let (link, _sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -5976,10 +5982,10 @@ mod tests {
         // must not sit redrawing for nothing.
         window
             .update(cx, |panel, _window, cx| {
-                panel.set_collab(crate::collab::CollabLink::default(), cx);
+                panel.set_collab(wows_toolkit_services::collab::CollabLink::default(), cx);
             })
             .expect("the window is open");
-        crate::collab::push_ping_aged(&state, [30.0, 30.0], Duration::from_secs(5));
+        wows_toolkit_services::collab::push_ping_aged(&state, [30.0, 30.0], Duration::from_secs(5));
         cx.executor().advance_clock(Duration::from_millis(200));
         cx.run_until_parked();
         assert_eq!(state.lock().pings.len(), 2, "nothing is shed once the session has gone");
@@ -6107,13 +6113,13 @@ mod tests {
         use wows_minimap_renderer::drawing::SidePanelLayout;
 
         let plain = super::playback_options_hidden();
-        assert_eq!(crate::minimap_preview::layout_for(&plain), SidePanelLayout::None);
+        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&plain), SidePanelLayout::None);
 
         let rosters = wows_minimap_renderer::RenderOptions { show_team_rosters: true, ..plain.clone() };
-        assert_eq!(crate::minimap_preview::layout_for(&rosters), SidePanelLayout::TeamRosters);
+        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&rosters), SidePanelLayout::TeamRosters);
 
         let stats = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..plain };
-        assert_eq!(crate::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
+        assert_eq!(wows_toolkit_replay_data::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
     }
 
     /// A playback bake carries the rosters, or the switch would have nothing
@@ -6144,7 +6150,7 @@ mod tests {
             }],
             ..Default::default()
         });
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6184,7 +6190,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6296,7 +6302,7 @@ mod tests {
             ids: vec![4242],
             owners: vec![7],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6376,7 +6382,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, _sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6458,7 +6464,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6520,7 +6526,7 @@ mod tests {
 
         cx.update(gpui_kit::init);
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6578,7 +6584,7 @@ mod tests {
             ids: vec![11],
             owners: vec![3],
         });
-        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        let (link, sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
             let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
@@ -6846,8 +6852,8 @@ mod tests {
         use std::time::Duration;
 
         let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
-        crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
-        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+        wows_toolkit_services::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
+        let (link, _sent) = wows_toolkit_services::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
         link.drop_stale_pings(Duration::from_secs_f32(super::PING_SECONDS));
         assert_eq!(state.lock().pings.len(), 1, "a fifth of a second into a one-second ripple");

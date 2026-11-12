@@ -11,13 +11,6 @@ use wows_toolkit_viewmodel::collab::NoticeLevel;
 use wows_toolkit_viewmodel::collab::SessionFailure;
 use wows_toolkit_viewmodel::collab::SessionNotice;
 
-// Removed once armor viewer and replay renderer import from the shared crate.
-pub use wows_toolkit_services::collab::CollabLink;
-pub use wows_toolkit_services::collab::ReplayId;
-pub use wows_toolkit_services::collab::SharedReplay;
-#[cfg(test)]
-pub use wows_toolkit_services::collab::push_ping_aged;
-
 /// Redraws `view` whenever the peer task changes the session. Installed once;
 /// later calls are no-ops.
 pub fn bind<V: 'static>(collab: &CollabState, view: &Entity<V>, cx: &mut App) {

@@ -408,7 +408,7 @@ mod tests {
     /// cargo test -p wows-toolkit-armor -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
     /// ```
     ///
-    /// Mirrors `replay_inspector::model`'s equivalent real-provider test.
+    /// Mirrors `wows_toolkit_replay_data::model`'s equivalent real-provider test.
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]
     fn ship_catalog_build_groups_and_sorts_ships_from_a_real_provider() {
