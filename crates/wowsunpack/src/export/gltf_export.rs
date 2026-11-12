@@ -3373,9 +3373,12 @@ pub fn armor_sub_models_by_zone(
             let mut colors = Vec::with_capacity(vert_count);
 
             for (vi, (tri, color)) in tris.iter().enumerate() {
+                // Negate Z for left-to-right-handed conversion, as the visual meshes are.
                 for v in 0..3 {
-                    positions.push(tri.vertices[v]);
-                    normals.push(tri.normals[v]);
+                    let [px, py, pz] = tri.vertices[v];
+                    positions.push([px, py, -pz]);
+                    let [nx, ny, nz] = tri.normals[v];
+                    normals.push([nx, ny, -nz]);
                     indices.push((vi * 3 + v) as u32);
                     colors.push(*color);
                 }
@@ -3656,5 +3659,24 @@ mod tests {
     #[test]
     fn a_part_with_no_lods_has_nothing_to_clamp_to() {
         assert_eq!(clamped_lod(0, 0), None);
+    }
+
+    #[test]
+    fn zone_armor_is_right_handed_like_the_visual_meshes() {
+        let triangle = crate::models::geometry::ArmorTriangle {
+            vertices: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, -9.0]],
+            normals: [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, -1.0]],
+            material_id: 1,
+            layer_index: 1,
+        };
+        let armor = crate::models::geometry::ArmorModel { name: "CM_PA_united".to_string(), triangles: vec![triangle] };
+
+        let zones = armor_sub_models_by_zone(&armor, None, None);
+        let interactive = InteractiveArmorMesh::from_armor_model(&armor, None, None);
+
+        assert_eq!(zones.len(), 1);
+        assert_eq!(zones[0].positions, [[1.0, 2.0, -3.0], [4.0, 5.0, -6.0], [7.0, 8.0, 9.0]]);
+        assert_eq!(zones[0].normals, [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]]);
+        assert_eq!(zones[0].positions, interactive.positions, "export and viewer armor agree");
     }
 }
