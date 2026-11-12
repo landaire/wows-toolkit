@@ -59,6 +59,10 @@ wows-toolkit-services = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
 wt-translations = { workspace = true }
+# The tactics board's shapes and capture points, as a collab session holds them.
+wt-collab-client = { workspace = true }
+# A ship search folds accents, as the armor viewer's does.
+unidecode = "0.3"
 
 [dev-dependencies]
 # Setting an mtime explicitly, so a test can order two files written in the

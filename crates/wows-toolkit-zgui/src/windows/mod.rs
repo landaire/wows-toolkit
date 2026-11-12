@@ -4,6 +4,8 @@
 //! motion, and its content finds [`Services`] through `Services::current()` as the main window's
 //! does. It has no [`Shell`](crate::shell::Shell): the chrome belongs to the main window.
 
+pub mod tactics;
+
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use zgui::component;
