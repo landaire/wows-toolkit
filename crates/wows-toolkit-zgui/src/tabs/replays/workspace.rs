@@ -44,6 +44,7 @@ use crate::tabs::replays::constants::ResultMappings;
 use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelEvents;
 use crate::tabs::replays::panel::PanelSetup;
+use crate::tabs::replays::panel::PanelTitle;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::ReplayPanelProps;
 use crate::tabs::replays::player_table_slot;
@@ -177,10 +178,13 @@ impl ReplayWorkspace {
         dock.register(
             PanelKind::new(REPLAY_KIND),
             PanelFactory::new(
-                // The file's name: the title the tab shows changes as the battle is read.
+                // The file's name until the battle is read, then "{ship} - {map}" as the title shows.
                 move |id| match Docked::of(id) {
                     Some(Docked::Replay(path)) => {
-                        path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned()
+                        match self.control_of(&Docked::Replay(path.clone())).map(PanelControl::title) {
+                            Some(PanelTitle::Read { title, .. }) => title,
+                            _ => path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned(),
+                        }
                     }
                     _ => String::new(),
                 },
