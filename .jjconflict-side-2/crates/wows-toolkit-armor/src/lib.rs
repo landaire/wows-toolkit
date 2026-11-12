@@ -20,7 +20,6 @@ pub mod load_ship;
 pub mod model_refs;
 pub mod model_tree;
 pub mod plate_picking;
-pub mod realtime;
 pub mod scene_load;
 pub mod splash;
 pub mod surface_maps;

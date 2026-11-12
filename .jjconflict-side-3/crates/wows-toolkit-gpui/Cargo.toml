@@ -118,8 +118,6 @@ notify = "8.2.0"
 arboard = "3.6.1"
 # `--help`, `--version`, and a refusal for an argument this build does not take.
 clap = { workspace = true }
-# A render put on the clipboard needs a file that outlives this process.
-tempfile = "3"
 # The preview carries the replay parser's own error rather than a rendering of
 # it, and that error is a `rootcause::Report`.
 rootcause = { workspace = true }
@@ -166,3 +164,5 @@ wows-toolkit-armor = { workspace = true, features = ["test-support"] }
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"
+# Scratch directories for tests that read and write files.
+tempfile = "3"

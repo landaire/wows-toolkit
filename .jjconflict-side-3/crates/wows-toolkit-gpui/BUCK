@@ -58,7 +58,6 @@ GPUI_DEPS = [
     "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",
     "//third-party/rust:rkyv",
-    "//third-party/rust:tempfile",
     "//third-party/rust:thiserror",
     "//third-party/rust:tiny-skia",
     "//third-party/rust:tokio",
@@ -129,7 +128,10 @@ workspace_test(
     buildscript = buildscript,
     # test-support lets the tests point `storage_dir` at a temporary directory.
     deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in GPUI_DEPS],
-    test_deps = ["//third-party/rust:filetime"],
+    test_deps = [
+        "//third-party/rust:filetime",
+        "//third-party/rust:tempfile",
+    ],
     incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window and a graphics device. One thread per core
     # wedges the run on a machine with many of them.
