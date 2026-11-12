@@ -1725,7 +1725,9 @@ mod tests {
 
         let open_layer = |cx: &mut TestAppContext| {
             cx.update_window(window.into(), |_, window, cx| {
-                app.update(cx, |app, cx| app.open_palette_mode(crate::palette::PaletteMode::ReplayFolders, window, cx));
+                app.update(cx, |app, cx| {
+                    app.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ReplayFolders, window, cx)
+                });
             })
             .expect("the test window stays open");
             settle(window, cx);
@@ -1927,7 +1929,9 @@ mod tests {
             .expect("the test window stays open")
         };
         cx.update_window(window.into(), |_, window, cx| {
-            app.update(cx, |app, cx| app.open_palette_mode(crate::palette::PaletteMode::ReplayFolders, window, cx));
+            app.update(cx, |app, cx| {
+                app.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ReplayFolders, window, cx)
+            });
         })
         .expect("the test window stays open");
         assert!(!marked(cx), "listed as present until it has been looked for");

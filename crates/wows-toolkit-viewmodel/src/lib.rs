@@ -33,6 +33,7 @@ pub mod index_rows;
 pub mod listing_row;
 pub mod match_stats;
 pub mod notices;
+pub mod palette;
 pub mod personal_rating;
 pub mod player_tracker;
 pub mod preview_dwell;
