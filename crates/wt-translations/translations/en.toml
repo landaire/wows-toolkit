@@ -2019,3 +2019,10 @@ depth_charges = "Depth charges"
 aircraft = "Aircraft"
 other = "Other"
 misc = "Misc"
+
+[ui.model_view]
+thickness_from = "Thickness from %{ship} (%{hp})"
+thickness_unknown = "Thickness unknown: no ship mounts this model"
+thickness_other_ships = "Other ships"
+export_title = "Export Model"
+export_tooltip = "Export the model to a GLB file"

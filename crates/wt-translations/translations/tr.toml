@@ -1947,3 +1947,10 @@ depth_charges = "Derinlik bombaları"
 aircraft = "Uçaklar"
 other = "Diğer"
 misc = "Çeşitli"
+
+[ui.model_view]
+thickness_from = "Kalınlık kaynağı: %{ship} (%{hp})"
+thickness_unknown = "Kalınlık bilinmiyor: bu modeli taşıyan gemi yok"
+thickness_other_ships = "Diğer gemiler"
+export_title = "Modeli dışa aktar"
+export_tooltip = "Modeli bir GLB dosyasına aktar"

@@ -32,6 +32,8 @@
 //! source data, no extra ship export), so they are populated for the hull
 //! popover's selectors (`popover.rs`) to consume directly.
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wowsunpack::game_params::types::HitLocation;
@@ -46,9 +48,13 @@ use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::CamoTextureSource;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
+use wowsunpack::export::hardpoint::Hardpoint;
+use wowsunpack::export::hardpoint::HardpointName;
+use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
+use wowsunpack::export::ship_parts::ShipPart;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::CameraTrajectory;
@@ -57,6 +63,10 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 
 use crate::viewport::types::Vec3;
+
+use super::model_refs::ShipPartRef;
+use super::model_refs::VehicleParamIndex;
+use super::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
 ///
@@ -147,10 +157,56 @@ pub struct ShipLoadOptions {
     pub camera_trajectories: Vec<(String, CameraTrajectory)>,
 }
 
-/// A loaded ship's armor data: everything the sidebar/load/upload path in
-/// this milestone produces or consumes. See the module doc for which fields
-/// of the egui app's `LoadedShipArmor` this intentionally omits.
+/// What a loaded scene is of.
+pub enum SceneSubject {
+    /// A ship as GameParams assembles it, with its mounts placed.
+    Ship(ShipSubject),
+    /// One catalogued model on its own.
+    Model(ModelSubject),
+}
+
+/// A ship as GameParams assembles it.
+pub struct ShipSubject {
+    pub vehicle_param_index: VehicleParamIndex,
+    /// Its parts, placed, with their hardpoints in ship space.
+    pub parts: Vec<ShipPart>,
+}
+
+/// A catalogued model shown on its own.
+pub struct ModelSubject {
+    pub path: ModelPath,
+    /// The ship part the model was opened from, which picks its armor
+    /// thickness ahead of any other ship mounting it.
+    pub from_ship: Option<ShipPartRef>,
+    /// In the model's node space, the space its meshes are drawn in.
+    pub hardpoints: Vec<Hardpoint>,
+    /// Where the armor plates' thickness comes from.
+    pub thickness: ArmorThickness,
+    /// Every ship mount the thickness could be read from instead, for the
+    /// rail's picker. Empty for a model with no armor.
+    pub thickness_choices: Vec<ThicknessSource>,
+}
+
+/// The ship mount an armor thickness is read from.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ThicknessSource {
+    pub vehicle_param_index: VehicleParamIndex,
+    pub display_name: String,
+    pub hp: HardpointName,
+}
+
+/// Where a model's armor thickness comes from. GameParams holds mount armor
+/// per ship, so a model without a ship has plates of no known thickness.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArmorThickness {
+    Ship(ThicknessSource),
+    Unknown,
+}
+
+/// A loaded scene: a ship's armor and hull meshes, or one model's meshes and
+/// any armor it carries. Ship-only data is empty for a model.
 pub struct LoadedShipArmor {
+    pub subject: SceneSubject,
     pub display_name: String,
     /// The ship's class, which picks the game's class-specific plate names.
     /// `None` for a ship whose GameParams class this build does not know.
@@ -180,8 +236,9 @@ pub struct LoadedShipArmor {
     pub camera_trajectories: Vec<(String, CameraTrajectory)>,
     /// Camo scheme metadata for the picker (`popover.rs`); no textures decoded.
     pub camo_scheme_infos: Vec<CamoSchemeInfo>,
-    /// Decodes a scheme's textures on demand when one is selected.
-    pub camo_source: CamoTextureSource,
+    /// Decodes a scheme's textures on demand when one is selected. `None`
+    /// for a model, which has no camouflage of its own.
+    pub camo_source: Option<CamoTextureSource>,
     /// The splash boxes this hull ships with. `None` for a hull carrying no
     /// splash file, which the splash mode reports rather than drawing an
     /// empty burst over.
@@ -197,6 +254,44 @@ impl LoadedShipArmor {
     /// Bounding-box center in model space.
     pub fn center(&self) -> Vec3 {
         (self.bounds.0 + self.bounds.1) * 0.5
+    }
+
+    pub fn is_ship(&self) -> bool {
+        matches!(self.subject, SceneSubject::Ship(_))
+    }
+
+    pub fn model(&self) -> Option<&ModelSubject> {
+        match &self.subject {
+            SceneSubject::Ship(_) => None,
+            SceneSubject::Model(model) => Some(model),
+        }
+    }
+
+    pub fn ship(&self) -> Option<&ShipSubject> {
+        match &self.subject {
+            SceneSubject::Ship(ship) => Some(ship),
+            SceneSubject::Model(_) => None,
+        }
+    }
+
+    pub fn has_armor(&self) -> bool {
+        !self.meshes.is_empty()
+    }
+
+    /// Whether the plates carry no thickness, so none of them is 0 mm in
+    /// the sense the zero-mm filter hides.
+    pub fn thickness_unknown(&self) -> bool {
+        self.model().is_some_and(|model| model.thickness == ArmorThickness::Unknown)
+    }
+
+    /// `display` as this scene can honour it: a model has no waterline, and
+    /// plates of unknown thickness are drawn rather than filtered as 0 mm.
+    pub fn effective_display(&self, display: DisplaySettings) -> DisplaySettings {
+        DisplaySettings {
+            show_waterline: display.show_waterline && self.is_ship(),
+            show_zero_mm: display.show_zero_mm || self.thickness_unknown(),
+            ..display
+        }
     }
 }
 
@@ -327,6 +422,7 @@ fn reload_load_options(
 /// verbatim, minus the splash-data/hit-location/camera-trajectory branches
 /// (see the module doc for why this v1 struct omits them).
 fn load_ship_armor(
+    param_index: &str,
     vehicle: &Vehicle,
     species: Option<Species>,
     ship_assets: &ShipAssets,
@@ -351,80 +447,10 @@ fn load_ship_armor(
         splash_data.as_ref().map(|data| super::splash::build_splash_box_groups(&data.boxes)).unwrap_or_default();
     let hit_locations = ctx.hit_locations().cloned();
 
-    let mut min = [f32::MAX; 3];
-    let mut max = [f32::MIN; 3];
-    for mesh in &meshes {
-        for pos in &mesh.positions {
-            let p = match &mesh.transform {
-                Some(t) => transform_point(t, *pos),
-                None => *pos,
-            };
-            for i in 0..3 {
-                min[i] = min[i].min(p[i]);
-                max[i] = max[i].max(p[i]);
-            }
-        }
-    }
-
-    let mut zone_parts_map: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
-    let mut zone_part_plates_map: HashMap<String, HashMap<String, std::collections::BTreeSet<i32>>> = HashMap::new();
-    for mesh in &meshes {
-        for info in &mesh.triangle_info {
-            zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material.name().to_owned());
-            let thickness_key = (info.thickness_mm * 10.0).round() as i32;
-            zone_part_plates_map
-                .entry(info.zone.clone())
-                .or_default()
-                .entry(info.material.name().to_owned())
-                .or_default()
-                .insert(thickness_key);
-        }
-    }
-    let mut zone_parts: Vec<(String, Vec<String>)> = zone_parts_map
-        .into_iter()
-        .map(|(zone, parts)| {
-            let mut parts: Vec<String> = parts.into_iter().collect();
-            parts.sort();
-            (zone, parts)
-        })
-        .collect();
-    zone_parts.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let zone_part_plates: Vec<ArmorZone> = zone_parts
-        .iter()
-        .map(|(zone, parts)| {
-            let parts_with_plates = parts
-                .iter()
-                .map(|part| {
-                    let plates = zone_part_plates_map
-                        .get(zone)
-                        .and_then(|m| m.get(part))
-                        .map(|s| s.iter().copied().collect())
-                        .unwrap_or_default();
-                    ZonePart { name: part.clone(), plates }
-                })
-                .collect();
-            ArmorZone { name: zone.clone(), parts: parts_with_plates }
-        })
-        .collect();
-
-    let zones: Vec<String> = zone_parts.iter().map(|(z, _)| z.clone()).collect();
+    let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
 
     let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| ShipLoadError::HullMeshes(format!("{e:?}")))?;
-
-    for mesh in &hull_meshes {
-        for pos in &mesh.positions {
-            let p = match &mesh.transform {
-                Some(t) => transform_point(t, *pos),
-                None => *pos,
-            };
-            for i in 0..3 {
-                min[i] = min[i].min(p[i]);
-                max[i] = max[i].max(p[i]);
-            }
-        }
-    }
-
+    let bounds = scene_bounds(&meshes, &hull_meshes);
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
     let mut hull_textures = HashMap::new();
@@ -432,7 +458,7 @@ fn load_ship_armor(
         if let Ok(img) = image::load_from_memory(&png) {
             let rgba = img.to_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
-            hull_textures.insert(mfm, super::camo::RgbaTexture { width: w, height: h, pixels: rgba.into_raw() });
+            hull_textures.insert(mfm, super::camo::RgbaTexture::new(w, h, rgba.into_raw()));
         }
     }
 
@@ -452,10 +478,14 @@ fn load_ship_armor(
     }
 
     Ok(LoadedShipArmor {
+        subject: SceneSubject::Ship(ShipSubject {
+            vehicle_param_index: VehicleParamIndex::new(param_index),
+            parts: ctx.parts().to_vec(),
+        }),
         display_name: options.display_name,
         species,
         meshes,
-        bounds: (Vec3::new(min[0], min[1], min[2]), Vec3::new(max[0], max[1], max[2])),
+        bounds,
         zones,
         zone_parts,
         zone_part_plates,
@@ -469,11 +499,73 @@ fn load_ship_armor(
         module_alternatives: options.module_alternatives,
         camera_trajectories: options.camera_trajectories,
         camo_scheme_infos,
-        camo_source,
+        camo_source: Some(camo_source),
         splash_data,
         splash_box_groups,
         hit_locations,
     })
+}
+
+/// An armor mesh set's zones, the materials in each, and each material's
+/// plate thicknesses, sorted for the visibility tree.
+pub(crate) struct ArmorZones {
+    pub zones: Vec<String>,
+    pub zone_parts: Vec<(String, Vec<String>)>,
+    pub zone_part_plates: Vec<ArmorZone>,
+}
+
+impl ArmorZones {
+    pub(crate) fn from_meshes(meshes: &[InteractiveArmorMesh]) -> Self {
+        let mut plates_by_part: BTreeMap<String, BTreeMap<String, BTreeSet<i32>>> = BTreeMap::new();
+        for mesh in meshes {
+            for info in &mesh.triangle_info {
+                let thickness_key = (info.thickness_mm * 10.0).round() as i32;
+                plates_by_part
+                    .entry(info.zone.clone())
+                    .or_default()
+                    .entry(info.material.name().to_owned())
+                    .or_default()
+                    .insert(thickness_key);
+            }
+        }
+
+        let zones = plates_by_part.keys().cloned().collect();
+        let zone_parts =
+            plates_by_part.iter().map(|(zone, parts)| (zone.clone(), parts.keys().cloned().collect())).collect();
+        let zone_part_plates = plates_by_part
+            .into_iter()
+            .map(|(zone, parts)| ArmorZone {
+                name: zone,
+                parts: parts
+                    .into_iter()
+                    .map(|(name, plates)| ZonePart { name, plates: plates.into_iter().collect() })
+                    .collect(),
+            })
+            .collect();
+
+        Self { zones, zone_parts, zone_part_plates }
+    }
+}
+
+/// The box around every armor and hull vertex, placed by its transform.
+pub(crate) fn scene_bounds(armor: &[InteractiveArmorMesh], hull: &[InteractiveHullMesh]) -> (Vec3, Vec3) {
+    let armor_points = armor.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), p)));
+    let hull_points = hull.iter().flat_map(|mesh| mesh.positions.iter().map(|p| (mesh.transform.as_ref(), p)));
+
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    for (transform, position) in armor_points.chain(hull_points) {
+        let p = match transform {
+            Some(t) => transform_point(t, *position),
+            None => *position,
+        };
+        for i in 0..3 {
+            min[i] = min[i].min(p[i]);
+            max[i] = max[i].max(p[i]);
+        }
+    }
+
+    (Vec3::new(min[0], min[1], min[2]), Vec3::new(max[0], max[1], max[2]))
 }
 
 /// Default LOD level for a fresh ship load: 0 = highest detail, matching the
@@ -507,7 +599,7 @@ pub(crate) fn load_ship_armor_by_param(
 ) -> Result<LoadedShipArmor, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
     let options = default_load_options(&vehicle, display_name, DEFAULT_LOD);
-    load_ship_armor(&vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
+    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`, then loads its
@@ -522,7 +614,7 @@ fn load_ship_armor_with_options(
     options: ShipLoadOptions,
 ) -> Result<LoadedShipArmor, ShipLoadError> {
     let vehicle = resolve_vehicle(ship_assets, param_index)?;
-    load_ship_armor(&vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
+    load_ship_armor(param_index, &vehicle, resolve_species(ship_assets, param_index), ship_assets, options)
 }
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets` and builds the

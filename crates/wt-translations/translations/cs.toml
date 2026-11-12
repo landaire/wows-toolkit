@@ -1947,3 +1947,10 @@ depth_charges = "Hlubinné pumy"
 aircraft = "Letadla"
 other = "Ostatní"
 misc = "Různé"
+
+[ui.model_view]
+thickness_from = "Tloušťka podle %{ship} (%{hp})"
+thickness_unknown = "Tloušťka neznámá: tento model nenese žádná loď"
+thickness_other_ships = "Jiné lodě"
+export_title = "Exportovat model"
+export_tooltip = "Exportovat model do souboru GLB"

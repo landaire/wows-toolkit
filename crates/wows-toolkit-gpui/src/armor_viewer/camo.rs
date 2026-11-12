@@ -24,6 +24,7 @@ use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 
 use super::upload_hull::mfm_stem;
+use crate::viewport::renderer::MipChain;
 
 /// Hermite smoothstep from 0 at `e0` to 1 at `e1`. Ports `common.rs:625-628`.
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -127,7 +128,8 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 /// stock detail stays in the parts the camo does not paint. That is entirely
 /// a property of the camo texture, so there is no waterline geometry involved
 /// here.
-/// One decoded texture: its size and its RGBA8 pixels.
+/// One decoded texture: its size, its RGBA8 pixels and the lower levels of
+/// its mip chain.
 ///
 /// A struct rather than a `(u32, u32, Vec<u8>)`, because a width and a height
 /// are the same type and nothing but the field name says which is which.
@@ -137,6 +139,18 @@ pub(crate) struct RgbaTexture {
     pub(crate) height: u32,
     /// Four bytes per pixel, row-major.
     pub(crate) pixels: Vec<u8>,
+    /// Built with the texture, off the UI thread, for the upload to use.
+    pub(crate) mips: MipChain,
+}
+
+impl RgbaTexture {
+    /// Builds the mip chain too: run it where the texture is decoded, not on
+    /// the UI thread.
+    pub(crate) fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+        let mips = MipChain::build(width, height, &pixels);
+
+        Self { width, height, pixels, mips }
+    }
 }
 
 /// Textures keyed by the hull part they cover.
@@ -250,7 +264,7 @@ pub(crate) fn build_active_camo(
             rgba
         };
 
-        out_textures.insert(stem.clone(), RgbaTexture { width: cw, height: ch, pixels });
+        out_textures.insert(stem.clone(), RgbaTexture::new(cw, ch, pixels));
     }
     (out_textures, uvs)
 }
@@ -281,7 +295,7 @@ mod tests {
     }
 
     fn solid_rgba(pixel: [u8; 4], w: u32, h: u32) -> RgbaTexture {
-        RgbaTexture { width: w, height: h, pixels: pixel.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+        RgbaTexture::new(w, h, pixel.iter().copied().cycle().take((w * h * 4) as usize).collect())
     }
 
     #[test]
@@ -297,7 +311,7 @@ mod tests {
 
     #[test]
     fn bilinear_rgba_returns_the_solid_color_of_a_uniform_texture() {
-        let RgbaTexture { width: w, height: h, pixels: data } = solid_rgba([10, 20, 30, 255], 4, 4);
+        let RgbaTexture { width: w, height: h, pixels: data, .. } = solid_rgba([10, 20, 30, 255], 4, 4);
         let sample = bilinear_rgba(&data, w, h, 0.3, 0.7);
         assert_eq!(sample, [10.0, 20.0, 30.0, 255.0]);
     }

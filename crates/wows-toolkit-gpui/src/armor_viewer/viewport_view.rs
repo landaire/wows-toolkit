@@ -57,20 +57,31 @@ use super::trajectory;
 use super::trajectory::ArcColor;
 use super::trajectory::ArcId;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
+use crate::armor_viewer::assets::ModelAssets;
 use crate::armor_viewer::camo::build_active_camo;
+use crate::armor_viewer::hardpoint_overlay;
+use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
 use crate::armor_viewer::legend::swatch_color;
+use crate::armor_viewer::load_model;
+use crate::armor_viewer::load_model::ModelLoadRequest;
+use crate::armor_viewer::load_model::MountRef;
+use crate::armor_viewer::load_model::SceneLoadError;
 use crate::armor_viewer::load_ship;
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
 use crate::armor_viewer::load_ship::LoadedShipArmor;
 use crate::armor_viewer::load_ship::PlateKey;
 use crate::armor_viewer::load_ship::ShipLoadError;
 use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
+use crate::armor_viewer::model_refs::HardpointTarget;
+use crate::armor_viewer::model_refs::OpenTarget;
+use crate::armor_viewer::model_refs::VehicleParamIndex;
 use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
 use crate::armor_viewer::upload;
 use crate::armor_viewer::upload::upload_armor_to_viewport;
 use crate::armor_viewer::upload_hull;
+use crate::armor_viewer::upload_hull::HullTextureCache;
 use crate::armor_viewer::visibility;
 use crate::armor_viewer::visibility::SidebarHighlightKey;
 use crate::armor_viewer::visibility::VisibilityFilter;
@@ -355,6 +366,12 @@ impl OpeningLayer {
     pub fn shows_armor(self) -> bool {
         self == Self::Armor
     }
+
+    /// What `scene` opens on. A scene with no armor opens on its meshes
+    /// whatever the setting, or it would open on nothing.
+    pub fn for_scene(self, scene: &LoadedShipArmor) -> Self {
+        if scene.has_armor() { self } else { Self::Mesh }
+    }
 }
 
 /// The visibility a newly opened model starts with.
@@ -636,17 +653,59 @@ pub(crate) struct LightingSliders {
     pub(crate) shininess: Entity<SliderField>,
 }
 
-/// What a Milestone 4 Task 8c background reload needs: the shared
-/// ship-export bundle, this ship's param index, and its display name (all
-/// otherwise owned by `ArmorViewerPane`, not this view). Set once via
-/// [`ViewportView::set_reload_source`] whenever the pane loads a ship
-/// (`pane.rs`'s `apply_ship_load_result`, right before `show_armor`); `None`
-/// until the first ship load completes. A reload itself (`reload_ship`)
-/// never mutates this -- only a genuinely new ship selection replaces it.
-struct ReloadSource {
-    bundle: Arc<ArmorAssetsBundle>,
-    param_index: String,
-    display_name: String,
+/// Which of the loads a pane started into one viewport a result belongs to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LoadGeneration(u64);
+
+/// Which kinds of option the scene on screen has anything for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SceneFeatures {
+    /// A ship: splash boxes, camera orbits, the waterline, camo and hulls.
+    pub(crate) ship: bool,
+    /// Armor plates: their tree, the legend, casts and the plate tools.
+    pub(crate) armor: bool,
+}
+
+/// What a pane's scene was loaded from, which a reload or an export reads
+/// again. Set by the pane right before `show_armor`; a reload never replaces
+/// it, only a new selection does.
+#[derive(Clone)]
+pub(crate) enum SceneSource {
+    Ship { bundle: Arc<ArmorAssetsBundle>, param_index: String, display_name: String },
+    Model { bundle: Arc<ArmorAssetsBundle>, models: Arc<ModelAssets>, request: ModelLoadRequest },
+}
+
+impl SceneSource {
+    pub(crate) fn bundle(&self) -> &Arc<ArmorAssetsBundle> {
+        match self {
+            Self::Ship { bundle, .. } | Self::Model { bundle, .. } => bundle,
+        }
+    }
+
+    pub(crate) fn display_name(&self) -> &str {
+        match self {
+            Self::Ship { display_name, .. } => display_name,
+            Self::Model { request, .. } => request.path.stem(),
+        }
+    }
+
+    /// The ship's param index, for a ship.
+    pub(crate) fn param_index(&self) -> Option<&str> {
+        match self {
+            Self::Ship { param_index, .. } => Some(param_index),
+            Self::Model { .. } => None,
+        }
+    }
+
+    /// What the sidebar highlights for this scene.
+    pub(crate) fn open_target(&self) -> OpenTarget {
+        match self {
+            Self::Ship { param_index, .. } => OpenTarget::Ship(VehicleParamIndex::new(param_index.clone())),
+            Self::Model { request, .. } => {
+                OpenTarget::Model { model: request.path.clone(), from_ship: request.from_ship.clone() }
+            }
+        }
+    }
 }
 
 /// What one pane hands another while "sync options" is on: everything
@@ -709,6 +768,8 @@ pub struct ViewportView {
     /// place of whatever it was drawing, matching the egui pane
     /// (`ui/tab.rs:2081`).
     ship_loading: Option<SharedString>,
+    /// The latest load the pane started into this viewport.
+    load_generation: LoadGeneration,
     /// The armor currently displayed, kept (beyond the initial upload) so a
     /// visibility change can re-upload without reloading the ship. `pub(crate)`
     /// so `popover.rs` can read it while building the popover's tree.
@@ -765,11 +826,10 @@ pub struct ViewportView {
     /// state, same defaults/scope as `expanded_hull_groups`. `pub(crate)` so
     /// `popover.rs` can read it while building the camo picker.
     pub(crate) expanded_camo_groups: HashSet<String>,
-    /// What a background reload (`reload_ship`) needs to re-export this same
-    /// ship under a new selection. `None` until the pane's first ship load
-    /// completes (`set_reload_source`); a reload never clears or replaces
-    /// this itself.
-    reload_source: Option<ReloadSource>,
+    /// What a background reload (`reload_ship`) or an export reads again.
+    /// `None` until the pane's first load completes (`set_scene_source`); a
+    /// reload never clears or replaces this itself.
+    scene_source: Option<SceneSource>,
     /// The hull-upgrade key selected in the hull popover (`popover.rs`),
     /// `None` = stock/default hull. Reset whenever a new ship loads. Threaded
     /// into `reload_ship`'s `ShipLoadOptions`. `pub(crate)` so `popover.rs`
@@ -818,6 +878,20 @@ pub struct ViewportView {
     /// compositor left tiled (GPU-side) rather than baking. Same lifetime/
     /// reset rules as `active_camo_textures`.
     active_camo_uvs: HashMap<String, UvTransform>,
+    /// The GPU textures the hull meshes sample, one per material. Cleared
+    /// with the scene, the active camo and the device they were made for.
+    hull_textures: HullTextureCache,
+    /// Whose hardpoints are marked, as the sidebar's checkboxes left them.
+    /// Kept across scenes: a target only draws while its model or ship is
+    /// the one shown.
+    hardpoint_targets: HashSet<HardpointTarget>,
+    /// The marked hardpoints' names and where each is drawn, for the
+    /// labels painted over the scene.
+    hardpoint_labels: Vec<hardpoint_overlay::HardpointLabel>,
+    /// The overlay mesh drawing the markers of `hardpoint_labels`.
+    hardpoint_mesh: Option<MeshId>,
+    /// The marker under the pointer, by its index in `hardpoint_labels`.
+    hovered_hardpoint: Option<usize>,
     /// Undo/redo history over `{part_visibility, plate_visibility}`. Every
     /// mutator snapshots the pre-mutation state here via `snapshot_and_mutate`
     /// before applying the change. Cleared whenever a new ship loads.
@@ -1037,6 +1111,7 @@ impl ViewportView {
             pending_armor: None,
             mesh_seed: MeshSeed::default(),
             ship_loading: None,
+            load_generation: LoadGeneration::default(),
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
             perspective: PerspectiveSettings::default(),
@@ -1063,7 +1138,7 @@ impl ViewportView {
             hull_mesh_ids: Vec::new(),
             expanded_hull_groups: HashSet::new(),
             expanded_camo_groups: HashSet::new(),
-            reload_source: None,
+            scene_source: None,
             selected_hull: None,
             hull_lod: load_ship::DEFAULT_LOD,
             selected_modules: HashMap::new(),
@@ -1073,6 +1148,11 @@ impl ViewportView {
             camo_generation: 0,
             active_camo_textures: HashMap::new(),
             active_camo_uvs: HashMap::new(),
+            hull_textures: HullTextureCache::default(),
+            hardpoint_targets: HashSet::new(),
+            hardpoint_labels: Vec::new(),
+            hardpoint_mesh: None,
+            hovered_hardpoint: None,
             undo_stack: VisibilityUndoStack::default(),
             expanded_zones: HashSet::new(),
             expanded_parts: HashSet::new(),
@@ -1332,7 +1412,7 @@ impl ViewportView {
     /// The assets this pane's ship was loaded from, which is where the
     /// translations for part and material names come from.
     pub fn reload_bundle(&self) -> Option<Arc<ArmorAssetsBundle>> {
-        self.reload_source.as_ref().map(|source| Arc::clone(&source.bundle))
+        self.scene_source.as_ref().map(|source| Arc::clone(source.bundle()))
     }
 
     /// The class of the ship shown, which picks the game's class-specific
@@ -1350,8 +1430,8 @@ impl ViewportView {
         }
     }
 
-    pub fn set_reload_source(&mut self, bundle: Arc<ArmorAssetsBundle>, param_index: String, display_name: String) {
-        self.reload_source = Some(ReloadSource { bundle, param_index, display_name });
+    pub(crate) fn set_scene_source(&mut self, source: SceneSource) {
+        self.scene_source = Some(source);
     }
 
     /// The currently displayed armor, if any. `pane.rs`'s Compare-clone
@@ -1361,24 +1441,42 @@ impl ViewportView {
         self.current_armor.clone()
     }
 
-    /// This pane's reload source (bundle/param index/display name), if a ship
-    /// has ever loaded here. `pane.rs`'s Compare-clone uses this to seed a new
-    /// pane's own `set_reload_source`, so the new pane can independently
-    /// switch hull/LOD/module afterward. `ReloadSource` itself stays private
-    /// to this module; this is the read-only seam.
-    pub(crate) fn reload_source(&self) -> Option<(Arc<ArmorAssetsBundle>, String, String)> {
-        self.reload_source.as_ref().map(|s| (Arc::clone(&s.bundle), s.param_index.clone(), s.display_name.clone()))
+    /// The scene handed to this pane: the one on screen, or the one waiting
+    /// for GPUI's device.
+    pub(crate) fn shown(&self) -> Option<&Arc<LoadedShipArmor>> {
+        self.current_armor.as_ref().or(self.pending_armor.as_ref().map(|(armor, _)| armor))
+    }
+
+    /// What the scene handed to this pane has for the option rail to act on.
+    /// `None` while nothing has been.
+    pub(crate) fn scene_features(&self) -> Option<SceneFeatures> {
+        self.shown().map(|armor| SceneFeatures { ship: armor.is_ship(), armor: armor.has_armor() })
+    }
+
+    /// What this pane's scene was loaded from. `pane.rs`'s Compare-clone uses
+    /// this to seed a new pane's own `set_scene_source`, so the new pane can
+    /// independently switch hull/LOD/module afterward.
+    pub(crate) fn scene_source(&self) -> Option<SceneSource> {
+        self.scene_source.clone()
     }
 
     /// The param index of the ship actually shown right now, or `None` if no
     /// ship has finished loading into this pane yet. Gated on `current_armor`
-    /// (not just `reload_source`) so a load still in flight -- which has
-    /// already called `set_reload_source` but hasn't reached `show_armor` --
+    /// (not just `scene_source`) so a load still in flight -- which has
+    /// already called `set_scene_source` but hasn't reached `show_armor` --
     /// does not count as "loaded": `pane.rs`'s re-click guard (mirroring
     /// egui's `already_selected`, `ui/tab.rs:520-521`) only skips a reload
     /// once the previous one actually finished and is on screen.
     pub(crate) fn loaded_param_index(&self) -> Option<&str> {
-        self.current_armor.is_some().then(|| self.reload_source.as_ref().map(|s| s.param_index.as_str())).flatten()
+        self.current_armor.as_ref()?;
+        self.scene_source.as_ref()?.param_index()
+    }
+
+    /// The model or ship shown, for the sidebar to highlight. `None` while
+    /// nothing has been handed to this pane.
+    pub(crate) fn open_target(&self) -> Option<OpenTarget> {
+        self.shown()?;
+        self.scene_source.as_ref().map(SceneSource::open_target)
     }
 
     /// A clone of the current camera, for `pane.rs` to read when broadcasting
@@ -1465,10 +1563,11 @@ impl ViewportView {
     /// device is back. `layer` picks what is in view once it is up.
     pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut Context<Self>) {
         if self.scene().is_some() {
-            self.upload_armor_now(armor, layer);
+            self.upload_armor_now(armor, layer, cx);
             self.pending_armor = None;
         } else {
             self.pending_armor = Some((armor, layer));
+            self.upload_hardpoints();
         }
         cx.notify();
     }
@@ -1492,10 +1591,11 @@ impl ViewportView {
     /// already captured the pre-bump value, so `apply_reload_result`'s
     /// generation guard discards its result instead of overwriting this
     /// (possibly different) ship's freshly uploaded armor.
-    fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer) {
-        let Some(scene) = self.scene() else { return };
-        let device = scene.device();
-        let queue = scene.queue();
+    fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut Context<Self>) {
+        if self.scene().is_none() {
+            return;
+        }
+        let layer = layer.for_scene(&armor);
         self.reload_generation += 1;
         self.plate_visibility.clear();
         self.hull_mesh_ids.clear();
@@ -1519,38 +1619,20 @@ impl ViewportView {
         self.hit_pulses.clear();
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
+        self.hull_textures.clear();
         let saved = AllVisible { hull: self.hull_all_visible, armor: self.armor_all_visible };
         let opening = OpeningVisibility::new(&armor, saved, layer);
         self.part_visibility = opening.parts;
         self.hull_visibility = opening.hull;
         let mesh = layer == OpeningLayer::Mesh;
         self.mesh_seed = MeshSeed { armor: mesh, hull: mesh };
-        let visibility = VisibilityFilter {
-            part: &self.part_visibility,
-            plate: &self.plate_visibility,
-            show_hidden_only: self.show_hidden_only,
-        };
-        self.mesh_triangle_info =
-            upload_armor_to_viewport(&mut self.viewport, device, &armor, visibility, self.display_settings);
-        upload_hull::upload_hull_meshes(
-            &mut self.viewport,
-            device,
-            queue,
-            scene.pipeline(),
-            &armor,
-            &mut self.hull_mesh_ids,
-            &self.hull_visibility,
-            self.display_settings.hull_opaque,
-            &self.active_camo_textures,
-            &self.active_camo_uvs,
-        );
         self.model_bounds = Some(armor.bounds);
         // The arcs were cast at the plates of the ship before; on this one
         // they mark nothing.
         self.arcs.clear();
         self.selected_arc = None;
-        self.upload_splash_boxes(device, &armor);
-        depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
+        let (min, max) = armor.bounds;
+        self.viewport.camera = ArcballCamera::from_bounds(min, max);
         // The camera the lock puts back is the one framed on the ship now
         // showing, not the one framed on the ship before it. A ship that names
         // no orbit has nothing to lock onto, and its control is not drawn, so
@@ -1564,6 +1646,7 @@ impl ViewportView {
             }
         }
         self.current_armor = Some(armor);
+        self.reupload_current_armor(cx);
     }
 
     /// Outlines the named splash boxes while they are shown, and keeps their
@@ -1578,6 +1661,53 @@ impl ViewportView {
             self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
         }
         self.splash_labels = splash::box_labels(&data.boxes);
+    }
+
+    /// Marks the hardpoints the sidebar asked for that belong to the scene
+    /// shown, and keeps their names for the labels. The names are kept
+    /// without a device too, so they always say what is marked.
+    fn upload_hardpoints(&mut self) {
+        if let Some(id) = self.hardpoint_mesh.take() {
+            self.viewport.remove_mesh(id);
+        }
+        self.hovered_hardpoint = None;
+        let Some(shown) = self.shown().cloned() else {
+            self.hardpoint_labels.clear();
+            return;
+        };
+
+        let markers = HardpointMarkers::for_scene(&shown, &self.hardpoint_targets);
+        self.hardpoint_labels = markers.labels;
+        let Some(scene) = self.scene() else { return };
+        if !markers.indices.is_empty() {
+            self.hardpoint_mesh =
+                Some(self.viewport.add_overlay_mesh(scene.device(), &markers.vertices, &markers.indices));
+        }
+        self.viewport.mark_dirty();
+    }
+
+    /// Adopts whose hardpoints are marked, redrawing only the markers.
+    pub(crate) fn set_hardpoint_targets(&mut self, targets: HashSet<HardpointTarget>, cx: &mut Context<Self>) {
+        if self.hardpoint_targets == targets {
+            return;
+        }
+        self.hardpoint_targets = targets;
+        self.upload_hardpoints();
+        cx.notify();
+    }
+
+    /// The marked hardpoints, as their labels name them.
+    pub(crate) fn hardpoint_labels(&self) -> &[hardpoint_overlay::HardpointLabel] {
+        &self.hardpoint_labels
+    }
+
+    /// Whether plates of 0 mm are drawn: when asked for, and always for a
+    /// model whose plates have no known thickness at all.
+    pub(crate) fn show_zero_mm(&self) -> bool {
+        match self.shown() {
+            Some(armor) => armor.effective_display(self.display_settings).show_zero_mm,
+            None => self.display_settings.show_zero_mm,
+        }
     }
 
     /// The device meshes are uploaded to, while there is one.
@@ -1615,11 +1745,13 @@ impl ViewportView {
             return;
         }
 
+        // The bind groups were made on the device being replaced.
+        self.hull_textures.clear();
         let Some((armor, layer)) = self.pending_armor.take() else {
             self.reupload_current_armor(cx);
             return;
         };
-        self.upload_armor_now(armor, layer);
+        self.upload_armor_now(armor, layer, cx);
         // The comparison needs a hull, and the one it was asked for arrived
         // while there was no device, so it found none and did nothing.
         if let Some((taken, shells)) = self.pane.as_ref().and_then(|pane| pane.upgrade()).and_then(|pane| {
@@ -2257,7 +2389,7 @@ impl ViewportView {
     }
 
     pub(crate) fn shown_ship_name(&self) -> Option<SharedString> {
-        self.reload_source.as_ref().map(|source| SharedString::from(source.display_name.clone()))
+        self.scene_source.as_ref().map(|source| SharedString::from(source.display_name().to_string()))
     }
 
     /// The ship being loaded into this viewport, if one is. Driven by the
@@ -2268,6 +2400,21 @@ impl ViewportView {
         }
         self.ship_loading = loading;
         cx.notify();
+    }
+
+    /// Starts a load into this pane, naming it while it runs. A result lands
+    /// only while its generation is still the latest one this pane started,
+    /// so a newer selection here supersedes it and one in another pane does
+    /// not.
+    pub(crate) fn begin_load(&mut self, name: SharedString, cx: &mut Context<Self>) -> LoadGeneration {
+        self.load_generation = LoadGeneration(self.load_generation.0 + 1);
+        self.set_ship_loading(Some(name), cx);
+
+        self.load_generation
+    }
+
+    pub(crate) fn is_current_load(&self, generation: LoadGeneration) -> bool {
+        self.load_generation == generation
     }
 
     /// Paints the scene at `bounds`, drawing it again first if it changed or
@@ -2305,6 +2452,21 @@ impl ViewportView {
         let on_screen = |at: Vec2| point(px(at.x), px(at.y));
 
         for label in self.splash_box_labels() {
+            let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
+            let Some(at) = camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else { continue };
+            paint_box_label(&label.name, on_screen(at), window, cx);
+        }
+
+        // A few markers are named outright; past that the names would bury
+        // the model, so only the one under the pointer is.
+        const LABELLED_OUTRIGHT: usize = 16;
+        let hardpoint_labels: Vec<&hardpoint_overlay::HardpointLabel> =
+            if self.hardpoint_labels.len() <= LABELLED_OUTRIGHT {
+                self.hardpoint_labels.iter().collect()
+            } else {
+                self.hovered_hardpoint.and_then(|index| self.hardpoint_labels.get(index)).into_iter().collect()
+            };
+        for label in hardpoint_labels {
             let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
             let Some(at) = camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else { continue };
             paint_box_label(&label.name, on_screen(at), window, cx);
@@ -2431,10 +2593,12 @@ impl ViewportView {
         // as the egui viewer suppresses it (`ui/tab.rs`).
         let plate_hover_changed = if self.drag.is_none() && self.camera_is_free() {
             let ring_changed = self.update_ring_hover(event.position);
-            self.update_plate_hover(event.position) || ring_changed
+            let hardpoint_changed = self.update_hardpoint_hover(event.position);
+            self.update_plate_hover(event.position) || ring_changed || hardpoint_changed
         } else {
             let ring_changed = self.clear_ring_hover();
-            self.clear_plate_hover() || ring_changed
+            let hardpoint_changed = self.hovered_hardpoint.take().is_some();
+            self.clear_plate_hover() || ring_changed || hardpoint_changed
         };
 
         if camera_changed || hover_changed || plate_hover_changed {
@@ -2940,6 +3104,32 @@ impl ViewportView {
         self.hovered_ring.take().is_some()
     }
 
+    /// Reads the hardpoint marker nearest the pointer, within a few pixels.
+    /// Returns whether it changed.
+    fn update_hardpoint_hover(&mut self, position: Point<Pixels>) -> bool {
+        const REACH_PX: f32 = 10.0;
+
+        let found = self.last_bounds.and_then(|bounds| {
+            let rect = view_rect_from_bounds(bounds);
+            let pointer = point_to_vec2(position);
+            self.hardpoint_labels
+                .iter()
+                .enumerate()
+                .filter_map(|(index, label)| {
+                    let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
+                    let at = self.viewport.camera.project_to_screen(anchor, rect)?;
+                    let distance = ((at.x - pointer.x).powi(2) + (at.y - pointer.y).powi(2)).sqrt();
+                    (distance <= REACH_PX).then_some((index, distance))
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(index, _)| index)
+        });
+
+        let changed = found != self.hovered_hardpoint;
+        self.hovered_hardpoint = found;
+        changed
+    }
+
     /// Clears any hovered plate, tooltip, and highlight overlay. Returns
     /// whether anything actually changed (so callers only `cx.notify()` when
     /// needed).
@@ -2962,6 +3152,7 @@ impl ViewportView {
         }
         let Some(scene) = self.scene() else { return };
         let Some(armor) = self.current_armor.clone() else { return };
+        let show_zero_mm = self.show_zero_mm();
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
             plate: &self.plate_visibility,
@@ -2973,7 +3164,7 @@ impl ViewportView {
             &armor,
             key,
             visibility,
-            self.display_settings.show_zero_mm,
+            show_zero_mm,
         );
         self.hover_highlight = Some((key.clone(), mesh_id));
         self.viewport.mark_dirty();
@@ -2996,7 +3187,7 @@ impl ViewportView {
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
-        let show_zero_mm = self.display_settings.show_zero_mm;
+        let show_zero_mm = self.show_zero_mm();
         let mesh_id = match &key {
             SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
                 &mut self.viewport,
@@ -3294,8 +3485,9 @@ impl ViewportView {
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
+        let display = armor.effective_display(self.display_settings);
         self.mesh_triangle_info =
-            upload::reupload_armor_plates(&mut self.viewport, device, &armor, visibility, self.display_settings);
+            upload::reupload_armor_plates(&mut self.viewport, device, &armor, visibility, display);
         // `viewport.clear()` (inside the armor re-upload above) wipes every
         // mesh, hull included -- top the hull back up now that the armor pass
         // is done, keeping the two upload paths decoupled (a hull-only change
@@ -3312,6 +3504,7 @@ impl ViewportView {
             self.display_settings.hull_opaque,
             &self.active_camo_textures,
             &self.active_camo_uvs,
+            &mut self.hull_textures,
         );
         self.ring_hovers.clear();
         if self.camera_rings.shown
@@ -3338,7 +3531,9 @@ impl ViewportView {
             self.ring_hovers = hovers;
         }
 
-        depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
+        if armor.is_ship() {
+            depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
+        }
 
         if self.display_settings.show_ship_center {
             let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
@@ -3369,8 +3564,7 @@ impl ViewportView {
         // hidden plate's rim is not reported as a hole in the ship.
         self.gap_count = 0;
         if self.show_gaps {
-            let (vertices, indices, count) =
-                gaps::build_gap_mesh(&armor, visibility, self.display_settings.show_zero_mm);
+            let (vertices, indices, count) = gaps::build_gap_mesh(&armor, visibility, display.show_zero_mm);
             self.gap_count = count;
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
@@ -3380,6 +3574,7 @@ impl ViewportView {
         // viewport while these want it back.
         self.apply_perspective(device, &armor);
         self.upload_splash_boxes(device, &armor);
+        self.upload_hardpoints();
 
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
@@ -3439,6 +3634,7 @@ impl ViewportView {
             self.display_settings.hull_opaque,
             &self.active_camo_textures,
             &self.active_camo_uvs,
+            &mut self.hull_textures,
         );
     }
 
@@ -3499,6 +3695,7 @@ impl ViewportView {
         let Some((id, armor)) = id.zip(self.current_armor.clone()) else {
             self.active_camo_textures.clear();
             self.active_camo_uvs.clear();
+            self.hull_textures.forget_camo();
             self.reupload_hull();
             cx.emit(ViewportChange::Settings);
             cx.notify();
@@ -3529,6 +3726,7 @@ impl ViewportView {
         }
         self.active_camo_textures = decode.textures;
         self.active_camo_uvs = decode.uvs;
+        self.hull_textures.forget_camo();
         self.reupload_hull();
         cx.emit(ViewportChange::Settings);
         cx.notify();
@@ -3590,34 +3788,51 @@ impl ViewportView {
     /// re-exporting armor geometry on a LOD-only change too (a perf, not
     /// correctness, deviation).
     pub(crate) fn reload_ship(&mut self, cx: &mut Context<Self>) {
-        let Some(source) = &self.reload_source else { return };
-        let bundle = Arc::clone(&source.bundle);
-        let param_index = source.param_index.clone();
-        let display_name = source.display_name.clone();
-
-        let options = match load_ship::build_reload_options(
-            &bundle.assets,
-            &param_index,
-            display_name,
-            self.hull_lod,
-            self.selected_hull.clone(),
-            self.selected_modules.clone(),
-        ) {
-            Ok(options) => options,
-            Err(e) => {
-                tracing::error!("armor viewer: failed to build reload options: {e}");
-                return;
+        let Some(source) = self.scene_source.clone() else { return };
+        let task = match source {
+            SceneSource::Ship { bundle, param_index, display_name } => {
+                let options = match load_ship::build_reload_options(
+                    &bundle.assets,
+                    &param_index,
+                    display_name,
+                    self.hull_lod,
+                    self.selected_hull.clone(),
+                    self.selected_modules.clone(),
+                ) {
+                    Ok(options) => options,
+                    Err(e) => {
+                        tracing::error!("armor viewer: failed to build reload options: {e}");
+                        return;
+                    }
+                };
+                let task = spawn_reload_ship_armor(bundle, param_index, options, cx);
+                cx.background_spawn(async move { task.await.map_err(SceneLoadError::from) })
+            }
+            SceneSource::Model { bundle, models, request } => {
+                let request = ModelLoadRequest { lod: self.hull_lod, ..request };
+                let task = load_model::spawn_load_model_scene(models, bundle, request, cx);
+                cx.background_spawn(async move { task.await.map_err(SceneLoadError::from) })
             }
         };
 
         self.reload_generation += 1;
         let generation = self.reload_generation;
-        let task = spawn_reload_ship_armor(bundle, param_index, options, cx);
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| this.apply_reload_result(generation, result, cx));
         })
         .detach();
+    }
+
+    /// Reads a model's armor thickness from another ship mounting it, keeping
+    /// the view as it is.
+    pub(crate) fn set_thickness_source(&mut self, mount: MountRef, cx: &mut Context<Self>) {
+        let Some(SceneSource::Model { request, .. }) = &mut self.scene_source else { return };
+        if request.thickness_from.as_ref() == Some(&mount) {
+            return;
+        }
+        request.thickness_from = Some(mount);
+        self.reload_ship(cx);
     }
 
     /// Opens the export-confirm panel (rail and context-menu "Export",
@@ -3628,15 +3843,28 @@ impl ViewportView {
     /// ship is loaded -- the button itself is disabled in that case
     /// (`current_armor.is_none()`), this is just defense in depth against a
     /// stale click.
-    pub(crate) fn open_export_confirm(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_export_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.current_armor.is_none() {
             return;
         }
-        let Some(source) = &self.reload_source else { return };
+        let source = match &self.scene_source {
+            Some(SceneSource::Ship { bundle, param_index, display_name }) => (bundle, param_index, display_name),
+            Some(SceneSource::Model { request, .. }) => {
+                // A model has no hull or camo to confirm; the pane's export
+                // dialog asks what it should contain.
+                let request = request.clone();
+                if let Some(pane) = self.pane() {
+                    pane.update(cx, |pane, cx| pane.export_catalog_model(request, window, cx));
+                }
+                return;
+            }
+            None => return,
+        };
+        let (bundle, param_index, display_name) = source;
         self.export_confirm = Some(ExportConfirm {
-            bundle: Arc::clone(&source.bundle),
-            param_index: source.param_index.clone(),
-            display_name: source.display_name.clone(),
+            bundle: Arc::clone(bundle),
+            param_index: param_index.clone(),
+            display_name: display_name.clone(),
             hull_lod: self.hull_lod,
             selected_hull: self.selected_hull.clone(),
             selected_modules: self.selected_modules.clone(),
@@ -3730,7 +3958,7 @@ impl ViewportView {
     fn apply_reload_result(
         &mut self,
         generation: u64,
-        result: Result<LoadedShipArmor, ShipLoadError>,
+        result: Result<LoadedShipArmor, SceneLoadError>,
         cx: &mut Context<Self>,
     ) {
         if generation != self.reload_generation {
@@ -3739,11 +3967,10 @@ impl ViewportView {
         let armor = match result {
             Ok(armor) => Arc::new(armor),
             Err(e) => {
-                tracing::error!("armor viewer: failed to reload ship armor: {e}");
+                tracing::error!("armor viewer: failed to reload: {e}");
                 return;
             }
         };
-        let Some(scene) = self.scene() else { return };
 
         // Resolve the selected camo by name while `self.current_armor` is
         // still the OLD armor (both old and new `camo_scheme_infos` are
@@ -3784,34 +4011,9 @@ impl ViewportView {
         self.active_camo_textures = active_camo_textures;
         self.active_camo_uvs = active_camo_uvs;
         self.model_bounds = Some(armor.bounds);
-
-        let visibility_filter = VisibilityFilter {
-            part: &self.part_visibility,
-            plate: &self.plate_visibility,
-            show_hidden_only: self.show_hidden_only,
-        };
-        self.mesh_triangle_info = upload::reupload_armor_plates(
-            &mut self.viewport,
-            scene.device(),
-            &armor,
-            visibility_filter,
-            self.display_settings,
-        );
-        upload_hull::upload_hull_meshes(
-            &mut self.viewport,
-            scene.device(),
-            scene.queue(),
-            scene.pipeline(),
-            &armor,
-            &mut self.hull_mesh_ids,
-            &self.hull_visibility,
-            self.display_settings.hull_opaque,
-            &self.active_camo_textures,
-            &self.active_camo_uvs,
-        );
-        self.viewport.mark_dirty();
+        self.hull_textures.clear();
         self.current_armor = Some(armor);
-        cx.notify();
+        self.reupload_current_armor(cx);
     }
 
     /// Toggles a camo-origin group header's expanded/collapsed state in the
@@ -4315,15 +4517,19 @@ struct CamoDecode {
 fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
     let (textures, decoded) = match cached {
         Some(t) => (t, None),
-        None => match armor.camo_source.decode(id) {
-            Ok(t) => {
+        None => match armor.camo_source.as_ref().map(|source| source.decode(id)) {
+            None => {
+                tracing::warn!("camo scheme {id:?} asked of a model with no camouflage; rendering as stock");
+                return CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
+            }
+            Some(Ok(t)) => {
                 if t.is_empty() {
                     tracing::warn!("camo scheme {id:?} decoded to zero textures for this ship; rendering as stock");
                 }
                 let t = Arc::new(t);
                 (Arc::clone(&t), Some(t))
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 tracing::warn!("failed to decode camo scheme {id:?}: {e}");
                 return CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
             }
@@ -4845,6 +5051,29 @@ mod opening_visibility_tests {
     fn the_armor_layer_follows_the_saved_defaults() {
         let opening = OpeningVisibility::from_groups(&zone_parts(), &hull_groups(), SAVED, OpeningLayer::Armor);
         assert_eq!(opening, OpeningVisibility::default());
+    }
+
+    fn turret() -> wowsunpack::export::model_catalog::ModelPath {
+        wowsunpack::export::model_catalog::ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model")
+            .expect("a model path")
+    }
+
+    #[test]
+    fn an_armored_model_opens_on_the_chosen_layer() {
+        let scene = crate::armor_viewer::load_model::fixtures::armored_model_scene(turret());
+
+        assert_eq!(OpeningLayer::Armor.for_scene(&scene), OpeningLayer::Armor);
+        assert_eq!(OpeningLayer::Mesh.for_scene(&scene), OpeningLayer::Mesh);
+    }
+
+    #[test]
+    fn a_model_without_armor_opens_on_its_meshes_and_shows_them() {
+        let scene = crate::armor_viewer::load_model::fixtures::model_scene(turret(), Vec::new());
+        let layer = OpeningLayer::Armor.for_scene(&scene);
+
+        assert_eq!(layer, OpeningLayer::Mesh);
+        let opening = OpeningVisibility::new(&scene, SAVED, layer);
+        assert_eq!(opening.hull.get("Turret"), Some(&true), "the model's mesh is shown");
     }
 
     #[test]

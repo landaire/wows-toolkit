@@ -1993,3 +1993,10 @@ depth_charges = "深水炸彈"
 aircraft = "飛機"
 other = "其他"
 misc = "雜項"
+
+[ui.model_view]
+thickness_from = "厚度來自 %{ship} (%{hp})"
+thickness_unknown = "厚度未知: 沒有艦船搭載此模型"
+thickness_other_ships = "其他艦船"
+export_title = "匯出模型"
+export_tooltip = "將模型匯出為 GLB 檔案"

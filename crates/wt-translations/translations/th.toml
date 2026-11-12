@@ -1993,3 +1993,10 @@ depth_charges = "ระเบิดน้ำลึก"
 aircraft = "อากาศยาน"
 other = "อื่น ๆ"
 misc = "เบ็ดเตล็ด"
+
+[ui.model_view]
+thickness_from = "ความหนาจาก %{ship} (%{hp})"
+thickness_unknown = "ไม่ทราบความหนา: ไม่มีเรือลำใดติดตั้งโมเดลนี้"
+thickness_other_ships = "เรือลำอื่น"
+export_title = "ส่งออกโมเดล"
+export_tooltip = "ส่งออกโมเดลเป็นไฟล์ GLB"

@@ -1993,3 +1993,10 @@ depth_charges = "Grenades ASM"
 aircraft = "Avions"
 other = "Autres"
 misc = "Divers"
+
+[ui.model_view]
+thickness_from = "Épaisseur selon %{ship} (%{hp})"
+thickness_unknown = "Épaisseur inconnue : aucun navire ne monte ce modèle"
+thickness_other_ships = "Autres navires"
+export_title = "Exporter le modèle"
+export_tooltip = "Exporter le modèle dans un fichier GLB"

@@ -380,7 +380,9 @@ impl GpuPipeline {
         self.color
     }
 
-    /// Create a texture bind group from RGBA8 pixel data.
+    /// Create a texture bind group from RGBA8 pixel data and the lower levels
+    /// of its mip chain, so a texture seen from afar is filtered rather than
+    /// aliased. `mips` must have been built from `rgba_data`.
     pub fn create_texture_bind_group(
         &self,
         device: &wgpu::Device,
@@ -388,11 +390,14 @@ impl GpuPipeline {
         rgba_data: &[u8],
         width: u32,
         height: u32,
+        mips: &MipChain,
     ) -> wgpu::BindGroup {
+        let top = (width, height, rgba_data);
+        let lower = mips.levels.iter().map(|level| (level.width, level.height, level.pixels.as_slice()));
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewport_3d_hull_texture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
+            mip_level_count: 1 + mips.levels.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -400,17 +405,23 @@ impl GpuPipeline {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            rgba_data,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
+        for (mip_level, (level_width, level_height, pixels)) in (0u32..).zip(std::iter::once(top).chain(lower)) {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * level_width),
+                    rows_per_image: Some(level_height),
+                },
+                wgpu::Extent3d { width: level_width, height: level_height, depth_or_array_layers: 1 },
+            );
+        }
 
         let view = texture.create_view(&Default::default());
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -422,6 +433,68 @@ impl GpuPipeline {
             ],
         })
     }
+}
+
+/// The levels of a texture's mip chain below its full size, down to one
+/// texel. Built where the texture is decoded, off the UI thread, since the
+/// upload that uses it runs on it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MipChain {
+    levels: Vec<MipLevel>,
+}
+
+impl MipChain {
+    /// Halves `pixels` (RGBA8, `width` by `height`) until one texel is left.
+    pub fn build(width: u32, height: u32, pixels: &[u8]) -> Self {
+        let mut levels = Vec::new();
+        let (mut source_width, mut source_height) = (width, height);
+        while source_width > 1 || source_height > 1 {
+            let source = levels.last().map_or(pixels, |level: &MipLevel| level.pixels.as_slice());
+            let level = halve(source, source_width, source_height);
+            (source_width, source_height) = (level.width, level.height);
+            levels.push(level);
+        }
+
+        Self { levels }
+    }
+}
+
+/// One level of a texture's mip chain, RGBA8.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MipLevel {
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+}
+
+/// The level below `pixels`: each texel the mean of the 2x2 block above it,
+/// the last row or column repeated where a dimension is odd. Averaged in the
+/// stored sRGB encoding.
+fn halve(pixels: &[u8], width: u32, height: u32) -> MipLevel {
+    let out_width = (width / 2).max(1) as usize;
+    let out_height = (height / 2).max(1) as usize;
+    let stride = width as usize * 4;
+    let last_x = width as usize - 1;
+    let last_y = height as usize - 1;
+
+    let mut out = Vec::with_capacity(out_width * out_height * 4);
+    for y in 0..out_height {
+        let top = (2 * y).min(last_y) * stride;
+        let bottom = (2 * y + 1).min(last_y) * stride;
+        for x in 0..out_width {
+            let left = (2 * x).min(last_x) * 4;
+            let right = (2 * x + 1).min(last_x) * 4;
+            for channel in 0..4 {
+                let sum = u32::from(pixels[top + left + channel])
+                    + u32::from(pixels[top + right + channel])
+                    + u32::from(pixels[bottom + left + channel])
+                    + u32::from(pixels[bottom + right + channel]);
+                out.push(((sum + 2) / 4) as u8);
+            }
+        }
+    }
+
+    MipLevel { width: out_width as u32, height: out_height as u32, pixels: out }
 }
 
 /// The uniform sets one frame binds: model space with hull lighting, world
@@ -1213,5 +1286,37 @@ impl Viewport3D {
     /// Top-right corner rect for the navigation gizmo within the viewport.
     pub fn gizmo_rect(&self, viewport: ViewRect) -> ViewRect {
         crate::viewport::gizmo::gizmo_rect(viewport)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_mip_chain_runs_down_to_one_texel() {
+        let sizes = |width: u32, height: u32| -> Vec<(u32, u32)> {
+            let pixels = vec![0u8; (width * height * 4) as usize];
+            MipChain::build(width, height, &pixels).levels.iter().map(|level| (level.width, level.height)).collect()
+        };
+
+        assert!(sizes(1, 1).is_empty());
+        assert_eq!(sizes(8, 2), vec![(4, 1), (2, 1), (1, 1)]);
+        assert_eq!(sizes(300, 7).len(), 8);
+    }
+
+    #[test]
+    fn a_halved_level_averages_each_block_and_repeats_an_odd_edge() {
+        // 3x2: the right column has no partner and is averaged with itself.
+        let pixels: Vec<u8> = [[0u8, 0, 0, 255], [100, 0, 0, 255], [40, 0, 0, 255]]
+            .into_iter()
+            .chain([[200, 0, 0, 255], [100, 0, 0, 255], [80, 0, 0, 255]])
+            .flatten()
+            .collect();
+
+        let halved = halve(&pixels, 3, 2);
+
+        assert_eq!((halved.width, halved.height), (1, 1));
+        assert_eq!(halved.pixels, vec![100, 0, 0, 255]);
     }
 }

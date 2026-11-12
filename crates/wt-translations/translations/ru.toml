@@ -1947,3 +1947,10 @@ depth_charges = "Глубинные бомбы"
 aircraft = "Самолёты"
 other = "Прочее"
 misc = "Разное"
+
+[ui.model_view]
+thickness_from = "Толщина по %{ship} (%{hp})"
+thickness_unknown = "Толщина неизвестна: ни один корабль не несёт эту модель"
+thickness_other_ships = "Другие корабли"
+export_title = "Экспорт модели"
+export_tooltip = "Экспортировать модель в файл GLB"

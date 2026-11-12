@@ -27,6 +27,8 @@ use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::SvgRenderer;
 use gpui_kit::Task;
+use wowsunpack::export::model_library::ModelLibrary;
+use wowsunpack::export::mount_armor::MountArmorIndex;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_assets::ShipIconState;
@@ -56,6 +58,13 @@ pub(crate) const CLASS_ICON_TINT: u32 = 0xffffff;
 pub enum ArmorAssetsError {
     #[error("failed to load ship assets: {0}")]
     ShipAssets(String),
+}
+
+/// Why the model library could not be built from a loaded bundle.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ModelLibraryLoadError {
+    #[error("failed to build the model library: {0}")]
+    Build(String),
 }
 
 /// One loaded build's Armor Viewer data: the shared ship-export assets, the
@@ -138,6 +147,30 @@ pub fn spawn_load_armor_assets(
     let svg_renderer = cx.svg_renderer();
     cx.background_spawn(async move {
         load_armor_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider(), &svg_renderer)
+    })
+}
+
+/// What opening and exporting any catalogued model reads: the library over
+/// `assets.bin` and the index of which ship mounts which model, where a
+/// model's armor thickness comes from.
+pub struct ModelAssets {
+    pub library: Arc<ModelLibrary>,
+    pub mount_armor: MountArmorIndex,
+}
+
+/// Builds [`ModelAssets`] over `bundle`'s assets on the background executor.
+/// Separate from the bundle load so the ship list is usable while
+/// `assets.bin` is indexed.
+pub fn spawn_build_model_library(
+    bundle: Arc<ArmorAssetsBundle>,
+    cx: &App,
+) -> Task<Result<ModelAssets, ModelLibraryLoadError>> {
+    cx.background_spawn(async move {
+        let library =
+            bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build(format!("{report:?}")))?;
+        let mount_armor = MountArmorIndex::build(bundle.assets.metadata());
+
+        Ok(ModelAssets { library: Arc::new(library), mount_armor })
     })
 }
 

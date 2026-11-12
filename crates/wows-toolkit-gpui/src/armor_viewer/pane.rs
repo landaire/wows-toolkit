@@ -40,6 +40,7 @@
 //! past the panel's own small bounds -- see `legend.rs`'s module doc.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
@@ -68,10 +69,23 @@ use gpui_kit::component::WindowExt as _;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::ArmorAssetsError;
+use super::assets::ModelAssets;
+use super::assets::ModelLibraryLoadError;
+use super::assets::spawn_build_model_library;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
+use super::load_model::ModelLoadRequest;
+use super::load_model::ModelSceneError;
+use super::load_model::spawn_load_model_scene;
+use super::model_refs::HardpointTarget;
+use super::model_refs::ShipPartRef;
+use super::sidebar::ExportCatalogModelRequested;
+use super::sidebar::HardpointsToggled;
+use super::sidebar::ModelSelected;
+use super::viewport_view::SceneSource;
 use wows_replays::types::EntityId;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
+use wowsunpack::export::model_catalog::ModelPath;
 
 use super::export_dialog;
 use super::legend;
@@ -98,6 +112,7 @@ use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::CastShell;
+use super::viewport_view::LoadGeneration;
 use super::viewport_view::OpeningLayer;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
@@ -121,6 +136,16 @@ enum BundleState {
     Failed(String),
 }
 
+/// Load status of the model library and mount index that the Models list,
+/// model loads and model exports read.
+enum ModelsState {
+    /// Waiting on the ship bundle it is built over.
+    NotStarted,
+    Loading,
+    Ready(Arc<ModelAssets>),
+    Failed(String),
+}
+
 /// The ship catalogue as a reader outside the pane sees it.
 pub(crate) enum CatalogStatus<'a> {
     /// Not loaded yet; it arrives once the build's assets have been read.
@@ -141,6 +166,11 @@ pub struct ArmorViewerPane {
     dock: Entity<ViewportDock>,
     scene: SharedSceneDevice,
     bundle: BundleState,
+    /// The model library, built once the bundle has loaded.
+    models: ModelsState,
+    /// Whose hardpoints are marked, as the sidebar's checkboxes left them.
+    /// Every viewport draws the ones that belong to its scene.
+    hardpoint_targets: HashSet<HardpointTarget>,
     /// The export choices being collected, held so the read behind them can
     /// report into the dialog that is showing them.
     export_dialog: Option<Entity<export_dialog::ExportDialogState>>,
@@ -167,14 +197,6 @@ pub struct ArmorViewerPane {
     /// The fields of the shared defaults row this port has no control for,
     /// kept as read so a save here writes them back unchanged.
     unported_defaults: UnportedDefaults,
-    /// Bumped by every `start_ship_load` call and captured into that load's
-    /// background task; a completing task whose captured value no longer
-    /// matches this field was superseded by a later ship selection and its
-    /// result is discarded instead of overwriting `ship_load`/`viewport`.
-    /// Guards against rapid clicks (A then B) applying out of order, since
-    /// nothing otherwise constrains which of two in-flight loads finishes
-    /// last.
-    ship_load_generation: u64,
     /// Milestone 5 Task 9c: when set, every pane's camera is kept in lockstep
     /// with whichever pane last moved its own (`on_viewport_event`). Off by
     /// default, matching the egui app's own `mirror_cameras` default.
@@ -330,12 +352,18 @@ impl ArmorViewerPane {
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
         let common_settings_sub = cx.subscribe_in(&sidebar, window, Self::on_common_settings);
+        let model_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_model_selected);
+        let hardpoints_sub = cx.subscribe_in(&sidebar, window, Self::on_hardpoints_toggled);
+        let export_catalog_sub = cx.subscribe_in(&sidebar, window, Self::on_export_catalog_model_requested);
         // `dock`'s own `cx.notify()` (add/close/activate pane) only
         // invalidates `ViewportDock`'s render; without this, the common-
         // settings toggle row below -- gated on `dock.panes().len() > 1` --
         // goes stale after a close (e.g. stays visible once back down to one
         // pane) until some unrelated event happens to re-render this pane.
-        let dock_sub = cx.observe(&dock, |_this, _dock, cx| cx.notify());
+        let dock_sub = cx.observe(&dock, |this, _dock, cx| {
+            this.push_open_target(cx);
+            cx.notify();
+        });
         let dock_event_sub = cx.subscribe_in(&dock, window, Self::on_dock_event);
 
         let pen = PenetrationState::new(window, cx);
@@ -355,6 +383,8 @@ impl ArmorViewerPane {
             dock,
             scene,
             bundle: BundleState::NotStarted,
+            models: ModelsState::NotStarted,
+            hardpoint_targets: HashSet::new(),
             export_dialog: None,
             _export_dialog_subscription: None,
             ship_load: ShipLoadState::Idle,
@@ -364,7 +394,6 @@ impl ArmorViewerPane {
             playback_at: None,
             legend: LegendState::default(),
             unported_defaults: UnportedDefaults::default(),
-            ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
             opening_layer: OpeningLayer::default(),
@@ -380,6 +409,9 @@ impl ArmorViewerPane {
                 ship_selected_sub,
                 compare_split_sub,
                 export_requested_sub,
+                model_selected_sub,
+                hardpoints_sub,
+                export_catalog_sub,
                 common_settings_sub,
                 viewport_event_sub,
                 dock_sub,
@@ -718,6 +750,8 @@ impl ArmorViewerPane {
         });
         let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
         self._subscriptions.push(viewport_event_sub);
+        let targets = self.hardpoint_targets.clone();
+        viewport.update(cx, |view, cx| view.set_hardpoint_targets(targets, cx));
 
         viewport
     }
@@ -734,15 +768,15 @@ impl ArmorViewerPane {
             let source = active.read(cx);
             source
                 .current_armor()
-                .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
+                .map(|armor| (armor, source.camera(), source.synced_settings(), source.scene_source()))
         };
 
         let viewport = self.fresh_viewport(window, cx);
 
-        if let Some((armor, camera, synced, reload_source)) = clone_source {
+        if let Some((armor, camera, synced, scene_source)) = clone_source {
             viewport.update(cx, |view, cx| {
-                if let Some((bundle, param_index, display_name)) = reload_source {
-                    view.set_reload_source(bundle, param_index, display_name);
+                if let Some(source) = scene_source {
+                    view.set_scene_source(source);
                 }
                 view.show_armor(armor, self.opening_layer, cx);
                 view.set_camera(camera, cx);
@@ -905,6 +939,7 @@ impl ArmorViewerPane {
                 // The attacker combo is filled the moment the catalog lands,
                 // not lazily in a render pass.
                 self.pen.set_catalog(&bundle.catalog);
+                self.start_model_library(Arc::clone(&bundle), cx);
                 self.bundle = BundleState::Ready(bundle);
             }
             Err(e) => {
@@ -912,6 +947,149 @@ impl ArmorViewerPane {
                 self.bundle = BundleState::Failed(e.to_string());
             }
         }
+        cx.notify();
+    }
+
+    /// Indexes every model over `bundle`'s assets in the background, for the
+    /// sidebar's Models list and for opening one.
+    fn start_model_library(&mut self, bundle: Arc<ArmorAssetsBundle>, cx: &mut Context<Self>) {
+        if !matches!(self.models, ModelsState::NotStarted) {
+            return;
+        }
+        self.models = ModelsState::Loading;
+        let task = spawn_build_model_library(bundle, cx);
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| this.apply_model_library(result, cx));
+        })
+        .detach();
+    }
+
+    fn apply_model_library(&mut self, result: Result<ModelAssets, ModelLibraryLoadError>, cx: &mut Context<Self>) {
+        match result {
+            Ok(models) => {
+                let library = Arc::clone(&models.library);
+                self.sidebar.update(cx, |sidebar, cx| sidebar.set_model_library(library, cx));
+                self.models = ModelsState::Ready(Arc::new(models));
+            }
+            Err(e) => {
+                tracing::error!("model viewer: failed to build the model library: {e}");
+                self.sidebar.update(cx, |sidebar, cx| sidebar.set_model_library_failed(cx));
+                self.models = ModelsState::Failed(e.to_string());
+            }
+        }
+        cx.notify();
+    }
+
+    fn on_model_selected(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &ModelSelected,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_model(event.model.clone(), event.from_ship.clone(), cx);
+    }
+
+    /// Opens one catalogued model in the active pane. A re-click on the model
+    /// already shown there is ignored, as a ship's is.
+    pub(crate) fn open_model(&mut self, model: ModelPath, from_ship: Option<ShipPartRef>, cx: &mut Context<Self>) {
+        let active = self.dock.read(cx).active_viewport();
+        let wanted = super::model_refs::OpenTarget::Model { model: model.clone(), from_ship: from_ship.clone() };
+        if active.read(cx).open_target().as_ref() == Some(&wanted) {
+            return;
+        }
+        self.forget_incoming();
+        self.start_model_load(ModelLoadRequest::new(model, from_ship), cx);
+    }
+
+    fn start_model_load(&mut self, request: ModelLoadRequest, cx: &mut Context<Self>) {
+        let (BundleState::Ready(bundle), ModelsState::Ready(models)) = (&self.bundle, &self.models) else {
+            tracing::warn!("model viewer: model selected before the model library finished loading");
+            return;
+        };
+        let bundle = Arc::clone(bundle);
+        let models = Arc::clone(models);
+        // Captured now, as a ship load captures it: the result lands in the
+        // pane it was asked for even if another becomes active meanwhile.
+        let target_viewport = self.dock.read(cx).active_viewport();
+
+        let display_name = request.path.stem().to_string();
+        self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
+        let generation = target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.into(), cx));
+        cx.notify();
+
+        let task = spawn_load_model_scene(Arc::clone(&models), Arc::clone(&bundle), request.clone(), cx);
+        let source = SceneSource::Model { bundle, models, request };
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this
+                .update(cx, |this, cx| this.apply_model_load_result(generation, source, target_viewport, result, cx));
+        })
+        .detach();
+    }
+
+    fn apply_model_load_result(
+        &mut self,
+        generation: LoadGeneration,
+        source: SceneSource,
+        target_viewport: Entity<ViewportView>,
+        result: Result<LoadedShipArmor, ModelSceneError>,
+        cx: &mut Context<Self>,
+    ) {
+        // A newer selection in the same pane superseded this load.
+        if !target_viewport.read(cx).is_current_load(generation) {
+            return;
+        }
+        let display_name = source.display_name().to_string();
+        match result {
+            Ok(scene) => {
+                self.ship_load = ShipLoadState::Idle;
+                target_viewport.update(cx, |viewport, cx| {
+                    viewport.set_ship_loading(None, cx);
+                    viewport.set_scene_source(source);
+                    viewport.show_armor(Arc::new(scene), self.opening_layer, cx);
+                });
+            }
+            Err(e) => {
+                tracing::error!("model viewer: failed to load {display_name}: {e}");
+                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(None, cx));
+                self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
+            }
+        }
+        self.push_open_target(cx);
+        cx.notify();
+    }
+
+    /// Tells the sidebar what the active pane shows, so its row is marked.
+    fn push_open_target(&self, cx: &mut Context<Self>) {
+        let open = self.dock.read(cx).active_viewport().read(cx).open_target();
+        self.sidebar.update(cx, |sidebar, cx| sidebar.set_open_model(open, cx));
+    }
+
+    fn on_hardpoints_toggled(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &HardpointsToggled,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_hardpoints_visible(event.target.clone(), event.visible, cx);
+    }
+
+    /// Marks or unmarks `target`'s hardpoints in every pane, and tells the
+    /// sidebar which are marked.
+    pub(crate) fn set_hardpoints_visible(&mut self, target: HardpointTarget, visible: bool, cx: &mut Context<Self>) {
+        let changed =
+            if visible { self.hardpoint_targets.insert(target) } else { self.hardpoint_targets.remove(&target) };
+        if !changed {
+            return;
+        }
+        for viewport in self.dock.read(cx).panes().to_vec() {
+            let targets = self.hardpoint_targets.clone();
+            viewport.update(cx, |view, cx| view.set_hardpoint_targets(targets, cx));
+        }
+        self.sidebar.update(cx, |sidebar, cx| sidebar.set_hardpoint_visibility(&self.hardpoint_targets, cx));
         cx.notify();
     }
 
@@ -959,18 +1137,59 @@ impl ArmorViewerPane {
             return;
         };
         let assets = Arc::clone(bundle);
-        let param_index = event.param_index.clone();
-        let display_name = event.display_name.clone();
         // The hull the pane is showing, which is the one the reader is looking
         // at. A sidebar menu opened with no ship loaded seeds nothing.
         let seed_hull = self.dock.read(cx).active_viewport().read(cx).selected_hull();
+        let request = ExportRequest::Ship {
+            param_index: event.param_index.clone(),
+            display_name: event.display_name.clone(),
+            seed_hull,
+        };
+        self.ask_export(request, assets, window, cx);
+    }
 
+    fn on_export_catalog_model_requested(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &ExportCatalogModelRequested,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request = ModelLoadRequest::new(event.model.clone(), event.from_ship.clone());
+        self.export_catalog_model(request, window, cx);
+    }
+
+    /// Asks what one catalogued model's export should contain, then writes it
+    /// with the armor thickness `request` picks. A request before the model
+    /// library has loaded is a no-op.
+    pub(crate) fn export_catalog_model(
+        &mut self,
+        request: ModelLoadRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (BundleState::Ready(bundle), ModelsState::Ready(models)) = (&self.bundle, &self.models) else {
+            tracing::warn!("model viewer: export requested before the model library finished loading");
+            return;
+        };
+        let assets = Arc::clone(bundle);
+        let request = ExportRequest::Model { request, models: Arc::clone(models) };
+        self.ask_export(request, assets, window, cx);
+    }
+
+    /// Reads the remembered export choices, then opens the dialog on them.
+    fn ask_export(
+        &mut self,
+        request: ExportRequest,
+        assets: Arc<ArmorAssetsBundle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn_in(window, async move |this, cx| {
             let Ok(asked) = cx.update(|_window, cx| export_defaults(cx)) else { return };
             let defaults = asked.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                let ship = ExportRequest { param_index, display_name, seed_hull, defaults };
-                this.open_export_dialog(ship, assets, window, cx);
+                this.open_export_dialog(request, defaults, assets, window, cx);
             });
         })
         .detach();
@@ -979,21 +1198,24 @@ impl ArmorViewerPane {
     /// Puts the export choices to the reader, and writes the model they confirm.
     fn open_export_dialog(
         &mut self,
-        ship: ExportRequest,
+        request: ExportRequest,
+        defaults: wows_toolkit_viewmodel::armor::export::ExportDefaults,
         assets: Arc<ArmorAssetsBundle>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ExportRequest { param_index, display_name, seed_hull, defaults } = ship;
-        let state = cx.new(|cx| {
-            export_dialog::ExportDialogState::new(
+        let state = cx.new(|cx| match request {
+            ExportRequest::Ship { param_index, display_name, seed_hull } => export_dialog::ExportDialogState::new(
                 param_index,
                 display_name,
                 seed_hull,
                 defaults,
                 Arc::clone(&assets),
                 cx,
-            )
+            ),
+            ExportRequest::Model { request, models } => {
+                export_dialog::ExportDialogState::new_model(request, models, defaults, Arc::clone(&assets), cx)
+            }
         });
         self.export_dialog = Some(state.clone());
         self._export_dialog_subscription =
@@ -1050,7 +1272,7 @@ impl ArmorViewerPane {
     ) {
         let view = state.read(cx);
         let (options, remember) = view.confirmed();
-        let param_index = view.param_index().to_owned();
+        let target = view.target().clone();
         let display_name = view.display_name().to_owned();
 
         // Remembered when the reader says yes, not when they pick a file: the
@@ -1069,7 +1291,14 @@ impl ArmorViewerPane {
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
-                    let result = load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
+                    let result = match target {
+                        export_dialog::ExportTarget::Ship { param_index, .. } => {
+                            load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path)
+                        }
+                        export_dialog::ExportTarget::Model { request, models } => {
+                            super::load_model::export_model_glb(&models, &request, &options, &path)
+                        }
+                    };
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
                     result.map(|()| {
@@ -1135,11 +1364,12 @@ impl ArmorViewerPane {
         health: Option<f32>,
         cx: &mut Context<Self>,
     ) {
-        if !self.ship_loaded {
+        let active = self.dock.read(cx).active_viewport();
+        // Hits are in a ship's space; a model opened since has none to take.
+        if !self.ship_loaded || !active.read(cx).scene_features().is_some_and(|features| features.ship) {
             return;
         }
         self.playback_at = Some(at);
-        let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
             view.set_hit_health(health, cx);
             view.follow_hits(hits, cx);
@@ -1159,13 +1389,11 @@ impl ArmorViewerPane {
         // was requested for.
         let target_viewport = self.dock.read(cx).active_viewport();
 
-        self.ship_load_generation += 1;
-        let generation = self.ship_load_generation;
-
         self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         // The viewport shows nothing until a ship arrives, so it says what it
         // is waiting for rather than inviting a selection already made.
-        target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(Some(display_name.clone().into()), cx));
+        let generation =
+            target_viewport.update(cx, |viewport, cx| viewport.begin_load(display_name.clone().into(), cx));
         cx.notify();
 
         let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
@@ -1181,7 +1409,7 @@ impl ArmorViewerPane {
     #[allow(clippy::too_many_arguments)]
     fn apply_ship_load_result(
         &mut self,
-        generation: u64,
+        generation: LoadGeneration,
         param_index: String,
         display_name: String,
         bundle: Arc<ArmorAssetsBundle>,
@@ -1189,9 +1417,9 @@ impl ArmorViewerPane {
         result: Result<LoadedShipArmor, ShipLoadError>,
         cx: &mut Context<Self>,
     ) {
-        if generation != self.ship_load_generation {
-            // A newer ship selection superseded this load; discard the
-            // result instead of clobbering the current selection's state.
+        if !target_viewport.read(cx).is_current_load(generation) {
+            // A newer selection in the same pane superseded this load; discard
+            // the result instead of clobbering that selection's state.
             return;
         }
         match result {
@@ -1206,7 +1434,11 @@ impl ArmorViewerPane {
                     // re-export against, and `show_armor`'s own reset
                     // (`upload_armor_now`) is what clears the hull/LOD/module
                     // selection for this (possibly new) ship.
-                    viewport.set_reload_source(bundle, param_index, display_name.clone());
+                    viewport.set_scene_source(SceneSource::Ship {
+                        bundle,
+                        param_index,
+                        display_name: display_name.clone(),
+                    });
                     viewport.show_armor(Arc::new(armor), self.opening_layer, cx);
                     // After the armor, because showing it starts the ship
                     // again and would drop them.
@@ -1226,6 +1458,7 @@ impl ArmorViewerPane {
                 self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
             }
         }
+        self.push_open_target(cx);
         cx.notify();
     }
 
@@ -1406,7 +1639,9 @@ impl Render for ArmorViewerPane {
         // Legend floats over the whole pane (not just the viewport), gated
         // on a ship being loaded, matching the egui app's `any_ship_loaded`
         // window gate (`ui/tab.rs` ~627-628).
-        let show_legend = self.ship_loaded && self.legend.visible;
+        // A model without armor has no thicknesses for it to explain.
+        let active_armor = self.dock.read(cx).active_viewport().read(cx).scene_features().map(|f| f.armor);
+        let show_legend = self.legend.visible && active_armor.unwrap_or(self.ship_loaded);
         let legend_panel = show_legend.then(|| legend::render_panel(&self.legend, cx));
 
         div()
@@ -1458,8 +1693,50 @@ fn is_ship_already_loaded(loaded_param_index: Option<&str>, requested_param_inde
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use gpui_kit::AppContext as _;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use wowsunpack::export::hardpoint::Hardpoint;
+    use wowsunpack::export::hardpoint::HardpointKind;
+    use wowsunpack::export::hardpoint::HardpointName;
+    use wowsunpack::export::model_catalog::ModelPath;
+
+    use super::ArmorViewerPane;
     use super::is_ship_already_loaded;
     use super::other_pane_indices;
+    use crate::armor_viewer::load_model::fixtures;
+    use crate::armor_viewer::model_refs::HardpointTarget;
+
+    /// Ticking a model's hardpoints in the sidebar marks them in the pane
+    /// showing it, and unticking takes the markers away again.
+    #[gpui_kit::test]
+    fn a_hardpoint_toggle_marks_and_unmarks_the_open_model(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), ArmorViewerPane::new);
+        let turret = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 1.0];
+        let hardpoint = Hardpoint { name: HardpointName::new("HP_Muzzle"), kind: HardpointKind::Mount, transform };
+        let scene = Arc::new(fixtures::model_scene(turret.clone(), vec![hardpoint]));
+
+        let labels =
+            |pane: &ArmorViewerPane, cx: &gpui_kit::App| pane.active_viewport(cx).read(cx).hardpoint_labels().len();
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                pane.active_viewport(cx).update(cx, |view, cx| view.show_armor(scene, layer, cx));
+                assert_eq!(labels(pane, cx), 0, "nothing is marked yet");
+
+                pane.set_hardpoints_visible(HardpointTarget::Model(turret.clone()), true, cx);
+                assert_eq!(labels(pane, cx), 1, "the model's one hardpoint is marked");
+
+                pane.set_hardpoints_visible(HardpointTarget::Model(turret), false, cx);
+                assert_eq!(labels(pane, cx), 0, "and unmarked again");
+            })
+            .expect("the test window stays open");
+    }
 
     #[test]
     fn already_loaded_when_the_active_pane_holds_the_same_param_index() {
@@ -1561,11 +1838,16 @@ impl IncomingFire {
     }
 }
 
-/// Which ship an export dialog opens on, and what it opens showing.
-struct ExportRequest {
-    param_index: String,
-    display_name: String,
-    /// The hull the pane is showing, where there is one to seed from.
-    seed_hull: Option<String>,
-    defaults: wows_toolkit_viewmodel::armor::export::ExportDefaults,
+/// What an export dialog opens on.
+enum ExportRequest {
+    Ship {
+        param_index: String,
+        display_name: String,
+        /// The hull the pane is showing, where there is one to seed from.
+        seed_hull: Option<String>,
+    },
+    Model {
+        request: ModelLoadRequest,
+        models: Arc<ModelAssets>,
+    },
 }

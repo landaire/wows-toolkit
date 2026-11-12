@@ -1993,3 +1993,10 @@ depth_charges = "爆雷"
 aircraft = "航空機"
 other = "その他"
 misc = "その他の部品"
+
+[ui.model_view]
+thickness_from = "装甲厚: %{ship} (%{hp})"
+thickness_unknown = "装甲厚不明: このモデルを搭載する艦艇はありません"
+thickness_other_ships = "他の艦艇"
+export_title = "モデルをエクスポート"
+export_tooltip = "モデルを GLB ファイルにエクスポート"

@@ -56,10 +56,13 @@ use crate::viewport::types::LightingSettings;
 
 use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
+use super::load_model::MountRef;
+use super::load_ship::ArmorThickness;
 use super::load_ship::ArmorZone;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
+use super::viewport_view::SceneFeatures;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 
 use super::viewport_view::CameraRingSettings;
@@ -89,11 +92,16 @@ pub(super) fn render_tools(
     entity: &Entity<ViewportView>,
     filter: &OptionsFilter,
 ) -> Option<AnyElement> {
+    // An open model keeps only the tools it has anything for; with nothing
+    // open every tool is drawn, disabled.
+    let features = view.scene_features();
+    let armor = features.is_none_or(|features| features.armor);
+    let ship = features.is_none_or(|features| features.ship);
     let tools: Vec<AnyElement> = [
-        render_hidden_plates_button(view, entity, filter),
-        render_gaps_button(view, entity, filter),
-        render_splash_button(view, entity, filter),
-        render_splash_boxes_button(view, entity, filter),
+        armor.then(|| render_hidden_plates_button(view, entity, filter)).flatten(),
+        armor.then(|| render_gaps_button(view, entity, filter)).flatten(),
+        ship.then(|| render_splash_button(view, entity, filter)).flatten(),
+        ship.then(|| render_splash_boxes_button(view, entity, filter)).flatten(),
         render_export_button(view, entity, filter),
     ]
     .into_iter()
@@ -124,6 +132,9 @@ pub(super) fn mark() -> Hsla {
 pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportView>, cx: &App) -> PopupMenu {
     let view = entity.read(cx);
     let has_armor = view.has_armor();
+    let features = view.scene_features();
+    let armor = features.is_none_or(|features| features.armor);
+    let ship = features.is_none_or(|features| features.ship);
     let show_hidden = view.show_hidden_only();
     let gaps_shown = view.gaps().shown;
     let splash = view.splash_state();
@@ -138,45 +149,53 @@ pub(super) fn quick_toggle_items(mut menu: PopupMenu, entity: &Entity<ViewportVi
             entity.update(cx, |view, cx| apply(view, !checked, cx));
         })
     };
-    menu = menu
-        .item(toggle(
-            t!("ui.armor.show_hidden").into_owned(),
-            show_hidden,
-            has_armor,
-            ViewportView::set_show_hidden_only,
-        ))
-        .item(toggle(t!("ui.armor.gaps").into_owned(), gaps_shown, has_armor, ViewportView::set_show_gaps))
-        .item(toggle(
-            t!("ui.armor.splash_mode").into_owned(),
-            splash.shown,
-            splash.has_data,
-            ViewportView::set_splash_mode,
-        ))
-        .item(toggle(
-            t!("ui.armor.splash_boxes").into_owned(),
-            splash.boxes_shown,
-            splash.has_data,
-            ViewportView::set_show_splash_boxes,
-        ));
+    if armor {
+        menu = menu
+            .item(toggle(
+                t!("ui.armor.show_hidden").into_owned(),
+                show_hidden,
+                has_armor,
+                ViewportView::set_show_hidden_only,
+            ))
+            .item(toggle(t!("ui.armor.gaps").into_owned(), gaps_shown, has_armor, ViewportView::set_show_gaps));
+    }
+    if ship {
+        menu = menu
+            .item(toggle(
+                t!("ui.armor.splash_mode").into_owned(),
+                splash.shown,
+                splash.has_data,
+                ViewportView::set_splash_mode,
+            ))
+            .item(toggle(
+                t!("ui.armor.splash_boxes").into_owned(),
+                splash.boxes_shown,
+                splash.has_data,
+                ViewportView::set_show_splash_boxes,
+            ));
+    }
 
     if let Some(pane) = pane {
         let options_open = pane.read(cx).options_open();
         let pen_pane = pane.clone();
-        menu = menu
-            .item(PopupMenuItem::new(t!("ui.armor.pen_check").into_owned()).on_click(move |_event, _window, cx| {
-                pen_pane.update(cx, |pane, cx| pane.open_option_section(OptionSection::PenCheck, cx));
-            }))
-            .item(PopupMenuItem::new(t!("ui.armor.options_panel").into_owned()).checked(options_open).on_click(
+        if armor {
+            menu = menu.item(PopupMenuItem::new(t!("ui.armor.pen_check").into_owned()).on_click(
                 move |_event, _window, cx| {
-                    pane.update(cx, |pane, cx| pane.toggle_options(cx));
+                    pen_pane.update(cx, |pane, cx| pane.open_option_section(OptionSection::PenCheck, cx));
                 },
             ));
+        }
+        menu = menu.item(PopupMenuItem::new(t!("ui.armor.options_panel").into_owned()).checked(options_open).on_click(
+            move |_event, _window, cx| {
+                pane.update(cx, |pane, cx| pane.toggle_options(cx));
+            },
+        ));
     }
 
     let export_entity = entity.clone();
     menu.separator().item(PopupMenuItem::new(t!("ui.armor.export_model").into_owned()).disabled(!has_armor).on_click(
-        move |_event, _window, cx| {
-            export_entity.update(cx, |view, cx| view.open_export_confirm(cx));
+        move |_event, window, cx| {
+            export_entity.update(cx, |view, cx| view.open_export_confirm(window, cx));
         },
     ))
 }
@@ -634,10 +653,13 @@ fn render_export_button(
             .child(tool_label(label_text))
             .compact()
             .w_full()
-            .tooltip(t!("ui.armor.export_tooltip").to_string())
+            .tooltip(match view.scene_features() {
+                Some(SceneFeatures { ship: false, .. }) => t!("ui.model_view.export_tooltip").to_string(),
+                Some(_) | None => t!("ui.armor.export_tooltip").to_string(),
+            })
             .disabled(!has_armor)
-            .on_click(move |_, _window, cx| {
-                click_entity.update(cx, |view, cx| view.open_export_confirm(cx));
+            .on_click(move |_, window, cx| {
+                click_entity.update(cx, |view, cx| view.open_export_confirm(window, cx));
             })
             .into_any_element(),
     )
@@ -661,7 +683,7 @@ pub(crate) fn render_popover_content(
             view.expanded_zones.clone(),
             view.expanded_parts.clone(),
             view.popover_scroll.clone(),
-            view.display_settings.show_zero_mm,
+            view.show_zero_mm(),
         )
     };
 
@@ -742,14 +764,68 @@ pub(crate) fn render_popover_content(
     let scroll_area =
         div().id("armor-visibility-tree-scroll").max_h(px(360.)).overflow_y_scroll().track_scroll(&scroll).child(tree);
 
+    let thickness = (!filter.is_active()).then(|| render_thickness_source(entity, &armor)).flatten();
+
     Some(
         v_flex()
             .w_full()
             .gap_2()
+            .children(thickness)
             // The bulk switches act on every plate, not only the ones a filter
             // left showing, so they are put away while one is typed.
             .when(!filter.is_active(), |this| this.child(header).child(div().h(px(1.)).bg(border)))
             .child(div().relative().max_h(px(360.)).child(scroll_area).child(Scrollbar::vertical(&scroll)))
+            .into_any_element(),
+    )
+}
+
+/// Which ship a model's plate thickness is read from, with a picker for any
+/// other ship mounting it. `None` for a ship, whose own armor it is.
+fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmor) -> Option<AnyElement> {
+    let model = armor.model()?;
+    let label = match &model.thickness {
+        ArmorThickness::Ship(source) => {
+            t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.hp.as_str()).into_owned()
+        }
+        ArmorThickness::Unknown => t!("ui.model_view.thickness_unknown").into_owned(),
+    };
+    let current = match &model.thickness {
+        ArmorThickness::Ship(source) => Some(source.vehicle_param_index.clone()),
+        ArmorThickness::Unknown => None,
+    };
+
+    let picker = (model.thickness_choices.len() > 1).then(|| {
+        let entity = entity.clone();
+        let choices = model.thickness_choices.clone();
+        Button::new("model-thickness-pick")
+            .label(t!("ui.model_view.thickness_other_ships").into_owned())
+            .compact()
+            .dropdown_menu(move |mut menu, _window, _cx| {
+                for choice in &choices {
+                    let entity = entity.clone();
+                    let mount =
+                        MountRef { vehicle_param_index: choice.vehicle_param_index.clone(), hp: choice.hp.clone() };
+                    let checked = current.as_ref() == Some(&choice.vehicle_param_index);
+                    menu = menu.item(PopupMenuItem::new(choice.display_name.clone()).checked(checked).on_click(
+                        move |_event, _window, cx| {
+                            let mount = mount.clone();
+                            entity.update(cx, |view, cx| view.set_thickness_source(mount, cx));
+                        },
+                    ));
+                }
+                menu
+            })
+    });
+
+    Some(
+        h_flex()
+            .id("model-thickness-source")
+            .test_support()
+            .gap_2()
+            .items_center()
+            .flex_wrap()
+            .child(div().flex_1().min_w_0().text_xs().text_color(crate::theme::text_dim()).child(label))
+            .children(picker)
             .into_any_element(),
     )
 }
@@ -1350,15 +1426,23 @@ pub(crate) fn render_display_popover_content(
         }
     };
 
-    let model = model_rows(entity, groups, &snapshot, filter, cx);
-    let camera = display_group(
-        groups,
-        OptionSection::CameraRings,
-        t!("ui.armor.camera_rings").into_owned(),
-        filter,
-        cx,
-        |filter, cx| camera_rings_group(entity, &snapshot, filter, cx),
-    );
+    let features = entity.read(cx).scene_features();
+    let armor = features.is_none_or(|features| features.armor);
+    let ship = features.is_none_or(|features| features.ship);
+    let model = model_rows(entity, groups, &snapshot, ShownRows { armor, ship }, filter, cx);
+    // The camera orbits are the ship's own, which a model has none of.
+    let camera = ship
+        .then(|| {
+            display_group(
+                groups,
+                OptionSection::CameraRings,
+                t!("ui.armor.camera_rings").into_owned(),
+                filter,
+                cx,
+                |filter, cx| camera_rings_group(entity, &snapshot, filter, cx),
+            )
+        })
+        .flatten();
     let lighting = display_group(
         groups,
         OptionSection::Lighting,
@@ -1372,11 +1456,21 @@ pub(crate) fn render_display_popover_content(
     (!parts.is_empty()).then(|| v_flex().w_full().gap_2().children(parts).into_any_element())
 }
 
+/// Which of the display section's model rows the scene has a use for.
+#[derive(Clone, Copy)]
+struct ShownRows {
+    /// The legend, plate edges, 0 mm plates and the armor and marker opacity.
+    armor: bool,
+    /// The waterline.
+    ship: bool,
+}
+
 /// The settings at the top of the display section, about the model itself.
 fn model_rows(
     entity: &Entity<ViewportView>,
     groups: &DisplayGroups,
     snapshot: &DisplayPopoverSnapshot,
+    shown: ShownRows,
     filter: &OptionsFilter,
     cx: &mut App,
 ) -> Option<AnyElement> {
@@ -1435,54 +1529,64 @@ fn model_rows(
         setting(|d, on| d.show_waterline = on),
     );
 
-    let rows: Vec<AnyElement> = [
-        legend,
-        filtered_checkbox(
-            "armor-display-plate-edges",
-            t!("ui.armor.plate_edges").into_owned(),
-            display.show_plate_edges,
-            false,
-            filter,
-            setting(|d, on| d.show_plate_edges = on),
-        ),
-        waterline_box,
-        waterline_opacity.map(|row| div().pl(px(20.)).child(row).into_any_element()),
-        filtered_checkbox(
-            "armor-display-zero-mm",
-            t!("ui.armor.zero_mm_plates").into_owned(),
-            display.show_zero_mm,
-            false,
-            filter,
-            setting(|d, on| d.show_zero_mm = on),
-        ),
-        filtered_checkbox(
+    let waterline_rows = [waterline_box, waterline_opacity.map(|row| div().pl(px(20.)).child(row).into_any_element())];
+    let armor_rows = shown.armor.then(|| {
+        [
+            legend,
+            filtered_checkbox(
+                "armor-display-plate-edges",
+                t!("ui.armor.plate_edges").into_owned(),
+                display.show_plate_edges,
+                false,
+                filter,
+                setting(|d, on| d.show_plate_edges = on),
+            ),
+            filtered_checkbox(
+                "armor-display-zero-mm",
+                t!("ui.armor.zero_mm_plates").into_owned(),
+                display.show_zero_mm,
+                false,
+                filter,
+                setting(|d, on| d.show_zero_mm = on),
+            ),
+        ]
+    });
+    let opacity_rows = shown.armor.then(|| {
+        [
+            labeled_slider_row(t!("ui.armor.armor_opacity").into_owned(), &snapshot.armor_slider, false, filter, cx),
+            snapshot
+                .has_markers
+                .then(|| {
+                    labeled_slider_row(
+                        t!("ui.armor.marker_opacity").into_owned(),
+                        &snapshot.marker_slider,
+                        false,
+                        filter,
+                        cx,
+                    )
+                })
+                .flatten(),
+        ]
+    });
+
+    let rows: Vec<AnyElement> = armor_rows
+        .into_iter()
+        .flatten()
+        .chain(waterline_rows.into_iter().filter(|_| shown.ship))
+        .chain([filtered_checkbox(
             "armor-display-ship-center",
             t!("ui.armor.ship_center").into_owned(),
             display.show_ship_center,
             false,
             filter,
             setting(|d, on| d.show_ship_center = on),
-        ),
-        labeled_slider_row(t!("ui.armor.armor_opacity").into_owned(), &snapshot.armor_slider, false, filter, cx),
-        snapshot
-            .has_markers
-            .then(|| {
-                labeled_slider_row(
-                    t!("ui.armor.marker_opacity").into_owned(),
-                    &snapshot.marker_slider,
-                    false,
-                    filter,
-                    cx,
-                )
-            })
-            .flatten(),
+        )])
+        .chain(opacity_rows.into_iter().flatten())
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
-        labeled_slider_row(t!("ui.armor.roll").into_owned(), &snapshot.roll_slider, false, filter, cx),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+        .chain([labeled_slider_row(t!("ui.armor.roll").into_owned(), &snapshot.roll_slider, false, filter, cx)])
+        .flatten()
+        .collect();
 
     (!rows.is_empty()).then(|| v_flex().gap_2().children(rows).into_any_element())
 }

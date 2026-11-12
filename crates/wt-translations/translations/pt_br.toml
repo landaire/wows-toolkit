@@ -1947,3 +1947,10 @@ depth_charges = "Cargas de profundidade"
 aircraft = "Aeronaves"
 other = "Outros"
 misc = "Diversos"
+
+[ui.model_view]
+thickness_from = "Espessura de %{ship} (%{hp})"
+thickness_unknown = "Espessura desconhecida: nenhum navio monta este modelo"
+thickness_other_ships = "Outros navios"
+export_title = "Exportar modelo"
+export_tooltip = "Exportar o modelo para um arquivo GLB"

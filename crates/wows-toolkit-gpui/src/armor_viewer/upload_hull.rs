@@ -88,6 +88,38 @@ pub(crate) fn tex_brightness(rgba: &[u8]) -> f32 {
     (TARGET_HI / p95.max(0.05)).clamp(1.0, 4.0)
 }
 
+/// What a hull texture was made from.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum TextureKey {
+    /// A material's own albedo, by `.mfm` path.
+    Base(String),
+    /// The active camo's texture, by `.mfm` stem.
+    Camo(String),
+}
+
+/// The GPU textures one scene's hull meshes sample, made once per material
+/// and shared by every mesh using it. Valid for one device, one scene and one
+/// active camo: clear it when any of them changes.
+#[derive(Default)]
+pub(crate) struct HullTextureCache {
+    textures: HashMap<TextureKey, (wgpu::BindGroup, f32)>,
+}
+
+impl HullTextureCache {
+    pub(crate) fn clear(&mut self) {
+        self.textures.clear();
+    }
+
+    /// Drops the active camo's textures, keeping the materials' own.
+    pub(crate) fn forget_camo(&mut self) {
+        self.textures.retain(|key, _| matches!(key, TextureKey::Base(_)));
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.textures.len()
+    }
+}
+
 /// Re-uploads `armor`'s hull meshes: removes every previously-uploaded hull
 /// mesh (`hull_mesh_ids`, drained and replaced in place) and re-adds only the
 /// ones `hull_visibility` marks visible (absent/false = hidden, matching the
@@ -117,6 +149,7 @@ pub fn upload_hull_meshes(
     hull_opaque: bool,
     active_camo_textures: &super::camo::TexturesByPart,
     active_camo_uvs: &HashMap<String, UvTransform>,
+    texture_cache: &mut HullTextureCache,
 ) {
     for mid in hull_mesh_ids.drain(..) {
         viewport.remove_mesh(mid);
@@ -134,16 +167,38 @@ pub fn upload_hull_meshes(
         let has_uvs = mesh.uvs.len() == mesh.positions.len();
         let stem = mesh.mfm_path.as_deref().map(mfm_stem);
         // Active camo texture for this stem takes precedence; otherwise the base albedo.
-        let texture_data = stem
-            .and_then(|s| active_camo_textures.get(s))
-            .or_else(|| mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p)));
+        let camo_texture = stem.and_then(|s| active_camo_textures.get(s).map(|texture| (s, texture)));
+        let texture = match camo_texture {
+            Some((stem, texture)) => Some((TextureKey::Camo(stem.to_string()), texture)),
+            None => mesh.mfm_path.as_ref().and_then(|path| {
+                armor.hull_textures.get(path).map(|texture| (TextureKey::Base(path.clone()), texture))
+            }),
+        }
+        .filter(|_| has_uvs);
         // Only apply a tiled UV transform when this stem actually has an
         // active camo texture; otherwise the mesh falls back to base albedo
         // with its own UVs.
-        let camo_uv = stem.filter(|s| active_camo_textures.contains_key(*s)).and_then(|s| active_camo_uvs.get(s));
-        let has_texture = texture_data.is_some() && has_uvs;
+        let camo_uv = camo_texture.and_then(|(s, _)| active_camo_uvs.get(s));
+        let bound = texture.map(|(key, texture)| {
+            texture_cache
+                .textures
+                .entry(key)
+                .or_insert_with(|| {
+                    let bind_group = pipeline.create_texture_bind_group(
+                        device,
+                        queue,
+                        &texture.pixels,
+                        texture.width,
+                        texture.height,
+                        &texture.mips,
+                    );
+                    (bind_group, tex_brightness(&texture.pixels))
+                })
+                .clone()
+        });
+        let has_texture = bound.is_some();
 
-        let brightness = texture_data.map(|texture| tex_brightness(&texture.pixels)).unwrap_or(FALLBACK_TEX_BRIGHTNESS);
+        let brightness = bound.as_ref().map_or(FALLBACK_TEX_BRIGHTNESS, |(_, brightness)| *brightness);
         let fallback_color: [f32; 4] =
             [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
@@ -182,12 +237,11 @@ pub fn upload_hull_meshes(
         if mesh.indices.is_empty() {
             continue;
         }
-        let mid = if let Some(texture) = texture_data.filter(|_| has_uvs) {
-            let tex_bind_group =
-                pipeline.create_texture_bind_group(device, queue, &texture.pixels, texture.width, texture.height);
-            viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bind_group)
-        } else {
-            viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)
+        let mid = match bound {
+            Some((bind_group, _)) => {
+                viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, bind_group)
+            }
+            None => viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer),
         };
         viewport.set_lit(mid, true);
         hull_mesh_ids.push(mid);

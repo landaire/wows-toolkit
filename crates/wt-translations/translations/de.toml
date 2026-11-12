@@ -1993,3 +1993,10 @@ depth_charges = "Wasserbomben"
 aircraft = "Flugzeuge"
 other = "Andere"
 misc = "Sonstiges"
+
+[ui.model_view]
+thickness_from = "Dicke von %{ship} (%{hp})"
+thickness_unknown = "Dicke unbekannt: kein Schiff trägt dieses Modell"
+thickness_other_ships = "Andere Schiffe"
+export_title = "Modell exportieren"
+export_tooltip = "Modell als GLB-Datei exportieren"

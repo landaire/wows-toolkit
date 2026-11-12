@@ -1993,3 +1993,10 @@ depth_charges = "Dieptebommen"
 aircraft = "Vliegtuigen"
 other = "Anders"
 misc = "Overig"
+
+[ui.model_view]
+thickness_from = "Dikte van %{ship} (%{hp})"
+thickness_unknown = "Dikte onbekend: geen schip voert dit model"
+thickness_other_ships = "Andere schepen"
+export_title = "Model exporteren"
+export_tooltip = "Het model naar een GLB-bestand exporteren"

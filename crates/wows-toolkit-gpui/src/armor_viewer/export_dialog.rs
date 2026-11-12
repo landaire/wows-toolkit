@@ -1,8 +1,9 @@
-//! What goes into an exported ship model, and what it costs.
+//! What goes into an exported ship or model, and what it costs.
 //!
 //! The choices are the shared ones (`wows_toolkit_viewmodel::armor::export`), so
 //! this collects the same contents, hull, level of detail, texture cap and camo
 //! set the egui dialog does and remembers the same answers for the next ship.
+//! A single model has no hull or camo to choose, so those rows are left out.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -27,6 +28,10 @@ use wows_toolkit_viewmodel::armor::export::draft_to_options;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
+use wowsunpack::export::model_catalog::ModelPath;
+use wowsunpack::export::model_library::ModelLibrary;
+use wowsunpack::export::model_library::ModelLoadOptions;
+use wowsunpack::export::model_library::TextureDecode;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::export::ship::ShipModelContext;
@@ -34,15 +39,20 @@ use wowsunpack::export::size_estimate::ExportSizeModel;
 use wowsunpack::export::size_estimate::SchemeLadderStatus;
 use wowsunpack::export::size_estimate::SizeEstimate;
 
-/// The ship the dialog has read, enough to offer its levels of detail and its
-/// camo schemes.
+use super::assets::ModelAssets;
+use super::load_model::ModelLoadRequest;
+
+/// What the dialog has read of its target, enough to offer its levels of
+/// detail and its camo schemes.
 ///
-/// `context` is kept so a camo ticked afterwards can be priced without reading
-/// the ship again.
+/// `context` is a ship's, kept so a camo ticked afterwards can be priced
+/// without reading the ship again. A model has none and is not priced.
 struct ShipMeta {
     hull_lod_count: usize,
     camo_schemes: Vec<CamoSchemeInfo>,
-    context: Arc<ShipModelContext>,
+    context: Option<Arc<ShipModelContext>>,
+    /// Whether there is armor to export; a model may carry none.
+    has_armor: bool,
 }
 
 /// How far the read of the ship has got.
@@ -50,6 +60,22 @@ enum MetaState {
     Loading,
     Loaded(ShipMeta),
     Failed(String),
+}
+
+/// What an export dialog writes.
+#[derive(Clone)]
+pub(crate) enum ExportTarget {
+    Ship {
+        param_index: String,
+        /// `(raw upgrade key, label)`, in the hull vocabulary the pane's own
+        /// picker uses, so one ship is described the same way in both places.
+        hull_upgrades: Vec<(String, String)>,
+    },
+    Model {
+        /// The model and the mount its armor thickness is read from.
+        request: ModelLoadRequest,
+        models: Arc<ModelAssets>,
+    },
 }
 
 /// How far the read of the ship's texture ladders has got.
@@ -80,13 +106,10 @@ enum SizeLine {
 /// for the redraw.
 pub(crate) struct Changed;
 
-/// A pending ship model export, and the choices behind it.
+/// A pending ship or model export, and the choices behind it.
 pub(crate) struct ExportDialogState {
-    param_index: String,
+    target: ExportTarget,
     display_name: String,
-    /// `(raw upgrade key, label)`, in the hull vocabulary the pane's own picker
-    /// uses, so one ship is described the same way in both places.
-    hull_upgrades: Vec<(String, String)>,
     meta: MetaState,
     size: SizeState,
     /// The camo ladders being read, so the same set is not asked for twice while
@@ -112,6 +135,31 @@ impl ExportDialogState {
         cx: &mut Context<Self>,
     ) -> Self {
         let hull_upgrades = hull_upgrades_for(&assets.assets, &param_index);
+        let target = ExportTarget::Ship { param_index, hull_upgrades };
+        Self::open(target, display_name, seed_hull, defaults, assets, cx)
+    }
+
+    /// Opens on one catalogued model.
+    pub(crate) fn new_model(
+        request: ModelLoadRequest,
+        models: Arc<ModelAssets>,
+        defaults: ExportDefaults,
+        assets: Arc<super::assets::ArmorAssetsBundle>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let display_name = request.path.stem().to_string();
+        let target = ExportTarget::Model { request, models };
+        Self::open(target, display_name, None, defaults, assets, cx)
+    }
+
+    fn open(
+        target: ExportTarget,
+        display_name: String,
+        seed_hull: Option<String>,
+        defaults: ExportDefaults,
+        assets: Arc<super::assets::ArmorAssetsBundle>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let draft = ExportDraft {
             contents: defaults.contents,
             hull: seed_hull,
@@ -120,9 +168,8 @@ impl ExportDialogState {
             camos: BTreeSet::new(),
         };
         let mut state = Self {
-            param_index,
+            target,
             display_name,
-            hull_upgrades,
             meta: MetaState::Loading,
             size: SizeState::Loading,
             pricing: BTreeSet::new(),
@@ -147,12 +194,20 @@ impl ExportDialogState {
         let reading = self.generation;
 
         let assets = Arc::clone(&self.assets);
-        let param_index = self.param_index.clone();
+        let target = self.target.clone();
         let hull = self.draft.hull.clone();
         cx.spawn(async move |this, cx| {
-            let read = cx.background_spawn(async move { read_ship_meta(&assets.assets, &param_index, hull) }).await;
+            let read = cx
+                .background_spawn(async move {
+                    match &target {
+                        ExportTarget::Ship { param_index, .. } => read_ship_meta(&assets.assets, param_index, hull),
+                        ExportTarget::Model { request, models } => read_model_meta(&models.library, &request.path),
+                    }
+                })
+                .await;
             let context = match read {
-                Ok((meta, context)) => {
+                Ok(meta) => {
+                    let context = meta.context.clone();
                     let landed = this.update(cx, |this, cx| {
                         if this.generation != reading {
                             return false;
@@ -177,6 +232,17 @@ impl ExportDialogState {
                     });
                     return;
                 }
+            };
+            // Only a ship's texture ladders are modelled; a model's size line
+            // stays silent.
+            let Some(context) = context else {
+                let _ = this.update(cx, |this, cx| {
+                    if this.generation == reading {
+                        this.size = SizeState::Loaded(None);
+                        cx.emit(Changed);
+                    }
+                });
+                return;
             };
 
             let priced = cx
@@ -205,6 +271,10 @@ impl ExportDialogState {
     /// same appearance.
     fn adopt_meta(&mut self, meta: ShipMeta) {
         self.draft.lod = self.draft.lod.min(meta.hull_lod_count.saturating_sub(1));
+        // A model without armor has only its meshes to write.
+        if !meta.has_armor {
+            self.draft.contents = ExportContents::Mesh;
+        }
         self.draft.camos.clear();
         if let Some(scheme) = default_camo(&meta.camo_schemes) {
             self.draft.camos.insert(scheme);
@@ -267,7 +337,7 @@ impl ExportDialogState {
             return;
         }
         let MetaState::Loaded(meta) = &self.meta else { return };
-        let context = Arc::clone(&meta.context);
+        let Some(context) = meta.context.as_ref().map(Arc::clone) else { return };
         self.pricing.extend(asking.iter().copied());
 
         cx.spawn(async move |this, cx| {
@@ -332,8 +402,8 @@ impl ExportDialogState {
         (draft_to_options(&self.draft), ExportDefaults::from_draft(&self.draft))
     }
 
-    pub(crate) fn param_index(&self) -> &str {
-        &self.param_index
+    pub(crate) fn target(&self) -> &ExportTarget {
+        &self.target
     }
 
     pub(crate) fn display_name(&self) -> &str {
@@ -356,7 +426,7 @@ fn read_ship_meta(
     assets: &wowsunpack::export::ship::ShipAssets,
     param_index: &str,
     hull: Option<String>,
-) -> Result<(ShipMeta, Arc<ShipModelContext>), String> {
+) -> Result<ShipMeta, String> {
     use wowsunpack::game_params::types::GameParamProvider;
 
     let param = assets.metadata().game_param_by_index(param_index);
@@ -371,12 +441,27 @@ fn read_ship_meta(
     let context = assets.load_ship_from_vehicle(&vehicle, &probe).map_err(|report| format!("{report:?}"))?;
     let context = Arc::new(context);
     let source = context.camo_texture_source().map_err(|report| format!("{report:?}"))?;
-    let meta = ShipMeta {
+
+    Ok(ShipMeta {
         hull_lod_count: context.hull_lod_count(),
         camo_schemes: source.scheme_infos(),
-        context: Arc::clone(&context),
-    };
-    Ok((meta, context))
+        context: Some(context),
+        has_armor: true,
+    })
+}
+
+/// The model as the dialog needs it: its levels of detail and whether it
+/// carries armor. Reads geometry but decodes no texture.
+fn read_model_meta(library: &ModelLibrary, model: &ModelPath) -> Result<ShipMeta, String> {
+    let options = ModelLoadOptions { textures: TextureDecode::None, ..ModelLoadOptions::default() };
+    let loaded = library.load_model(model, &options).map_err(|report| format!("{report:?}"))?;
+
+    Ok(ShipMeta {
+        hull_lod_count: loaded.lod_count(),
+        camo_schemes: Vec::new(),
+        context: None,
+        has_armor: loaded.has_armor(),
+    })
 }
 
 /// The hull upgrades this ship offers, in the pane's own vocabulary.
@@ -413,8 +498,19 @@ pub(crate) fn render(state: &Entity<ExportDialogState>, dialog: Dialog, _window:
     let draft_lod = view.draft.lod;
     let draft_res = view.draft.texture_res;
     let ticked = view.draft.camos.clone();
-    let hulls = view.hull_upgrades.clone();
-    let title = format!("{} - {}", t!("ui.armor.export_model"), view.display_name);
+    let hulls = match &view.target {
+        ExportTarget::Ship { hull_upgrades, .. } => hull_upgrades.clone(),
+        ExportTarget::Model { .. } => Vec::new(),
+    };
+    let has_armor = match &view.meta {
+        MetaState::Loaded(meta) => meta.has_armor,
+        MetaState::Loading | MetaState::Failed(_) => true,
+    };
+    let heading = match &view.target {
+        ExportTarget::Ship { .. } => t!("ui.armor.export_model"),
+        ExportTarget::Model { .. } => t!("ui.model_view.export_title"),
+    };
+    let title = format!("{heading} - {}", view.display_name);
 
     let loading = matches!(view.meta, MetaState::Loading);
     // No hull chosen means the first one, which is what the exporter takes and
@@ -432,26 +528,21 @@ pub(crate) fn render(state: &Entity<ExportDialogState>, dialog: Dialog, _window:
         .gap_2()
         .w(px(460.))
         .child(row(t!("ui.armor.export.contents").into_owned(), {
-            h_flex().gap_1().children(
-                [ExportContents::Mesh, ExportContents::Armor, ExportContents::MeshAndArmor]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ix, contents)| {
-                        let state = state.clone();
-                        let chosen = contents == draft_contents;
-                        crate::ui::selectable(
-                            ("armor-export-contents", ix),
-                            chosen,
-                            Button::new(("armor-export-contents-button", ix))
-                                .label(t!(contents_label_key(contents)).into_owned())
-                                .compact()
-                                .selected(chosen)
-                                .on_click(move |_event, _window, cx: &mut App| {
-                                    state.update(cx, |state, cx| state.edit(cx, |draft| draft.contents = contents));
-                                }),
-                        )
-                    }),
-            )
+            h_flex().gap_1().children(offered_contents(has_armor).enumerate().map(|(ix, contents)| {
+                let state = state.clone();
+                let chosen = contents == draft_contents;
+                crate::ui::selectable(
+                    ("armor-export-contents", ix),
+                    chosen,
+                    Button::new(("armor-export-contents-button", ix))
+                        .label(t!(contents_label_key(contents)).into_owned())
+                        .compact()
+                        .selected(chosen)
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            state.update(cx, |state, cx| state.edit(cx, |draft| draft.contents = contents));
+                        }),
+                )
+            }))
         }))
         .when(!hulls.is_empty(), |this| {
             this.child(row(t!("ui.armor.export.hull").into_owned(), {
@@ -710,4 +801,25 @@ fn camo_groups(schemes: &[CamoSchemeInfo]) -> Vec<CamoGroup<'_>> {
         groups.push(CamoGroup { heading, schemes: group });
     }
     groups
+}
+
+/// What an export can be asked to contain: a model without armor has only its
+/// meshes to write.
+fn offered_contents(has_armor: bool) -> impl Iterator<Item = ExportContents> {
+    [ExportContents::Mesh, ExportContents::Armor, ExportContents::MeshAndArmor]
+        .into_iter()
+        .filter(move |contents| has_armor || !contents.includes_armor())
+}
+
+#[cfg(test)]
+mod tests {
+    use wowsunpack::export::ship::ExportContents;
+
+    use super::offered_contents;
+
+    #[test]
+    fn a_model_without_armor_is_offered_only_its_meshes() {
+        assert_eq!(offered_contents(false).collect::<Vec<_>>(), vec![ExportContents::Mesh]);
+        assert_eq!(offered_contents(true).count(), 3);
+    }
 }

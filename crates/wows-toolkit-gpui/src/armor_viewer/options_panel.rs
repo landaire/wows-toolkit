@@ -77,10 +77,14 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         );
 
     let tools = popover::render_tools(viewport.read(cx), &viewport, &filter);
+    // Nothing open yet keeps every section, each saying so; an open model
+    // drops what it has nothing for.
+    let features = viewport.read(cx).scene_features();
+    let has_armor = features.is_none_or(|features| features.armor);
     let shift = crate::status_bar::ModifierKey::Shift.label(cx);
     // Where the trajectory toggle was: a Shift-click casts, with nothing to
     // switch on first, and this is where a reader looks for how.
-    let cast_hint = (!filter.is_active()).then(|| {
+    let cast_hint = (!filter.is_active() && has_armor).then(|| {
         h_flex()
             .id("armor-cast-hint")
             .test_support()
@@ -110,41 +114,53 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         open: view.option_sections_open(),
     };
 
-    let sections: Vec<AnyElement> = [
-        section(
-            view,
-            pane,
-            OptionSection::Trajectory,
-            t!("ui.armor.trajectory").as_ref(),
-            &filter,
-            cx,
-            |filter, cx| {
-                // Nothing in it is a setting a filter could find.
-                (!filter.is_active()).then(|| super::trajectory_panel::render(view, pane, &viewport, cx))
-            },
-        ),
-        section(view, pane, OptionSection::PenCheck, t!("ui.armor.pen_check").as_ref(), &filter, cx, |filter, cx| {
-            (!filter.is_active()).then(|| super::analysis::render_section(view, pane, cx))
-        }),
-        section(
-            view,
-            pane,
-            OptionSection::Visibility,
-            t!("ui.armor.armor_options").as_ref(),
-            &filter,
-            cx,
-            |filter, cx| popover::render_popover_content(&visibility, filter, cx),
-        ),
+    // Not built at all for a model without armor: a collapsed section costs
+    // nothing, but an open one builds its whole body.
+    let armor_sections = if has_armor {
+        vec![
+            section(
+                view,
+                pane,
+                OptionSection::Trajectory,
+                t!("ui.armor.trajectory").as_ref(),
+                &filter,
+                cx,
+                |filter, cx| {
+                    // Nothing in it is a setting a filter could find.
+                    (!filter.is_active()).then(|| super::trajectory_panel::render(view, pane, &viewport, cx))
+                },
+            ),
+            section(
+                view,
+                pane,
+                OptionSection::PenCheck,
+                t!("ui.armor.pen_check").as_ref(),
+                &filter,
+                cx,
+                |filter, cx| (!filter.is_active()).then(|| super::analysis::render_section(view, pane, cx)),
+            ),
+            section(
+                view,
+                pane,
+                OptionSection::Visibility,
+                t!("ui.armor.armor_options").as_ref(),
+                &filter,
+                cx,
+                |filter, cx| popover::render_popover_content(&visibility, filter, cx),
+            ),
+        ]
+    } else {
+        Vec::new()
+    };
+    let mesh_sections = [
         section(view, pane, OptionSection::Hull, t!("ui.armor.hull_toggle").as_ref(), &filter, cx, |filter, cx| {
             popover::render_hull_popover_content(&hull, filter, cx)
         }),
         section(view, pane, OptionSection::Display, t!("ui.armor.display").as_ref(), &filter, cx, |filter, cx| {
             popover::render_display_popover_content(&display, &groups, filter, cx)
         }),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    ];
+    let sections: Vec<AnyElement> = armor_sections.into_iter().chain(mesh_sections).flatten().collect();
     let nothing_matched = filter.is_active() && tools.is_none() && sections.is_empty();
 
     let body =
@@ -238,6 +254,8 @@ fn section(
 // `gpui_kit::*` re-export of GPUI's own `test` macro.
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use gpui_kit::AppContext as _;
     use gpui_kit::Bounds;
     use gpui_kit::Pixels;
@@ -248,7 +266,12 @@ mod tests {
     use gpui_kit::size;
     use gpui_kit::test::TestWindowExt as _;
 
+    use wowsunpack::export::model_catalog::ModelPath;
+
+    use crate::armor_viewer::load_model::fixtures;
+    use crate::armor_viewer::load_ship::LoadedShipArmor;
     use crate::armor_viewer::pane::ArmorViewerPane;
+    use crate::armor_viewer::pane::OptionSection;
 
     /// The rail's tool buttons.
     const TOOLS: [&str; 5] = [
@@ -307,6 +330,61 @@ mod tests {
                 assert!(inside_across(button, label), "{tool}'s label at {label:?} is inside the button at {button:?}");
                 assert!(inside_across(rail(window), button), "{tool} at {button:?} is inside the rail");
             }
+        })
+        .expect("the test window stays open");
+    }
+
+    fn turret() -> ModelPath {
+        ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path")
+    }
+
+    /// Hands the active pane `scene`, as a finished model load does.
+    fn show(window: WindowHandle<ArmorViewerPane>, scene: LoadedShipArmor, cx: &mut TestAppContext) {
+        window
+            .update(cx, |pane, _window, cx| {
+                let layer = pane.opening_layer();
+                pane.active_viewport(cx).update(cx, |view, cx| view.show_armor(Arc::new(scene), layer, cx));
+            })
+            .expect("the test window stays open");
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the test window stays open");
+    }
+
+    fn section(which: OptionSection) -> String {
+        format!("armor-options-section-{which:?}")
+    }
+
+    #[gpui_kit::test]
+    fn a_model_without_armor_keeps_only_the_mesh_and_display_sections(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+        show(window, fixtures::model_scene(turret(), Vec::new()), cx);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            for gone in [OptionSection::Trajectory, OptionSection::PenCheck, OptionSection::Visibility] {
+                assert!(window.try_find(section(gone)).is_none(), "{gone:?} has nothing to act on");
+            }
+            for kept in [OptionSection::Hull, OptionSection::Display] {
+                assert!(window.try_find(section(kept)).is_some(), "{kept:?} stays");
+            }
+            for gone in TOOLS.iter().filter(|tool| **tool != "armor-export-trigger") {
+                assert!(window.try_find(*gone).is_none(), "{gone} is for armor or a ship");
+            }
+            assert!(window.try_find("armor-export-trigger").is_some(), "a model still exports");
+            assert!(window.try_find("armor-cast-hint").is_none(), "there is nothing to cast at");
+        })
+        .expect("the test window stays open");
+    }
+
+    #[gpui_kit::test]
+    fn a_model_with_armor_keeps_the_armor_sections_but_not_the_ship_tools(cx: &mut TestAppContext) {
+        let window = open_at_double_size(cx);
+        show(window, fixtures::armored_model_scene(turret()), cx);
+
+        cx.update_window(window.into(), |_, window, _cx| {
+            for kept in [OptionSection::Trajectory, OptionSection::PenCheck, OptionSection::Visibility] {
+                assert!(window.try_find(section(kept)).is_some(), "{kept:?} reads the model's plates");
+            }
+            assert!(window.try_find("armor-show-hidden-button").is_some(), "plate tools stay");
+            assert!(window.try_find("armor-splash-button").is_none(), "splash boxes are a ship's");
         })
         .expect("the test window stays open");
     }
