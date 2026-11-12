@@ -202,7 +202,7 @@ kept so the next audit does not re-report them.
     reader can see. The global switches decide whether a layer is drawn at
     all and follow the per-ship choices, so asking for one ship's ranges turns
     the layer on and clearing the last one puts it away again. Show Realtime
-    Armor is not on it yet: that opens the armor viewer on a ship, which is a
+    Armor is not on it yet: that opens the model viewer on a ship, which is a
     tab away rather than a filter.
   - The team-advantage breakdown reads on hover over the strip the score bar
     is drawn in. The rows themselves moved to `wows_core::advantage`
@@ -214,14 +214,14 @@ kept so the next audit does not re-report them.
     the annotation toolbar -- are in. What each needed:
     - **Show Realtime Armor** from the per-ship menu. The egui app opens an
       armor viewer bound to a `RealtimeArmorBridge` that streams shot hits at
-      it as playback advances. The port's armor viewer has no shot-hit
+      it as playback advances. The port's model viewer has no shot-hit
       pipeline at all -- no `ResolvedShotHit`, no bridge, no per-ship shot
       timeline -- so this is that pipeline, not a button.
       `extract_timeline_and_shots` already hands back the per-ship timelines,
       and `ShipShotTimeline` now answers the questions a viewport asks of one
       -- the hits taken by a clock, the hits gained since the last one, and
       the health at a clock -- so the data half is shared and ready. What is
-      missing is the armor viewer's side. Its bookkeeping is in:
+      missing is the model viewer's side. Its bookkeeping is in:
       `armor_viewer::realtime::RealtimeArmorFeed` holds a ship's timeline and
       answers what it had taken by the moment playback is showing, reporting a
       step forward as the hits it gained and a step backwards as "draw the
@@ -240,7 +240,7 @@ kept so the next audit does not re-report them.
       ship the battle recorded hits on, since where those landed is the whole
       point of the viewer; which ship it was comes off the roster the frame
       already carries, because a ship command says who is in it but not which
-      ship it is. Choosing it hands the hits up to the tab the armor viewer
+      ship it is. Choosing it hands the hits up to the tab the model viewer
       lives in, since the viewport owns neither. Each hit is drawn as a small
       cross of three bars rather than a sphere: it reads at any angle, it is
       not mistaken for part of the ship, and its size is a setting. Every hit
@@ -355,7 +355,7 @@ kept so the next audit does not re-report them.
       cannot come out different colours.
       The chooser that assigns a ship to a placed one is on the toolbar,
       shown while one is picked out: the same search over the same catalogue
-      the armor viewer lists ships from, matched on the folded name each
+      the model viewer lists ships from, matched on the folded name each
       entry carries. Choosing one sets the class and the identity and leaves
       the build stock, which is where the egui chooser leaves it. The
       matches are worked out as the box is typed in rather than while the
@@ -543,7 +543,7 @@ kept so the next audit does not re-report them.
   and badges the replays that arrive while another tab is shown. The egui app
   keeps its workspaces for the session only.
 
-## Armor Viewer
+## Model Viewer
 
 - [done] The navigation gizmo drew and reacted with no ship loaded.
 - [done] A ship's own row now offers "Compare (split view)"; the header

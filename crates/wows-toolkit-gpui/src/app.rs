@@ -484,7 +484,7 @@ impl AppTab {
             AppTab::Stats | AppTab::DirectoryStats(_) => "ui.tabs.stats",
             AppTab::PlayerTracker => "ui.tabs.player_tracker",
             AppTab::Search => "ui.tabs.search",
-            AppTab::ArmorViewer => "ui.tabs.armor_viewer",
+            AppTab::ArmorViewer => "ui.tabs.model_viewer",
             AppTab::Unpacker => "ui.tabs.unpacker",
             AppTab::Launcher => "ui.tabs.launcher",
         }
@@ -503,7 +503,7 @@ impl AppTab {
             AppTab::Stats | AppTab::DirectoryStats(_) => crate::icons::Glyph::ChartColumn,
             AppTab::PlayerTracker => crate::icons::Glyph::VenetianMask,
             AppTab::Search => crate::icons::Glyph::Search,
-            AppTab::ArmorViewer => crate::icons::Glyph::Shield,
+            AppTab::ArmorViewer => crate::icons::Glyph::Box,
             AppTab::Unpacker => crate::icons::Glyph::Archive,
             AppTab::Launcher => crate::icons::Glyph::Rocket,
         }
