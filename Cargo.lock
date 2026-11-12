@@ -1487,6 +1487,7 @@ dependencies = [
 name = "buck-reindeer-features"
 version = "0.1.0"
 dependencies = [
+ "accesskit_consumer 0.38.0",
  "dhat",
  "egui_kittest",
  "filetime",
@@ -1499,6 +1500,10 @@ dependencies = [
  "rustls-graviola",
  "sevenz-rust2",
  "tar",
+ "zgui-platform-headless",
+ "zgui-render-vector-vello",
+ "zgui-render-wgpu",
+ "zgui-testkit-scene",
 ]
 
 [[package]]
