@@ -28,10 +28,13 @@ pub mod minimap_preview;
 pub mod model;
 pub mod paths;
 pub mod render_defaults;
+pub mod replay_dir;
 pub mod replay_index;
 #[cfg(any(test, feature = "test-support"))]
 pub mod sample;
 pub mod shareable;
+#[cfg(any(test, feature = "test-support"))]
+pub mod simulated_watch;
 pub mod sort;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

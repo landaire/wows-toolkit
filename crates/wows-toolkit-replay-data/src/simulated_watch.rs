@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::browser_view::DirChange;
-use super::browser_view::WatchSink;
-use super::browser_view::WatchStopCause;
+use crate::replay_dir::DirChange;
+use crate::replay_dir::WatchSink;
+use crate::replay_dir::WatchStopCause;
 
 #[derive(Default)]
 struct Watches {
@@ -35,7 +35,7 @@ thread_local! {
 
 /// One listing's watch. Dropping it ends the watch, as dropping a filesystem
 /// watcher does.
-pub(crate) struct Registration {
+pub struct Registration {
     id: u64,
 }
 
@@ -57,17 +57,17 @@ impl Drop for Registration {
 }
 
 /// Routes every watch started on this thread from now on through [`report`].
-pub(crate) fn install() {
+pub fn install() {
     WATCHES.with(|watches| *watches.borrow_mut() = Some(Watches::default()));
 }
 
 /// Whether this thread has [`install`]ed simulated watches.
-pub(super) fn is_installed() -> bool {
+pub fn is_installed() -> bool {
     WATCHES.with(|watches| watches.borrow().is_some())
 }
 
 /// Registers a watch on `dir`, unless watches on it are [`refuse`]d.
-pub(super) fn register(dir: &Path, sink: WatchSink) -> Result<Registration, WatchStopCause> {
+pub fn register(dir: &Path, sink: WatchSink) -> Result<Registration, WatchStopCause> {
     WATCHES.with(|watches| {
         let mut watches = watches.borrow_mut();
         let watches = watches.as_mut().expect("simulated watches are installed");
@@ -85,7 +85,7 @@ pub(super) fn register(dir: &Path, sink: WatchSink) -> Result<Registration, Watc
 }
 
 /// How many watches are open on `dir`.
-pub(crate) fn watching(dir: &Path) -> usize {
+pub fn watching(dir: &Path) -> usize {
     WATCHES.with(|watches| {
         watches.borrow().as_ref().map_or(0, |watches| watches.open.iter().filter(|watch| watch.dir == dir).count())
     })
@@ -93,14 +93,14 @@ pub(crate) fn watching(dir: &Path) -> usize {
 
 /// How many times a watch on `dir` has been asked for, whether or not it
 /// started.
-pub(crate) fn asked(dir: &Path) -> usize {
+pub fn asked(dir: &Path) -> usize {
     WATCHES.with(|watches| {
         watches.borrow().as_ref().map_or(0, |watches| watches.asked.iter().filter(|asked| *asked == dir).count())
     })
 }
 
 /// Refuses every watch asked for on `dir` from now on, or stops refusing them.
-pub(crate) fn refuse(dir: &Path, refused: bool) {
+pub fn refuse(dir: &Path, refused: bool) {
     WATCHES.with(|watches| {
         let mut watches = watches.borrow_mut();
         let watches = watches.as_mut().expect("simulated watches are installed");
@@ -112,7 +112,7 @@ pub(crate) fn refuse(dir: &Path, refused: bool) {
 }
 
 /// Reports `change` to every watch open on `dir`, and says how many it reached.
-pub(crate) fn report(dir: &Path, change: DirChange) -> usize {
+pub fn report(dir: &Path, change: DirChange) -> usize {
     WATCHES.with(|watches| {
         let watches = watches.borrow();
         let Some(watches) = watches.as_ref() else { return 0 };
@@ -123,7 +123,7 @@ pub(crate) fn report(dir: &Path, change: DirChange) -> usize {
 
 /// Reports an error from the watcher to every watch open on `dir`, as notify
 /// does from its own thread.
-pub(crate) fn fail(dir: &Path, error: &str) {
+pub fn fail(dir: &Path, error: &str) {
     WATCHES.with(|watches| {
         let mut watches = watches.borrow_mut();
         let Some(watches) = watches.as_mut() else { return };
@@ -135,7 +135,7 @@ pub(crate) fn fail(dir: &Path, error: &str) {
 
 /// Tells every watch open on `dir` that the watcher dropped events, as notify
 /// does when the kernel's queue overflows.
-pub(crate) fn overflow(dir: &Path) {
+pub fn overflow(dir: &Path) {
     WATCHES.with(|watches| {
         let mut watches = watches.borrow_mut();
         let Some(watches) = watches.as_mut() else { return };
@@ -148,7 +148,7 @@ pub(crate) fn overflow(dir: &Path) {
 
 /// Panics on every watch open on `dir`, as the watcher's thread does when it
 /// dies: each sink is dropped by the unwinding.
-pub(crate) fn crash(dir: &Path, message: &'static str) {
+pub fn crash(dir: &Path, message: &'static str) {
     for sink in take(dir) {
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             let _held = sink;
@@ -160,7 +160,7 @@ pub(crate) fn crash(dir: &Path, message: &'static str) {
 
 /// Ends every watch open on `dir` without a word, as a watcher's thread that
 /// returns does.
-pub(crate) fn exit(dir: &Path) {
+pub fn exit(dir: &Path) {
     drop(take(dir));
 }
 

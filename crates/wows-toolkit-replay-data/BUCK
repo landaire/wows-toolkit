@@ -17,9 +17,11 @@ REPLAY_DATA_COMMON_DEPS = [
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:escaper",
+    "//third-party/rust:futures",
     "//third-party/rust:gettext",
     "//third-party/rust:image",
     "//third-party/rust:jiff",
+    "//third-party/rust:notify",
     "//third-party/rust:rkyv",
     "//third-party/rust:rootcause",
     "//third-party/rust:rust-i18n",
@@ -33,6 +35,7 @@ REPLAY_DATA_COMMON_DEPS = [
 
 REPLAY_DATA_DEPS = REPLAY_DATA_COMMON_DEPS + [
     "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-services:wows_toolkit_services",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
 ]
 
@@ -40,6 +43,7 @@ REPLAY_DATA_DEPS = REPLAY_DATA_COMMON_DEPS + [
 # does not also link the shipping builds.
 REPLAY_DATA_TEST_SUPPORT_DEPS = REPLAY_DATA_COMMON_DEPS + [
     "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 ]
 

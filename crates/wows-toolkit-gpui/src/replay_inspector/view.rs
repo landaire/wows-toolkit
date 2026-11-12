@@ -52,7 +52,6 @@ use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
-use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
 use super::empty_map::sample_map;
@@ -78,6 +77,7 @@ use folders::ReplayFolder;
 use folders::SavedList;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
 
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.

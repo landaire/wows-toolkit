@@ -8,7 +8,7 @@
 //! `available_builds`/`latest_build` selection dropped -- this module only
 //! needs the replays directory, not a loaded game build).
 //! `wows_toolkit_replay_data::install::resolve_replays_dir` ports that lookup;
-//! `scan_replay_files` then lists `*.wowsreplay` files
+//! `wows_toolkit_replay_data::replay_dir::scan_replay_files` then lists `*.wowsreplay` files
 //! (skipping `temp.wowsreplay`, matching `task/replays.rs::replay_filepaths`)
 //! and reads each one's header via `ReplayFile::meta_from_file` -- plaintext
 //! metadata only, no packet decryption/decompression, so this is safe to run
@@ -71,6 +71,23 @@ use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
 use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_ATTEMPTS;
+use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_RETRY;
+use wows_toolkit_replay_data::replay_dir::DirChange;
+use wows_toolkit_replay_data::replay_dir::DirWatch;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
+use wows_toolkit_replay_data::replay_dir::ScanProgress;
+use wows_toolkit_replay_data::replay_dir::ScannedDir;
+use wows_toolkit_replay_data::replay_dir::ScannedReplay;
+use wows_toolkit_replay_data::replay_dir::WatchMessage;
+use wows_toolkit_replay_data::replay_dir::WatchSink;
+use wows_toolkit_replay_data::replay_dir::WatchState;
+use wows_toolkit_replay_data::replay_dir::WatchStopCause;
+use wows_toolkit_replay_data::replay_dir::missing_builds;
+use wows_toolkit_replay_data::replay_dir::read_replay;
+use wows_toolkit_replay_data::replay_dir::report_missed;
+use wows_toolkit_replay_data::replay_dir::scan_replay_files;
+use wows_toolkit_replay_data::replay_dir::start_watch;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::PanicReport;
@@ -104,21 +121,6 @@ use super::table::resolve_color;
 /// no resolvable translation, once game data is loaded -- mirroring
 /// `Replay::vehicle_name`'s own fallback (`mod.rs:2580`).
 const SPECTATOR_LABEL: &str = "Spectator";
-
-/// One replay's header-only scan result, before ship/map translation (see the
-/// module doc). `ship_id` is the relation-0 vehicle's `shipId`, mirroring
-/// `Replay::player_vehicle` (`mod.rs:2576`); `raw_ship`/`raw_map` are the
-/// untranslated fallbacks `translate_replay` uses while `game_data` is not
-/// yet loaded.
-struct RawReplay {
-    path: PathBuf,
-    listed: ListedReplay,
-    /// The version and build the replay names, kept because a build number
-    /// alone does not identify data to fetch: build numbers are per server, so a
-    /// download falls back on the version to find the nearest published build.
-    /// `None` when the header's version does not parse.
-    version: Option<Version>,
-}
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
 /// looked up by tree-item id during rendering. Groups need no side table:
@@ -245,24 +247,6 @@ enum ScanStatus {
     Failed(ScanError),
 }
 
-/// How far the directory scan has got.
-///
-/// The walk that finds the candidate files is a single cheap pass, so `total`
-/// is known before the first meta is read; `done` then climbs through it.
-/// A total of zero means the walk itself is still running, which reads as
-/// "scanning" with no denominator to state.
-#[derive(Clone, Copy, Default)]
-struct ScanProgress {
-    done: usize,
-    total: usize,
-}
-
-/// Files read between one progress report and the next.
-///
-/// Reporting every file would post a message and a repaint per meta read,
-/// which is more work than the read itself on a warm directory.
-const SCAN_REPORT_EVERY: usize = 16;
-
 /// Reasons `start_scan` can fail before it ever reaches the background
 /// thread. Only the case `start_scan` actually produces is represented; the
 /// per-file read failures inside `scan_replay_files` are logged and skipped
@@ -331,20 +315,8 @@ pub enum ReplayBrowserEvent {
     },
 }
 
-/// A build the listing needs and nothing on this machine has.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingBuild {
-    pub build: u32,
-    /// The version its replays name, for the cross-server fallback when the
-    /// repository has no exact build.
-    pub version: Option<String>,
-    /// How many listed replays were recorded on it, so the reader can judge
-    /// whether the download is worth it.
-    pub replays: usize,
-}
-
 pub struct ReplayBrowser {
-    files: Vec<RawReplay>,
+    files: Vec<ScannedReplay>,
     /// A directory the reader opened instead of the install's, if any.
     chosen_directory: Option<PathBuf>,
     /// How far the running scan has got. `None` when none is running.
@@ -462,7 +434,7 @@ impl ReplayBrowser {
     /// Seeds the listing with a replay at `path`, as a scan would. Test-only.
     #[cfg(test)]
     pub(crate) fn seed_listing_for_test(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
-        self.files.push(RawReplay {
+        self.files.push(ScannedReplay {
             version: None,
             path,
             listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
@@ -489,7 +461,7 @@ impl ReplayBrowser {
         date_time: &str,
         cx: &mut Context<Self>,
     ) {
-        self.files.push(RawReplay {
+        self.files.push(ScannedReplay {
             version: Version::try_from_client_exe(&format!("{},{build}", version.replace('.', ","))),
             path,
             listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
@@ -811,7 +783,7 @@ impl ReplayBrowser {
     /// Every listed replay as a forced re-index sees it, in listing order.
     pub fn reindex_candidates(&self) -> Vec<ReindexCandidate> {
         let scope = self.index_scope();
-        self.files.iter().map(|file| reindex_candidate(file, &scope)).collect()
+        self.files.iter().map(|file| file.reindex_candidate(&scope)).collect()
     }
 
     /// Asks for `paths` to be read again and their index entries rewritten.
@@ -825,7 +797,7 @@ impl ReplayBrowser {
             .files
             .iter()
             .filter(|file| wanted.contains(&file.path))
-            .map(|file| reindex_candidate(file, &scope))
+            .map(|file| file.reindex_candidate(&scope))
             .collect();
         if candidates.is_empty() {
             return;
@@ -1214,18 +1186,7 @@ impl ReplayBrowser {
         messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
         cx: &mut Context<Self>,
     ) {
-        cx.background_spawn(async move {
-            // A directory that cannot be read cannot be watched either, which
-            // the watch reports.
-            let Ok(entries) = std::fs::read_dir(&dir) else { return };
-            for entry in entries.flatten() {
-                let Some(path) = listed_replay(&entry) else { continue };
-                if !walked.contains(&path) {
-                    let _ = messages.unbounded_send(WatchMessage::Missed(path));
-                }
-            }
-        })
-        .detach();
+        cx.background_spawn(async move { report_missed(&dir, &walked, &messages) }).detach();
     }
 
     fn is_current_watch(&self, scan_generation: u64, watch_generation: u64) -> bool {
@@ -2405,70 +2366,6 @@ impl Render for ReplayBrowser {
     }
 }
 
-/// What a scan read of a directory.
-struct ScannedDir {
-    files: Vec<RawReplay>,
-    /// The replay files the scan settled: those it read, and those it could
-    /// not read that were last written before it began. The watch started
-    /// after it reports the rest, which arrived or were still being written.
-    walked: HashSet<PathBuf>,
-}
-
-/// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
-/// reads each one's header-only metadata. Ports
-/// `task/replays.rs::replay_filepaths`'s filter (minus the creation-time
-/// sort, which `build_browser_tree` redoes by path anyway) plus a per-file
-/// `ReplayFile::meta_from_file` read. A file that fails to parse (corrupt,
-/// mid-write, or from a format this parser does not understand) is logged
-/// and skipped rather than aborting the whole scan.
-fn scan_replay_files(
-    replays_dir: &Path,
-    reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
-) -> ScannedDir {
-    let began = std::time::SystemTime::now();
-    let Ok(entries) = std::fs::read_dir(replays_dir) else {
-        return ScannedDir { files: Vec::new(), walked: HashSet::new() };
-    };
-
-    // The walk is separated from the meta reads so the listing can say how
-    // many files there are to read before it starts reading them.
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        candidates.extend(listed_replay(&entry));
-    }
-    let total = candidates.len();
-    let mut walked = HashSet::with_capacity(total);
-    let _ = reports.unbounded_send(ScanProgress { done: 0, total });
-
-    let mut out = Vec::with_capacity(total);
-    for (read, path) in candidates.into_iter().enumerate() {
-        match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => {
-                walked.insert(path.clone());
-                out.push(RawReplay {
-                    version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
-                    listed: ListedReplay::from_meta(&meta),
-                    path,
-                });
-            }
-            Err(err) => {
-                tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta");
-                // A time that cannot be read leaves the file to be read again.
-                let written = std::fs::metadata(&path).and_then(|metadata| metadata.modified());
-                if written.is_ok_and(|written| written < began) {
-                    walked.insert(path);
-                }
-            }
-        }
-        let done = read + 1;
-        if done % SCAN_REPORT_EVERY == 0 || done == total {
-            let _ = reports.unbounded_send(ScanProgress { done, total });
-        }
-    }
-
-    ScannedDir { files: out, walked }
-}
-
 /// What the listing says while it waits for the game data.
 ///
 /// The version comes from the install's own `preferences.xml`, so the line names
@@ -2492,295 +2389,6 @@ fn force_reindex_label(count: usize) -> String {
     }
 }
 
-/// One listed replay as a forced re-index sees it.
-fn reindex_candidate(file: &RawReplay, scope: &SourceScope) -> ReindexCandidate {
-    ReindexCandidate::from_listing(file.path.clone(), scope.clone(), file.version, &file.listed.date_time)
-}
-
-/// The listed builds nothing on this machine can read, with how many replays
-/// each one accounts for.
-///
-/// Ports the set the egui app offers to download after a directory scan
-/// (`app.rs`'s `DirectoryScanned` arm). A replay whose header names no build is
-/// not counted: nothing could be fetched for it.
-fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuild> {
-    let mut counted: std::collections::BTreeMap<u32, MissingBuild> = std::collections::BTreeMap::new();
-    for file in files {
-        let Some(build) = file.listed.build else { continue };
-        let entry = counted.entry(build).or_insert_with(|| MissingBuild { build, version: None, replays: 0 });
-        entry.replays += 1;
-        if entry.version.is_none() {
-            entry.version = file.version.as_ref().map(wows_toolkit_replay_data::force_reindex::version_said);
-        }
-    }
-
-    counted.into_values().filter(|missing| !cache.can_read_build(missing.build, missing.version.as_deref())).collect()
-}
-
-/// Whether a listing's directory watch is running.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum WatchState {
-    /// Not started: the listing starts it when its scan finishes.
-    Starting,
-    Running,
-    /// Stopped; `next` says whether a restart is waiting.
-    Stopped {
-        cause: WatchStopCause,
-        next: NextStep,
-    },
-}
-
-/// Why a directory watch stopped, or never started.
-///
-/// No watcher at all is a platform or resource failure, while an unwatchable
-/// directory is usually a network share or one that has since gone.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum WatchStopCause {
-    #[error("no filesystem watcher could be created: {error}")]
-    NoWatcher { error: String },
-    #[error("the directory could not be watched: {error}")]
-    NotWatchable { error: String },
-    #[error("the watcher reported an error: {error}")]
-    Backend { error: String },
-    #[error("the watched directory was moved or removed")]
-    DirectoryGone,
-    #[error("the watcher panicked: {report}")]
-    Panicked { report: PanicReport },
-    #[error("the watcher's thread ended")]
-    Exited,
-}
-
-impl WatchStopCause {
-    /// What the reader is shown. The two start failures read as the egui app
-    /// words them.
-    pub fn said(&self) -> String {
-        match self {
-            Self::NoWatcher { error } => t!("error.file_watcher_creation", error = error).into_owned(),
-            Self::NotWatchable { error } => t!("error.replay_dir_watch", error = error).into_owned(),
-            Self::Backend { error } => t!("ui.replay_folders.watch_cause_backend", error = error).into_owned(),
-            Self::DirectoryGone => t!("ui.replay_folders.watch_cause_gone").into_owned(),
-            Self::Panicked { report } => t!("ui.replay_folders.watch_cause_panicked", error = report).into_owned(),
-            Self::Exited => t!("ui.replay_folders.watch_cause_exited").into_owned(),
-        }
-    }
-}
-
-/// What the watcher saw happen to one replay.
-///
-/// Carried rather than three channels, so the reads stay in the order the
-/// directory reported them: a replay created and then written to must not be
-/// read in the other order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DirChange {
-    Appeared(PathBuf),
-    Changed(PathBuf),
-    Removed(PathBuf),
-}
-
-impl DirChange {
-    fn path(&self) -> &Path {
-        match self {
-            Self::Appeared(path) | Self::Changed(path) | Self::Removed(path) => path,
-        }
-    }
-}
-
-/// What a directory watch sends its listing.
-pub(crate) enum WatchMessage {
-    Change(DirChange),
-    /// The watcher dropped events, so the directory is read again.
-    Rescan,
-    /// A replay the scan did not walk, found once the watch had started.
-    Missed(PathBuf),
-    Stopped(WatchStopCause),
-}
-
-/// The end of a directory watch that runs on the watcher's own thread.
-///
-/// Says when the watch stops: on an error from the watcher, on its directory
-/// being removed, and on a panic, whether in this code or in the watcher's,
-/// which drops this as it unwinds the thread.
-pub(crate) struct WatchSink {
-    dir: PathBuf,
-    messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
-    stopped: bool,
-    /// Cleared when this is dropped, which the watcher's thread does as it
-    /// ends.
-    thread_alive: Arc<AtomicBool>,
-}
-
-impl WatchSink {
-    fn new(dir: PathBuf, messages: futures::channel::mpsc::UnboundedSender<WatchMessage>) -> Self {
-        Self { dir, messages, stopped: false, thread_alive: Arc::new(AtomicBool::new(true)) }
-    }
-
-    pub(crate) fn handle(&mut self, event: notify::Result<notify::Event>) {
-        if self.stopped {
-            return;
-        }
-
-        let forwarded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.forward(event)));
-        let cause = match forwarded {
-            Ok(None) => return,
-            Ok(Some(cause)) => cause,
-            Err(payload) => WatchStopCause::Panicked { report: PanicReport::caught(payload.as_ref()) },
-        };
-        self.stop(cause);
-    }
-
-    /// Passes on what happened to a finished replay, or says why the watch
-    /// has stopped.
-    fn forward(&self, event: notify::Result<notify::Event>) -> Option<WatchStopCause> {
-        let event = match event {
-            Ok(event) => event,
-            Err(err) => return Some(WatchStopCause::Backend { error: err.to_string() }),
-        };
-        // The watch goes with its directory. A move reads as a rename of the
-        // directory itself, after which inotify follows it to its new path.
-        let gone = matches!(
-            event.kind,
-            notify::EventKind::Remove(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
-        );
-        if gone && event.paths.contains(&self.dir) {
-            return Some(WatchStopCause::DirectoryGone);
-        }
-        if event.need_rescan() {
-            let _ = self.messages.unbounded_send(WatchMessage::Rescan);
-            return None;
-        }
-
-        let make = match event.kind {
-            notify::EventKind::Create(_)
-            | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
-                DirChange::Appeared
-            }
-            // A replay written to again: a re-save, a copy that landed
-            // before the writer had finished with it, or battle results
-            // added to a battle the client left early. Windows reports a
-            // content change as `Any`.
-            notify::EventKind::Modify(notify::event::ModifyKind::Data(_) | notify::event::ModifyKind::Any) => {
-                DirChange::Changed
-            }
-            notify::EventKind::Remove(_) => DirChange::Removed,
-            _ => return None,
-        };
-        for path in event.paths {
-            if is_finished_replay(&path) {
-                self.change(make(path));
-            }
-        }
-
-        None
-    }
-
-    /// Sends `change` to the listing, saying whether it is still there to
-    /// read it. It is gone once the directory changes or the app closes.
-    pub(crate) fn change(&self, change: DirChange) -> bool {
-        self.messages.unbounded_send(WatchMessage::Change(change)).is_ok()
-    }
-
-    fn stop(&mut self, cause: WatchStopCause) {
-        self.stopped = true;
-        // A listing that has gone has nothing to restart.
-        let _ = self.messages.unbounded_send(WatchMessage::Stopped(cause));
-    }
-}
-
-impl Drop for WatchSink {
-    fn drop(&mut self) {
-        self.thread_alive.store(false, Ordering::Release);
-        // Dropped by a panic unwinding the watcher's thread, which ends the
-        // watch with it.
-        if std::thread::panicking() && !self.stopped {
-            self.stop(WatchStopCause::Panicked { report: PanicReport::unwinding() });
-        }
-    }
-}
-
-/// A watcher on notify's own thread; dropping it ends the watch.
-struct FilesystemWatch {
-    watcher: ManuallyDrop<notify::RecommendedWatcher>,
-    thread_alive: Arc<AtomicBool>,
-}
-
-impl Drop for FilesystemWatch {
-    fn drop(&mut self) {
-        // notify's inotify watcher panics as it is dropped once its thread has
-        // ended, so one whose thread has ended is leaked instead.
-        if self.thread_alive.load(Ordering::Acquire) {
-            // SAFETY: dropped once, here, and never used again.
-            unsafe { ManuallyDrop::drop(&mut self.watcher) };
-        }
-    }
-}
-
-/// Holds a directory's watch open; dropping it ends the watch.
-enum DirWatch {
-    Filesystem {
-        _watch: FilesystemWatch,
-    },
-    #[cfg(test)]
-    Simulated {
-        _registration: super::simulated_watch::Registration,
-    },
-}
-
-fn is_finished_replay(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
-        && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
-}
-
-/// The replay a directory entry names, when the listing shows it. The scan
-/// and the check for replays the watch missed both read entries through
-/// this, so a file one of them lists is never news to the other.
-///
-/// A symlink counts when it leads to a file: a replays directory of links
-/// into another install is a reader's own arrangement.
-fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
-    let path = entry.path();
-    if !is_finished_replay(&path) {
-        return None;
-    }
-    let file_type = entry.file_type().ok()?;
-    let is_file = file_type.is_file() || (file_type.is_symlink() && path.is_file());
-    is_file.then_some(path)
-}
-
-/// Starts watching `dir`, sending what happens in it to `sink`.
-fn start_watch(dir: &Path, sink: WatchSink) -> Result<DirWatch, WatchStopCause> {
-    // The test scheduler refuses wakeups from notify's own thread, so a test
-    // reports changes itself.
-    #[cfg(test)]
-    if super::simulated_watch::is_installed() {
-        return super::simulated_watch::register(dir, sink)
-            .map(|registration| DirWatch::Simulated { _registration: registration });
-    }
-
-    filesystem_watch(dir, sink).map(|watch| DirWatch::Filesystem { _watch: watch })
-}
-
-/// Watches `dir` on notify's own thread.
-fn filesystem_watch(dir: &Path, mut sink: WatchSink) -> Result<FilesystemWatch, WatchStopCause> {
-    use notify::Watcher as _;
-
-    let thread_alive = Arc::clone(&sink.thread_alive);
-    let watcher = notify::recommended_watcher(move |event| sink.handle(event))
-        .map_err(|err| WatchStopCause::NoWatcher { error: err.to_string() })?;
-    let mut watch = FilesystemWatch { watcher: ManuallyDrop::new(watcher), thread_alive };
-    watch
-        .watcher
-        .watch(dir, notify::RecursiveMode::NonRecursive)
-        .map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
-
-    Ok(watch)
-}
-
-/// How long to keep retrying a replay the watcher has just reported, and how
-/// long to wait between attempts. The file appears before the game has
-/// finished writing its header, so the first read usually fails.
-const APPEARED_REPLAY_ATTEMPTS: usize = 10;
-const APPEARED_REPLAY_RETRY: std::time::Duration = std::time::Duration::from_millis(300);
-
 /// Reads the header of a replay the watcher reported, retrying while the game
 /// finishes writing it. `None` once the attempts run out, which is what a file
 /// that is not a replay after all looks like.
@@ -2789,19 +2397,14 @@ const APPEARED_REPLAY_RETRY: std::time::Duration = std::time::Duration::from_mil
 /// background executor for it would serialise every other background job
 /// behind one replay, and would stall the single-threaded test executor
 /// outright.
-async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawReplay> {
+async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<ScannedReplay> {
     for attempt in 0..APPEARED_REPLAY_ATTEMPTS {
         if attempt > 0 {
             cx.background_executor().timer(APPEARED_REPLAY_RETRY).await;
         }
         let read = path.clone();
-        let parsed = cx.background_spawn(async move { ReplayFile::meta_from_file(&read).ok() }).await;
-        if let Some(meta) = parsed {
-            return Some(RawReplay {
-                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe),
-                listed: ListedReplay::from_meta(&meta),
-                path,
-            });
+        if let Some(scanned) = cx.background_spawn(async move { read_replay(read) }).await {
+            return Some(scanned);
         }
     }
     tracing::warn!(path = %path.display(), "replay browser: a new replay never became readable");
@@ -3020,52 +2623,6 @@ mod tests {
         assert!(!unnamed.contains("0.10.5.0"));
     }
 
-    /// A build nothing on this machine can read is reported once, with how many
-    /// of the listed replays are waiting on it, so the offer to fetch it can say
-    /// what it is for. A build the cache holds is not reported at all.
-    #[test]
-    fn the_listing_reports_only_the_builds_nothing_can_read() {
-        use std::path::PathBuf;
-
-        let cache_dir = tempfile::tempdir().expect("a temp directory");
-        std::fs::create_dir_all(cache_dir.path().join("0.10.5_100")).expect("the dump directory is created");
-        std::fs::write(cache_dir.path().join("0.10.5_100").join("metadata.toml"), "").expect("the dump is marked");
-
-        let listed = |build: Option<u32>, version: &str| super::RawReplay {
-            path: PathBuf::from(format!("{}-{version}.wowsreplay", build.unwrap_or_default())),
-            version: (!version.is_empty()).then(|| {
-                let client_exe = format!("{},{}", version.replace('.', ","), build.unwrap_or_default());
-                wowsunpack::data::Version::try_from_client_exe(&client_exe).expect("the test version parses")
-            }),
-            listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
-                ship_id: None,
-                map_name: String::new(),
-                game_type: String::new(),
-                scenario: String::new(),
-                date_time: String::new(),
-                build,
-            },
-        };
-
-        let files = vec![
-            listed(Some(100), "0.10.5"),
-            listed(Some(200), "0.11.0"),
-            listed(Some(200), "0.11.0"),
-            // A header naming no build: nothing could be fetched for it.
-            listed(None, ""),
-        ];
-
-        // A directory that is not an install, so only the cache can answer.
-        let cache = wows_toolkit_replay_data::load::GameDataCache::new(PathBuf::from("G:/does-not-exist"))
-            .with_cache_dir(&cache_dir.path().to_string_lossy());
-
-        let missing = super::missing_builds(&files, &cache);
-        assert_eq!(missing.len(), 1, "the cached build is not offered, got {missing:?}");
-        assert_eq!(missing[0].build, 200);
-        assert_eq!(missing[0].version.as_deref(), Some("0.11.0"));
-        assert_eq!(missing[0].replays, 2, "both replays of that build are counted");
-    }
-
     /// A replay the directory no longer holds leaves the listing, and its
     /// marking and highlight go with it: the egui app drops the row on the same
     /// event (`tab_state.rs`'s `NotifyFileEvent::Removed` arm).
@@ -3280,126 +2837,5 @@ mod tests {
 
         let low = Bounds::new(point(px(0.), px(700.)), size(px(320.), px(40.)));
         assert_eq!(super::beside_row(low, popup, viewport), point(px(324.), px(240.)), "its bottom is the row's");
-    }
-
-    /// A replay reached through a symlink is walked by the scan, so the watch
-    /// never reports it as one that arrived after the listing was read.
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_replay_is_walked_rather_than_reported_as_new() {
-        let real = tempfile::tempdir().expect("a temporary directory");
-        let listed = tempfile::tempdir().expect("a temporary directory");
-        let target = real.path().join("20260818_132652_PWSD610-Smaland.wowsreplay");
-        std::fs::write(&target, b"not a replay").expect("the file is written");
-        let link = listed.path().join("20260818_132652_PWSD610-Smaland.wowsreplay");
-        std::os::unix::fs::symlink(&target, &link).expect("the link is made");
-        let dangling = listed.path().join("20260818_132653_PWSD610-Gone.wowsreplay");
-        std::os::unix::fs::symlink(real.path().join("gone.wowsreplay"), &dangling).expect("the link is made");
-        // The scan counts a file written before it began as walked even when
-        // it cannot be read, so the written time must be in the past.
-        std::thread::sleep(std::time::Duration::from_millis(20));
-
-        let (reports, _progress) = futures::channel::mpsc::unbounded();
-        let scanned = super::scan_replay_files(listed.path(), &reports);
-
-        assert!(scanned.walked.contains(&link), "the link to a replay is walked");
-        assert!(!scanned.walked.contains(&dangling), "a link to nothing is not a replay");
-    }
-
-    use super::is_finished_replay;
-    use std::path::Path;
-
-    #[test]
-    fn the_watcher_ignores_everything_but_a_finished_replay() {
-        assert!(is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland.wowsreplay")));
-        // The match in progress, which has no metadata until it ends.
-        assert!(!is_finished_replay(Path::new("replays/temp.wowsreplay")));
-        assert!(!is_finished_replay(Path::new("replays/tempArenaInfo.json")));
-        assert!(!is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland")));
-    }
-
-    /// The filesystem watch reports a replay written into its directory, and
-    /// reports nothing more once it is dropped.
-    #[test]
-    fn the_filesystem_watch_reports_a_new_replay_until_it_is_dropped() {
-        use std::time::Duration;
-        use std::time::Instant;
-
-        use futures::channel::mpsc::TryRecvError;
-
-        use super::DirChange;
-        use super::WatchMessage;
-        use super::WatchSink;
-
-        // Waits for the next report; `None` once the watch has closed the
-        // channel or nothing arrives in time.
-        fn next(
-            messages: &mut futures::channel::mpsc::UnboundedReceiver<WatchMessage>,
-            deadline: Instant,
-        ) -> Option<WatchMessage> {
-            loop {
-                match messages.try_recv() {
-                    Ok(message) => return Some(message),
-                    Err(TryRecvError::Empty) if Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(20))
-                    }
-                    Err(TryRecvError::Empty | TryRecvError::Closed) => return None,
-                }
-            }
-        }
-
-        let dir = tempfile::tempdir().expect("a temp directory");
-        let (sender, mut messages) = futures::channel::mpsc::unbounded();
-        let sink = WatchSink::new(dir.path().to_path_buf(), sender);
-        let watcher = super::filesystem_watch(dir.path(), sink).expect("the directory is watchable");
-
-        let landed = dir.path().join("landed.wowsreplay");
-        std::fs::write(&landed, b"not yet a replay").expect("the file is written");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let first = next(&mut messages, deadline);
-        assert!(
-            matches!(&first, Some(WatchMessage::Change(DirChange::Appeared(path))) if *path == landed),
-            "the new file is reported first"
-        );
-
-        // Dropping it closes the channel, which is what ends the listing's
-        // task for the watch. Reports queued before the drop may come first.
-        drop(watcher);
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while next(&mut messages, deadline).is_some() {}
-        assert!(matches!(messages.try_recv(), Err(TryRecvError::Closed)), "the dropped watch closes its channel");
-    }
-
-    /// Removing the watched directory ends the watch with it, which the watch
-    /// says rather than falling silent.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn the_filesystem_watch_says_its_directory_was_removed() {
-        use std::time::Duration;
-        use std::time::Instant;
-
-        use super::WatchMessage;
-        use super::WatchSink;
-        use super::WatchStopCause;
-
-        let parent = tempfile::tempdir().expect("a temp directory");
-        let dir = parent.path().join("replays");
-        std::fs::create_dir(&dir).expect("the directory is made");
-        let (sender, mut messages) = futures::channel::mpsc::unbounded();
-        let _watcher =
-            super::filesystem_watch(&dir, WatchSink::new(dir.clone(), sender)).expect("the directory is watchable");
-
-        std::fs::remove_dir(&dir).expect("the directory is removed");
-
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let stopped = loop {
-            match messages.try_recv() {
-                Ok(WatchMessage::Stopped(cause)) => break Some(cause),
-                Ok(WatchMessage::Change(_) | WatchMessage::Rescan | WatchMessage::Missed(_)) => {}
-                Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-                Err(_) => break None,
-            }
-        };
-        assert_eq!(stopped, Some(WatchStopCause::DirectoryGone));
     }
 }
