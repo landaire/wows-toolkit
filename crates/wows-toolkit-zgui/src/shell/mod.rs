@@ -81,7 +81,7 @@ use crate::i18n::LanguageCode;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::collab::CollabHost;
-use crate::shell::dialogs::DialogHostProps;
+pub(crate) use crate::shell::dialogs::DialogHostProps;
 use crate::shell::drop::DropIntent;
 use crate::shell::drop::DropScrimProps;
 use crate::shell::drop::DropScrimState;
