@@ -21,6 +21,8 @@ use gpui_kit::test::TestWindowExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::settings::ZoomFactor;
 
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::index::query::SortColumn as SearchSortColumn;
@@ -35,9 +37,7 @@ use wows_toolkit_config::ReplayGrouping;
 use crate::app::App;
 use crate::app::AppTab;
 use crate::app::SettingsSection;
-use crate::settings::GpuiSettings;
 use crate::stats::load::SessionData;
-use crate::zoom::ZoomFactor;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
 /// by index, matching `AppTab::ALL`'s order.
@@ -426,8 +426,8 @@ fn a_directory_dialog_that_cannot_open_says_why(cx: &mut TestAppContext) {
 /// The WoWs directory is deliberately empty: `apply_settings` then takes its
 /// "directory is not set" branch and starts no directory scan or game-data
 /// load, which keeps these tests off the filesystem.
-pub(crate) fn test_settings() -> GpuiSettings {
-    GpuiSettings {
+pub(crate) fn test_settings() -> StartupSettings {
+    StartupSettings {
         locale: None,
         theme: Default::default(),
         twitch_token: None,
@@ -1043,7 +1043,7 @@ fn opening_a_search_result_shows_the_replay_inspector(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_unpacker_shows_the_saved_extraction_directory(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    let settings = GpuiSettings { output_dir: "C:/extracted".to_string(), ..test_settings() };
+    let settings = StartupSettings { output_dir: "C:/extracted".to_string(), ..test_settings() };
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {

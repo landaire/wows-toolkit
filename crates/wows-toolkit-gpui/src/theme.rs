@@ -13,10 +13,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
+use wows_toolkit_viewmodel::settings::ZoomFactor;
 
 use wows_toolkit_viewmodel::settings::ThemeChoice;
-
-use crate::zoom::ZoomFactor;
 
 /// Named color schemes applied to the desktop's shared surface tokens.
 ///
