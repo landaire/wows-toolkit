@@ -196,6 +196,7 @@ pub fn ReplaysTab() -> impl IntoView {
     let listing_open = RwSignal::new_local(true);
     let listing_width = RwSignal::new_local(LISTING_WIDTH);
     publish_toggles(workspace.dock, listing_open);
+    publish_mode(workspace);
 
     let banner = move || match services.game_data.state() {
         GameDataState::Failed(reason) => Some(view! {
@@ -445,6 +446,16 @@ fn publish_toggles(dock: DockState, listing_open: RwSignal<bool, LocalStorage>) 
         }));
     }
     on_cleanup_local(move || drop(effects));
+}
+
+/// Names on the status bar the held-key mode of the panels on screen.
+fn publish_mode(workspace: ReplayWorkspace) {
+    let Some(chrome) = TabChrome::current() else { return };
+    let mode = RenderEffect::new(move |_| chrome.set_mode(workspace.mode()));
+    on_cleanup_local(move || {
+        drop(mode);
+        chrome.set_mode(None);
+    });
 }
 
 /// What the dock shows with nothing open: a faint map, and what can be dropped on it.

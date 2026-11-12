@@ -6,6 +6,7 @@
 //! the game's packed files. That is the same fallback the GPUI front end draws for an icon it has
 //! not resolved.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::columns::NDA;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
@@ -30,8 +32,14 @@ use wowsunpack::game_types::ChargeCount;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::use_local_context;
 use zgui::view;
 use zgui::view::AnyView;
@@ -47,6 +55,8 @@ use zgui_ui::TooltipTriggerProps;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
+use crate::shell::tabs::ModeHint;
+use crate::shell::tabs::ModifierKey;
 
 const SHEET: &str = "wt-replay-expanded";
 
@@ -155,6 +165,66 @@ enum DamageDirection {
 /// The rows a table shows, shared by every row's detail.
 pub type Rows = Arc<[PlayerRow]>;
 
+/// The mode Alt puts the damage breakdowns in, as the status bar names it.
+pub const SHARE_MODE: ModeHint = ModeHint { key: ModifierKey::Alt, name_key: "ui.replay.damage_share.mode" };
+
+/// Whether Alt changes anything in `row`'s detail: a shown damage column draws at least one share
+/// line, which takes a nonzero amount to a player `rows` names.
+pub fn shows_damage_shares(row: &PlayerRow, rows: &[PlayerRow], columns: &[ReplayColumn], debug: bool) -> bool {
+    let Some(interactions) = row.damage_interactions.as_ref() else { return false };
+    if row.should_hide_stats() && !debug {
+        return false;
+    }
+
+    columns
+        .iter()
+        .filter_map(|column| match column {
+            ReplayColumn::ActualDamage => Some(DamageDirection::Dealt),
+            ReplayColumn::ReceivedDamage => Some(DamageDirection::Received),
+            _ => None,
+        })
+        .any(|direction| {
+            interactions.iter().any(|(account_id, interaction)| {
+                interaction_amount(interaction, direction) > 0 && rows.iter().any(|other| other.db_id == *account_id)
+            })
+        })
+}
+
+/// The expanded rows of one panel whose detail lists damage shares.
+#[derive(Clone, Copy)]
+pub struct ShareRows(RwSignal<HashSet<AccountId>, LocalStorage>);
+
+impl ShareRows {
+    pub fn new() -> Self {
+        Self(RwSignal::new_local(HashSet::new()))
+    }
+
+    pub(super) fn mark(self, row: AccountId, shows: bool) {
+        // `try_`, as a row's cleanup can run after the panel's control is gone.
+        if self.0.try_with_untracked(|rows| rows.contains(&row) != shows) != Some(true) {
+            return;
+        }
+        self.0.update(|rows| {
+            if shows {
+                rows.insert(row);
+            } else {
+                rows.remove(&row);
+            }
+        });
+    }
+
+    /// Whether any row lists them. Reactive.
+    pub fn any(self) -> bool {
+        self.0.with(|rows| !rows.is_empty())
+    }
+}
+
+impl Default for ShareRows {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Whether `column` has detail to draw for `row`, so a table knows which cells grow.
 pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRow], debug: bool) -> bool {
     let hidden = row.should_hide_stats() && !debug;
@@ -182,7 +252,8 @@ pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRo
 }
 
 /// Every column's detail for `row`, side by side in `columns` order, for a table whose detail
-/// spans the whole row. A column with nothing to show takes no room.
+/// spans the whole row. A column with nothing to show takes no room. `share_rows` is told while
+/// the detail lists damage shares.
 #[component]
 pub fn ExpandedRow(
     #[prop(into)] columns: Signal<Rc<[ReplayColumn]>, LocalStorage>,
@@ -190,8 +261,23 @@ pub fn ExpandedRow(
     rows: Rows,
     #[prop(into)] debug: Signal<bool, LocalStorage>,
     #[prop(into)] alt_held: Signal<bool, LocalStorage>,
+    #[prop(optional)] share_rows: Option<ShareRows>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
+
+    if let Some(share_rows) = share_rows {
+        let player = row.db_id;
+        let marked = Arc::clone(&row);
+        let named = Arc::clone(&rows);
+        let marking = RenderEffect::new(move |_| {
+            let shows = columns.with(|columns| shows_damage_shares(&marked, &named, columns, debug.get()));
+            share_rows.mark(player, shows);
+        });
+        on_cleanup_local(move || {
+            drop(marking);
+            share_rows.mark(player, false);
+        });
+    }
 
     view! {
         row(class = "wt-xr", attr:data-testid = "replay-expanded-row") {

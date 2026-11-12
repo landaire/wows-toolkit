@@ -37,6 +37,7 @@ use zgui::view::AnyView;
 
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::tabs::ModeHint;
 use crate::tabs::armor_viewer::library::FeedSource;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::replays::constants::ResultMappings;
@@ -52,6 +53,7 @@ use crate::windows::renderer::session::ArmorRequest;
 use crate::windows::renderer::session::RenderRequest;
 use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::view::ReplayRendererProps;
+use crate::windows::renderer::view::SHORTCUTS_MODE;
 use crate::windows::renderer::watched::WatchedPlaybackProps;
 
 const REPLAY_KIND: &str = "replay";
@@ -291,6 +293,28 @@ impl ReplayWorkspace {
             && self.dock.is_region_empty(DockRegion::Left)
             && self.dock.is_region_empty(DockRegion::Right)
             && self.dock.is_region_empty(DockRegion::Bottom)
+    }
+
+    /// The held-key mode of the panels on screen, for the status bar. A panel behind another tab
+    /// or in a closed region offers none. When several are on screen, the one whose key is down
+    /// wins. Reactive.
+    pub fn mode(self) -> Option<ModeHint> {
+        let modes: Vec<ModeHint> = self
+            .dock
+            .shown_panels()
+            .iter()
+            .filter_map(|id| match Docked::of(id)? {
+                Docked::Replay(path) => self.replays.with(|replays| replays.get(&path).copied())?.mode(),
+                Docked::Renderer(path) => {
+                    let session = self.renderers.with(|renderers| renderers.get(&path).copied())?;
+                    session.is_open().then_some(SHORTCUTS_MODE)
+                }
+                Docked::Watched(_) => None,
+            })
+            .collect();
+        let held = self.shell.held_modifiers();
+
+        modes.iter().copied().find(|mode| mode.key.is_down(held)).or_else(|| modes.first().copied())
     }
 
     /// Shows `path` in a tab. `None` when nothing could be shown, because there is no game data
@@ -547,5 +571,9 @@ impl ReplayWorkspace {
     /// Why the replay open at `path` failed to read, once it has.
     pub fn read_failure_for_test(self, path: &std::path::Path) -> Option<String> {
         self.replays.with_untracked(|replays| replays.get(path).and_then(|control| control.failure()))
+    }
+
+    pub fn control_for_test(self, path: &std::path::Path) -> Option<PanelControl> {
+        self.replays.with_untracked(|replays| replays.get(path).copied())
     }
 }

@@ -21,6 +21,7 @@ use zgui::view;
 
 use super::DamageDirection;
 use super::ExpandedRowProps;
+use super::ShareRows;
 use super::damage_event_rows;
 use super::group_ribbons;
 use super::has_column_detail;
@@ -28,6 +29,7 @@ use super::interaction_amount;
 use super::interaction_percentage;
 use super::reorder_bulge_after_main_caliber;
 use super::share_text;
+use super::shows_damage_shares;
 use super::spotting_target_rows;
 use crate::shell::ShellHarnessProps;
 
@@ -261,6 +263,56 @@ fn a_hidden_row_shows_no_damage_breakdown() {
 
     assert!(window.by_attribute("data-column", "ActualDamage").is_some(), "the column still shows its line");
     assert!(window.by_test_id("replay-damage-interactions").is_none());
+}
+
+/// Alt changes something only where a shown damage column draws a share line: a nonzero amount, to
+/// a player the table names, on a row whose figures may be shown.
+#[test]
+fn alt_names_a_mode_only_over_damage_shares_on_screen() {
+    let mut open = base_row(1, Relation::new(0), true);
+    open.damage_interactions = Some([(AccountId(2), interaction(1_000, 10.0, 0, 0.0))].into_iter().collect());
+    let other = base_row(2, Relation::new(2), false);
+    let rows = [open.clone(), other];
+    let bare = PlayerRow { damage_interactions: Some(Default::default()), ..base_row(3, Relation::new(1), false) };
+    let hidden = PlayerRow { manual_stat_hide_toggle: true, ..open.clone() };
+    let dealt = [ReplayColumn::Name, ReplayColumn::ActualDamage];
+
+    assert!(shows_damage_shares(&open, &rows, &dealt, false));
+    assert!(!shows_damage_shares(&open, &rows, &[ReplayColumn::Name, ReplayColumn::Kills], false), "no damage column");
+    assert!(!shows_damage_shares(&open, &rows, &[ReplayColumn::ReceivedDamage], false), "nothing was received");
+    assert!(!shows_damage_shares(&open, &rows[..1], &dealt, false), "the other player is not in the table");
+    assert!(!shows_damage_shares(&bare, &rows, &dealt, false), "the row has no shares");
+    assert!(!shows_damage_shares(&hidden, &rows, &dealt, false), "the row's figures are under NDA");
+    assert!(shows_damage_shares(&hidden, &rows, &dealt, true), "unless debug mode lifts it");
+}
+
+/// An open row tells its panel it lists damage shares while a damage column is shown, and stops
+/// when the column is put away.
+#[test]
+fn an_open_row_reports_its_shares_while_a_damage_column_is_shown() {
+    let mut row = base_row(1, Relation::new(0), true);
+    row.damage_interactions = Some([(AccountId(2), interaction(1_000, 10.0, 0, 0.0))].into_iter().collect());
+    let handed = Rc::new(std::cell::Cell::new(None));
+    let built = Rc::clone(&handed);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 900.0, height: 600.0 }), move || {
+        let columns = RwSignal::new_local(Rc::<[ReplayColumn]>::from([ReplayColumn::Name, ReplayColumn::ActualDamage]));
+        let share_rows = ShareRows::new();
+        built.set(Some((columns, share_rows)));
+        let row = Arc::new(row.clone());
+        let rows: super::Rows = Arc::from(vec![(*row).clone(), base_row(2, Relation::new(2), false)]);
+        view! {
+            ShellHarness(theme = ThemeChoice::Dark) {
+                ExpandedRow(columns = columns, row = row, rows = rows, debug = false, alt_held = false, share_rows = share_rows)
+            }
+        }
+    })
+    .expect("the detail opens");
+    let (columns, share_rows) = handed.get().expect("the view was built");
+    assert!(share_rows.any(), "the damage column lists the row's shares");
+
+    columns.set(Rc::from([ReplayColumn::Name, ReplayColumn::Kills]));
+    window.advance(std::time::Duration::from_millis(32));
+    assert!(!share_rows.any(), "with no damage column shown there is nothing for Alt to flip");
 }
 
 /// Holding Alt flips every share to the other player's total.
