@@ -1895,6 +1895,7 @@ open = "Aç"
 export = "Modeli Dışa Aktar"
 copy_path = "Model yolunu kopyala"
 path_copied = "%{path} kopyalandı"
+skin_replaces = "%{exterior} takılıyken %{model} yerine geçer"
 hardpoints_tooltip = "Bağlantı noktalarını göster"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Diğer"
 
 [ui.models.variant]
 dead = "Enkaz"
+skin = "Görünüm"
 
 [ui.models.kind]
 ship = "Gemiler"

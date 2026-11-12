@@ -118,8 +118,8 @@ impl Expansion<'_> {
 pub(super) struct BuiltTree {
     pub items: Vec<TreeItem>,
     pub rows: HashMap<SharedString, RowKind>,
-    /// During a search, the field a row was found by where it is not the
-    /// row's own name.
+    /// Dim text drawn after a row's name: during a search, the field the row
+    /// was found by where it is not the row's own name; on a skin, that it is.
     pub notes: HashMap<SharedString, SharedString>,
 }
 
@@ -731,6 +731,10 @@ impl Builder<'_, '_, '_, '_> {
             let id = model_row_id(&variant.path);
             let label = variant_label(&variant.kind, &variant.path);
             let kind = RowKind::Model(variant.path.clone());
+            if variant.kind == ModelVariantKind::Skin {
+                self.notes.insert(id.clone(), t!("ui.models.variant.skin").into_owned().into());
+            }
+
             if variant.variants.is_empty() {
                 items.push(self.leaf(id, label, kind));
                 continue;
@@ -822,7 +826,8 @@ pub(super) mod fixture {
     pub const IOWA_INDEX: &str = "PASB018";
     pub const IOWA: &str = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945.model";
     pub const IOWA_TURRET: &str = "content/gameplay/usa/gun/main/AGM034_16in50_Mk7/AGM034_16in50_Mk7.model";
-    const IOWA_SKIN: &str = "content/gameplay/usa/ship/battleship/ASB128_Iowa_Halloween/ASB128_Iowa_Halloween.model";
+    pub const IOWA_SKIN: &str =
+        "content/gameplay/usa/ship/battleship/ASB128_Iowa_Halloween/ASB128_Iowa_Halloween.model";
     const SECONDARY: &str = "content/gameplay/usa/gun/secondary/AGS010_5in38_Mk32_Mod12/AGS010_5in38_Mk32_Mod12.model";
     const DIRECTOR: &str = "content/gameplay/usa/director/AD001_Director_Mk37/AD001_Director_Mk37.model";
     const BOLLARD: &str = "content/gameplay/usa/misc/AM2061/AM2061.model";
@@ -879,6 +884,9 @@ pub(super) mod fixture {
             &key(&["127 mm/38 Mk.12 on a Mk.32 mount", "PAGS010", "PAGS010_5in38_Mk32_Mod12", "4283885552"]),
         );
         references.insert(DIRECTOR, &key(&["PAD001", "PAD001_Director_Mk37", "4293063664"]));
+        // Two exteriors, out of order, show the same skin.
+        references.insert_skin(IOWA_SKIN, IOWA, "Spooky");
+        references.insert_skin(IOWA_SKIN, IOWA, "Halloween");
 
         references
     }
@@ -1137,6 +1145,17 @@ mod tests {
             ]
         );
         assert_eq!(built.rows.get(SEPARATOR_ID), Some(&RowKind::Separator));
+    }
+
+    #[test]
+    fn a_skin_row_is_tagged_as_a_skin() {
+        let data = data();
+        let skin = model_row_id(&fixture::path(fixture::IOWA_SKIN));
+
+        let built = expand_all(&data);
+
+        assert_eq!(built.notes.get(&skin).map(|note| note.to_string()).as_deref(), Some("Skin"));
+        assert_eq!(built.notes.len(), 1, "outside a search only the skin row carries a note");
     }
 
     #[test]
@@ -1521,6 +1540,13 @@ mod tests {
         for folder in &index.folders {
             eprintln!("  {} -> {:?}", folder.key, folder.name);
         }
+        let mut skins: Vec<_> = index.skins.iter().collect();
+        skins.sort_by(|a, b| a.0.cmp(b.0));
+        eprintln!("[measured] {} skin models", skins.len());
+        for (skin, uses) in skins.iter().take(3) {
+            eprintln!("  {} <- {uses:?}", skin.stem());
+        }
+        assert!(!skins.is_empty(), "exteriors swap in skin models");
         for directory in ["usa", "japan", "uk", "panasia", "panamerica", "commonwealth"] {
             let key = format!("nation-{directory}");
             let nation = index.folders.iter().find(|folder| folder.key == key);

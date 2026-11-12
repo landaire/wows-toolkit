@@ -1941,6 +1941,7 @@ open = "開く"
 export = "モデルをエクスポート"
 copy_path = "モデルパスをコピー"
 path_copied = "%{path} をコピーしました"
+skin_replaces = "%{exterior} の装備時に %{model} の代わりに使用されます"
 hardpoints_tooltip = "取り付け位置を表示"
 
 [ui.models.group]
@@ -1977,6 +1978,7 @@ other = "その他"
 
 [ui.models.variant]
 dead = "残骸"
+skin = "外観"
 
 [ui.models.kind]
 ship = "艦艇"

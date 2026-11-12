@@ -1967,6 +1967,7 @@ open = "Open"
 export = "Export Model"
 copy_path = "Copy model path"
 path_copied = "Copied %{path}"
+skin_replaces = "Replaces %{model} when %{exterior} is equipped"
 hardpoints_tooltip = "Show attachment points"
 
 [ui.models.group]
@@ -2003,6 +2004,7 @@ other = "Other"
 
 [ui.models.variant]
 dead = "Wreck"
+skin = "Skin"
 
 [ui.models.kind]
 ship = "Ships"

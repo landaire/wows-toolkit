@@ -1895,6 +1895,7 @@ open = "Открыть"
 export = "Экспортировать модель"
 copy_path = "Копировать путь к модели"
 path_copied = "Скопировано: %{path}"
+skin_replaces = "Заменяет %{model}, когда установлен %{exterior}"
 hardpoints_tooltip = "Показать точки крепления"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Прочее"
 
 [ui.models.variant]
 dead = "Обломки"
+skin = "Облик"
 
 [ui.models.kind]
 ship = "Корабли"

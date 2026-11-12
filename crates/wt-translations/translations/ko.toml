@@ -1941,6 +1941,7 @@ open = "열기"
 export = "모델 내보내기"
 copy_path = "모델 경로 복사"
 path_copied = "%{path} 복사됨"
+skin_replaces = "%{exterior} 장착 시 %{model}을(를) 대체합니다"
 hardpoints_tooltip = "부착 지점 표시"
 
 [ui.models.group]
@@ -1977,6 +1978,7 @@ other = "기타"
 
 [ui.models.variant]
 dead = "잔해"
+skin = "외형"
 
 [ui.models.kind]
 ship = "함선"

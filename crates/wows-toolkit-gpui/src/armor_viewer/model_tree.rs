@@ -26,6 +26,7 @@ use wowsunpack::export::ship_parts::ListedMisc;
 use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::export::ship_parts::ShipPartListing;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::translations::translate_exterior;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::MountParam;
 use wowsunpack::game_types::GameParamId;
@@ -39,6 +40,9 @@ use super::search_key::SearchKey;
 pub struct ModelTreeIndex {
     /// The gameplay nations, then one folder per other model group.
     pub folders: Vec<ModelFolder>,
+    /// What each skin model replaces, for its row's tooltip. Shared, as a
+    /// row hands it to its tooltip on every frame.
+    pub skins: HashMap<ModelPath, Arc<[SkinUse]>>,
 }
 
 /// A folder of the model listing.
@@ -127,14 +131,25 @@ impl VariantRow {
 
 /// The GameParams entries that use each model: ships for their hull models,
 /// mounts for theirs. A model is found by their names as well as its own.
+/// Also the exteriors that swap each skin model in.
 #[derive(Default)]
 pub struct ModelReferences {
     keys: HashMap<ModelPath, SearchKey>,
+    skins: HashMap<ModelPath, Vec<SkinUse>>,
+}
+
+/// A stock model a skin model replaces, and the exteriors that replace it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkinUse {
+    pub stock: ModelPath,
+    /// The exteriors' names in the current locale, or their GameParams names
+    /// where the game has none, sorted.
+    pub exteriors: Vec<String>,
 }
 
 impl ModelReferences {
     pub fn new() -> Self {
-        Self { keys: HashMap::new() }
+        Self { keys: HashMap::new(), skins: HashMap::new() }
     }
 
     /// The references of the ships in `ships`, which are the ships the
@@ -148,6 +163,17 @@ impl ModelReferences {
         // mounts with each other; each pairing is added once.
         let mut seen: HashSet<(&str, GameParamId)> = HashSet::new();
         for param in metadata.params() {
+            if let Some(exterior) = param.exterior() {
+                // The game names an exterior under one of several keys; an
+                // unnamed one shows its GameParams name.
+                let name = translate_exterior(param, metadata).0.unwrap_or_else(|| param.name().to_string());
+                for pair in exterior.peculiarity_models() {
+                    references.insert_skin(&pair.replacement, &pair.stock, &name);
+                }
+
+                continue;
+            }
+
             let Some(ship_key) = listed.get(param.index()) else {
                 continue;
             };
@@ -180,6 +206,28 @@ impl ModelReferences {
         }
 
         references
+    }
+
+    /// Records that exterior `exterior` shows model `replacement` in place of
+    /// `stock`, keeping stocks and exteriors sorted and listed once. Paths
+    /// that are not models are left out.
+    pub fn insert_skin(&mut self, replacement: &str, stock: &str, exterior: &str) {
+        let (Ok(replacement), Ok(stock)) = (ModelPath::parse(replacement), ModelPath::parse(stock)) else {
+            return;
+        };
+
+        let uses = self.skins.entry(replacement).or_default();
+        let idx = match uses.binary_search_by(|skin| skin.stock.cmp(&stock)) {
+            Ok(idx) => idx,
+            Err(idx) => {
+                uses.insert(idx, SkinUse { stock, exteriors: Vec::new() });
+                idx
+            }
+        };
+        let exteriors = &mut uses[idx].exteriors;
+        if let Err(at) = exteriors.binary_search_by(|name| name.as_str().cmp(exterior)) {
+            exteriors.insert(at, exterior.to_string());
+        }
     }
 
     /// Adds `key`'s fields to model `model`'s. A path that is not a model
@@ -384,7 +432,9 @@ impl ModelTreeIndex {
         }
         nations.append(&mut groups);
 
-        Self { folders: nations }
+        let skins = references.skins.iter().map(|(skin, uses)| (skin.clone(), Arc::from(uses.as_slice()))).collect();
+
+        Self { folders: nations, skins }
     }
 
     pub fn model_count(&self) -> usize {

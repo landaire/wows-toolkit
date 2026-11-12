@@ -1895,6 +1895,7 @@ open = "Відкрити"
 export = "Експортувати модель"
 copy_path = "Копіювати шлях до моделі"
 path_copied = "Скопійовано: %{path}"
+skin_replaces = "Замінює %{model}, коли встановлено %{exterior}"
 hardpoints_tooltip = "Показати точки кріплення"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Інше"
 
 [ui.models.variant]
 dead = "Уламки"
+skin = "Вигляд"
 
 [ui.models.kind]
 ship = "Кораблі"

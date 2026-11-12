@@ -1895,6 +1895,7 @@ open = "Otevřít"
 export = "Exportovat model"
 copy_path = "Kopírovat cestu k modelu"
 path_copied = "Zkopírováno: %{path}"
+skin_replaces = "Nahrazuje %{model}, když je nasazeno %{exterior}"
 hardpoints_tooltip = "Zobrazit upevňovací body"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Ostatní"
 
 [ui.models.variant]
 dead = "Vrak"
+skin = "Vzhled"
 
 [ui.models.kind]
 ship = "Lodě"

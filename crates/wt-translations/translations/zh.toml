@@ -1941,6 +1941,7 @@ open = "打开"
 export = "导出模型"
 copy_path = "复制模型路径"
 path_copied = "已复制 %{path}"
+skin_replaces = "装备 %{exterior} 时替换 %{model}"
 hardpoints_tooltip = "显示挂载点"
 
 [ui.models.group]
@@ -1977,6 +1978,7 @@ other = "其他"
 
 [ui.models.variant]
 dead = "残骸"
+skin = "外观"
 
 [ui.models.kind]
 ship = "舰船"

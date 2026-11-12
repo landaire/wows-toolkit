@@ -1895,6 +1895,7 @@ open = "Otwórz"
 export = "Eksportuj model"
 copy_path = "Kopiuj ścieżkę modelu"
 path_copied = "Skopiowano %{path}"
+skin_replaces = "Zastępuje %{model}, gdy założono %{exterior}"
 hardpoints_tooltip = "Pokaż punkty mocowania"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Inne"
 
 [ui.models.variant]
 dead = "Wrak"
+skin = "Wygląd"
 
 [ui.models.kind]
 ship = "Okręty"

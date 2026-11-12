@@ -63,6 +63,7 @@ use super::model_refs::VehicleParamIndex;
 use super::model_tree::ModelReferences;
 use super::model_tree::ModelTreeIndex;
 use super::model_tree::ShipPartRows;
+use super::model_tree::SkinUse;
 use super::model_tree::list_all_ship_parts;
 use super::search_key::fold;
 use super::sidebar_tree::Expansion;
@@ -792,22 +793,31 @@ fn opens_on_its_own(kind: &RowKind) -> bool {
 }
 
 /// What a row's tooltip says: its whole name, which the row may cut short,
-/// and the model path or GameParams index behind it.
-fn row_tooltip(kind: &RowKind) -> Option<String> {
-    match kind {
-        RowKind::Ship { param_index, display_name } => Some(format!("{display_name}\n{param_index}")),
-        RowKind::Model(model) | RowKind::ShipPart { node: None, model, .. } => {
-            Some(format!("{}\n{model}", model.stem()))
-        }
-        RowKind::ShipPart { node: Some(node), model, .. } => Some(format!("{node} {}\n{model}", model.stem())),
+/// and the model path or GameParams index behind it. A skin row also says
+/// what it replaces, from `skin_uses`.
+fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse]) -> Option<String> {
+    let mut text = match kind {
+        RowKind::Ship { param_index, display_name } => format!("{display_name}\n{param_index}"),
+        RowKind::Model(model) | RowKind::ShipPart { node: None, model, .. } => format!("{}\n{model}", model.stem()),
+        RowKind::ShipPart { node: Some(node), model, .. } => format!("{node} {}\n{model}", model.stem()),
         RowKind::Nation(_)
         | RowKind::Class(_)
         | RowKind::PartFolder
         | RowKind::Separator
         | RowKind::ModelsStatus
         | RowKind::ModelNation { .. }
-        | RowKind::ModelGroup => None,
+        | RowKind::ModelGroup => return None,
+    };
+
+    // A line per exterior, so the sentence reads the same in every locale.
+    for skin in skin_uses {
+        for exterior in &skin.exteriors {
+            text.push('\n');
+            text.push_str(&t!("ui.models.skin_replaces", model = skin.stock.stem(), exterior = exterior));
+        }
     }
+
+    Some(text)
 }
 
 /// Renders one row: indent guides, a chevron or spacer, the nation flag or
@@ -820,6 +830,7 @@ fn render_sidebar_item(
     bundle: &ArmorAssetsBundle,
     row_info: &HashMap<SharedString, RowKind>,
     notes: &HashMap<SharedString, SharedString>,
+    index: Option<&ModelTreeIndex>,
     hardpoints: &HashSet<HardpointTarget>,
     window: &mut Window,
     cx: &mut App,
@@ -895,7 +906,14 @@ fn render_sidebar_item(
     // The text is built on hover; a row only clones what it shows.
     let hover = kind.filter(|kind| opens_on_its_own(kind));
     if let Some(kind) = hover.cloned() {
-        row = row.tooltip(move |window, cx| Tooltip::new(row_tooltip(&kind).unwrap_or_default()).build(window, cx));
+        let skin_uses = match &kind {
+            RowKind::Model(model) => index.and_then(|index| index.skins.get(model)).cloned(),
+            _ => None,
+        };
+        row = row.tooltip(move |window, cx| {
+            let skin_uses = skin_uses.as_deref().unwrap_or_default();
+            Tooltip::new(row_tooltip(&kind, skin_uses).unwrap_or_default()).build(window, cx)
+        });
     }
 
     if let Some(target) = kind.and_then(hardpoint_target) {
@@ -1029,11 +1047,27 @@ impl Render for Sidebar {
                 let bundle = Arc::clone(bundle);
                 let row_info = Rc::clone(&self.row_info);
                 let notes = Rc::clone(&self.row_notes);
+                let index = match &self.models {
+                    ModelsState::Ready(index) => Some(Arc::clone(index)),
+                    ModelsState::Loading | ModelsState::Unavailable => None,
+                };
                 let hardpoints = Rc::clone(&self.hardpoint_visibility);
                 let menu_entity = entity.clone();
                 let menu_row_info = Rc::clone(&self.row_info);
                 tree(&self.tree_state, move |ix, entry, _selected, window, cx| {
-                    render_sidebar_item(entity.clone(), ix, entry, &bundle, &row_info, &notes, &hardpoints, window, cx)
+                    let index = index.as_deref();
+                    render_sidebar_item(
+                        entity.clone(),
+                        ix,
+                        entry,
+                        &bundle,
+                        &row_info,
+                        &notes,
+                        index,
+                        &hardpoints,
+                        window,
+                        cx,
+                    )
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     row_context_menu(&menu_entity, menu_row_info.get(&entry.item().id), menu)
@@ -1232,16 +1266,34 @@ mod tests {
             node: Some("HP_AGM_1".into()),
         };
 
-        assert_eq!(super::row_tooltip(&ship).as_deref(), Some("Iowa\nPASB018"));
+        assert_eq!(super::row_tooltip(&ship, &[]).as_deref(), Some("Iowa\nPASB018"));
         assert_eq!(
-            super::row_tooltip(&RowKind::Model(turret)).as_deref(),
+            super::row_tooltip(&RowKind::Model(turret), &[]).as_deref(),
             Some(format!("AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
         );
         assert_eq!(
-            super::row_tooltip(&part).as_deref(),
+            super::row_tooltip(&part, &[]).as_deref(),
             Some(format!("HP_AGM_1 AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
         );
-        assert_eq!(super::row_tooltip(&RowKind::PartFolder), None, "a folder shows its whole name already");
+        assert_eq!(super::row_tooltip(&RowKind::PartFolder, &[]), None, "a folder shows its whole name already");
+    }
+
+    #[test]
+    fn a_skin_row_tooltip_names_the_model_it_replaces_and_the_exteriors() {
+        rust_i18n::set_locale("en");
+        let catalog = fixture::catalog();
+        let ships = fixture::ships();
+        let index = ModelTreeIndex::build(&catalog, &ships, &fixture::references(&ships), &fixture::metadata());
+        let skin = fixture::path(fixture::IOWA_SKIN);
+        let uses = index.skins.get(&skin).expect("the skin's exteriors are known");
+
+        let tooltip = super::row_tooltip(&RowKind::Model(skin.clone()), uses);
+
+        let expected = format!(
+            "ASB128_Iowa_Halloween\n{}\nReplaces ASB028_Iowa_1945 when Halloween is equipped\nReplaces ASB028_Iowa_1945 when Spooky is equipped",
+            fixture::IOWA_SKIN
+        );
+        assert_eq!(tooltip.as_deref(), Some(expected.as_str()));
     }
 
     #[gpui_kit::test]

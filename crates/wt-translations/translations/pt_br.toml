@@ -1895,6 +1895,7 @@ open = "Abrir"
 export = "Exportar modelo"
 copy_path = "Copiar caminho do modelo"
 path_copied = "%{path} copiado"
+skin_replaces = "Substitui %{model} quando %{exterior} está equipado"
 hardpoints_tooltip = "Mostrar pontos de fixação"
 
 [ui.models.group]
@@ -1931,6 +1932,7 @@ other = "Outros"
 
 [ui.models.variant]
 dead = "Destroços"
+skin = "Visual"
 
 [ui.models.kind]
 ship = "Navios"
