@@ -21,6 +21,8 @@ use gpui_kit::test::TestWindowExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::settings::ZoomFactor;
 
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::index::query::SortColumn as SearchSortColumn;
@@ -35,9 +37,7 @@ use wows_toolkit_config::ReplayGrouping;
 use crate::app::App;
 use crate::app::AppTab;
 use crate::app::SettingsSection;
-use crate::settings::GpuiSettings;
 use crate::stats::load::SessionData;
-use crate::zoom::ZoomFactor;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
 /// by index, matching `AppTab::ALL`'s order.
@@ -426,8 +426,8 @@ fn a_directory_dialog_that_cannot_open_says_why(cx: &mut TestAppContext) {
 /// The WoWs directory is deliberately empty: `apply_settings` then takes its
 /// "directory is not set" branch and starts no directory scan or game-data
 /// load, which keeps these tests off the filesystem.
-pub(crate) fn test_settings() -> GpuiSettings {
-    GpuiSettings {
+pub(crate) fn test_settings() -> StartupSettings {
+    StartupSettings {
         locale: None,
         theme: Default::default(),
         twitch_token: None,
@@ -449,7 +449,7 @@ pub(crate) fn test_settings() -> GpuiSettings {
         auto_load_latest_replay: false,
         output_dir: String::new(),
         armor_defaults: None,
-        model_opening_layer: Default::default(),
+        model_show_armor: true,
         model_xray_highlight: Default::default(),
         auto_dump_game_data: false,
         game_data_cache_dir: String::new(),
@@ -510,7 +510,7 @@ fn the_show_armor_checkbox_restores_and_saves_the_opening_layer(cx: &mut TestApp
 
     let window = open_wide_app(cx);
     let mut settings = test_settings();
-    settings.model_opening_layer = OpeningLayer::Mesh;
+    settings.model_show_armor = false;
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
     let pane = window.update(cx, |app, _window, _cx| app.armor_pane().clone()).expect("the test window stays open");
     assert_eq!(cx.update(|cx| pane.read(cx).opening_layer()), OpeningLayer::Mesh, "restored from the settings");
@@ -544,15 +544,14 @@ fn the_show_armor_checkbox_restores_and_saves_the_opening_layer(cx: &mut TestApp
 /// The saved choice is read back at startup, and armor is the default.
 #[tokio::test]
 async fn the_opening_layer_is_read_from_the_settings_store() {
-    use crate::armor_viewer::viewport_view::OpeningLayer;
     use wows_toolkit_viewmodel::settings::keys;
 
     let pool = wows_toolkit_config::test_pool().await;
-    assert_eq!(GpuiSettings::load(&pool).await.model_opening_layer, OpeningLayer::Armor);
+    assert!(StartupSettings::load(&pool).await.model_show_armor);
     wows_toolkit_config::queries::set_setting(&pool, keys::MODEL_VIEWER_SHOW_ARMOR, &false)
         .await
         .expect("the setting is written");
-    assert_eq!(GpuiSettings::load(&pool).await.model_opening_layer, OpeningLayer::Mesh);
+    assert!(!StartupSettings::load(&pool).await.model_show_armor);
 }
 
 /// The Ships list's settings menu carries when the hover highlight shows
@@ -608,11 +607,11 @@ async fn the_xray_highlight_is_read_from_the_settings_store() {
     use wows_toolkit_viewmodel::settings::keys;
 
     let pool = wows_toolkit_config::test_pool().await;
-    assert_eq!(GpuiSettings::load(&pool).await.model_xray_highlight, XrayHighlight::Always);
+    assert_eq!(StartupSettings::load(&pool).await.model_xray_highlight, XrayHighlight::Always);
     wows_toolkit_config::queries::set_setting(&pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT, &XrayHighlight::WhileHeld)
         .await
         .expect("the setting is written");
-    assert_eq!(GpuiSettings::load(&pool).await.model_xray_highlight, XrayHighlight::WhileHeld);
+    assert_eq!(StartupSettings::load(&pool).await.model_xray_highlight, XrayHighlight::WhileHeld);
 }
 
 /// The penetration checker is a section of the options rail, not a panel of
@@ -1167,7 +1166,7 @@ fn opening_a_search_result_shows_the_replay_inspector(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_unpacker_shows_the_saved_extraction_directory(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    let settings = GpuiSettings { output_dir: "C:/extracted".to_string(), ..test_settings() };
+    let settings = StartupSettings { output_dir: "C:/extracted".to_string(), ..test_settings() };
     window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {

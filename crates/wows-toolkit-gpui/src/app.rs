@@ -44,6 +44,7 @@ use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rust_i18n::t;
 use std::rc::Rc;
 use wows_toolkit_replay_data::load::GameDataStatus;
+use wows_toolkit_viewmodel::settings::ZoomFactor;
 
 use crate::armor_viewer::ArmorViewerPane;
 use crate::game_data_cache;
@@ -57,7 +58,6 @@ use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
 use crate::zoom::ResetZoom;
-use crate::zoom::ZoomFactor;
 use crate::zoom::ZoomIn;
 use crate::zoom::ZoomOut;
 
@@ -408,10 +408,11 @@ impl JobReport {
 /// The states the app reports with a message that stays until they are fixed.
 const STUCK_WOWS_DIR: &str = "wows-dir";
 const STUCK_TWITCH_TOKEN: &str = "twitch-token";
+use wows_toolkit_services::settings::StartupSettings;
+
 use crate::runtime;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
-use crate::settings::GpuiSettings;
 use crate::settings_store;
 use crate::stats::load::SessionData;
 use crate::stats::view::StatsView;
@@ -542,7 +543,7 @@ enum SettingsState {
     Loading,
     /// Boxed: the settings are far larger than the other variants, and this
     /// enum is a field of the app itself.
-    Loaded(Box<GpuiSettings>),
+    Loaded(Box<StartupSettings>),
     Failed(String),
 }
 
@@ -2396,7 +2397,7 @@ impl App {
         cx.notify();
     }
 
-    pub fn apply_settings(&mut self, settings: GpuiSettings, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn apply_settings(&mut self, settings: StartupSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.zoom = settings.zoom;
         self.theme = settings.theme;
         let channel = settings.twitch_channel.clone();
@@ -2441,7 +2442,7 @@ impl App {
         self.watch_live_matches(&wows_dir, proxy_url, cx);
         let game_data = self.replay_inspector.read(cx).game_data();
         self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
-        let opening_layer = settings.model_opening_layer;
+        let opening_layer = crate::armor_viewer::viewport_view::OpeningLayer::from_show_armor(settings.model_show_armor);
         let xray_highlight = settings.model_xray_highlight;
         self.armor_pane.update(cx, |pane, cx| {
             pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx);
@@ -2734,14 +2735,14 @@ impl App {
 
     /// The loaded settings, or `None` while they are still being read or
     /// after the read failed.
-    fn settings(&self) -> Option<&GpuiSettings> {
+    fn settings(&self) -> Option<&StartupSettings> {
         match &self.settings {
             SettingsState::Loaded(settings) => Some(settings),
             _ => None,
         }
     }
 
-    fn settings_mut(&mut self) -> Option<&mut GpuiSettings> {
+    fn settings_mut(&mut self) -> Option<&mut StartupSettings> {
         match &mut self.settings {
             SettingsState::Loaded(settings) => Some(settings),
             _ => None,
@@ -3117,7 +3118,7 @@ impl App {
         &mut self,
         key: &'static str,
         cx: &mut Context<Self>,
-        apply: impl FnOnce(&mut GpuiSettings) -> T,
+        apply: impl FnOnce(&mut StartupSettings) -> T,
     ) {
         let Some(settings) = self.settings_mut() else { return };
         let value = apply(settings);

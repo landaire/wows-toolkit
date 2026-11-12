@@ -106,6 +106,7 @@ use crate::armor_viewer::visibility::VisibilityFilter;
 use crate::armor_viewer::visibility::VisibilitySnapshot;
 use crate::armor_viewer::visibility::VisibilityUndoStack;
 use crate::armor_viewer::xray::XrayHighlight;
+use crate::armor_viewer::xray::XrayHighlightView;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -5786,6 +5787,7 @@ mod hover_tests {
     use super::ViewportView;
     use crate::armor_viewer::pane::ArmorViewerPane;
     use crate::armor_viewer::xray::XrayHighlight;
+    use crate::armor_viewer::xray::XrayHighlightView;
     use crate::viewport::renderer::HighlightDepth;
 
     const TOOLTIPS: [&str; 3] = ["armor-plate-tooltip", "armor-mesh-tooltip", "armor-ring-tooltip"];

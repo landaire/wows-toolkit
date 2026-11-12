@@ -1,6 +1,6 @@
 //! Settings snapshot loaded from the shared SQLite config DB at startup.
 //!
-//! An edit is written back through [`crate::settings_store`], to the same row
+//! An edit is written back through [`crate::settings_writer`], to the same row
 //! the egui app reads, so a setting changed in either app holds in both.
 
 use std::path::PathBuf;
@@ -11,16 +11,14 @@ use wows_toolkit_config::queries;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
+use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
-use crate::armor_viewer::viewport_view::OpeningLayer;
-use crate::armor_viewer::xray::XrayHighlight;
-use crate::zoom::ZoomFactor;
-
 /// Settings read from the shared config DB, applied once at startup.
-pub struct GpuiSettings {
+pub struct StartupSettings {
     pub zoom: ZoomFactor,
     /// Which palette to render in. The egui app writes the same setting, so
     /// the two open in the theme the user last chose in either.
@@ -38,9 +36,8 @@ pub struct GpuiSettings {
     pub replay: ReplaySettings,
     /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
     /// in the Replay Inspector and reveals its raw-metadata/raw-results
-    /// viewers. Read-only seed for the RI's session debug toggle (see
-    /// `replay_inspector::view::ReplayInspectorView::set_debug_mode`); this
-    /// crate never writes it back.
+    /// viewers. Read-only seed for the inspector's session debug toggle; the
+    /// GPUI front end never writes it back.
     pub debug_mode: bool,
     /// `check_for_updates` in the shared database: whether the app looks for a
     /// new release at startup. Defaults on, as the egui app does.
@@ -54,9 +51,8 @@ pub struct GpuiSettings {
     pub proxy_url: String,
     /// `TabState.persisted.auto_load_latest_replay` in the egui app: a
     /// top-level setting, not part of `ReplaySettings`. Read-only seed for the
-    /// RI header's "Autoload Latest Replay" checkbox; this crate never writes
-    /// it back, and does not yet act on it (see the checkbox's own doc
-    /// comment in `replay_inspector::view`).
+    /// inspector header's "Autoload Latest Replay" checkbox; the GPUI front end
+    /// never writes it back.
     pub auto_load_latest_replay: bool,
     /// Where the unpacker writes extracted files. Empty until the user picks
     /// one, which is the absence this setting has always used; the Extract
@@ -65,13 +61,13 @@ pub struct GpuiSettings {
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
-    /// What a model opens showing in the Model Viewer.
-    pub model_opening_layer: OpeningLayer,
-    /// When a hovered part's highlight shows through what is in front of it.
+    /// Whether a model opens showing its armor in the Model Viewer.
+    pub model_show_armor: bool,
+    /// When a hovered part's highlight in the Model Viewer shows through what
+    /// is in front of it.
     pub model_xray_highlight: XrayHighlight,
     /// Whether game data is cached on load so old replays still open after a
-    /// game update. The port does not dump; it reports and manages the cache
-    /// the egui app writes.
+    /// game update.
     pub auto_dump_game_data: bool,
     /// Where the game-data cache is kept. Empty means the default location,
     /// which is the absence this setting has always used.
@@ -98,16 +94,13 @@ pub struct GpuiSettings {
     /// has been read, which makes the first check a full one.
     pub constants_commit: Option<String>,
     /// Whether Code Integrity Guard is applied. Read at startup before any window
-    /// exists; the control here writes it for the next launch, as the egui
-    /// settings tab's own does.
-    // Off Windows that control is compiled out, leaving no reader, but the field
-    // still loads from the database so the stored preference is not lost.
-    #[cfg_attr(not(windows), expect(dead_code))]
+    /// exists; a front end's settings control writes it for the next launch, as
+    /// the egui settings tab's own does.
     pub code_integrity: wows_toolkit_hardening::CodeIntegrityPreference,
 }
 
-impl GpuiSettings {
-    /// Load all leaf settings this tab displays. Each `get_setting` miss falls
+impl StartupSettings {
+    /// Load all leaf settings the settings tab displays. Each `get_setting` miss falls
     /// back to that field's documented default rather than a sentinel value.
     pub async fn load(pool: &SqlitePool) -> Self {
         // Clamped: the slider and the shortcuts only offer this range.
@@ -157,9 +150,8 @@ impl GpuiSettings {
             }
         };
         // Absent until the reader turns it off, and armor is the default.
-        let model_opening_layer = OpeningLayer::from_show_armor(
-            queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true),
-        );
+        let model_show_armor =
+            queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true);
         // Absent until the reader chooses a mode, and always is the default.
         let model_xray_highlight =
             queries::get_setting::<XrayHighlight>(pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT).await.unwrap_or_default();
@@ -208,7 +200,7 @@ impl GpuiSettings {
             auto_load_latest_replay,
             output_dir,
             armor_defaults,
-            model_opening_layer,
+            model_show_armor,
             model_xray_highlight,
             auto_dump_game_data,
             game_data_cache_dir,

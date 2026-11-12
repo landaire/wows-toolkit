@@ -86,6 +86,7 @@ use super::sidebar_tree::model_building_row_id;
 use super::sidebar_tree::open_row_id;
 use super::viewport_view::OpeningLayer;
 use super::xray::XrayHighlight;
+use super::xray::XrayHighlightView;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;

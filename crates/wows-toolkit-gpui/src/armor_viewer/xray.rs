@@ -3,43 +3,30 @@
 
 use gpui_kit::App;
 use rust_i18n::t;
-use serde::Deserialize;
-use serde::Serialize;
+pub use wows_toolkit_viewmodel::settings::XrayHighlight;
 
 use crate::status_bar::ModifierKey;
 use crate::viewport::renderer::HighlightDepth;
 
-/// When the highlight of a part hovered in the view shows through what is in
-/// front of it.
-/// Persisted under `keys::MODEL_VIEWER_XRAY_HIGHLIGHT`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum XrayHighlight {
-    #[default]
-    Always,
-    /// Only while [`XrayHighlight::KEY`] is held.
-    WhileHeld,
-    Off,
-}
-
-impl XrayHighlight {
-    pub const ALL: [Self; 3] = [Self::Always, Self::WhileHeld, Self::Off];
-
-    /// The key [`Self::WhileHeld`] waits for. Shift casts shells, and window
-    /// managers often take Alt.
-    pub const KEY: ModifierKey = ModifierKey::Secondary;
+/// The GPUI key and depth for an [`XrayHighlight`].
+pub trait XrayHighlightView: Copy {
+    /// The key [`XrayHighlight::WhileHeld`] waits for. Shift casts shells,
+    /// and window managers often take Alt.
+    const KEY: ModifierKey = ModifierKey::Secondary;
 
     /// How the highlight meets the geometry in front of it while
     /// [`Self::KEY`] is or is not held.
-    pub fn depth(self, key_held: bool) -> HighlightDepth {
-        match self {
-            Self::Always => HighlightDepth::XRay,
-            Self::WhileHeld if key_held => HighlightDepth::XRay,
-            Self::WhileHeld | Self::Off => HighlightDepth::Tested,
-        }
+    fn depth(self, key_held: bool) -> HighlightDepth;
+
+    fn label(self, cx: &App) -> String;
+}
+
+impl XrayHighlightView for XrayHighlight {
+    fn depth(self, key_held: bool) -> HighlightDepth {
+        if self.shows_through(key_held) { HighlightDepth::XRay } else { HighlightDepth::Tested }
     }
 
-    pub fn label(self, cx: &App) -> String {
+    fn label(self, cx: &App) -> String {
         match self {
             Self::Always => t!("ui.armor.xray_always").into_owned(),
             Self::WhileHeld => t!("ui.armor.xray_while_held", key = Self::KEY.label(cx)).into_owned(),
@@ -83,12 +70,5 @@ mod tests {
             assert_eq!(layer_depth_state(HighlightOrigin::Row.layer(), depth), DepthState::Ignored, "{mode:?} {held}");
             assert_eq!(layer_depth_state(HighlightOrigin::ViewHover.layer(), depth), view, "{mode:?} {held}");
         }
-    }
-
-    #[test]
-    fn the_stored_form_is_stable() {
-        let stored: Vec<String> =
-            XrayHighlight::ALL.iter().map(|mode| serde_json::to_string(mode).expect("serializes")).collect();
-        assert_eq!(stored, ["\"always\"", "\"while_held\"", "\"off\""]);
     }
 }
