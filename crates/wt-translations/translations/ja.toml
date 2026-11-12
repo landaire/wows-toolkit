@@ -2048,6 +2048,23 @@ thickness_unknown = "装甲厚不明: このモデルを搭載する艦艇はあ
 thickness_other_ships = "他の艦艇"
 export_title = "モデルをエクスポート"
 export_tooltip = "モデルを GLB ファイルにエクスポート"
+part_model = "モデル: %{model}"
+part_hardpoint = "取り付け位置: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "船体"
+main_battery = "主砲"
+secondary_battery = "副砲"
+aa_guns = "対空"
+torpedoes = "魚雷"
+depth_charges = "爆雷"
+fire_control = "射撃管制"
+radar = "レーダー"
+missiles = "ミサイル発射機"
+decorations = "装飾"
+misc = "その他の部品"
+armor = "装甲"
+other = "その他"
 
 [ui.scene_problem]
 cannot_show = "%{name} を表示できません"

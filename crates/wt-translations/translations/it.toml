@@ -2048,6 +2048,23 @@ thickness_unknown = "Spessore sconosciuto: nessuna nave monta questo modello"
 thickness_other_ships = "Altre navi"
 export_title = "Esporta modello"
 export_tooltip = "Esporta il modello in un file GLB"
+part_model = "Modello: %{model}"
+part_hardpoint = "Punto di aggancio: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Scafo"
+main_battery = "Batteria principale"
+secondary_battery = "Secondarie"
+aa_guns = "AA"
+torpedoes = "Siluri"
+depth_charges = "Bombe di profondità"
+fire_control = "Controllo del tiro"
+radar = "Radar"
+missiles = "Lanciamissili"
+decorations = "Decorazioni"
+misc = "Varie"
+armor = "Corazza"
+other = "Altro"
 
 [ui.scene_problem]
 cannot_show = "Impossibile mostrare %{name}"

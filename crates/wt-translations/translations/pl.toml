@@ -2002,6 +2002,23 @@ thickness_unknown = "Grubość nieznana: żaden okręt nie ma tego modelu"
 thickness_other_ships = "Inne okręty"
 export_title = "Eksportuj model"
 export_tooltip = "Eksportuj model do pliku GLB"
+part_model = "Model: %{model}"
+part_hardpoint = "Punkt mocowania: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Kadłub"
+main_battery = "Artyleria główna"
+secondary_battery = "Artyleria pomocnicza"
+aa_guns = "OPL"
+torpedoes = "Torpedy"
+depth_charges = "Bomby głębinowe"
+fire_control = "Kierowanie ogniem"
+radar = "Radary"
+missiles = "Wyrzutnie rakiet"
+decorations = "Dekoracje"
+misc = "Różne"
+armor = "Pancerz"
+other = "Inne"
 
 [ui.scene_problem]
 cannot_show = "Nie można wyświetlić %{name}"

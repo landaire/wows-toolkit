@@ -63,6 +63,12 @@ use crate::armor_viewer::assets::ModelAssets;
 use crate::armor_viewer::camo::build_active_camo;
 use crate::armor_viewer::hardpoint_overlay;
 use crate::armor_viewer::hardpoint_overlay::HardpointMarkers;
+use crate::armor_viewer::hull_picking;
+use crate::armor_viewer::hull_picking::HighlightChange;
+use crate::armor_viewer::hull_picking::HoverTarget;
+use crate::armor_viewer::hull_picking::HullMeshIndex;
+use crate::armor_viewer::hull_picking::MeshHit;
+use crate::armor_viewer::hull_picking::MeshTooltip;
 use crate::armor_viewer::legend::swatch_color;
 use crate::armor_viewer::load_model;
 use crate::armor_viewer::load_model::ModelLoadRequest;
@@ -633,6 +639,14 @@ struct HoverInfo {
     cursor: Point<Pixels>,
 }
 
+/// The mesh under the pointer when no plate is: which mesh, what its tooltip
+/// says, and the cursor position the tooltip is anchored near.
+struct MeshHover {
+    mesh: HullMeshIndex,
+    tooltip: MeshTooltip,
+    cursor: Point<Pixels>,
+}
+
 /// The display-settings popover's numeric sliders (`popover.rs`). A
 /// persistent `Entity<SliderField>` per slider so
 /// its thumb position survives the popover closing and reopening (the
@@ -977,6 +991,15 @@ pub struct ViewportView {
     /// hovered row changes, the popover closes, or a visibility mutation
     /// re-uploads the armor.
     sidebar_highlight: Option<(SidebarHighlightKey, MeshId)>,
+    /// The mesh under the pointer when no plate is. A plate hit takes the
+    /// hover from any mesh, so the plate tools keep working through the hull.
+    hovered_mesh: Option<MeshHover>,
+    /// The overlay mesh highlighting every mesh named as `hovered_mesh` is,
+    /// by that name.
+    mesh_highlight: Option<(String, MeshId)>,
+    /// Which hull meshes the last hull upload drew, by [`HullMeshIndex`]:
+    /// the meshes a hover can hit.
+    hull_shown: Vec<bool>,
     /// Per-mesh triangle tooltip data from the most recent armor upload, used
     /// to map a `pick()` hit back to its `ArmorTriangleTooltip`.
     mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
@@ -1204,6 +1227,9 @@ impl ViewportView {
             hovered_ring: None,
             hover_highlight: None,
             sidebar_highlight: None,
+            hovered_mesh: None,
+            mesh_highlight: None,
+            hull_shown: Vec::new(),
             mesh_triangle_info: Vec::new(),
             last_plate: None,
             pane: None,
@@ -1666,6 +1692,9 @@ impl ViewportView {
         self.hit_pulses.clear();
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
+        self.hovered_mesh = None;
+        self.mesh_highlight = None;
+        self.hull_shown.clear();
         self.hull_textures.clear();
         let saved = AllVisible { hull: self.hull_all_visible, armor: self.armor_all_visible };
         let opening = OpeningVisibility::new(&armor, saved, layer);
@@ -2533,6 +2562,9 @@ impl ViewportView {
         self.hovered_ring = None;
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
+        self.hovered_mesh = None;
+        self.mesh_highlight = None;
+        self.hull_shown.clear();
         self.hit_pulses.clear();
         self.arcs.clear();
         self.selected_arc = None;
@@ -2757,7 +2789,8 @@ impl ViewportView {
         } else {
             let ring_changed = self.clear_ring_hover();
             let hardpoint_changed = self.hovered_hardpoint.take().is_some();
-            self.clear_plate_hover() || ring_changed || hardpoint_changed
+            let plate_changed = self.clear_plate_hover();
+            self.clear_mesh_hover() || plate_changed || ring_changed || hardpoint_changed
         };
 
         if camera_changed || hover_changed || plate_hover_changed {
@@ -3202,25 +3235,35 @@ impl ViewportView {
         self.scene().is_some()
     }
 
-    /// CPU-picks at `position` (screen space) and updates `self.hovered` to
-    /// match, matching the egui app's own per-frame hover pick (`tab.rs:5326-5347`).
-    /// Rebuilds the hover-highlight overlay mesh only when the hovered plate
-    /// actually changed (an on-demand GPU upload); the cursor position is
-    /// still refreshed on every call so the floating tooltip element tracks
-    /// the pointer. Returns whether the caller should `cx.notify()`.
+    /// CPU-picks at `position` (screen space) and updates `self.hovered` or,
+    /// when no plate is hit, `self.hovered_mesh` to match, as the egui app's
+    /// own per-frame hover pick does for plates (`tab.rs:5326-5347`).
+    /// Rebuilds a highlight overlay mesh only when the hovered plate or mesh
+    /// name actually changed (an on-demand GPU upload); the cursor position
+    /// is still refreshed on every call so the floating tooltip element
+    /// tracks the pointer. Returns whether the caller should `cx.notify()`.
     fn update_plate_hover(&mut self, position: Point<Pixels>) -> bool {
-        let Some(bounds) = self.last_bounds else { return self.clear_plate_hover() };
-        if self.current_armor.is_none() {
-            return self.clear_plate_hover();
-        }
+        let Some(bounds) = self.last_bounds else { return self.clear_plate_hover() | self.clear_mesh_hover() };
+        let Some(armor) = self.current_armor.clone() else {
+            return self.clear_plate_hover() | self.clear_mesh_hover();
+        };
         let rect = view_rect_from_bounds(bounds);
-        let hit = self.viewport.pick(point_to_vec2(position), rect);
-        let found =
+        let pointer = point_to_vec2(position);
+        let hit = self.viewport.pick(pointer, rect);
+        let plate =
             hit.as_ref().and_then(|h| picking_ui::tooltip_for_hit(h, &self.mesh_triangle_info)).map(|tooltip| {
                 let key = picking_ui::plate_key_of(tooltip);
                 (key, tooltip.clone())
             });
-        let Some((key, tooltip)) = found else { return self.clear_plate_hover() };
+        let (key, tooltip) = match HoverTarget::resolve(plate, || self.pick_mesh(&armor, pointer, rect)) {
+            HoverTarget::Plate(plate) => plate,
+            HoverTarget::Mesh(hit) => {
+                self.clear_plate_hover();
+                return self.set_mesh_hover(&armor, hit, position);
+            }
+            HoverTarget::Nothing => return self.clear_plate_hover() | self.clear_mesh_hover(),
+        };
+        self.clear_mesh_hover();
 
         let key_changed = self.hovered.as_ref().map(|h| h.key != key).unwrap_or(true);
         // Remembered past the hover itself: the penetration checker is opened
@@ -3231,6 +3274,88 @@ impl ViewportView {
             self.rebuild_hover_highlight(&key);
         }
         true
+    }
+
+    /// The nearest shown mesh along the ray through `pointer`.
+    fn pick_mesh(&self, armor: &LoadedShipArmor, pointer: Vec2, rect: ViewRect) -> Option<MeshHit> {
+        let (origin, direction) = self.viewport.screen_to_model_ray(pointer, rect)?;
+
+        armor.hull_pick.pick(origin, direction, &self.hull_shown)
+    }
+
+    /// Hovers the mesh `hit` names, rebuilding the highlight only when the
+    /// hovered mesh name changed. Returns whether the caller should
+    /// `cx.notify()`.
+    fn set_mesh_hover(&mut self, armor: &LoadedShipArmor, hit: MeshHit, cursor: Point<Pixels>) -> bool {
+        let (Some(mesh), Some(source)) = (armor.hull_meshes.get(hit.mesh.get()), armor.hull_pick.source(hit.mesh))
+        else {
+            return self.clear_mesh_hover();
+        };
+
+        let tooltip = match self.hovered_mesh.take() {
+            Some(hover) if hover.mesh == hit.mesh => hover.tooltip,
+            _ => MeshTooltip::new(mesh, source),
+        };
+        self.hovered_mesh = Some(MeshHover { mesh: hit.mesh, tooltip, cursor });
+        let highlighted = self.mesh_highlight.as_ref().map(|(name, _)| name.as_str());
+        match HighlightChange::between(highlighted, Some(&mesh.name)) {
+            HighlightChange::Keep => {}
+            HighlightChange::Show(name) => self.show_mesh_highlight(name),
+            HighlightChange::Remove => self.remove_mesh_highlight(),
+        }
+
+        true
+    }
+
+    /// Clears any hovered mesh, its tooltip and its highlight. Returns
+    /// whether there was one.
+    fn clear_mesh_hover(&mut self) -> bool {
+        self.remove_mesh_highlight();
+
+        self.hovered_mesh.take().is_some()
+    }
+
+    /// Replaces the mesh highlight with one over every mesh named `name`.
+    fn show_mesh_highlight(&mut self, name: String) {
+        self.remove_mesh_highlight();
+        let Some(scene) = self.scene() else { return };
+        let Some(armor) = self.current_armor.clone() else { return };
+        let names = [name];
+        let mesh_id = hull_picking::upload_hull_highlight(
+            &mut self.viewport,
+            scene.device(),
+            &armor.hull_meshes,
+            &names,
+            picking_ui::HOVER_HIGHLIGHT_COLOR,
+        );
+        let [name] = names;
+        self.mesh_highlight = Some((name, mesh_id));
+        self.viewport.mark_dirty();
+    }
+
+    fn remove_mesh_highlight(&mut self) {
+        if let Some((_, old_id)) = self.mesh_highlight.take() {
+            self.viewport.remove_mesh(old_id);
+            self.viewport.mark_dirty();
+        }
+    }
+
+    /// Keeps the hovered mesh after its meshes were uploaded again: drops it
+    /// once hidden, else draws its highlight again if the upload removed it.
+    fn revalidate_mesh_hover(&mut self) {
+        let Some(armor) = self.current_armor.clone() else { return };
+        let shown = self
+            .hovered_mesh
+            .as_ref()
+            .filter(|hover| self.hull_shown.get(hover.mesh.get()) == Some(&true))
+            .and_then(|hover| armor.hull_meshes.get(hover.mesh.get()));
+        match shown {
+            Some(mesh) if self.mesh_highlight.is_none() => self.show_mesh_highlight(mesh.name.clone()),
+            Some(_) => {}
+            None => {
+                self.clear_mesh_hover();
+            }
+        }
     }
 
     /// Reads the camera orbit under the pointer, if it is resting on one.
@@ -3372,6 +3497,13 @@ impl ViewportView {
                 pk,
                 visibility,
                 show_zero_mm,
+            ),
+            SidebarHighlightKey::HullMeshes(names) => hull_picking::upload_hull_highlight(
+                &mut self.viewport,
+                scene.device(),
+                &armor.hull_meshes,
+                names,
+                picking_ui::SIDEBAR_HIGHLIGHT_COLOR,
             ),
         };
         self.sidebar_highlight = Some((key, mesh_id));
@@ -3666,6 +3798,7 @@ impl ViewportView {
             &self.active_camo_uvs,
             &mut self.hull_textures,
         );
+        self.hull_shown = hull_picking::shown_meshes(&armor.hull_meshes, &self.hull_visibility);
         self.ring_hovers.clear();
         if self.camera_rings.shown
             && let Some((mode, trajectory)) =
@@ -3762,6 +3895,8 @@ impl ViewportView {
         if let Some((key, _)) = self.sidebar_highlight.take() {
             self.rebuild_sidebar_highlight(key);
         }
+        self.mesh_highlight = None;
+        self.revalidate_mesh_hover();
         self.viewport.mark_dirty();
         cx.notify();
     }
@@ -3804,6 +3939,8 @@ impl ViewportView {
             &self.active_camo_uvs,
             &mut self.hull_textures,
         );
+        self.hull_shown = hull_picking::shown_meshes(&armor.hull_meshes, &self.hull_visibility);
+        self.revalidate_mesh_hover();
     }
 
     /// Mutates `hull_visibility` via `mutate` and re-uploads only the hull --
@@ -4214,6 +4351,9 @@ impl ViewportView {
         self.hovered_ring = None;
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
+        self.hovered_mesh = None;
+        self.mesh_highlight = None;
+        self.hull_shown.clear();
 
         self.active_camo_textures = textures;
         self.active_camo_uvs = uvs;
@@ -4463,6 +4603,15 @@ impl Render for ViewportView {
                 .into_any_element()
         });
 
+        let mesh_tooltip_overlay = self.hovered_mesh.as_ref().filter(|_| self.hovered_ring.is_none()).map(|hover| {
+            let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
+            deferred(
+                anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(hover.tooltip.element(cx)),
+            )
+            .with_priority(0)
+            .into_any_element()
+        });
+
         // Right-click context menu: hide/show the hovered plate, show all
         // hidden plates, and disable the hovered part's material. Snapshots
         // `self.hovered`/`plate_visibility` at render time (refreshed on
@@ -4607,6 +4756,7 @@ impl Render for ViewportView {
                     .child(readout)
             }))
             .when_some(tooltip_overlay, |this, t| this.child(t))
+            .when_some(mesh_tooltip_overlay, |this, t| this.child(t))
             .when_some(ring_overlay, |this, t| this.child(t))
             .when_some(export_overlay, |this, o| this.child(o))
             // Right is not a camera button, so a press opens the menu without

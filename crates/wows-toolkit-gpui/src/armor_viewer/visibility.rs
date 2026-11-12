@@ -4,8 +4,8 @@
 //! (`VisibilityFilter`), the undo/redo snapshot type (`VisibilitySnapshot`,
 //! `VisibilityUndoStack` -- ports `armor_viewer::state.rs:115-159` verbatim),
 //! the sidebar-hover highlight key (`SidebarHighlightKey` -- ports the
-//! Zone/Part/Plate variants of `armor_viewer::state::SidebarHighlightKey`;
-//! `HullMeshes`/`SplashBoxes` are M4/deferred and intentionally omitted),
+//! Zone/Part/Plate/HullMeshes variants of `armor_viewer::state::SidebarHighlightKey`;
+//! `SplashBoxes` is deferred and intentionally omitted),
 //! and the pure tri-state derivation the popover's tree renders from.
 //!
 //! **Convention note.** `part_visibility` uses the same boolean sense the
@@ -89,8 +89,8 @@ impl VisibilityUndoStack {
 }
 
 /// Identifies what the user is hovering in the visibility popover, for the
-/// sidebar-hover highlight overlay (`popover.rs`). Ports the Zone/Part/Plate
-/// variants of `armor_viewer::state::SidebarHighlightKey`.
+/// sidebar-hover highlight overlay (`popover.rs`). Ports the Zone/Part/Plate/
+/// HullMeshes variants of `armor_viewer::state::SidebarHighlightKey`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarHighlightKey {
     /// All visible armor triangles in a zone.
@@ -99,6 +99,8 @@ pub enum SidebarHighlightKey {
     Part(String, String),
     /// A specific plate by (zone, material, thickness_i32).
     Plate(PlateKey),
+    /// Every hull mesh with one of these names, shown or not.
+    HullMeshes(Vec<String>),
 }
 
 /// Whether `(zone, part)` is visible per `part_visibility` (absent = visible).

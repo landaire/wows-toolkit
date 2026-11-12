@@ -2002,6 +2002,23 @@ thickness_unknown = "Товщина невідома: жоден корабел�
 thickness_other_ships = "Інші кораблі"
 export_title = "Експорт моделі"
 export_tooltip = "Експортувати модель у файл GLB"
+part_model = "Модель: %{model}"
+part_hardpoint = "Точка кріплення: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Корпус"
+main_battery = "Головний калібр"
+secondary_battery = "Допоміжний калібр"
+aa_guns = "ППО"
+torpedoes = "Торпеди"
+depth_charges = "Глибинні бомби"
+fire_control = "Керування вогнем"
+radar = "Радари"
+missiles = "Ракетні установки"
+decorations = "Прикраси"
+misc = "Різне"
+armor = "Броня"
+other = "Інше"
 
 [ui.scene_problem]
 cannot_show = "Неможливо показати %{name}"

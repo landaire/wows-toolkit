@@ -15,7 +15,8 @@
 //! the left, the 3D viewport on the right, wired so picking a ship loads and
 //! displays its armor. `picking_ui` adds CPU plate picking on top: hover
 //! highlight + thickness tooltip, and click/context-menu plate visibility
-//! toggles. `visibility` holds the zone/part/plate override maps' shared
+//! toggles; `hull_picking` hovers the meshes the same way where no plate is
+//! hit. `visibility` holds the zone/part/plate override maps' shared
 //! types (`VisibilityFilter`, undo/redo snapshot stack, sidebar-highlight
 //! key) plus the tri-state tree's pure derivation logic; `popover` builds the
 //! options rail's tools and the armor-visibility tree on top of it,
@@ -50,6 +51,7 @@ mod export_dialog;
 mod gaps;
 mod hardpoint_overlay;
 mod hits;
+mod hull_picking;
 pub mod legend;
 mod length_marks;
 mod load_model;

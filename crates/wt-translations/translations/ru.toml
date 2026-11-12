@@ -2002,6 +2002,23 @@ thickness_unknown = "Толщина неизвестна: ни один кора
 thickness_other_ships = "Другие корабли"
 export_title = "Экспорт модели"
 export_tooltip = "Экспортировать модель в файл GLB"
+part_model = "Модель: %{model}"
+part_hardpoint = "Точка крепления: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Корпус"
+main_battery = "Главный калибр"
+secondary_battery = "Вспомогательный калибр"
+aa_guns = "ПВО"
+torpedoes = "Торпеды"
+depth_charges = "Глубинные бомбы"
+fire_control = "Управление огнём"
+radar = "Радары"
+missiles = "Ракетные установки"
+decorations = "Украшения"
+misc = "Разное"
+armor = "Броня"
+other = "Прочее"
 
 [ui.scene_problem]
 cannot_show = "Невозможно показать %{name}"

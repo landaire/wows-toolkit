@@ -14,11 +14,9 @@
 //! base-albedo-only behavior exactly.
 //!
 //! Hull-upgrade/LOD reload (Task 8c) is out of scope; this always uploads
-//! whatever `armor.hull_meshes` currently holds. The sidebar-hover highlight
-//! for a hovered hull row (egui's `SidebarHighlightKey::HullMeshes`) is
-//! deferred -- this port's `SidebarHighlightKey` intentionally omits that
-//! variant for now (see `visibility.rs`'s module doc); the hull popover's own
-//! hover therefore has no 3D highlight yet, only the checkbox state.
+//! whatever `armor.hull_meshes` currently holds. The meshes are uploaded
+//! non-pickable: hover picking walks `armor.hull_pick` (`hull_picking.rs`)
+//! instead, so shell casts through the armor never stop on the hull.
 
 use std::collections::HashMap;
 

@@ -30,6 +30,7 @@ use crate::models::visual::VisualPrototype;
 use super::hardpoint::mat4_linear_determinant;
 use super::material_alpha::AlphaMode;
 use super::part_group::PartGroup;
+use super::ship_parts::ShipPartKey;
 use super::texture;
 
 #[derive(Debug, Error)]
@@ -3107,6 +3108,10 @@ pub struct InteractiveHullMesh {
     /// so it defaults to [`PartGroup::Hull`] and the ship loader assigns the real
     /// group alongside the mount transform.
     pub group: PartGroup,
+    /// The ship part the mesh draws, set by the ship loader. `None` for a
+    /// mesh of a model loaded on its own.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub part: Option<ShipPartKey>,
 }
 
 /// Collect hull visual meshes (render sets) from a visual prototype and geometry.
@@ -3266,6 +3271,7 @@ pub(crate) fn collect_hull_meshes_indexed(
             colors: Vec::new(),
             transform: None,
             group: PartGroup::Hull,
+            part: None,
         });
     }
 

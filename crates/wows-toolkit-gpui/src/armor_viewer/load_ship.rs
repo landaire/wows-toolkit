@@ -70,6 +70,8 @@ use wowsunpack::game_types::GameParamId;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::types::Vec3;
 
+use super::hull_picking::HullPickIndex;
+use super::hull_picking::MeshSource;
 use super::model_refs::ShipPartRef;
 use super::model_refs::VehicleParamIndex;
 use super::upload::DisplaySettings;
@@ -251,6 +253,8 @@ pub struct LoadedShipArmor {
     /// Hull visual meshes. Loaded for Milestone 4; not displayed by `upload.rs` yet.
     pub hull_meshes: Vec<InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
+    /// `hull_meshes` placed in model space for hover picking.
+    pub hull_pick: HullPickIndex,
     /// Decoded hull textures, keyed by `.mfm` path.
     pub hull_textures: super::camo::TexturesByPart,
     /// The alpha mode of each hull material that tests or blends alpha, by
@@ -525,6 +529,7 @@ fn load_ship_armor(
     let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| ShipLoadError::HullMeshes(format!("{e:?}")))?;
     let bounds = scene_bounds(&meshes, &hull_meshes);
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
+    let hull_pick = HullPickIndex::build(&hull_meshes, MeshSource::for_ship(&hull_meshes, ctx.parts()));
 
     let mut hull_textures = HashMap::new();
     let mut hull_alpha = HashMap::new();
@@ -568,6 +573,7 @@ fn load_ship_armor(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
+        hull_pick,
         hull_textures,
         hull_alpha,
         hull_lod_count,
@@ -872,6 +878,7 @@ mod tests {
                 colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::MainBattery,
+                part: None,
             },
             InteractiveHullMesh {
                 name: "Hull_Main".to_string(),
@@ -884,6 +891,7 @@ mod tests {
                 colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::Hull,
+                part: None,
             },
             InteractiveHullMesh {
                 name: "Hull_Main".to_string(),
@@ -896,6 +904,7 @@ mod tests {
                 colors: Vec::new(),
                 transform: None,
                 group: wowsunpack::export::part_group::PartGroup::Hull,
+                part: None,
             },
         ];
         let groups = build_hull_part_groups(&meshes);

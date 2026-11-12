@@ -1291,6 +1291,14 @@ impl Viewport3D {
         picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)
     }
 
+    /// Unproject a screen position to a ray in model space, the space mesh
+    /// vertices are uploaded in.
+    pub fn screen_to_model_ray(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Option<(Vec3, Vec3)> {
+        let (origin, dir) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)?;
+
+        Some(self.ray_to_model_space(origin, dir))
+    }
+
     /// Perform CPU picking that returns ALL hits along the ray, sorted by distance.
     /// Each hit includes the triangle normal for impact angle calculations.
     pub fn pick_all(&self, screen_pos: Vec2, viewport_rect: ViewRect) -> Vec<(HitResult, Vec3)> {

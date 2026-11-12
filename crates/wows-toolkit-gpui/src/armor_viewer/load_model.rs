@@ -39,6 +39,8 @@ use wowsunpack::game_types::GameParamId;
 
 use super::assets::ModelAssets;
 use super::camo::RgbaTexture;
+use super::hull_picking::HullPickIndex;
+use super::hull_picking::MeshSource;
 use super::load_ship::ArmorThickness;
 use super::load_ship::ArmorZones;
 use super::load_ship::EmptyScene;
@@ -368,6 +370,8 @@ pub(crate) fn load_model_scene(
     let parts = model.into_parts();
     let mut textures = HullTextures::default();
     textures.extend(parts.materials);
+    let from_part = request.from_ship.as_ref().map(|from| &from.part);
+    let sources = MeshSource::for_model(&parts.parts, parts.meshes.len(), from_part);
 
     let subject = ModelSubject {
         path: request.path.clone(),
@@ -379,7 +383,7 @@ pub(crate) fn load_model_scene(
     };
     let lods = SceneLods { count: lod_count, shown: request.lod };
 
-    Ok(model_scene(subject, meshes, parts.meshes, textures, lods))
+    Ok(model_scene(subject, meshes, parts.meshes, sources, textures, lods))
 }
 
 /// How a model is loaded for display at `lod`.
@@ -413,6 +417,7 @@ fn load_building_scene(
     let mut lod_count = hull.lod_count();
     let hull = hull.into_parts();
     let mut hull_meshes = hull.meshes;
+    let mut sources = MeshSource::for_model(&hull.parts, hull_meshes.len(), None);
     let mut textures = HullTextures::default();
     textures.extend(hull.materials);
 
@@ -445,6 +450,8 @@ fn load_building_scene(
         }
         lod_count = lod_count.max(model.lod_count());
         let parts = model.into_parts();
+        let mount_part = ShipPartKey::Mount(mount.hardpoint().clone());
+        sources.extend(MeshSource::for_model(&parts.parts, parts.meshes.len(), Some(&mount_part)));
         for mut mesh in parts.meshes {
             mesh.transform = Some(place_on(node.transform, mesh.transform));
             hull_meshes.push(mesh);
@@ -462,7 +469,7 @@ fn load_building_scene(
     };
     let lods = SceneLods { count: lod_count, shown: request.lod };
 
-    Ok(model_scene(subject, armor, hull_meshes, textures, lods))
+    Ok(model_scene(subject, armor, hull_meshes, sources, textures, lods))
 }
 
 /// `transform` (column-major, `None` for identity) moved onto a node at `node`.
@@ -504,16 +511,19 @@ impl HullTextures {
     }
 }
 
-/// One model's scene, with the ship-only data empty.
+/// One model's scene, with the ship-only data empty. `sources` holds one
+/// entry per mesh of `hull_meshes`.
 fn model_scene(
     subject: ModelSubject,
     meshes: Vec<InteractiveArmorMesh>,
     hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
+    sources: Vec<MeshSource>,
     hull_textures: HullTextures,
     lods: SceneLods,
 ) -> LoadedShipArmor {
     let bounds = scene_bounds(&meshes, &hull_meshes);
     let hull_part_groups = build_hull_part_groups(&hull_meshes);
+    let hull_pick = HullPickIndex::build(&hull_meshes, sources);
     let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
 
     LoadedShipArmor {
@@ -527,6 +537,7 @@ fn model_scene(
         zone_part_plates,
         hull_meshes,
         hull_part_groups,
+        hull_pick,
         hull_textures: hull_textures.textures,
         hull_alpha: hull_textures.alpha,
         hull_lod_count: lods.count,
@@ -658,6 +669,7 @@ pub(crate) mod fixtures {
             colors: Vec::new(),
             transform: None,
             group: PartGroup::MainBattery,
+            part: None,
         }
     }
 
@@ -684,8 +696,13 @@ pub(crate) mod fixtures {
         }
     }
 
+    fn sources(path: &ModelPath, count: usize) -> Vec<MeshSource> {
+        vec![MeshSource { model: Some(path.clone()), part: None }; count]
+    }
+
     /// A one-triangle model with no armor and `hardpoints`.
     pub(crate) fn model_scene(path: ModelPath, hardpoints: Vec<Hardpoint>) -> LoadedShipArmor {
+        let sources = sources(&path, 1);
         let subject = ModelSubject {
             path,
             from_ship: None,
@@ -698,6 +715,7 @@ pub(crate) mod fixtures {
             subject,
             Vec::new(),
             vec![hull_mesh()],
+            sources,
             HullTextures::default(),
             SceneLods { count: 2, shown: 0 },
         )
@@ -705,6 +723,7 @@ pub(crate) mod fixtures {
 
     /// A one-triangle model carrying one plate of unknown thickness.
     pub(crate) fn armored_model_scene(path: ModelPath) -> LoadedShipArmor {
+        let sources = sources(&path, 1);
         let subject = ModelSubject {
             path,
             from_ship: None,
@@ -717,6 +736,7 @@ pub(crate) mod fixtures {
             subject,
             vec![armor_mesh()],
             vec![hull_mesh()],
+            sources,
             HullTextures::default(),
             SceneLods { count: 2, shown: 0 },
         )
@@ -725,6 +745,7 @@ pub(crate) mod fixtures {
     /// A model with no armor drawn from `hull` alone, authored with
     /// `lod_count` levels of detail.
     pub(crate) fn hull_scene(path: ModelPath, hull: Vec<InteractiveHullMesh>, lod_count: usize) -> LoadedShipArmor {
+        let sources = sources(&path, hull.len());
         let subject = ModelSubject {
             path,
             from_ship: None,
@@ -733,7 +754,8 @@ pub(crate) mod fixtures {
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
         };
-        super::model_scene(subject, Vec::new(), hull, HullTextures::default(), SceneLods { count: lod_count, shown: 0 })
+        let lods = SceneLods { count: lod_count, shown: 0 };
+        super::model_scene(subject, Vec::new(), hull, sources, HullTextures::default(), lods)
     }
 }
 

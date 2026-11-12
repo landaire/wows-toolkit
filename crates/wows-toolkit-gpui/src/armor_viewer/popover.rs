@@ -849,9 +849,8 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
 /// (`ViewportView::reload_ship`), the camo picker changes the active camo
 /// directly (`ViewportView::select_camo`).
 ///
-/// **Deferred.** The sidebar-hover highlight for a hovered hull row (egui's
-/// `SidebarHighlightKey::HullMeshes`) is out of this port's scope -- see
-/// `upload_hull.rs`'s module doc.
+/// Hovering a group or mesh row highlights its meshes in the viewport
+/// (`SidebarHighlightKey::HullMeshes`), shown or not, as egui does.
 pub(crate) fn render_hull_popover_content(
     entity: &Entity<ViewportView>,
     filter: &OptionsFilter,
@@ -1289,13 +1288,12 @@ fn render_hull_group_row(
         });
 
     let title = title.unwrap_or_else(|| StyledText::new(group.to_string()));
-    let header = h_flex()
-        .id(format!("armor-hull-vis-group-row-{group}"))
-        .gap_1()
-        .items_center()
-        .child(chevron)
-        .child(checkbox)
-        .child(div().text_sm().child(title));
+    let header = hoverable_row(
+        format!("armor-hull-vis-group-row-{group}"),
+        entity,
+        SidebarHighlightKey::HullMeshes(names.to_vec()),
+        h_flex().gap_1().items_center().child(chevron).child(checkbox).child(div().text_sm().child(title)),
+    );
 
     let mut column = v_flex().gap_1().child(header);
     if expanded {
@@ -1314,7 +1312,7 @@ fn render_hull_mesh_row(
     let visible = hull_visibility.get(name).copied().unwrap_or(false);
     let toggle_entity = entity.clone();
     let toggle_name = name.to_string();
-    filtered_checkbox(
+    let row = filtered_checkbox(
         format!("armor-hull-vis-mesh-{name}"),
         name.to_string(),
         visible,
@@ -1329,7 +1327,10 @@ fn render_hull_mesh_row(
                 })
             });
         },
-    )
+    )?;
+    let key = SidebarHighlightKey::HullMeshes(vec![name.to_string()]);
+
+    Some(hoverable_row(format!("armor-hull-vis-mesh-row-{name}"), entity, key, row).into_any_element())
 }
 
 /// What the display section draws, read off the viewport in one pass.

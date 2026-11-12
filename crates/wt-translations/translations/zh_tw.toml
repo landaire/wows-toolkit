@@ -2048,6 +2048,23 @@ thickness_unknown = "厚度未知: 沒有艦船搭載此模型"
 thickness_other_ships = "其他艦船"
 export_title = "匯出模型"
 export_tooltip = "將模型匯出為 GLB 檔案"
+part_model = "模型：%{model}"
+part_hardpoint = "掛載點：%{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "艦體"
+main_battery = "主砲"
+secondary_battery = "副砲"
+aa_guns = "防空"
+torpedoes = "魚雷"
+depth_charges = "深水炸彈"
+fire_control = "火控"
+radar = "雷達"
+missiles = "飛彈發射器"
+decorations = "裝飾"
+misc = "雜項"
+armor = "裝甲"
+other = "其他"
 
 [ui.scene_problem]
 cannot_show = "無法顯示 %{name}"

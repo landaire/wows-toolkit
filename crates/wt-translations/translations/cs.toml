@@ -2002,6 +2002,23 @@ thickness_unknown = "Tloušťka neznámá: tento model nenese žádná loď"
 thickness_other_ships = "Jiné lodě"
 export_title = "Exportovat model"
 export_tooltip = "Exportovat model do souboru GLB"
+part_model = "Model: %{model}"
+part_hardpoint = "Upevňovací bod: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Trup"
+main_battery = "Hlavní baterie"
+secondary_battery = "Sekundární výzbroj"
+aa_guns = "PVO"
+torpedoes = "Torpéda"
+depth_charges = "Hlubinné pumy"
+fire_control = "Řízení palby"
+radar = "Radary"
+missiles = "Raketomety"
+decorations = "Dekorace"
+misc = "Různé"
+armor = "Pancíř"
+other = "Ostatní"
 
 [ui.scene_problem]
 cannot_show = "%{name} nelze zobrazit"

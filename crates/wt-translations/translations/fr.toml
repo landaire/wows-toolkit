@@ -2048,6 +2048,23 @@ thickness_unknown = "Épaisseur inconnue : aucun navire ne monte ce modèle"
 thickness_other_ships = "Autres navires"
 export_title = "Exporter le modèle"
 export_tooltip = "Exporter le modèle dans un fichier GLB"
+part_model = "Modèle : %{model}"
+part_hardpoint = "Point d'attache : %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Coque"
+main_battery = "Batterie principale"
+secondary_battery = "Secondaires"
+aa_guns = "DCA"
+torpedoes = "Torpilles"
+depth_charges = "Grenades ASM"
+fire_control = "Conduite de tir"
+radar = "Radars"
+missiles = "Lance-missiles"
+decorations = "Décorations"
+misc = "Divers"
+armor = "Blindage"
+other = "Autres"
 
 [ui.scene_problem]
 cannot_show = "Impossible d'afficher %{name}"

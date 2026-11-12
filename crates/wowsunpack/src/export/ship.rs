@@ -512,6 +512,7 @@ impl ShipAssets {
             miscs: &miscs,
         }
         .parts(&db, &self_id_index, &model_leaves);
+        let hull_models = hull.models.clone();
 
         // Resolve material-based camouflage schemes (ship-specific + universal + expendable).
         let ship_index = self.find_ship_index(&info.model_dir);
@@ -532,6 +533,7 @@ impl ShipAssets {
             vfs: self.vfs.clone(),
             assets_bin_bytes: self.assets_bin_bytes.clone(),
             hull_parts,
+            hull_models,
             turret_models,
             mounts,
             misc_models,
@@ -1196,6 +1198,8 @@ pub struct ShipModelContext {
     /// alive costs nothing extra here.
     assets_bin_bytes: Arc<Vec<u8>>,
     hull_parts: Vec<OwnedSubModel>,
+    /// Aligned with `hull_parts`. `None` for a visual the store holds no model beside.
+    hull_models: Vec<Option<ModelPath>>,
     turret_models: Vec<OwnedSubModel>,
     mounts: Vec<ResolvedMount>,
     /// Unique misc-part models (propellers, boats, deck fittings), deduplicated by name.
@@ -1436,10 +1440,13 @@ impl ShipModelContext {
         let mut result = Vec::new();
 
         // Hull parts (no transform, already in world space).
-        for part in &self.hull_parts {
+        for (part, model) in self.hull_parts.iter().zip(&self.hull_models) {
             let geom =
                 geometry::parse_geometry(&part.geom_bytes).context("Failed to parse hull geometry for hull meshes")?;
-            let meshes = gltf_export::collect_hull_meshes(&part.visual, &geom, &db, lod, damaged, None)?;
+            let mut meshes = gltf_export::collect_hull_meshes(&part.visual, &geom, &db, lod, damaged, None)?;
+            for mesh in &mut meshes {
+                mesh.part = model.clone().map(ShipPartKey::HullSection);
+            }
             result.extend(meshes);
         }
 
@@ -1455,6 +1462,7 @@ impl ShipModelContext {
                 mesh.transform = mount.transform.map(gltf_export::negate_z_transform);
                 mesh.name = format!("{} [{}]", mesh.name, mount.hp_name);
                 mesh.group = group;
+                mesh.part = Some(ShipPartKey::Mount(HardpointName::new(mount.hp_name.as_str())));
             }
             result.extend(meshes);
         }
@@ -1476,6 +1484,7 @@ impl ShipModelContext {
                 mesh.transform = misc.transform.map(gltf_export::negate_z_transform);
                 mesh.name = format!("{} [{}]", mesh.name, misc.label());
                 mesh.group = PartGroup::Misc;
+                mesh.part = Some(ShipPartKey::Misc { node: misc.node.clone(), parent: misc.parent.clone() });
             }
             result.extend(meshes);
         }

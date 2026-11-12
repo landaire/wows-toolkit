@@ -2048,6 +2048,23 @@ thickness_unknown = "Dikte onbekend: geen schip voert dit model"
 thickness_other_ships = "Andere schepen"
 export_title = "Model exporteren"
 export_tooltip = "Het model naar een GLB-bestand exporteren"
+part_model = "Model: %{model}"
+part_hardpoint = "Bevestigingspunt: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Romp"
+main_battery = "Hoofdbatterij"
+secondary_battery = "Secundair"
+aa_guns = "Luchtafweer"
+torpedoes = "Torpedo's"
+depth_charges = "Dieptebommen"
+fire_control = "Vuurleiding"
+radar = "Radars"
+missiles = "Raketwerpers"
+decorations = "Decoraties"
+misc = "Overig"
+armor = "Pantser"
+other = "Anders"
 
 [ui.scene_problem]
 cannot_show = "%{name} kan niet worden weergegeven"

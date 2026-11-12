@@ -2048,6 +2048,23 @@ thickness_unknown = "두께 알 수 없음: 이 모델을 장착한 함선이 �
 thickness_other_ships = "다른 함선"
 export_title = "모델 내보내기"
 export_tooltip = "모델을 GLB 파일로 내보내기"
+part_model = "모델: %{model}"
+part_hardpoint = "부착 지점: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "선체"
+main_battery = "주포"
+secondary_battery = "부포"
+aa_guns = "대공"
+torpedoes = "어뢰"
+depth_charges = "폭뢰"
+fire_control = "사격 통제"
+radar = "레이더"
+missiles = "미사일 발사기"
+decorations = "장식"
+misc = "기타 부품"
+armor = "장갑"
+other = "기타"
 
 [ui.scene_problem]
 cannot_show = "%{name}을(를) 표시할 수 없습니다"

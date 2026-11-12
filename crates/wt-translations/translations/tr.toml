@@ -2002,6 +2002,23 @@ thickness_unknown = "Kalınlık bilinmiyor: bu modeli taşıyan gemi yok"
 thickness_other_ships = "Diğer gemiler"
 export_title = "Modeli dışa aktar"
 export_tooltip = "Modeli bir GLB dosyasına aktar"
+part_model = "Model: %{model}"
+part_hardpoint = "Bağlantı noktası: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Gövde"
+main_battery = "Ana batarya"
+secondary_battery = "İkincil bataryalar"
+aa_guns = "Uçaksavar"
+torpedoes = "Torpidolar"
+depth_charges = "Derinlik bombaları"
+fire_control = "Atış kontrolü"
+radar = "Radarlar"
+missiles = "Füze rampaları"
+decorations = "Süslemeler"
+misc = "Çeşitli"
+armor = "Zırh"
+other = "Diğer"
 
 [ui.scene_problem]
 cannot_show = "%{name} gösterilemiyor"

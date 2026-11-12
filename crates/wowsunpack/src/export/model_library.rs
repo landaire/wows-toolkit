@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Read;
 use std::io::Write;
+use std::ops::Range;
 use std::sync::Arc;
 
 use rootcause::Report;
@@ -331,6 +332,7 @@ impl ModelLibrary {
                 mesh.transform = mesh_transform;
                 mesh.group = group;
             }
+            let first_mesh = meshes.len();
             meshes.extend(part_meshes);
             armor.extend(geom.armor_models);
 
@@ -339,6 +341,7 @@ impl ModelLibrary {
                 visual_path: source.visual_path.clone(),
                 geometry_path: source.geometry_path.clone(),
                 lod_count: source.visual.lods.len(),
+                meshes: first_mesh..meshes.len(),
             });
         }
 
@@ -874,6 +877,8 @@ pub struct ModelPart {
     pub visual_path: String,
     pub geometry_path: String,
     pub lod_count: usize,
+    /// The meshes it contributed, as indices into the model's meshes.
+    pub meshes: Range<usize>,
 }
 
 /// The textures one material references.

@@ -2074,6 +2074,23 @@ thickness_unknown = "Thickness unknown: no ship mounts this model"
 thickness_other_ships = "Other ships"
 export_title = "Export Model"
 export_tooltip = "Export the model to a GLB file"
+part_model = "Model: %{model}"
+part_hardpoint = "Attachment point: %{hardpoint}"
+
+[ui.model_view.part_group]
+hull = "Hull"
+main_battery = "Main battery"
+secondary_battery = "Secondary battery"
+aa_guns = "AA guns"
+torpedoes = "Torpedoes"
+depth_charges = "Depth charges"
+fire_control = "Fire control"
+radar = "Radar"
+missiles = "Missiles"
+decorations = "Decorations"
+misc = "Misc"
+armor = "Armor"
+other = "Other"
 
 [ui.scene_problem]
 cannot_show = "%{name} cannot be shown"
