@@ -6,6 +6,7 @@
 //! build their own bar over one implementation of the rules.
 
 pub mod label;
+pub mod picker;
 pub mod seed;
 pub mod select;
 pub mod suggest;
