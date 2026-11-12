@@ -35,6 +35,8 @@ pub mod keys {
     pub const AUTO_DUMP_GAME_DATA: &str = "auto_dump_game_data";
     /// Whether a model opens with its armor in view rather than its hull.
     pub const MODEL_VIEWER_SHOW_ARMOR: &str = "model_viewer_show_armor";
+    /// The ship tiers the Model Viewer sidebar lists, as `[lowest, highest]`.
+    pub const MODEL_VIEWER_SHIP_TIERS: &str = "model_viewer_ship_tiers";
     /// Where that cache is kept. Empty means the default location.
     pub const GAME_DATA_CACHE_DIR: &str = "game_data_cache_dir";
     /// The game-data repository commit the cache was last checked against.

@@ -54,6 +54,58 @@ impl ShipCatalog {
     }
 }
 
+/// The ship tiers the Model Viewer sidebar lists, inclusive and never empty.
+/// Stored as `[lowest, highest]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "[u32; 2]", into = "[u32; 2]")]
+pub struct TierRange {
+    lowest: u32,
+    highest: u32,
+}
+
+impl TierRange {
+    pub const LOWEST: u32 = 1;
+    pub const HIGHEST: u32 = 11;
+    /// Every tier, which filters nothing.
+    pub const ALL: Self = Self { lowest: Self::LOWEST, highest: Self::HIGHEST };
+
+    /// The tiers from `a` to `b`, in either order, kept inside I to XI.
+    pub fn new(a: u32, b: u32) -> Self {
+        let lowest = a.min(b).clamp(Self::LOWEST, Self::HIGHEST);
+        let highest = a.max(b).clamp(Self::LOWEST, Self::HIGHEST);
+
+        Self { lowest, highest }
+    }
+
+    pub fn lowest(self) -> u32 {
+        self.lowest
+    }
+
+    pub fn highest(self) -> u32 {
+        self.highest
+    }
+
+    pub fn contains(self, tier: u32) -> bool {
+        (self.lowest..=self.highest).contains(&tier)
+    }
+
+    pub fn is_all(self) -> bool {
+        self == Self::ALL
+    }
+}
+
+impl From<[u32; 2]> for TierRange {
+    fn from([a, b]: [u32; 2]) -> Self {
+        Self::new(a, b)
+    }
+}
+
+impl From<TierRange> for [u32; 2] {
+    fn from(range: TierRange) -> Self {
+        [range.lowest, range.highest]
+    }
+}
+
 /// Canonical display order for ship classes.
 fn species_order(s: &Species) -> u32 {
     match s {
@@ -198,6 +250,19 @@ impl ShipCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tier_range_is_ordered_kept_inside_i_to_xi_and_stored_as_a_pair() {
+        let range = TierRange::new(8, 3);
+        assert_eq!((range.lowest(), range.highest()), (3, 8));
+        assert!(range.contains(3) && range.contains(8) && !range.contains(2) && !range.contains(9));
+        assert_eq!(TierRange::new(0, 40), TierRange::ALL);
+        assert!(TierRange::ALL.is_all() && !range.is_all());
+
+        assert_eq!(serde_json::to_string(&range).expect("serializes"), "[3,8]");
+        let read: TierRange = serde_json::from_str("[12,5]").expect("a stored pair reads back");
+        assert_eq!(read, TierRange::new(5, 11), "an out-of-range store is brought back inside");
+    }
 
     #[test]
     fn tier_roman_covers_i_through_xi_and_falls_back_for_unknown_tiers() {

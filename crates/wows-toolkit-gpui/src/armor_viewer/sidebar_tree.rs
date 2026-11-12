@@ -30,6 +30,7 @@ use wowsunpack::game_params::types::Species;
 use super::catalog::NationGroup;
 use super::catalog::ShipCatalog;
 use super::catalog::ShipEntry;
+use super::catalog::TierRange;
 use super::catalog::species_name;
 use super::catalog::tier_roman;
 use super::model_refs::OpenTarget;
@@ -140,31 +141,27 @@ type ShipMatches = MatchGroup<MatchGroup<MatchGroup<ShipMatch>>>;
 type ModelMatches = MatchGroup<FolderMatches>;
 
 impl SearchMatches {
-    /// `None` for an empty `query`, which lists everything. `query` is
-    /// already lowercased.
-    pub(super) fn from_query(sources: &TreeSources<'_>, query: &str) -> Option<Self> {
-        if query.is_empty() {
+    /// `None` for an empty `query` and every tier, which lists everything.
+    /// `query` is already folded. The tiers filter only ships; models are
+    /// filtered by the query alone.
+    pub(super) fn from_query(sources: &TreeSources<'_>, query: &str, tiers: TierRange) -> Option<Self> {
+        if query.is_empty() && tiers.is_all() {
             return None;
         }
 
+        let found = |ship: &ShipEntry| ship_match(ship, sources.ship_parts, query, tiers);
         let ships = sources
             .ships
             .nations
             .iter()
-            .map(|nation| {
-                nation
-                    .classes
-                    .iter()
-                    .map(|class| class.ships.iter().map(|ship| ship_match(ship, sources.ship_parts, query)).collect())
-                    .collect()
-            })
+            .map(|nation| nation.classes.iter().map(|class| class.ships.iter().map(found).collect()).collect())
             .collect();
 
         let models = match sources.models {
-            ModelSection::Ready(index) => {
+            ModelSection::Ready(index) if !query.is_empty() => {
                 Some(index.folders.iter().map(|folder| FolderMatches::new(folder, query)).collect())
             }
-            ModelSection::Loading | ModelSection::Unavailable => None,
+            ModelSection::Ready(_) | ModelSection::Loading | ModelSection::Unavailable => None,
         };
 
         Some(Self { query: query.to_string(), ships, models })
@@ -200,7 +197,16 @@ enum ShipMatch {
     Parts,
 }
 
-fn ship_match(ship: &ShipEntry, ship_parts: &HashMap<VehicleParamIndex, ShipPartRows>, query: &str) -> ShipMatch {
+fn ship_match(
+    ship: &ShipEntry,
+    ship_parts: &HashMap<VehicleParamIndex, ShipPartRows>,
+    query: &str,
+    tiers: TierRange,
+) -> ShipMatch {
+    if !tiers.contains(ship.tier) {
+        return ShipMatch::Miss;
+    }
+
     if ship.search_key.matches(query) {
         return ShipMatch::Name;
     }
@@ -997,11 +1003,68 @@ mod tests {
     }
 
     fn build(data: &Data, query: &str, set: &mut HashSet<SharedString>, auto: bool) -> BuiltTree {
+        build_in_tiers(data, query, TierRange::ALL, set, auto)
+    }
+
+    fn build_in_tiers(
+        data: &Data,
+        query: &str,
+        tiers: TierRange,
+        set: &mut HashSet<SharedString>,
+        auto: bool,
+    ) -> BuiltTree {
         let sources =
             TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
-        let search = SearchMatches::from_query(&sources, query);
+        let search = SearchMatches::from_query(&sources, query, tiers);
 
         build_tree(&sources, search.as_ref(), &mut Expansion { set, closed: &HashSet::new(), auto })
+    }
+
+    #[test]
+    fn a_tier_range_lists_only_the_ships_in_it_and_every_model() {
+        let data = data();
+        let mut set = HashSet::from(["armor-nation-USA".into(), "armor-class-USA-Battleship".into()]);
+
+        let built = build_in_tiers(&data, "", TierRange::new(9, 11), &mut set, false);
+
+        assert_eq!(
+            outline(&built.items),
+            [
+                "Japan (1) +",
+                "U.S.A. (1)",
+                "  Battleship (1)",
+                "    IX Iowa +",
+                "Models",
+                "events +",
+                "Japan +",
+                "U.S.A. +",
+                "Buildings +",
+                "Locations +",
+                "Ports +"
+            ],
+            "South Carolina, tier III, is left out"
+        );
+
+        let built = build_in_tiers(&data, "", TierRange::new(1, 5), &mut set, false);
+        assert_eq!(outline(&built.items)[..3], ["U.S.A. (1)", "  Battleship (1)", "    III S. Carolina"]);
+    }
+
+    #[test]
+    fn a_tier_range_and_a_search_apply_together() {
+        let data = data();
+
+        let built = build_in_tiers(&data, "carolina", TierRange::new(9, 11), &mut HashSet::new(), true);
+        assert_eq!(outline(&built.items), ["Models"], "the ship the search names is outside the tiers");
+
+        let built = build_in_tiers(&data, "carolina", TierRange::new(3, 3), &mut HashSet::new(), true);
+        assert_eq!(outline(&built.items), ["U.S.A. (1)", "  Battleship (1)", "    III S. Carolina", "Models"]);
+
+        let built = build_in_tiers(&data, "agm034", TierRange::new(10, 11), &mut HashSet::new(), true);
+        assert_eq!(
+            outline(&built.items),
+            ["Models", "U.S.A. (1)", "  Guns (1)", "    Main battery (1)", "      AGM034_16in50_Mk7 +"],
+            "Iowa, which mounts the turret, is outside the tiers; the turret model is still listed"
+        );
     }
 
     fn is_placeholder(item: &TreeItem) -> bool {
@@ -1472,7 +1535,7 @@ mod tests {
             let sources =
                 TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
             let started = Instant::now();
-            let matches = SearchMatches::from_query(&sources, query);
+            let matches = SearchMatches::from_query(&sources, query, TierRange::ALL);
             eprintln!("[measured] {query:?}: matched in {:?}", started.elapsed());
             drop(matches);
 

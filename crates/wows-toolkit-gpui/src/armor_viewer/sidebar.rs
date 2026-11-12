@@ -35,6 +35,10 @@ use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::slider::Slider;
+use gpui_kit::component::slider::SliderEvent;
+use gpui_kit::component::slider::SliderState;
+use gpui_kit::component::slider::SliderValue;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeEvent;
@@ -44,11 +48,14 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelLibrary;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
+use super::catalog::TierRange;
+use super::catalog::tier_roman;
 use super::model_refs::HardpointTarget;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartRef;
@@ -189,8 +196,17 @@ pub struct Sidebar {
     /// What the active pane shows, highlighted in the tree.
     open_model: Option<OpenTarget>,
 
+    /// The tiers the Ships section lists, and the slider choosing them.
+    tiers: TierRange,
+    tier_slider: Entity<SliderState>,
+    /// The saved tiers are read once, with the first bundle: the config
+    /// database is not open yet when the sidebar is made.
+    tiers_restored: bool,
+
     _search_debounce: Option<Task<()>>,
     _model_index_task: Option<Task<()>>,
+    _tiers_restore: Option<Task<()>>,
+    _tier_slider_subscription: Subscription,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -208,6 +224,7 @@ impl Sidebar {
         let search_state = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.models.search").to_string()));
         let search_subscription = cx.subscribe_in(&search_state, window, Self::on_search_event);
         let tree_subscription = cx.subscribe(&tree_state, Self::on_tree_event);
+        let (tier_slider, tier_slider_subscription) = tier_slider(TierRange::ALL, cx);
 
         Self {
             bundle: None,
@@ -226,8 +243,13 @@ impl Sidebar {
             search_collapsed: HashSet::new(),
             hardpoint_visibility: Rc::new(HashSet::new()),
             open_model: None,
+            tiers: TierRange::ALL,
+            tier_slider,
+            tiers_restored: false,
             _search_debounce: None,
             _model_index_task: None,
+            _tiers_restore: None,
+            _tier_slider_subscription: tier_slider_subscription,
             _subscriptions: vec![search_subscription, tree_subscription],
         }
     }
@@ -240,6 +262,8 @@ impl Sidebar {
     /// comparing.
     fn common_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let common = self.common;
+        let tiers = self.tiers;
+        let tier_slider = self.tier_slider.clone();
         let entity = cx.entity();
         Popover::new("armor-sidebar-common")
             .trigger(
@@ -248,7 +272,7 @@ impl Sidebar {
                     .compact()
                     .tooltip(t!("ui.armor.common_settings").to_string()),
             )
-            .content(move |_state, _window, _cx| {
+            .content(move |_state, _window, cx| {
                 let mirror_entity = entity.clone();
                 let sync_entity = entity.clone();
                 let stack_entity = entity.clone();
@@ -308,6 +332,24 @@ impl Sidebar {
                                 });
                             }),
                     )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .pt_2()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div().text_sm().child(
+                                    t!(
+                                        "ui.armor.tier_filter",
+                                        lowest = tier_roman(tiers.lowest()),
+                                        highest = tier_roman(tiers.highest())
+                                    )
+                                    .into_owned(),
+                                ),
+                            )
+                            .child(Slider::new(&tier_slider)),
+                    )
                     .into_any_element()
             })
     }
@@ -328,10 +370,65 @@ impl Sidebar {
     /// for the one built over this bundle.
     pub fn set_bundle(&mut self, bundle: Arc<ArmorAssetsBundle>, cx: &mut Context<Self>) {
         self.bundle = Some(bundle);
+        if !std::mem::replace(&mut self.tiers_restored, true) {
+            self.restore_tiers(cx);
+        }
         self.model_library = None;
         self.models = ModelsState::Loading;
         self.ship_parts = Arc::new(HashMap::new());
         self._model_index_task = None;
+        self.rebuild_tree(Rebuild::Rematch, cx);
+        cx.notify();
+    }
+
+    /// Reads back the tiers saved by an earlier session.
+    fn restore_tiers(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else {
+            return;
+        };
+
+        self._tiers_restore = Some(cx.spawn(async move |this, cx| {
+            let stored = crate::runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<TierRange>(&pool, keys::MODEL_VIEWER_SHIP_TIERS).await
+            })
+            .await;
+            let Ok(Some(tiers)) = stored else {
+                return;
+            };
+
+            let _ = this.update(cx, |this, cx| this.adopt_tiers(tiers, cx));
+        }));
+    }
+
+    /// Shows `tiers` on the slider and lists only their ships.
+    fn adopt_tiers(&mut self, tiers: TierRange, cx: &mut Context<Self>) {
+        let (slider, subscription) = tier_slider(tiers, cx);
+        self.tier_slider = slider;
+        self._tier_slider_subscription = subscription;
+        self.set_tiers(tiers, cx);
+    }
+
+    fn on_tier_slider(&mut self, _slider: Entity<SliderState>, event: &SliderEvent, cx: &mut Context<Self>) {
+        // The reader's choice wins over a saved one still being read.
+        self._tiers_restore = None;
+
+        match event {
+            SliderEvent::Change(value) => self.set_tiers(tiers_from_slider(*value), cx),
+            // Saved once the handle is let go, not on every step of a drag.
+            SliderEvent::Release(value) => {
+                let tiers = tiers_from_slider(*value);
+                self.set_tiers(tiers, cx);
+                crate::settings_store::save(keys::MODEL_VIEWER_SHIP_TIERS, &tiers, cx);
+            }
+        }
+    }
+
+    fn set_tiers(&mut self, tiers: TierRange, cx: &mut Context<Self>) {
+        if self.tiers == tiers {
+            return;
+        }
+
+        self.tiers = tiers;
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
@@ -492,7 +589,7 @@ impl Sidebar {
         };
         let sources = TreeSources { ships: &bundle.catalog, ship_parts: &self.ship_parts, models };
         if rebuild == Rebuild::Rematch {
-            self.search = SearchMatches::from_query(&sources, &self.query);
+            self.search = SearchMatches::from_query(&sources, &self.query, self.tiers);
         }
 
         let searching = !self.query.is_empty();
@@ -528,6 +625,27 @@ fn hardpoint_target(kind: &RowKind) -> Option<HardpointTarget> {
         }
         _ => None,
     }
+}
+
+/// A slider over the tiers, I to XI, with its handles on `tiers`. Its step
+/// keeps each handle on a whole tier, and a handle stops at the other.
+fn tier_slider(tiers: TierRange, cx: &mut Context<Sidebar>) -> (Entity<SliderState>, Subscription) {
+    let slider = cx.new(|_| {
+        SliderState::new()
+            .min(TierRange::LOWEST as f32)
+            .max(TierRange::HIGHEST as f32)
+            .step(1.)
+            .default_value((tiers.lowest() as f32, tiers.highest() as f32))
+    });
+    let subscription = cx.subscribe(&slider, Sidebar::on_tier_slider);
+
+    (slider, subscription)
+}
+
+/// The tiers a slider's handles stand on. A value between tiers, which the
+/// slider's step does not let a handle take, goes to the nearer one.
+fn tiers_from_slider(value: SliderValue) -> TierRange {
+    TierRange::new(value.start().round() as u32, value.end().round() as u32)
 }
 
 /// The model a row opens and the ship part it was opened from.
@@ -810,11 +928,14 @@ mod tests {
     use gpui_kit::SharedString;
     use gpui_kit::TestAppContext;
     use gpui_kit::WindowHandle;
+    use gpui_kit::component::slider::SliderEvent;
+    use gpui_kit::component::slider::SliderValue;
     use gpui_kit::component::tree::TreeEvent;
     use gpui_kit::px;
     use gpui_kit::size;
     use gpui_kit::test::TestAppContextExt;
     use gpui_kit::test::TestWindowExt;
+    use wows_toolkit_viewmodel::settings::keys;
     use wowsunpack::export::hardpoint::HardpointName;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -824,6 +945,7 @@ mod tests {
     use crate::replay_inspector::icons::IconCache;
 
     use super::super::assets::ArmorAssetsBundle;
+    use super::super::catalog::TierRange;
     use super::super::model_refs::HardpointTarget;
     use super::super::model_refs::OpenTarget;
     use super::super::model_refs::ShipPartKey;
@@ -1055,6 +1177,55 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_tier_slider_narrows_the_ships_and_saves_the_tiers_when_let_go(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let iowa = ship_row_id(fixture::IOWA_INDEX);
+        let south_carolina = ship_row_id("PASB001");
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.browse_expanded.extend(["armor-nation-USA".into(), "armor-class-USA-Battleship".into()]);
+                let slider = sidebar.tier_slider.clone();
+                sidebar.on_tier_slider(slider.clone(), &SliderEvent::Change(SliderValue::Range(2.8, 8.)), cx);
+                sidebar.on_tier_slider(slider, &SliderEvent::Release(SliderValue::Range(3., 8.)), cx);
+            })
+            .expect("the window is open");
+
+        assert!(row_index(&window, &south_carolina, cx).is_some(), "tier III is listed");
+        assert_eq!(row_index(&window, &iowa, cx), None, "tier IX is not");
+        let saved: Vec<String> = crate::settings_store::saved_for_test()
+            .into_iter()
+            .filter(|(key, _)| *key == keys::MODEL_VIEWER_SHIP_TIERS)
+            .map(|(_, json)| json)
+            .collect();
+        assert_eq!(saved, ["[3,8]"], "saved once, when the handle is let go");
+    }
+
+    #[gpui_kit::test]
+    fn saved_tiers_move_the_slider_and_filter_the_ships(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+
+        let (value, tiers) = window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.browse_expanded.extend(["armor-nation-USA".into(), "armor-class-USA-Battleship".into()]);
+                sidebar.adopt_tiers(TierRange::new(9, 11), cx);
+                (sidebar.tier_slider.read(cx).value(), sidebar.tiers)
+            })
+            .expect("the window is open");
+
+        assert_eq!(value, SliderValue::Range(9., 11.));
+        assert_eq!(tiers, TierRange::new(9, 11));
+        assert!(row_index(&window, &ship_row_id(fixture::IOWA_INDEX), cx).is_some(), "Iowa, tier IX, is listed");
+        assert_eq!(row_index(&window, &ship_row_id("PASB001"), cx), None, "S. Carolina, tier III, is not");
+    }
+
+    #[test]
+    fn slider_handles_give_whole_tiers_in_order() {
+        assert_eq!(super::tiers_from_slider(SliderValue::Range(3.2, 8.6)), TierRange::new(3, 9));
+        assert_eq!(super::tiers_from_slider(SliderValue::Range(8., 3.)), TierRange::new(3, 8), "crossed handles");
+        assert_eq!(super::tiers_from_slider(SliderValue::Range(0., 30.)), TierRange::ALL);
+    }
+
+    #[gpui_kit::test]
     fn typing_a_search_filters_ships_and_models(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
 
@@ -1119,7 +1290,7 @@ mod tests {
                         ship_parts: &sidebar.ship_parts,
                         models: ModelSection::Ready(index),
                     };
-                    SearchMatches::from_query(&sources, "yamato")
+                    SearchMatches::from_query(&sources, "yamato", TierRange::ALL)
                 };
                 sidebar.search = stand_in;
 
