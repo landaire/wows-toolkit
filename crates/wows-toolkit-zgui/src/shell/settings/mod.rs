@@ -9,6 +9,7 @@ mod tests;
 mod zoom_anchor;
 
 use landaire_ui::DrawerProps;
+use landaire_ui::MarkedTextProps;
 use landaire_ui::PanelWidth;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
@@ -63,6 +64,7 @@ use crate::shell::Shell;
 use crate::shell::settings::controls::SettingControlProps;
 use crate::shell::settings::controls::SettingNoteProps;
 use crate::shell::settings::zoom_anchor::ZoomAnchor;
+use crate::text_marks::marks;
 
 pub use wows_toolkit_viewmodel::settings_drawer::Setting;
 pub use wows_toolkit_viewmodel::settings_drawer::SettingsSection;
@@ -586,7 +588,7 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
                             SectionHeading(shell = shell, section = section, first = Signal::derive_local(move || first_section() == Some(section)))
                             column(class = "wt-settings__card") {
                                 for setting in move || rows.get().into_iter().filter(|setting| setting.section() == section).collect::<Vec<_>>(), key = |setting: &Setting| *setting {
-                                    SettingRow(shell = shell, setting = setting)
+                                    SettingRow(shell = shell, setting = setting, query = query)
                                 }
                             }
                         }
@@ -702,9 +704,10 @@ fn SectionHeading(shell: Shell, section: SettingsSection, first: Signal<bool, Lo
     }
 }
 
-/// One setting: its name and description, the control that changes it, and a line about it.
+/// One setting: its name and description, each marked where `query` matched it, the control that
+/// changes it, and a line about it.
 #[component]
-fn SettingRow(shell: Shell, setting: Setting) -> impl IntoView {
+fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalStorage>) -> impl IntoView {
     let locale = Services::current().locale;
     let node = NodeRef::new();
     follow_jump(shell, node, move |target| target == SettingsTarget::Setting(setting));
@@ -713,14 +716,32 @@ fn SettingRow(shell: Shell, setting: Setting) -> impl IntoView {
         column(class = "wt-settings__row", node_ref = node, attr:data-testid = row_test_id(setting)) {
             row(class = "wt-settings__row-body", attr:data-stacked = setting.stacked().then(String::new)) {
                 column(class = "wt-settings__row-text") {
-                    text(class = "wt-settings__row-title", attr:data-testid = "settings-row-title") {{move || {
+                    {move || {
                         locale.track();
-                        setting.title().into_owned()
-                    }}}
-                    text(class = "wt-settings__row-description", attr:data-testid = "settings-row-description") {{move || {
+                        let title = setting.title().into_owned();
+                        let ranges = query.with(|query| marks(query, &title));
+                        view! {
+                            MarkedText(
+                                class = "wt-settings__row-title",
+                                attr:data-testid = "settings-row-title",
+                                text = title,
+                                ranges = ranges
+                            )
+                        }
+                    }}
+                    {move || {
                         locale.track();
-                        setting.description().into_owned()
-                    }}}
+                        let description = setting.description().into_owned();
+                        let ranges = query.with(|query| marks(query, &description));
+                        view! {
+                            MarkedText(
+                                class = "wt-settings__row-description",
+                                attr:data-testid = "settings-row-description",
+                                text = description,
+                                ranges = ranges
+                            )
+                        }
+                    }}
                 }
                 SettingControl(shell = shell, setting = setting)
             }
