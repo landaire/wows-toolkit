@@ -1,6 +1,7 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 LANDAIRE_UI_DEPS = [
+    "//third-party/rust:serde",
     "//third-party/rust:thiserror",
     "//third-party/rust:zgui",
     "//third-party/rust:zgui-ui",
@@ -44,6 +45,10 @@ workspace_test(
     version = "0.1.0",
     features = ["test-support"],
     deps = TEST_SUPPORT_DEPS,
+    test_deps = [
+        "//third-party/rust:insta",
+        "//third-party/rust:serde_json",
+    ],
 )
 
 workspace_integration_tests(
