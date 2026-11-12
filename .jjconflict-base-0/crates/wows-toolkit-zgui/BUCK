@@ -10,6 +10,7 @@ buildscript = workspace_buildscript(
 
 ZGUI_DEPS = [
     "//crates/landaire-ui:landaire_ui",
+    "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
@@ -26,12 +27,13 @@ ZGUI_DEPS = [
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
+    "//third-party/rust:arboard",
     "//third-party/rust:ciborium",
     "//third-party/rust:csv",
     "//third-party/rust:clap",
     "//third-party/rust:futures",
-    "//third-party/rust:humansize",
     "//third-party/rust:image",
+    "//third-party/rust:humansize",
     "//third-party/rust:jiff",
     "//third-party/rust:reqwest",
     "//third-party/rust:resvg",
@@ -73,8 +75,8 @@ workspace_binary(
 _TEST_SUPPORT_VARIANTS = {
     "//crates/landaire-ui:landaire_ui": "//crates/landaire-ui:landaire_ui_test_support",
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
-    "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+    "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher": "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
 }
 
