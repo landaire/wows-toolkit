@@ -19,12 +19,12 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use wows_toolkit_services::collab::CollabState;
+use wows_toolkit_services::collab::SharedWindow as CollabSharedWindow;
+use wows_toolkit_viewmodel::collab::SessionFailure;
 use wt_collab_client::PeerRole;
 use wt_collab_client::Permissions;
 use wt_collab_client::SessionStatus;
-
-use crate::collab::CollabState;
-use crate::collab::SharedWindow as CollabSharedWindow;
 
 /// How wide the popover sits, matching the egui one's own minimum.
 const WIDTH: Pixels = px(300.);
@@ -113,7 +113,7 @@ fn render_body<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> An
 /// What is offered with no session running: a name, then host or join.
 fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> AnyElement {
     let named = !view.collab().display_name.trim().is_empty();
-    let failure = view.collab().failure.clone();
+    let failure = view.collab().failure.as_ref().map(SessionFailure::text);
 
     v_flex()
         .gap_2()
@@ -145,7 +145,7 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                         let Some(owner) = owner.upgrade() else { return };
                         let version = toolkit_version();
                         owner.update(cx, |view: &mut V, cx| {
-                            view.collab_mut().host(version, cx);
+                            crate::collab::host(view.collab_mut(), version, cx);
                             cx.notify();
                         });
                     });
@@ -167,7 +167,7 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                         let token = token.clone();
                         let version = toolkit_version();
                         owner.update(cx, |view: &mut V, cx| {
-                            view.collab_mut().join(token, version, cx);
+                            crate::collab::join(view.collab_mut(), token, version, cx);
                             cx.notify();
                         });
                     });

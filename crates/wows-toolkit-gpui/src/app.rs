@@ -2073,7 +2073,7 @@ impl App {
     /// Nothing is opened here: a board with no map of its own takes up a peer's
     /// as it follows the session, which is where the boards a joiner is sent
     /// after the handshake turn up.
-    fn share_session_with_board(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+    fn share_session_with_board(&mut self, link: wows_toolkit_services::collab::CollabLink, cx: &mut Context<Self>) {
         if let Some(board) = self.tactics_board.as_ref().and_then(|handle| handle.upgrade()) {
             board.update(cx, |board, cx| board.set_collab(link, cx));
         }

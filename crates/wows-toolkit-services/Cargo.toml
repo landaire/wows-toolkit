@@ -12,8 +12,8 @@ name = "wows_toolkit_services"
 path = "src/lib.rs"
 
 [features]
-# Records file dialogs and answers them as dismissed instead of opening them,
-# for headless tests.
+# For headless front-end tests: file dialogs are recorded and answered as
+# dismissed instead of opened, and a collab link can stand without a session.
 test-support = []
 
 [dependencies]
@@ -22,6 +22,8 @@ ciborium = { workspace = true }
 # The update download reports its progress over a channel.
 futures = "0.3"
 jiff = { workspace = true }
+# The collab session state the peer task and the front end both hold.
+parking_lot = "0.12.5"
 # Matches the egui app's feature set so both resolve one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 rootcause = { workspace = true }
@@ -44,7 +46,13 @@ wows-toolkit-config = { workspace = true }
 wows-toolkit-hardening = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 # The live roster the stats lookup is asked about.
+# The map dimensions a tactics board carries.
+wows_minimap_renderer = { workspace = true }
 wows_replays = { workspace = true }
+# A ping's clock, which a test ages.
+web-time = { workspace = true }
+# The collaborative session mesh, shared with the egui app.
+wt-collab-client = { workspace = true }
 # The release archive the update is read out of.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 

@@ -25,9 +25,9 @@ use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_toolkit_replay_data::load::GameDataCache;
 
-use crate::collab::ReplayId;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
+use wows_toolkit_services::collab::ReplayId;
 
 /// How often the frames the session has sent are looked for.
 ///
@@ -85,14 +85,14 @@ pub struct WatchedPlayback {
     _tick: Option<Task<()>>,
     focus_handle: FocusHandle,
     /// The session this is watching, for taking the sink out again.
-    collab: crate::collab::CollabLink,
+    collab: wows_toolkit_services::collab::CollabLink,
 }
 
 impl WatchedPlayback {
     /// Opens a viewport on one of the session's windows and asks for its frames.
     pub fn new(
-        shared: crate::collab::SharedWindow,
-        collab: crate::collab::CollabLink,
+        shared: wows_toolkit_services::collab::SharedWindow,
+        collab: wows_toolkit_services::collab::CollabLink,
         game_data: Option<GameDataCache>,
         cx: &mut Context<Self>,
     ) -> Self {
