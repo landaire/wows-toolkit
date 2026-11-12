@@ -283,6 +283,11 @@ impl HeadlessWindow {
         self.press_on(element, PointerButton::Secondary, Modifiers::NONE)
     }
 
+    /// Presses and releases the middle button over the middle of `element`.
+    pub fn middle_click(&mut self, element: Element) -> Result<(), HeadlessError> {
+        self.press_on(element, PointerButton::Middle, Modifiers::NONE)
+    }
+
     /// Presses the primary button over the middle of `element`, moves the pointer to `to` in
     /// `steps` moves, one output frame apart, and releases it there.
     pub fn drag(&mut self, element: Element, to: Point<DevicePx, Device>, steps: u32) -> Result<(), HeadlessError> {

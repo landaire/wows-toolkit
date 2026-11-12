@@ -518,8 +518,21 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
     let single = move || panels.with(Vec::len) == 1;
     let label = use_local_context::<DockLabels>().map(|labels| labels.tabs).unwrap_or_default();
 
+    let on_close_tabs = UnsyncCallback::new(move |values: Vec<String>| {
+        for value in values {
+            // The strip offers only closable panels of this group.
+            let _ = state.close(&PanelId::new(value));
+        }
+    });
+
     view! {
-        TabStrip(value = shown, label = label, class = "lui-dock__group", class:lui-dock__group-single = single) {
+        TabStrip(
+            value = shown,
+            label = label,
+            on_close_tabs = on_close_tabs,
+            class = "lui-dock__group",
+            class:lui-dock__group-single = single
+        ) {
             for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
                 DockTab(state = state, entry = entry)
             }
