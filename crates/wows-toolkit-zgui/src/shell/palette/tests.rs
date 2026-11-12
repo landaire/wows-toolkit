@@ -1,11 +1,17 @@
 //! The palette driven through the shell, as the reader drives it.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
+use futures::channel::oneshot;
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
+use wows_toolkit_viewmodel::palette::PaletteMode;
+use zgui::reactive::Mounted;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 
@@ -14,6 +20,14 @@ use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::shell::palette::Layer;
+use crate::shell::palette::ModeQuery;
+use crate::shell::palette::ModeRow;
+use crate::shell::palette::ModeRows;
+use crate::shell::palette::ModeSource;
+use crate::shell::palette::ModeSpec;
+use crate::shell::palette::PaletteControl;
+use crate::shell::palette::PaletteRun;
 use crate::shell::palette::ShipParamIndex;
 use crate::shell::palette::builtin::TEST_MODES;
 use crate::shell::palette::builtin::TestModes;
@@ -211,7 +225,7 @@ fn ships() -> Vec<ArmorShipRow> {
 /// Armor Viewer, ctrl+p goes straight to the ship list.
 #[test]
 fn the_palette_opens_any_ship_in_the_armor_viewer() {
-    let mut window = open_window(TestModes { ships: Some(ships()), folders: None });
+    let mut window = open_window(TestModes { ships: Some(ships()), ..TestModes::default() });
 
     shortcut(&mut window, 'p');
     assert!(shown(&window, ROOT), "ctrl+p elsewhere opens the root list");
@@ -249,13 +263,101 @@ fn the_palette_opens_any_ship_in_the_armor_viewer() {
     assert!(shown(&window, ROOT), "Backspace in an empty ship search returns to the root list");
 }
 
+/// While nothing offers the ship list, ctrl+p on the Armor Viewer opens the root list.
+#[test]
+fn ctrl_p_on_the_armor_viewer_without_a_ship_list_opens_the_root_list() {
+    let mut window = open_window(TestModes::default());
+    shortcut(&mut window, 'k');
+    window
+        .click(window.by_test_id("palette-item-go-to-armor-viewer").expect("the Armor Viewer is listed"))
+        .expect("the entry can be clicked");
+    settle(&mut window);
+    assert!(shown(&window, "tab-page-armor-viewer"));
+
+    shortcut(&mut window, 'p');
+    assert!(shown(&window, ROOT), "ctrl+p opens the root list");
+    assert!(!shown(&window, BACK));
+}
+
+/// An answer to a query the reader has since changed is dropped, even when it arrives before
+/// the pause after the change has ended.
+#[test]
+fn an_answer_to_a_replaced_query_is_dropped() {
+    type Pending = Rc<RefCell<Vec<(String, oneshot::Sender<ModeRows>)>>>;
+    let pending: Pending = Rc::default();
+    let asked = Rc::clone(&pending);
+    let players = move |needle: String| -> ModeQuery {
+        let (answer, answered) = oneshot::channel();
+        asked.borrow_mut().push((needle, answer));
+        Box::pin(async move { answered.await.unwrap_or(ModeRows::Ready(Vec::new())) })
+    };
+    let answer = |needle: &str| {
+        let at = pending.borrow().iter().position(|(asked, _)| asked == needle).expect("the query was read");
+        let (_, answer) = pending.borrow_mut().remove(at);
+        let row = ModeRow::new(format!("answer to {needle}"), PaletteRun::action(|| {}));
+        // The task reading a replaced query may already be gone.
+        let _ = answer.send(ModeRows::Ready(vec![row]));
+    };
+    let mut window = open_window(TestModes { players: Some(Rc::new(players)), ..TestModes::default() });
+
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "search players");
+    press(&mut window, NamedKey::Enter);
+    assert!(shown(&window, "palette-mode-players"));
+
+    window.type_text("a");
+    window.advance(Duration::from_millis(200));
+    window.type_text("b");
+    window.advance(Duration::from_millis(10));
+    answer("a");
+    window.advance(Duration::from_millis(20));
+    assert!(!shown(&window, "palette-row-0"), "the answer to the replaced query is not listed");
+
+    window.advance(Duration::from_millis(200));
+    answer("ab");
+    window.advance(Duration::from_millis(20));
+    assert_eq!(label(&mut window, "palette-row-0").as_deref(), Some("answer to ab"));
+}
+
+fn local_mode() -> ModeSpec {
+    ModeSpec { source: ModeSource::Local(Rc::new(|_: &str| ModeRows::Ready(Vec::new()))), on_enter: None }
+}
+
+/// A mode open on an offer taken back opens again, as a new opening, from the latest offer left,
+/// and returns to the root list once none is left.
+#[test]
+fn a_mode_whose_offer_is_taken_back_reopens_from_the_offer_left() {
+    zgui::reactive::install().expect("the reactive runtime installs");
+    let root = Mounted::new();
+    let palette = root.with(PaletteControl::new);
+
+    let first = Mounted::new();
+    first.with(|| palette.offer_mode(PaletteMode::Players, local_mode()));
+    palette.open_mode(PaletteMode::Players);
+    let second = Mounted::new();
+    second.with(|| palette.offer_mode(PaletteMode::Players, local_mode()));
+    let opened = palette.opening.get_untracked().expect("the mode is open");
+
+    first.unmount();
+    let reopened = palette.opening.get_untracked().expect("the palette stays open");
+    assert_eq!(reopened.layer, Layer::Mode(PaletteMode::Players));
+    assert_ne!(reopened.id, opened.id, "the list is opened again");
+    assert_ne!(reopened.offer, opened.offer, "from the offer left");
+    assert!(reopened.offer.and_then(|offer| palette.offered_spec(offer)).is_some());
+
+    second.unmount();
+    assert_eq!(palette.layer_untracked(), Some(Layer::Root), "with no offer left, the root list");
+
+    root.unmount();
+}
+
 /// The directory list puts "Browse..." first, and marks a recent directory that is gone once it
 /// has been looked for.
 #[test]
 fn the_directory_list_marks_a_directory_that_is_gone() {
     let present = tempfile::tempdir().expect("a temporary directory can be made");
     let folders = vec![present.path().to_path_buf(), PathBuf::from("/nonexistent/old replays")];
-    let mut window = open_window(TestModes { ships: None, folders: Some(folders) });
+    let mut window = open_window(TestModes { folders: Some(folders), ..TestModes::default() });
 
     shortcut(&mut window, 'k');
     type_text(&mut window, "open replay directory");
@@ -279,7 +381,7 @@ fn the_palette_renders_in_dark_and_light() {
     for (appearance, name) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
         let folders =
             vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from("/nonexistent/World_of_Warships/replays")];
-        TEST_MODES.set(TestModes { ships: None, folders: Some(folders) });
+        TEST_MODES.set(TestModes { folders: Some(folders), ..TestModes::default() });
         let mut window = open_shell(review_options(appearance));
 
         shortcut(&mut window, 'k');

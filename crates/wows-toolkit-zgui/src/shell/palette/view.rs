@@ -30,6 +30,7 @@ use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::task::Task;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::A11yBinding;
@@ -208,7 +209,7 @@ pub fn CommandPalette(shell: Shell) -> impl IntoView {
                     Some(Opening { layer: Layer::Root, .. }) => {
                         AnyView::new(view! { RootList(shell = shell, query = query) })
                     }
-                    Some(Opening { layer: Layer::Mode(mode), .. }) => match palette.mode_spec(mode) {
+                    Some(Opening { layer: Layer::Mode(mode), offer, .. }) => match offer.and_then(|offer| palette.offered_spec(offer)) {
                         Some(spec) => {
                             AnyView::new(view! { ModeList(shell = shell, mode = mode, spec = spec, query = query) })
                         }
@@ -370,28 +371,38 @@ fn follow_query(
     searching: RwSignal<bool, LocalStorage>,
 ) {
     let timers = Timers::current();
-    let due = RwSignal::new_local(None::<String>);
+    let due = RwSignal::new_local(None::<(u64, String)>);
     let pause = StoredValue::new_local(None::<TimeoutHandle>);
+    let reading = StoredValue::new_local(None::<Task>);
     let asked = StoredValue::new(0_u64);
 
+    // The generation advances as the query changes, not when the pause ends, so an answer to
+    // the previous query arriving during the pause is dropped.
     let pausing = RenderEffect::new(move |_| {
         let needle = query.get();
+        asked.update_value(|asked| *asked += 1);
+        let this = asked.get_value();
+        if let Some(Some(earlier)) = reading.try_update_value(Option::take) {
+            earlier.cancel();
+        }
         searching.set(true);
         rows.set(Rc::new(ModeRows::Ready(Vec::new())));
         match &timers {
             Some(timers) => {
-                pause.set_value(Some(timers.set_timeout(QUERY_PAUSE, move || due.set(Some(needle)))));
+                pause.set_value(Some(timers.set_timeout(QUERY_PAUSE, move || due.set(Some((this, needle))))));
             }
-            None => due.set(Some(needle)),
+            None => due.set(Some((this, needle))),
         }
     });
 
-    let reading = RenderEffect::new(move |_| {
-        let Some(needle) = due.get() else { return };
-        asked.update_value(|asked| *asked += 1);
-        let this = asked.get_value();
+    let fetching = RenderEffect::new(move |_| {
+        let Some((this, needle)) = due.get() else { return };
+        if asked.get_value() != this {
+            return;
+        }
+
         let read = fetch(needle);
-        spawn_local(async move {
+        let task = spawn_local(async move {
             let found = read.await;
             if asked.get_value() != this {
                 return;
@@ -399,12 +410,16 @@ fn follow_query(
             rows.set(Rc::new(found));
             searching.set(false);
         });
+        reading.set_value(Some(task));
     });
 
     on_cleanup_local(move || {
         drop(pausing);
-        drop(reading);
+        drop(fetching);
         pause.set_value(None);
+        if let Some(Some(earlier)) = reading.try_update_value(Option::take) {
+            earlier.cancel();
+        }
     });
 }
 

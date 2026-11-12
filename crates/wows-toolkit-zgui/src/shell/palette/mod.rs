@@ -327,6 +327,8 @@ struct OpeningId(u64);
 struct Opening {
     layer: Layer,
     id: OpeningId,
+    /// The offer a mode's list was opened from.
+    offer: Option<OfferId>,
 }
 
 /// Names one offer, so the scope that made it takes back that one.
@@ -391,25 +393,32 @@ impl PaletteControl {
 
     /// Opens the palette on its root list.
     pub fn open_root(self) {
-        self.show(Layer::Root);
+        self.show(Layer::Root, None);
     }
 
     /// Opens the palette on `mode`'s list, or on the root list while nothing offers the mode.
     pub fn open_mode(self, mode: PaletteMode) {
-        let Some(spec) = self.mode_spec(mode) else {
+        let latest = self.modes.with_untracked(|modes| {
+            modes
+                .iter()
+                .rev()
+                .find(|offered| offered.key == mode)
+                .map(|offered| (offered.id, offered.value.on_enter.clone()))
+        });
+        let Some((offer, on_enter)) = latest else {
             self.open_root();
             return;
         };
 
-        self.show(Layer::Mode(mode));
-        if let Some(on_enter) = spec.on_enter {
+        self.show(Layer::Mode(mode), Some(offer));
+        if let Some(on_enter) = on_enter {
             on_enter();
         }
     }
 
-    fn show(self, layer: Layer) {
+    fn show(self, layer: Layer, offer: Option<OfferId>) {
         let id = OpeningId(self.next());
-        self.opening.set(Some(Opening { layer, id }));
+        self.opening.set(Some(Opening { layer, id, offer }));
     }
 
     pub fn close(self) {
@@ -429,12 +438,19 @@ impl PaletteControl {
     }
 
     /// Lists `mode` on the root list until the calling scope is cleaned up. A later offer of the
-    /// same mode is the one entered while both stand.
+    /// same mode is the one entered while both stand. A mode open on the offer taken back opens
+    /// again from the latest offer left, or the root list when none is.
     pub fn offer_mode(self, mode: PaletteMode, spec: ModeSpec) {
         let id = OfferId(self.next());
         self.modes.update(|modes| modes.push(Offered { id, key: mode, value: spec }));
         on_cleanup_local(move || {
             self.modes.try_update(|modes| modes.retain(|offered| offered.id != id));
+
+            let open =
+                self.opening.try_with_untracked(|opening| opening.is_some_and(|opening| opening.offer == Some(id)));
+            if open == Some(true) {
+                self.open_mode(mode);
+            }
         });
     }
 
@@ -454,9 +470,9 @@ impl PaletteControl {
         taken
     }
 
-    fn mode_spec(self, mode: PaletteMode) -> Option<ModeSpec> {
+    fn offered_spec(self, offer: OfferId) -> Option<ModeSpec> {
         self.modes.with_untracked(|modes| {
-            modes.iter().rev().find(|offered| offered.key == mode).map(|offered| offered.value.clone())
+            modes.iter().find(|offered| offered.id == offer).map(|offered| offered.value.clone())
         })
     }
 

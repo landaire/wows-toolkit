@@ -79,6 +79,8 @@ pub fn offer(shell: Shell) {
 pub struct TestModes {
     pub ships: Option<Vec<modes::ArmorShipRow>>,
     pub folders: Option<Vec<std::path::PathBuf>>,
+    /// Read in place of the replay index for the players list.
+    pub players: Option<std::rc::Rc<dyn Fn(String) -> super::ModeQuery>>,
 }
 
 #[cfg(test)]
@@ -100,6 +102,10 @@ fn offer_test_modes(shell: Shell) {
         shell
             .palette
             .offer_mode(PaletteMode::ReplayFolders, modes::replay_folders(shell, Signal::stored_local(folders)));
+    }
+    if let Some(players) = offered.players {
+        let spec = super::ModeSpec { source: super::ModeSource::Query(players), on_enter: None };
+        shell.palette.offer_mode(PaletteMode::Players, spec);
     }
 }
 
