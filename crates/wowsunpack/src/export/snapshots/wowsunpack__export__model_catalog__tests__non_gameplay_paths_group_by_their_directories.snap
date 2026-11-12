@@ -1,0 +1,23 @@
+---
+source: crates/wowsunpack/src/export/model_catalog.rs
+expression: summary(&catalog)
+---
+[
+    "AM3 | Other(Some(ModelDirectory(\"content/gameplay\"))) | Other",
+    "AM1 | Other(Some(ModelDirectory(\"content/gameplay\"))) | Other",
+    "AGX | Other(Some(ModelDirectory(\"content/gameplay\"))) | Other",
+    "LBC001_House | Location(SceneGroup { category: ModelDirectory(\"building\"), sub_category: Some(ModelDirectory(\"city\")) }) | Other",
+    "LBC9 | Other(Some(ModelDirectory(\"content/location\"))) | Other",
+    "LYB206_Respawn | Building(Unassigned) | Other",
+    "LL371_Statue_of_liberty | Location(SceneGroup { category: ModelDirectory(\"landmark\"), sub_category: None }) | Other",
+    "LNG006 | Building(Unassigned) | Other",
+    "LNR561_Shoreside | Location(SceneGroup { category: ModelDirectory(\"nature\"), sub_category: Some(ModelDirectory(\"rock\")) }) | Other",
+    "pillar | Other(Some(ModelDirectory(\"content/mesh_decal_test\"))) | Other",
+    "02_aluminum | Other(Some(ModelDirectory(\"content/pbs_test\"))) | Other",
+    "box | Other(Some(ModelDirectory(\"content/pbs_test\"))) | Other",
+    "OL160_London | Port(SceneGroup { category: ModelDirectory(\"landmark\"), sub_category: None }) | Other",
+    "OMW001_Bollard | Port(SceneGroup { category: ModelDirectory(\"misc\"), sub_category: Some(ModelDirectory(\"wharf\")) }) | Other",
+    "YMS001_YHBM_M_1 | Style(ModelDirectory(\"Halloween19\")) | Other",
+    "unit_cube | Other(Some(ModelDirectory(\"helpers/models\"))) | Other",
+    "unit_sphere | Other(None) | Other",
+]

@@ -1,6 +1,7 @@
-//! The Model Viewer sidebar's model listing: the catalogue grouped by nation,
-//! kind and sub-kind, with every row's search text folded once so a search
-//! only runs substring tests.
+//! The Model Viewer sidebar's model listing: the catalogue grouped into
+//! folders, gameplay models by nation, kind and sub-kind and every other model
+//! by the group the catalogue files it in, with every row's search text folded
+//! once so a search only runs substring tests.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -8,8 +9,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::export::model_catalog::BuildingKind;
+use wowsunpack::export::model_catalog::MiscCategory;
 use wowsunpack::export::model_catalog::ModelCatalog;
 use wowsunpack::export::model_catalog::ModelEntry;
+use wowsunpack::export::model_catalog::ModelGroup;
+use wowsunpack::export::model_catalog::ModelGroupKind;
 use wowsunpack::export::model_catalog::ModelKind;
 use wowsunpack::export::model_catalog::ModelNation;
 use wowsunpack::export::model_catalog::ModelPath;
@@ -32,28 +37,40 @@ use super::search_key::SearchKey;
 
 /// Every listed catalogue model, grouped for the tree.
 pub struct ModelTreeIndex {
-    pub nations: Vec<ModelNationGroup>,
+    /// The gameplay nations, then one folder per other model group.
+    pub folders: Vec<ModelFolder>,
 }
 
-pub struct ModelNationGroup {
-    pub nation: ModelNation,
-    /// The GameParams nation of the same name, whose flag and translated name
-    /// the row shows.
-    pub ship_nation: Option<String>,
-    pub display_name: String,
-    pub kinds: Vec<ModelKindGroup>,
-}
-
-pub struct ModelKindGroup {
-    pub kind: ModelKind,
-    /// Sub-kind folders in sub-kind order, then the models filed directly
-    /// under the kind (`sub_kind: None`).
-    pub sub_kinds: Vec<ModelSubKindGroup>,
-}
-
-pub struct ModelSubKindGroup {
-    pub sub_kind: Option<ModelSubKind>,
+/// A folder of the model listing.
+pub struct ModelFolder {
+    /// Unique among its siblings. A row id joins it to its ancestors' keys.
+    pub key: String,
+    pub name: FolderName,
+    /// Sub-folders in display order.
+    pub folders: Vec<ModelFolder>,
+    /// The models filed directly in the folder, by stem.
     pub models: Vec<ModelRow>,
+}
+
+/// What a folder shows as its name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderName {
+    Nation {
+        /// The GameParams nation of the same name, whose flag the row shows.
+        flag: Option<String>,
+        /// Its translated name, or the directory name.
+        display_name: String,
+    },
+    Group(ModelGroupKind),
+    Kind(ModelKind),
+    SubKind(ModelSubKind),
+    Building {
+        kind: BuildingKind,
+        /// The game's name for the kind, where it has one.
+        display_name: Option<String>,
+    },
+    /// A directory, which is the only name the game gives it.
+    Directory(String),
 }
 
 pub struct ModelRow {
@@ -282,7 +299,8 @@ impl ShipPartRows {
     pub fn from_listing(listing: &ShipPartListing, catalog: &ModelCatalog, keys: &mut PartKeys<'_>) -> Self {
         let mut groups: BTreeMap<MountGroup, Vec<PartRow>> = BTreeMap::new();
         for mount in &listing.mounts {
-            let kind = catalog.owning_entry(&mount.model).map(ModelEntry::kind);
+            let entry = catalog.owning_entry(&mount.model);
+            let kind = entry.and_then(|entry| entry.group().gameplay()).map(|gameplay| gameplay.kind());
             groups.entry(MountGroup::classify(mount.group, kind)).or_default().push(PartRow {
                 key: ShipPartKey::Mount(mount.hp.clone()),
                 node: mount.hp.to_string(),
@@ -336,46 +354,76 @@ impl ShipPartRows {
 impl ModelTreeIndex {
     /// Groups `catalog`'s listed entries. `ships` names the nations whose
     /// directory matches a GameParams nation.
-    pub fn build(catalog: &ModelCatalog, ships: &ShipCatalog, references: &ModelReferences) -> Self {
-        let mut nations: Vec<ModelNationGroup> = Vec::new();
+    pub fn build(
+        catalog: &ModelCatalog,
+        ships: &ShipCatalog,
+        references: &ModelReferences,
+        metadata: &GameMetadataProvider,
+    ) -> Self {
+        let mut nations: Vec<ModelFolder> = Vec::new();
+        let mut groups: Vec<ModelFolder> = Vec::new();
         for entry in catalog.listed_entries() {
-            let nation_idx = match nations.iter().position(|group| group.nation == *entry.nation()) {
-                Some(idx) => idx,
-                None => {
-                    nations.push(new_nation_group(entry.nation(), ships));
-                    nations.len() - 1
-                }
-            };
-            insert_entry(&mut nations[nation_idx], entry, catalog, references);
-        }
-
-        for nation in &mut nations {
-            nation.kinds.sort_by_key(|group| group.kind);
-            for kind in &mut nation.kinds {
-                // `None` sorts first; models filed directly under the kind go last.
-                kind.sub_kinds.sort_by(|a, b| match (&a.sub_kind, &b.sub_kind) {
-                    (None, None) => std::cmp::Ordering::Equal,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (Some(a), Some(b)) => a.cmp(b),
-                });
-                for sub_kind in &mut kind.sub_kinds {
-                    sub_kind.models.sort_by_cached_key(|model| model.path.stem().to_lowercase());
-                }
+            let row = model_row(entry, catalog, references);
+            let path = folder_path(entry.group(), ships, metadata);
+            let (top, rest) = path.split_first().expect("a folder path names its top folder");
+            let siblings = if entry.group().kind() == ModelGroupKind::Gameplay { &mut nations } else { &mut groups };
+            let mut folder = child_folder(siblings, top);
+            for step in rest {
+                folder = child_folder(&mut folder.folders, step);
             }
+            folder.models.push(row);
         }
-        nations.sort_by_cached_key(|group| group.display_name.to_lowercase());
 
-        Self { nations }
+        nations.sort_by_cached_key(|folder| folder_order(&folder.name));
+        groups.sort_by_cached_key(|folder| folder_order(&folder.name));
+        let mut pending: Vec<&mut ModelFolder> = nations.iter_mut().chain(groups.iter_mut()).collect();
+        while let Some(folder) = pending.pop() {
+            folder.folders.sort_by_cached_key(|folder| folder_order(&folder.name));
+            folder.models.sort_by_cached_key(|model| model.path.stem().to_lowercase());
+            pending.extend(folder.folders.iter_mut());
+        }
+        nations.append(&mut groups);
+
+        Self { folders: nations }
     }
 
     pub fn model_count(&self) -> usize {
-        self.nations
-            .iter()
-            .flat_map(|nation| &nation.kinds)
-            .flat_map(|kind| &kind.sub_kinds)
-            .map(|sub_kind| sub_kind.models.len())
-            .sum()
+        let mut count = 0;
+        let mut pending: Vec<&ModelFolder> = self.folders.iter().collect();
+        while let Some(folder) = pending.pop() {
+            count += folder.models.len();
+            pending.extend(&folder.folders);
+        }
+
+        count
+    }
+}
+
+/// A folder's place among its siblings, which are all of one variant.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FolderOrder {
+    /// Groups, kinds and misc categories, by their `ALL` display order.
+    Rank(usize),
+    /// Other sub-kinds and building kinds, by their declaration order.
+    SubKind(ModelSubKind),
+    Building(BuildingKind),
+    /// Nations and directories, by name.
+    Name(String),
+}
+
+fn folder_order(name: &FolderName) -> FolderOrder {
+    // Every `ALL` lists each variant, so the fallback never applies.
+    let rank = |position: Option<usize>| FolderOrder::Rank(position.unwrap_or(usize::MAX));
+    match name {
+        FolderName::Nation { display_name, .. } => FolderOrder::Name(display_name.to_lowercase()),
+        FolderName::Directory(directory) => FolderOrder::Name(directory.to_lowercase()),
+        FolderName::Group(group) => rank(ModelGroupKind::ALL.iter().position(|each| each == group)),
+        FolderName::Kind(kind) => rank(ModelKind::ALL.iter().position(|each| each == kind)),
+        FolderName::SubKind(ModelSubKind::Misc(category)) => {
+            rank(MiscCategory::ALL.iter().position(|each| each == category))
+        }
+        FolderName::SubKind(sub_kind) => FolderOrder::SubKind(sub_kind.clone()),
+        FolderName::Building { kind, .. } => FolderOrder::Building(kind.clone()),
     }
 }
 
@@ -448,40 +496,71 @@ fn misc_label(misc: &ListedMisc, ship_model: Option<&ModelPath>) -> String {
     }
 }
 
-fn new_nation_group(nation: &ModelNation, ships: &ShipCatalog) -> ModelNationGroup {
-    let ship_nation = ships.nations.iter().find(|group| same_nation(nation.as_str(), &group.nation));
+/// The folders an entry is filed in, top first, each with its key.
+fn folder_path(group: &ModelGroup, ships: &ShipCatalog, metadata: &GameMetadataProvider) -> Vec<(String, FolderName)> {
+    let group_folder = |kind: ModelGroupKind| (format!("{kind:?}"), FolderName::Group(kind));
+    let directory = |name: &str| (name.to_string(), FolderName::Directory(name.to_string()));
+    match group {
+        ModelGroup::Gameplay(gameplay) => {
+            let kind = (format!("{:?}", gameplay.kind()), FolderName::Kind(gameplay.kind()));
+            let mut path = vec![nation_folder(gameplay.nation(), ships), kind];
+            if let Some(sub_kind) = gameplay.sub_kind() {
+                path.push((format!("{sub_kind:?}"), FolderName::SubKind(sub_kind.clone())));
+            }
 
-    ModelNationGroup {
-        nation: nation.clone(),
-        ship_nation: ship_nation.map(|group| group.nation.clone()),
-        display_name: ship_nation.map_or_else(|| nation.as_str().to_string(), |group| group.display_name.clone()),
-        kinds: Vec::new(),
+            path
+        }
+        ModelGroup::Building(kind) => {
+            let display_name = kind.translation_key().and_then(|key| metadata.localized_name_from_id(&key));
+            let folder = (format!("{kind:?}"), FolderName::Building { kind: kind.clone(), display_name });
+            vec![group_folder(ModelGroupKind::Building), folder]
+        }
+        ModelGroup::Character(nation) => vec![group_folder(ModelGroupKind::Character), nation_folder(nation, ships)],
+        ModelGroup::Location(scene) | ModelGroup::Port(scene) => {
+            let mut path = vec![group_folder(group.kind()), directory(scene.category().as_str())];
+            if let Some(sub_category) = scene.sub_category() {
+                path.push(directory(sub_category.as_str()));
+            }
+
+            path
+        }
+        ModelGroup::Style(style) => vec![group_folder(ModelGroupKind::Style), directory(style.as_str())],
+        ModelGroup::Other(Some(other)) => vec![group_folder(ModelGroupKind::Other), directory(other.as_str())],
+        ModelGroup::Other(None) => vec![group_folder(ModelGroupKind::Other)],
     }
 }
 
-fn insert_entry(
-    nation: &mut ModelNationGroup,
-    entry: &ModelEntry,
-    catalog: &ModelCatalog,
-    references: &ModelReferences,
-) {
-    let kind_idx = match nation.kinds.iter().position(|group| group.kind == entry.kind()) {
-        Some(idx) => idx,
-        None => {
-            nation.kinds.push(ModelKindGroup { kind: entry.kind(), sub_kinds: Vec::new() });
-            nation.kinds.len() - 1
-        }
-    };
-    let kind = &mut nation.kinds[kind_idx];
-
-    let sub_kind_idx = match kind.sub_kinds.iter().position(|group| group.sub_kind.as_ref() == entry.sub_kind()) {
-        Some(idx) => idx,
-        None => {
-            kind.sub_kinds.push(ModelSubKindGroup { sub_kind: entry.sub_kind().cloned(), models: Vec::new() });
-            kind.sub_kinds.len() - 1
-        }
+/// The folder for model directory `nation`, named and flagged after the
+/// GameParams nation of the same name where there is one.
+fn nation_folder(nation: &ModelNation, ships: &ShipCatalog) -> (String, FolderName) {
+    let ship_nation = ships.nations.iter().find(|group| same_nation(nation.as_str(), &group.nation));
+    let name = FolderName::Nation {
+        flag: ship_nation.map(|group| group.nation.clone()),
+        display_name: ship_nation.map_or_else(|| nation.as_str().to_string(), |group| group.display_name.clone()),
     };
 
+    (format!("nation-{nation}"), name)
+}
+
+/// The folder of `siblings` keyed `key`, added when absent.
+fn child_folder<'a>(siblings: &'a mut Vec<ModelFolder>, (key, name): &(String, FolderName)) -> &'a mut ModelFolder {
+    let idx = match siblings.iter().position(|folder| folder.key == *key) {
+        Some(idx) => idx,
+        None => {
+            siblings.push(ModelFolder {
+                key: key.clone(),
+                name: name.clone(),
+                folders: Vec::new(),
+                models: Vec::new(),
+            });
+            siblings.len() - 1
+        }
+    };
+
+    &mut siblings[idx]
+}
+
+fn model_row(entry: &ModelEntry, catalog: &ModelCatalog, references: &ModelReferences) -> ModelRow {
     let variants = entry
         .variants()
         .iter()
@@ -501,11 +580,14 @@ fn insert_entry(
             variant_row(&variant.kind, &variant.path, variants)
         })
         .collect();
-    kind.sub_kinds[sub_kind_idx].models.push(ModelRow {
-        path: entry.path().clone(),
-        search_key: references.model_key(entry.path()),
-        variants,
-    });
+
+    // A building model is also found by the `Building` params using it.
+    let mut search_key = references.model_key(entry.path());
+    for building in entry.building_params() {
+        search_key.push(building.name());
+    }
+
+    ModelRow { path: entry.path().clone(), search_key, variants }
 }
 
 fn variant_row(kind: &ModelVariantKind, path: &ModelPath, variants: Vec<VariantRow>) -> VariantRow {

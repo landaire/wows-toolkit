@@ -17,6 +17,9 @@ use gpui_kit::SharedString;
 use gpui_kit::component::tree::TreeItem;
 use rust_i18n::t;
 
+use wowsunpack::export::model_catalog::BuildingKind;
+use wowsunpack::export::model_catalog::MiscCategory;
+use wowsunpack::export::model_catalog::ModelGroupKind;
 use wowsunpack::export::model_catalog::ModelKind;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_catalog::ModelSubKind;
@@ -32,12 +35,11 @@ use super::catalog::tier_roman;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
+use super::model_tree::FolderName;
 use super::model_tree::HullRow;
-use super::model_tree::ModelKindGroup;
+use super::model_tree::ModelFolder;
 use super::model_tree::ModelMatch;
-use super::model_tree::ModelNationGroup;
 use super::model_tree::ModelRow;
-use super::model_tree::ModelSubKindGroup;
 use super::model_tree::ModelTreeIndex;
 use super::model_tree::MountGroup;
 use super::model_tree::PartRow;
@@ -47,6 +49,8 @@ use super::search_key::SearchKey;
 
 pub(super) const SEPARATOR_ID: &str = "armor-models-separator";
 const MODELS_STATUS_ID: &str = "armor-models-status";
+/// The row id prefix of every model folder.
+const MODEL_FOLDER_ID: &str = "model-folder";
 
 /// What a tree row id refers to, consulted by the row renderer, the click
 /// handler and the context menu.
@@ -132,8 +136,8 @@ pub(super) struct SearchMatches {
 /// Ships by nation and class, in [`ShipCatalog`] order.
 type ShipMatches = MatchGroup<MatchGroup<MatchGroup<ShipMatch>>>;
 
-/// Models by nation, kind and sub-kind, in [`ModelTreeIndex`] order.
-type ModelMatches = MatchGroup<MatchGroup<MatchGroup<MatchGroup<ModelMatch>>>>;
+/// The top model folders, in [`ModelTreeIndex`] order.
+type ModelMatches = MatchGroup<FolderMatches>;
 
 impl SearchMatches {
     /// `None` for an empty `query`, which lists everything. `query` is
@@ -157,28 +161,32 @@ impl SearchMatches {
             .collect();
 
         let models = match sources.models {
-            ModelSection::Ready(index) => Some(
-                index
-                    .nations
-                    .iter()
-                    .map(|nation| {
-                        nation
-                            .kinds
-                            .iter()
-                            .map(|kind| {
-                                kind.sub_kinds
-                                    .iter()
-                                    .map(|sub_kind| sub_kind.models.iter().map(|model| model.search(query)).collect())
-                                    .collect()
-                            })
-                            .collect()
-                    })
-                    .collect(),
-            ),
+            ModelSection::Ready(index) => {
+                Some(index.folders.iter().map(|folder| FolderMatches::new(folder, query)).collect())
+            }
             ModelSection::Loading | ModelSection::Unavailable => None,
         };
 
         Some(Self { query: query.to_string(), ships, models })
+    }
+}
+
+/// The matches in one model folder, in its listing order.
+pub(super) struct FolderMatches {
+    count: usize,
+    folders: Vec<FolderMatches>,
+    models: Vec<ModelMatch>,
+}
+
+impl FolderMatches {
+    /// Folders nest at most three deep, so this recursion stays shallow.
+    fn new(folder: &ModelFolder, query: &str) -> Self {
+        let folders: Vec<FolderMatches> = folder.folders.iter().map(|folder| Self::new(folder, query)).collect();
+        let models: Vec<ModelMatch> = folder.models.iter().map(|model| model.search(query)).collect();
+        let count = folders.iter().map(MatchCount::match_count).sum::<usize>()
+            + models.iter().map(MatchCount::match_count).sum::<usize>();
+
+        Self { count, folders, models }
     }
 }
 
@@ -252,6 +260,12 @@ impl<T> MatchCount for MatchGroup<T> {
     }
 }
 
+impl MatchCount for FolderMatches {
+    fn match_count(&self) -> usize {
+        self.count
+    }
+}
+
 /// Builds the tree. `search` is `None` when listing everything.
 pub(super) fn build_tree(
     sources: &TreeSources<'_>,
@@ -262,7 +276,7 @@ pub(super) fn build_tree(
     let mut items = Vec::new();
 
     let ship_matches = search.map(|search| &search.ships);
-    for (nation, matches) in paired(&sources.ships.nations, ship_matches) {
+    for (nation, matches) in paired(&sources.ships.nations, members(ship_matches)) {
         if shown(matches) {
             items.push(builder.ship_nation(nation, matches));
         }
@@ -276,9 +290,9 @@ pub(super) fn build_tree(
         ModelSection::Unavailable => items.push(builder.status_row(t!("ui.models.unavailable").into_owned())),
         ModelSection::Ready(index) => {
             let model_matches = search.and_then(|search| search.models.as_ref());
-            for (nation, matches) in paired(&index.nations, model_matches) {
+            for (folder, matches) in paired(&index.folders, members(model_matches)) {
                 if shown(matches) {
-                    items.push(builder.model_nation(nation, matches));
+                    items.push(builder.model_folder(MODEL_FOLDER_ID, folder, matches));
                 }
             }
         }
@@ -363,11 +377,84 @@ pub(super) fn model_sub_kind_label(sub_kind: &ModelSubKind) -> String {
         ModelSubKind::Missile => "ui.models.sub_kind.missile",
         ModelSubKind::Jato => "ui.models.sub_kind.jato",
         ModelSubKind::Shell => "ui.models.sub_kind.shell",
+        ModelSubKind::Misc(category) => return misc_category_label(*category),
         // The directory name is the only name the game gives it.
         ModelSubKind::Unrecognized(directory) => return directory.clone(),
     };
 
     t!(key).into_owned()
+}
+
+fn misc_category_label(category: MiscCategory) -> String {
+    let key = match category {
+        MiscCategory::Crane => "ui.models.misc.crane",
+        MiscCategory::Anchor => "ui.models.misc.anchor",
+        MiscCategory::DeckFitting => "ui.models.misc.deck_fitting",
+        MiscCategory::Instrument => "ui.models.misc.instrument",
+        MiscCategory::Propeller => "ui.models.misc.propeller",
+        MiscCategory::Searchlight => "ui.models.misc.searchlight",
+        MiscCategory::Boat => "ui.models.misc.boat",
+        MiscCategory::Flag => "ui.models.misc.flag",
+        MiscCategory::Insignia => "ui.models.misc.insignia",
+        MiscCategory::Railing => "ui.models.misc.railing",
+        MiscCategory::Hatch => "ui.models.misc.hatch",
+        MiscCategory::Ventilation => "ui.models.misc.ventilation",
+        MiscCategory::Antenna => "ui.models.misc.antenna",
+        MiscCategory::Weapon => "ui.models.misc.weapon",
+        MiscCategory::Stowage => "ui.models.misc.stowage",
+        MiscCategory::Other => "ui.models.misc.other",
+    };
+
+    t!(key).into_owned()
+}
+
+fn model_group_label(group: ModelGroupKind) -> String {
+    let key = match group {
+        ModelGroupKind::Gameplay => "ui.models.group.gameplay",
+        ModelGroupKind::Building => "ui.models.group.building",
+        ModelGroupKind::Character => "ui.models.group.character",
+        ModelGroupKind::Location => "ui.models.group.location",
+        ModelGroupKind::Port => "ui.models.group.port",
+        ModelGroupKind::Style => "ui.models.group.style",
+        ModelGroupKind::Other => "ui.models.group.other",
+    };
+
+    t!(key).into_owned()
+}
+
+/// A building kind the game has no name for: its GameParams species, or
+/// one of the groups no species names.
+fn building_kind_label(kind: &BuildingKind) -> String {
+    let species = match kind {
+        BuildingKind::Weapon => return t!("ui.models.building.weapon").into_owned(),
+        BuildingKind::Unassigned => return t!("ui.models.building.unassigned").into_owned(),
+        BuildingKind::Unspecified => return t!("ui.models.building.unspecified").into_owned(),
+        BuildingKind::Unrecognized(species) => return species.clone(),
+        BuildingKind::Complex => "Complex",
+        BuildingKind::CoastalArtillery => "CoastalArtillery",
+        BuildingKind::AntiAircraft => "AntiAircraft",
+        BuildingKind::AirBase => "AirBase",
+        BuildingKind::Military => "Military",
+        BuildingKind::SensorTower => "SensorTower",
+        BuildingKind::RayTower => "RayTower",
+        BuildingKind::Generator => "Generator",
+        BuildingKind::SpaceStation => "SpaceStation",
+    };
+
+    species.to_string()
+}
+
+fn folder_label(name: &FolderName) -> String {
+    match name {
+        FolderName::Nation { display_name, .. } => display_name.clone(),
+        FolderName::Group(group) => model_group_label(*group),
+        FolderName::Kind(kind) => model_kind_label(*kind),
+        FolderName::SubKind(sub_kind) => model_sub_kind_label(sub_kind),
+        FolderName::Building { kind, display_name } => {
+            display_name.clone().unwrap_or_else(|| building_kind_label(kind))
+        }
+        FolderName::Directory(directory) => directory.clone(),
+    }
 }
 
 pub(super) fn mount_group_label(group: MountGroup) -> String {
@@ -470,7 +557,7 @@ impl Builder<'_, '_, '_, '_> {
         let wanted = self.opens_ships();
         self.folder(id, label, RowKind::Nation(nation.nation.clone()), wanted, |b| {
             let mut items = Vec::new();
-            for (class, matches) in paired(&nation.classes, matches) {
+            for (class, matches) in paired(&nation.classes, members(matches)) {
                 if !shown(matches) {
                     continue;
                 }
@@ -478,7 +565,7 @@ impl Builder<'_, '_, '_, '_> {
                 let id: SharedString = format!("armor-class-{}-{:?}", nation.nation, class.species).into();
                 let label = counted(species_name(&class.species), matches);
                 items.push(b.folder(id, label, RowKind::Class(class.species), wanted, |b| {
-                    paired(&class.ships, matches)
+                    paired(&class.ships, members(matches))
                         .filter(|(_, found)| shown(*found))
                         .map(|(ship, found)| b.ship_row(ship, found.copied()))
                         .collect()
@@ -574,64 +661,29 @@ impl Builder<'_, '_, '_, '_> {
         self.leaf(id, format!("{} {}", part.node, part.model.stem()), kind)
     }
 
-    fn model_nation(
-        &mut self,
-        nation: &ModelNationGroup,
-        matches: Option<&MatchGroup<MatchGroup<MatchGroup<ModelMatch>>>>,
-    ) -> TreeItem {
-        let id: SharedString = format!("model-nation-{}", nation.nation).into();
-        let kind = RowKind::ModelNation { flag: nation.ship_nation.clone() };
-        let label = counted(nation.display_name.clone(), matches);
+    /// A model folder under the row id `parent`, with its sub-folders and
+    /// then its models.
+    fn model_folder(&mut self, parent: &str, folder: &ModelFolder, matches: Option<&FolderMatches>) -> TreeItem {
+        let id: SharedString = format!("{parent}/{}", folder.key).into();
+        let kind = match &folder.name {
+            FolderName::Nation { flag, .. } => RowKind::ModelNation { flag: flag.clone() },
+            _ => RowKind::ModelGroup,
+        };
+        let label = counted(folder_label(&folder.name), matches);
         let wanted = self.opens_models();
+        let parent = id.clone();
         self.folder(id, label, kind, wanted, |b| {
-            paired(&nation.kinds, matches)
+            let mut items: Vec<TreeItem> = paired(&folder.folders, matches.map(|matches| matches.folders.as_slice()))
                 .filter(|(_, found)| shown(*found))
-                .map(|(kind, found)| b.model_kind(nation, kind, found))
-                .collect()
-        })
-    }
-
-    fn model_kind(
-        &mut self,
-        nation: &ModelNationGroup,
-        kind: &ModelKindGroup,
-        matches: Option<&MatchGroup<MatchGroup<ModelMatch>>>,
-    ) -> TreeItem {
-        let id: SharedString = format!("model-kind-{}-{:?}", nation.nation, kind.kind).into();
-        let label = counted(model_kind_label(kind.kind), matches);
-        let wanted = self.opens_models();
-        self.folder(id, label, RowKind::ModelGroup, wanted, |b| {
-            let mut items = Vec::new();
-            for (sub_kind, matches) in paired(&kind.sub_kinds, matches) {
-                if !shown(matches) {
-                    continue;
-                }
-
-                match &sub_kind.sub_kind {
-                    Some(name) => items.push(b.model_sub_kind(nation, kind, sub_kind, name, matches)),
-                    None => items.extend(b.model_rows(&sub_kind.models, matches)),
-                }
-            }
+                .map(|(child, found)| b.model_folder(&parent, child, found))
+                .collect();
+            items.extend(b.model_rows(&folder.models, matches.map(|matches| matches.models.as_slice())));
 
             items
         })
     }
 
-    fn model_sub_kind(
-        &mut self,
-        nation: &ModelNationGroup,
-        kind: &ModelKindGroup,
-        sub_kind: &ModelSubKindGroup,
-        name: &ModelSubKind,
-        matches: Option<&MatchGroup<ModelMatch>>,
-    ) -> TreeItem {
-        let id: SharedString = format!("model-sub-{}-{:?}-{name:?}", nation.nation, kind.kind).into();
-        let label = counted(model_sub_kind_label(name), matches);
-        let wanted = self.opens_models();
-        self.folder(id, label, RowKind::ModelGroup, wanted, |b| b.model_rows(&sub_kind.models, matches))
-    }
-
-    fn model_rows(&mut self, models: &[ModelRow], matches: Option<&MatchGroup<ModelMatch>>) -> Vec<TreeItem> {
+    fn model_rows(&mut self, models: &[ModelRow], matches: Option<&[ModelMatch]>) -> Vec<TreeItem> {
         paired(models, matches)
             .filter(|(_, found)| shown(*found))
             .map(|(model, found)| self.model_row(model, found.copied()))
@@ -688,12 +740,14 @@ impl Builder<'_, '_, '_, '_> {
 }
 
 /// `items` beside their matches; each has `None` when listing everything.
-fn paired<'a, I, M>(
-    items: &'a [I],
-    matches: Option<&'a MatchGroup<M>>,
-) -> impl Iterator<Item = (&'a I, Option<&'a M>)> {
-    let mut members = matches.map(|group| group.members.iter());
+fn paired<'a, I, M>(items: &'a [I], matches: Option<&'a [M]>) -> impl Iterator<Item = (&'a I, Option<&'a M>)> {
+    let mut members = matches.map(|matches| matches.iter());
     items.iter().map(move |item| (item, members.as_mut().and_then(Iterator::next)))
+}
+
+/// A group's matches in listing order.
+fn members<M>(group: Option<&MatchGroup<M>>) -> Option<&[M]> {
+    group.map(|group| group.members.as_slice())
 }
 
 /// Whether a row is listed. Every row is when listing everything.
@@ -734,6 +788,10 @@ pub(super) mod fixture {
     use std::collections::HashMap;
 
     use wowsunpack::export::hardpoint::HardpointName;
+    use wowsunpack::export::model_catalog::BuildingKind;
+    use wowsunpack::export::model_catalog::BuildingModels;
+    use wowsunpack::export::model_catalog::BuildingParamRef;
+    use wowsunpack::export::model_catalog::CatalogLinks;
     use wowsunpack::export::model_catalog::ModelCatalog;
     use wowsunpack::export::model_catalog::ModelPath;
     use wowsunpack::export::part_group::PartGroup;
@@ -741,6 +799,7 @@ pub(super) mod fixture {
     use wowsunpack::export::ship_parts::ListedMount;
     use wowsunpack::export::ship_parts::MiscParent;
     use wowsunpack::export::ship_parts::ShipPartListing;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::game_params::types::PeculiarityModel;
     use wowsunpack::game_params::types::Species;
 
@@ -762,6 +821,7 @@ pub(super) mod fixture {
     const DIRECTOR: &str = "content/gameplay/usa/director/AD001_Director_Mk37/AD001_Director_Mk37.model";
     const BOLLARD: &str = "content/gameplay/usa/misc/AM2061/AM2061.model";
     const YAMATO: &str = "content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model";
+    pub const FORT: &str = "content/location/gameplay/building/LGB001_Fort/LGB001_Fort.model";
 
     pub fn path(raw: &str) -> ModelPath {
         ModelPath::parse(raw).expect("a model path")
@@ -834,10 +894,26 @@ pub(super) mod fixture {
             YAMATO,
             "content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model",
             "content/gameplay/events/director/XD006_Lazarus_Director/XD006_Lazarus_Director.model",
+            "content/gameplay/usa/misc/AM116_Boat_Winch_2/AM116_Boat_Winch_2.model",
+            FORT,
+            "content/location/building/city/LBC001_House/LBC001_House.model",
+            "content/ports/misc/wharf/PMW001_Crane/PMW001_Crane.model",
         ];
-        let skins = [PeculiarityModel { stock: IOWA.to_string(), replacement: IOWA_SKIN.to_string() }];
+        let skins = vec![PeculiarityModel { stock: IOWA.to_string(), replacement: IOWA_SKIN.to_string() }];
+        let fort = BuildingModels {
+            param: BuildingParamRef::new("PCBX022_PCGM002".to_string(), BuildingKind::Complex),
+            model: Some(FORT.to_string()),
+            dead_model: None,
+            mount_models: Vec::new(),
+        };
 
-        ModelCatalog::from_paths(paths.map(path), &skins)
+        ModelCatalog::from_paths(paths.map(path), &CatalogLinks::new(skins, vec![fort]))
+    }
+
+    /// A provider without params or translations: names the game would give
+    /// fall back to their keys.
+    pub fn metadata() -> GameMetadataProvider {
+        GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds")
     }
 
     /// Iowa's parts; Yamato lists none.
@@ -879,6 +955,9 @@ pub(super) mod fixture {
 
 #[cfg(test)]
 mod tests {
+    use wowsunpack::export::model_catalog::CatalogLinks;
+    use wowsunpack::export::model_catalog::ModelCatalog;
+
     use super::*;
 
     struct Data {
@@ -892,7 +971,7 @@ mod tests {
         let ships = fixture::ships();
         let catalog = fixture::catalog();
         let references = fixture::references(&ships);
-        let index = ModelTreeIndex::build(&catalog, &ships, &references);
+        let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
         let parts = fixture::ship_parts(&catalog, &references);
 
         Data { ships, index, parts }
@@ -910,8 +989,9 @@ mod tests {
                 ))
             })
         });
-        let catalog = wowsunpack::export::model_catalog::ModelCatalog::from_paths(guns, &[]);
-        let index = ModelTreeIndex::build(&catalog, &ships, &super::super::model_tree::ModelReferences::new());
+        let catalog = ModelCatalog::from_paths(guns, &CatalogLinks::default());
+        let references = super::super::model_tree::ModelReferences::new();
+        let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
 
         Data { ships, index, parts: HashMap::new() }
     }
@@ -979,8 +1059,32 @@ mod tests {
 
         let built = build(&data, "", &mut HashSet::new(), true);
 
-        assert_eq!(outline(&built.items), ["Japan +", "U.S.A. +", "Models", "events +", "Japan +", "U.S.A. +"]);
+        assert_eq!(
+            outline(&built.items),
+            [
+                "Japan +",
+                "U.S.A. +",
+                "Models",
+                "events +",
+                "Japan +",
+                "U.S.A. +",
+                "Buildings +",
+                "Locations +",
+                "Ports +"
+            ]
+        );
         assert_eq!(built.rows.get(SEPARATOR_ID), Some(&RowKind::Separator));
+    }
+
+    #[test]
+    fn a_search_finds_a_building_model_by_the_building_param_using_it() {
+        let data = data();
+        let fort = model_row_id(&fixture::path(fixture::FORT));
+
+        let built = build(&data, "pcbx022", &mut HashSet::new(), true);
+
+        assert_eq!(outline(&built.items), ["Models", "Buildings (1)", "  Complex (1)", "    LGB001_Fort"]);
+        assert_eq!(built.notes.get(&fort).map(|note| note.to_string()).as_deref(), Some("PCBX022_PCGM002"));
     }
 
     #[test]
@@ -1042,7 +1146,21 @@ mod tests {
             "  Directors",
             "    AD001_Director_Mk37",
             "  Miscellaneous",
-            "    AM2061",
+            "    Deck fittings",
+            "      AM116_Boat_Winch_2",
+            "    Other",
+            "      AM2061",
+            "Buildings",
+            "  Complex",
+            "    LGB001_Fort",
+            "Locations",
+            "  building",
+            "    city",
+            "      LBC001_House",
+            "Ports",
+            "  misc",
+            "    wharf",
+            "      PMW001_Crane",
         ];
         assert_eq!(outline(&built.items), expected);
 
@@ -1254,7 +1372,7 @@ mod tests {
         assert_eq!(built.rows.len(), 3, "the heading and two nations");
         assert!(set.is_empty(), "nothing was opened for the search");
 
-        set.insert("model-nation-usa".into());
+        set.insert("model-folder/nation-usa".into());
         let built = build(&data, "gun", &mut set, false);
 
         assert_eq!(
@@ -1280,7 +1398,7 @@ mod tests {
         let mut set = HashSet::new();
         build(&data, "agm034", &mut set, true);
         set.remove("armor-nation-USA");
-        set.remove("model-nation-usa");
+        set.remove("model-folder/nation-usa");
 
         let built = build(&data, "agm034", &mut set, false);
 
@@ -1327,7 +1445,7 @@ mod tests {
         eprintln!("[measured] model references in {:?}", started.elapsed());
 
         let started = Instant::now();
-        let index = ModelTreeIndex::build(library.catalog(), &ships, &references);
+        let index = ModelTreeIndex::build(library.catalog(), &ships, &references, &metadata);
         eprintln!("[measured] index of {} models in {:?}", index.model_count(), started.elapsed());
         assert_eq!(index.model_count(), library.catalog().listed_entries().count());
 
@@ -1337,12 +1455,14 @@ mod tests {
         eprintln!("[measured] parts of {}/{ship_count} ships in {:?}", parts.len(), started.elapsed());
         assert!(parts.len() * 10 >= ship_count * 9, "most ships list their parts");
 
-        for nation in &index.nations {
-            eprintln!("  {} -> {:?} ({})", nation.nation, nation.ship_nation, nation.display_name);
+        for folder in &index.folders {
+            eprintln!("  {} -> {:?}", folder.key, folder.name);
         }
         for directory in ["usa", "japan", "uk", "panasia", "panamerica", "commonwealth"] {
-            let nation = index.nations.iter().find(|nation| nation.nation.as_str() == directory);
-            assert!(nation.is_some_and(|nation| nation.ship_nation.is_some()), "{directory} has a flag");
+            let key = format!("nation-{directory}");
+            let nation = index.folders.iter().find(|folder| folder.key == key);
+            let flagged = nation.is_some_and(|nation| matches!(&nation.name, FolderName::Nation { flag: Some(_), .. }));
+            assert!(flagged, "{directory} has a flag");
         }
 
         let data = Data { ships, index, parts };

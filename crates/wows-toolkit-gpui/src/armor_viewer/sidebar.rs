@@ -385,7 +385,8 @@ impl Sidebar {
             let (index_bundle, index_library, index_references) =
                 (Arc::clone(&bundle), Arc::clone(&library), Arc::clone(&references));
             let index = cx.background_spawn(async move {
-                ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog, &index_references)
+                let metadata = index_bundle.assets.metadata();
+                ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog, &index_references, metadata)
             });
             let parts = cx.background_spawn(async move {
                 list_all_ship_parts(&bundle.catalog, bundle.assets.metadata(), &library, &references)
@@ -835,7 +836,8 @@ mod tests {
                 let catalog = fixture::catalog();
                 let ships = fixture::ships();
                 let references = fixture::references(&ships);
-                sidebar.adopt_model_index(ModelTreeIndex::build(&catalog, &ships, &references), cx);
+                let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
+                sidebar.adopt_model_index(index, cx);
                 sidebar.adopt_ship_parts(fixture::ship_parts(&catalog, &references), cx);
             })
             .expect("the window is open");
@@ -1027,7 +1029,8 @@ mod tests {
                 };
                 sidebar.search = stand_in;
 
-                for id in ["model-nation-japan", "model-kind-japan-Ship", "model-sub-japan-Ship-Battleship"] {
+                let japan = "model-folder/nation-japan";
+                for id in [japan.to_string(), format!("{japan}/Ship"), format!("{japan}/Ship/Battleship")] {
                     let tree_state = sidebar.tree_state.clone();
                     sidebar.on_tree_event(tree_state, &TreeEvent::Expanded(id.into()), cx);
                 }

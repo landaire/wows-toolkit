@@ -1,28 +1,41 @@
-//! Catalogue of the `.model` prototypes under `content/gameplay/`.
+//! Catalogue of every `.model` prototype in an `assets.bin`.
 //!
-//! Gameplay models follow `content/gameplay/<nation>/<kind>/[<sub-kind>/]<dir>/<leaf>.model`.
-//! The model named after its directory is the base model. Its siblings are
-//! variants of it: `_dead` wreck models and the hull sections of a ship
-//! (`_Bow`, `_MidFront`, `_MidBack`, `_Stern`). Skin models live in their own
-//! directories and are linked to their stock model through the GameParams
-//! `peculiarityModels` of the exteriors that apply them.
+//! Gameplay models follow `content/gameplay/<nation>/<kind>/[<sub-kind>/]<dir>/<leaf>.model`
+//! and are grouped by nation, kind and sub-kind. Models a GameParams `Building`
+//! uses (forts, aerodromes, towers) are grouped by building kind. Location and
+//! port scenery is grouped by its category directories, and the rest by its
+//! top directories.
+//!
+//! In every directory the model named after the directory is the base model.
+//! Its siblings are variants of it: `_dead` wreck models and the hull sections
+//! of a ship (`_Bow`, `_MidFront`, `_MidBack`, `_Stern`). Skin models live in
+//! their own directories and are linked to their stock model through the
+//! GameParams `peculiarityModels` of the exteriors that apply them. A building
+//! wreck in its own directory is linked through the building's `deadModel`.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 
 use thiserror::Error;
 
+use crate::data::TranslationKey;
 use crate::data::assets_bin_vfs::PrototypeType;
 use crate::game_params::provider::GameMetadataProvider;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::PeculiarityModel;
+use crate::game_params::types::Species;
 use crate::models::assets_bin::PrototypeDatabase;
+use crate::recognized::Recognized;
 
 use super::part_group::PartGroup;
 
 const GAMEPLAY_PREFIX: &str = "content/gameplay/";
+const LOCATION_PREFIX: &str = "content/location/";
+const PORTS_PREFIX: &str = "content/ports/";
+const STYLES_PREFIX: &str = "content/styles/";
 const MODEL_EXTENSION: &str = ".model";
 const DEAD_SUFFIX: &str = "_dead";
 
@@ -109,6 +122,24 @@ impl fmt::Display for ModelNation {
     }
 }
 
+/// A directory name, e.g. `building` or `Halloween19`, or a path of directory
+/// names, e.g. `helpers/models`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ModelDirectory(String);
+
+impl ModelDirectory {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ModelDirectory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// The kind directory of a gameplay model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -123,7 +154,7 @@ pub enum ModelKind {
     Projectile,
     Misc,
     Cap,
-    /// A kind directory with no dedicated variant (e.g. `character`).
+    /// A kind directory with no dedicated variant (e.g. `decoration`).
     Other,
 }
 
@@ -160,9 +191,9 @@ impl ModelKind {
     }
 }
 
-/// The sub-kind directory of a gameplay model, read in the context of its
-/// [`ModelKind`] (`torpedo` is a launcher under `gun` and a weapon under
-/// `projectile`).
+/// The sub-kind of a gameplay model: its sub-kind directory, read in the
+/// context of its [`ModelKind`] (`torpedo` is a launcher under `gun` and a
+/// weapon under `projectile`), or the [`MiscCategory`] of a misc model.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ModelSubKind {
@@ -192,6 +223,8 @@ pub enum ModelSubKind {
     Missile,
     Jato,
     Shell,
+    /// A misc model, which has no sub-kind directory, by what its name says it is.
+    Misc(MiscCategory),
     /// A sub-kind directory this catalogue has no variant for.
     Unrecognized(String),
 }
@@ -232,11 +265,560 @@ impl ModelSubKind {
     }
 }
 
+/// What a gameplay misc model is, read from the English words of its file
+/// name (`AM116_Boat_Winch_2` is a winch). Misc file names are the only signal
+/// every misc model carries: the `MP_` nodes that place them are named after
+/// the same file names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MiscCategory {
+    Crane,
+    Anchor,
+    DeckFitting,
+    Instrument,
+    Propeller,
+    Searchlight,
+    Boat,
+    Flag,
+    Insignia,
+    Railing,
+    Hatch,
+    Ventilation,
+    Antenna,
+    Weapon,
+    Stowage,
+    /// No word of the name is in the keyword table.
+    Other,
+}
+
+impl MiscCategory {
+    /// Every category, in display order.
+    pub const ALL: [MiscCategory; 16] = [
+        Self::Propeller,
+        Self::Boat,
+        Self::Anchor,
+        Self::Crane,
+        Self::DeckFitting,
+        Self::Searchlight,
+        Self::Flag,
+        Self::Insignia,
+        Self::Railing,
+        Self::Hatch,
+        Self::Ventilation,
+        Self::Antenna,
+        Self::Instrument,
+        Self::Weapon,
+        Self::Stowage,
+        Self::Other,
+    ];
+
+    /// The category of the misc model named `stem`, e.g. `AM116_Boat_Winch_2`.
+    /// The first `_`-separated part is the model id and is skipped. The other
+    /// parts are split into lowercase words at case and digit changes, and the
+    /// first table row holding any of the words wins, so a name with two
+    /// matching words (`Boat_Winch`) goes to the earlier row.
+    pub fn classify(stem: &str) -> Self {
+        const KEYWORDS: [(MiscCategory, &[&str]); 15] = [
+            (MiscCategory::Crane, &["crane", "cranes", "cran", "davit", "davits", "derrick", "boom"]),
+            (MiscCategory::Anchor, &["anchor", "anchors", "hawse", "chain"]),
+            (
+                MiscCategory::DeckFitting,
+                &[
+                    "capstan", "windlass", "winch", "winches", "bollard", "bollards", "fairlead", "fairled", "cleat",
+                    "chock", "fender", "fenders", "roller", "bench", "seat",
+                ],
+            ),
+            (
+                MiscCategory::Instrument,
+                &[
+                    "rangefinder",
+                    "rf",
+                    "finder",
+                    "director",
+                    "dir",
+                    "dct",
+                    "binocular",
+                    "binoculars",
+                    "sight",
+                    "periscope",
+                    "compass",
+                    "pelorus",
+                    "binnacle",
+                    "telegraph",
+                    "indicator",
+                    "ind",
+                    "repeater",
+                    "lookout",
+                    "telephone",
+                    "speaker",
+                    "siren",
+                    "gauge",
+                    "manometer",
+                    "anemometer",
+                    "wheel",
+                    "handwheel",
+                    "steering",
+                    "bell",
+                    "clock",
+                    "panel",
+                    "switch",
+                ],
+            ),
+            (MiscCategory::Propeller, &["propeller", "propellers", "screw", "screws", "rudder", "rudders", "shaft"]),
+            (
+                MiscCategory::Searchlight,
+                &[
+                    "searchlight",
+                    "searchlights",
+                    "projector",
+                    "lamp",
+                    "lamps",
+                    "light",
+                    "lights",
+                    "lantern",
+                    "lanterm",
+                    "headlights",
+                    "luminaire",
+                    "fakel",
+                    "mastheadlight",
+                ],
+            ),
+            (
+                MiscCategory::Boat,
+                &[
+                    "boat",
+                    "boats",
+                    "motorboat",
+                    "motorboot",
+                    "whaleboat",
+                    "lifeboat",
+                    "longboat",
+                    "cutter",
+                    "kutter",
+                    "segelkutter",
+                    "torpedoskutter",
+                    "launch",
+                    "lauch",
+                    "dinghy",
+                    "gig",
+                    "pinnace",
+                    "whaler",
+                    "yawl",
+                    "liferaft",
+                    "raft",
+                    "rafts",
+                    "float",
+                    "floater",
+                    "motoscafi",
+                    "motoscafo",
+                    "lancia",
+                    "lancie",
+                    "bote",
+                    "barca",
+                    "canot",
+                    "sampan",
+                    "punt",
+                    "skiff",
+                    "shallop",
+                    "lifebuoy",
+                    "buoy",
+                ],
+            ),
+            (MiscCategory::Flag, &["flag", "flags", "mast", "masts", "ensign", "pennant", "banner", "flagstaff"]),
+            (
+                MiscCategory::Insignia,
+                &[
+                    "crest",
+                    "crests",
+                    "emblem",
+                    "nameplate",
+                    "name",
+                    "plate",
+                    "monogramm",
+                    "monogram",
+                    "motto",
+                    "honours",
+                    "eagle",
+                    "figure",
+                    "figurehead",
+                    "decal",
+                    "decor",
+                    "decoration",
+                    "decorations",
+                    "gerb",
+                    "arms",
+                    "sign",
+                    "letter",
+                    "text",
+                    "ribbon",
+                    "order",
+                ],
+            ),
+            (
+                MiscCategory::Railing,
+                &[
+                    "railing",
+                    "railings",
+                    "rail",
+                    "rails",
+                    "leer",
+                    "leers",
+                    "ladder",
+                    "ladders",
+                    "stairway",
+                    "stairs",
+                    "stair",
+                    "gangway",
+                    "accommodation",
+                ],
+            ),
+            (MiscCategory::Hatch, &["hatch", "hatches", "door", "doors", "coaming", "manhole", "skylight"]),
+            (
+                MiscCategory::Ventilation,
+                &[
+                    "ventilation",
+                    "ventelation",
+                    "ventilator",
+                    "ventilators",
+                    "vent",
+                    "vents",
+                    "mushroom",
+                    "cowl",
+                    "intake",
+                ],
+            ),
+            (MiscCategory::Antenna, &["radar", "antenna", "antennas", "aerial", "insulator", "insulators", "iff"]),
+            (
+                MiscCategory::Weapon,
+                &[
+                    "gun",
+                    "guns",
+                    "gundeck",
+                    "barbette",
+                    "cannon",
+                    "kanon",
+                    "turret",
+                    "shield",
+                    "torpedo",
+                    "torpedoes",
+                    "charge",
+                    "thrower",
+                    "launcher",
+                    "paravane",
+                    "paravanes",
+                    "mine",
+                    "mines",
+                    "ammunition",
+                    "ammobox",
+                    "ammo",
+                    "shell",
+                    "shells",
+                    "cartridges",
+                    "loading",
+                    "oerlikon",
+                    "hotchkiss",
+                    "pdr",
+                    "mm",
+                    "cm",
+                    "catapult",
+                    "rocket",
+                ],
+            ),
+            (
+                MiscCategory::Stowage,
+                &[
+                    "box",
+                    "boxes",
+                    "locker",
+                    "lockers",
+                    "crate",
+                    "crates",
+                    "barrel",
+                    "barrels",
+                    "bags",
+                    "stowage",
+                    "provisions",
+                    "cart",
+                    "shelving",
+                    "rack",
+                    "racks",
+                    "basket",
+                    "reel",
+                    "reels",
+                    "hose",
+                    "drum",
+                    "cylinder",
+                    "spare",
+                    "holder",
+                    "cover",
+                    "covers",
+                    "cloth",
+                    "tarpaulin",
+                ],
+            ),
+        ];
+
+        let words = name_words(stem);
+        KEYWORDS
+            .iter()
+            .find(|(_, keywords)| words.iter().any(|word| keywords.contains(&word.as_str())))
+            .map_or(Self::Other, |(category, _)| *category)
+    }
+
+    /// Lowercase identifier, e.g. `deck_fitting`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Crane => "crane",
+            Self::Anchor => "anchor",
+            Self::DeckFitting => "deck_fitting",
+            Self::Instrument => "instrument",
+            Self::Propeller => "propeller",
+            Self::Searchlight => "searchlight",
+            Self::Boat => "boat",
+            Self::Flag => "flag",
+            Self::Insignia => "insignia",
+            Self::Railing => "railing",
+            Self::Hatch => "hatch",
+            Self::Ventilation => "ventilation",
+            Self::Antenna => "antenna",
+            Self::Weapon => "weapon",
+            Self::Stowage => "stowage",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// What a GameParams `Building` is, from its species, plus the two groups of
+/// building models that no species names.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BuildingKind {
+    Complex,
+    CoastalArtillery,
+    AntiAircraft,
+    AirBase,
+    Military,
+    SensorTower,
+    RayTower,
+    Generator,
+    SpaceStation,
+    /// A species this catalogue has no variant for.
+    Unrecognized(String),
+    /// A param that names no species.
+    Unspecified,
+    /// A gun mount only buildings carry (`content/location/gameplay/gun/...`).
+    Weapon,
+    /// A model in a building directory that no `Building` param uses.
+    Unassigned,
+}
+
+impl BuildingKind {
+    pub fn from_species(species: &Recognized<Species>) -> Self {
+        match species {
+            Recognized::Known(Species::Complex) => Self::Complex,
+            Recognized::Known(Species::CoastalArtillery) => Self::CoastalArtillery,
+            Recognized::Known(Species::AntiAircraft) => Self::AntiAircraft,
+            Recognized::Known(Species::AirBase) => Self::AirBase,
+            Recognized::Known(Species::Military) => Self::Military,
+            Recognized::Known(Species::SensorTower) => Self::SensorTower,
+            Recognized::Known(Species::RayTower) => Self::RayTower,
+            Recognized::Known(Species::Generator) => Self::Generator,
+            Recognized::Known(Species::SpaceStation) => Self::SpaceStation,
+            Recognized::Known(other) => Self::Unrecognized(other.name().to_string()),
+            Recognized::Unknown(raw) => Self::Unrecognized(raw.clone()),
+        }
+    }
+
+    /// The game's name for the species, `IDS_BUILDING_<SPECIES>` (e.g.
+    /// `IDS_BUILDING_COMPLEX`, "Fort"). `None` for the kinds no species names.
+    pub fn translation_key(&self) -> Option<TranslationKey> {
+        let species = match self {
+            Self::Complex => "COMPLEX",
+            Self::CoastalArtillery => "COASTALARTILLERY",
+            Self::AntiAircraft => "ANTIAIRCRAFT",
+            Self::AirBase => "AIRBASE",
+            Self::Military => "MILITARY",
+            Self::SensorTower => "SENSORTOWER",
+            Self::RayTower => "RAYTOWER",
+            Self::Generator => "GENERATOR",
+            Self::SpaceStation => "SPACESTATION",
+            Self::Unrecognized(raw) => {
+                return Some(TranslationKey::new(format!("IDS_BUILDING_{}", raw.to_uppercase())));
+            }
+            Self::Unspecified | Self::Weapon | Self::Unassigned => return None,
+        };
+
+        Some(TranslationKey::new(format!("IDS_BUILDING_{species}")))
+    }
+}
+
+/// A GameParams `Building` param, e.g. `PCBX022_PCGM002`, a fort.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BuildingParamRef {
+    name: String,
+    kind: BuildingKind,
+}
+
+impl BuildingParamRef {
+    pub fn new(name: String, kind: BuildingKind) -> Self {
+        Self { name, kind }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn kind(&self) -> &BuildingKind {
+        &self.kind
+    }
+}
+
+/// The models one `Building` param uses, as GameParams spells their paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingModels {
+    pub param: BuildingParamRef,
+    /// `hull.model`.
+    pub model: Option<String>,
+    /// `hull.deadModel`.
+    pub dead_model: Option<String>,
+    /// The `model` and `deadMesh` of each `HP_` mount.
+    pub mount_models: Vec<String>,
+}
+
+/// The links between models that GameParams declares.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogLinks {
+    skins: Vec<PeculiarityModel>,
+    buildings: Vec<BuildingModels>,
+}
+
+impl CatalogLinks {
+    pub fn new(skins: Vec<PeculiarityModel>, buildings: Vec<BuildingModels>) -> Self {
+        Self { skins, buildings }
+    }
+
+    pub fn from_metadata(metadata: &GameMetadataProvider) -> Self {
+        Self::new(peculiarity_models(metadata), building_models(metadata))
+    }
+
+    pub fn skins(&self) -> &[PeculiarityModel] {
+        &self.skins
+    }
+
+    pub fn buildings(&self) -> &[BuildingModels] {
+        &self.buildings
+    }
+}
+
+/// Where a gameplay model sits in its directory layout.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GameplayGroup {
+    nation: ModelNation,
+    kind: ModelKind,
+    sub_kind: Option<ModelSubKind>,
+}
+
+impl GameplayGroup {
+    pub fn nation(&self) -> &ModelNation {
+        &self.nation
+    }
+
+    pub fn kind(&self) -> ModelKind {
+        self.kind
+    }
+
+    pub fn sub_kind(&self) -> Option<&ModelSubKind> {
+        self.sub_kind.as_ref()
+    }
+}
+
+/// The category directories of a location or port model, e.g. `building` and
+/// `city` for `content/location/building/city/<dir>/<leaf>.model`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneGroup {
+    category: ModelDirectory,
+    sub_category: Option<ModelDirectory>,
+}
+
+impl SceneGroup {
+    pub fn category(&self) -> &ModelDirectory {
+        &self.category
+    }
+
+    pub fn sub_category(&self) -> Option<&ModelDirectory> {
+        self.sub_category.as_ref()
+    }
+}
+
+/// The folder a model is listed in.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ModelGroup {
+    /// `content/gameplay/<nation>/<kind>/[<sub-kind>/]<dir>/<leaf>.model`.
+    Gameplay(GameplayGroup),
+    /// A model GameParams `Building` params use, or one in a building directory.
+    Building(BuildingKind),
+    /// `content/gameplay/<nation>/character/<dir>/<leaf>.model`.
+    Character(ModelNation),
+    /// `content/location/<category>/[<sub-category>/]<dir>/<leaf>.model`.
+    Location(SceneGroup),
+    /// `content/ports/<category>/[<sub-category>/]<dir>/<leaf>.model`.
+    Port(SceneGroup),
+    /// `content/styles/<style>/<dir>/<leaf>.model`.
+    Style(ModelDirectory),
+    /// Any other model, by its first two directories (`helpers/models`), or
+    /// `None` for a model at the VFS root.
+    Other(Option<ModelDirectory>),
+}
+
+impl ModelGroup {
+    pub fn kind(&self) -> ModelGroupKind {
+        match self {
+            Self::Gameplay(_) => ModelGroupKind::Gameplay,
+            Self::Building(_) => ModelGroupKind::Building,
+            Self::Character(_) => ModelGroupKind::Character,
+            Self::Location(_) => ModelGroupKind::Location,
+            Self::Port(_) => ModelGroupKind::Port,
+            Self::Style(_) => ModelGroupKind::Style,
+            Self::Other(_) => ModelGroupKind::Other,
+        }
+    }
+
+    pub fn gameplay(&self) -> Option<&GameplayGroup> {
+        match self {
+            Self::Gameplay(group) => Some(group),
+            _ => None,
+        }
+    }
+}
+
+/// The top-level folder of a [`ModelGroup`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ModelGroupKind {
+    Gameplay,
+    Building,
+    Character,
+    Location,
+    Port,
+    Style,
+    Other,
+}
+
+impl ModelGroupKind {
+    /// Every top-level folder, in display order.
+    pub const ALL: [ModelGroupKind; 7] =
+        [Self::Gameplay, Self::Building, Self::Character, Self::Location, Self::Port, Self::Style, Self::Other];
+}
+
 /// How a variant relates to its base model.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ModelVariantKind {
-    /// The wreck model (`<base>_dead.model`).
+    /// The wreck model (`<base>_dead.model`, or a building's `deadModel`).
     Dead,
     /// A sibling `<base>_<suffix>.model`, e.g. the `Bow` hull section.
     Section(String),
@@ -256,11 +838,10 @@ pub struct ModelVariant {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ModelEntry {
     path: ModelPath,
-    nation: ModelNation,
-    kind: ModelKind,
-    sub_kind: Option<ModelSubKind>,
+    group: ModelGroup,
     variants: Vec<ModelVariant>,
     skin_of: Vec<ModelPath>,
+    building_params: Vec<BuildingParamRef>,
 }
 
 impl ModelEntry {
@@ -273,16 +854,8 @@ impl ModelEntry {
         self.path.stem()
     }
 
-    pub fn nation(&self) -> &ModelNation {
-        &self.nation
-    }
-
-    pub fn kind(&self) -> ModelKind {
-        self.kind
-    }
-
-    pub fn sub_kind(&self) -> Option<&ModelSubKind> {
-        self.sub_kind.as_ref()
+    pub fn group(&self) -> &ModelGroup {
+        &self.group
     }
 
     /// Dead, section and skin variants, sorted by kind then path.
@@ -301,9 +874,19 @@ impl ModelEntry {
         &self.skin_of
     }
 
+    /// The `Building` params that use this model or one of its dead and
+    /// section variants as hull, wreck or mount, sorted.
+    pub fn building_params(&self) -> &[BuildingParamRef] {
+        &self.building_params
+    }
+
     /// The part group a ship lists a mount of this model under.
     pub fn part_group(&self) -> PartGroup {
-        match (self.kind, &self.sub_kind) {
+        let ModelGroup::Gameplay(group) = &self.group else {
+            return PartGroup::Other;
+        };
+
+        match (group.kind, &group.sub_kind) {
             (ModelKind::Ship, _) => PartGroup::Hull,
             (ModelKind::Gun, Some(ModelSubKind::MainBattery)) => PartGroup::MainBattery,
             (ModelKind::Gun, Some(ModelSubKind::SecondaryBattery)) => PartGroup::SecondaryBattery,
@@ -319,7 +902,7 @@ impl ModelEntry {
     }
 }
 
-/// Every gameplay model in an `assets.bin`, grouped for browsing.
+/// Every model in an `assets.bin`, grouped for browsing.
 #[derive(Debug, Clone, Default)]
 pub struct ModelCatalog {
     /// Base models, sorted by path.
@@ -327,20 +910,20 @@ pub struct ModelCatalog {
     entry_index: HashMap<ModelPath, usize>,
     /// Dead and section variant path to the index of its base entry.
     variant_owner: HashMap<ModelPath, usize>,
-    kind_counts: BTreeMap<ModelKind, usize>,
+    group_counts: BTreeMap<ModelGroupKind, usize>,
 }
 
 impl ModelCatalog {
-    /// Group `paths` and link the skins `peculiarity_models` names. Paths that
-    /// do not follow the gameplay layout are left out. A skin pair whose stock
+    /// Group `paths` and apply the GameParams `links`. Every path becomes a
+    /// base entry or a dead or section variant of one. A skin pair whose stock
     /// or replacement is not a base model of the catalogue is skipped.
-    pub fn from_paths(paths: impl IntoIterator<Item = ModelPath>, peculiarity_models: &[PeculiarityModel]) -> Self {
+    pub fn from_paths(paths: impl IntoIterator<Item = ModelPath>, links: &CatalogLinks) -> Self {
         let mut by_directory: BTreeMap<String, Vec<ModelPath>> = BTreeMap::new();
         for path in paths {
             by_directory.entry(path.directory().to_string()).or_default().push(path);
         }
 
-        let mut entries: Vec<ModelPath> = Vec::new();
+        let mut bases: Vec<ModelPath> = Vec::new();
         let mut pending_variants: Vec<(ModelPath, ModelVariant)> = Vec::new();
         for (directory, mut paths) in by_directory {
             paths.sort();
@@ -348,7 +931,7 @@ impl ModelCatalog {
             let directory_name = directory.rsplit('/').next().unwrap_or(&directory);
 
             let Some(base) = paths.iter().find(|p| p.stem() == directory_name).cloned() else {
-                entries.extend(paths);
+                bases.extend(paths);
                 continue;
             };
 
@@ -358,13 +941,49 @@ impl ModelCatalog {
                 }
                 match variant_kind(directory_name, path.stem()) {
                     Some(kind) => pending_variants.push((base.clone(), ModelVariant { kind, path })),
-                    None => entries.push(path),
+                    None => bases.push(path),
                 }
             }
-            entries.push(base);
+            bases.push(base);
         }
 
-        let mut entries: Vec<ModelEntry> = entries.into_iter().filter_map(new_entry).collect();
+        let buildings = BuildingUses::new(links.buildings());
+        let mut bases: HashSet<ModelPath> = bases.into_iter().collect();
+        for (hull, dead) in buildings.separate_wrecks(&bases) {
+            bases.remove(&dead);
+            // The wreck's own parts are wreck models of the hull, never parts it loads with.
+            for (owner, variant) in pending_variants.iter_mut().filter(|(owner, _)| *owner == dead) {
+                *owner = hull.clone();
+                variant.kind = ModelVariantKind::Dead;
+            }
+            pending_variants.push((hull, ModelVariant { kind: ModelVariantKind::Dead, path: dead }));
+        }
+
+        let mut owner_of: HashMap<&ModelPath, &ModelPath> = bases.iter().map(|base| (base, base)).collect();
+        for (base, variant) in &pending_variants {
+            owner_of.insert(&variant.path, base);
+        }
+        let mut votes: HashMap<&ModelPath, BuildingVotes> = HashMap::new();
+        for (path, role, param) in buildings.references() {
+            let Some(&owner) = owner_of.get(path) else {
+                continue;
+            };
+            votes.entry(owner).or_default().add(role, param);
+        }
+
+        let mut entries: Vec<ModelEntry> = bases
+            .iter()
+            .map(|path| {
+                let votes = votes.get(path);
+                ModelEntry {
+                    path: path.clone(),
+                    group: group_of(path, votes),
+                    variants: Vec::new(),
+                    skin_of: Vec::new(),
+                    building_params: votes.map(BuildingVotes::params).unwrap_or_default(),
+                }
+            })
+            .collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         let entry_index: HashMap<ModelPath, usize> =
             entries.iter().enumerate().map(|(idx, entry)| (entry.path.clone(), idx)).collect();
@@ -378,7 +997,7 @@ impl ModelCatalog {
             entries[owner].variants.push(variant);
         }
 
-        for pair in peculiarity_models {
+        for pair in links.skins() {
             let (Ok(stock), Ok(skin)) = (ModelPath::parse(&pair.stock), ModelPath::parse(&pair.replacement)) else {
                 continue;
             };
@@ -398,14 +1017,14 @@ impl ModelCatalog {
             }
         }
 
-        let mut kind_counts = BTreeMap::new();
+        let mut group_counts = BTreeMap::new();
         for entry in &mut entries {
             entry.variants.sort_by(|a, b| (&a.kind, &a.path).cmp(&(&b.kind, &b.path)));
             entry.skin_of.sort();
-            *kind_counts.entry(entry.kind).or_insert(0) += 1;
+            *group_counts.entry(entry.group.kind()).or_insert(0) += 1;
         }
 
-        Self { entries, entry_index, variant_owner, kind_counts }
+        Self { entries, entry_index, variant_owner, group_counts }
     }
 
     /// Every base model, skins included, sorted by path.
@@ -430,9 +1049,9 @@ impl ModelCatalog {
         self.entry(path).or_else(|| self.variant_owner.get(path).map(|&idx| &self.entries[idx]))
     }
 
-    /// Number of base models per kind, skins included.
-    pub fn count_by_kind(&self) -> &BTreeMap<ModelKind, usize> {
-        &self.kind_counts
+    /// Number of base models per top-level folder, skins included.
+    pub fn count_by_group(&self) -> &BTreeMap<ModelGroupKind, usize> {
+        &self.group_counts
     }
 }
 
@@ -485,6 +1104,129 @@ impl ModelPathIndex {
     }
 }
 
+/// How a `Building` param uses a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildingRole {
+    Hull,
+    Wreck,
+    Mount,
+}
+
+/// Every model path the `Building` params name, by role.
+struct BuildingUses<'a> {
+    references: Vec<(ModelPath, BuildingRole, &'a BuildingParamRef)>,
+    /// `(hull, deadModel)` pairs, in param order.
+    wrecks: Vec<(ModelPath, ModelPath)>,
+}
+
+impl<'a> BuildingUses<'a> {
+    fn new(buildings: &'a [BuildingModels]) -> Self {
+        let mut buildings: Vec<&BuildingModels> = buildings.iter().collect();
+        buildings.sort_by(|a, b| a.param.cmp(&b.param));
+
+        let parse = |raw: &Option<String>| raw.as_deref().and_then(|raw| ModelPath::parse(raw).ok());
+        let mut references = Vec::new();
+        let mut wrecks = Vec::new();
+        for building in buildings {
+            let hull = parse(&building.model);
+            let dead = parse(&building.dead_model);
+            if let (Some(hull), Some(dead)) = (&hull, &dead)
+                && hull != dead
+            {
+                wrecks.push((hull.clone(), dead.clone()));
+            }
+            if let Some(hull) = hull {
+                references.push((hull, BuildingRole::Hull, &building.param));
+            }
+            if let Some(dead) = dead {
+                references.push((dead, BuildingRole::Wreck, &building.param));
+            }
+            for mount in &building.mount_models {
+                if let Ok(mount) = ModelPath::parse(mount) {
+                    references.push((mount, BuildingRole::Mount, &building.param));
+                }
+            }
+        }
+
+        Self { references, wrecks }
+    }
+
+    fn references(&self) -> impl Iterator<Item = (&ModelPath, BuildingRole, &'a BuildingParamRef)> {
+        self.references.iter().map(|(path, role, param)| (path, *role, *param))
+    }
+
+    /// `(hull, wreck)` pairs where the wreck is a base model of its own
+    /// directory that no building uses as its hull, so it is listed as the
+    /// hull's dead variant. A wreck claimed by several hulls goes to the first.
+    fn separate_wrecks(&self, bases: &HashSet<ModelPath>) -> Vec<(ModelPath, ModelPath)> {
+        let hulls: HashSet<&ModelPath> = self
+            .references
+            .iter()
+            .filter(|(_, role, _)| *role == BuildingRole::Hull)
+            .map(|(path, _, _)| path)
+            .collect();
+
+        let mut claimed: HashSet<&ModelPath> = HashSet::new();
+        let mut pairs = Vec::new();
+        for (hull, dead) in &self.wrecks {
+            if hulls.contains(dead) || !bases.contains(hull) || !bases.contains(dead) || !claimed.insert(dead) {
+                continue;
+            }
+            pairs.push((hull.clone(), dead.clone()));
+        }
+
+        pairs
+    }
+}
+
+/// The building params that reference one base model, by role.
+#[derive(Default)]
+struct BuildingVotes {
+    hull: Vec<BuildingParamRef>,
+    wreck: Vec<BuildingParamRef>,
+    mount: Vec<BuildingParamRef>,
+}
+
+impl BuildingVotes {
+    fn add(&mut self, role: BuildingRole, param: &BuildingParamRef) {
+        let list = match role {
+            BuildingRole::Hull => &mut self.hull,
+            BuildingRole::Wreck => &mut self.wreck,
+            BuildingRole::Mount => &mut self.mount,
+        };
+        list.push(param.clone());
+    }
+
+    /// The kind most hull uses name, else most wreck uses; ties go to the
+    /// earlier kind, and params without a species count only when no other
+    /// does. `None` when the model is only a mount.
+    fn structure_kind(&self) -> Option<BuildingKind> {
+        let users = if self.hull.is_empty() { &self.wreck } else { &self.hull };
+        let mut counts: BTreeMap<&BuildingKind, usize> = BTreeMap::new();
+        for param in users.iter().filter(|param| param.kind != BuildingKind::Unspecified) {
+            *counts.entry(&param.kind).or_insert(0) += 1;
+        }
+
+        let Some(most) = counts.values().copied().max() else {
+            return (!users.is_empty()).then_some(BuildingKind::Unspecified);
+        };
+        counts.into_iter().find(|(_, count)| *count == most).map(|(kind, _)| kind.clone())
+    }
+
+    fn is_mount(&self) -> bool {
+        !self.mount.is_empty()
+    }
+
+    fn params(&self) -> Vec<BuildingParamRef> {
+        let mut params: Vec<BuildingParamRef> =
+            self.hull.iter().chain(&self.wreck).chain(&self.mount).cloned().collect();
+        params.sort();
+        params.dedup();
+
+        params
+    }
+}
+
 /// Every `peculiarityModels` pair across the GameParams exteriors, sorted and
 /// without duplicates.
 pub fn peculiarity_models(metadata: &GameMetadataProvider) -> Vec<PeculiarityModel> {
@@ -500,21 +1242,126 @@ pub fn peculiarity_models(metadata: &GameMetadataProvider) -> Vec<PeculiarityMod
     pairs
 }
 
-/// Builds the entry for `path` when it follows the gameplay layout:
-/// `<nation>/<kind>/[<sub-kind>/]<dir>/<leaf>.model` below `content/gameplay/`,
-/// every directory named.
-fn new_entry(path: ModelPath) -> Option<ModelEntry> {
-    let relative = path.as_str().strip_prefix(GAMEPLAY_PREFIX)?;
-    let segments: Vec<&str> = relative.split('/').collect();
-    if !(4..=5).contains(&segments.len()) || segments.iter().any(|segment| segment.is_empty()) {
-        return None;
+/// The models of every GameParams `Building` param.
+pub fn building_models(metadata: &GameMetadataProvider) -> Vec<BuildingModels> {
+    metadata
+        .params()
+        .iter()
+        .filter_map(|param| {
+            let building = param.building()?;
+            let kind = param.species().map_or(BuildingKind::Unspecified, BuildingKind::from_species);
+            let mounts = building.mounts().iter().map(|mount| mount.model_path().to_string());
+
+            Some(BuildingModels {
+                param: BuildingParamRef::new(param.name().to_string(), kind),
+                model: building.model().map(str::to_string),
+                dead_model: building.dead_model().map(str::to_string),
+                mount_models: mounts.chain(building.mount_dead_models().iter().cloned()).collect(),
+            })
+        })
+        .collect()
+}
+
+/// The folder for the base model `path`. A model a building uses as hull or
+/// wreck goes under that building's kind, and a building-only mount under
+/// [`BuildingKind::Weapon`], ahead of the path layout.
+fn group_of(path: &ModelPath, votes: Option<&BuildingVotes>) -> ModelGroup {
+    if let Some(kind) = votes.and_then(BuildingVotes::structure_kind) {
+        return ModelGroup::Building(kind);
     }
 
-    let nation = ModelNation(segments[0].to_string());
-    let kind = ModelKind::from_directory(segments[1]);
-    let sub_kind = (segments.len() == 5).then(|| ModelSubKind::from_directory(kind, segments[2]));
+    let raw = path.as_str();
+    if votes.is_some_and(BuildingVotes::is_mount) && !raw.starts_with(GAMEPLAY_PREFIX) {
+        return ModelGroup::Building(BuildingKind::Weapon);
+    }
 
-    Some(ModelEntry { path, nation, kind, sub_kind, variants: Vec::new(), skin_of: Vec::new() })
+    // Building directories, whether or not a current param uses the model.
+    if raw.starts_with("content/location/gameplay/") || raw.starts_with("content/location/nature/gameplay/") {
+        return ModelGroup::Building(BuildingKind::Unassigned);
+    }
+
+    let directories: Vec<&str> = path.directory().split('/').collect();
+    let named = |dirs: &[&str]| dirs.iter().all(|dir| !dir.is_empty());
+
+    if raw.starts_with(GAMEPLAY_PREFIX) {
+        let dirs = &directories[2..];
+        if (3..=4).contains(&dirs.len()) && named(dirs) {
+            return gameplay_group(dirs, path.stem());
+        }
+    }
+
+    let scene = || {
+        let dirs = &directories[2..];
+        ((2..=3).contains(&dirs.len()) && named(dirs)).then(|| SceneGroup {
+            category: ModelDirectory(dirs[0].to_string()),
+            sub_category: (dirs.len() == 3).then(|| ModelDirectory(dirs[1].to_string())),
+        })
+    };
+    if raw.starts_with(LOCATION_PREFIX)
+        && let Some(scene) = scene()
+    {
+        return ModelGroup::Location(scene);
+    }
+    if raw.starts_with(PORTS_PREFIX)
+        && let Some(scene) = scene()
+    {
+        return ModelGroup::Port(scene);
+    }
+
+    if raw.starts_with(STYLES_PREFIX) {
+        let dirs = &directories[2..];
+        if dirs.len() == 2 && named(dirs) {
+            return ModelGroup::Style(ModelDirectory(dirs[0].to_string()));
+        }
+    }
+
+    let top: Vec<&str> = directories.iter().take(2).copied().filter(|dir| !dir.is_empty()).collect();
+    ModelGroup::Other((!top.is_empty()).then(|| ModelDirectory(top.join("/"))))
+}
+
+/// The group for a gameplay model below `content/gameplay/` whose directories
+/// are `dirs`: `<nation>/<kind>/[<sub-kind>/]<dir>`.
+fn gameplay_group(dirs: &[&str], stem: &str) -> ModelGroup {
+    let nation = ModelNation(dirs[0].to_string());
+    if dirs[1] == "character" {
+        return ModelGroup::Character(nation);
+    }
+
+    let kind = ModelKind::from_directory(dirs[1]);
+    let sub_kind = match (dirs.len(), kind) {
+        (4, _) => Some(ModelSubKind::from_directory(kind, dirs[2])),
+        (_, ModelKind::Misc) => Some(ModelSubKind::Misc(MiscCategory::classify(stem))),
+        _ => None,
+    };
+
+    ModelGroup::Gameplay(GameplayGroup { nation, kind, sub_kind })
+}
+
+/// The lowercase English words of a model name after its leading id: `_`
+/// separates parts, and a part splits where letters meet digits and where a
+/// lowercase letter meets an uppercase one (`MotorBoat35ft` is `motor`,
+/// `boat`, `35`, `ft`).
+fn name_words(stem: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    for part in stem.split('_').skip(1) {
+        let mut word = String::new();
+        let mut previous: Option<char> = None;
+        for ch in part.chars() {
+            let splits = previous.is_some_and(|prev| {
+                prev.is_ascii_digit() != ch.is_ascii_digit() || (prev.is_lowercase() && ch.is_uppercase())
+            });
+            if splits && !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            word.extend(ch.to_lowercase());
+            previous = Some(ch);
+        }
+        if !word.is_empty() {
+            words.push(word);
+        }
+    }
+
+    words
 }
 
 /// The variant a sibling of the base model in `directory_name` is, or `None`
@@ -538,16 +1385,33 @@ mod tests {
         ModelPath::parse(raw).expect("valid model path")
     }
 
-    fn catalog(raw: &[&str], skins: &[(&str, &str)]) -> ModelCatalog {
-        let skins: Vec<PeculiarityModel> = skins
+    fn skins(pairs: &[(&str, &str)]) -> Vec<PeculiarityModel> {
+        pairs
             .iter()
             .map(|(stock, replacement)| PeculiarityModel {
                 stock: stock.to_string(),
                 replacement: replacement.to_string(),
             })
-            .collect();
+            .collect()
+    }
 
-        ModelCatalog::from_paths(raw.iter().map(|p| path(p)), &skins)
+    fn catalog(raw: &[&str], pairs: &[(&str, &str)]) -> ModelCatalog {
+        ModelCatalog::from_paths(raw.iter().map(|p| path(p)), &CatalogLinks::new(skins(pairs), Vec::new()))
+    }
+
+    fn building(name: &str, kind: BuildingKind, model: &str, dead_model: &str, mounts: &[&str]) -> BuildingModels {
+        let optional = |raw: &str| (!raw.is_empty()).then(|| raw.to_string());
+
+        BuildingModels {
+            param: BuildingParamRef::new(name.to_string(), kind),
+            model: optional(model),
+            dead_model: optional(dead_model),
+            mount_models: mounts.iter().map(|mount| mount.to_string()).collect(),
+        }
+    }
+
+    fn summary(catalog: &ModelCatalog) -> Vec<String> {
+        catalog.entries().iter().map(|e| format!("{} | {:?} | {:?}", e.name(), e.group(), e.part_group())).collect()
     }
 
     #[test]
@@ -569,24 +1433,6 @@ mod tests {
     }
 
     #[test]
-    fn paths_off_the_gameplay_layout_are_left_out() {
-        let catalog = catalog(
-            &[
-                "content/gameplay/usa/AM1.model",
-                "content/gameplay/usa/misc/AM2.model",
-                "content/gameplay/usa/gun/main/extra/AGX/AGX.model",
-                "content/gameplay//misc/AM3/AM3.model",
-                "content/location/speedtree/Tree01/Tree01.model",
-                "content/gameplay/usa/misc/AM4/AM4.model",
-            ],
-            &[],
-        );
-
-        let names: Vec<&str> = catalog.entries().iter().map(ModelEntry::name).collect();
-        assert_eq!(names, ["AM4"]);
-    }
-
-    #[test]
     fn groups_real_paths_by_nation_kind_and_sub_kind() {
         let catalog = catalog(
             &[
@@ -604,23 +1450,47 @@ mod tests {
                 "content/gameplay/usa/aircraft/fighter/AAF001_Grumman_F3F/AAF001_Grumman_F3F.model",
                 "content/gameplay/usa/projectile/torpedo/APT003_Avia_Torpedo_Mk13/APT003_Avia_Torpedo_Mk13.model",
                 "content/gameplay/usa/projectile/jato/APJ001_Jato_14AS_1000/APJ001_Jato_14AS_1000.model",
+                "content/gameplay/usa/misc/AM116_Boat_Winch_2/AM116_Boat_Winch_2.model",
                 "content/gameplay/usa/misc/AM2061/AM2061.model",
                 "content/gameplay/events/director/XD006_Lazarus_Director/XD006_Lazarus_Director.model",
-                "content/gameplay/common/character/CH001_Sailor/CH001_Sailor.model",
+                "content/gameplay/common/decoration/CD001_Garland/CD001_Garland.model",
+                "content/gameplay/common/character/CH001_Dasha/CH001_Dasha.model",
                 "content/gameplay/usa/gun/railgun/AGR001_Test/AGR001_Test.model",
-                "content/location/speedtree/Tree01/Tree01.model",
             ],
             &[],
         );
 
-        let summary: Vec<String> = catalog
-            .entries()
-            .iter()
-            .map(|e| {
-                format!("{} | {} | {:?} | {:?} | {:?}", e.name(), e.nation(), e.kind(), e.sub_kind(), e.part_group())
-            })
-            .collect();
-        insta::assert_debug_snapshot!(summary);
+        insta::assert_debug_snapshot!(summary(&catalog));
+    }
+
+    #[test]
+    fn non_gameplay_paths_group_by_their_directories() {
+        let catalog = catalog(
+            &[
+                "content/location/building/city/LBC001_House/LBC001_House.model",
+                "content/location/landmark/LL371_Statue_of_liberty/LL371_Statue_of_liberty.model",
+                "content/location/nature/rock/LNR561_Shoreside/LNR561_Shoreside.model",
+                "content/location/gameplay/building/LYB206_Respawn/LYB206_Respawn.model",
+                "content/location/nature/gameplay/LNG006/LNG006.model",
+                "content/ports/misc/wharf/OMW001_Bollard/OMW001_Bollard.model",
+                "content/ports/landmark/OL160_London/OL160_London.model",
+                "content/styles/Halloween19/YMS001_YHBM_M_1/YMS001_YHBM_M_1.model",
+                "content/pbs_test/box/box.model",
+                "content/pbs_test/GGX_artists_materials_set/02_aluminum.model",
+                "helpers/models/unit_cube.model",
+                "content/mesh_decal_test/pillar.model",
+                "unit_sphere.model",
+                // Off the gameplay layout: too shallow, too deep, an empty directory.
+                "content/gameplay/usa/AM1.model",
+                "content/gameplay/usa/gun/main/extra/AGX/AGX.model",
+                "content/gameplay//misc/AM3/AM3.model",
+                // Too deep for a scene layout.
+                "content/location/building/city/extra/LBC9/LBC9.model",
+            ],
+            &[],
+        );
+
+        insta::assert_debug_snapshot!(summary(&catalog));
     }
 
     #[test]
@@ -640,6 +1510,9 @@ mod tests {
                 // A directory without a base model keeps every model listed.
                 "content/gameplay/usa/misc/AM900_Set/AM901_Part.model",
                 "content/gameplay/usa/misc/AM900_Set/AM902_Part.model",
+                // The same rules hold outside gameplay.
+                "content/location/vehicle/railroad/LVR001_Wagon/LVR001_Wagon.model",
+                "content/location/vehicle/railroad/LVR001_Wagon/LVR001_Wagon_dead.model",
             ],
             &[],
         );
@@ -689,5 +1562,114 @@ mod tests {
         let skin_entry = catalog.entry(&path(skin)).expect("skin entry");
         assert_eq!(skin_entry.skin_of(), [path(stock)]);
         assert_eq!(skin_entry.variants().len(), 1, "the skin keeps its own dead model");
+    }
+
+    #[test]
+    fn buildings_group_by_the_kind_of_the_params_that_use_them() {
+        let fort = "content/location/gameplay/building/LYB041/LYB041.model";
+        let tower = "content/location/gameplay/building/LYB048_PA_Building/LYB048_PA_Building.model";
+        let tower_wreck = "content/location/gameplay/building/LYB048_PA_Building_dead/LYB048_PA_Building_dead.model";
+        let tower_wreck_part =
+            "content/location/gameplay/building/LYB048_PA_Building_dead/LYB048_PA_Building_dead_Top.model";
+        let base = "content/location/gameplay/building/LYB031/LYB031.model";
+        let star_base = "content/location/gameplay/building/LYB205_StarTrek_01/LYB205_StarTrek_01.model";
+        let field_gun = "content/location/gameplay/gun/main/LYGM002_105mm_LeFH_18/LYGM002_105mm_LeFH_18.model";
+        let field_gun_dead =
+            "content/location/gameplay/gun/main/LYGM002_105mm_LeFH_18/LYGM002_105mm_LeFH_18_dead.model";
+        let ship_gun = "content/gameplay/germany/gun/main/GGM058_280mm54_5_C34/GGM058_280mm54_5_C34.model";
+        let airfield = "content/location/nature/gameplay/LNG001/LNG001.model";
+        let airfield_dead = "content/location/nature/gameplay/LNG001/LNG001_dead.model";
+        let buildings = vec![
+            building("PCBC022_PCGM002", BuildingKind::CoastalArtillery, fort, "", &[field_gun, field_gun_dead]),
+            building("PCBX022_PCGM002", BuildingKind::Complex, fort, "", &[ship_gun]),
+            building("PCBX023_PCGM003", BuildingKind::Complex, fort, "", &[]),
+            // The wreck has its own directory and becomes the tower's dead variant.
+            building("PCBR004", BuildingKind::RayTower, tower, tower_wreck, &[]),
+            // LYB031 is a wreck here and a hull below, so it stays listed.
+            building("PCBM016_STK_1", BuildingKind::Military, star_base, base, &[]),
+            building("PCBX008", BuildingKind::Complex, base, base, &[]),
+            building("PCBB001", BuildingKind::AirBase, airfield, airfield_dead, &[]),
+            // A param without models links nothing.
+            building("PCBF099_Airfield", BuildingKind::Unrecognized("Fake".to_string()), "", "", &[]),
+            // A param without a species does not outvote the ones with a species.
+            building("PCBZ001", BuildingKind::Unspecified, fort, "", &[]),
+            building("PCBZ002", BuildingKind::Unspecified, fort, "", &[]),
+            building("PCBZ003", BuildingKind::Unspecified, fort, "", &[]),
+        ];
+        let paths = [
+            fort,
+            tower,
+            tower_wreck,
+            tower_wreck_part,
+            base,
+            star_base,
+            field_gun,
+            field_gun_dead,
+            ship_gun,
+            airfield,
+            airfield_dead,
+        ];
+        let catalog =
+            ModelCatalog::from_paths(paths.iter().map(|p| path(p)), &CatalogLinks::new(Vec::new(), buildings));
+
+        let rows: Vec<String> = catalog
+            .entries()
+            .iter()
+            .map(|e| {
+                let params: Vec<&str> = e.building_params().iter().map(BuildingParamRef::name).collect();
+                let variants: Vec<&str> = e.variants().iter().map(|v| v.path.stem()).collect();
+                format!("{} | {:?} | params {params:?} | variants {variants:?}", e.name(), e.group())
+            })
+            .collect();
+        insta::assert_debug_snapshot!(rows);
+        assert_eq!(catalog.owning_entry(&path(tower_wreck)).map(ModelEntry::name), Some("LYB048_PA_Building"));
+        assert_eq!(
+            catalog.owning_entry(&path(tower_wreck_part)).map(ModelEntry::name),
+            Some("LYB048_PA_Building"),
+            "a variant of the folded wreck moves with it"
+        );
+    }
+
+    #[test]
+    fn building_kinds_name_their_game_strings() {
+        let complex = BuildingKind::from_species(&Recognized::Known(Species::Complex));
+        assert_eq!(complex, BuildingKind::Complex);
+        assert_eq!(complex.translation_key(), Some(TranslationKey::new("IDS_BUILDING_COMPLEX")));
+        assert_eq!(
+            BuildingKind::from_species(&Recognized::Unknown("Lighthouse".to_string())).translation_key(),
+            Some(TranslationKey::new("IDS_BUILDING_LIGHTHOUSE"))
+        );
+        assert_eq!(BuildingKind::Weapon.translation_key(), None);
+    }
+
+    #[test]
+    fn misc_names_classify_by_the_first_matching_keyword_row() {
+        let stems = [
+            "CM110_Propeller4_L",
+            "RM869_Rudder_Indicator",
+            "AM116_Boat_Winch_2",
+            "ZM519_Longboat_34ft",
+            "AM6242_Motor_boat_35ft_Black",
+            "ZM971_Anchor_Capstan_high",
+            "RM296_Cran_of_Boats",
+            "WM864_Running_Lights_R",
+            "AM1023_Code_Signal_Flags",
+            "GM179_Crest_Mecklenburg",
+            "WM5136_Leer_Skoda_1",
+            "AM601_Skylight_Hatch",
+            "ZM818_Ventilation_Mushroom",
+            "WM5048_Radar_type_285",
+            "AM6059_Compass_Binnacle",
+            "JM495_Gun_Deck_Rangefinder",
+            "WM5234_Gun_Deck_L",
+            "GM041_52mm_SK_L55",
+            "XM085_Wood_Box_2_Ice",
+            "XM289_YHAR_FranceArc_M_1",
+            "RM884",
+        ];
+
+        let categories: Vec<String> =
+            stems.iter().map(|stem| format!("{stem} | {:?}", MiscCategory::classify(stem))).collect();
+        insta::assert_debug_snapshot!(categories);
     }
 }

@@ -70,4 +70,15 @@ expression: listed
             },
         ],
     ),
+    (
+        "LVR001_Wagon",
+        [
+            ModelVariant {
+                kind: Dead,
+                path: ModelPath(
+                    "content/location/vehicle/railroad/LVR001_Wagon/LVR001_Wagon_dead.model",
+                ),
+            },
+        ],
+    ),
 ]

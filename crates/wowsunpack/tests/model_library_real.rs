@@ -207,7 +207,8 @@ fn every_catalogued_kind_loads() {
     let mut failures = Vec::new();
     let mut loaded = 0usize;
     for kind in wowsunpack::export::model_catalog::ModelKind::ALL {
-        for entry in catalog.entries().iter().filter(|e| e.kind() == kind).take(5) {
+        let of_kind = catalog.entries().iter().filter(|e| e.group().gameplay().is_some_and(|g| g.kind() == kind));
+        for entry in of_kind.take(5) {
             match library.load_model(entry.path(), &options(TextureDecode::None)) {
                 Ok(_) => loaded += 1,
                 Err(error) => failures.push(format!("{}: {error}", entry.path())),

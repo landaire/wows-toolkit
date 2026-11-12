@@ -1,0 +1,13 @@
+---
+source: crates/wowsunpack/src/export/model_catalog.rs
+expression: rows
+---
+[
+    "GGM058_280mm54_5_C34 | Gameplay(GameplayGroup { nation: ModelNation(\"germany\"), kind: Gun, sub_kind: Some(MainBattery) }) | params [\"PCBX022_PCGM002\"] | variants []",
+    "LYB031 | Building(Complex) | params [\"PCBM016_STK_1\", \"PCBX008\"] | variants []",
+    "LYB041 | Building(Complex) | params [\"PCBC022_PCGM002\", \"PCBX022_PCGM002\", \"PCBX023_PCGM003\", \"PCBZ001\", \"PCBZ002\", \"PCBZ003\"] | variants []",
+    "LYB048_PA_Building | Building(RayTower) | params [\"PCBR004\"] | variants [\"LYB048_PA_Building_dead\", \"LYB048_PA_Building_dead_Top\"]",
+    "LYB205_StarTrek_01 | Building(Military) | params [\"PCBM016_STK_1\"] | variants []",
+    "LYGM002_105mm_LeFH_18 | Building(Weapon) | params [\"PCBC022_PCGM002\"] | variants [\"LYGM002_105mm_LeFH_18_dead\"]",
+    "LNG001 | Building(AirBase) | params [\"PCBB001\"] | variants [\"LNG001_dead\"]",
+]

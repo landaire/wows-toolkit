@@ -170,8 +170,10 @@ impl ModelLibrary {
         let db = assets.db();
         let self_id_index = db.build_self_id_index();
         let model_index = ModelPathIndex::build(&db, &self_id_index);
-        let catalog =
-            ModelCatalog::from_paths(model_index.paths().cloned(), &model_catalog::peculiarity_models(metadata));
+        let catalog = ModelCatalog::from_paths(
+            model_index.paths().cloned(),
+            &model_catalog::CatalogLinks::from_metadata(metadata),
+        );
 
         let mut first_by_stem: HashMap<&str, (usize, &ModelPath)> = HashMap::new();
         for path in model_index.paths() {
