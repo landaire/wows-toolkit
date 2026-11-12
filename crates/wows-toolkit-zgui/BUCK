@@ -10,6 +10,9 @@ buildscript = workspace_buildscript(
 
 ZGUI_DEPS = [
     "//crates/landaire-ui:landaire_ui",
+    "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wowsunpack:wowsunpack",
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
@@ -22,8 +25,10 @@ ZGUI_DEPS = [
     "//crates/wows-toolkit-services:wows_toolkit_services",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wt-translations:wt_translations",
+    "//third-party/rust:arboard",
     "//third-party/rust:clap",
     "//third-party/rust:futures",
+    "//third-party/rust:image",
     "//third-party/rust:humansize",
     "//third-party/rust:rootcause",
     "//third-party/rust:rust-i18n",
@@ -40,6 +45,7 @@ ZGUI_DEPS = [
     "//third-party/rust:zgui-ui-icons",
     "//third-party/rust:zgui-ui-primitives",
     "//third-party/rust:zgui-ui-tokens",
+    "//third-party/rust:zgui-image",
 ]
 
 # Not wows_toolkit_zgui_bin: the target name is a path component of every object file a release

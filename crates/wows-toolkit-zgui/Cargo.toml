@@ -13,6 +13,8 @@ zgui-ui-icons = { workspace = true }
 zgui-ui-tokens = { workspace = true }
 # The placement a hover card is asked for.
 zgui-ui-primitives = { workspace = true }
+# Map thumbnails are handed to image elements as in-memory bytes.
+zgui-image = { workspace = true }
 # Palettes, the theme root and the window chrome shared with other zgui front ends.
 landaire-ui = { workspace = true }
 # The icon set, shared with the other desktop front end.
@@ -30,6 +32,14 @@ wgc-download = { workspace = true }
 wgc-install = { workspace = true }
 # The process mitigations, applied before a window exists.
 wows-toolkit-hardening = { workspace = true }
+# The replay listing: map art for its thumbnails, the rating its rows carry, and the game data
+# the keyboard reference is read from.
+wows_minimap_renderer = { workspace = true }
+wows-replay-insights = { workspace = true }
+wowsunpack = { workspace = true }
+image = { workspace = true, features = ["png"] }
+# Copying replay files puts a file list on the clipboard, which zgui's clipboard does not write.
+arboard = "3.6.1"
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }
 wt-translations = { workspace = true }
@@ -69,6 +79,8 @@ landaire-ui = { workspace = true, features = ["test-support"] }
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
+# Directory watches are reported by the tests instead of the filesystem.
+wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # Game versions, for the palette's version list tests.
 wowsunpack = { workspace = true }

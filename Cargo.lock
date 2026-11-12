@@ -16757,6 +16757,7 @@ dependencies = [
 name = "wows-toolkit-zgui"
 version = "1.0.5"
 dependencies = [
+ "arboard",
  "clap",
  "futures",
  "humansize",
@@ -16778,6 +16779,7 @@ dependencies = [
  "wgc-install",
  "windows-sys 0.61.2",
  "winresource",
+ "wows-replay-insights",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-icons",
@@ -16785,9 +16787,11 @@ dependencies = [
  "wows-toolkit-replay-data",
  "wows-toolkit-services",
  "wows-toolkit-viewmodel",
+ "wows_minimap_renderer",
  "wowsunpack",
  "wt-translations",
  "zgui",
+ "zgui-image",
  "zgui-ui",
  "zgui-ui-icons",
  "zgui-ui-primitives",
