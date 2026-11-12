@@ -59,15 +59,8 @@ use wowsunpack::game_types::GameParamId;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
-use super::sidebar_tree::Expansion;
-use super::sidebar_tree::ModelSection;
-use super::sidebar_tree::RowKind;
-use super::sidebar_tree::RowNote;
-use super::sidebar_tree::SearchMatches;
-use super::sidebar_tree::TreeSources;
-use super::sidebar_tree::build_tree;
-use super::sidebar_tree::model_building_row_id;
-use super::sidebar_tree::open_row_id;
+use super::sidebar_tree::shared_id;
+use super::sidebar_tree::tree_items;
 use super::viewport_view::OpeningLayer;
 use super::xray::XrayHighlight;
 use super::xray::XrayHighlightView;
@@ -87,10 +80,19 @@ use wows_toolkit_armor::model_tree::FortificationRow;
 use wows_toolkit_armor::model_tree::ModelReferences;
 use wows_toolkit_armor::model_tree::ModelTreeIndex;
 use wows_toolkit_armor::model_tree::ShipPartRows;
-use wows_toolkit_armor::model_tree::SkinUse;
 use wows_toolkit_armor::model_tree::list_all_ship_parts;
 use wows_toolkit_armor::model_tree::list_fortifications;
 use wows_toolkit_armor::model_tree::list_model_buildings;
+use wows_toolkit_armor::sidebar_tree::Expansion;
+use wows_toolkit_armor::sidebar_tree::ModelSection;
+use wows_toolkit_armor::sidebar_tree::RowId;
+use wows_toolkit_armor::sidebar_tree::RowKind;
+use wows_toolkit_armor::sidebar_tree::RowNote;
+use wows_toolkit_armor::sidebar_tree::SearchMatches;
+use wows_toolkit_armor::sidebar_tree::TreeSources;
+use wows_toolkit_armor::sidebar_tree::build_tree;
+use wows_toolkit_armor::sidebar_tree::open_row_ids;
+use wows_toolkit_armor::sidebar_tree::row_tooltip;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
 /// starts the ship's background armor load in response.
@@ -194,9 +196,9 @@ enum Rebuild {
 /// What the row renderer reads, gathered once per sidebar render.
 struct RowContext {
     bundle: Arc<ArmorAssetsBundle>,
-    row_info: Rc<HashMap<SharedString, RowKind>>,
-    notes: Rc<HashMap<SharedString, RowNote>>,
-    unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
+    row_info: Rc<HashMap<RowId, RowKind>>,
+    notes: Rc<HashMap<RowId, RowNote>>,
+    unavailable: Rc<HashMap<RowId, GeometryAvailability>>,
     index: Option<Arc<ModelTreeIndex>>,
     hardpoints: Rc<HashSet<HardpointTarget>>,
     /// The search the rows are listed for, which marks what it matched.
@@ -212,11 +214,11 @@ pub struct Sidebar {
     search: Option<SearchMatches>,
     tree_state: Entity<TreeState>,
     /// Rebuilt with the tree, never per render.
-    row_info: Rc<HashMap<SharedString, RowKind>>,
+    row_info: Rc<HashMap<RowId, RowKind>>,
     /// Dim text drawn after each row's name.
-    row_notes: Rc<HashMap<SharedString, RowNote>>,
+    row_notes: Rc<HashMap<RowId, RowNote>>,
     /// The model rows the install cannot draw, drawn dimmed.
-    row_unavailable: Rc<HashMap<SharedString, GeometryAvailability>>,
+    row_unavailable: Rc<HashMap<RowId, GeometryAvailability>>,
     /// What the comparison panes share. Owned by `ArmorViewerPane`; kept here
     /// so the header can draw it beside the button that opens a pane.
     common: CommonPaneSettings,
@@ -227,12 +229,12 @@ pub struct Sidebar {
     fortifications: Arc<Vec<FortificationRow>>,
 
     /// Folders open while not searching. Kept across searches.
-    browse_expanded: HashSet<SharedString>,
+    browse_expanded: HashSet<RowId>,
     /// Folders open during the current search.
-    search_expanded: HashSet<SharedString>,
+    search_expanded: HashSet<RowId>,
     /// Folders the user closed during the current search, which a later
     /// match leaves closed.
-    search_collapsed: HashSet<SharedString>,
+    search_collapsed: HashSet<RowId>,
 
     /// Targets whose hardpoints the pane shows.
     hardpoint_visibility: Rc<HashSet<HardpointTarget>>,
@@ -718,12 +720,10 @@ impl Sidebar {
 
         // The open model's row is highlighted for the pane, not chosen.
         let open = self.open_row_ids();
-        let highlighted = self
-            .tree_state
-            .read(cx)
-            .selected_item()
-            .map(|item| item.id.clone())
-            .filter(|id| !open.contains(id) && self.row_info.get(id).is_some_and(opens_on_its_own));
+        let highlighted =
+            self.tree_state.read(cx).selected_item().map(|item| item.id.clone()).filter(|id| {
+                !open.contains(id) && self.row_info.get(id.as_ref()).is_some_and(RowKind::opens_on_its_own)
+            });
         if let Some(id) = highlighted.or_else(|| self.first_openable_row(cx)) {
             self.open_row(&id, cx);
         }
@@ -746,14 +746,14 @@ impl Sidebar {
         (0..)
             .map_while(|ix| state.entry(ix))
             .map(|entry| &entry.item().id)
-            .find(|id| self.row_info.get(*id).is_some_and(opens_on_its_own))
+            .find(|id| self.row_info.get(id.as_ref()).is_some_and(RowKind::opens_on_its_own))
             .cloned()
     }
 
     /// Does what a click on row `id` does: a ship or model row opens, a
     /// folder opens or closes.
     fn open_row(&mut self, id: &SharedString, cx: &mut Context<Self>) {
-        let Some(kind) = self.row_info.get(id).cloned() else {
+        let Some(kind) = self.row_info.get(id.as_ref()).cloned() else {
             return;
         };
 
@@ -836,13 +836,15 @@ impl Sidebar {
         let expanded = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
         match event {
             TreeEvent::Expanded(id) => {
-                expanded.insert(id.clone());
-                self.search_collapsed.remove(id);
+                let id = RowId::from(id.as_ref());
+                self.search_collapsed.remove(&id);
+                expanded.insert(id);
             }
             TreeEvent::Collapsed(id) => {
-                expanded.remove(id);
+                let id = RowId::from(id.as_ref());
+                expanded.remove(&id);
                 if searching {
-                    self.search_collapsed.insert(id.clone());
+                    self.search_collapsed.insert(id);
                 }
             }
         }
@@ -892,7 +894,7 @@ impl Sidebar {
         self.row_info = Rc::new(built.rows);
         self.row_notes = Rc::new(built.notes);
         self.row_unavailable = Rc::new(built.unavailable);
-        self.tree_state.update(cx, |state, cx| state.set_items(built.items, cx));
+        self.tree_state.update(cx, |state, cx| state.set_items(tree_items(built.items), cx));
         let kept_ix = kept.and_then(|id| self.tree_state.read(cx).index_of(&id));
         match kept_ix {
             Some(ix) => self.tree_state.update(cx, |state, cx| state.set_selected_index(Some(ix), cx)),
@@ -918,25 +920,12 @@ impl Sidebar {
         let Some(open) = &self.open_model else {
             return Vec::new();
         };
-        let mut ids = vec![open_row_id(open)];
-        if let (OpenTarget::Building(building), ModelsState::Ready(index)) = (open, &self.models)
-            && let Some(hull) = index.building_hulls.get(building)
-        {
-            ids.push(model_building_row_id(hull, *building));
-        }
+        let index = match &self.models {
+            ModelsState::Ready(index) => Some(index.as_ref()),
+            ModelsState::Loading | ModelsState::Unavailable => None,
+        };
 
-        ids
-    }
-}
-
-/// The hardpoint target a row's checkbox controls, if it has one.
-fn hardpoint_target(kind: &RowKind) -> Option<HardpointTarget> {
-    match kind {
-        RowKind::Model(model) => Some(HardpointTarget::Model(model.clone())),
-        RowKind::ShipPart { ship, part, .. } => {
-            Some(HardpointTarget::ShipPart { vehicle_param_index: ship.clone(), part: part.clone() })
-        }
-        _ => None,
+        open_row_ids(open, index).iter().map(shared_id).collect()
     }
 }
 
@@ -963,60 +952,7 @@ fn tiers_from_slider(value: SliderValue) -> TierRange {
 
 /// The model a row opens and the ship part it was opened from.
 fn model_selection(kind: &RowKind) -> Option<ModelSelected> {
-    match kind {
-        RowKind::Model(model) => Some(ModelSelected { model: model.clone(), from_ship: None }),
-        RowKind::ShipPart { ship, part, model, .. } => Some(ModelSelected {
-            model: model.clone(),
-            from_ship: Some(ShipPartRef { vehicle_param_index: ship.clone(), part: part.clone() }),
-        }),
-        _ => None,
-    }
-}
-
-/// Whether a row opens a ship or model, rather than being a folder or heading.
-fn opens_on_its_own(kind: &RowKind) -> bool {
-    matches!(kind, RowKind::Ship { .. } | RowKind::Building { .. } | RowKind::Model(_) | RowKind::ShipPart { .. })
-}
-
-/// What a row's tooltip says: its whole name, which the row may cut short,
-/// and the model path or GameParams index behind it. A skin row also says
-/// what it replaces, from `skin_uses`, and a row the install cannot draw,
-/// why.
-fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse], missing: Option<GeometryAvailability>) -> Option<String> {
-    let mut text = match kind {
-        RowKind::Ship { param_index, display_name } => format!("{display_name}\n{param_index}"),
-        RowKind::Building { display_name, param_name, .. } => format!("{display_name}\n{param_name}"),
-        RowKind::Model(model) | RowKind::ShipPart { node: None, model, .. } => format!("{}\n{model}", model.stem()),
-        RowKind::ShipPart { node: Some(node), model, .. } => format!("{node} {}\n{model}", model.stem()),
-        RowKind::Nation(_)
-        | RowKind::Class(_)
-        | RowKind::PartFolder
-        | RowKind::Separator
-        | RowKind::ModelsStatus
-        | RowKind::ModelNation { .. }
-        | RowKind::ModelGroup
-        | RowKind::BuildingGroup => return None,
-    };
-
-    // A line per exterior, so the sentence reads the same in every locale.
-    for skin in skin_uses {
-        for exterior in &skin.exteriors {
-            text.push('\n');
-            text.push_str(&t!("ui.models.skin_replaces", model = skin.stock.stem(), exterior = exterior));
-        }
-    }
-
-    let missing = match missing {
-        Some(GeometryAvailability::Absent) => Some(t!("ui.models.geometry_absent")),
-        Some(GeometryAvailability::NoGeometry) => Some(t!("ui.models.geometry_none")),
-        Some(GeometryAvailability::Present) | None => None,
-    };
-    if let Some(missing) = missing {
-        text.push('\n');
-        text.push_str(&missing);
-    }
-
-    Some(text)
+    kind.model_selection().map(|(model, from_ship)| ModelSelected { model, from_ship })
 }
 
 /// Renders one row: indent guides, a chevron or spacer, the nation flag or
@@ -1032,7 +968,7 @@ fn render_sidebar_item(
     let RowContext { bundle, row_info, notes, unavailable, index, hardpoints, query } = context;
     let index = index.as_deref();
     let item = entry.item();
-    let kind = row_info.get(&item.id);
+    let kind = row_info.get(item.id.as_ref());
 
     if let Some(RowKind::Separator) = kind {
         let heading = h_flex()
@@ -1100,7 +1036,7 @@ fn render_sidebar_item(
         }
         _ => label.child(text().child(item.label.clone())),
     };
-    let note = notes.get(&item.id).map(|note| match note {
+    let note = notes.get(item.id.as_ref()).map(|note| match note {
         RowNote::Matched(text) => marked_text(query, text.clone()),
         RowNote::Tag(text) => StyledText::new(text.clone()),
     });
@@ -1108,14 +1044,14 @@ fn render_sidebar_item(
         Some(note) => label.child(text().text_color(cx.theme().muted_foreground).child(note)),
         None => label,
     };
-    let missing = unavailable.get(&item.id).copied();
+    let missing = unavailable.get(item.id.as_ref()).copied();
     let label = match missing {
         Some(_) => label.text_color(cx.theme().muted_foreground),
         None => label,
     };
     row = row.child(label);
     // The text is built on hover; a row only clones what it shows.
-    let hover = kind.filter(|kind| opens_on_its_own(kind));
+    let hover = kind.filter(|kind| kind.opens_on_its_own());
     if let Some(kind) = hover.cloned() {
         let skin_uses = match &kind {
             RowKind::Model(model) => index.and_then(|index| index.skins.get(model)).cloned(),
@@ -1127,7 +1063,7 @@ fn render_sidebar_item(
         });
     }
 
-    if let Some(target) = kind.and_then(hardpoint_target) {
+    if let Some(target) = kind.and_then(RowKind::hardpoint_target) {
         let visible = hardpoints.contains(&target);
         let entity = sidebar.clone();
         row = row.child(
@@ -1303,7 +1239,7 @@ impl Render for Sidebar {
                     render_sidebar_item(entity.clone(), ix, entry, &context, window, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
-                    row_context_menu(&menu_entity, menu_row_info.get(&entry.item().id), menu)
+                    row_context_menu(&menu_entity, menu_row_info.get(entry.item().id.as_ref()), menu)
                 })
                 .flex_1()
                 .into_any_element()
@@ -1338,7 +1274,6 @@ mod tests {
     use gpui_kit::test::TestWindowExt;
     use wows_toolkit_viewmodel::settings::keys;
     use wowsunpack::export::hardpoint::HardpointName;
-    use wowsunpack::export::model_catalog::GeometryAvailability;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::game_types::GameParamId;
@@ -1348,16 +1283,6 @@ mod tests {
     use crate::replay_inspector::icons::IconCache;
 
     use super::super::assets::ArmorAssetsBundle;
-    use super::super::sidebar_tree::ModelSection;
-    use super::super::sidebar_tree::RowKind;
-    use super::super::sidebar_tree::SearchMatches;
-    use super::super::sidebar_tree::TreeSources;
-    use super::super::sidebar_tree::building_row_id;
-    use super::super::sidebar_tree::fixture;
-    use super::super::sidebar_tree::model_building_row_id;
-    use super::super::sidebar_tree::model_row_id;
-    use super::super::sidebar_tree::part_row_id;
-    use super::super::sidebar_tree::ship_row_id;
     use super::BuildingSelected;
     use super::HardpointsToggled;
     use super::ModelSelected;
@@ -1374,6 +1299,16 @@ mod tests {
     use wows_toolkit_armor::model_refs::VehicleParamIndex;
     use wows_toolkit_armor::model_tree::ModelBuildings;
     use wows_toolkit_armor::model_tree::ModelTreeIndex;
+    use wows_toolkit_armor::sidebar_tree::ModelSection;
+    use wows_toolkit_armor::sidebar_tree::RowId;
+    use wows_toolkit_armor::sidebar_tree::SearchMatches;
+    use wows_toolkit_armor::sidebar_tree::TreeSources;
+    use wows_toolkit_armor::sidebar_tree::building_row_id;
+    use wows_toolkit_armor::sidebar_tree::fixture;
+    use wows_toolkit_armor::sidebar_tree::model_building_row_id;
+    use wows_toolkit_armor::sidebar_tree::model_row_id;
+    use wows_toolkit_armor::sidebar_tree::part_row_id;
+    use wows_toolkit_armor::sidebar_tree::ship_row_id;
 
     /// Ship assets over an empty store: the sidebar reads only the catalog and
     /// icons from the bundle.
@@ -1425,8 +1360,9 @@ mod tests {
         seen
     }
 
-    fn row_index(window: &WindowHandle<Sidebar>, id: &SharedString, cx: &mut TestAppContext) -> Option<usize> {
-        window.update(cx, |sidebar, _window, cx| sidebar.tree_state.read(cx).index_of(id)).expect("the window is open")
+    fn row_index(window: &WindowHandle<Sidebar>, id: &RowId, cx: &mut TestAppContext) -> Option<usize> {
+        let id = SharedString::from(id.to_string());
+        window.update(cx, |sidebar, _window, cx| sidebar.tree_state.read(cx).index_of(&id)).expect("the window is open")
     }
 
     fn selected_row(window: &WindowHandle<Sidebar>, cx: &mut TestAppContext) -> Option<usize> {
@@ -1499,56 +1435,6 @@ mod tests {
 
         let copied = cx.read_from_clipboard().and_then(|item| item.text());
         assert_eq!(copied.as_deref(), Some(fixture::IOWA_TURRET));
-    }
-
-    #[test]
-    fn a_row_tooltip_names_the_whole_row_and_what_it_opens() {
-        let turret = fixture::path(fixture::IOWA_TURRET);
-        let ship = RowKind::Ship { param_index: fixture::IOWA_INDEX.to_string(), display_name: "Iowa".to_string() };
-        let part = RowKind::ShipPart {
-            ship: VehicleParamIndex::new(fixture::IOWA_INDEX),
-            part: ShipPartKey::Mount(HardpointName::new("HP_AGM_1")),
-            model: turret.clone(),
-            node: Some("HP_AGM_1".into()),
-        };
-
-        assert_eq!(super::row_tooltip(&ship, &[], None).as_deref(), Some("Iowa\nPASB018"));
-        assert_eq!(
-            super::row_tooltip(&RowKind::Model(turret.clone()), &[], None).as_deref(),
-            Some(format!("AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
-        );
-        assert_eq!(
-            super::row_tooltip(&part, &[], None).as_deref(),
-            Some(format!("HP_AGM_1 AGM034_16in50_Mk7\n{}", fixture::IOWA_TURRET).as_str())
-        );
-        assert_eq!(super::row_tooltip(&RowKind::PartFolder, &[], None), None, "a folder shows its whole name already");
-
-        rust_i18n::set_locale("en");
-        assert_eq!(
-            super::row_tooltip(&RowKind::Model(turret), &[], Some(GeometryAvailability::Absent)).as_deref(),
-            Some(format!("AGM034_16in50_Mk7\n{}\nNot in your game files", fixture::IOWA_TURRET).as_str()),
-            "a model the install lacks says so"
-        );
-    }
-
-    #[test]
-    fn a_skin_row_tooltip_names_the_model_it_replaces_and_the_exteriors() {
-        rust_i18n::set_locale("en");
-        let catalog = fixture::catalog();
-        let ships = fixture::ships();
-        let references = fixture::references(&ships);
-        let index =
-            ModelTreeIndex::build(&catalog, &ships, &references, ModelBuildings::default(), &fixture::metadata());
-        let skin = fixture::path(fixture::IOWA_SKIN);
-        let uses = index.skins.get(&skin).expect("the skin's exteriors are known");
-
-        let tooltip = super::row_tooltip(&RowKind::Model(skin.clone()), uses, None);
-
-        let expected = format!(
-            "ASB128_Iowa_Halloween\n{}\nReplaces ASB028_Iowa_1945 when Halloween is equipped\nReplaces ASB028_Iowa_1945 when Spooky is equipped",
-            fixture::IOWA_SKIN
-        );
-        assert_eq!(tooltip.as_deref(), Some(expected.as_str()));
     }
 
     #[gpui_kit::test]
@@ -1692,7 +1578,7 @@ mod tests {
             .update(cx, |sidebar, _window, cx| {
                 let folders = ["armor-nation-USA".to_string(), "armor-class-USA-Battleship".to_string()];
                 let model_folders = [usa.to_string(), format!("{usa}/Gun"), format!("{usa}/Gun/MainBattery")];
-                sidebar.browse_expanded.extend(folders.into_iter().chain(model_folders).map(SharedString::from));
+                sidebar.browse_expanded.extend(folders.into_iter().chain(model_folders).map(RowId::from));
                 sidebar.rebuild_tree(Rebuild::Keep, cx);
             })
             .expect("the window is open");
@@ -1709,7 +1595,7 @@ mod tests {
             [ShipSelected { param_index: fixture::IOWA_INDEX.to_string(), display_name: "Iowa".to_string() }]
         );
 
-        let japan: SharedString = "model-folder/nation-japan".into();
+        let japan = RowId::from("model-folder/nation-japan");
         let row = row_index(&window, &japan, cx).expect("Japan's models are listed");
         press_on_row(window, row, "enter", cx);
         assert!(row_index(&window, &"model-folder/nation-japan/Ship".into(), cx).is_some(), "the folder opened");
@@ -1842,8 +1728,8 @@ mod tests {
                 let references = fixture::references(&ships);
                 let index = ModelTreeIndex::build(&catalog, &ships, &references, buildings, &fixture::metadata());
                 sidebar.browse_expanded.extend(
-                    ["model-folder/Building", "model-folder/Building/Complex", &model_row_id(&fort_model)]
-                        .map(SharedString::from),
+                    ["model-folder/Building", "model-folder/Building/Complex", model_row_id(&fort_model).as_str()]
+                        .map(RowId::from),
                 );
                 sidebar.adopt_model_index(index, cx);
             })
@@ -1980,7 +1866,7 @@ mod tests {
     #[gpui_kit::test]
     fn escape_in_the_search_clears_it_and_lists_everything(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
-        let japan: SharedString = "armor-nation-Japan".into();
+        let japan = RowId::from("armor-nation-Japan");
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);

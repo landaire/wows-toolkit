@@ -1952,7 +1952,6 @@ mod tests {
     use super::other_pane_indices;
     use super::take_pending_hits;
     use crate::armor_viewer::assets::ArmorAssetsBundle;
-    use crate::armor_viewer::sidebar_tree::fixture;
     use crate::armor_viewer::viewport_view::ViewportView;
     use crate::replay_inspector::icons::IconCache;
     use wows_toolkit_armor::load_model::ProblemReason;
@@ -1963,6 +1962,7 @@ mod tests {
     use wows_toolkit_armor::load_ship::ShipLoadError;
     use wows_toolkit_armor::model_refs::HardpointTarget;
     use wows_toolkit_armor::scene_load::FirstStage;
+    use wows_toolkit_armor::sidebar_tree::fixture;
 
     /// Ship assets over an empty store: a load result lands without reading it.
     fn bundle() -> Arc<ArmorAssetsBundle> {
