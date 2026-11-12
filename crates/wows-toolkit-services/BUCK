@@ -1,12 +1,15 @@
 load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
 
 SERVICES_COMMON_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wt-collab-client:wt_collab_client",
     "//third-party/rust:ciborium",
     "//third-party/rust:futures",
     "//third-party/rust:jiff",
+    "//third-party/rust:parking_lot",
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
     "//third-party/rust:serde_json",
@@ -18,6 +21,7 @@ SERVICES_COMMON_DEPS = [
     "//third-party/rust:tracing-appender",
     "//third-party/rust:tracing-subscriber",
     "//third-party/rust:twitch_api",
+    "//third-party/rust:web-time",
     "//third-party/rust:zip",
 ]
 
