@@ -41,6 +41,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::queries;
+use wows_toolkit_services::stats::SessionData;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 
 use wows_toolkit_viewmodel::stats::DivisionFilter;
@@ -60,7 +61,6 @@ use super::chart_panel::ChartSettings;
 use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
 use super::directory::DirectoryScope;
-use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
 use super::ships::ShipsPanelEvent;
 use super::ships::StatsShipsPanel;

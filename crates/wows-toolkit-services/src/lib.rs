@@ -12,6 +12,7 @@ pub mod personal_rating;
 pub mod runtime;
 pub mod settings;
 pub mod settings_writer;
+pub mod stats;
 pub mod supervision;
 pub mod twitch;
 pub mod update;

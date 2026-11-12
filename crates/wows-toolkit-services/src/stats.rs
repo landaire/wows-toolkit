@@ -1,4 +1,4 @@
-//! Reading the Stats tab's data out of the shared config database.
+//! Reading the session statistics out of the shared config database.
 //!
 //! The rows and the filter settings are the same ones the egui app writes, so
 //! the two apps show the same session without a migration between them.
@@ -14,6 +14,8 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
+use crate::http::UserAgent;
+
 /// Everything the Stats tab needs at startup.
 #[derive(Default)]
 pub struct SessionData {
@@ -23,7 +25,7 @@ pub struct SessionData {
     pub filters: StatsFilters,
     /// The expected-values table personal rating is computed against.
     /// Refreshed on the shared disk cache when it is missing or stale (see
-    /// `wows_toolkit_services::personal_rating`), so the two apps keep one copy between them.
+    /// `crate::personal_rating`), so the two apps keep one copy between them.
     /// Absent when the fetch fails and there is no cache to fall back on.
     pub personal_rating: Option<Arc<PersonalRatingData>>,
 }
@@ -31,7 +33,8 @@ pub struct SessionData {
 impl SessionData {
     /// `proxy_url` is the saved proxy setting, empty for a direct
     /// connection; the expected-values refresh is the one network call here.
-    pub async fn load(pool: &SqlitePool, proxy_url: &str) -> Self {
+    /// A future for the tokio runtime.
+    pub async fn load(pool: &SqlitePool, agent: UserAgent, proxy_url: &str) -> Self {
         let games = match queries::get_all_session_stats(pool).await {
             Ok(rows) => rows.into_iter().map(PerGameStat::from_row).collect(),
             Err(err) => {
@@ -40,7 +43,7 @@ impl SessionData {
             }
         };
 
-        let personal_rating = wows_toolkit_services::personal_rating::load_refreshed(crate::http::USER_AGENT, proxy_url).await.map(Arc::new);
+        let personal_rating = crate::personal_rating::load_refreshed(agent, proxy_url).await.map(Arc::new);
 
         Self { games, filters: load_filters(pool).await, personal_rating }
     }
