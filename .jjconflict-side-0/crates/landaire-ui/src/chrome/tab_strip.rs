@@ -73,6 +73,7 @@ const CSS: &str = css!(
         min-width: 0;
         overflow-x: auto;
         overflow-y: hidden;
+        --zgui-scrollbar-width: none;
     }
     .lui-tab-strip__track {
         position: relative;
