@@ -665,7 +665,11 @@ mod tests {
             view.scan_install(wows_dir.clone(), cx);
         });
         with_view(window, &view, cx, |view, window, cx| {
-            view.adopt_pinned_folders(super::super::folders::PinnedFolders(vec![pinned.clone()]), window, cx);
+            view.adopt_pinned_folders(
+                wows_toolkit_viewmodel::replay_folders::PinnedFolders(vec![pinned.clone()]),
+                window,
+                cx,
+            );
         });
         settle(window, cx);
 

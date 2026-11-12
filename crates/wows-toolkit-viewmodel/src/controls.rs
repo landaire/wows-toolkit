@@ -6,6 +6,12 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::Read as _;
+
+use wowsunpack::vfs::VfsPath;
+
+/// Where the game keeps the scheme.
+const SCHEME_PATH: &str = "system/data/commands.scheme.xml";
 
 /// A single key-binding entry parsed from `commands.scheme.xml`.
 #[derive(Clone, Debug)]
@@ -44,6 +50,20 @@ const EXCLUDED_COMMANDS: &[&str] = &[
 /// Returns true if this command tag should be excluded from the controls list.
 fn should_exclude_command(tag_name: &str) -> bool {
     tag_name.contains("REPLAY_UTILS") || EXCLUDED_COMMANDS.contains(&tag_name)
+}
+
+/// Reads and parses the scheme out of `vfs`.
+///
+/// `None` when the build carries no scheme, or one this parse makes nothing of: there is then no
+/// reference to show rather than an empty window.
+pub fn read_scheme(vfs: &VfsPath) -> Option<Vec<CommandGroup>> {
+    let mut file = vfs.join(SCHEME_PATH).and_then(|path| path.open_file()).ok()?;
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() || bytes.is_empty() {
+        return None;
+    }
+    let groups = parse_commands_scheme(&bytes);
+    (!groups.is_empty()).then_some(groups)
 }
 
 /// Parse `system/data/commands.scheme.xml` from raw bytes into grouped commands

@@ -69,7 +69,6 @@ use crate::side_split::SideWidth;
 use crate::stats::directory::DirectoryStatsRequested;
 use folder_index::FolderIndex;
 use folder_index::Offer;
-use folders::FolderHistory;
 use folders::FolderId;
 use folders::FolderSource;
 use folders::FolderState;
@@ -78,6 +77,7 @@ use folders::SavedList;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
+use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 
 /// Identifies the message an auto-export failure keeps up, so a directory of
 /// battles that all fail says so once.

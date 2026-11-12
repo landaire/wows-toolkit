@@ -16,11 +16,18 @@ use std::path::PathBuf;
 
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::RowIdentity;
 use wows_toolkit_viewmodel::listing_row::RowStats;
 use wows_toolkit_viewmodel::listing_row::identity_line;
+use wows_toolkit_viewmodel::listing_row::listed_row_identity;
+use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wows_toolkit_viewmodel::listing_row::stats_line_parts;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+
+use crate::load::GameDataCache;
+use crate::replay_dir::ScannedReplay;
 
 /// A replay file's minimal summary for the file browser: enough to sort,
 /// group, and label it without a full packet parse.
@@ -37,6 +44,39 @@ pub struct ReplayLite {
     /// What the row reports: outcome, damage, kills, division. From the
     /// replay index, so it is unknown until the index has seen the file.
     pub stats: RowStats,
+}
+
+impl ReplayLite {
+    /// `scanned` named against its own build when `cache` has it loaded, else against
+    /// `fallback`, and reported from the index's `summary`. With no game data at all the row
+    /// shows the raw ship id and map name.
+    pub fn from_scanned(
+        scanned: &ScannedReplay,
+        cache: Option<&GameDataCache>,
+        fallback: Option<&GameMetadataProvider>,
+        summary: Option<&RowSummary>,
+    ) -> Self {
+        let listed = &scanned.listed;
+        let loaded = listed.build.and_then(|build| cache?.loaded_build(build));
+        let metadata = loaded.as_ref().map(|data| data.provider().as_ref()).or(fallback);
+        let identity = match metadata {
+            Some(metadata) => listed_row_identity(listed, metadata),
+            None => RowIdentity {
+                ship: listed.ship_id.map(|id| id.to_string()).unwrap_or_else(|| "Spectator".to_owned()),
+                map: listed.map_name.clone(),
+                scenario: listed.scenario.clone(),
+                mode: listed.game_type.clone(),
+                date_time: listed.date_time.clone(),
+            },
+        };
+
+        Self {
+            path: scanned.path.clone(),
+            map_name: listed.map_name.clone(),
+            identity,
+            stats: resolve_row_stats(None, summary),
+        }
+    }
 }
 
 /// One row of the file-browser tree: a Date/Ship group with its children, or
