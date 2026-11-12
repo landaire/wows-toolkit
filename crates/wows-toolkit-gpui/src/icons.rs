@@ -1,6 +1,4 @@
-//! The icons the app draws: Lucide's (ISC, `assets/icons/LICENSE-LUCIDE`), and
-//! brand logos from Simple Icons (CC0, `assets/icons/LICENSE-SIMPLE-ICONS`),
-//! which Lucide does not draw.
+//! The icons the app draws, from `wows_toolkit_icons`.
 //!
 //! Each is an SVG served by [`AppAssets`] and drawn by `gpui_kit`'s `Icon`, so
 //! it takes the size and colour of the text around it.
@@ -27,10 +25,10 @@ macro_rules! prefix {
 
 const PREFIX: &str = prefix!();
 
-/// Declares [`Glyph`], one variant per vendored `assets/icons/<name>.svg`.
+/// Declares [`Glyph`], one variant per icon `wows_toolkit_icons` lists.
 macro_rules! glyphs {
     ($($variant:ident => $name:literal,)*) => {
-        /// One vendored icon.
+        /// One icon.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum Glyph {
             $($variant,)*
@@ -46,7 +44,7 @@ macro_rules! glyphs {
 
             fn svg(self) -> &'static [u8] {
                 match self {
-                    $(Self::$variant => include_bytes!(concat!("../assets/icons/", $name, ".svg")),)*
+                    $(Self::$variant => wows_toolkit_icons::Glyph::$variant.svg().as_bytes(),)*
                 }
             }
 
@@ -61,76 +59,7 @@ macro_rules! glyphs {
     };
 }
 
-glyphs! {
-    AppWindow => "app-window",
-    Archive => "archive",
-    Bomb => "bomb",
-    Box => "box",
-    Castle => "castle",
-    ChartColumn => "chart-column",
-    ChartLine => "chart-line",
-    Circle => "circle",
-    CircleCheck => "circle-check",
-    CircleX => "circle-x",
-    Clipboard => "clipboard",
-    ClipboardList => "clipboard-list",
-    Clock => "clock",
-    Copy => "copy",
-    Crosshair => "crosshair",
-    Database => "database",
-    Download => "download",
-    Equal => "equal",
-    Eraser => "eraser",
-    Eye => "eye",
-    EyeOff => "eye-off",
-    FaceSlightlyFrowning => "face-slightly-frowning",
-    FastForward => "fast-forward",
-    File => "file",
-    FileText => "file-text",
-    Flame => "flame",
-    Folder => "folder",
-    FolderOpen => "folder-open",
-    Funnel => "funnel",
-    Image => "image",
-    Info => "info",
-    List => "list",
-    Lock => "lock",
-    Monitor => "monitor",
-    MousePointer => "mouse-pointer",
-    MoveUpRight => "move-up-right",
-    Music => "music",
-    NotebookPen => "notebook-pen",
-    Paintbrush => "paintbrush",
-    PanelBottom => "panel-bottom",
-    PanelLeft => "panel-left",
-    PanelRight => "panel-right",
-    Pin => "pin",
-    Plug => "plug",
-    Radio => "radio",
-    Rewind => "rewind",
-    Rocket => "rocket",
-    RotateCcw => "rotate-ccw",
-    RotateCw => "rotate-cw",
-    Ruler => "ruler",
-    Search => "search",
-    Settings => "settings",
-    Shield => "shield",
-    SkipBack => "skip-back",
-    SkipForward => "skip-forward",
-    Slash => "slash",
-    Square => "square",
-    Sword => "sword",
-    SquareArrowOutUpRight => "square-arrow-out-up-right",
-    Table => "table",
-    Trash => "trash",
-    Triangle => "triangle",
-    TriangleAlert => "triangle-alert",
-    Trophy => "trophy",
-    Twitch => "twitch",
-    Users => "users",
-    VenetianMask => "venetian-mask",
-    X => "x",
-}
+wows_toolkit_icons::glyph_list!(glyphs);
 
 impl From<LineGlyph> for Glyph {
     fn from(glyph: LineGlyph) -> Self {
