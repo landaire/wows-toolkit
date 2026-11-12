@@ -247,11 +247,11 @@ impl App {
             cx,
             move |this, outcome, cx| {
                 let plan = match outcome {
-                    game_data_cache::CacheOutcome::Planned { plan } => plan,
+                    wows_toolkit_services::game_data_cache::CacheOutcome::Planned { plan } => plan,
                     // An unanswered question establishes nothing about what is
                     // published, so nothing is put to the reader as unobtainable.
                     outcome => {
-                        if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
+                        if let wows_toolkit_services::game_data_cache::CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("force re-index: the download could not be planned: {reason}");
                         }
                         this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
@@ -418,13 +418,13 @@ impl App {
             cx,
             move |this, outcome, cx| {
                 match outcome {
-                    game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
+                    wows_toolkit_services::game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
                         fetching.fetched += fetched;
                         if !failed.is_empty() {
                             fetching.failed.insert(release);
                         }
                     }
-                    game_data_cache::CacheOutcome::Failed(reason) => {
+                    wows_toolkit_services::game_data_cache::CacheOutcome::Failed(reason) => {
                         tracing::warn!(
                             build = release.build.0,
                             "force re-index: the game data was not fetched: {reason}"
@@ -447,7 +447,10 @@ impl App {
 
         if fetched > 0 || !failed.is_empty() {
             let failed_builds = failed.iter().map(|release| release.build.0).collect();
-            self.cache_job_finished(game_data_cache::CacheOutcome::Downloaded { fetched, failed: failed_builds }, cx);
+            self.cache_job_finished(
+                wows_toolkit_services::game_data_cache::CacheOutcome::Downloaded { fetched, failed: failed_builds },
+                cx,
+            );
         }
         // Which rows have a preview and which builds are missing are both
         // decided as a directory is walked.

@@ -7,6 +7,7 @@
 pub mod child_process;
 pub mod constants;
 pub mod dialog;
+pub mod game_data_cache;
 pub mod http;
 pub mod logging;
 pub mod personal_rating;
