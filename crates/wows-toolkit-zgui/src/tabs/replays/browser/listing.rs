@@ -511,11 +511,19 @@ impl Listing {
         }
     }
 
+    /// Reports the builds the listed replays need that nothing here can read, if any.
+    fn report_missing_builds(self) {
+        let missing = self.missing_builds();
+        if !missing.is_empty() {
+            self.say(ListingEvent::BuildsMissing(missing));
+        }
+    }
+
     /// The builds the listed replays need that nothing here can read. With no cache yet, every
     /// listed build is.
-    fn report_missing_builds(self) {
+    pub fn missing_builds(self) -> Vec<MissingBuild> {
         let cache = self.work.with_value(|work| work.services.game_data.cache_untracked());
-        let missing = self.files.with_untracked(|files| match &cache {
+        self.files.with_untracked(|files| match &cache {
             Some(cache) => missing_builds(files, cache),
             None => {
                 let mut counted: std::collections::BTreeMap<u32, MissingBuild> = std::collections::BTreeMap::new();
@@ -530,10 +538,7 @@ impl Listing {
                 }
                 counted.into_values().collect()
             }
-        });
-        if !missing.is_empty() {
-            self.say(ListingEvent::BuildsMissing(missing));
-        }
+        })
     }
 
     /// Drops the watch, as the listing no longer follows its directory.
