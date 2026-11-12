@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use landaire_ui::Appearance;
+use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use wows_toolkit_viewmodel::palette::PaletteMode;
@@ -261,6 +262,32 @@ fn the_palette_opens_any_ship_in_the_armor_viewer() {
     shortcut(&mut window, 'p');
     press(&mut window, NamedKey::Backspace);
     assert!(shown(&window, ROOT), "Backspace in an empty ship search returns to the root list");
+}
+
+/// A row marks the letters of its name the query matched, and an empty query marks nothing.
+#[test]
+fn rows_mark_the_letters_the_query_matched() {
+    let mut window = open_window(TestModes { ships: Some(ships()), ..TestModes::default() });
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "open ship");
+    press(&mut window, NamedKey::Enter);
+    assert!(marked(&window).is_empty(), "an empty query marks nothing");
+
+    type_text(&mut window, "ymt");
+    assert_eq!(marked(&window), ["Y", "m", "t"], "each letter where it matched");
+
+    press(&mut window, NamedKey::Escape);
+    type_text(&mut window, "smal");
+    assert_eq!(marked(&window), ["Sm\u{e5}l"], "a folded letter is marked as written");
+}
+
+/// The marked pieces the rows show. The list builds each row twice, the second time in the
+/// catalogue it walks, so the pieces come in two equal halves.
+fn marked(window: &HeadlessWindow) -> Vec<String> {
+    let mut pieces = window.texts_by_class(MARK_CLASS);
+    let copy = pieces.split_off(pieces.len() / 2);
+    assert_eq!(pieces, copy, "the catalogue holds the same rows");
+    pieces
 }
 
 /// While nothing offers the ship list, ctrl+p on the Armor Viewer opens the root list.
