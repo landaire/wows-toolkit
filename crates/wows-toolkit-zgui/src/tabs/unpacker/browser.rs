@@ -7,6 +7,7 @@ use landaire_ui::BranchClick;
 use landaire_ui::CollapseButtonProps;
 use landaire_ui::ExpandRailProps;
 use landaire_ui::LeafLead;
+use landaire_ui::MarkedTextProps;
 use landaire_ui::NodeKind;
 use landaire_ui::PanelSide;
 use landaire_ui::SidePanel;
@@ -65,6 +66,7 @@ use crate::tabs::unpacker::pane::PaneState;
 use crate::tabs::unpacker::pane::RowKey;
 use crate::tabs::unpacker::pane::SIDEBAR_MAX_WIDTH;
 use crate::tabs::unpacker::pane::SIDEBAR_MIN_WIDTH;
+use crate::text_marks::marks;
 
 const SHEET: &str = "wt-unpacker-browser";
 
@@ -434,6 +436,9 @@ fn file_row_content(model: UnpackerModel, pane: Pane, ix: usize, entry: ListingE
         AnyView::new(view! { AppIcon(glyph = glyph) })
     };
     let size = entry.size.map(byte_size).unwrap_or_default();
+    // A directory listing and a glob mark nothing.
+    let label_marks =
+        pane.rows.with_untracked(|rows| rows.query().map(|query| marks(query, &entry.label)).unwrap_or_default());
 
     AnyView::new(view! {
         Tooltip {
@@ -447,7 +452,7 @@ fn file_row_content(model: UnpackerModel, pane: Pane, ix: usize, entry: ListingE
             TooltipContent {{hover.clone()}}
         }
         box(class = "wt-file__glyph") {{glyph}}
-        text(class = "wt-file__name") {{entry.label.clone()}}
+        MarkedText(class = "wt-file__name", text = entry.label.clone(), ranges = label_marks)
         text(class = format!("wt-file__size {TABULAR_CLASS}")) {{size}}
         text(class = "wt-file__type") {{entry.type_label()}}
     })

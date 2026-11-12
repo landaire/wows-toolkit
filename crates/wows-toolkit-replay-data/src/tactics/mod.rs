@@ -27,6 +27,8 @@ use wows_replays::types::TeamId;
 use wows_toolkit_services::collab::CapPointId;
 use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_types::WorldPos;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::WireCapPoint;
@@ -69,16 +71,23 @@ pub struct MapEntry {
     pub choice: MapChoice,
     /// The label, with the id or space after it where two maps read alike.
     pub title: String,
+    /// The title, the label, the space and the id, folded for the search.
+    keys: Vec<FilterKey>,
 }
 
 impl MapEntry {
-    /// Whether `query` finds this entry: by its title, its label, its space or its id.
-    pub fn matches(&self, query: &str) -> bool {
-        let query = query.trim().to_lowercase();
-        self.title.to_lowercase().contains(&query)
-            || self.choice.label.to_lowercase().contains(&query)
-            || self.choice.space.to_lowercase().contains(&query)
-            || self.choice.map_id.is_some_and(|id| id.to_string().contains(&query))
+    /// The entries `query` finds by their title, label, space or id, best first. Every entry in
+    /// order for an inactive query.
+    pub fn rank<'a>(entries: &'a [MapEntry], query: &FilterQuery) -> Vec<&'a MapEntry> {
+        if !query.is_active() {
+            return entries.iter().collect();
+        }
+
+        let mut scored: Vec<_> =
+            entries.iter().filter_map(|entry| Some((query.best(entry.keys.iter())?.1, entry))).collect();
+        scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+
+        scored.into_iter().map(|(_, entry)| entry).collect()
     }
 }
 
@@ -438,7 +447,9 @@ pub fn map_entries(maps: &[MapChoice]) -> Vec<MapEntry> {
             } else {
                 choice.label.clone()
             };
-            MapEntry { choice, title }
+            let mut keys = vec![FilterKey::new(&title), FilterKey::new(&choice.label), FilterKey::new(&choice.space)];
+            keys.extend(choice.map_id.map(|id| FilterKey::new(&id.to_string())));
+            MapEntry { choice, title, keys }
         })
         .collect()
 }

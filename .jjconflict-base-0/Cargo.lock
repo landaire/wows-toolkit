@@ -16672,7 +16672,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
- "unidecode",
  "walkdir",
  "wows-battle-world",
  "wows-data-mgr",
