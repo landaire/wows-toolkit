@@ -25,6 +25,8 @@ use zgui::view::IntoView;
 use zgui::view::request_frame;
 use zgui::vocab::Timestamp;
 
+use crate::theme::rating_band_name;
+
 /// How long the figures take to count up.
 pub const COUNT_UP: Duration = Duration::from_millis(400);
 
@@ -133,7 +135,7 @@ fn schedule(
 
 /// The CSS colour a PR band's text is drawn in: the theme's `--wt-pr-<band>-text`.
 fn tier_color(category: PersonalRatingCategory) -> String {
-    format!("var(--wt-pr-{}-text)", category.name().to_lowercase().replace(' ', "-"))
+    format!("var(--wt-pr-{}-text)", rating_band_name(category))
 }
 
 /// The recording player's figures and Personal Rating as tiles, counted up to `progress`. A

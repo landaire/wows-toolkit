@@ -67,6 +67,7 @@ use crate::shell::Shell;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::tables::HoverTextProps;
 use crate::tabs::player_tracker::tables::severity;
+use crate::theme::rating_band_name;
 
 /// The `data-tint` a roster name is drawn in: the same tones the replay inspector's names use.
 fn tint_name(tint: PlayerTint) -> &'static str {
@@ -76,20 +77,6 @@ fn tint_name(tint: PlayerTint) -> &'static str {
         PlayerTint::Enemy => "enemy",
         PlayerTint::DivisionMate => "division",
         PlayerTint::Abuser => "abuser",
-    }
-}
-
-/// The band's name in the `--wt-pr-<band>-text` and `-hue` properties.
-pub fn band_name(band: PersonalRatingCategory) -> &'static str {
-    match band {
-        PersonalRatingCategory::Bad => "bad",
-        PersonalRatingCategory::BelowAverage => "below-average",
-        PersonalRatingCategory::Average => "average",
-        PersonalRatingCategory::Good => "good",
-        PersonalRatingCategory::VeryGood => "very-good",
-        PersonalRatingCategory::Great => "great",
-        PersonalRatingCategory::Unicum => "unicum",
-        PersonalRatingCategory::SuperUnicum => "super-unicum",
     }
 }
 
@@ -338,12 +325,12 @@ fn TeamColumn(
                 text(class = "wt-tracker-team__title") {{title}}
                 text(class = "wt-tracker-small wt-tracker-dim") {{players}}
                 {win_rate.map(|rate| view! {
-                    text(class = "wt-tracker-small", attr:data-band = band_name(PersonalRatingCategory::from_win_rate(rate))) {
+                    text(class = "wt-tracker-small", attr:data-band = rating_band_name(PersonalRatingCategory::from_win_rate(rate))) {
                         {t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")).into_owned()}
                     }
                 }.into_view())}
                 {rating.map(|pr| view! {
-                    text(class = "wt-tracker-small", attr:data-band = band_name(PersonalRatingCategory::from_pr(pr))) {
+                    text(class = "wt-tracker-small", attr:data-band = rating_band_name(PersonalRatingCategory::from_pr(pr))) {
                         {format!("{}: {pr:.0}", t!("stat.avg_pr"))}
                     }
                 }.into_view())}
@@ -385,7 +372,7 @@ fn RosterRow(
     let both_scopes = win_rate_hover(player, None);
     let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
     // The lead scope's band, far fainter than a chip, so a screen of rows reads as bands first.
-    let band = row_stats(player, lead).band.map(band_name);
+    let band = row_stats(player, lead).band.map(rating_band_name);
 
     let cells: Vec<AnyView> = context
         .modes
@@ -646,7 +633,7 @@ fn scope_cells(
     }
 
     let win_rate = stat_text(stats.win_rate.map(|rate| format!("{rate:.1}%")), pending);
-    let rate_band = stats.band.map(band_name);
+    let rate_band = stats.band.map(rating_band_name);
     let rate_cell = match rate_band {
         Some(band) => AnyView::new(view! {
             box(attr:data-band = band.to_owned(), class = "wt-tracker-band wt-tracker-roster-col--stat") {
@@ -660,7 +647,7 @@ fn scope_cells(
 
     let rating = match stats.pr {
         Some(pr) => {
-            let band = band_name(PersonalRatingCategory::from_pr(pr));
+            let band = rating_band_name(PersonalRatingCategory::from_pr(pr));
             let id = StoredValue::new(format!("{id}-pr"));
             let hover = StoredValue::new(
                 t!(match mode {
