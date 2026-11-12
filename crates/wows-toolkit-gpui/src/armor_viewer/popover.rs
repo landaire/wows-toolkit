@@ -1537,14 +1537,24 @@ fn model_rows(
     let rows: Vec<AnyElement> = armor_rows
         .into_iter()
         .flatten()
-        .chain([filtered_checkbox(
-            "armor-display-ship-center",
-            t!("ui.armor.ship_center").into_owned(),
-            display.show_ship_center,
-            false,
-            filter,
-            setting(|d, on| d.show_ship_center = on),
-        )])
+        .chain([
+            filtered_checkbox(
+                "armor-display-length-marks",
+                t!("ui.armor.length_marks").into_owned(),
+                display.show_length_marks,
+                false,
+                filter,
+                setting(|d, on| d.show_length_marks = on),
+            ),
+            filtered_checkbox(
+                "armor-display-ship-center",
+                t!("ui.armor.ship_center").into_owned(),
+                display.show_ship_center,
+                false,
+                filter,
+                setting(|d, on| d.show_ship_center = on),
+            ),
+        ])
         .chain(opacity_rows.into_iter().flatten())
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.

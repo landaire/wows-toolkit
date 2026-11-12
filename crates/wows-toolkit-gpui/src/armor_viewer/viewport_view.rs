@@ -52,6 +52,8 @@ use super::analysis::SimAgreement;
 use super::camera_rings;
 use super::depth_cues;
 use super::gaps;
+use super::length_marks::LengthMarks;
+use super::length_marks::Reading;
 use super::splash;
 use super::trajectory;
 use super::trajectory::ArcColor;
@@ -915,6 +917,9 @@ pub struct ViewportView {
     /// The marked hardpoints' names and where each is drawn, for the
     /// labels painted over the scene.
     hardpoint_labels: Vec<hardpoint_overlay::HardpointLabel>,
+    /// The marks on the grid under the shown scene, read for their labels
+    /// and the overall size. `None` without a scene of any extent.
+    length_marks: Option<LengthMarks>,
     /// The overlay mesh drawing the markers of `hardpoint_labels`.
     hardpoint_mesh: Option<MeshId>,
     /// The scene units per pixel `hardpoint_mesh` was sized for.
@@ -1183,6 +1188,7 @@ impl ViewportView {
             hull_textures: HullTextureCache::default(),
             hardpoint_targets: HashSet::new(),
             hardpoint_labels: Vec::new(),
+            length_marks: None,
             hardpoint_mesh: None,
             hardpoint_world_per_pixel: 0.0,
             hovered_hardpoint: None,
@@ -2240,6 +2246,14 @@ impl ViewportView {
         Some(t!("ui.armor.realtime_readout", health = format!("{health:.0}"), hits = self.hits.len()).into_owned())
     }
 
+    /// The shown model's overall length and beam, while the length marks are.
+    pub(crate) fn length_readout(&self) -> Option<String> {
+        let marks = self.length_marks.filter(|_| self.display_settings.show_length_marks)?;
+        let (length, beam) = (Reading::of_size(marks.length()).text(), Reading::of_size(marks.beam()).text());
+
+        Some(t!("ui.armor.length_readout", length = length, beam = beam).into_owned())
+    }
+
     /// Whether the openings in the armor are marked, and how many there
     /// were.
     pub(crate) fn gaps(&self) -> GapState {
@@ -2535,6 +2549,7 @@ impl ViewportView {
         self.hull_mesh_ids.clear();
         self.aim_mesh_ids.clear();
         self.hardpoint_mesh = None;
+        self.length_marks = None;
         self.upload_hardpoints();
     }
 
@@ -2574,8 +2589,8 @@ impl ViewportView {
     }
 
     /// Draws what is laid over the scene in screen space: the splash box
-    /// names and the cast arcs. In screen space, so a label or a line keeps
-    /// its size however far the camera pulls back.
+    /// names, the length marks' distances and the cast arcs. In screen space,
+    /// so a label or a line keeps its size however far the camera pulls back.
     fn paint_annotations(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let rect = view_rect_from_bounds(bounds);
         let camera = &self.viewport.camera;
@@ -2584,7 +2599,20 @@ impl ViewportView {
         for label in self.splash_box_labels() {
             let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
             let Some(at) = camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else { continue };
-            paint_box_label(&label.name, on_screen(at), window, cx);
+            paint_box_label(&label.name, on_screen(at), 1., window, cx);
+        }
+
+        // The grid is drawn in world space, so its labels are placed there too.
+        if let Some(marks) = self.length_marks.filter(|_| self.display_settings.show_length_marks) {
+            let eye = camera.eye_position();
+            let labels = marks
+                .labels(|a, b| (a - eye).norm() < (b - eye).norm(), |position| depth_cues::grid_fade(&marks, position));
+            for label in labels {
+                let Some(at) = camera.project_to_screen(label.position, rect).filter(|at| rect.contains(*at)) else {
+                    continue;
+                };
+                paint_box_label(&label.text, on_screen(at), label.opacity, window, cx);
+            }
         }
 
         // A few markers are named outright; past that the names would bury
@@ -2599,7 +2627,7 @@ impl ViewportView {
         for label in hardpoint_labels {
             let anchor = self.viewport.pos_to_world_space(Vec3::from(label.position));
             let Some(at) = camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else { continue };
-            paint_box_label(&label.name, on_screen(at), window, cx);
+            paint_box_label(&label.name, on_screen(at), 1., window, cx);
         }
 
         // The arc being edited is drawn last, over the others.
@@ -3662,8 +3690,14 @@ impl ViewportView {
             self.ring_hovers = hovers;
         }
 
-        if armor.is_ship() {
-            depth_cues::upload_waterline_grid(&mut self.viewport, device, armor.bounds);
+        // A model has no water to stand in, so its grid lies under it.
+        let plane_y = if armor.is_ship() { 0. } else { armor.bounds.0.y };
+        self.length_marks = LengthMarks::new(armor.bounds, plane_y);
+        let show_marks = self.display_settings.show_length_marks;
+        if let Some(marks) = self.length_marks.as_ref()
+            && (armor.is_ship() || show_marks)
+        {
+            depth_cues::upload_waterline_grid(&mut self.viewport, device, marks, show_marks);
         }
 
         if self.display_settings.show_ship_center {
@@ -4556,6 +4590,20 @@ impl Render for ViewportView {
                     .text_xs()
                     .child(readout)
             }))
+            .children(self.length_readout().filter(|_| scene_shown).map(|readout| {
+                div()
+                    .absolute()
+                    .bottom_2()
+                    .left_2()
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().background.opacity(0.85))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .child(readout)
+            }))
             .when_some(tooltip_overlay, |this, t| this.child(t))
             .when_some(ring_overlay, |this, t| this.child(t))
             .when_some(export_overlay, |this, o| this.child(o))
@@ -4895,13 +4943,13 @@ fn fall_direction(approach: Vec3, impact: Option<&ImpactResult>) -> Vec3 {
     }
 }
 
-/// Paints a splash box's name centred above where it is anchored, on a dark
-/// plate so it reads against any hull, in the egui viewer's colours.
-fn paint_box_label(name: &str, anchor: Point<Pixels>, window: &mut Window, cx: &mut App) {
+/// Paints a label centred above where it is anchored, on a dark plate so it
+/// reads against any hull, in the egui viewer's colours, at `opacity`.
+fn paint_box_label(name: &str, anchor: Point<Pixels>, opacity: f32, window: &mut Window, cx: &mut App) {
     let run = TextRun {
         len: name.len(),
         font: window.text_style().font(),
-        color: rgba(0xc8dcffdc).into(),
+        color: Hsla::from(rgba(0xc8dcffdc)).opacity(opacity),
         background_color: None,
         underline: None,
         strikethrough: None,
@@ -4911,7 +4959,7 @@ fn paint_box_label(name: &str, anchor: Point<Pixels>, window: &mut Window, cx: &
     let origin = point(anchor.x - shaped.width() * 0.5, anchor.y - line_height - px(2.0));
 
     let plate = Bounds { origin, size: size(shaped.width(), line_height) }.dilate(px(2.0));
-    window.paint_quad(fill(plate, rgba(0x0000008c)).corner_radii(px(2.0)));
+    window.paint_quad(fill(plate, Hsla::from(rgba(0x0000008c)).opacity(opacity)).corner_radii(px(2.0)));
     let _ = shaped.paint(origin, line_height, TextAlign::Left, None, window, cx);
 }
 

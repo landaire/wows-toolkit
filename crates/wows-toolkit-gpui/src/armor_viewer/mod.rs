@@ -51,6 +51,7 @@ mod gaps;
 mod hardpoint_overlay;
 mod hits;
 pub mod legend;
+mod length_marks;
 mod load_model;
 mod load_ship;
 pub mod model_refs;

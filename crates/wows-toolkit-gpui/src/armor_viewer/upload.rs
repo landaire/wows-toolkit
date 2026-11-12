@@ -73,6 +73,9 @@ pub struct DisplaySettings {
     /// How solid the impact markers are drawn, so a hull crowded with them can
     /// still be read.
     pub marker_opacity: f32,
+    /// Distances marked and written on the grid under the model, with its
+    /// overall length and beam.
+    pub show_length_marks: bool,
 }
 
 impl Default for DisplaySettings {
@@ -85,6 +88,7 @@ impl Default for DisplaySettings {
             hull_opaque: false,
             show_ship_center: false,
             marker_opacity: 1.0,
+            show_length_marks: true,
         }
     }
 }
@@ -100,10 +104,12 @@ impl DisplaySettings {
             show_zero_mm: row.show_zero_mm,
             armor_opacity: row.armor_opacity as f32,
             hull_opaque: row.hull_opaque,
-            // The egui viewer keeps both of these on the pane rather than in the
-            // shared `armor_viewer_defaults` row, so neither is restored.
+            // The egui viewer keeps the first two on the pane rather than in
+            // the shared `armor_viewer_defaults` row, and has no length marks,
+            // so none is restored.
             show_ship_center: Self::default().show_ship_center,
             marker_opacity: Self::default().marker_opacity,
+            show_length_marks: Self::default().show_length_marks,
         }
     }
 }
