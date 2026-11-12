@@ -1,5 +1,6 @@
 //! The Replays tab.
 
+pub mod panel;
 pub mod table;
 
 use zgui::component;
