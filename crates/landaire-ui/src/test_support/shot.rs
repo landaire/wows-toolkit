@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use zgui::prelude::IntoView;
 use zgui_render_wgpu::Pixels;
@@ -9,7 +10,8 @@ use crate::test_support::window::HeadlessOptions;
 use crate::test_support::window::HeadlessWindow;
 
 /// Opens `view` headlessly with `options`, drawn on the graphics device whatever
-/// `options.drawing` says, and writes what it shows to `path` as a PNG.
+/// `options.drawing` says, and writes what it shows to `path` as a PNG once a second of its
+/// clock has passed, so whatever moves as it is built has come to rest.
 pub fn render_png<F, V>(options: HeadlessOptions, view: F, path: &Path) -> Result<(), HeadlessError>
 where
     F: FnMut() -> V + 'static,
@@ -17,6 +19,7 @@ where
 {
     let options = HeadlessOptions { drawing: Drawing::Device, ..options };
     let mut window = HeadlessWindow::open(options, view)?;
+    window.advance(Duration::from_secs(1));
 
     window.save_png(path)
 }
