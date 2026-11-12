@@ -32,6 +32,8 @@ use super::hardpoint::mat4_linear_determinant;
 use super::material_alpha::AlphaMode;
 use super::part_group::PartGroup;
 use super::ship_parts::ShipPartKey;
+use super::surface_maps::GltfSurfacePngs;
+use super::surface_maps::SurfaceMapPaths;
 use super::texture;
 
 #[derive(Debug, Error)]
@@ -250,12 +252,25 @@ pub struct MapMesh {
     pub indices: Vec<u32>,
     /// Index into [`MapScene::textures`] for the albedo texture, if any.
     pub albedo_texture: Option<usize>,
+    pub surface: MapSurfaceTextures,
     /// Base color factor (used when no texture). RGBA linear.
     pub base_color: [f32; 4],
     /// Alpha blending mode: false = opaque, true = blend.
     pub alpha_blend: bool,
     /// Alpha cutoff for mask mode (e.g. `Some(0.5)` for leaf transparency).
     pub alpha_cutoff: Option<f32>,
+}
+
+/// Indices into [`MapScene::textures`] of a mesh's glTF-encoded surface maps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MapSurfaceTextures {
+    pub normal: Option<usize>,
+    pub metal_roughness: Option<usize>,
+}
+
+impl MapSurfaceTextures {
+    /// A mesh with no surface map.
+    pub const NONE: Self = Self { normal: None, metal_roughness: None };
 }
 
 /// A positioned model instance in the map.
@@ -275,7 +290,8 @@ pub struct MapScene {
     pub model_meshes: Vec<MapMesh>,
     /// Positioned model instances referencing `model_meshes` by range.
     pub model_instances: Vec<MapModelInstance>,
-    /// Shared albedo textures (PNG bytes). Meshes reference these by index.
+    /// Shared textures (PNG bytes): albedos and glTF-encoded surface maps.
+    /// Meshes reference these by index.
     pub textures: Vec<Vec<u8>>,
     /// Terrain mesh, if generated.
     pub terrain: Option<MapMesh>,
@@ -294,6 +310,7 @@ pub struct MapScene {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct MapMaterialKey {
     albedo_texture: Option<usize>,
+    surface: MapSurfaceTextures,
     base_color_bits: [u32; 4],
     alpha_blend: bool,
     alpha_cutoff_bits: Option<u32>,
@@ -356,6 +373,8 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
     let mut textures: Vec<Vec<u8>> = Vec::new();
     // Cache: MFM full path -> texture index and the alpha its material draws.
     let mut texture_cache: HashMap<String, Option<(usize, AlphaMode)>> = HashMap::new();
+    // Cache: MFM full path -> its surface maps in `textures`.
+    let mut surface_cache: HashMap<String, MapSurfaceTextures> = HashMap::new();
 
     // Build path_id → model index map for instance lookups.
     let path_to_model: HashMap<u64, usize> = merged.models.iter().enumerate().map(|(i, r)| (r.path_id, i)).collect();
@@ -410,6 +429,22 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                 None
             };
             let alpha = albedo.map_or(AlphaMode::Opaque, |(_, alpha)| alpha);
+            let surface = match (vfs, db, &self_id_index, &prim.mfm_full_path) {
+                (Some(vfs), Some(db), Some(self_id_index), Some(mfm_path)) => {
+                    *surface_cache.entry(mfm_path.clone()).or_insert_with(|| {
+                        let paths = texture::parse_mfm_from_db(db, prim.mfm_path_id)
+                            .map_or(SurfaceMapPaths::NONE, |m| SurfaceMapPaths::of_material(&m, db, self_id_index));
+                        match paths.load(vfs, texture_lod).to_gltf_pngs() {
+                            Ok(pngs) => push_surface_pngs(&mut textures, pngs),
+                            Err(e) => {
+                                eprintln!("  Warning: failed to encode surface maps for {mfm_path}: {e}");
+                                MapSurfaceTextures::NONE
+                            }
+                        }
+                    })
+                }
+                _ => MapSurfaceTextures::NONE,
+            };
 
             model_meshes.push(MapMesh {
                 name: prim.material_name,
@@ -418,6 +453,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                 uvs: prim.uvs,
                 indices: prim.indices,
                 albedo_texture: albedo.map(|(idx, _)| idx),
+                surface,
                 base_color: [1.0, 1.0, 1.0, 1.0],
                 alpha_blend: alpha == AlphaMode::Blend,
                 alpha_cutoff: match alpha {
@@ -521,6 +557,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                 uvs: species.mesh.uvs.clone(),
                 indices: species.mesh.indices.clone(),
                 albedo_texture,
+                surface: MapSurfaceTextures::NONE,
                 base_color: [1.0, 1.0, 1.0, 1.0],
                 alpha_blend: false,
                 alpha_cutoff: Some(0.5),
@@ -575,10 +612,12 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
         );
     }
 
-    let tex_tried = texture_cache.len();
-    let tex_loaded = textures.len();
+    let albedos_tried = texture_cache.len();
+    let albedos_loaded = texture_cache.values().filter(|albedo| albedo.is_some()).count();
+    let with_surface_maps = surface_cache.values().filter(|surface| **surface != MapSurfaceTextures::NONE).count();
     eprintln!(
-        "Map scene: {} model meshes, {} instances, {tex_loaded}/{tex_tried} textures loaded",
+        "Map scene: {} model meshes, {} instances, {albedos_loaded}/{albedos_tried} albedos and \
+         {with_surface_maps} materials' surface maps loaded",
         model_meshes.len(),
         model_instances.len(),
     );
@@ -598,6 +637,20 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
         bounds: bounds.clone(),
         vegetation_instances,
     })
+}
+
+/// Appends a material's glTF-encoded surface maps to the scene textures.
+fn push_surface_pngs(textures: &mut Vec<Vec<u8>>, pngs: GltfSurfacePngs) -> MapSurfaceTextures {
+    let mut push = |png: Option<Vec<u8>>| {
+        png.map(|png| {
+            textures.push(png);
+            textures.len() - 1
+        })
+    };
+    let normal = push(pngs.normal);
+    let metal_roughness = push(pngs.metal_roughness);
+
+    MapSurfaceTextures { normal, metal_roughness }
 }
 
 /// Generate a terrain mesh from the heightmap.
@@ -743,6 +796,7 @@ fn generate_terrain_mesh(cfg: &TerrainConfig<'_>) -> MapMesh {
         uvs,
         indices,
         albedo_texture: None,
+        surface: MapSurfaceTextures::NONE,
         base_color: [0.3, 0.35, 0.25, 1.0],
         alpha_blend: false,
         alpha_cutoff: None,
@@ -774,6 +828,7 @@ fn generate_water_mesh(cfg: &WaterConfig<'_>) -> MapMesh {
         uvs,
         indices,
         albedo_texture: None,
+        surface: MapSurfaceTextures::NONE,
         base_color: [0.1, 0.3, 0.5, 0.85],
         alpha_blend: true,
         alpha_cutoff: None,
@@ -1182,17 +1237,18 @@ fn build_map_mesh_primitive(
         attributes.insert(Valid(json::mesh::Semantic::TexCoords(0)), uv);
     }
 
-    // Material: deduplicate by (texture index, base color, alpha blend, alpha cutoff).
+    // Material: deduplicate by (textures, base color, alpha blend, alpha cutoff).
     // Encode base_color as [u32; 4] for HashMap key (f32 isn't Hash).
     let mat_key = MapMaterialKey {
         albedo_texture: mesh.albedo_texture,
+        surface: mesh.surface,
         base_color_bits: mesh.base_color.map(|c| c.to_bits()),
         alpha_blend: mesh.alpha_blend,
         alpha_cutoff_bits: mesh.alpha_cutoff.map(|c| c.to_bits()),
     };
 
     let material = *mat_cache.entry(mat_key).or_insert_with(|| {
-        if let Some(tex_idx) = mesh.albedo_texture
+        let material = if let Some(tex_idx) = mesh.albedo_texture
             && let Some(&gltf_tex) = gltf_texture_cache.get(&tex_idx)
         {
             // Textured material: reference the shared glTF Texture.
@@ -1239,7 +1295,16 @@ fn build_map_mesh_primitive(
                 },
                 ..Default::default()
             })
-        }
+        };
+        let shared = |index: Option<usize>| index.and_then(|index| gltf_texture_cache.get(&index).copied());
+        set_material_surface_textures(
+            root,
+            material,
+            shared(mesh.surface.normal),
+            shared(mesh.surface.metal_roughness),
+        );
+
+        material
     });
 
     json::mesh::Primitive {
@@ -2200,6 +2265,9 @@ pub struct TextureSet {
     /// The alpha mode of each base albedo whose material tests or blends
     /// alpha, by MFM stem. A stem not listed draws opaque.
     pub base_alpha: HashMap<String, AlphaMode>,
+    /// Normal and metallic-roughness maps in glTF's channel layout, by MFM
+    /// stem. Camo variants share them with the base material.
+    pub base_surface: HashMap<String, GltfSurfacePngs>,
 }
 
 impl TextureSet {
@@ -2210,6 +2278,7 @@ impl TextureSet {
             tiled_uv_transforms: HashMap::new(),
             base_uv_transforms: HashMap::new(),
             base_alpha: HashMap::new(),
+            base_surface: HashMap::new(),
         }
     }
 }
@@ -2274,25 +2343,17 @@ impl ImageContentKey {
     }
 }
 
-/// Embed a PNG image in the glTF binary buffer and create a textured material.
-/// Returns the material index.
+/// Embed a PNG image in the glTF binary buffer and create a texture sampling it.
 ///
 /// Images are deduplicated by content via `image_cache`: a byte-identical PNG
 /// is embedded once and reused across parts and camo schemes.
-///
-/// `uv_transform` is an optional `[scale_x, scale_y, offset_x, offset_y]` applied
-/// via `KHR_texture_transform` for tiled camouflage textures. Because the transform
-/// lives on the glTF texture (not the image), a shared image still gets its own
-/// texture per distinct transform.
-fn create_textured_material(
+fn embed_png_texture(
     root: &mut json::Root,
     bin_data: &mut Vec<u8>,
     image_cache: &mut ImageCache,
     png_bytes: &[u8],
-    material_name: &str,
     image_name: Option<String>,
-    uv_transform: Option<[f32; 4]>,
-) -> json::Index<json::Material> {
+) -> json::Index<json::Texture> {
     let key = ImageContentKey::new(png_bytes);
     let image = match image_cache.images.get(&key) {
         Some(existing) => *existing,
@@ -2335,13 +2396,32 @@ fn create_textured_material(
         extras: Default::default(),
     });
 
-    let texture = root.push(json::Texture {
+    root.push(json::Texture {
         source: image,
         sampler: Some(sampler),
         name: None,
         extensions: Default::default(),
         extras: Default::default(),
-    });
+    })
+}
+
+/// Embed a PNG image (see [`embed_png_texture`]) and create a material with it
+/// as the base color. Returns the material index.
+///
+/// `uv_transform` is an optional `[scale_x, scale_y, offset_x, offset_y]` applied
+/// via `KHR_texture_transform` for tiled camouflage textures. Because the transform
+/// lives on the glTF texture (not the image), a shared image still gets its own
+/// texture per distinct transform.
+fn create_textured_material(
+    root: &mut json::Root,
+    bin_data: &mut Vec<u8>,
+    image_cache: &mut ImageCache,
+    png_bytes: &[u8],
+    material_name: &str,
+    image_name: Option<String>,
+    uv_transform: Option<[f32; 4]>,
+) -> json::Index<json::Material> {
+    let texture = embed_png_texture(root, bin_data, image_cache, png_bytes, image_name);
 
     let tex_transform_ext = uv_transform.map(|t| json::extensions::texture::Info {
         texture_transform: Some(json::extensions::texture::TextureTransform {
@@ -2378,6 +2458,50 @@ fn set_material_alpha(root: &mut json::Root, material: json::Index<json::Materia
     material.alpha_mode = Valid(mode);
     material.alpha_cutoff = cutoff;
     material.double_sided = alpha != AlphaMode::Opaque;
+}
+
+/// Embeds a stem's glTF-encoded surface maps and sets them on `material`.
+fn set_material_surface_pngs(
+    root: &mut json::Root,
+    bin_data: &mut Vec<u8>,
+    image_cache: &mut ImageCache,
+    material: json::Index<json::Material>,
+    pngs: &GltfSurfacePngs,
+    stem: &str,
+) {
+    let normal =
+        pngs.normal.as_ref().map(|png| embed_png_texture(root, bin_data, image_cache, png, Some(format!("{stem}_n"))));
+    let metal_roughness = pngs
+        .metal_roughness
+        .as_ref()
+        .map(|png| embed_png_texture(root, bin_data, image_cache, png, Some(format!("{stem}_mr"))));
+
+    set_material_surface_textures(root, material, normal, metal_roughness);
+}
+
+/// Sets `material`'s normal and metallic-roughness textures. The metallic
+/// and roughness factors stay at their default of one, so the texture alone
+/// decides both.
+fn set_material_surface_textures(
+    root: &mut json::Root,
+    material: json::Index<json::Material>,
+    normal: Option<json::Index<json::Texture>>,
+    metal_roughness: Option<json::Index<json::Texture>>,
+) {
+    let material = &mut root.materials[material.value()];
+    if let Some(index) = normal {
+        material.normal_texture = Some(json::material::NormalTexture {
+            index,
+            scale: 1.0,
+            tex_coord: 0,
+            extensions: Default::default(),
+            extras: Default::default(),
+        });
+    }
+    if let Some(index) = metal_roughness {
+        material.pbr_metallic_roughness.metallic_roughness_texture =
+            Some(json::texture::Info { index, tex_coord: 0, extensions: None, extras: Default::default() });
+    }
 }
 
 /// Create an untextured material.
@@ -2614,6 +2738,14 @@ fn add_primitive_to_root(
                 })
             })
             .collect();
+
+        if let Some((stem, pngs)) =
+            prim.mfm_stem.as_ref().and_then(|stem| texture_set.base_surface.get(stem).map(|pngs| (stem, pngs)))
+        {
+            for material in std::iter::once(default_mat).chain(variant_mats.iter().flatten().copied()) {
+                set_material_surface_pngs(root, bin_data, image_cache, material, pngs, stem);
+            }
+        }
 
         mat_cache.materials.insert(cache_key.clone(), CachedMaterial { default_mat, variant_mats });
     }

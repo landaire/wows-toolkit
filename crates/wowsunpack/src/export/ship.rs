@@ -80,6 +80,8 @@ use super::ship_parts::select_hull_mount_points;
 use super::ship_parts::select_hull_upgrade;
 use super::ship_parts::split_compound_hp;
 use super::size_estimate;
+use super::surface_maps::GltfSurfacePngs;
+use super::surface_maps::SurfaceMapPaths;
 use super::texture;
 use super::texture::MaterialAlbedo;
 
@@ -1900,6 +1902,7 @@ impl ShipModelContext {
         let mut tex_set = TextureSet::empty();
         tex_set.base = source.base_albedos();
         tex_set.base_alpha = source.base_alpha();
+        tex_set.base_surface = source.base_surface_pngs();
 
         if let CamoSelection::Baked(id) = &self.options.camos {
             let info =
@@ -2357,12 +2360,13 @@ pub(crate) fn resolve_part_texture<'a>(
     textures.get("tile").or_else(|| textures.get("hull"))
 }
 
-/// Resolved MFM info: stem (leaf name without `.mfm`), full VFS path, and
-/// the alpha its material draws.
+/// Resolved MFM info: stem (leaf name without `.mfm`), full VFS path, the
+/// alpha its material draws and the surface maps it names.
 pub struct MfmInfo {
     pub stem: String,
     pub full_path: String,
     pub alpha: AlphaMode,
+    pub surface_maps: SurfaceMapPaths,
 }
 
 /// Collect MFM stems and full paths from a visual's render sets.
@@ -2386,18 +2390,23 @@ pub fn collect_mfm_info(
 
         if seen.insert(stem.to_string()) {
             let full_path = db.reconstruct_path(path_idx, self_id_index);
-            // Without the material record nothing marks the alpha as opacity.
-            let alpha = texture::parse_mfm_from_db(db, rs.material_mfm_path_id)
-                .map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(&material, &full_path));
-            result.push(MfmInfo { stem: stem.to_string(), full_path, alpha });
+            // Without the material record nothing marks the alpha as opacity
+            // or names a surface map.
+            let material = texture::parse_mfm_from_db(db, rs.material_mfm_path_id);
+            let alpha =
+                material.as_ref().map_or(AlphaMode::Opaque, |material| AlphaMode::of_material(material, &full_path));
+            let surface_maps = material
+                .as_ref()
+                .map_or(SurfaceMapPaths::NONE, |material| SurfaceMapPaths::of_material(material, db, self_id_index));
+            result.push(MfmInfo { stem: stem.to_string(), full_path, alpha, surface_maps });
         }
     }
 
     result
 }
 
-/// Base albedo PNGs for a set of MFM infos. Camo schemes come from
-/// `CamoTextureSource`, which is the single enumeration ids are defined against.
+/// Base albedo PNGs and surface maps for a set of MFM infos. Camo schemes come
+/// from `CamoTextureSource`, which is the single enumeration ids are defined against.
 pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::TextureLod) -> TextureSet {
     let mut base = HashMap::new();
     let mut base_alpha = HashMap::new();
@@ -2427,7 +2436,31 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::Tex
         }
     }
 
-    TextureSet { base, base_alpha, ..TextureSet::empty() }
+    let base_surface = base_surface_pngs(unique_infos.iter().copied(), vfs, lod);
+
+    TextureSet { base, base_alpha, base_surface, ..TextureSet::empty() }
+}
+
+/// The glTF-encoded surface maps of each MFM info that names one, by stem.
+pub(crate) fn base_surface_pngs<'a>(
+    infos: impl IntoIterator<Item = &'a MfmInfo>,
+    vfs: &VfsPath,
+    lod: texture::TextureLod,
+) -> HashMap<String, GltfSurfacePngs> {
+    let mut out = HashMap::new();
+    for info in infos {
+        match info.surface_maps.load(vfs, lod).to_gltf_pngs() {
+            Ok(pngs) if !pngs.is_empty() => {
+                out.insert(info.stem.clone(), pngs);
+            }
+            Ok(_) => {
+                // Names no map the VFS holds.
+            }
+            Err(e) => eprintln!("  Warning: failed to encode surface maps for {}: {e}", info.stem),
+        }
+    }
+
+    out
 }
 
 /// Resolve a compound hardpoint (e.g. `HP_AGM_3_HP_AGA_1`) by finding the

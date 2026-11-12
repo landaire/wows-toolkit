@@ -289,7 +289,7 @@ pub(crate) fn decode_dds(dds_bytes: &[u8], lod: TextureLod) -> Result<RgbaImage,
     })
 }
 
-fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, Report<TextureError>> {
+pub(crate) fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, Report<TextureError>> {
     let mut png_buf = Vec::new();
     PngEncoder::new(&mut png_buf)
         .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
@@ -682,6 +682,8 @@ use crate::models::material;
 use crate::models::material::MaterialPrototype;
 
 use super::material_alpha::AlphaMode;
+use super::surface_maps::SurfaceMapPaths;
+use super::surface_maps::SurfaceMaps;
 
 /// Resolve a texture selfId hash from an MFM property to a VFS path,
 /// load the DDS bytes, and return them.
@@ -943,5 +945,15 @@ impl MaterialSession<'_> {
     /// [`load_or_bake_albedo`] for the material at `mfm_path`.
     pub fn albedo(&self, mfm_path: &str, mfm_path_id: u64, lod: TextureLod) -> Option<MaterialAlbedo> {
         load_or_bake_albedo(self.vfs, mfm_path, mfm_path_id, Some(&self.db), Some(&self.self_id_index), lod)
+    }
+
+    /// The normal and metal-gloss maps the material `mfm_path_id` names,
+    /// decoded at `lod`. Empty without a material record.
+    pub fn surface_maps(&self, mfm_path_id: u64, lod: TextureLod) -> SurfaceMaps {
+        let Some(material) = parse_mfm_from_db(&self.db, mfm_path_id) else {
+            return SurfaceMaps { normal: None, metal_gloss: None };
+        };
+
+        SurfaceMapPaths::of_material(&material, &self.db, &self.self_id_index).load(self.vfs, lod)
     }
 }

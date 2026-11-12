@@ -54,6 +54,9 @@ use super::model_catalog::ModelPath;
 use super::model_catalog::ModelPathIndex;
 use super::part_group::PartGroup;
 use super::ship::ExportContents;
+use super::surface_maps::MetalGlossMap;
+use super::surface_maps::NormalMap;
+use super::surface_maps::SurfaceMaps;
 use super::texture;
 use super::texture::TextureLod;
 
@@ -128,7 +131,7 @@ pub struct ModelExportOptions {
     /// Write the destroyed state (crack geometry) instead of the intact one.
     pub damaged: bool,
     pub texture_lod: TextureLod,
-    /// Embed albedo textures.
+    /// Embed albedo, normal and metallic-roughness textures.
     pub textures: bool,
     pub contents: ExportContents,
     /// Write one empty node per hardpoint.
@@ -166,6 +169,8 @@ pub enum ModelExportError {
     RenderSets { visual_path: String },
     #[error("the albedo of {mfm_path} could not be encoded")]
     TextureEncode { mfm_path: String },
+    #[error("the surface maps of {mfm_path} could not be encoded")]
+    SurfaceMapEncode { mfm_path: String },
     #[error("the GLB of {path} could not be written")]
     Write { path: ModelPath },
 }
@@ -520,10 +525,10 @@ impl ModelLibrary {
         self.catalog.owning_entry(path).map_or(PartGroup::Other, ModelEntry::part_group)
     }
 
-    /// Albedo PNGs by material stem, as the GLB writer keys them, for the
-    /// materials of the render sets the export writes at `options`' LOD and
-    /// damage state. A material without an albedo the VFS holds stays
-    /// untextured.
+    /// Albedo PNGs and glTF-encoded surface maps by material stem, as the GLB
+    /// writer keys them, for the materials of the render sets the export
+    /// writes at `options`' LOD and damage state. A material without an
+    /// albedo the VFS holds stays untextured.
     fn export_textures(
         &self,
         db: &PrototypeDatabase<'_>,
@@ -551,11 +556,12 @@ impl ModelLibrary {
 
         let load_options = ModelLoadOptions {
             texture_lod: options.texture_lod,
-            textures: TextureDecode::Albedo,
+            textures: TextureDecode::AllMaps,
             ..ModelLoadOptions::default()
         };
         let mut textures = TextureSet::empty();
 
+        let mut visited = HashSet::new();
         let render_sets = sources.iter().flat_map(|source| &source.visual.render_sets);
         for mfm_path_id in render_sets.map(|render_set| render_set.material_mfm_path_id) {
             let Some(&position) = self.self_id_index.get(&mfm_path_id) else {
@@ -563,14 +569,26 @@ impl ModelLibrary {
             };
             let leaf = &db.paths_storage[position].name;
             let stem = leaf.strip_suffix(".mfm").unwrap_or(leaf);
-            if !written.contains(stem) || textures.base.contains_key(stem) {
+            if !written.contains(stem) || !visited.insert(stem) {
                 continue;
             }
 
             let mfm_path = db.reconstruct_path(position, &self.self_id_index);
-            let material = self.resolve_material(db, &mfm_path, mfm_path_id, &load_options);
-            let alpha = material.alpha;
-            let Some(image) = material.albedo.and_then(|albedo| albedo.image) else {
+            let ModelMaterial { alpha, albedo, normal, metal_gloss, .. } =
+                self.resolve_material(db, &mfm_path, mfm_path_id, &load_options);
+
+            let maps = SurfaceMaps {
+                normal: normal.and_then(MaterialTexture::into_rgba_image).map(NormalMap::new),
+                metal_gloss: metal_gloss.and_then(MaterialTexture::into_rgba_image).map(MetalGlossMap::new),
+            };
+            let surface = maps
+                .to_gltf_pngs()
+                .context_with(|| ModelExportError::SurfaceMapEncode { mfm_path: mfm_path.clone() })?;
+            if !surface.is_empty() {
+                textures.base_surface.insert(stem.to_string(), surface);
+            }
+
+            let Some(image) = albedo.and_then(|albedo| albedo.image) else {
                 continue;
             };
             let png =
@@ -897,6 +915,15 @@ pub struct MaterialTexture {
     pub source: TextureSource,
     /// RGBA8 at the requested texture LOD, when [`TextureDecode`] asked for it.
     pub image: Option<RgbaImageData>,
+}
+
+impl MaterialTexture {
+    /// The decoded pixels, when the load decoded them.
+    pub fn into_rgba_image(self) -> Option<image::RgbaImage> {
+        let RgbaImageData { width, height, pixels } = self.image?;
+
+        image::RgbaImage::from_raw(width, height, pixels)
+    }
 }
 
 /// Where a texture came from.

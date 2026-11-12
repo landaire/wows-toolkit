@@ -7,7 +7,9 @@ use crate::export::camouflage;
 use crate::export::camouflage::UvTransform;
 use crate::export::gltf_export::CamoOrigin;
 use crate::export::material_alpha::AlphaMode;
+use crate::export::ship;
 use crate::export::ship::MfmInfo;
+use crate::export::surface_maps::GltfSurfacePngs;
 use crate::export::texture;
 
 /// Stable identity of a camo scheme within a single loaded ship. It indexes the
@@ -282,6 +284,13 @@ impl CamoTextureSource {
             .filter(|info| info.alpha != AlphaMode::Opaque)
             .map(|info| (info.stem.clone(), info.alpha))
             .collect()
+    }
+
+    /// The glTF-encoded surface maps of each base material that names one,
+    /// by MFM stem, as [`TextureSet::base_surface`](super::gltf_export::TextureSet)
+    /// holds them.
+    pub fn base_surface_pngs(&self) -> HashMap<String, GltfSurfacePngs> {
+        ship::base_surface_pngs(&self.unique_infos, &self.vfs, self.lod)
     }
 
     /// The base albedo DDS path per stem, without reading it.
