@@ -1517,9 +1517,10 @@ impl ViewportView {
     pub(crate) fn open_target(&self) -> Option<OpenTarget> {
         let target = match &self.shown()?.subject {
             SceneSubject::Ship(ship) => OpenTarget::Ship(ship.vehicle_param_index.clone()),
-            SceneSubject::Model(model) => {
-                OpenTarget::Model { model: model.path.clone(), from_ship: model.from_ship.clone() }
-            }
+            SceneSubject::Model(model) => match model.from_building {
+                Some(building) => OpenTarget::Building(building),
+                None => OpenTarget::Model { model: model.path.clone(), from_ship: model.from_ship.clone() },
+            },
         };
 
         Some(target)
@@ -5428,7 +5429,9 @@ mod real_model_tests {
         let assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
         let library = assets.model_library().expect("the model library");
         let mount_armor = MountArmorIndex::build(&metadata, library.catalog());
-        let models = ModelAssets { library: Arc::new(library), mount_armor };
+        // This test opens no building.
+        let buildings = wowsunpack::export::building_armor::BuildingArmorIndex::default();
+        let models = ModelAssets { library: Arc::new(library), mount_armor, buildings };
         let entries = models.library.catalog().entries();
         let turrets = entries.iter().filter(|entry| entry.name() == "AGM034_16in50_Mk7");
         let directors = entries.iter().filter(|entry| entry.name().contains("Director")).take(3);

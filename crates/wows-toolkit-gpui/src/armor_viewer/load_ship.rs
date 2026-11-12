@@ -54,6 +54,7 @@ use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::material_alpha::AlphaMode;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelExportError;
+use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
@@ -64,6 +65,7 @@ use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
+use wowsunpack::game_types::GameParamId;
 
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::types::Vec3;
@@ -146,6 +148,10 @@ pub enum ExportGlbError {
     WriteShip { path: std::path::PathBuf, report: Report },
     #[error("failed to write model glb {path}: {report}")]
     WriteModel { path: std::path::PathBuf, report: Report<ModelExportError> },
+    #[error("building {building} is not an armored building of this build")]
+    UnknownBuilding { building: GameParamId },
+    #[error("failed to read the hull of building {building}: {report}")]
+    BuildingHull { building: GameParamId, report: Report<ModelLoadError> },
     #[error("failed to write glb {path}: {source}")]
     Flush { path: std::path::PathBuf, source: std::io::Error },
 }
@@ -186,6 +192,8 @@ pub struct ModelSubject {
     /// The ship part the model was opened from, which picks its armor
     /// thickness ahead of any other ship mounting it.
     pub from_ship: Option<ShipPartRef>,
+    /// The building shown, when the model is its hull drawn with its mounts.
+    pub from_building: Option<GameParamId>,
     /// In the model's node space, the space its meshes are drawn in.
     pub hardpoints: Vec<Hardpoint>,
     /// Where the armor plates' thickness comes from.
@@ -212,11 +220,16 @@ pub struct HullThicknessSource {
 }
 
 /// Where a model's armor thickness comes from. GameParams holds mount armor
-/// per ship, so a model without a ship has plates of no known thickness.
+/// per ship or building, so a model without either has plates of no known
+/// thickness.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArmorThickness {
     Ship(ThicknessSource),
     Hull(HullThicknessSource),
+    /// The building's own mount entries, by its GameParams name.
+    Building {
+        name: String,
+    },
     Unknown,
 }
 

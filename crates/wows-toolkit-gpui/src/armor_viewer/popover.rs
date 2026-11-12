@@ -790,12 +790,13 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
         ArmorThickness::Hull(source) => {
             t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.section.stem()).into_owned()
         }
+        ArmorThickness::Building { name } => t!("ui.model_view.thickness_from_building", building = name).into_owned(),
         ArmorThickness::Unknown => t!("ui.model_view.thickness_unknown").into_owned(),
     };
     let current = match &model.thickness {
         ArmorThickness::Ship(source) => Some(source.vehicle_param_index.clone()),
         ArmorThickness::Hull(source) => Some(source.vehicle_param_index.clone()),
-        ArmorThickness::Unknown => None,
+        ArmorThickness::Building { .. } | ArmorThickness::Unknown => None,
     };
 
     let picker = (model.thickness_choices.len() > 1).then(|| {

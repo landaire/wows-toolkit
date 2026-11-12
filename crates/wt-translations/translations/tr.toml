@@ -1995,6 +1995,7 @@ other = "Diğer"
 misc = "Çeşitli"
 
 [ui.model_view]
+thickness_from_building = "%{building} kalınlığı"
 thickness_from = "Kalınlık kaynağı: %{ship} (%{hp})"
 thickness_unknown = "Kalınlık bilinmiyor: bu modeli taşıyan gemi yok"
 thickness_other_ships = "Diğer gemiler"

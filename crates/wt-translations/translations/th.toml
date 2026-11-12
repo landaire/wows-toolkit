@@ -2041,6 +2041,7 @@ other = "อื่น ๆ"
 misc = "เบ็ดเตล็ด"
 
 [ui.model_view]
+thickness_from_building = "ความหนาจาก %{building}"
 thickness_from = "ความหนาจาก %{ship} (%{hp})"
 thickness_unknown = "ไม่ทราบความหนา: ไม่มีเรือลำใดติดตั้งโมเดลนี้"
 thickness_other_ships = "เรือลำอื่น"

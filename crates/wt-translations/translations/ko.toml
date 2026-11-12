@@ -2041,6 +2041,7 @@ other = "기타"
 misc = "기타 부품"
 
 [ui.model_view]
+thickness_from_building = "%{building}의 두께"
 thickness_from = "두께 기준: %{ship} (%{hp})"
 thickness_unknown = "두께 알 수 없음: 이 모델을 장착한 함선이 없습니다"
 thickness_other_ships = "다른 함선"

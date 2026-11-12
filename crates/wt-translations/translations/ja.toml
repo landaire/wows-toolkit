@@ -2041,6 +2041,7 @@ other = "その他"
 misc = "その他の部品"
 
 [ui.model_view]
+thickness_from_building = "%{building} の装甲厚"
 thickness_from = "装甲厚: %{ship} (%{hp})"
 thickness_unknown = "装甲厚不明: このモデルを搭載する艦艇はありません"
 thickness_other_ships = "他の艦艇"

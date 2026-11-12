@@ -2067,6 +2067,7 @@ other = "Other"
 misc = "Misc"
 
 [ui.model_view]
+thickness_from_building = "Thickness from %{building}"
 thickness_from = "Thickness from %{ship} (%{hp})"
 thickness_unknown = "Thickness unknown: no ship mounts this model"
 thickness_other_ships = "Other ships"

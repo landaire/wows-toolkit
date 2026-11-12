@@ -1995,6 +1995,7 @@ other = "Inne"
 misc = "Różne"
 
 [ui.model_view]
+thickness_from_building = "Grubość według %{building}"
 thickness_from = "Grubość według %{ship} (%{hp})"
 thickness_unknown = "Grubość nieznana: żaden okręt nie ma tego modelu"
 thickness_other_ships = "Inne okręty"

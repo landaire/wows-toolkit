@@ -81,6 +81,7 @@ use super::load_model::SceneProblem;
 use super::load_model::spawn_load_model_scene;
 use super::model_refs::HardpointTarget;
 use super::model_refs::ShipPartRef;
+use super::sidebar::BuildingSelected;
 use super::sidebar::ExportCatalogModelRequested;
 use super::sidebar::HardpointsToggled;
 use super::sidebar::ModelSelected;
@@ -88,6 +89,7 @@ use super::viewport_view::SceneSource;
 use wows_replays::types::EntityId;
 use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
 use wowsunpack::export::model_catalog::ModelPath;
+use wowsunpack::game_types::GameParamId;
 
 use super::export_dialog;
 use super::legend;
@@ -347,6 +349,7 @@ impl ArmorViewerPane {
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
         let common_settings_sub = cx.subscribe_in(&sidebar, window, Self::on_common_settings);
         let model_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_model_selected);
+        let building_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_building_selected);
         let hardpoints_sub = cx.subscribe_in(&sidebar, window, Self::on_hardpoints_toggled);
         let export_catalog_sub = cx.subscribe_in(&sidebar, window, Self::on_export_catalog_model_requested);
         // `dock`'s own `cx.notify()` (add/close/activate pane) only
@@ -403,6 +406,7 @@ impl ArmorViewerPane {
                 compare_split_sub,
                 export_requested_sub,
                 model_selected_sub,
+                building_selected_sub,
                 hardpoints_sub,
                 export_catalog_sub,
                 common_settings_sub,
@@ -986,6 +990,53 @@ impl ArmorViewerPane {
         cx: &mut Context<Self>,
     ) {
         self.open_model(event.model.clone(), event.from_ship.clone(), cx);
+    }
+
+    fn on_building_selected(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &BuildingSelected,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_building(event.building, cx);
+    }
+
+    /// Opens an armored building with its mounts in the active pane. A
+    /// building with no hull model says so in the pane.
+    pub(crate) fn open_building(&mut self, building: GameParamId, cx: &mut Context<Self>) {
+        let ModelsState::Ready(models) = &self.models else {
+            tracing::warn!("model viewer: building selected before the model library finished loading");
+            return;
+        };
+        let models = Arc::clone(models);
+        let Some(entry) = models.buildings.building(building) else {
+            tracing::error!("model viewer: building {building} is not in the armored building index");
+            return;
+        };
+        let active = self.dock.read(cx).active_viewport();
+        if active.read(cx).open_target() == Some(super::model_refs::OpenTarget::Building(building)) {
+            if self.cancel_load(&active, cx) {
+                self.forget_incoming();
+            }
+            return;
+        }
+        self.forget_incoming();
+
+        let Some(hull) = entry.model().cloned() else {
+            tracing::error!("model viewer: building {} names no hull model", entry.param().name());
+            let problem = SceneProblem {
+                subject: entry.param().name().to_string().into(),
+                reason: ProblemReason::GeometryAbsent,
+            };
+            // A load still running would otherwise land over the message.
+            self.cancel_load(&active, cx);
+            active.update(cx, |viewport, cx| viewport.fail_load(problem, cx));
+            self.push_open_target(cx);
+            cx.notify();
+            return;
+        };
+        self.start_model_load(ModelLoadRequest::for_building(hull, building), cx);
     }
 
     /// Opens one catalogued model in the active pane. A re-click on the model

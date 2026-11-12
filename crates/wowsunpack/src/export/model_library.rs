@@ -41,6 +41,7 @@ use super::gltf_export::TextureSet;
 use super::gltf_export::negate_z_transform;
 use super::hardpoint::Hardpoint;
 use super::hardpoint::ModelSpaceHardpoints;
+use super::hardpoint::mat4_mul;
 use super::hardpoint::mesh_to_node_space;
 use super::hardpoint::model_extenders;
 use super::material_alpha::AlphaMode;
@@ -141,6 +142,16 @@ pub struct ModelArmorMaps<'a> {
     pub hull: Option<&'a ArmorMap>,
     /// A mount's own `armor` map, checked first.
     pub mount: Option<&'a ArmorMap>,
+}
+
+/// A model written into another's GLB at a node, with its own armor maps.
+#[derive(Debug, Clone, Copy)]
+pub struct PlacedModel<'a> {
+    pub path: &'a ModelPath,
+    /// Where the model sits, right-handed like [`Hardpoint::transform`];
+    /// `None` at the origin.
+    pub node: Option<[f32; 16]>,
+    pub armor: ModelArmorMaps<'a>,
 }
 
 /// Why a model could not be exported.
@@ -364,9 +375,31 @@ impl ModelLibrary {
         armor: ModelArmorMaps<'_>,
         writer: &mut impl Write,
     ) -> Result<(), Report<ModelExportError>> {
+        self.export_placed_glb(path, &[], armor, options, writer)
+    }
+
+    /// Writes `path` as [`Self::export_glb`] does, with each of `placed` at
+    /// its node: a building is its hull and each gun mount at the hull
+    /// hardpoint it sits on. The hardpoints written are `path`'s.
+    pub fn export_placed_glb(
+        &self,
+        path: &ModelPath,
+        placed: &[PlacedModel<'_>],
+        armor: ModelArmorMaps<'_>,
+        options: &ModelExportOptions,
+        writer: &mut impl Write,
+    ) -> Result<(), Report<ModelExportError>> {
         let db = &self.assets.db();
-        let sources = self.read_parts(db, path).context_with(|| ModelExportError::Load { path: path.clone() })?;
-        let group = self.part_group(path);
+        let base = PlacedModel { path, node: None, armor };
+        let mut sources = self.read_parts(db, path).context_with(|| ModelExportError::Load { path: path.clone() })?;
+        let own_parts = sources.len();
+        let mut placements = vec![&base; own_parts];
+        for model in placed {
+            let parts =
+                self.read_parts(db, model.path).context_with(|| ModelExportError::Load { path: model.path.clone() })?;
+            placements.extend(std::iter::repeat_n(model, parts.len()));
+            sources.extend(parts);
+        }
 
         let mut geometries = Vec::with_capacity(sources.len());
         for source in &sources {
@@ -375,16 +408,27 @@ impl ModelLibrary {
             geometries.push(geometry);
         }
 
+        // Nodes are right-handed like every hardpoint; sub-models and armor
+        // take left-handed transforms, which the writer converts.
+        let node_left_handed = |model: &PlacedModel<'_>| model.node.map(negate_z_transform);
         let sub_models: Vec<SubModel<'_>> = sources
             .iter()
             .zip(&geometries)
-            .map(|(source, geometry)| SubModel {
-                name: source.model_path.stem().to_string(),
-                visual: &source.visual,
-                geometry,
-                transform: mesh_to_node_space(&source.visual, &db.strings),
-                group,
-                barrel_pitch: None,
+            .zip(&placements)
+            .map(|((source, geometry), model)| {
+                let mesh = mesh_to_node_space(&source.visual, &db.strings);
+                let transform = match (node_left_handed(model), mesh) {
+                    (Some(node), Some(mesh)) => Some(mat4_mul(&node, &mesh)),
+                    (node, mesh) => node.or(mesh),
+                };
+                SubModel {
+                    name: source.model_path.stem().to_string(),
+                    visual: &source.visual,
+                    geometry,
+                    transform,
+                    group: self.part_group(model.path),
+                    barrel_pitch: None,
+                }
             })
             .collect();
 
@@ -396,12 +440,19 @@ impl ModelLibrary {
 
         let mut armor_meshes = Vec::new();
         if options.contents.includes_armor() {
-            for armor_model in geometries.iter().flat_map(|geometry| &geometry.armor_models) {
-                armor_meshes.extend(gltf_export::armor_sub_models_by_zone(armor_model, armor.hull, armor.mount));
+            for (geometry, model) in geometries.iter().zip(&placements) {
+                for armor_model in &geometry.armor_models {
+                    let mut zones =
+                        gltf_export::armor_sub_models_by_zone(armor_model, model.armor.hull, model.armor.mount);
+                    for zone in &mut zones {
+                        zone.transform = node_left_handed(model);
+                    }
+                    armor_meshes.extend(zones);
+                }
             }
         }
 
-        let hardpoints = if options.hardpoints { model_hardpoints(db, &sources) } else { Vec::new() };
+        let hardpoints = if options.hardpoints { model_hardpoints(db, &sources[..own_parts]) } else { Vec::new() };
         let hardpoint_sets = [HardpointSet { name: path.stem().to_string(), hardpoints: &hardpoints }];
 
         gltf_export::export_ship_glb(

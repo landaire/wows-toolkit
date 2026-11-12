@@ -2,6 +2,7 @@
 //! draws: its meshes with their albedo textures, its hardpoints, and the armor
 //! it carries, coloured by the GameParams armor of a ship that mounts it.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Write;
@@ -11,6 +12,7 @@ use gpui_kit::App;
 use gpui_kit::AppContext;
 use gpui_kit::SharedString;
 use gpui_kit::Task;
+use nalgebra::Matrix4;
 use rootcause::Report;
 use rust_i18n::t;
 use wowsunpack::data::ResourceLoader;
@@ -22,6 +24,8 @@ use wowsunpack::export::model_library::ModelArmorMaps;
 use wowsunpack::export::model_library::ModelExportOptions;
 use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::model_library::ModelLoadOptions;
+use wowsunpack::export::model_library::ModelMaterial;
+use wowsunpack::export::model_library::PlacedModel;
 use wowsunpack::export::model_library::TextureDecode;
 use wowsunpack::export::mount_armor::MountArmorIndex;
 use wowsunpack::export::mount_armor::MountArmorRef;
@@ -31,6 +35,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Vehicle;
+use wowsunpack::game_types::GameParamId;
 
 use super::assets::ModelAssets;
 use super::camo::RgbaTexture;
@@ -62,11 +67,16 @@ const UNKNOWN_THICKNESS_COLOR: [f32; 4] = [0.55, 0.55, 0.58, 1.0];
 pub enum ModelSceneError {
     #[error("failed to load model {path}: {report}")]
     Load { path: ModelPath, report: Report<ModelLoadError> },
+    #[error("building {building} is not an armored building of this build")]
+    UnknownBuilding { building: GameParamId },
 }
 
 impl ModelSceneError {
     pub(crate) fn problem(&self) -> ProblemReason {
-        let Self::Load { report, .. } = self;
+        let report = match self {
+            Self::Load { report, .. } => report,
+            Self::UnknownBuilding { .. } => return ProblemReason::ModelUnreadable,
+        };
         match report.current_context() {
             ModelLoadError::GeometryAbsent { .. } => ProblemReason::GeometryAbsent,
             ModelLoadError::NoGeometry { .. } => ProblemReason::Empty(EmptyScene::Meshless),
@@ -149,6 +159,9 @@ impl ProblemReason {
 pub struct ModelLoadRequest {
     pub path: ModelPath,
     pub from_ship: Option<ShipPartRef>,
+    /// The building whose hull `path` is: its mounts are placed on it and
+    /// its own armor entries give the plates their thickness.
+    pub from_building: Option<GameParamId>,
     /// The mount picked to colour the plates. `None` takes the part's own
     /// ship when it has one.
     pub thickness_from: Option<MountRef>,
@@ -164,7 +177,12 @@ pub struct MountRef {
 
 impl ModelLoadRequest {
     pub fn new(path: ModelPath, from_ship: Option<ShipPartRef>) -> Self {
-        Self { path, from_ship, thickness_from: None, lod: 0 }
+        Self { path, from_ship, from_building: None, thickness_from: None, lod: 0 }
+    }
+
+    /// `building`, drawn from its hull model `hull` with its mounts.
+    pub fn for_building(hull: ModelPath, building: GameParamId) -> Self {
+        Self { path: hull, from_ship: None, from_building: Some(building), thickness_from: None, lod: 0 }
     }
 
     /// The mount to colour the plates by: the one picked, else the mount the
@@ -291,13 +309,26 @@ fn thickness_choices(
         .collect()
 }
 
-/// Whether `request`'s plates have a thickness to show or export.
+/// Whether `request`'s plates have a thickness to show or export. A
+/// building's come from its own mount entries.
 pub(crate) fn thickness_known(
     models: &ModelAssets,
     metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
 ) -> bool {
+    if request.from_building.is_some() {
+        return true;
+    }
+
     thickness_ref(&models.mount_armor, metadata, request).is_some()
+}
+
+/// Whether a building's mounts carry armor plates, `None` for a request that
+/// is not a building. Its hull carries none.
+pub(crate) fn building_has_armor(models: &ModelAssets, request: &ModelLoadRequest) -> Option<bool> {
+    let building = models.buildings.building(request.from_building?)?;
+
+    Some(building.mounts().iter().any(|mount| mount.has_armor()))
 }
 
 /// Loads `request` from `models`, resolving armor thickness from `metadata`.
@@ -307,12 +338,11 @@ pub(crate) fn load_model_scene(
     metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
 ) -> Result<LoadedShipArmor, ModelSceneError> {
-    let options = ModelLoadOptions {
-        lod: request.lod,
-        damaged: false,
-        texture_lod: TextureLod::from_max_edge(Some(DISPLAY_TEXTURE_EDGE)),
-        textures: TextureDecode::Albedo,
-    };
+    if let Some(building) = request.from_building {
+        return load_building_scene(models, request, building);
+    }
+
+    let options = display_options(request.lod);
     let model = models
         .library
         .load_model(&request.path, &options)
@@ -336,28 +366,115 @@ pub(crate) fn load_model_scene(
 
     let lod_count = model.lod_count();
     let parts = model.into_parts();
-
-    let mut hull_textures = HashMap::new();
-    let mut hull_alpha = HashMap::new();
-    for (mfm_path, material) in parts.materials {
-        let Some(image) = material.albedo.and_then(|albedo| albedo.image) else { continue };
-        if material.alpha != AlphaMode::Opaque {
-            hull_alpha.insert(mfm_path.clone(), material.alpha);
-        }
-        let texture = RgbaTexture::new(image.width, image.height, image.pixels);
-        hull_textures.insert(mfm_path, texture);
-    }
+    let mut textures = HullTextures::default();
+    textures.extend(parts.materials);
 
     let subject = ModelSubject {
         path: request.path.clone(),
         from_ship: request.from_ship.clone(),
+        from_building: None,
         hardpoints: parts.hardpoints,
         thickness,
         thickness_choices,
     };
     let lods = SceneLods { count: lod_count, shown: request.lod };
 
-    Ok(model_scene(subject, meshes, parts.meshes, HullTextures { textures: hull_textures, alpha: hull_alpha }, lods))
+    Ok(model_scene(subject, meshes, parts.meshes, textures, lods))
+}
+
+/// How a model is loaded for display at `lod`.
+fn display_options(lod: usize) -> ModelLoadOptions {
+    ModelLoadOptions {
+        lod,
+        damaged: false,
+        texture_lod: TextureLod::from_max_edge(Some(DISPLAY_TEXTURE_EDGE)),
+        textures: TextureDecode::Albedo,
+    }
+}
+
+/// Loads `building`'s hull at `request.path` and places each of its mounts
+/// on the hull node it names, with the plates' thickness from the building's
+/// own armor entries. A mount whose node the hull lacks, or whose model does
+/// not load, is left out and logged.
+fn load_building_scene(
+    models: &ModelAssets,
+    request: &ModelLoadRequest,
+    building: GameParamId,
+) -> Result<LoadedShipArmor, ModelSceneError> {
+    let entry = models.buildings.building(building).ok_or(ModelSceneError::UnknownBuilding { building })?;
+    let options = display_options(request.lod);
+    let hull = models
+        .library
+        .load_model(&request.path, &options)
+        .map_err(|report| ModelSceneError::Load { path: request.path.clone(), report })?;
+
+    let hull_maps = entry.hull_armor_maps();
+    let mut armor = hull.armor_meshes(hull_maps.hull, hull_maps.mount);
+    let mut lod_count = hull.lod_count();
+    let hull = hull.into_parts();
+    let mut hull_meshes = hull.meshes;
+    let mut textures = HullTextures::default();
+    textures.extend(hull.materials);
+
+    for mount in entry.mounts() {
+        let Some(node) = hull.hardpoints.iter().find(|hardpoint| hardpoint.name == *mount.hardpoint()) else {
+            tracing::warn!(
+                "model viewer: {} has no node {} for its mount {}",
+                entry.param().name(),
+                mount.hardpoint().as_str(),
+                mount.model()
+            );
+            continue;
+        };
+        let model = match models.library.load_model(mount.model(), &options) {
+            Ok(model) => model,
+            Err(report) => {
+                tracing::warn!(
+                    "model viewer: mount {} of {} did not load: {report}",
+                    mount.model(),
+                    entry.param().name()
+                );
+                continue;
+            }
+        };
+
+        let maps = entry.mount_armor_maps(mount);
+        for mut plate in model.armor_meshes(maps.hull, maps.mount) {
+            plate.transform = Some(place_on(node.transform, plate.transform));
+            armor.push(plate);
+        }
+        lod_count = lod_count.max(model.lod_count());
+        let parts = model.into_parts();
+        for mut mesh in parts.meshes {
+            mesh.transform = Some(place_on(node.transform, mesh.transform));
+            hull_meshes.push(mesh);
+        }
+        textures.extend(parts.materials);
+    }
+
+    let subject = ModelSubject {
+        path: request.path.clone(),
+        from_ship: None,
+        from_building: Some(building),
+        hardpoints: hull.hardpoints,
+        thickness: ArmorThickness::Building { name: entry.param().name().to_string() },
+        thickness_choices: Vec::new(),
+    };
+    let lods = SceneLods { count: lod_count, shown: request.lod };
+
+    Ok(model_scene(subject, armor, hull_meshes, textures, lods))
+}
+
+/// `transform` (column-major, `None` for identity) moved onto a node at `node`.
+fn place_on(node: [f32; 16], transform: Option<[f32; 16]>) -> [f32; 16] {
+    let Some(transform) = transform else {
+        return node;
+    };
+    let placed = Matrix4::from_column_slice(&node) * Matrix4::from_column_slice(&transform);
+    let mut out = [0.0; 16];
+    out.copy_from_slice(placed.as_slice());
+
+    out
 }
 
 /// How many mesh LODs a model has, and which one is shown.
@@ -372,6 +489,19 @@ struct SceneLods {
 struct HullTextures {
     textures: super::camo::TexturesByPart,
     alpha: HashMap<String, AlphaMode>,
+}
+
+impl HullTextures {
+    /// Adds the decoded albedo of each of `materials`, keyed by `.mfm` path.
+    fn extend(&mut self, materials: BTreeMap<String, ModelMaterial>) {
+        for (mfm_path, material) in materials {
+            let Some(image) = material.albedo.and_then(|albedo| albedo.image) else { continue };
+            if material.alpha != AlphaMode::Opaque {
+                self.alpha.insert(mfm_path.clone(), material.alpha);
+            }
+            self.textures.insert(mfm_path, RgbaTexture::new(image.width, image.height, image.pixels));
+        }
+    }
 }
 
 /// One model's scene, with the ship-only data empty.
@@ -435,7 +565,8 @@ pub fn spawn_load_model_scene(
 
 /// Writes `request`'s model to `path` as a GLB with its textures, hardpoints
 /// and, when `options` asks for it, its armor at the thickness the viewer
-/// shows it with. Synchronous and CPU/IO-bound; callers run it off the UI
+/// shows it with. A building is written with its mounts placed as the viewer
+/// places them. Synchronous and CPU/IO-bound; callers run it off the UI
 /// thread.
 pub(crate) fn export_model_glb(
     models: &ModelAssets,
@@ -444,9 +575,6 @@ pub(crate) fn export_model_glb(
     options: &ShipExportOptions,
     path: &std::path::Path,
 ) -> Result<(), ExportGlbError> {
-    let source = thickness_ref(&models.mount_armor, metadata, request);
-    // No source writes no thickness, which is what the viewer shows as unknown.
-    let armor = source.as_ref().map(ThicknessRef::maps).unwrap_or_default();
     let export_options = ModelExportOptions {
         lod: options.lod,
         damaged: options.damaged,
@@ -456,13 +584,54 @@ pub(crate) fn export_model_glb(
         hardpoints: options.hardpoints,
     };
 
+    // A building is read before the file is made, so a building that cannot
+    // be read leaves no empty file behind.
+    let building = match request.from_building {
+        Some(building) => {
+            let entry = models.buildings.building(building).ok_or(ExportGlbError::UnknownBuilding { building })?;
+            let hull_options = ModelLoadOptions { textures: TextureDecode::None, ..display_options(options.lod) };
+            let hull = models
+                .library
+                .load_model(&request.path, &hull_options)
+                .map_err(|report| ExportGlbError::BuildingHull { building, report })?;
+            Some((entry, hull))
+        }
+        None => None,
+    };
+
     let file = std::fs::File::create(path)
         .map_err(|source| ExportGlbError::CreateFile { path: path.to_path_buf(), source })?;
     let mut writer = std::io::BufWriter::new(file);
-    models
-        .library
-        .export_glb(&request.path, &export_options, armor, &mut writer)
-        .map_err(|report| ExportGlbError::WriteModel { path: path.to_path_buf(), report })?;
+    let written = match &building {
+        Some((entry, hull)) => {
+            let placed: Vec<PlacedModel<'_>> = entry
+                .mounts()
+                .iter()
+                .filter_map(|mount| {
+                    let node = hull.hardpoints().iter().find(|hardpoint| hardpoint.name == *mount.hardpoint())?;
+                    Some(PlacedModel {
+                        path: mount.model(),
+                        node: Some(node.transform),
+                        armor: entry.mount_armor_maps(mount),
+                    })
+                })
+                .collect();
+            models.library.export_placed_glb(
+                &request.path,
+                &placed,
+                entry.hull_armor_maps(),
+                &export_options,
+                &mut writer,
+            )
+        }
+        None => {
+            let source = thickness_ref(&models.mount_armor, metadata, request);
+            // No source writes no thickness, which is what the viewer shows as unknown.
+            let armor = source.as_ref().map(ThicknessRef::maps).unwrap_or_default();
+            models.library.export_glb(&request.path, &export_options, armor, &mut writer)
+        }
+    };
+    written.map_err(|report| ExportGlbError::WriteModel { path: path.to_path_buf(), report })?;
 
     writer.flush().map_err(|source| ExportGlbError::Flush { path: path.to_path_buf(), source })
 }
@@ -520,6 +689,7 @@ pub(crate) mod fixtures {
         let subject = ModelSubject {
             path,
             from_ship: None,
+            from_building: None,
             hardpoints,
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
@@ -538,6 +708,7 @@ pub(crate) mod fixtures {
         let subject = ModelSubject {
             path,
             from_ship: None,
+            from_building: None,
             hardpoints: Vec::new(),
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
@@ -557,6 +728,7 @@ pub(crate) mod fixtures {
         let subject = ModelSubject {
             path,
             from_ship: None,
+            from_building: None,
             hardpoints: Vec::new(),
             thickness: ArmorThickness::Unknown,
             thickness_choices: Vec::new(),
@@ -569,6 +741,7 @@ pub(crate) mod fixtures {
 mod tests {
     use std::sync::Arc;
 
+    use wowsunpack::export::building_armor::BuildingArmorIndex;
     use wowsunpack::export::mount_armor::MountArmorIndex;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -664,8 +837,9 @@ mod tests {
         let assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
         let library = assets.model_library().expect("the model library");
         let mount_armor = MountArmorIndex::build(&metadata, library.catalog());
+        let buildings = BuildingArmorIndex::build(&metadata, &library);
 
-        Some((ModelAssets { library: Arc::new(library), mount_armor }, metadata))
+        Some((ModelAssets { library: Arc::new(library), mount_armor, buildings }, metadata))
     }
 
     fn catalogued(models: &ModelAssets, name: &str) -> ModelPath {
@@ -734,6 +908,72 @@ mod tests {
         assert_eq!(scene.hull_alpha.get(disc_material), Some(&AlphaMode::Blend));
         let texture = scene.hull_textures.get(disc_material).expect("the disc albedo");
         assert!(texture.pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc keeps its alpha");
+    }
+
+    /// A fort opens as its hull with each gun mount placed on its node, the
+    /// mounts' plates thick from the fort's own entries; a fort whose hull
+    /// the install does not ship says so (build 13533378 lacks LYB015, the
+    /// hull of PCBX001).
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_fort_opens_with_its_armored_mounts() {
+        let Some((models, metadata)) = real_models() else { return };
+        let fort = |prefix: &str| {
+            let building =
+                models.buildings.buildings().iter().find(|building| building.param().name().starts_with(prefix));
+            let building = building.unwrap_or_else(|| panic!("{prefix} is an armored building"));
+            let hull = building.model().expect("the fort names a hull").clone();
+
+            load_model_scene(&models, &metadata, &ModelLoadRequest::for_building(hull, building.id()))
+        };
+
+        let Err(absent) = fort("PCBX001") else {
+            panic!("PCBX001's hull loads");
+        };
+        let scene = fort("PCBX006").expect("PCBX006 loads");
+
+        assert_eq!(absent.problem(), ProblemReason::GeometryAbsent);
+        let model = scene.model().expect("a model scene");
+        assert!(model.from_building.is_some());
+        assert!(matches!(model.thickness, ArmorThickness::Building { .. }));
+        assert!(scene.meshes.iter().any(|plate| plate.transform.is_some()), "the mounts' plates are placed on them");
+        let thickest = scene
+            .meshes
+            .iter()
+            .flat_map(|plate| &plate.triangle_info)
+            .map(|info| info.thickness_mm)
+            .fold(0.0, f32::max);
+        assert_eq!(thickest, 360.0, "the main battery's face plate, from the fort's own mount entries");
+        assert_eq!(scene.emptiness(), None);
+    }
+
+    /// A fort's GLB carries its gun mounts and their armor, not its hull
+    /// alone: it is larger than the hull's own export.
+    #[test]
+    #[ignore = "needs a local game install in WOWS_DIR"]
+    fn a_fort_exports_with_its_mounts() {
+        let Some((models, metadata)) = real_models() else { return };
+        let building =
+            models.buildings.buildings().iter().find(|building| building.param().name().starts_with("PCBX006"));
+        let building = building.expect("PCBX006 is an armored building");
+        let hull = building.model().expect("the fort names a hull").clone();
+        let options = ShipExportOptions {
+            textures: false,
+            contents: wowsunpack::export::ship::ExportContents::MeshAndArmor,
+            ..ShipExportOptions::default()
+        };
+        let directory = std::env::temp_dir();
+        let fort_path = directory.join("model_viewer_fort_export.glb");
+        let hull_path = directory.join("model_viewer_fort_hull_export.glb");
+
+        let fort = ModelLoadRequest::for_building(hull.clone(), building.id());
+        export_model_glb(&models, &metadata, &fort, &options, &fort_path).expect("the fort exports");
+        export_model_glb(&models, &metadata, &ModelLoadRequest::new(hull, None), &options, &hull_path)
+            .expect("the hull exports");
+
+        let size = |path: &std::path::Path| std::fs::metadata(path).expect("the file was written").len();
+        assert!(size(&fort_path) > size(&hull_path), "the fort writes its mounts too");
+        assert!(super::building_has_armor(&models, &fort) == Some(true), "its mounts are armored");
     }
 }
 

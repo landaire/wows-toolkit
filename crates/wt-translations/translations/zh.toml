@@ -2041,6 +2041,7 @@ other = "其他"
 misc = "杂项"
 
 [ui.model_view]
+thickness_from_building = "厚度来自 %{building}"
 thickness_from = "厚度来自 %{ship} (%{hp})"
 thickness_unknown = "厚度未知: 没有舰船搭载此模型"
 thickness_other_ships = "其他舰船"

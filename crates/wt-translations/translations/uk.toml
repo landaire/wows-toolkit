@@ -1995,6 +1995,7 @@ other = "Інше"
 misc = "Різне"
 
 [ui.model_view]
+thickness_from_building = "Товщина за %{building}"
 thickness_from = "Товщина за %{ship} (%{hp})"
 thickness_unknown = "Товщина невідома: жоден корабель не несе цю модель"
 thickness_other_ships = "Інші кораблі"

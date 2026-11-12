@@ -1995,6 +1995,7 @@ other = "Ostatní"
 misc = "Různé"
 
 [ui.model_view]
+thickness_from_building = "Tloušťka podle %{building}"
 thickness_from = "Tloušťka podle %{ship} (%{hp})"
 thickness_unknown = "Tloušťka neznámá: tento model nenese žádná loď"
 thickness_other_ships = "Jiné lodě"

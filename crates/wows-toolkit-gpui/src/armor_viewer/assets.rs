@@ -28,6 +28,7 @@ use gpui_kit::AppContext;
 use gpui_kit::SvgRenderer;
 use gpui_kit::Task;
 use rootcause::Report;
+use wowsunpack::export::building_armor::BuildingArmorIndex;
 use wowsunpack::export::model_library::ModelLibrary;
 use wowsunpack::export::model_library::ModelLibraryError;
 use wowsunpack::export::mount_armor::MountArmorIndex;
@@ -153,11 +154,12 @@ pub fn spawn_load_armor_assets(
 }
 
 /// What opening and exporting any catalogued model reads: the library over
-/// `assets.bin` and the index of which ship mounts which model, where a
-/// model's armor thickness comes from.
+/// `assets.bin`, the index of which ship mounts which model, where a model's
+/// armor thickness comes from, and the armored buildings with their mounts.
 pub struct ModelAssets {
     pub library: Arc<ModelLibrary>,
     pub mount_armor: MountArmorIndex,
+    pub buildings: BuildingArmorIndex,
 }
 
 /// Builds [`ModelAssets`] over `bundle`'s assets on the background executor.
@@ -170,8 +172,9 @@ pub fn spawn_build_model_library(
     cx.background_spawn(async move {
         let library = bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build { report })?;
         let mount_armor = MountArmorIndex::build(bundle.assets.metadata(), library.catalog());
+        let buildings = BuildingArmorIndex::build(bundle.assets.metadata(), &library);
 
-        Ok(ModelAssets { library: Arc::new(library), mount_armor })
+        Ok(ModelAssets { library: Arc::new(library), mount_armor, buildings })
     })
 }
 

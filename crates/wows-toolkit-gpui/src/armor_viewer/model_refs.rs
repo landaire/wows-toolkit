@@ -4,6 +4,7 @@
 use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::ship_parts::MiscParent;
+use wowsunpack::game_types::GameParamId;
 
 pub use wowsunpack::export::mount_armor::VehicleParamIndex;
 pub use wowsunpack::export::ship_parts::ShipPartKey;
@@ -41,5 +42,10 @@ pub enum HardpointTarget {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OpenTarget {
     Ship(VehicleParamIndex),
-    Model { model: ModelPath, from_ship: Option<ShipPartRef> },
+    Model {
+        model: ModelPath,
+        from_ship: Option<ShipPartRef>,
+    },
+    /// A building opened with its gun mounts, by its GameParams id.
+    Building(GameParamId),
 }

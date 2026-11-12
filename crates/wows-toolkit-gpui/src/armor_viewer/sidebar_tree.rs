@@ -356,6 +356,7 @@ pub(super) fn open_row_id(open: &OpenTarget) -> SharedString {
         OpenTarget::Ship(ship) => ship_row_id(ship.as_str()),
         OpenTarget::Model { model, from_ship: None } => model_row_id(model),
         OpenTarget::Model { from_ship: Some(part), .. } => part_row_id(&part.vehicle_param_index, &part.part),
+        OpenTarget::Building(id) => building_row_id(*id),
     }
 }
 

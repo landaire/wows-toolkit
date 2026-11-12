@@ -474,12 +474,13 @@ fn read_model_meta(
         .model_summary(&request.path)
         .map_err(|report| ModelMetaError { path: request.path.clone(), report })?;
     let thickness_known = super::load_model::thickness_known(models, metadata, request);
+    let has_armor = super::load_model::building_has_armor(models, request).unwrap_or(summary.has_armor);
 
     Ok(ShipMeta {
         hull_lod_count: summary.lod_count,
         camo_schemes: Vec::new(),
         context: None,
-        has_armor: model_exports_armor(summary.has_armor, thickness_known),
+        has_armor: model_exports_armor(has_armor, thickness_known),
     })
 }
 
