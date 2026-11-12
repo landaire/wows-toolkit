@@ -52,7 +52,7 @@ pub enum DamageKind {
 }
 
 impl DamageKind {
-    const ALL: [Self; 10] = [
+    pub const ALL: [Self; 10] = [
         Self::Ap,
         Self::Sap,
         Self::He,
