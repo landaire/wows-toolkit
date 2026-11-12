@@ -1,7 +1,8 @@
 //! The GameParams `Building` params whose models carry armor plates, with the
-//! armor maps that give those plates thickness. Building hulls in current
-//! installs carry no plates of their own; a fort's armor is its gun mounts,
-//! whose thickness the building's `HP_` entries list as on a ship.
+//! armor maps that give those plates thickness. A building's hull plates are
+//! the faces of its model's `hit_locations` collision model, keyed by
+//! `hull.armor`; its gun mounts carry ship-style armor models keyed by their
+//! `HP_` entries.
 
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ use crate::game_types::GameParamId;
 use super::hardpoint::HardpointName;
 use super::model_catalog::BuildingKind;
 use super::model_catalog::BuildingParamRef;
+use super::model_catalog::GeometryAvailability;
 use super::model_catalog::ModelPath;
 use super::model_library::ModelArmorMaps;
 use super::model_library::ModelLibrary;
@@ -83,7 +85,9 @@ impl ArmoredBuilding {
         self.armor.as_ref()
     }
 
-    /// Whether the hull model's geometry carries armor plates.
+    /// Whether the hull has armor plates: `hull.armor` lists a thickness and
+    /// the hull model's geometry carries the plates, or the install does not
+    /// ship that geometry, so the map alone tells.
     pub fn hull_has_armor(&self) -> bool {
         self.hull_has_armor
     }
@@ -113,8 +117,8 @@ pub struct BuildingArmorIndex {
 
 impl BuildingArmorIndex {
     /// Reads the armor count of each building and mount model once. A model
-    /// whose geometry cannot be read, such as one the install does not ship,
-    /// counts as unarmored: there is no plate to show.
+    /// whose geometry cannot be read counts as unarmored: there is no plate
+    /// to show.
     pub fn build(metadata: &GameMetadataProvider, library: &ModelLibrary) -> Self {
         let mut armored_models: HashMap<ModelPath, bool> = HashMap::new();
         let mut has_armor = |path: &ModelPath| {
@@ -122,6 +126,7 @@ impl BuildingArmorIndex {
                 .entry(path.clone())
                 .or_insert_with(|| library.model_summary(path).is_ok_and(|summary| summary.has_armor))
         };
+        let availability = |path: &ModelPath| library.catalog().geometry(path);
 
         let mut buildings = Vec::new();
         for param in metadata.params() {
@@ -130,7 +135,7 @@ impl BuildingArmorIndex {
             };
             let kind = param.species().map_or(BuildingKind::Unspecified, BuildingKind::from_species);
             let param_ref = BuildingParamRef::new(param.name().to_string(), kind);
-            let Some(armored) = armored_building(param.id(), param_ref, building, &mut has_armor) else {
+            let Some(armored) = armored_building(param.id(), param_ref, building, &availability, &mut has_armor) else {
                 continue;
             };
             buildings.push(armored);
@@ -150,16 +155,18 @@ impl BuildingArmorIndex {
     }
 }
 
-/// The armored view of `building`, or `None` when neither its hull model nor
-/// a mount model carries plates.
+/// The armored view of `building`, or `None` when neither its hull nor a
+/// mount model carries plates.
 fn armored_building(
     id: GameParamId,
     param: BuildingParamRef,
     building: &Building,
+    availability: &impl Fn(&ModelPath) -> Option<GeometryAvailability>,
     has_armor: &mut impl FnMut(&ModelPath) -> bool,
 ) -> Option<ArmoredBuilding> {
     let model = building.model().and_then(|raw| ModelPath::parse(raw).ok());
-    let hull_has_armor = model.as_ref().is_some_and(&mut *has_armor);
+    let hull_has_armor =
+        model.as_ref().is_some_and(|model| hull_has_armor(building.armor(), availability(model), || has_armor(model)));
     let mounts: Vec<BuildingMount> = building
         .mounts()
         .iter()
@@ -180,4 +187,54 @@ fn armored_building(
     }
 
     Some(ArmoredBuilding { id, param, model, armor: building.armor().cloned(), hull_has_armor, mounts })
+}
+
+/// Whether a hull with armor map `armor` and a model of `availability` has
+/// plates. `model_has_armor` reads the model's geometry.
+fn hull_has_armor(
+    armor: Option<&ArmorMap>,
+    availability: Option<GeometryAvailability>,
+    model_has_armor: impl FnOnce() -> bool,
+) -> bool {
+    if armor.is_none_or(HashMap::is_empty) {
+        return false;
+    }
+
+    match availability {
+        // Nothing to read: the map is all the install says about the plates.
+        Some(GeometryAvailability::Absent | GeometryAvailability::NoGeometry) => true,
+        Some(GeometryAvailability::Present) | None => model_has_armor(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn belt_armor() -> ArmorMap {
+        HashMap::from([(77, BTreeMap::from([(1, 200.0)]))])
+    }
+
+    #[test]
+    fn a_hull_needs_a_thickness_and_plates() {
+        let armor = belt_armor();
+        let present = Some(GeometryAvailability::Present);
+
+        assert!(hull_has_armor(Some(&armor), present, || true));
+        assert!(!hull_has_armor(Some(&armor), present, || false), "the model has no hit_locations faces");
+        assert!(!hull_has_armor(Some(&HashMap::new()), present, || true), "an empty map gives no thickness");
+        assert!(!hull_has_armor(None, present, || true));
+    }
+
+    #[test]
+    fn an_unshipped_hull_takes_its_map_at_its_word() {
+        let armor = belt_armor();
+
+        assert!(hull_has_armor(Some(&armor), Some(GeometryAvailability::Absent), || unreachable!()));
+        assert!(hull_has_armor(Some(&armor), Some(GeometryAvailability::NoGeometry), || unreachable!()));
+        assert!(!hull_has_armor(None, Some(GeometryAvailability::Absent), || unreachable!()));
+        assert!(hull_has_armor(Some(&armor), None, || true), "unknown availability reads the model");
+    }
 }
