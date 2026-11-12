@@ -44,7 +44,7 @@ fn a_turret_exports_with_textures_armor_and_hardpoint_nodes() {
         return;
     };
     let library = assets.model_library().expect("model library");
-    let index = MountArmorIndex::build(assets.metadata());
+    let index = MountArmorIndex::build(assets.metadata(), library.catalog());
     let turret = ModelPath::parse(IOWA_TURRET).expect("model path");
     let mount = index.referencing(&turret).first().expect("the turret is mounted");
 
@@ -142,4 +142,12 @@ fn a_ship_exports_its_hardpoints_per_part() {
     for hardpoint in &turret.hardpoints {
         assert!(names.contains(&hardpoint.name.as_str()), "{} is exported", hardpoint.name);
     }
+
+    let without = ShipExportOptions { hardpoints: false, ..options };
+    let ship = assets.load_ship_from_vehicle(&vehicle, &without).expect("Iowa loads");
+    let mut glb = Vec::new();
+    ship.export_glb(&mut glb).expect("export");
+    let gltf = gltf::Gltf::from_slice(&glb).expect("a valid GLB");
+    let scene = gltf.document.default_scene().expect("a default scene");
+    assert!(scene.nodes().all(|node| node.name() != Some("Hardpoints")), "hardpoints are left out on request");
 }

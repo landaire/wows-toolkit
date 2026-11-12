@@ -195,11 +195,20 @@ pub struct ThicknessSource {
     pub hp: HardpointName,
 }
 
+/// The ship whose hull `armor` map gives a hull section its thickness.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HullThicknessSource {
+    pub vehicle_param_index: VehicleParamIndex,
+    pub display_name: String,
+    pub section: ModelPath,
+}
+
 /// Where a model's armor thickness comes from. GameParams holds mount armor
 /// per ship, so a model without a ship has plates of no known thickness.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArmorThickness {
     Ship(ThicknessSource),
+    Hull(HullThicknessSource),
     Unknown,
 }
 

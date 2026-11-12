@@ -89,6 +89,7 @@ pub fn draft_to_options(draft: &ExportDraft) -> ShipExportOptions {
         texture_lod: draft.texture_res.to_texture_lod(),
         camos,
         module_overrides: Default::default(),
+        hardpoints: true,
     }
 }
 

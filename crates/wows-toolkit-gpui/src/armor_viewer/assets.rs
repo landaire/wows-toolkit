@@ -168,7 +168,7 @@ pub fn spawn_build_model_library(
     cx.background_spawn(async move {
         let library =
             bundle.assets.model_library().map_err(|report| ModelLibraryLoadError::Build(format!("{report:?}")))?;
-        let mount_armor = MountArmorIndex::build(bundle.assets.metadata());
+        let mount_armor = MountArmorIndex::build(bundle.assets.metadata(), library.catalog());
 
         Ok(ModelAssets { library: Arc::new(library), mount_armor })
     })

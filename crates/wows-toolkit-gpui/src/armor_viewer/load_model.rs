@@ -24,12 +24,15 @@ use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::export::texture::TextureLod;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::Vehicle;
 
 use super::assets::ModelAssets;
 use super::camo::RgbaTexture;
 use super::load_ship::ArmorThickness;
 use super::load_ship::ArmorZones;
 use super::load_ship::ExportGlbError;
+use super::load_ship::HullThicknessSource;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ModelSubject;
 use super::load_ship::SceneSubject;
@@ -103,16 +106,69 @@ impl ModelLoadRequest {
     }
 }
 
-/// The mount `request` reads its plate thickness from: the one picked, else
-/// the mount the part was opened from, else the first ship mounting the
-/// model. `None` when no ship mounting it names any armor for it.
-fn thickness_ref<'a>(index: &'a MountArmorIndex, request: &ModelLoadRequest) -> Option<&'a MountArmorRef> {
+/// Where a request's plate thickness is read from.
+enum ThicknessRef<'a> {
+    /// A ship mount of the model.
+    Mount(&'a MountArmorRef),
+    /// The hull `armor` map of the ship a hull section was opened from.
+    Hull { vehicle: Arc<Param>, vehicle_index: &'a VehicleParamIndex, section: &'a ModelPath },
+}
+
+impl ThicknessRef<'_> {
+    fn maps(&self) -> ModelArmorMaps<'_> {
+        match self {
+            Self::Mount(mount) => ModelArmorMaps { hull: mount.hull_armor(), mount: mount.mount_armor() },
+            Self::Hull { vehicle, .. } => {
+                ModelArmorMaps { hull: vehicle.vehicle().and_then(Vehicle::armor), mount: None }
+            }
+        }
+    }
+
+    /// The source as the rail names it.
+    fn thickness(&self, metadata: &GameMetadataProvider) -> ArmorThickness {
+        match self {
+            Self::Mount(mount) => ArmorThickness::Ship(thickness_source(metadata, mount)),
+            Self::Hull { vehicle_index, section, .. } => ArmorThickness::Hull(HullThicknessSource {
+                vehicle_param_index: (*vehicle_index).clone(),
+                display_name: vehicle_display_name(metadata, vehicle_index),
+                section: (*section).clone(),
+            }),
+        }
+    }
+}
+
+/// Where `request` reads its plate thickness from: the mount picked, else
+/// the part it was opened from, else the first ship mounting the model.
+/// `None` when none of them names any armor for it.
+fn thickness_ref<'a>(
+    index: &'a MountArmorIndex,
+    metadata: &GameMetadataProvider,
+    request: &'a ModelLoadRequest,
+) -> Option<ThicknessRef<'a>> {
     let wanted = request
         .thickness_mount()
-        .and_then(|mount| index.find(&request.path, mount.vehicle_param_index.as_str(), &mount.hp))
+        .and_then(|mount| index.find(&request.path, &mount.vehicle_param_index, &mount.hp))
         .filter(|mount| names_armor(mount));
+    if let Some(mount) = wanted {
+        return Some(ThicknessRef::Mount(mount));
+    }
 
-    wanted.or_else(|| index.referencing(&request.path).iter().find(|mount| names_armor(mount)))
+    if let Some(hull) = hull_section_ref(metadata, request) {
+        return Some(hull);
+    }
+
+    index.referencing(&request.path).iter().find(|mount| names_armor(mount)).map(ThicknessRef::Mount)
+}
+
+/// The hull `armor` map of the ship a hull section was opened from. A hull
+/// section is no mount, so the mount index never lists it.
+fn hull_section_ref<'a>(metadata: &GameMetadataProvider, request: &'a ModelLoadRequest) -> Option<ThicknessRef<'a>> {
+    let part = request.from_ship.as_ref()?;
+    let ShipPartKey::HullSection(section) = &part.part else { return None };
+    let vehicle = metadata.game_param_by_index(part.vehicle_param_index.as_str())?;
+    vehicle.vehicle()?.armor()?;
+
+    Some(ThicknessRef::Hull { vehicle, vehicle_index: &part.vehicle_param_index, section })
 }
 
 /// Whether `mount` gives any thickness. One without either map would read
@@ -121,17 +177,23 @@ fn names_armor(mount: &MountArmorRef) -> bool {
     mount.mount_armor().is_some() || mount.hull_armor().is_some()
 }
 
-/// `mount` as the rail names it.
-fn thickness_source(metadata: &GameMetadataProvider, mount: &MountArmorRef) -> ThicknessSource {
-    let vehicle_index = mount.vehicle_index();
+/// The ship `vehicle_index` names, as the rail shows it.
+fn vehicle_display_name(metadata: &GameMetadataProvider, vehicle_index: &VehicleParamIndex) -> String {
     // A ship GameParams cannot name is still a ship; its index is what there
     // is to show for it.
-    let display_name = metadata
-        .game_param_by_index(vehicle_index)
+    metadata
+        .game_param_by_index(vehicle_index.as_str())
         .and_then(|param| metadata.localized_name_from_param(&param).or_else(|| Some(param.name().to_string())))
-        .unwrap_or_else(|| vehicle_index.to_string());
+        .unwrap_or_else(|| vehicle_index.to_string())
+}
 
-    ThicknessSource { vehicle_param_index: VehicleParamIndex::new(vehicle_index), display_name, hp: mount.hp().clone() }
+/// `mount` as the rail's picker names it.
+fn thickness_source(metadata: &GameMetadataProvider, mount: &MountArmorRef) -> ThicknessSource {
+    ThicknessSource {
+        vehicle_param_index: mount.vehicle_index().clone(),
+        display_name: vehicle_display_name(metadata, mount.vehicle_index()),
+        hp: mount.hp().clone(),
+    }
 }
 
 /// One mount per ship mounting `model`, in the index's order. A ship's
@@ -170,12 +232,15 @@ pub(crate) fn load_model_scene(
         .load_model(&request.path, &options)
         .map_err(|report| ModelSceneError::Load { path: request.path.clone(), reason: format!("{report:?}") })?;
 
-    let (meshes, thickness, thickness_choices) = match thickness_ref(&models.mount_armor, request) {
-        Some(mount) => (
-            model.armor_meshes(mount.hull_armor(), mount.mount_armor()),
-            ArmorThickness::Ship(thickness_source(metadata, mount)),
-            thickness_choices(metadata, &models.mount_armor, &request.path),
-        ),
+    let (meshes, thickness, thickness_choices) = match thickness_ref(&models.mount_armor, metadata, request) {
+        Some(source) => {
+            let maps = source.maps();
+            (
+                model.armor_meshes(maps.hull, maps.mount),
+                source.thickness(metadata),
+                thickness_choices(metadata, &models.mount_armor, &request.path),
+            )
+        }
         None => {
             let mut meshes = model.armor_meshes(None, None);
             paint_unknown_thickness(&mut meshes);
@@ -275,15 +340,14 @@ pub fn spawn_load_model_scene(
 /// thread.
 pub(crate) fn export_model_glb(
     models: &ModelAssets,
+    metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
     options: &ShipExportOptions,
     path: &std::path::Path,
 ) -> Result<(), ExportGlbError> {
-    let mount = thickness_ref(&models.mount_armor, request);
-    let armor = ModelArmorMaps {
-        hull: mount.and_then(MountArmorRef::hull_armor),
-        mount: mount.and_then(MountArmorRef::mount_armor),
-    };
+    let source = thickness_ref(&models.mount_armor, metadata, request);
+    // No source writes no thickness, which is what the viewer shows as unknown.
+    let armor = source.as_ref().map(ThicknessRef::maps).unwrap_or_default();
     let export_options = ModelExportOptions {
         lod: options.lod,
         damaged: options.damaged,
@@ -390,8 +454,82 @@ mod tests {
     use wowsunpack::export::mount_armor::MountArmorIndex;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::game_params::types::ArmorMap;
+    use wowsunpack::game_params::types::ParamData;
+    use wowsunpack::game_types::GameParamId;
 
     use super::*;
+
+    fn ship_with_hull_armor(armor: Option<ArmorMap>) -> GameMetadataProvider {
+        let vehicle = Vehicle::builder()
+            .level(10)
+            .group("battleship".to_owned())
+            .maybe_abilities(None)
+            .upgrades(Vec::new())
+            .maybe_config_data(None)
+            .maybe_model_path(None)
+            .maybe_armor(armor)
+            .maybe_hit_locations(None)
+            .permoflages(Vec::new())
+            .camera_trajectories(Vec::new())
+            .maybe_ttx_components(None)
+            .innate_skills(Vec::new())
+            .build();
+        let param = Param::builder()
+            .id(GameParamId::from(1u32))
+            .index("PASB018".to_owned())
+            .name("PASB018_Iowa_1944".to_owned())
+            .nation("USA".to_owned())
+            .data(ParamData::Vehicle(vehicle))
+            .build();
+
+        GameMetadataProvider::from_params_no_specs(vec![param]).expect("a one-ship provider builds")
+    }
+
+    fn section() -> ModelPath {
+        ModelPath::parse("content/gameplay/usa/ship/battleship/ASB018_Iowa_1944/ASB018_Iowa_1944_Bow.model")
+            .expect("a model path")
+    }
+
+    fn opened_from_ship(part: ShipPartKey) -> ModelLoadRequest {
+        let from_ship = ShipPartRef { vehicle_param_index: VehicleParamIndex::new("PASB018"), part };
+        ModelLoadRequest::new(section(), Some(from_ship))
+    }
+
+    #[test]
+    fn a_hull_section_opened_from_its_ship_reads_that_ships_hull_armor() {
+        let armor: ArmorMap = HashMap::from([(7, std::collections::BTreeMap::from([(1, 32.0)]))]);
+        let metadata = ship_with_hull_armor(Some(armor.clone()));
+        let index = MountArmorIndex::default();
+        let request = opened_from_ship(ShipPartKey::HullSection(section()));
+
+        let source = thickness_ref(&index, &metadata, &request).expect("the ship's hull armor");
+
+        assert_eq!(source.maps().hull, Some(&armor));
+        assert!(source.maps().mount.is_none());
+        let ArmorThickness::Hull(hull) = source.thickness(&metadata) else { panic!("a hull source") };
+        assert_eq!(hull.vehicle_param_index.as_str(), "PASB018");
+        assert_eq!(hull.section, section());
+    }
+
+    #[test]
+    fn a_hull_section_has_no_thickness_without_a_ship_or_its_armor() {
+        let index = MountArmorIndex::default();
+        let armorless = ship_with_hull_armor(None);
+        let armored = ship_with_hull_armor(Some(HashMap::from([(7, std::collections::BTreeMap::from([(1, 32.0)]))])));
+
+        let from_armorless_ship = opened_from_ship(ShipPartKey::HullSection(section()));
+        assert!(thickness_ref(&index, &armorless, &from_armorless_ship).is_none());
+
+        let on_its_own = ModelLoadRequest::new(section(), None);
+        assert!(thickness_ref(&index, &armored, &on_its_own).is_none());
+
+        let misc = ShipPartKey::Misc {
+            node: HardpointName::new("MP_Misc_1"),
+            parent: wowsunpack::export::ship_parts::MiscParent::HullSection(section()),
+        };
+        assert!(thickness_ref(&index, &armored, &opened_from_ship(misc)).is_none(), "a misc is not the hull");
+    }
 
     /// Opens the Iowa class main turret on its own against a real install:
     /// its meshes, textures, hardpoints and armor, with the thickness read
@@ -412,10 +550,9 @@ mod tests {
         .expect("the game VFS");
         let metadata = Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("GameParams"));
         let assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata)).expect("ship assets");
-        let models = ModelAssets {
-            library: Arc::new(assets.model_library().expect("the model library")),
-            mount_armor: MountArmorIndex::build(&metadata),
-        };
+        let library = assets.model_library().expect("the model library");
+        let mount_armor = MountArmorIndex::build(&metadata, library.catalog());
+        let models = ModelAssets { library: Arc::new(library), mount_armor };
         let turret = models
             .library
             .catalog()

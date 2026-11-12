@@ -273,6 +273,10 @@ enum Commands {
         #[arg(long, value_enum, default_value = "mesh")]
         contents: ContentsArg,
 
+        /// Omit the empty nodes that mark each part's hardpoints
+        #[arg(long)]
+        no_hardpoints: bool,
+
         /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
         /// texture tier that meets the limit. Overrides the tier that --lod selects
         #[arg(long)]
@@ -1126,6 +1130,7 @@ fn run() -> Result<(), Report> {
             no_textures,
             damaged,
             contents,
+            no_hardpoints,
             max_texture_size,
             list_textures,
             camos,
@@ -1147,6 +1152,7 @@ fn run() -> Result<(), Report> {
                 no_textures,
                 damaged,
                 contents,
+                no_hardpoints,
                 max_texture_size,
                 list_textures,
                 &camos,
@@ -2016,6 +2022,7 @@ fn run_export_ship(
     no_textures: bool,
     damaged: bool,
     contents: ContentsArg,
+    no_hardpoints: bool,
     max_texture_size: Option<u32>,
     list_textures: bool,
     camos: &[String],
@@ -2078,6 +2085,7 @@ fn run_export_ship(
         damaged,
         contents: contents.into(),
         texture_lod: resolve_texture_lod(max_texture_size, lod),
+        hardpoints: !no_hardpoints,
         ..Default::default()
     };
 

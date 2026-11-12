@@ -32,6 +32,7 @@ use crate::game_params::keys;
 use crate::game_params::provider::GameMetadataProvider;
 use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::HullUpgradeConfig;
 use crate::game_params::types::MountPoint;
 use crate::game_params::types::Species;
 use crate::game_params::types::Vehicle;
@@ -69,10 +70,12 @@ use super::ship_parts::MISC_NODE_PREFIX;
 use super::ship_parts::MiscParent;
 use super::ship_parts::ShipPart;
 use super::ship_parts::ShipPartKey;
+use super::ship_parts::battle_section_extenders;
 use super::ship_parts::misc_name_from_node;
 use super::ship_parts::mount_has_misc_selection;
 use super::ship_parts::mount_shows_misc;
 use super::ship_parts::select_hull_mount_points;
+use super::ship_parts::select_hull_upgrade;
 use super::ship_parts::split_compound_hp;
 use super::size_estimate;
 use super::texture;
@@ -154,6 +157,8 @@ pub struct ShipExportOptions {
     pub module_overrides: std::collections::HashMap<crate::game_params::keys::ComponentType, String>,
     /// Which camouflage schemes to embed. Default: [`CamoSelection::BaseOnly`].
     pub camos: CamoSelection,
+    /// Write one empty node per part hardpoint. Default: true.
+    pub hardpoints: bool,
 }
 
 impl Default for ShipExportOptions {
@@ -167,6 +172,7 @@ impl Default for ShipExportOptions {
             texture_lod: texture::TextureLod::Full,
             module_overrides: std::collections::HashMap::new(),
             camos: CamoSelection::BaseOnly,
+            hardpoints: true,
         }
     }
 }
@@ -486,9 +492,12 @@ impl ShipAssets {
         let mounts = loaded.mounts;
 
         // Load misc parts (propellers, boats, deck fittings) from the skeleton extenders
-        // the hull section and mount models name, and place them at their `MP_` nodes.
+        // the hull section and mount models name and the hull component adds, and place
+        // them at their `MP_` nodes.
         let model_leaves = ModelLeaves::new(&db);
-        let hull = HullSections::new(&hull_parts, &visual_paths, &db, &self_id_index, &model_leaves);
+        let upgrade = vehicle.and_then(|v| select_hull_upgrade(v, options.hull.as_deref()));
+        let hull =
+            HullSections::new(&hull_parts, &visual_paths, &db, &self_id_index, &model_leaves, &info.model_dir, upgrade);
         let (misc_models, miscs) =
             self.collect_miscs(&db, &self_id_index, &model_leaves, &hull, &mounts, &turret_models);
 
@@ -921,8 +930,9 @@ impl ShipAssets {
             .parts
             .iter()
             .zip(&hull.models)
-            .filter_map(|(part, section)| Some((section.as_ref()?, model_leaves.extenders(db, &part.name))));
-        for (section, extenders) in hull_extenders {
+            .zip(&hull.extenders)
+            .filter_map(|((part, section), extenders)| Some((part, section.as_ref()?, extenders)));
+        for (part, section, extenders) in hull_extenders {
             let nodes =
                 extenders.iter().flat_map(|ext| ext.name_ids.iter().zip(&ext.parent_name_ids).zip(&ext.matrices));
             for ((&name_id, &parent_id), matrix) in nodes {
@@ -939,7 +949,7 @@ impl ShipAssets {
                     continue;
                 };
                 let parent_name = db.strings.get_string_by_id(parent_id);
-                let transform = compose_misc_transform(parent_name, &matrix.0, hull.parts, &db.strings);
+                let transform = compose_misc_transform(parent_name, &matrix.0, &part.visual, hull.parts, &db.strings);
                 placements.push(ResolvedMisc {
                     node: HardpointName::new(node_name),
                     parent: MiscParent::HullSection(section.clone()),
@@ -990,8 +1000,7 @@ impl ShipAssets {
                 // off `Rotate_Y`, above that reflecting bone, so applying it would mirror
                 // the misc model (an improper, det -1 transform).
                 let parent_name = db.strings.get_string_by_id(parent_id);
-                let local =
-                    compose_misc_transform(parent_name, &local_matrix, std::slice::from_ref(turret), &db.strings);
+                let local = compose_misc_transform(parent_name, &local_matrix, &turret.visual, &[], &db.strings);
                 let transform = mat4_mul(&mount.armor_transform, &local);
                 placements.push(ResolvedMisc {
                     node: HardpointName::new(node_name),
@@ -1647,11 +1656,14 @@ impl ShipModelContext {
             }
         }
 
-        let hardpoint_sets: Vec<HardpointSet<'_>> = self
-            .parts
-            .iter()
-            .map(|part| HardpointSet { name: part.key.label(), hardpoints: &part.hardpoints })
-            .collect();
+        let hardpoint_sets: Vec<HardpointSet<'_>> = if self.options.hardpoints {
+            self.parts
+                .iter()
+                .map(|part| HardpointSet { name: part.key.label(), hardpoints: &part.hardpoints })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         gltf_export::export_ship_glb(
             &sub_models,
@@ -2048,21 +2060,28 @@ impl ResolvedMisc {
     }
 }
 
-/// The hull parts of a ship with the `.model` each is keyed by.
+/// The hull parts of a ship with the `.model` each is keyed by and the
+/// skeleton extenders the game attaches to it.
 struct HullSections<'a> {
     parts: &'a [OwnedSubModel],
     /// Aligned with `parts`. `None` for a visual the store holds no model beside.
     models: Vec<Option<ModelPath>>,
+    /// Aligned with `parts`: the model's own extenders, then those the hull
+    /// component adds in battle.
+    extenders: Vec<Vec<skeleton_extender::SkeletonExtender>>,
 }
 
 impl<'a> HullSections<'a> {
-    /// `visual_paths` holds `(sub_name, visual path)` for every hull visual found.
+    /// `visual_paths` holds `(sub_name, visual path)` for every hull visual
+    /// found; `model_dir` is the ship model's stem.
     fn new(
         parts: &'a [OwnedSubModel],
         visual_paths: &[(String, String)],
         db: &PrototypeDatabase<'_>,
         self_id_index: &HashMap<u64, usize>,
         model_leaves: &ModelLeaves<'_>,
+        model_dir: &str,
+        upgrade: Option<&HullUpgradeConfig>,
     ) -> Self {
         let paths: HashMap<&str, &str> =
             visual_paths.iter().map(|(name, path)| (name.as_str(), path.as_str())).collect();
@@ -2075,32 +2094,44 @@ impl<'a> HullSections<'a> {
                 (stored == model.as_str()).then_some(model)
             })
             .collect();
+        let extenders = parts
+            .iter()
+            .map(|part| {
+                let mut extenders = model_leaves.extenders(db, &part.name);
+                extenders.extend(battle_section_extenders(db, self_id_index, upgrade, model_dir, &part.name));
+                extenders
+            })
+            .collect();
 
-        Self { parts, models }
+        Self { parts, models, extenders }
     }
 }
 
 /// Compose a misc node's ship-space transform from its parent node's world transform
 /// and its own local matrix.
 ///
-/// The parent is referenced by name into the base model skeleton. When it resolves to
-/// a hull node (e.g. the model root "Scene Root", which is identity), the composed
-/// transform is `parent_world * local`. When the parent name is absent from the loaded
-/// hull skeleton the local matrix is already ship-space, so it is used directly.
+/// The parent is referenced by name into the base model skeleton, looked up in `own`
+/// (the visual whose extender names the node) first, as sections reuse node names,
+/// then in `others`. When it resolves (e.g. the model root "Scene Root", which is
+/// identity), the composed transform is `parent_world * local`. When no visual holds
+/// it the local matrix is already ship-space, so it is used directly.
 fn compose_misc_transform(
     parent_name: Option<&str>,
     local: &[f32; 16],
-    hull_parts: &[OwnedSubModel],
+    own: &VisualPrototype,
+    others: &[OwnedSubModel],
     strings: &assets_bin::StringsSection<'_>,
 ) -> [f32; 16] {
-    if let Some(pname) = parent_name {
-        for part in hull_parts {
-            if let Some(parent_world) = part.visual.find_hardpoint_transform(pname, strings) {
-                return mat4_mul(&parent_world, local);
-            }
-        }
+    let parent_world = parent_name.and_then(|name| {
+        std::iter::once(own)
+            .chain(others.iter().map(|part| &part.visual))
+            .find_map(|visual| visual.find_hardpoint_transform(name, strings))
+    });
+
+    match parent_world {
+        Some(parent_world) => mat4_mul(&parent_world, local),
+        None => *local,
     }
-    *local
 }
 
 /// What [`ShipModelContext::parts`] is built from, borrowed during the load.
@@ -2124,12 +2155,12 @@ impl ShipPartSources<'_> {
         let mut parts = Vec::with_capacity(self.hull.parts.len() + self.mounts.len() + self.miscs.len());
 
         let hull_visuals: Vec<&VisualPrototype> = self.hull.parts.iter().map(|part| &part.visual).collect();
-        for (part, model) in self.hull.parts.iter().zip(&self.hull.models) {
+        for ((part, model), extenders) in self.hull.parts.iter().zip(&self.hull.models).zip(&self.hull.extenders) {
             // A part is keyed by its model path; a visual path that names none cannot be keyed.
             let Some(model) = model else {
                 continue;
             };
-            let hardpoints = model_space_hardpoints(db, model_leaves, part, &hull_visuals);
+            let hardpoints = model_space_hardpoints(db, part, extenders, &hull_visuals);
             parts.push(ShipPart {
                 key: ShipPartKey::HullSection(model.clone()),
                 model: Some(model.clone()),
@@ -2148,7 +2179,7 @@ impl ShipPartSources<'_> {
         let turret_hardpoints: Vec<ModelSpaceHardpoints> = self
             .turret_models
             .iter()
-            .map(|turret| model_space_hardpoints(db, model_leaves, turret, &[&turret.visual]))
+            .map(|turret| model_space_hardpoints(db, turret, &model_leaves.extenders(db, &turret.name), &[]))
             .collect();
         for mount in self.mounts {
             let idx = mount.turret_model_index;
@@ -2172,7 +2203,7 @@ impl ShipPartSources<'_> {
         let misc_hardpoints: Vec<ModelSpaceHardpoints> = self
             .misc_models
             .iter()
-            .map(|misc| model_space_hardpoints(db, model_leaves, misc, &[&misc.visual]))
+            .map(|misc| model_space_hardpoints(db, misc, &model_leaves.extenders(db, &misc.name), &[]))
             .collect();
         for misc in self.miscs {
             let idx = misc.misc_model_index;
@@ -2239,17 +2270,18 @@ fn sibling_model_path(visual_path: &str) -> Option<ModelPath> {
     ModelPath::parse(&format!("{stem}.model")).ok()
 }
 
-/// The `HP_` nodes of `part`'s visual and the `MP_`/`EP_` nodes of its
-/// model's skeleton extenders, whose parents are looked up in `parent_visuals`.
+/// The `HP_` nodes of `part`'s visual and the `MP_`/`EP_` nodes of
+/// `extenders`, whose parents are looked up in `part`'s own visual first, then
+/// in `other_visuals`.
 fn model_space_hardpoints(
     db: &PrototypeDatabase<'_>,
-    model_leaves: &ModelLeaves<'_>,
     part: &OwnedSubModel,
-    parent_visuals: &[&VisualPrototype],
+    extenders: &[skeleton_extender::SkeletonExtender],
+    other_visuals: &[&VisualPrototype],
 ) -> ModelSpaceHardpoints {
     let mut hardpoints = ModelSpaceHardpoints::new();
     hardpoints.add_visual(&part.visual, &db.strings);
-    hardpoints.add_extenders(&model_leaves.extenders(db, &part.name), parent_visuals, &db.strings);
+    hardpoints.add_extenders(extenders, &part.visual, other_visuals, &db.strings);
 
     hardpoints
 }

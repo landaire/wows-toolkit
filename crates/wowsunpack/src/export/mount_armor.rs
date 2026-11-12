@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
 
 use crate::game_params::keys::ComponentType;
@@ -16,7 +17,28 @@ use crate::game_params::types::MountPoint;
 use crate::game_types::GameParamId;
 
 use super::hardpoint::HardpointName;
+use super::model_catalog::ModelCatalog;
 use super::model_catalog::ModelPath;
+
+/// A vehicle's GameParams index, e.g. `PASB018`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VehicleParamIndex(String);
+
+impl VehicleParamIndex {
+    pub fn new(index: impl Into<String>) -> Self {
+        Self(index.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for VehicleParamIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// Every model GameParams mounts on a ship, with each ship and hardpoint that
 /// mounts it. Built once; owns its data.
@@ -27,8 +49,10 @@ pub struct MountArmorIndex {
 
 impl MountArmorIndex {
     /// Indexes the mounts of every hull upgrade and every alternative
-    /// component of every vehicle.
-    pub fn build(metadata: &GameMetadataProvider) -> Self {
+    /// component of every vehicle. A skin no ship mounts directly takes the
+    /// mounts of the stock models `catalog` links it to, as an exterior swaps
+    /// it in at those hardpoints.
+    pub fn build(metadata: &GameMetadataProvider, catalog: &ModelCatalog) -> Self {
         let mut by_model: HashMap<ModelPath, Vec<MountArmorRef>> = HashMap::new();
 
         for param in metadata.params() {
@@ -59,7 +83,7 @@ impl MountArmorIndex {
 
                     by_model.entry(model).or_default().push(MountArmorRef {
                         vehicle: param.id(),
-                        vehicle_index: param.index().to_string(),
+                        vehicle_index: VehicleParamIndex::new(param.index()),
                         tier: vehicle.level(),
                         hp,
                         mount_armor: mount.mount_armor().cloned().map(Arc::new),
@@ -73,6 +97,21 @@ impl MountArmorIndex {
             refs.sort_by(|a, b| (a.tier, &a.vehicle_index, &a.hp).cmp(&(b.tier, &b.vehicle_index, &b.hp)));
         }
 
+        let mut skin_refs: Vec<(ModelPath, Vec<MountArmorRef>)> = Vec::new();
+        for entry in catalog.entries() {
+            if entry.skin_of().is_empty() || by_model.contains_key(entry.path()) {
+                continue;
+            }
+            let mut refs: Vec<MountArmorRef> =
+                entry.skin_of().iter().filter_map(|stock| by_model.get(stock)).flatten().cloned().collect();
+            if refs.is_empty() {
+                continue;
+            }
+            refs.sort_by(|a, b| (a.tier, &a.vehicle_index, &a.hp).cmp(&(b.tier, &b.vehicle_index, &b.hp)));
+            skin_refs.push((entry.path().clone(), refs));
+        }
+        by_model.extend(skin_refs);
+
         Self { by_model }
     }
 
@@ -83,9 +122,14 @@ impl MountArmorIndex {
     }
 
     /// The mount of `model` at `hp` on the vehicle with GameParams index
-    /// `vehicle_index` (e.g. `PASB018`).
-    pub fn find(&self, model: &ModelPath, vehicle_index: &str, hp: &HardpointName) -> Option<&MountArmorRef> {
-        self.referencing(model).iter().find(|mount| mount.vehicle_index == vehicle_index && &mount.hp == hp)
+    /// `vehicle_index`.
+    pub fn find(
+        &self,
+        model: &ModelPath,
+        vehicle_index: &VehicleParamIndex,
+        hp: &HardpointName,
+    ) -> Option<&MountArmorRef> {
+        self.referencing(model).iter().find(|mount| &mount.vehicle_index == vehicle_index && &mount.hp == hp)
     }
 
     /// Number of distinct mounted models.
@@ -102,7 +146,7 @@ impl MountArmorIndex {
 #[derive(Debug, Clone)]
 pub struct MountArmorRef {
     vehicle: GameParamId,
-    vehicle_index: String,
+    vehicle_index: VehicleParamIndex,
     tier: u32,
     hp: HardpointName,
     mount_armor: Option<Arc<ArmorMap>>,
@@ -114,8 +158,7 @@ impl MountArmorRef {
         self.vehicle
     }
 
-    /// The vehicle's GameParams index, e.g. `PASB018`.
-    pub fn vehicle_index(&self) -> &str {
+    pub fn vehicle_index(&self) -> &VehicleParamIndex {
         &self.vehicle_index
     }
 

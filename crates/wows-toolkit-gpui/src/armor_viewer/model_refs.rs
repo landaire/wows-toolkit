@@ -1,33 +1,12 @@
 //! Names for what the Model Viewer sidebar can open or toggle, shared by the
 //! sidebar and the pane that acts on its events.
 
-use std::fmt;
-
 use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::ship_parts::MiscParent;
 
+pub use wowsunpack::export::mount_armor::VehicleParamIndex;
 pub use wowsunpack::export::ship_parts::ShipPartKey;
-
-/// A ship's GameParams index, e.g. `PASB018`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VehicleParamIndex(String);
-
-impl VehicleParamIndex {
-    pub fn new(index: impl Into<String>) -> Self {
-        Self(index.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for VehicleParamIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
 
 /// The ship and part a part model was opened from.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -200,3 +200,45 @@ fn listings_match_loads_across_classes() {
         assert_same_parts(&name, &listing.keys().collect(), ship.parts());
     }
 }
+
+/// Benson's hull components attach different deck fittings
+/// (`customSkeletonExtenders.battle`), so its two hulls list different miscs.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_hull_component_adds_its_battle_skeleton_extenders() {
+    let Some(fixture) = FIXTURE.as_ref() else {
+        return;
+    };
+    let benson = vehicle(&fixture.assets, "ASD049_Benson_1944");
+    let hull_miscs = |hull: &str| -> BTreeSet<String> {
+        let listing = fixture.library.list_ship_parts(benson, Some(hull), &HashMap::new()).expect("Benson lists");
+        listing
+            .miscs
+            .iter()
+            .filter(|misc| matches!(misc.parent, MiscParent::HullSection(_)))
+            .map(|misc| misc.node.to_string())
+            .collect()
+    };
+
+    let mut upgrades: Vec<&String> = benson.hull_upgrades().expect("Benson has hull upgrades").keys().collect();
+    upgrades.sort();
+    let [first, second] = upgrades[..] else {
+        panic!("Benson has two hulls, got {upgrades:?}");
+    };
+    let a = hull_miscs(first);
+    let b = hull_miscs(second);
+    assert!(a.iter().any(|node| !b.contains(node)), "hull A attaches fittings hull B lacks");
+    assert!(b.iter().any(|node| !a.contains(node)), "hull B attaches fittings hull A lacks");
+
+    let options = ShipExportOptions { textures: false, hull: Some(second.clone()), ..ShipExportOptions::default() };
+    let ship = fixture.assets.load_ship_from_vehicle(benson, &options).expect("Benson loads");
+    let loaded: BTreeSet<String> = ship
+        .parts()
+        .iter()
+        .filter_map(|part| match &part.key {
+            ShipPartKey::Misc { node, parent: MiscParent::HullSection(_) } => Some(node.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(loaded, b, "the loader attaches what the listing names");
+}

@@ -1317,9 +1317,13 @@ impl ArmorViewerPane {
                         export_dialog::ExportTarget::Ship { param_index, .. } => {
                             load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path)
                         }
-                        export_dialog::ExportTarget::Model { request, models } => {
-                            super::load_model::export_model_glb(&models, &request, &options, &path)
-                        }
+                        export_dialog::ExportTarget::Model { request, models } => super::load_model::export_model_glb(
+                            &models,
+                            assets.assets.metadata(),
+                            &request,
+                            &options,
+                            &path,
+                        ),
                     };
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.

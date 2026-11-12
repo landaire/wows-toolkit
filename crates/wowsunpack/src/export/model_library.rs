@@ -94,7 +94,7 @@ pub enum TextureDecode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ModelLoadOptions {
-    /// Mesh LOD (0 = most detailed). A part without that LOD contributes no meshes.
+    /// Mesh LOD (0 = most detailed), clamped to each part's deepest.
     pub lod: usize,
     /// Show the destroyed state (crack geometry) instead of the intact one.
     pub damaged: bool,
@@ -189,6 +189,10 @@ impl ModelLibrary {
         self.assets.db()
     }
 
+    pub(crate) fn self_id_index(&self) -> &HashMap<u64, usize> {
+        &self.self_id_index
+    }
+
     /// The model named `stem`, as the ship loader resolves misc models by name.
     pub(crate) fn model_by_stem(&self, stem: &str) -> Option<&ModelPath> {
         self.models_by_stem.get(stem)
@@ -211,6 +215,24 @@ impl ModelLibrary {
         &self.vfs
     }
 
+    /// The LOD count and armor presence of `path` and its sections, read
+    /// without building meshes or textures.
+    pub fn model_summary(&self, path: &ModelPath) -> Result<ModelSummary, Report<ModelLoadError>> {
+        let db = &self.assets.db();
+        let sources = self.read_parts(db, path)?;
+        let mut summary = ModelSummary { lod_count: 0, has_armor: false };
+        for source in &sources {
+            summary.lod_count = summary.lod_count.max(source.visual.lods.len());
+            if !summary.has_armor {
+                let geom = geometry::parse_geometry(&source.geometry_bytes)
+                    .context_with(|| ModelLoadError::GeometryParse { path: source.geometry_path.clone() })?;
+                summary.has_armor = !geom.armor_models.is_empty();
+            }
+        }
+
+        Ok(summary)
+    }
+
     /// Loads `path` with every section the catalogue lists for it: a ship's
     /// own visual holds only a distant silhouette, its sections the hull.
     pub fn load_model(
@@ -228,12 +250,14 @@ impl ModelLibrary {
         for source in &sources {
             let geom = geometry::parse_geometry(&source.geometry_bytes)
                 .context_with(|| ModelLoadError::GeometryParse { path: source.geometry_path.clone() })?;
+            // A part clamps a deep LOD request to its own deepest, as export does.
+            let lod = options.lod.min(source.visual.lods.len().saturating_sub(1));
             let mut part_meshes = gltf_export::collect_hull_meshes_indexed(
                 &source.visual,
                 &geom,
                 db,
                 &self.self_id_index,
-                options.lod,
+                lod,
                 options.damaged,
                 None,
             )
@@ -662,6 +686,14 @@ pub struct LoadedModelParts {
     pub armor: Vec<ArmorModel>,
 }
 
+/// What [`ModelLibrary::model_summary`] reads of a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelSummary {
+    /// The most LODs any part authors.
+    pub lod_count: usize,
+    pub has_armor: bool,
+}
+
 /// One `.model` that contributed meshes to a [`LoadedModel`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelPart {
@@ -730,7 +762,7 @@ fn model_hardpoints(db: &PrototypeDatabase<'_>, sources: &[PartSource]) -> Vec<H
     for source in sources {
         let mut part = ModelSpaceHardpoints::new();
         part.add_visual(&source.visual, &db.strings);
-        part.add_extenders(&source.extenders, &visuals, &db.strings);
+        part.add_extenders(&source.extenders, &source.visual, &visuals, &db.strings);
         for hardpoint in part.placed(None) {
             if !hardpoints.contains(&hardpoint) {
                 hardpoints.push(hardpoint);

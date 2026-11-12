@@ -787,10 +787,14 @@ fn render_thickness_source(entity: &Entity<ViewportView>, armor: &LoadedShipArmo
         ArmorThickness::Ship(source) => {
             t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.hp.as_str()).into_owned()
         }
+        ArmorThickness::Hull(source) => {
+            t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.section.stem()).into_owned()
+        }
         ArmorThickness::Unknown => t!("ui.model_view.thickness_unknown").into_owned(),
     };
     let current = match &model.thickness {
         ArmorThickness::Ship(source) => Some(source.vehicle_param_index.clone()),
+        ArmorThickness::Hull(source) => Some(source.vehicle_param_index.clone()),
         ArmorThickness::Unknown => None,
     };
 
@@ -867,7 +871,7 @@ pub(crate) fn render_hull_popover_content(
         (
             view.current_armor.clone(),
             view.hull_visibility.clone(),
-            view.display_settings.hull_opaque,
+            view.hull_opaque(),
             view.expanded_hull_groups.clone(),
             view.selected_camo,
             view.expanded_camo_groups.clone(),

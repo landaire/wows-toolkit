@@ -227,6 +227,9 @@ pub const SPLASH_BOXES: &str = "splashBoxes";
 pub const THICKNESS: &str = "thickness";
 pub const DRAFT: &str = "draft";
 pub const DOCK_Y_OFFSET: &str = "dockYOffset";
+pub const CUSTOM_SKELETON_EXTENDERS: &str = "customSkeletonExtenders";
+/// The preset of `customMiscs` and `customSkeletonExtenders` the game shows in battle.
+pub const BATTLE_PRESET: &str = "battle";
 pub const HEALTH: &str = "health";
 pub const MAX_SPEED: &str = "maxSpeed";
 pub const SPEED_COEF: &str = "speedCoef";

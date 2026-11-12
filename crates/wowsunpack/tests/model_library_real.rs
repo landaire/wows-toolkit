@@ -208,3 +208,33 @@ fn every_catalogued_kind_loads() {
     eprintln!("{loaded} loaded, {} failed", failures.len());
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_lod_past_a_part_s_deepest_draws_that_part_at_its_deepest() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    let iowa = library.load_model(&path(IOWA), &options(TextureDecode::None)).expect("Iowa loads");
+    let deepest = ModelLoadOptions { lod: iowa.lod_count() - 1, ..options(TextureDecode::None) };
+    let at_deepest = library.load_model(&path(IOWA), &deepest).expect("Iowa loads at its deepest LOD");
+    let past = ModelLoadOptions { lod: 64, ..options(TextureDecode::None) };
+    let clamped = library.load_model(&path(IOWA), &past).expect("Iowa loads past its LODs");
+
+    assert!(!clamped.meshes().is_empty(), "each part clamps to its own deepest LOD");
+    assert_eq!(clamped.meshes().len(), at_deepest.meshes().len());
+}
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_summary_matches_the_loaded_model() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    for raw in [IOWA, IOWA_TURRET] {
+        let loaded = library.load_model(&path(raw), &options(TextureDecode::None)).expect("model loads");
+        let summary = library.model_summary(&path(raw)).expect("summary reads");
+        assert_eq!(summary.lod_count, loaded.lod_count(), "{raw}");
+        assert_eq!(summary.has_armor, loaded.has_armor(), "{raw}");
+    }
+}

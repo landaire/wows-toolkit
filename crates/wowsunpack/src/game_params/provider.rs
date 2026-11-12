@@ -1393,7 +1393,9 @@ fn read_string_seq(val: &Value) -> Vec<String> {
     items.iter().filter_map(|v| v.string_ref().map(|s| s.inner().clone())).collect()
 }
 
-/// Parse a `customMiscs` dict (preset name -> list of misc names).
+/// Parse a string-keyed dict of string lists, such as `customMiscs` (preset
+/// name -> misc names) or a `customSkeletonExtenders` preset (section ->
+/// extender paths).
 fn parse_custom_miscs(dict: &pickled::Dict) -> HashMap<String, Vec<String>> {
     dict.iter()
         .filter_map(|(k, v)| {
@@ -2476,6 +2478,12 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
             config.hull_model_path = read_string(&hull_data, keys::MODEL);
             config.draft = read_float(&hull_data, keys::DRAFT).map(Meters::from);
             config.dock_y_offset = read_float(&hull_data, keys::DOCK_Y_OFFSET);
+            config.battle_skeleton_extenders = hull_data
+                .get(&pk(keys::CUSTOM_SKELETON_EXTENDERS))
+                .and_then(|v| v.dict_or_object_dict())
+                .and_then(|presets| presets.inner().get(&pk(keys::BATTLE_PRESET)).and_then(|v| v.dict_or_object_dict()))
+                .map(|sections| parse_custom_miscs(&sections.inner()))
+                .unwrap_or_default();
 
             // TTX hull base stats from the same resolved hull component sub-object.
             let (battery_capacity, battery_regen_rate) = read_submarine_battery(&hull_data);

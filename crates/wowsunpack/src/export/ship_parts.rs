@@ -11,16 +11,20 @@ use rootcause::Report;
 use rootcause::prelude::ResultExt;
 use thiserror::Error;
 
+use crate::game_params::keys;
 use crate::game_params::keys::ComponentType;
+use crate::game_params::types::HullUpgradeConfig;
 use crate::game_params::types::MountPoint;
 use crate::game_params::types::MountSpecies;
 use crate::game_params::types::Vehicle;
+use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::assets_bin::StringsSection;
 use crate::models::skeleton_extender::SkeletonExtender;
 use crate::models::visual::VisualPrototype;
 
 use super::hardpoint::Hardpoint;
 use super::hardpoint::HardpointName;
+use super::hardpoint::skeleton_extender_at;
 use super::model_catalog::ModelEntry;
 use super::model_catalog::ModelPath;
 use super::model_library::ModelLibrary;
@@ -32,7 +36,7 @@ pub(super) const MISC_NODE_PREFIX: &str = "MP_";
 
 /// The `customMiscs` preset key the game shows in battle (`MiscPresets.battle`);
 /// the viewer renders the battle configuration, excluding `dock`-only extras.
-pub(super) const MISC_PRESET_BATTLE: &str = "battle";
+pub(super) const MISC_PRESET_BATTLE: &str = keys::BATTLE_PRESET;
 
 /// Names one part of a ship, alike in a [`ShipPartListing`] and in
 /// [`super::ship::ShipModelContext::parts`].
@@ -165,9 +169,11 @@ impl ModelLibrary {
         let hull_sections: Vec<ModelPath> = std::iter::once(ship.clone()).chain(sections).collect();
 
         let db = self.db();
+        let upgrade = select_hull_upgrade(vehicle, hull);
         let mut miscs = BTreeSet::new();
         for section in &hull_sections {
-            let extenders = self.model_extenders(&db, section);
+            let mut extenders = self.model_extenders(&db, section);
+            extenders.extend(battle_section_extenders(&db, self.self_id_index(), upgrade, ship.stem(), section.stem()));
             for node in misc_nodes(&extenders, &db.strings) {
                 let Some(model) = self.model_by_stem(&misc_name_from_node(node)) else {
                     continue;
@@ -250,16 +256,13 @@ impl ModelLibrary {
     }
 }
 
-/// Mount points for the chosen hull upgrade, with optional module overrides.
-/// `hull_selection` names an upgrade, a substring of one, or a hull component
-/// prefix (`"B"`); `None` takes the first upgrade by name. `None` when the
-/// vehicle has no upgrades or the selection matches none. A hardpoint two
-/// components name is kept once.
-pub(super) fn select_hull_mount_points(
-    vehicle: &Vehicle,
+/// The hull upgrade `hull_selection` names: an upgrade, a substring of one,
+/// or a hull component prefix (`"B"`); `None` takes the first upgrade by name.
+/// `None` when the vehicle has no upgrades or the selection matches none.
+pub(super) fn select_hull_upgrade<'v>(
+    vehicle: &'v Vehicle,
     hull_selection: Option<&str>,
-    module_overrides: &HashMap<ComponentType, String>,
-) -> Option<Vec<MountPoint>> {
+) -> Option<&'v HullUpgradeConfig> {
     let upgrades = vehicle.hull_upgrades()?;
     let mut sorted: Vec<_> = upgrades.iter().collect();
     sorted.sort_by_key(|(k, _)| (*k).clone());
@@ -279,16 +282,44 @@ pub(super) fn select_hull_mount_points(
         sorted.first().copied()
     };
 
-    selected.map(|(_, config)| {
-        let mount_points: Vec<MountPoint> = if module_overrides.is_empty() {
-            config.all_mount_points().cloned().collect()
-        } else {
-            config.mount_points_with_overrides(module_overrides).cloned().collect()
-        };
+    selected.map(|(_, config)| config)
+}
 
-        let mut seen = HashSet::new();
-        mount_points.into_iter().filter(|mount| seen.insert(mount.hp_name().to_string())).collect()
-    })
+/// Mount points for the hull upgrade [`select_hull_upgrade`] picks, with
+/// optional module overrides. A hardpoint two components name is kept once.
+pub(super) fn select_hull_mount_points(
+    vehicle: &Vehicle,
+    hull_selection: Option<&str>,
+    module_overrides: &HashMap<ComponentType, String>,
+) -> Option<Vec<MountPoint>> {
+    let config = select_hull_upgrade(vehicle, hull_selection)?;
+    let mount_points: Vec<MountPoint> = if module_overrides.is_empty() {
+        config.all_mount_points().cloned().collect()
+    } else {
+        config.mount_points_with_overrides(module_overrides).cloned().collect()
+    };
+
+    let mut seen = HashSet::new();
+    Some(mount_points.into_iter().filter(|mount| seen.insert(mount.hp_name().to_string())).collect())
+}
+
+/// The skeleton extenders `upgrade`'s hull component adds in battle to the
+/// hull section `section_stem` of the ship model `ship_stem`. Empty for the
+/// ship model itself, a section the component names none for, or a path
+/// that does not resolve.
+pub(super) fn battle_section_extenders(
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    upgrade: Option<&HullUpgradeConfig>,
+    ship_stem: &str,
+    section_stem: &str,
+) -> Vec<SkeletonExtender> {
+    let Some(section) = section_stem.strip_prefix(ship_stem).and_then(|rest| rest.strip_prefix('_')) else {
+        return Vec::new();
+    };
+    let paths = upgrade.and_then(|upgrade| upgrade.battle_skeleton_extenders.get(section));
+
+    paths.into_iter().flatten().filter_map(|path| skeleton_extender_at(db, self_id_index, path)).collect()
 }
 
 /// Splits a compound hardpoint such as `HP_AGM_3_HP_AGA_1` at the longest

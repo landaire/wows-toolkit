@@ -1271,6 +1271,10 @@ pub struct HullUpgradeConfig {
     /// Used to position the waterline plane on the ship model.
     #[cfg_attr(feature = "serde", serde(default))]
     pub dock_y_offset: Option<f32>,
+    /// Skeleton extender paths the hull component adds in battle
+    /// (`customSkeletonExtenders.battle`), keyed by hull section, e.g. `MidFront`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub battle_skeleton_extenders: HashMap<String, Vec<String>>,
     /// Mount points grouped by component type key (default selection).
     #[cfg_attr(feature = "serde", serde(default))]
     pub mounts_by_type: HashMap<super::keys::ComponentType, ComponentMounts>,

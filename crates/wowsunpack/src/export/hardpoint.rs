@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::assets_bin::PrototypeLocation;
 use crate::models::assets_bin::StringsSection;
 use crate::models::model::ModelPrototype;
 use crate::models::skeleton_extender;
@@ -113,12 +114,14 @@ impl ModelSpaceHardpoints {
     }
 
     /// Adds the `MP_` and `EP_` nodes of `extenders`. A node's parent is named
-    /// into the base skeleton, so it is looked up in `visuals`; a parent no
-    /// visual holds leaves the local matrix as the model-space transform.
+    /// into the base skeleton: it is looked up in `own` first, as sections
+    /// reuse node names, then in `others`; a parent no visual holds leaves the
+    /// local matrix as the model-space transform.
     pub(crate) fn add_extenders(
         &mut self,
         extenders: &[SkeletonExtender],
-        visuals: &[&VisualPrototype],
+        own: &VisualPrototype,
+        others: &[&VisualPrototype],
         strings: &StringsSection<'_>,
     ) {
         for extender in extenders {
@@ -131,9 +134,11 @@ impl ModelSpaceHardpoints {
                     continue;
                 };
 
-                let parent_world = strings
-                    .get_string_by_id(parent_id)
-                    .and_then(|parent| visuals.iter().find_map(|v| v.find_hardpoint_transform(parent, strings)));
+                let parent_world = strings.get_string_by_id(parent_id).and_then(|parent| {
+                    std::iter::once(own)
+                        .chain(others.iter().copied())
+                        .find_map(|v| v.find_hardpoint_transform(parent, strings))
+                });
                 let world = match parent_world {
                     Some(parent_world) => mat4_mul(&parent_world, &local.0),
                     None => local.0,
@@ -174,20 +179,35 @@ impl ModelSpaceHardpoints {
 /// The skeleton extenders a model names. One that does not resolve or parse
 /// is skipped: extenders only add hardpoints.
 pub(crate) fn model_extenders(db: &PrototypeDatabase<'_>, model: &ModelPrototype) -> Vec<SkeletonExtender> {
-    const SKELETON_EXTENDER_BLOB_INDEX: usize = 2;
-
     model
         .skel_ext_res_ids
         .iter()
-        .filter_map(|&id| {
-            let location = db.decode_r2p_value(db.lookup_r2p(id)?).ok()?;
-            if location.blob_index != SKELETON_EXTENDER_BLOB_INDEX {
-                return None;
-            }
-            let record = db.get_prototype_data(location, skeleton_extender::SKELETON_EXTENDER_ITEM_SIZE).ok()?;
-            skeleton_extender::parse_skeleton_extender(record).ok()
-        })
+        .filter_map(|&id| extender_at_location(db, db.decode_r2p_value(db.lookup_r2p(id)?).ok()?))
         .collect()
+}
+
+/// The skeleton extender at the VFS `path`, when it resolves to one and reads.
+pub(crate) fn skeleton_extender_at(
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    path: &str,
+) -> Option<SkeletonExtender> {
+    let (location, _) = db.resolve_path(path, self_id_index).ok()?;
+
+    extender_at_location(db, location)
+}
+
+/// The skeleton extender record at `location`; `None` for a location in
+/// another prototype blob, whose records have another layout.
+fn extender_at_location(db: &PrototypeDatabase<'_>, location: PrototypeLocation) -> Option<SkeletonExtender> {
+    const SKELETON_EXTENDER_BLOB_INDEX: usize = 2;
+
+    if location.blob_index != SKELETON_EXTENDER_BLOB_INDEX {
+        return None;
+    }
+    let record = db.get_prototype_data(location, skeleton_extender::SKELETON_EXTENDER_ITEM_SIZE).ok()?;
+
+    skeleton_extender::parse_skeleton_extender(record).ok()
 }
 
 /// Transform from a model's mesh space into its node space. Mount meshes are
@@ -244,5 +264,85 @@ mod tests {
         let placed = hardpoints.placed(Some(&translation(0.0, 1.0, 10.0)));
         let positions: Vec<(&str, [f32; 3])> = placed.iter().map(|h| (h.name.as_str(), h.position())).collect();
         assert_eq!(positions, [("HP_AGA_1", [0.25, 1.5, -9.5]), ("HP_AGA_2", [0.0, 1.5, -9.5])]);
+    }
+
+    const PARENT_ID: u32 = 1;
+    const NODE_ID: u32 = 2;
+
+    /// A one-slot-per-id strings table naming `PARENT_ID` and `NODE_ID`.
+    fn strings_table() -> (Vec<u8>, Vec<u8>, &'static [u8]) {
+        let data: &'static [u8] = b"Bollard\0MP_Rope\0";
+        let mut buckets = vec![0u8; 4 * 8];
+        let mut values = vec![0u8; 4 * 4];
+        for (id, offset) in [(PARENT_ID, 0u32), (NODE_ID, 8)] {
+            let slot = id as usize;
+            buckets[slot * 8..slot * 8 + 4].copy_from_slice(&id.to_le_bytes());
+            values[slot * 4..slot * 4 + 4].copy_from_slice(&offset.to_le_bytes());
+        }
+
+        (buckets, values, data)
+    }
+
+    /// A visual with one root node named `PARENT_ID` at `world`.
+    fn visual_with_parent(world: [f32; 16]) -> VisualPrototype {
+        use crate::data::parser_utils::BoundingBox;
+        use crate::data::parser_utils::Matrix4x4;
+        use crate::models::visual::VisualNodes;
+
+        VisualPrototype {
+            nodes: VisualNodes {
+                name_map_name_ids: vec![PARENT_ID],
+                name_map_node_ids: vec![0],
+                name_ids: vec![PARENT_ID],
+                matrices: vec![Matrix4x4(world)],
+                parent_ids: vec![0xFFFF],
+            },
+            merged_geometry_path_id: 0,
+            underwater_model: false,
+            abovewater_model: true,
+            bounding_box: BoundingBox { min: [0.0; 3], max: [0.0; 3] },
+            render_sets: Vec::new(),
+            lods: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_extender_parent_resolves_in_its_own_visual_first() {
+        use crate::data::parser_utils::Matrix4x4;
+        use crate::models::assets_bin::HashmapSection;
+
+        let (buckets, values, string_data) = strings_table();
+        let strings = StringsSection {
+            offsets_map: HashmapSection {
+                capacity: 4,
+                buckets: &buckets,
+                values: &values,
+                bucket_stride: 8,
+                value_stride: 4,
+            },
+            string_data,
+        };
+        let own = visual_with_parent(translation(2.0, 0.0, 0.0));
+        let base = visual_with_parent(translation(7.0, 0.0, 0.0));
+        let extender = SkeletonExtender {
+            name_ids: vec![NODE_ID],
+            parent_name_ids: vec![PARENT_ID],
+            matrices: vec![Matrix4x4(translation(0.0, 1.0, 0.0))],
+        };
+
+        let mut hardpoints = ModelSpaceHardpoints::new();
+        hardpoints.add_extenders(std::slice::from_ref(&extender), &own, &[&base, &own], &strings);
+        let placed = hardpoints.placed(None);
+        let positions: Vec<(&str, [f32; 3])> = placed.iter().map(|h| (h.name.as_str(), h.position())).collect();
+        assert_eq!(positions, [("MP_Rope", [2.0, 1.0, 0.0])]);
+
+        let mut fallback = ModelSpaceHardpoints::new();
+        // A visual without the parent node falls back to the others.
+        let mut bare = visual_with_parent(translation(0.0, 0.0, 0.0));
+        bare.nodes.name_map_name_ids.clear();
+        bare.nodes.name_map_node_ids.clear();
+        fallback.add_extenders(std::slice::from_ref(&extender), &bare, &[&own], &strings);
+        let placed = fallback.placed(None);
+        assert_eq!(placed.iter().map(Hardpoint::position).collect::<Vec<_>>(), [[2.0, 1.0, 0.0]]);
     }
 }
