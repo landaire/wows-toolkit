@@ -150,6 +150,35 @@ fn is_addressable(name: &str) -> bool {
 /// The path of the VFS root, and what an unset selection means.
 pub const ROOT_PATH: &str = "/";
 
+/// One segment of the path bar above the listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Crumb {
+    pub label: String,
+    /// The absolute directory path the segment navigates to.
+    pub path: String,
+}
+
+/// "res" for the root, then one segment per directory of `dir`.
+pub fn breadcrumbs(dir: &str) -> Vec<Crumb> {
+    let mut crumbs = vec![Crumb { label: "res".to_string(), path: ROOT_PATH.to_string() }];
+    let mut accumulated = String::new();
+    for part in dir.trim_matches('/').split('/').filter(|part| !part.is_empty()) {
+        accumulated.push('/');
+        accumulated.push_str(part);
+        crumbs.push(Crumb { label: part.to_string(), path: accumulated.clone() });
+    }
+    crumbs
+}
+
+/// The absolute path of the directory `file` is in, in the form the folder tree names
+/// directories by: [`ROOT_PATH`] for a file at the root.
+pub fn containing_dir(file: &VfsPath) -> String {
+    match file.as_str().trim_end_matches('/').rsplit_once('/') {
+        Some((dir, _)) if !dir.is_empty() => format!("/{}", dir.trim_start_matches('/')),
+        _ => ROOT_PATH.to_string(),
+    }
+}
+
 /// Filter text shorter than this lists the selected directory instead of
 /// searching. One or two characters match most of an install, which costs a
 /// full-list pass to produce a result nobody wanted.

@@ -11,6 +11,8 @@ use std::io;
 use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
+
+use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
 
 #[derive(Debug, thiserror::Error)]
@@ -130,6 +132,59 @@ pub enum PrototypeOutput {
     /// raw. A prototype the decoder rejects is written raw rather than
     /// skipped, so the extraction never silently loses a file.
     DecodeToJson,
+}
+
+/// What the extraction queue is doing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ExtractState {
+    #[default]
+    Idle,
+    /// Expanding the queue's directories. The file count is not known yet, so there is no
+    /// fraction to show.
+    Counting,
+    Running(ExtractProgress),
+    Failed(String),
+    /// Finished or cancelled, with what actually reached disk.
+    Done(ExtractOutcome),
+}
+
+impl ExtractState {
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Counting | Self::Running(_))
+    }
+
+    pub fn progress(&self) -> Option<&ExtractProgress> {
+        match self {
+            Self::Running(progress) => Some(progress),
+            _ => None,
+        }
+    }
+
+    /// The state after the run ends with `result`.
+    pub fn finished(result: Result<ExtractOutcome, ExtractError>) -> Self {
+        match result {
+            Ok(outcome) => Self::Done(outcome),
+            Err(err) => Self::Failed(err.to_string()),
+        }
+    }
+
+    /// Where a run has got to, in words. `None` before anything has run.
+    pub fn status(&self) -> Option<String> {
+        Some(match self {
+            Self::Idle => return None,
+            Self::Counting => t!("ui.unpacker.counting_files").into_owned(),
+            Self::Running(progress) => {
+                t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned()
+            }
+            Self::Failed(reason) => t!("ui.unpacker.extract_failed", reason = reason).into_owned(),
+            Self::Done(ExtractOutcome::Completed { written }) => {
+                t!("ui.unpacker.extracted", count = written).into_owned()
+            }
+            Self::Done(ExtractOutcome::Stopped { written }) => {
+                t!("ui.unpacker.cancelled", count = written).into_owned()
+            }
+        })
+    }
 }
 
 /// Writes every file in `files` under `output_dir`, reporting progress to
