@@ -1581,7 +1581,7 @@ fn comparison_output_stays_bounded() {
         }
         let output = game().call_tool("ship_comparison", args).expect("group compares");
         let chars = serde_json::to_string(&output).expect("output serializes").len();
-        let limit = if named.is_some() { 25_000 } else { 30_000 };
+        let limit = if named.is_some() { 26_000 } else { 30_000 };
         assert!(chars < limit, "tier 10 {class} named {named:?}: {chars} chars, over {limit}");
         sizes.push(format!("tier 10 {class} named {named:?}: {chars} chars, about {} tokens", chars * 2 / 7));
         if class == "destroyer" && named.is_none() {
@@ -2926,6 +2926,31 @@ fn citadel_profiles_of_a_battleship_a_turtleback_and_cruisers() {
     let zao = profile("Zao");
     assert!(zao.shape.turtleback.is_none());
     insta::assert_yaml_snapshot!("citadel_profile_zao", zao);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn prins_van_oranje_broadside_stacks_total_every_plate_to_the_citadel() {
+    let profile = game()
+        .citadel_profile(&CitadelProfileArgs { ship: "Prins van Oranje".to_owned(), ..Default::default() })
+        .expect("Prins van Oranje has a citadel");
+    let broadside = profile.approaches.first().expect("the profile has a broadside approach");
+
+    for stack in &broadside.stacks {
+        assert!(stack.plates.len() >= 2, "a side stack includes outer armor and the citadel");
+        assert!(
+            stack.plates.last().is_some_and(|plate| plate.zone == "Citadel"),
+            "the first citadel plate ends the stack"
+        );
+        let listed_total: f32 = stack.plates.iter().map(|plate| plate.effective_mm.value()).sum();
+        if stack.more_plates == 0 {
+            assert!((stack.total_effective_mm.value() - listed_total).abs() < 0.1);
+        } else {
+            assert!(stack.total_effective_mm.value() >= listed_total);
+        }
+    }
+
+    insta::assert_yaml_snapshot!(broadside);
 }
 
 #[test]

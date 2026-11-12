@@ -47,6 +47,50 @@ fn main_battery_dispersion_with_and_without_range_modifiers() {
 
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
+fn grosser_kurfurst_range_mod_comparison_defaults_to_12_km() {
+    let request: DispersionAtRangeArgs = serde_json::from_value(serde_json::json!({
+        "ship": "GK",
+        "build": "range mod",
+    }))
+    .expect("the default range is accepted");
+    assert_eq!(request.range_km, Km::new(12.0));
+
+    let output = GAME.dispersion_at_range(&request).expect("range mod dispersion resolves");
+    assert_eq!(output.headline.as_deref(), Some("Gun Fire Control System Modification 2"));
+    insta::assert_yaml_snapshot!(output.conclusion);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn base_build_request_does_not_compare_base_with_itself() {
+    let output = GAME
+        .dispersion_at_range(&DispersionAtRangeArgs {
+            build: Some("base".to_owned()),
+            ..args("GK", 12.0, DispersionBattery::MainBattery)
+        })
+        .expect("base dispersion resolves");
+
+    assert_eq!(output.headline.as_deref(), Some("base"));
+    assert!(!output.conclusion.contains("without base"));
+    insta::assert_yaml_snapshot!(output.conclusion);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn range_mod_comparison_names_different_clamped_distances() {
+    let output = GAME
+        .dispersion_at_range(&DispersionAtRangeArgs {
+            build: Some("range mod".to_owned()),
+            ..args("GK", 21.0, DispersionBattery::MainBattery)
+        })
+        .expect("range mod dispersion resolves");
+
+    assert!(output.conclusion.contains("builds are evaluated at different distances"));
+    insta::assert_yaml_snapshot!(output.conclusion);
+}
+
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
 fn secondary_dispersion_with_and_without_modifiers() {
     for range_km in [6.0, 10.0] {
         let output = GAME

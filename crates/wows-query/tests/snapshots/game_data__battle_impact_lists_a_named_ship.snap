@@ -6,12 +6,12 @@ group: tier 10 battleships
 ranked: 32
 formula: "factor share = share of the other ships of the group (of the same tier for armor and offensive overmatch factors) whose value the ship's beats, ties counting half. A ship without a measured factor others have counts as worse than every ship with it and tied with the others without it; no funny button contributes zero funny-button utility. A factor marked unmeasured ranks only among peers that have it and is left out for ships without it. A family (gun_dpm, gun_alpha) takes the ship's best ammo, ranked among the ships with that ammo. component = weighted mean of its factor shares. Damage delivery = the power mean with exponent -8 of firepower, accuracy, gun handling, survivability and mobility after flooring each at 20%; it is multiplied by 65% for each of those components or reach that beats less than half of the group. Reach is a tactical weakness but not a linear damage bottleneck because dispersion is measured at 12 km. Score = damage delivery x71.5%, survivability x5%, funny-button utility x15%, unique-commander talent potential x5%, close quarters x1% and spotting x2.5%, 0 to 100."
 weights:
-  - "firepower 14.2%: effective_gun_damage x1, gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x2, gun_alpha (best of alpha_ap, alpha_he, alpha_sap) x1.5, main_battery_reload x0.75, main_battery_range x0.25, cruiser_bow_overmatch x1, cruiser_full_bow_overmatch x0.75, cruiser_external_overmatch x0.5, main_sap_coverage x1.5"
-  - "accuracy 14.2%: dispersion x1, vertical_dispersion x1, sigma x1"
-  - "handling 14.2%: turret_traverse x0.5, bow_barrels x0.5, all_bear_from_bow x1"
+  - "firepower 14.3%: effective_gun_damage x1, gun_dpm (best of dpm_ap, dpm_he, dpm_sap) x2, gun_alpha (best of alpha_ap, alpha_he, alpha_sap) x1.5, main_battery_reload x0.75, main_battery_range x0.25, ap_penetration x1, ap_fuse_threshold x0.5, cruiser_bow_overmatch x1, cruiser_full_bow_overmatch x0.75, cruiser_external_overmatch x0.5, main_sap_coverage x1.5"
+  - "accuracy 14.3%: dispersion x1, vertical_dispersion x1, sigma x1"
+  - "handling 14.3%: turret_traverse x0.5, bow_barrels x0.5, all_bear_from_bow x1"
   - "reach penalty only: main_battery_range x1"
-  - "survivability 19.2%: health x1, repair_party_total_heal x1, damage_control_reload x0.25, bb_ap_citadel x0.75, bow_overmatch x0.5, cruiser_he_damaging x0.25"
-  - "mobility 14.2%: speed x1, rudder_shift x1, turning_circle x1"
+  - "survivability 19.3%: health x1, repair_party_total_heal x1, damage_control_reload x0.25, bb_ap_citadel x0.75, bow_overmatch x0.5, cruiser_he_damaging x0.25"
+  - "mobility 14.3%: speed x1, rudder_shift x1, turning_circle x1"
   - "spotting 2.5%: concealment x1, radar_range x1, hydro_range x0.5, torpedo_detection x0.25, smoke_lifetime x0.5, mobile_smoke_duration x1"
   - "utility 15%: funny_button_effect x1.25, funny_button_access x1"
   - "commander 5%: commander_talent_effect x1"
@@ -19,10 +19,10 @@ weights:
 ships:
   - rank: 1
     ship: "T10 Wisconsin (battleship, USA, premium)"
-    score: 47.8
+    score: 48.2
     components:
       firepower:
-        score: 45.3
+        score: 46.6
         top:
           - effective_gun_damage 11.53 index (beats 84%)
           - cruiser_bow_overmatch 100% (beats 61%)
@@ -77,7 +77,7 @@ ships:
     score: 34.5
     components:
       firepower:
-        score: 75.7
+        score: 72.1
         top:
           - dpm_he 172028 HP/min (beats 89%)
           - alpha_he 65600 HP (beats 75%)
@@ -130,7 +130,7 @@ ships:
     score: 28.7
     components:
       firepower:
-        score: 53.7
+        score: 51.4
         top:
           - dpm_he 151240 HP/min (beats 68%)
           - alpha_he 73200 HP (beats 89%)
@@ -185,7 +185,7 @@ ships:
     score: 24.7
     components:
       firepower:
-        score: 70.2
+        score: 65.3
         top:
           - dpm_he 196364 HP/min (beats 96%)
           - alpha_he 86400 HP (beats 100%)
@@ -234,15 +234,15 @@ ships:
       - funny_button_access none (beats 0%)
       - secondary_dpm 189905 HP/min (beats 3%)
 lowest:
-  - "32. T10 Irresistible (battleship, Commonwealth, premium) 9.6"
-  - "31. T10 Slava (battleship, Russia, premium) 9.7"
-  - "30. T10 Bourgogne (battleship, France, premium) 10"
+  - "32. T10 Bourgogne (battleship, France, premium) 8.3"
+  - "31. T10 Irresistible (battleship, Commonwealth, premium) 9.6"
+  - "30. T10 Slava (battleship, Russia, premium) 9.7"
   - "28. T10 Schlieffen (battleship, Germany) 10.6"
   - "28. T10 G. Kurfürst (battleship, Germany, premium) 10.6"
 notes:
   - "A judgment from game data, not from win rates or player results: the weights are a stated opinion of what sways a battle. Read the components to see why a ship scores as it does."
   - "Scores compare released ships of one class and tier range only; a named test or experimental ship is included on request. A cruiser's score says nothing against a battleship's."
-  - "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion and flight time measured at 12 km. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice."
+  - "Values are those of ship_comparison: each on its best-fit build, consumables stock, and horizontal dispersion, vertical dispersion, flight time and raw AP penetration measured at 12 km. AP penetration is the head-on Krupp result at impact velocity, distinct from overmatch. The AP fuse threshold is the normalized armor thickness needed to arm the shell; a hit that crosses the target without arming overpenetrates, so lower thresholds score higher. Fuse time and residual velocity still decide how far an armed shell travels. Damage assumes every shell and torpedo hits. Secondary DPM incorporates shell damage, barrel count and reload; fires per minute incorporates projectile count, reload and each shell's fire chance across the main and secondary batteries. SAP coverage is the share of external armor plate thicknesses in the ship's matchmaking range that the battery can penetrate. A consumable counts when any slot offers it, though a slot holds one choice."
   - "The funny button means the F key: Combat Instructions or an alternative fire mode. Its effect index measures modifier magnitude and duration. Its access index uses the least demanding repeatable charge path. Equal burden means 20 ribbons, 10 adjustment salvos, 4 visibility changes, 3 consumable uses, 120 timer seconds, or potential damage equal to 10 times ship HP."
   - "Mobile smoke counts its active duration. Unique-commander talent potential measures the modifiers from a talent's first activation; talent activation difficulty, improved skills and non-modifier talent effects are not estimated."
   - "Not counted: anti-aircraft, exact shell hit probability, consumable uptime, ability charge events during a real match and player positioning."

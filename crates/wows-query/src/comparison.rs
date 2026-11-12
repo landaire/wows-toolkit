@@ -648,6 +648,8 @@ pub(crate) enum Factor {
     MainBatteryRange,
     DamagePerMinute(AmmoKind),
     EffectiveGunDamage,
+    ApPenetration,
+    ApFuseThreshold,
     Alpha(AmmoKind),
     FlightTime(AmmoKind),
     TurretTraverse,
@@ -709,6 +711,8 @@ impl Factor {
         factors.extend(AmmoKind::ALL.map(Self::Alpha));
         factors.extend(AmmoKind::ALL.map(Self::FlightTime));
         factors.push(Self::EffectiveGunDamage);
+        factors.push(Self::ApPenetration);
+        factors.push(Self::ApFuseThreshold);
         factors.extend([
             Self::TurretTraverse,
             Self::Dispersion,
@@ -796,6 +800,18 @@ impl Factor {
                 "index",
                 Better::Higher,
                 "main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time",
+            ),
+            Self::ApPenetration => (
+                "ap_penetration",
+                "mm",
+                Better::Higher,
+                "raw penetration of the largest main battery AP shell at the reference range, against a plate struck head-on before impact angle",
+            ),
+            Self::ApFuseThreshold => (
+                "ap_fuse_threshold",
+                "mm",
+                Better::Lower,
+                "minimum normalized armor thickness that arms the fuse of the largest main battery AP shell; a hit that crosses the target without arming overpenetrates",
             ),
             Self::TurretTraverse => {
                 ("turret_traverse", "s", Better::Lower, "time a main battery turret takes to turn 180 deg")
@@ -1050,7 +1066,14 @@ impl Factor {
 
     /// Measured at the reference range.
     pub(crate) fn uses_reference_range(self) -> bool {
-        matches!(self, Self::Dispersion | Self::VerticalDispersion | Self::EffectiveGunDamage | Self::FlightTime(_))
+        matches!(
+            self,
+            Self::Dispersion
+                | Self::VerticalDispersion
+                | Self::EffectiveGunDamage
+                | Self::ApPenetration
+                | Self::FlightTime(_)
+        )
     }
 
     fn scope(self) -> RankScope {
@@ -1889,11 +1912,13 @@ impl GameData {
             }
         }
 
+        let shells: Vec<Shell> = self.shells(ship).into_iter().filter(|shell| shell.battery == Battery::Main).collect();
+        if let Some(threshold) = largest_shell(&shells, Ammo::Ap).and_then(|shell| shell.fuse_threshold_mm) {
+            values.insert(Factor::ApFuseThreshold, Factor::ApFuseThreshold.rounded(threshold.value()));
+        }
         if let Some(range) = values.get(&Factor::MainBatteryRange).copied()
             && range >= reference_range.value()
         {
-            let shells: Vec<Shell> =
-                self.shells(ship).into_iter().filter(|shell| shell.battery == Battery::Main).collect();
             for kind in AmmoKind::ALL {
                 let Some(shell) = largest_shell(&shells, kind.ammo()) else {
                     continue;
@@ -1901,6 +1926,12 @@ impl GameData {
                 if let Some(impact) = self.shell_impact(&shell.param, reference_range)? {
                     let time = impact.time_to_target.value();
                     values.insert(Factor::FlightTime(kind), Factor::FlightTime(kind).rounded(time));
+                    if kind == AmmoKind::Ap {
+                        values.insert(
+                            Factor::ApPenetration,
+                            Factor::ApPenetration.rounded(impact.raw_penetration.value()),
+                        );
+                    }
                 }
             }
         }

@@ -24,6 +24,8 @@ factors:
   - "flight_time_he (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "flight_time_sap (s, lower is better): flight time of the largest main battery shell of this ammo to the reference range; absent when the range is beyond the ship's reach"
   - "effective_gun_damage (index, higher is better): main battery damage output adjusted by dispersion ellipse area, sigma and shell flight time at the reference range: best DPM x sigma / horizontal dispersion / vertical dispersion / flight time"
+  - "ap_penetration (mm, higher is better): raw penetration of the largest main battery AP shell at the reference range, against a plate struck head-on before impact angle"
+  - "ap_fuse_threshold (mm, lower is better): minimum normalized armor thickness that arms the fuse of the largest main battery AP shell; a hit that crosses the target without arming overpenetrates"
   - "turret_traverse (s, lower is better): time a main battery turret takes to turn 180 deg"
   - "dispersion (m, lower is better): main battery horizontal dispersion at the reference range, or at the ship's own range when shorter"
   - "vertical_dispersion (m, lower is better): main battery vertical dispersion at the reference range, or at the ship's own range when shorter"
@@ -200,6 +202,16 @@ leaders:
       - "Conte Verde (Italy, premium) 9.58 index"
     worst:
       - "Cumberland (United_Kingdom, test) 2.77 index"
+  ap_penetration:
+    best:
+      - "Slava (Russia, premium) 656.64 mm"
+    worst:
+      - "Conte Verde (Italy, premium) 223.71 mm"
+  ap_fuse_threshold:
+    best:
+      - "Conte Verde (Italy, premium) 34 mm"
+    worst:
+      - "Shikishima (Japan, premium) 85 mm"
   turret_traverse:
     best:
       - "Conte Verde (Italy, premium) 21.74 s"
@@ -468,6 +480,8 @@ ships:
       flight_time_ap: "8.77 (rank 41/43, p5)"
       flight_time_he: "8.77 (rank 37/39, p5)"
       effective_gun_damage: "4.84 (rank 16/43, p64)"
+      ap_penetration: "571.04 (rank 17/43, p62)"
+      ap_fuse_threshold: "85 (rank 42/43, p0)"
       turret_traverse: "21.74 (rank 1/43, p71)"
       dispersion: "162 (rank 5/43, p76)"
       vertical_dispersion: "89 (rank 12/43, p71)"
@@ -509,6 +523,7 @@ ships:
       - "weakness: main_battery_range 20.38 km, lower than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "weakness: flight_time_ap 8.77 s, higher than 95% of the 42 other tier 10 battleships (rank 41/43)"
       - "weakness: flight_time_he 8.77 s, higher than 95% of the 38 other tier 10 battleships (rank 37/39)"
+      - "weakness: ap_fuse_threshold 85 mm, tied for the highest of the 43 tier 10 battleships (rank 42/43)"
       - "weakness: secondary_range 10.08 km, the lowest of the 43 tier 10 battleships (rank 43/43)"
       - "strength: concealment 10.6 km, the lowest of the 43 tier 10 battleships (rank 1/43)"
       - "weakness: turning_circle 1160 m, the highest of the 43 tier 10 battleships (rank 43/43)"
@@ -594,6 +609,8 @@ ships:
       flight_time_ap: "7.7 (rank 7/43, p81)"
       flight_time_sap: "7.43 (rank 1/4, p67)"
       effective_gun_damage: "3.93 (rank 34/43, p21)"
+      ap_penetration: "513.39 (rank 34/43, p17)"
+      ap_fuse_threshold: "64 (rank 7/43, p81)"
       turret_traverse: "27.75 (rank 20/43, p50)"
       dispersion: "186 (rank 18/43, p60) (with unique upgrade Improved Rangefinders)"
       vertical_dispersion: "105 (rank 39/43, p7) (with unique upgrade Improved Rangefinders)"
@@ -699,6 +716,8 @@ ships:
       flight_time_ap: "7.95 (rank 16/43, p64)"
       flight_time_he: "8.19 (rank 19/39, p53)"
       effective_gun_damage: "8.91 (rank 2/43, p98)"
+      ap_penetration: "367.78 (rank 40/43, p7)"
+      ap_fuse_threshold: "52 (rank 4/43, p93)"
       turret_traverse: "26.09 (rank 15/43, p57)"
       dispersion: "146 (rank 2/43, p98)"
       vertical_dispersion: "76 (rank 3/43, p95)"
@@ -741,6 +760,8 @@ ships:
       - "strength: dpm_ap 413482 HP/min, higher than 93% of the 42 other tier 10 battleships (rank 4/43)"
       - "strength: dpm_he 226779 HP/min, higher than 97% of the 38 other tier 10 battleships (rank 2/39)"
       - "strength: effective_gun_damage 8.91 index, higher than 98% of the 42 other tier 10 battleships (rank 2/43)"
+      - "weakness: ap_penetration 367.78 mm, lower than 93% of the 42 other tier 10 battleships (rank 40/43)"
+      - "strength: ap_fuse_threshold 52 mm, lower than 93% of the 42 other tier 10 battleships (rank 4/43)"
       - "strength: dispersion 146 m, lower than 98% of the 42 other tier 10 battleships (rank 2/43)"
       - "strength: vertical_dispersion 76 m, lower than 95% of the 42 other tier 10 battleships (rank 3/43)"
       - "weakness: bow_barrels 40%, tied for the lowest of the 43 tier 10 battleships (rank 42/43)"
@@ -817,13 +838,14 @@ head_to_head:
   - ships:
       - Incomparable
       - C. Colombo
-    compared: 38
+    compared: 40
     first_better:
       - repair_party_heal
       - repair_party_total_heal
       - main_battery_reload
       - main_battery_range
       - effective_gun_damage
+      - ap_penetration
       - turret_traverse
       - dispersion
       - vertical_dispersion
@@ -843,6 +865,7 @@ head_to_head:
       - dpm_ap
       - alpha_ap
       - flight_time_ap
+      - ap_fuse_threshold
       - bow_barrels
       - stern_barrels
       - all_bear_from_bow
@@ -867,15 +890,16 @@ head_to_head:
       - bb_ap_citadel 0 vs 7.2% (100% apart)
       - bow_overmatch 5.74 vs 87.7% (93% apart)
       - stern_overmatch 5.74 vs 87.7% (93% apart)
-    verdict: "Mixed: Incomparable is better on 19 of 38 compared factors, C. Colombo on 17, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Incomparable is better on 20 of 40 compared factors, C. Colombo on 18, 2 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - Incomparable
       - Tōgasa
-    compared: 46
+    compared: 48
     first_better:
       - health
       - repair_party_heal
       - repair_party_total_heal
+      - ap_penetration
       - turret_traverse
       - sigma
       - bow_barrels
@@ -904,6 +928,7 @@ head_to_head:
       - flight_time_ap
       - flight_time_he
       - effective_gun_damage
+      - ap_fuse_threshold
       - dispersion
       - vertical_dispersion
       - fires_per_minute
@@ -929,16 +954,17 @@ head_to_head:
       - bb_ap_citadel 0.8 vs 7.2% (89% apart)
       - dpm_he 226779 vs 108117 HP/min (52% apart)
       - effective_gun_damage 8.91 vs 4.84 index (46% apart)
-    verdict: "Mixed: Incomparable is better on 21 of 46 compared factors, Tōgasa on 20, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: Incomparable is better on 22 of 48 compared factors, Tōgasa on 21, 5 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
   - ships:
       - C. Colombo
       - Tōgasa
-    compared: 38
+    compared: 40
     first_better:
       - health
       - repair_party_total_heal
       - alpha_ap
       - flight_time_ap
+      - ap_penetration
       - bow_barrels
       - all_bear_from_bow
       - all_bear_from_stern
@@ -958,6 +984,7 @@ head_to_head:
       - main_battery_range
       - dpm_ap
       - effective_gun_damage
+      - ap_fuse_threshold
       - turret_traverse
       - dispersion
       - vertical_dispersion
@@ -983,7 +1010,7 @@ head_to_head:
       - effective_gun_damage 8.91 vs 3.93 index (56% apart)
       - main_battery_reload 20.24 vs 32.56 s (38% apart)
       - vertical_dispersion 76 vs 105 m (28% apart)
-    verdict: "Mixed: C. Colombo is better on 18 of 38 compared factors, Tōgasa on 16, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
+    verdict: "Mixed: C. Colombo is better on 19 of 40 compared factors, Tōgasa on 17, 4 tied; neither leads on twice as many factors as the other, so weigh the factors that matter for the question."
 notes:
   - "Values are on each ship's best-fit build for that factor, as ship_stats reports them. Few ships have a unique upgrade: a value takes one only where it says \"with unique upgrade <name>\", and an unmarked value takes none. Firing arcs use the module combination with the most barrels or tubes. Consumables and their factors (repair_party_*, damage_control_reload, radar_*, hydro_range, torpedo_detection, smoke_lifetime) and torpedo flood_coefficient are stock, repair_party_total_heal on the top hull's HP; a consumable factor takes the best option of any slot."
   - "rank r/n: position among the n ships of the group with the factor, 1 best, ties sharing a rank. pNN: the share of the other n - 1 ships the ship beats. Torpedo factors rank among every torpedo option of the group's ships; matchup rates among the peers armor_assessment compares with."

@@ -13,7 +13,7 @@ ship:
   status: released
 battery: main_battery
 range_km: 24
-conclusion: "24 km is past Stalingrad's 23.61 km main battery range with Gun Fire Control System Modification 2; using 23.61 km. With Gun Fire Control System Modification 2 (23.61 km range), dispersion at 23.61 km is 246.3 m horizontal and 147.8 m vertical. Stalingrad's main battery reaches 20.35 km, short of 24 km. With Gun Fire Control System Modification 2 it reaches 23.61 km; close enough to take at 23.61 km, dispersion is 246.3 m horizontal and 147.8 m vertical. Among tier 10 battleships at 24 km (40 ranked, 2 out of reach), Stalingrad on Gun Fire Control System Modification 2 ranks 8 of 40 on horizontal dispersion, 10 on vertical and 1 on the radius holding half of the shells; the median is 256.8 m horizontal and 175.7 m vertical, the tightest horizontal is Conte Verde (198.6 m)."
+conclusion: "Without Gun Fire Control System Modification 2, Stalingrad's main battery reaches 20.35 km, short of 24 km. With Gun Fire Control System Modification 2 (23.61 km range), dispersion at 23.61 km is 246.3 m horizontal and 147.8 m vertical. Among tier 10 battleships at 24 km (40 ranked, 2 out of reach), Stalingrad on Gun Fire Control System Modification 2 ranks 8 of 40 on horizontal dispersion, 10 on vertical and 1 on the radius holding half of the shells; the median is 256.8 m horizontal and 175.7 m vertical, the tightest horizontal is Conte Verde (198.6 m)."
 guns:
   - mount: main battery
     min_radius: 1.6
