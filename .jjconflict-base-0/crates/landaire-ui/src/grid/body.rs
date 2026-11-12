@@ -164,10 +164,7 @@ where
         move |ev: &mut EventCx<'_, events::PointerDown>| match ev.button {
             Some(PointerButton::Primary) => cx.press_row(&key, ev.modifiers),
             Some(PointerButton::Secondary) => {
-                if !cx.selection.with_untracked(|selection| selection.contains(&key)) {
-                    cx.press_row(&key, Modifiers::NONE);
-                }
-                cx.cursor.set(Some(key.clone()));
+                cx.target_row(&key);
                 if cx.row_menu.is_some() {
                     cx.menu_target.set(Some(MenuTarget::Row(key.clone())));
                     cx.menu_claimed.set(true);
