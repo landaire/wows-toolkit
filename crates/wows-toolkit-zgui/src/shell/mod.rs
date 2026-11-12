@@ -95,6 +95,7 @@ use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
 use crate::window_shell::RememberGeometryProps;
 use crate::zoom::ZoomStep;
+use crate::windows::tactics::TacticsHost;
 
 pub use crate::shell::dialogs::DialogHandle;
 pub use crate::shell::dialogs::Dialogs;
@@ -229,6 +230,8 @@ pub struct Shell {
     pub settings_drawer: SettingsDrawerControl,
     pub palette: PaletteControl,
     pub dialogs: Dialogs,
+    /// The tactics board's window, the layouts it starts from and the session it joins.
+    pub tactics: TacticsHost,
     drop_scrim: DropScrimState,
     toasts: Toasts,
     services: Services,
@@ -254,6 +257,7 @@ impl Shell {
             settings_drawer: SettingsDrawerControl::new(),
             palette: PaletteControl::new(),
             dialogs: Dialogs::new(),
+            tactics: TacticsHost::new(),
             drop_scrim: DropScrimState::new(),
             toasts,
             services,
@@ -518,6 +522,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     provide_local_context(shell);
 
     startup::begin(services, shell);
+    shell.tactics.begin(services);
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);
