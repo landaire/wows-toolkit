@@ -7,6 +7,9 @@
 use landaire_ui::Appearance;
 use landaire_ui::Rgb;
 use landaire_ui::Scheme;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_toolkit_replay_data::damage_mix::DamageKind;
+use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use zgui::component;
 use zgui::reactive::LocalStorage;
@@ -148,12 +151,96 @@ impl Semantic {
         ]
     }
 
-    fn rule(&self) -> String {
-        let declarations: String =
-            self.properties().iter().map(|(property, color)| format!("{property}: {color}; ")).collect();
+    /// The `:root` rule for `appearance`: these tones, then the personal rating and damage type
+    /// tones, which have one set per appearance rather than per meaning.
+    fn rule(appearance: Appearance) -> String {
+        let dark = appearance == Appearance::Dark;
+        let mut declarations: String = Self::for_appearance(appearance)
+            .properties()
+            .iter()
+            .map(|(property, color)| format!("{property}: {color}; "))
+            .collect();
+        for category in RATING_BANDS {
+            let text = Rgb::new(personal_rating::chip_text(category, dark));
+            let hue = Rgb::new(personal_rating::chip_hue(category));
+            let name = rating_band_name(category);
+            declarations.push_str(&format!("--wt-pr-{name}-text: {text}; --wt-pr-{name}-hue: {hue}; "));
+        }
+        for kind in DamageKind::ALL {
+            let color = damage_tone(kind, dark);
+            declarations.push_str(&format!("--wt-damage-{}: {color}; ", damage_kind_name(kind)));
+        }
 
         format!(":root {{ {declarations}}}")
     }
+}
+
+const RATING_BANDS: [PersonalRatingCategory; 8] = [
+    PersonalRatingCategory::Bad,
+    PersonalRatingCategory::BelowAverage,
+    PersonalRatingCategory::Average,
+    PersonalRatingCategory::Good,
+    PersonalRatingCategory::VeryGood,
+    PersonalRatingCategory::Great,
+    PersonalRatingCategory::Unicum,
+    PersonalRatingCategory::SuperUnicum,
+];
+
+/// The suffix of a rating band's `--wt-pr-*` properties.
+pub const fn rating_band_name(category: PersonalRatingCategory) -> &'static str {
+    match category {
+        PersonalRatingCategory::Bad => "bad",
+        PersonalRatingCategory::BelowAverage => "below-average",
+        PersonalRatingCategory::Average => "average",
+        PersonalRatingCategory::Good => "good",
+        PersonalRatingCategory::VeryGood => "very-good",
+        PersonalRatingCategory::Great => "great",
+        PersonalRatingCategory::Unicum => "unicum",
+        PersonalRatingCategory::SuperUnicum => "super-unicum",
+    }
+}
+
+/// The suffix of a damage type's `--wt-damage-*` property.
+pub const fn damage_kind_name(kind: DamageKind) -> &'static str {
+    match kind {
+        DamageKind::Ap => "ap",
+        DamageKind::Sap => "sap",
+        DamageKind::He => "he",
+        DamageKind::Secondary => "secondary",
+        DamageKind::Plane => "plane",
+        DamageKind::Ram => "ram",
+        DamageKind::Torpedo => "torpedo",
+        DamageKind::Fire => "fire",
+        DamageKind::Flood => "flood",
+        DamageKind::Other => "other",
+    }
+}
+
+/// A damage type's colour. A light panel darkens every colour by one factor in lightness so a
+/// thin bar stands off it.
+fn damage_tone(kind: DamageKind, dark: bool) -> Rgb {
+    const LIGHT_LIGHTNESS: f32 = 0.72;
+
+    let [red, green, blue] = kind.rgb();
+    if dark {
+        return Rgb::from_channels(red, green, blue);
+    }
+
+    let channels = [red, green, blue].map(|channel| f32::from(channel) / 255.0);
+    let max = channels.iter().copied().fold(0.0, f32::max);
+    let min = channels.iter().copied().fold(1.0, f32::min);
+    let lightness = (max + min) / 2.0;
+    // At a fixed hue and saturation, each channel's distance from the lightness is proportional to
+    // the smaller of the lightness and its complement.
+    let target = lightness * LIGHT_LIGHTNESS;
+    let room = lightness.min(1.0 - lightness);
+    let scale = if room > 0.0 { target.min(1.0 - target) / room } else { 0.0 };
+    let [red, green, blue] = channels.map(|channel| {
+        let value = target + (channel - lightness) * scale;
+        (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    });
+
+    Rgb::from_channels(red, green, blue)
 }
 
 /// The landaire-ui choice the saved `choice` names.
@@ -180,11 +267,11 @@ pub fn semantic_sheet(choice: ThemeChoice) -> String {
     let choice = palette_choice(choice);
     match choice {
         landaire_ui::ThemeChoice::System => {
-            let light = Semantic::LIGHT.rule();
-            let dark = Semantic::DARK.rule();
+            let light = Semantic::rule(Appearance::Light);
+            let dark = Semantic::rule(Appearance::Dark);
             format!("{light}\n@media (prefers-color-scheme: dark) {{ {dark} }}")
         }
-        landaire_ui::ThemeChoice::Fixed(scheme) => Semantic::for_appearance(scheme.palette().appearance).rule(),
+        landaire_ui::ThemeChoice::Fixed(scheme) => Semantic::rule(scheme.palette().appearance),
     }
 }
 
