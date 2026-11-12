@@ -1,0 +1,58 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+LANDAIRE_UI_DEPS = [
+    "//third-party/rust:thiserror",
+    "//third-party/rust:zgui",
+    "//third-party/rust:zgui-ui",
+    "//third-party/rust:zgui-ui-icons",
+    "//third-party/rust:zgui-ui-tokens",
+]
+
+# The test-support feature: the headless platform, the offscreen renderer and
+# the accessibility tree reader.
+TEST_SUPPORT_DEPS = LANDAIRE_UI_DEPS + [
+    "//third-party/rust:accesskit_consumer",
+    "//third-party/rust:image",
+    "//third-party/rust:zgui-platform-headless",
+    "//third-party/rust:zgui-render-vector-vello",
+    "//third-party/rust:zgui-render-wgpu",
+    "//third-party/rust:zgui-testkit-scene",
+]
+
+workspace_library(
+    name = "landaire_ui",
+    crate = "landaire_ui",
+    package = "landaire-ui",
+    version = "0.1.0",
+    deps = LANDAIRE_UI_DEPS,
+)
+
+workspace_library(
+    name = "landaire_ui_test_support",
+    crate = "landaire_ui",
+    package = "landaire-ui",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = TEST_SUPPORT_DEPS,
+)
+
+workspace_test(
+    name = "landaire_ui_test",
+    crate = "landaire_ui",
+    crate_root = "src/lib.rs",
+    package = "landaire-ui",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = TEST_SUPPORT_DEPS,
+)
+
+workspace_integration_tests(
+    package = "landaire-ui",
+    version = "0.1.0",
+    library = ":landaire_ui_test_support",
+    features = ["test-support"],
+    deps = [
+        "//third-party/rust:zgui",
+        "//third-party/rust:zgui-ui",
+    ],
+)
