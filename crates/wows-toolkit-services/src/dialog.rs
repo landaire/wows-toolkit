@@ -54,11 +54,11 @@ pub enum Asked {
 pub enum DialogError {
     #[cfg(all(target_os = "linux", not(feature = "test-support")))]
     #[error(transparent)]
-    Portal(portal::PortalError),
+    Portal(Box<portal::PortalError>),
 
     #[cfg(all(target_os = "linux", not(feature = "test-support")))]
     #[error("{portal}, and zenity failed ({zenity})")]
-    Unavailable { portal: portal::PortalError, zenity: zenity::ZenityError },
+    Unavailable { portal: Box<portal::PortalError>, zenity: zenity::ZenityError },
 
     #[cfg(feature = "test-support")]
     #[error("the test refused the dialog")]
@@ -109,11 +109,11 @@ async fn ask(request: Request) -> Answer {
         Err(portal) => portal,
     };
     if !portal.is_missing() {
-        return Err(DialogError::Portal(portal));
+        return Err(DialogError::Portal(Box::new(portal)));
     }
 
     tracing::warn!("file dialog: {portal}, so zenity is asked instead");
-    zenity::ask(&request).await.map_err(|zenity| DialogError::Unavailable { portal, zenity })
+    zenity::ask(&request).await.map_err(|zenity| DialogError::Unavailable { portal: Box::new(portal), zenity })
 }
 
 #[cfg(all(not(target_os = "linux"), not(feature = "test-support")))]
