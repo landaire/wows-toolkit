@@ -9,6 +9,7 @@ mod about;
 mod crash;
 mod dialogs;
 mod drop;
+mod file_dialog;
 mod first_run;
 mod menu;
 mod notices;
@@ -18,6 +19,7 @@ mod startup;
 mod status_bar;
 pub mod tabs;
 mod update;
+mod wows_dir;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
