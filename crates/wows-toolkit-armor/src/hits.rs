@@ -10,7 +10,7 @@ use nalgebra::Vector3;
 use wows_replay_insights::hull_impact;
 use wows_replay_insights::timeline::PreExtractedHit;
 
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::types::Vertex;
 
 type Vec3 = Vector3<f32>;
 
@@ -23,7 +23,7 @@ const THICKNESS: f32 = 0.22;
 /// What a marker is coloured. One colour for every hit: what kind of hit it
 /// was is the penetration checker's answer, not a marker's, and colouring
 /// them here would say something this does not know.
-pub(crate) const COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
+pub const COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
 
 /// What the ship-centre cross is coloured (`armor_viewer/ui/tab.rs`).
 const CENTER_COLOR: [f32; 4] = [1.0, 0.85, 0.1, 1.0];
@@ -40,7 +40,7 @@ const CENTER_ARM_FRACTION: f32 = 0.05;
 /// A hit whose victim was not being watched at that moment carries no pose,
 /// and [`hull_impact::hull_impact`] refuses it rather than guessing where it
 /// landed, so it is left unmarked instead of marked in the wrong place.
-pub(crate) fn build_markers(
+pub fn build_markers(
     hits: &[PreExtractedHit],
     model_center: Vec3,
     bounds: Option<(Vec3, Vec3)>,
@@ -63,7 +63,7 @@ pub(crate) fn build_markers(
 /// Where the game measures a ship from, which is not where the hull's middle
 /// looks to be: the egui viewer draws the same three axes for the same reason
 /// (`armor_viewer/ui/tab.rs`'s `show_ship_center`).
-pub(crate) fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
+pub fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
     let (min, max) = bounds;
     let extent = max - min;
     let arm = (extent.x.max(extent.y).max(extent.z) * CENTER_ARM_FRACTION).max(CENTER_ARM_FLOOR);

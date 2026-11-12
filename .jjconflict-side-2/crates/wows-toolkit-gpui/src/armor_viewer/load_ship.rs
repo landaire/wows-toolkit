@@ -303,7 +303,7 @@ pub struct LoadedShipArmor {
     /// The splash boxes this hull ships with. `None` for a hull carrying no
     /// splash file, which the splash mode reports rather than drawing an
     /// empty burst over.
-    pub splash_data: Option<super::splash::ShipSplashData>,
+    pub splash_data: Option<wows_toolkit_armor::splash::ShipSplashData>,
     /// The boxes grouped by the part they belong to, for the visibility list.
     pub splash_box_groups: Vec<(String, Vec<String>)>,
     /// The zones GameParams names for this ship, which is where a splash
@@ -566,9 +566,11 @@ fn load_ship_armor(
 
     let meshes = ctx.interactive_armor_meshes().map_err(|e| ShipLoadError::ArmorMeshes(format!("{e:?}")))?;
 
-    let splash_data = super::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
-    let splash_box_groups =
-        splash_data.as_ref().map(|data| super::splash::build_splash_box_groups(&data.boxes)).unwrap_or_default();
+    let splash_data = wows_toolkit_armor::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
+    let splash_box_groups = splash_data
+        .as_ref()
+        .map(|data| wows_toolkit_armor::splash::build_splash_box_groups(&data.boxes))
+        .unwrap_or_default();
     let hit_locations = ctx.hit_locations().cloned();
 
     let ArmorZones { zones, zone_parts, zone_part_plates } = ArmorZones::from_meshes(&meshes);
