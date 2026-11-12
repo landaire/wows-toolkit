@@ -39,9 +39,9 @@ use wows_toolkit_viewmodel::tactics::naming;
 use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_types::WorldPos;
 
-use crate::frame_texture::BgraFrame;
 use crate::frame_texture::FrameTexture;
 use crate::frame_texture::frame_view;
+use wows_toolkit_replay_data::frame::BgraFrame;
 
 /// A board's walk of the replays recorded layouts nothing had before.
 ///
@@ -2569,14 +2569,14 @@ fn rasterise(
     // Over the zones, so a line drawn across one is not buried under it.
     commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
     match drawing.art {
-        Some(art) => crate::minimap_preview::render_map_art(
+        Some(art) => wows_toolkit_replay_data::minimap_preview::render_map_art(
             &format!("board-{}", drawing.board_id),
             art,
             game_data,
             view,
             &commands,
         ),
-        None => crate::minimap_preview::render_map(drawing.space, game_data, view, &commands),
+        None => wows_toolkit_replay_data::minimap_preview::render_map(drawing.space, game_data, view, &commands),
     }
 }
 
