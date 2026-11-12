@@ -5,19 +5,6 @@
 
 use std::collections::HashMap;
 
-use gpui_kit::AnyElement;
-use gpui_kit::App;
-use gpui_kit::FontWeight;
-use gpui_kit::InteractiveElement;
-use gpui_kit::IntoElement;
-use gpui_kit::ParentElement;
-use gpui_kit::Styled;
-use gpui_kit::base::TestSupportExt as _;
-use gpui_kit::component::ActiveTheme;
-use gpui_kit::component::v_flex;
-use gpui_kit::div;
-use gpui_kit::px;
-use gpui_wgpu::wgpu;
 use rust_i18n::t;
 use wowsunpack::export::armor_ray::ray_triangle_intersect;
 use wowsunpack::export::armor_ray::transform_point;
@@ -31,14 +18,13 @@ use wowsunpack::export::ship_parts::ShipPart;
 use wowsunpack::export::ship_parts::ShipPartKey;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-use wows_toolkit_armor::viewport::renderer::Viewport3D;
-use wows_toolkit_armor::viewport::types::MeshId;
-use wows_toolkit_armor::viewport::types::Vec3;
-use wows_toolkit_armor::viewport::types::Vertex;
-
-use super::load_ship::transform_normal;
-use super::picking_ui::HighlightOrigin;
-use wows_toolkit_armor::model_tree::model_sub_kind_label;
+use crate::load_ship::transform_normal;
+use crate::model_tree::model_sub_kind_label;
+use crate::plate_picking::HighlightOrigin;
+use crate::viewport::renderer::Viewport3D;
+use crate::viewport::types::MeshId;
+use crate::viewport::types::Vec3;
+use crate::viewport::types::Vertex;
 
 /// A mesh's position in `LoadedShipArmor::hull_meshes`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -131,7 +117,7 @@ impl HullPickIndex {
                 Some(transform) => mesh.positions.iter().map(|at| transform_point(transform, *at)).collect(),
                 None => mesh.positions.clone(),
             };
-            for corners in mesh.indices.chunks_exact(3) {
+            for corners in mesh.indices.as_chunks::<3>().0 {
                 let corner = |at: u32| positions.get(at as usize).copied();
                 let (Some(a), Some(b), Some(c)) = (corner(corners[0]), corner(corners[1]), corner(corners[2])) else {
                     continue;
@@ -402,7 +388,7 @@ pub fn highlight_geometry(
 
             Some(Vertex { position, normal, color, uv: [0.0, 0.0], tangent: [0.0; 4] })
         };
-        for corners in mesh.indices.chunks_exact(3) {
+        for corners in mesh.indices.as_chunks::<3>().0 {
             let (Some(a), Some(b), Some(c)) = (vertex(corners[0]), vertex(corners[1]), vertex(corners[2])) else {
                 continue;
             };
@@ -458,7 +444,7 @@ impl MeshTooltip {
     }
 
     /// The group line: the group's name, and a miscellaneous part's kind.
-    fn group_label(&self) -> String {
+    pub fn group_label(&self) -> String {
         let named = part_group_label(self.group);
         match self.misc {
             Some(category) => format!("{named} > {}", model_sub_kind_label(&ModelSubKind::Misc(category))),
@@ -466,25 +452,14 @@ impl MeshTooltip {
         }
     }
 
-    pub fn element(&self, cx: &App) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let model = self.model.as_ref().map(|model| t!("ui.model_view.part_model", model = model).into_owned());
-        let hardpoint = self
-            .hardpoint
-            .as_ref()
-            .map(|hardpoint| t!("ui.model_view.part_hardpoint", hardpoint = hardpoint).into_owned());
-        let body = v_flex()
-            .gap_1()
-            .child(div().font_weight(FontWeight::BOLD).text_size(px(14.)).child(self.name.clone()))
-            .child(div().text_sm().child(self.group_label()))
-            .children(model.map(|model| div().text_xs().text_color(muted).child(model)))
-            .children(hardpoint.map(|hardpoint| div().text_xs().text_color(muted).child(hardpoint)));
+    /// The model line, when the mesh comes from a model.
+    pub fn model_label(&self) -> Option<String> {
+        self.model.as_ref().map(|model| t!("ui.model_view.part_model", model = model).into_owned())
+    }
 
-        crate::ui::overlay_surface(div().id("armor-mesh-tooltip").test_support(), cx)
-            .px_2()
-            .py_1()
-            .child(body)
-            .into_any_element()
+    /// The hardpoint line, when the mesh is mounted on one.
+    pub fn hardpoint_label(&self) -> Option<String> {
+        self.hardpoint.as_ref().map(|hardpoint| t!("ui.model_view.part_hardpoint", hardpoint = hardpoint).into_owned())
     }
 }
 

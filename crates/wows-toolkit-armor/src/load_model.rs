@@ -9,10 +9,6 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use gpui_kit::App;
-use gpui_kit::AppContext;
-use gpui_kit::SharedString;
-use gpui_kit::Task;
 use nalgebra::Matrix4;
 use rootcause::Report;
 use rust_i18n::t;
@@ -38,29 +34,29 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::game_types::GameParamId;
 
-use super::assets::ModelAssets;
-use super::camo::RgbaTexture;
-use super::hull_picking::MeshSource;
-use super::load_ship::ArmorThickness;
-use super::load_ship::ArmorZones;
-use super::load_ship::EmptyScene;
-use super::load_ship::ExportGlbError;
-use super::load_ship::HullThicknessSource;
-use super::load_ship::LoadedShipArmor;
-use super::load_ship::ModelSubject;
-use super::load_ship::SceneSubject;
-use super::load_ship::ThicknessSource;
-use super::load_ship::build_hull_part_groups;
-use super::load_ship::scene_bounds;
-use super::scene_load::FirstStage;
-use super::scene_load::LoadCancel;
-use super::scene_load::LoadCancelled;
-use super::scene_load::RestJob;
-use super::surface_maps::SurfaceMapsByPart;
-use super::surface_maps::model_surface_textures;
-use wows_toolkit_armor::model_refs::ShipPartKey;
-use wows_toolkit_armor::model_refs::ShipPartRef;
-use wows_toolkit_armor::model_refs::VehicleParamIndex;
+use crate::assets::ModelAssets;
+use crate::camo::RgbaTexture;
+use crate::hull_picking::MeshSource;
+use crate::load_ship::ArmorThickness;
+use crate::load_ship::ArmorZones;
+use crate::load_ship::EmptyScene;
+use crate::load_ship::ExportGlbError;
+use crate::load_ship::HullThicknessSource;
+use crate::load_ship::LoadedShipArmor;
+use crate::load_ship::ModelSubject;
+use crate::load_ship::SceneSubject;
+use crate::load_ship::ThicknessSource;
+use crate::load_ship::build_hull_part_groups;
+use crate::load_ship::scene_bounds;
+use crate::model_refs::ShipPartKey;
+use crate::model_refs::ShipPartRef;
+use crate::model_refs::VehicleParamIndex;
+use crate::scene_load::FirstStage;
+use crate::scene_load::LoadCancel;
+use crate::scene_load::LoadCancelled;
+use crate::scene_load::RestJob;
+use crate::surface_maps::SurfaceMapsByPart;
+use crate::surface_maps::model_surface_textures;
 
 /// Longest texture edge decoded for display. The viewport has no use for the
 /// 4096 hull atlases at full size, and each costs 64 MiB as RGBA.
@@ -82,7 +78,7 @@ pub enum ModelSceneError {
 }
 
 impl ModelSceneError {
-    pub(crate) fn problem(&self) -> ProblemReason {
+    pub fn problem(&self) -> ProblemReason {
         let report = match self {
             Self::Load { report, .. } => report,
             // A cancelled load was superseded, so nothing shows its outcome.
@@ -108,7 +104,7 @@ impl ModelSceneError {
 #[derive(Debug, thiserror::Error)]
 pub enum SceneLoadError {
     #[error(transparent)]
-    Ship(#[from] super::load_ship::ShipLoadError),
+    Ship(#[from] crate::load_ship::ShipLoadError),
     #[error(transparent)]
     Model(#[from] ModelSceneError),
     #[error(transparent)]
@@ -117,7 +113,7 @@ pub enum SceneLoadError {
 
 impl SceneLoadError {
     /// What the viewport tells the reader in place of the scene.
-    pub(crate) fn problem(&self) -> ProblemReason {
+    pub fn problem(&self) -> ProblemReason {
         match self {
             // A cancelled load was superseded, so nothing shows its outcome.
             Self::Ship(_) | Self::Cancelled(_) => ProblemReason::ShipUnreadable,
@@ -125,11 +121,11 @@ impl SceneLoadError {
         }
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Cancelled(_)
-                | Self::Ship(super::load_ship::ShipLoadError::Cancelled(_))
+                | Self::Ship(crate::load_ship::ShipLoadError::Cancelled(_))
                 | Self::Model(ModelSceneError::Cancelled(_))
         )
     }
@@ -137,21 +133,21 @@ impl SceneLoadError {
 
 /// What the viewport shows in place of a scene it cannot draw.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SceneProblem {
+pub struct SceneProblem {
     /// The ship or model asked for, as the reader picked it.
-    pub subject: SharedString,
+    pub subject: Arc<str>,
     pub reason: ProblemReason,
 }
 
 impl SceneProblem {
-    pub(crate) fn headline(&self) -> String {
+    pub fn headline(&self) -> String {
         t!("ui.scene_problem.cannot_show", name = self.subject).into_owned()
     }
 }
 
 /// Why a scene cannot be drawn, in the terms the reader is told.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProblemReason {
+pub enum ProblemReason {
     /// The install lists the model but does not ship its geometry.
     GeometryAbsent,
     ModelUnreadable,
@@ -162,7 +158,7 @@ pub(crate) enum ProblemReason {
 }
 
 impl ProblemReason {
-    pub(crate) fn explanation(self) -> String {
+    pub fn explanation(self) -> String {
         let text = match self {
             Self::GeometryAbsent => t!("ui.scene_problem.geometry_absent"),
             Self::ModelUnreadable => t!("ui.scene_problem.model_unreadable"),
@@ -334,11 +330,7 @@ fn thickness_choices(
 
 /// Whether `request`'s plates have a thickness to show or export. A
 /// building's come from its own mount entries.
-pub(crate) fn thickness_known(
-    models: &ModelAssets,
-    metadata: &GameMetadataProvider,
-    request: &ModelLoadRequest,
-) -> bool {
+pub fn thickness_known(models: &ModelAssets, metadata: &GameMetadataProvider, request: &ModelLoadRequest) -> bool {
     if request.from_building.is_some() {
         return true;
     }
@@ -348,7 +340,7 @@ pub(crate) fn thickness_known(
 
 /// Whether a building's hull or mounts carry armor plates, `None` for a
 /// request that is not a building.
-pub(crate) fn building_has_armor(models: &ModelAssets, request: &ModelLoadRequest) -> Option<bool> {
+pub fn building_has_armor(models: &ModelAssets, request: &ModelLoadRequest) -> Option<bool> {
     let building = models.buildings.building(request.from_building?)?;
 
     Some(building.hull_has_armor() || building.mounts().iter().any(|mount| mount.has_armor()))
@@ -357,7 +349,7 @@ pub(crate) fn building_has_armor(models: &ModelAssets, request: &ModelLoadReques
 /// The first stage of loading `request` from `models`, resolving armor
 /// thickness from `metadata`. Synchronous and CPU/IO-bound; callers run it
 /// off the UI thread.
-pub(crate) fn load_model_scene(
+pub fn load_model_scene(
     models: &ModelAssets,
     metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
@@ -522,7 +514,7 @@ struct SceneLods {
 /// albedos that are not opaque, by `.mfm` path.
 #[derive(Default)]
 struct HullTextures {
-    textures: super::camo::TexturesByPart,
+    textures: crate::camo::TexturesByPart,
     alpha: HashMap<String, AlphaMode>,
     surface: SurfaceMapsByPart,
 }
@@ -600,23 +592,12 @@ fn paint_unknown_thickness(meshes: &mut [InteractiveArmorMesh]) {
     }
 }
 
-/// Kicks off the first stage of a model load on the background executor.
-pub(crate) fn spawn_load_model_scene(
-    models: Arc<ModelAssets>,
-    bundle: Arc<super::assets::ArmorAssetsBundle>,
-    request: ModelLoadRequest,
-    cancel: LoadCancel,
-    cx: &App,
-) -> Task<Result<FirstStage, ModelSceneError>> {
-    cx.background_spawn(async move { load_model_scene(&models, bundle.assets.metadata(), &request, &cancel) })
-}
-
 /// Writes `request`'s model to `path` as a GLB with its textures, hardpoints
 /// and, when `options` asks for it, its armor at the thickness the viewer
 /// shows it with. A building is written with its mounts placed as the viewer
 /// places them. Synchronous and CPU/IO-bound; callers run it off the UI
 /// thread.
-pub(crate) fn export_model_glb(
+pub fn export_model_glb(
     models: &ModelAssets,
     metadata: &GameMetadataProvider,
     request: &ModelLoadRequest,
@@ -684,8 +665,8 @@ pub(crate) fn export_model_glb(
     writer.flush().map_err(|source| ExportGlbError::Flush { path: path.to_path_buf(), source })
 }
 
-#[cfg(test)]
-pub(crate) mod fixtures {
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures {
     use wowsunpack::export::gltf_export::ArmorTriangleInfo;
     use wowsunpack::export::gltf_export::InteractiveHullMesh;
     use wowsunpack::export::hardpoint::Hardpoint;
@@ -694,7 +675,7 @@ pub(crate) mod fixtures {
 
     use super::*;
 
-    pub(crate) fn hull_mesh() -> InteractiveHullMesh {
+    pub fn hull_mesh() -> InteractiveHullMesh {
         InteractiveHullMesh {
             name: "Turret".to_string(),
             positions: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 2.0, 6.0]],
@@ -737,7 +718,7 @@ pub(crate) mod fixtures {
     }
 
     /// `first` with its background stage run.
-    pub(crate) fn finished(first: FirstStage) -> LoadedShipArmor {
+    pub fn finished(first: FirstStage) -> LoadedShipArmor {
         let FirstStage { scene, rest } = first;
         for job in rest {
             job.run(&scene, &LoadCancel::new()).expect("a fixture's background job runs");
@@ -747,7 +728,7 @@ pub(crate) mod fixtures {
     }
 
     /// The first stage of [`model_scene`]'s load, its background stage not run.
-    pub(crate) fn model_first_stage(path: ModelPath, hardpoints: Vec<Hardpoint>) -> FirstStage {
+    pub fn model_first_stage(path: ModelPath, hardpoints: Vec<Hardpoint>) -> FirstStage {
         let sources = sources(&path, 1);
         let subject = ModelSubject {
             path,
@@ -768,12 +749,12 @@ pub(crate) mod fixtures {
     }
 
     /// A one-triangle model with no armor and `hardpoints`.
-    pub(crate) fn model_scene(path: ModelPath, hardpoints: Vec<Hardpoint>) -> LoadedShipArmor {
+    pub fn model_scene(path: ModelPath, hardpoints: Vec<Hardpoint>) -> LoadedShipArmor {
         finished(model_first_stage(path, hardpoints))
     }
 
     /// A one-triangle model carrying one plate of unknown thickness.
-    pub(crate) fn armored_model_scene(path: ModelPath) -> LoadedShipArmor {
+    pub fn armored_model_scene(path: ModelPath) -> LoadedShipArmor {
         let sources = sources(&path, 1);
         let subject = ModelSubject {
             path,
@@ -795,7 +776,7 @@ pub(crate) mod fixtures {
 
     /// A model with no armor drawn from `hull` alone, authored with
     /// `lod_count` levels of detail.
-    pub(crate) fn hull_scene(path: ModelPath, hull: Vec<InteractiveHullMesh>, lod_count: usize) -> LoadedShipArmor {
+    pub fn hull_scene(path: ModelPath, hull: Vec<InteractiveHullMesh>, lod_count: usize) -> LoadedShipArmor {
         let sources = sources(&path, hull.len());
         let subject = ModelSubject {
             path,
@@ -989,7 +970,7 @@ mod tests {
         let disc_material = disc.mfm_path.as_ref().expect("a material");
         assert_eq!(scene.hull_alpha.get(disc_material), Some(&AlphaMode::Blend));
         let texture = scene.hull_textures.get(disc_material).expect("the disc albedo");
-        assert!(texture.pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc keeps its alpha");
+        assert!(texture.pixels.as_chunks::<4>().0.iter().any(|px| px[3] < u8::MAX), "the disc keeps its alpha");
     }
 
     /// A fort opens as its hull with each gun mount placed on its node: the

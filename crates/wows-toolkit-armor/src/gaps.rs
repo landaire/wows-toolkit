@@ -16,12 +16,12 @@ use std::collections::HashMap;
 
 use wowsunpack::export::armor_ray::transform_point;
 
-use super::load_ship::LoadedShipArmor;
+use crate::load_ship::LoadedShipArmor;
 
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::types::Vertex;
 
-use super::upload::plate_is_visible;
-use super::visibility::VisibilityFilter;
+use crate::upload::plate_is_visible;
+use crate::visibility::VisibilityFilter;
 
 /// Half the width of the ribbon a gap edge is drawn as.
 const GAP_EDGE_HALF_WIDTH: f32 = 0.006;
@@ -43,7 +43,7 @@ const MIN_GAP_WIDTH: f32 = 0.12;
 
 /// One edge of the armor surface, and which way that surface faces.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct EdgeData {
+pub struct EdgeData {
     pub p0: [f32; 3],
     pub p1: [f32; 3],
     /// The face normal of the triangle the edge was first seen on, which is
@@ -88,7 +88,7 @@ fn edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
 /// Only the triangles the viewport is currently showing are walked: hiding a
 /// plate opens a hole in the model that is not a hole in the ship, and
 /// counting it would report the reader's own filter back to them.
-pub(crate) fn build_gap_mesh(
+pub fn build_gap_mesh(
     armor: &LoadedShipArmor,
     visibility: VisibilityFilter,
     show_zero_mm: bool,

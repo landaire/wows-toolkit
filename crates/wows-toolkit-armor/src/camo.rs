@@ -24,8 +24,8 @@ use std::sync::Mutex;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 
-use super::upload_hull::mfm_stem;
-use wows_toolkit_armor::viewport::renderer::MipChain;
+use crate::upload_hull::mfm_stem;
+use crate::viewport::renderer::MipChain;
 
 /// Hermite smoothstep from 0 at `e0` to 1 at `e1`. Ports `common.rs:625-628`.
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -135,11 +135,11 @@ fn downsampled_luminance(srgba: &[u8], sw: u32, sh: u32) -> LowFreqLuma {
 /// A struct rather than a `(u32, u32, Vec<u8>)`, because a width and a height
 /// are the same type and nothing but the field name says which is which.
 #[derive(Debug)]
-pub(crate) struct RgbaTexture {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
+pub struct RgbaTexture {
+    pub width: u32,
+    pub height: u32,
     /// Four bytes per pixel, row-major.
-    pub(crate) pixels: Vec<u8>,
+    pub pixels: Vec<u8>,
     /// Built with the texture, off the UI thread, and given up to the first
     /// upload so the levels are not held in memory beside the GPU's copy.
     mips: Mutex<Option<MipChain>>,
@@ -148,7 +148,7 @@ pub(crate) struct RgbaTexture {
 impl RgbaTexture {
     /// Builds the mip chain too: run it where the texture is decoded, not on
     /// the UI thread.
-    pub(crate) fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+    pub fn new(width: u32, height: u32, pixels: Vec<u8>) -> Self {
         let mips = Mutex::new(Some(MipChain::build(width, height, &pixels)));
 
         Self { width, height, pixels, mips }
@@ -157,7 +157,7 @@ impl RgbaTexture {
     /// The lower mip levels, for one upload. The first upload takes those
     /// built with the texture; a later one, onto a new device, builds them
     /// again.
-    pub(crate) fn take_mips(&self) -> MipChain {
+    pub fn take_mips(&self) -> MipChain {
         let held = self.mips.lock().ok().and_then(|mut held| held.take());
 
         held.unwrap_or_else(|| MipChain::build(self.width, self.height, &self.pixels))
@@ -168,9 +168,9 @@ impl RgbaTexture {
 ///
 /// The stock albedo is keyed by `.mfm` path and the composited camo by part
 /// stem, which is why the key is a plain `String` on both sides.
-pub(crate) type TexturesByPart = HashMap<String, RgbaTexture>;
+pub type TexturesByPart = HashMap<String, RgbaTexture>;
 
-pub(crate) fn build_active_camo(
+pub fn build_active_camo(
     textures: &SchemeTextures,
     uv_transforms: &HashMap<String, UvTransform>,
     use_color_scheme: bool,

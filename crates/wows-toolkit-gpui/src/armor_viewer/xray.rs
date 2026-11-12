@@ -38,7 +38,7 @@ impl XrayHighlightView for XrayHighlight {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::armor_viewer::picking_ui::HighlightOrigin;
+    use wows_toolkit_armor::plate_picking::HighlightOrigin;
     use wows_toolkit_armor::viewport::renderer::DepthState;
     use wows_toolkit_armor::viewport::renderer::layer_depth_state;
 
