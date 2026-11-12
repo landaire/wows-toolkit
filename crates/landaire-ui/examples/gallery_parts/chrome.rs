@@ -109,7 +109,7 @@ fn SplitFrame() -> impl IntoView {
                 text {"Shift: compare"}
                 StatusBarEnd(slot) {
                     text {"Rendering "}
-                    CountUp(value = done)
+                    CountUp(value = Signal::derive_local(move || done.get() as f64))
                     text {" of 30"}
                     RunningBar(done = share, label = "Rendering")
                     StatusToggle(pressed = RwSignal::new_local(false), icon = ELLIPSIS, label = "Show details")

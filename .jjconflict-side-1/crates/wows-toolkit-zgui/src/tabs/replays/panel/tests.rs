@@ -266,6 +266,28 @@ fn a_rating_table_arriving_after_the_parse_still_fills_the_badge_in() {
     assert!(window.by_test_id(PR_TILE_ID).is_some());
 }
 
+/// The figures count up when the battle is first shown, and tiles built again for a later read of
+/// it show their figures at once.
+#[test]
+fn the_header_figures_count_up_once() {
+    let table = RwSignal::new_local(None);
+    let Opened { mut window } = open(Opening {
+        seed: Some(loaded(model_at_expected_values(), true)),
+        rating: Some(table.into()),
+        ..Opening::default()
+    });
+    let damage = |window: &mut HeadlessWindow| {
+        let value = window.by_class("wt-rp-tile__value").expect("the damage tile is first");
+        window.a11y(value).and_then(|state| state.label).expect("the figure is announced")
+    };
+    assert_eq!(damage(&mut window), "50,000", "the count has ended on the figure");
+
+    table.set(Some(Arc::new(fixture_personal_rating_data())));
+    window.advance(Duration::from_millis(17));
+    assert!(window.by_test_id(PR_TILE_ID).is_some(), "the tiles were built again");
+    assert_eq!(damage(&mut window), "50,000", "the figure is not counted again");
+}
+
 /// The team damage line splits each side's results total.
 #[test]
 fn the_team_damage_split_is_drawn() {

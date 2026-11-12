@@ -6,6 +6,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::CountFormat;
+use landaire_ui::CountUpProps;
 use landaire_ui::MotionPreference;
 use landaire_ui::RevealProps;
 use landaire_ui::ThemeRootProps;
@@ -51,7 +53,7 @@ fn Revealed(controls: Controls) -> impl IntoView {
 /// A box announced as the figure a count shows for `count`.
 #[component]
 fn Counted(count: RwSignal<u64, LocalStorage>) -> impl IntoView {
-    let shown = count_up(count.into());
+    let shown = count_up::<u64>(count.into());
 
     view! {
         box(
@@ -154,4 +156,47 @@ fn reducing_motion_ends_a_count_and_a_close_under_way() {
     assert_eq!(shown_count(&mut window), 40, "the count is at its figure");
     assert_eq!(revealed_height(&window), 0.0, "the reveal is shut");
     assert!(window.by_test_id("content").is_none(), "its content is dropped");
+}
+
+/// A percentage counted from nothing when it is first shown.
+#[component]
+fn Share(share: RwSignal<f64, LocalStorage>) -> impl IntoView {
+    view! {
+        ThemeRoot {
+            CountUp(value = share, from = 0.0, format = CountFormat::percent(1), attr:data-testid = "share")
+        }
+    }
+}
+
+fn shown_share(window: &mut HeadlessWindow) -> String {
+    let share = window.by_test_id("share").expect("the share is built");
+
+    window.a11y(share).and_then(|state| state.label).expect("the share is announced")
+}
+
+#[test]
+fn a_decimal_count_runs_from_its_start_and_is_written_by_its_format() {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let share = RwSignal::new_local(0.5);
+        sent.set(Some(share));
+        view! { Share(share = share) }
+    })
+    .expect("opens");
+    let share = handed.get().expect("the view was built");
+
+    let started: f64 = shown_share(&mut window).trim_end_matches('%').parse().expect("a percentage");
+    assert!(started < 50.0, "the count starts below its figure at {started}");
+
+    window.advance(SETTLE);
+    assert_eq!(shown_share(&mut window), "50.0%");
+
+    share.set(0.625);
+    window.advance(Duration::from_millis(100));
+    let rising: f64 = shown_share(&mut window).trim_end_matches('%').parse().expect("a percentage");
+    assert!(rising > 50.0 && rising < 62.5, "part way through, the count is between its figures at {rising}");
+
+    window.advance(SETTLE);
+    assert_eq!(shown_share(&mut window), "62.5%");
 }

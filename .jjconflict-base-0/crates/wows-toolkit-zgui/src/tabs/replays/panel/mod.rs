@@ -983,7 +983,8 @@ fn result_name(result: Option<BattleResult>) -> Option<&'static str> {
 #[component]
 fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
     let loaded = header.loaded;
-    let progress = figures::count_up(run_count);
+    // Tiles built again for a later read of the model show their figures as they are.
+    let count_next = StoredValue::new(run_count);
     let result = move || {
         loaded.with(|loaded| loaded.as_ref().and_then(|loaded| result_name(loaded.battle_result)).map(str::to_owned))
     };
@@ -998,8 +999,10 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
         let rating =
             model.rows.iter().find(|row| row.is_self).and_then(|row| row.personal_rating.clone()).filter(|_| !hidden);
         let (allies, enemies) = figures::team_damage(&model.rows);
+        let counting = count_next.get_value();
+        count_next.set_value(false);
         Some(AnyView::new(view! {
-            StatTiles(own = own, rating = rating, progress = progress)
+            StatTiles(own = own, rating = rating, counting = counting)
             DamageSplit(allies = allies, enemies = enemies)
         }))
     };
