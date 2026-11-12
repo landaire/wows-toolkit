@@ -42,6 +42,7 @@ pub mod query_bar;
 pub mod replay_export;
 pub mod search;
 pub mod settings;
+pub mod settings_drawer;
 pub mod stats;
 pub mod tactics;
 pub mod twitch;
