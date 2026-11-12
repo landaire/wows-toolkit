@@ -59,8 +59,9 @@ pub struct ModelPrototype {
     /// Skeleton extension resource IDs (selfIds of skeleton extender prototypes).
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64_vec"))]
     pub skel_ext_res_ids: Vec<u64>,
-    /// Animation entries (each has the same layout as a ModelPrototype record).
-    pub animations: Vec<ModelPrototype>,
+    /// Animation state machine resource IDs (selfIds of `.ssm` entries).
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64_vec"))]
+    pub animation_res_ids: Vec<u64>,
     /// Dye entries for camouflage / cosmetic material replacement.
     pub dyes: Vec<DyeEntry>,
 }
@@ -185,18 +186,19 @@ fn parse_model_at(blob_data: &[u8], base: usize) -> Result<ModelPrototype, Repor
         Vec::new()
     };
 
-    // animations: array of ModelPrototype (0x28 each), relptr at +0x18
-    let animations = if animations_count > 0 {
+    // animationResIds: array of u64 selfIds of `.ssm` animation state machines, relptr at +0x18
+    let animation_res_ids = if animations_count > 0 {
         let abs = resolve_relptr(base, hdr.animations_relptr);
-        let need = animations_count * MODEL_ITEM_SIZE;
+        let need = animations_count * 8;
         if abs + need > blob_data.len() {
             return Err(Report::new(ModelError::DataTooShort { offset: abs, need, have: blob_data.len() }));
         }
-        let mut anims = Vec::with_capacity(animations_count);
-        for i in 0..animations_count {
-            anims.push(parse_model_at(blob_data, abs + i * MODEL_ITEM_SIZE)?);
-        }
-        anims
+        let input = &mut &blob_data[abs..];
+        let ids: Vec<u64> =
+            repeat(animations_count, le_u64).parse_next(input).map_err(|_: ErrMode<ContextError>| {
+                ModelError::DataTooShort { offset: abs, need, have: blob_data.len() }
+            })?;
+        ids
     } else {
         Vec::new()
     };
@@ -213,7 +215,7 @@ fn parse_model_at(blob_data: &[u8], base: usize) -> Result<ModelPrototype, Repor
         visual_resource_id: hdr.visual_resource_id,
         misc_type: hdr.misc_type,
         skel_ext_res_ids,
-        animations,
+        animation_res_ids,
         dyes,
     })
 }
@@ -278,4 +280,24 @@ fn parse_dye_entries(blob_data: &[u8], offset: usize, count: usize) -> Result<Ve
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The header of `CM001_Propeller3_L.model` from build 13533378, with its
+    /// one animation id moved to directly after the record.
+    #[test]
+    fn animation_entries_are_resource_ids() {
+        let mut record = Vec::new();
+        record.extend_from_slice(&0x8DAE_4DED_FE61_44CEu64.to_le_bytes());
+        record.extend_from_slice(&[0x00, 0x01, 0x01, 0x00, 0, 0, 0, 0]);
+        record.extend_from_slice(&0i64.to_le_bytes());
+        record.extend_from_slice(&(MODEL_ITEM_SIZE as i64).to_le_bytes());
+        record.extend_from_slice(&0i64.to_le_bytes());
+        record.extend_from_slice(&0xC8BB_2CD2_A54B_5B0Au64.to_le_bytes());
+
+        insta::assert_debug_snapshot!(parse_model(&record).expect("record parses"));
+    }
 }

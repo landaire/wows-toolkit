@@ -1,0 +1,13 @@
+---
+source: crates/wowsunpack/src/models/model.rs
+expression: "parse_model(&record).expect(\"record parses\")"
+---
+ModelPrototype {
+    visual_resource_id: 10209183089865868494,
+    misc_type: 1,
+    skel_ext_res_ids: [],
+    animation_res_ids: [
+        14464203911458413322,
+    ],
+    dyes: [],
+}
