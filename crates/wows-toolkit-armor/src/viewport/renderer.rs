@@ -220,9 +220,9 @@ impl SceneColorTarget {
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
     color: SceneColorTarget,
-    /// Pipeline with depth writes enabled — used for opaque geometry (armor).
+    /// Pipeline with depth writes enabled, for opaque geometry (armor).
     pipeline: wgpu::RenderPipeline,
-    /// Pipeline without depth writes — used for transparent hull geometry.
+    /// Pipeline without depth writes, for transparent hull geometry.
     pipeline_no_depth_write: wgpu::RenderPipeline,
     /// Pipeline that ignores depth: overlays, row highlights, and hover
     /// highlights in [`HighlightDepth::XRay`].
@@ -234,7 +234,7 @@ pub struct GpuPipeline {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     /// Shared sampler for all diffuse textures.
     default_sampler: wgpu::Sampler,
-    /// 1x1 white texture bind group — bound for non-textured meshes.
+    /// 1x1 white texture bind group, bound for non-textured meshes.
     fallback_texture_bind_group: wgpu::BindGroup,
     /// 1x1 flat normal, bound where a material lacks a surface map. The
     /// material's flags keep the shader from reading it.
@@ -1193,7 +1193,7 @@ impl Viewport3D {
             },
         );
 
-        // No pick_data entry — this mesh is invisible to picking
+        // No pick_data entry: this mesh is invisible to picking.
         self.needs_redraw = true;
         id
     }
@@ -1464,7 +1464,7 @@ impl Viewport3D {
         if !has_roll && !has_yaw {
             return (origin, dir);
         }
-        // Inverse: Rz(+roll) * Ry(-yaw) — composed as a single rotation.
+        // Inverse: Rz(+roll) * Ry(-yaw), composed as a single rotation.
         let inv_rot = {
             let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), self.model_roll);
             let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), -self.model_yaw);
