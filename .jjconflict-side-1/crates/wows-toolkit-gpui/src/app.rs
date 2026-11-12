@@ -61,10 +61,8 @@ use crate::zoom::ZoomIn;
 use crate::zoom::ZoomOut;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
 
-pub(crate) use settings_drawer::Setting;
-
-#[cfg(test)]
-pub(crate) use settings_drawer::SettingsSection;
+pub(crate) use wows_toolkit_viewmodel::settings_drawer::Setting;
+pub(crate) use wows_toolkit_viewmodel::settings_drawer::SettingsSection;
 
 /// Where the menu's links go, as the egui menu bar sends them.
 const ISSUES_URL: &str = "https://github.com/landaire/wows-toolkit/issues/new/choose";
@@ -423,7 +421,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_services::stats::SessionData;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
