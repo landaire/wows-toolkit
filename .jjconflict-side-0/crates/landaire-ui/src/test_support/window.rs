@@ -23,6 +23,7 @@ use zgui::render::Renderer;
 use zgui::runtime::AppError;
 use zgui::runtime::Runtime;
 use zgui::view::AttrName;
+use zgui::view::ClassName;
 use zgui::view::NodeId;
 use zgui::view::OverlayLayer;
 use zgui::vocab::KeyCode;
@@ -184,19 +185,19 @@ impl HeadlessWindow {
 
     /// The first element that carries [`TEST_ID_ATTRIBUTE`] set to `id`, overlays included.
     pub fn by_test_id(&self, id: &str) -> Option<Element> {
-        let window = self.window();
-        let dom = window.dom();
+        let dom = self.window().dom();
         let attribute = AttrName::new(TEST_ID_ATTRIBUTE);
 
-        let mut pending = self.roots();
-        while let Some(node) = pending.pop() {
-            if dom.attribute(node, attribute).as_deref() == Some(id) {
-                return Some(Element(node));
-            }
-            pending.extend(dom.children(node).into_iter().rev());
-        }
+        self.first_in_document(|node| dom.attribute(node, attribute).as_deref() == Some(id))
+    }
 
-        None
+    /// The first element whose class list holds `class`, overlays included, for a part a
+    /// component builds itself.
+    pub fn by_class(&self, class: &str) -> Option<Element> {
+        let dom = self.window().dom();
+        let class = ClassName::new(class);
+
+        self.first_in_document(|node| dom.classes(node).contains(&class))
     }
 
     /// The first element, in reading order, whose accessible name is `label`.
@@ -336,6 +337,21 @@ impl HeadlessWindow {
 
     fn surface(&self) -> Option<Arc<OffscreenSurface>> {
         self.harness.platform().offscreens().into_iter().next()
+    }
+
+    /// The first node in document order, overlays included, that `matches`.
+    fn first_in_document(&self, matches: impl Fn(NodeId) -> bool) -> Option<Element> {
+        let dom = self.window().dom();
+
+        let mut pending = self.roots();
+        while let Some(node) = pending.pop() {
+            if matches(node) {
+                return Some(Element(node));
+            }
+            pending.extend(dom.children(node).into_iter().rev());
+        }
+
+        None
     }
 
     /// The page root and each overlay band's root, since overlays are not below the page.
