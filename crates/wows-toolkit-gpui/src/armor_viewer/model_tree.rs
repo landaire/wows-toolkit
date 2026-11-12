@@ -1,10 +1,13 @@
 //! The Model Viewer sidebar's model listing: the catalogue grouped by nation,
-//! kind and sub-kind, with every row's name lowercased once so a search only
-//! runs substring tests.
+//! kind and sub-kind, with every row's search text folded once so a search
+//! only runs substring tests.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::model_catalog::ModelCatalog;
 use wowsunpack::export::model_catalog::ModelEntry;
 use wowsunpack::export::model_catalog::ModelKind;
@@ -19,10 +22,13 @@ use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::export::ship_parts::ShipPartListing;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::MountParam;
+use wowsunpack::game_types::GameParamId;
 
 use super::catalog::ShipCatalog;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
+use super::search_key::SearchKey;
 
 /// Every listed catalogue model, grouped for the tree.
 pub struct ModelTreeIndex {
@@ -52,16 +58,17 @@ pub struct ModelSubKindGroup {
 
 pub struct ModelRow {
     pub path: ModelPath,
-    /// Lowercased stem. A search names models, not the directories they sit
-    /// in, which nearly every query would match.
-    pub search_key: String,
+    /// The stem, then the GameParams entries that use the model. A search
+    /// does not look at the directories a model sits in, which nearly every
+    /// query would match.
+    pub search_key: SearchKey,
     pub variants: Vec<VariantRow>,
 }
 
 pub struct VariantRow {
     pub kind: ModelVariantKind,
     pub path: ModelPath,
-    /// Lowercased stem, as [`ModelRow::search_key`].
+    /// Lowercased stem.
     pub search_key: String,
     /// A skin's own dead and section variants; empty for the other kinds.
     pub variants: Vec<VariantRow>,
@@ -79,7 +86,7 @@ pub enum ModelMatch {
 
 impl ModelRow {
     pub fn search(&self, query: &str) -> ModelMatch {
-        if self.search_key.contains(query) {
+        if self.search_key.matches(query) {
             return ModelMatch::Name;
         }
 
@@ -98,6 +105,105 @@ impl VariantRow {
 
     pub fn any_variant_matches(&self, query: &str) -> bool {
         self.variants.iter().any(|variant| variant.matches(query))
+    }
+}
+
+/// The GameParams entries that use each model: ships for their hull models,
+/// mounts for theirs. A model is found by their names as well as its own.
+#[derive(Default)]
+pub struct ModelReferences {
+    keys: HashMap<ModelPath, SearchKey>,
+}
+
+impl ModelReferences {
+    pub fn new() -> Self {
+        Self { keys: HashMap::new() }
+    }
+
+    /// The references of the ships in `ships`, which are the ships the
+    /// sidebar lists, and of every mount they carry on any hull.
+    pub fn build(ships: &ShipCatalog, metadata: &GameMetadataProvider) -> Self {
+        let listed: HashMap<&str, &SearchKey> =
+            ships.ships().map(|ship| (ship.param_index.as_str(), &ship.search_key)).collect();
+        let mut references = Self::new();
+        let mut mount_keys: HashMap<GameParamId, SearchKey> = HashMap::new();
+        // Ships repeat their hull models and mounts across hulls and share
+        // mounts with each other; each pairing is added once.
+        let mut seen: HashSet<(&str, GameParamId)> = HashSet::new();
+        for param in metadata.params() {
+            let Some(ship_key) = listed.get(param.index()) else {
+                continue;
+            };
+            let Some(vehicle) = param.vehicle() else {
+                continue;
+            };
+
+            let hulls = vehicle.hull_upgrades().into_iter().flat_map(|hulls| hulls.values());
+            let hull_models =
+                vehicle.model_path().into_iter().chain(hulls.clone().filter_map(|hull| hull.hull_model_path()));
+            for model in hull_models {
+                if seen.insert((model, param.id())) {
+                    references.insert(model, ship_key);
+                }
+            }
+
+            let alternatives =
+                hulls.clone().flat_map(|hull| hull.alternative_mounts.values()).flat_map(|mounts| mounts.mounts());
+            for mount in hulls.flat_map(|hull| hull.all_mount_points()).chain(alternatives) {
+                let Some(mount_param) = mount.param() else {
+                    continue;
+                };
+                if !seen.insert((mount.model_path(), mount_param.id())) {
+                    continue;
+                }
+
+                let key = mount_keys.entry(mount_param.id()).or_insert_with(|| mount_search_key(metadata, mount_param));
+                references.insert(mount.model_path(), key);
+            }
+        }
+
+        references
+    }
+
+    /// Adds `key`'s fields to model `model`'s. A path that is not a model
+    /// names nothing the sidebar lists.
+    pub fn insert(&mut self, model: &str, key: &SearchKey) {
+        let Ok(path) = ModelPath::parse(model) else {
+            return;
+        };
+
+        self.keys.entry(path).or_default().extend(key);
+    }
+
+    /// What `model` is found by: its stem, then its references.
+    pub fn model_key(&self, model: &ModelPath) -> SearchKey {
+        let mut key = SearchKey::new();
+        key.push(model.stem());
+        if let Some(references) = self.keys.get(model) {
+            key.extend(references);
+        }
+
+        key
+    }
+}
+
+/// [`ModelReferences::model_key`] for each part model, built once however
+/// many ships carry it.
+pub struct PartKeys<'a> {
+    references: &'a ModelReferences,
+    keys: HashMap<ModelPath, Arc<SearchKey>>,
+}
+
+impl<'a> PartKeys<'a> {
+    pub fn new(references: &'a ModelReferences) -> Self {
+        Self { references, keys: HashMap::new() }
+    }
+
+    fn key(&mut self, model: &ModelPath) -> Arc<SearchKey> {
+        let references = self.references;
+        let key = self.keys.entry(model.clone()).or_insert_with(|| Arc::new(references.model_key(model)));
+
+        Arc::clone(key)
     }
 }
 
@@ -141,15 +247,24 @@ impl MountGroup {
 #[derive(Default)]
 pub struct ShipPartRows {
     /// The hull model and its sections.
-    pub hull: Vec<ModelPath>,
+    pub hull: Vec<HullRow>,
     /// Non-empty groups in [`MountGroup`] order.
     pub mounts: Vec<MountGroupRows>,
     pub misc: Vec<PartRow>,
+    /// Every part's search key once; ships repeat a mount many times.
+    keys: Vec<Arc<SearchKey>>,
 }
 
 pub struct MountGroupRows {
     pub group: MountGroup,
     pub parts: Vec<PartRow>,
+}
+
+/// The hull model or one of its sections.
+pub struct HullRow {
+    pub model: ModelPath,
+    /// As [`ModelRow::search_key`].
+    pub search_key: Arc<SearchKey>,
 }
 
 /// One mount or misc part.
@@ -159,10 +274,12 @@ pub struct PartRow {
     /// its parent mount or hull section.
     pub node: String,
     pub model: ModelPath,
+    /// As [`ModelRow::search_key`].
+    pub search_key: Arc<SearchKey>,
 }
 
 impl ShipPartRows {
-    pub fn from_listing(listing: &ShipPartListing, catalog: &ModelCatalog) -> Self {
+    pub fn from_listing(listing: &ShipPartListing, catalog: &ModelCatalog, keys: &mut PartKeys<'_>) -> Self {
         let mut groups: BTreeMap<MountGroup, Vec<PartRow>> = BTreeMap::new();
         for mount in &listing.mounts {
             let kind = catalog.owning_entry(&mount.model).map(ModelEntry::kind);
@@ -170,35 +287,56 @@ impl ShipPartRows {
                 key: ShipPartKey::Mount(mount.hp.clone()),
                 node: mount.hp.to_string(),
                 model: mount.model.clone(),
+                search_key: keys.key(&mount.model),
             });
         }
 
-        let misc = listing
+        let misc: Vec<PartRow> = listing
             .miscs
             .iter()
             .map(|misc| PartRow {
                 key: misc.key(),
                 node: misc_label(misc, listing.hull_sections.first()),
                 model: misc.model.clone(),
+                search_key: keys.key(&misc.model),
             })
             .collect();
 
-        Self {
-            hull: listing.hull_sections.clone(),
-            mounts: groups.into_iter().map(|(group, parts)| MountGroupRows { group, parts }).collect(),
-            misc,
-        }
+        let hull: Vec<HullRow> = listing
+            .hull_sections
+            .iter()
+            .map(|model| HullRow { model: model.clone(), search_key: keys.key(model) })
+            .collect();
+
+        let mounts: Vec<MountGroupRows> =
+            groups.into_iter().map(|(group, parts)| MountGroupRows { group, parts }).collect();
+        let mut unique_keys: Vec<Arc<SearchKey>> = hull
+            .iter()
+            .map(|row| &row.search_key)
+            .chain(mounts.iter().flat_map(|group| &group.parts).map(|part| &part.search_key))
+            .chain(misc.iter().map(|part| &part.search_key))
+            .map(Arc::clone)
+            .collect();
+        unique_keys.sort_by_key(Arc::as_ptr);
+        unique_keys.dedup_by(|a, b| Arc::ptr_eq(a, b));
+
+        Self { hull, mounts, misc, keys: unique_keys }
     }
 
     pub fn is_empty(&self) -> bool {
         self.hull.is_empty() && self.mounts.is_empty() && self.misc.is_empty()
+    }
+
+    /// Whether `query` names any part.
+    pub fn any_matches(&self, query: &str) -> bool {
+        self.keys.iter().any(|key| key.matches(query))
     }
 }
 
 impl ModelTreeIndex {
     /// Groups `catalog`'s listed entries. `ships` names the nations whose
     /// directory matches a GameParams nation.
-    pub fn build(catalog: &ModelCatalog, ships: &ShipCatalog) -> Self {
+    pub fn build(catalog: &ModelCatalog, ships: &ShipCatalog, references: &ModelReferences) -> Self {
         let mut nations: Vec<ModelNationGroup> = Vec::new();
         for entry in catalog.listed_entries() {
             let nation_idx = match nations.iter().position(|group| group.nation == *entry.nation()) {
@@ -208,7 +346,7 @@ impl ModelTreeIndex {
                     nations.len() - 1
                 }
             };
-            insert_entry(&mut nations[nation_idx], entry, catalog);
+            insert_entry(&mut nations[nation_idx], entry, catalog, references);
         }
 
         for nation in &mut nations {
@@ -250,8 +388,10 @@ pub fn list_all_ship_parts(
     ships: &ShipCatalog,
     metadata: &GameMetadataProvider,
     library: &ModelLibrary,
+    references: &ModelReferences,
 ) -> HashMap<VehicleParamIndex, ShipPartRows> {
     let no_overrides = HashMap::new();
+    let mut keys = PartKeys::new(references);
     let mut parts = HashMap::new();
     for ship in ships.ships() {
         let Some(param) = metadata.game_param_by_index(&ship.param_index) else {
@@ -264,7 +404,7 @@ pub fn list_all_ship_parts(
         // `None` is the default hull, as for a ship load with no hull selected.
         match library.list_ship_parts(vehicle, None, &no_overrides) {
             Ok(listing) => {
-                let rows = ShipPartRows::from_listing(&listing, library.catalog());
+                let rows = ShipPartRows::from_listing(&listing, library.catalog(), &mut keys);
                 parts.insert(VehicleParamIndex::new(ship.param_index.clone()), rows);
             }
             Err(report) => {
@@ -274,6 +414,21 @@ pub fn list_all_ship_parts(
     }
 
     parts
+}
+
+/// What a mount is found by: the game's name for it, where it has one, and
+/// its GameParams index, name and id.
+fn mount_search_key(metadata: &GameMetadataProvider, param: &MountParam) -> SearchKey {
+    let name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}", param.name().to_uppercase()));
+    let mut key = SearchKey::new();
+    if let Some(name) = metadata.localized_name_from_id(&name_key) {
+        key.push(name);
+    }
+    key.push(param.index());
+    key.push(param.name());
+    key.push(param.id().to_string());
+
+    key
 }
 
 /// A misc node behind the mount or hull section carrying it: `HP_x MP_y`,
@@ -304,7 +459,12 @@ fn new_nation_group(nation: &ModelNation, ships: &ShipCatalog) -> ModelNationGro
     }
 }
 
-fn insert_entry(nation: &mut ModelNationGroup, entry: &ModelEntry, catalog: &ModelCatalog) {
+fn insert_entry(
+    nation: &mut ModelNationGroup,
+    entry: &ModelEntry,
+    catalog: &ModelCatalog,
+    references: &ModelReferences,
+) {
     let kind_idx = match nation.kinds.iter().position(|group| group.kind == entry.kind()) {
         Some(idx) => idx,
         None => {
@@ -343,7 +503,7 @@ fn insert_entry(nation: &mut ModelNationGroup, entry: &ModelEntry, catalog: &Mod
         .collect();
     kind.sub_kinds[sub_kind_idx].models.push(ModelRow {
         path: entry.path().clone(),
-        search_key: entry.path().stem().to_lowercase(),
+        search_key: references.model_key(entry.path()),
         variants,
     });
 }
@@ -390,7 +550,7 @@ mod tests {
         use wowsunpack::game_data::AssetsBin;
 
         fn row_keys(rows: &ShipPartRows) -> BTreeSet<ShipPartKey> {
-            let hull = rows.hull.iter().cloned().map(ShipPartKey::HullSection);
+            let hull = rows.hull.iter().map(|row| ShipPartKey::HullSection(row.model.clone()));
             let mounts = rows.mounts.iter().flat_map(|group| &group.parts).map(|part| part.key.clone());
             let miscs = rows.misc.iter().map(|part| part.key.clone());
 
@@ -410,7 +570,7 @@ mod tests {
         let library = ModelLibrary::new(vfs.clone(), Arc::clone(&bytes), &metadata).expect("model library");
         let assets = ShipAssets::from_parts(&vfs, Arc::clone(&metadata), bytes);
         let ships = ShipCatalog::build(&metadata);
-        let listed = list_all_ship_parts(&ships, &metadata, &library);
+        let listed = list_all_ship_parts(&ships, &metadata, &library, &ModelReferences::new());
 
         let no_overrides = HashMap::new();
         let options = ShipExportOptions { textures: false, ..ShipExportOptions::default() };

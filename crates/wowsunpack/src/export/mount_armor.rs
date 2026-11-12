@@ -3,6 +3,7 @@
 //! is set per ship and hardpoint, so a mount opened on its own borrows it from
 //! a ship that mounts it.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -37,6 +38,12 @@ impl VehicleParamIndex {
 impl fmt::Display for VehicleParamIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl Borrow<str> for VehicleParamIndex {
+    fn borrow(&self) -> &str {
+        &self.0
     }
 }
 

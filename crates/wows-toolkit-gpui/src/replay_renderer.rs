@@ -6471,6 +6471,7 @@ mod tests {
                     param_index: "PRSC610".to_string(),
                     display_name: "Moskva".to_string(),
                     search_name: "moskva".to_string(),
+                    search_key: crate::armor_viewer::search_key::SearchKey::new(),
                     tier: 10,
                 };
                 // Without game data loaded there is no param to resolve, so

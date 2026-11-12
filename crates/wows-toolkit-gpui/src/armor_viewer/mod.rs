@@ -61,6 +61,7 @@ pub mod pane;
 pub mod picking_ui;
 pub mod popover;
 pub mod realtime;
+pub mod search_key;
 pub mod sidebar;
 mod sidebar_tree;
 pub mod splash;

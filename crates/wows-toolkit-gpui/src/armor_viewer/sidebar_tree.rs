@@ -32,6 +32,7 @@ use super::catalog::tier_roman;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
+use super::model_tree::HullRow;
 use super::model_tree::ModelKindGroup;
 use super::model_tree::ModelMatch;
 use super::model_tree::ModelNationGroup;
@@ -42,6 +43,7 @@ use super::model_tree::MountGroup;
 use super::model_tree::PartRow;
 use super::model_tree::ShipPartRows;
 use super::model_tree::VariantRow;
+use super::search_key::SearchKey;
 
 pub(super) const SEPARATOR_ID: &str = "armor-models-separator";
 const MODELS_STATUS_ID: &str = "armor-models-status";
@@ -89,15 +91,17 @@ pub(super) struct TreeSources<'a> {
 }
 
 /// Which folders are expanded. With `auto` set, every folder a search wants
-/// open is opened and recorded in `set`.
+/// open is opened and recorded in `set`, except those in `closed`.
 pub(super) struct Expansion<'a> {
     pub set: &'a mut HashSet<SharedString>,
+    /// Folders the user closed during the search.
+    pub closed: &'a HashSet<SharedString>,
     pub auto: bool,
 }
 
 impl Expansion<'_> {
     fn resolve(&mut self, id: &SharedString, wanted: bool) -> bool {
-        if self.auto && wanted {
+        if self.auto && wanted && !self.closed.contains(id) {
             self.set.insert(id.clone());
             return true;
         }
@@ -109,6 +113,9 @@ impl Expansion<'_> {
 pub(super) struct BuiltTree {
     pub items: Vec<TreeItem>,
     pub rows: HashMap<SharedString, RowKind>,
+    /// During a search, the field a row was found by where it is not the
+    /// row's own name.
+    pub notes: HashMap<SharedString, SharedString>,
 }
 
 /// What a search names, worked out once per query and per change to the
@@ -123,7 +130,7 @@ pub(super) struct SearchMatches {
 }
 
 /// Ships by nation and class, in [`ShipCatalog`] order.
-type ShipMatches = MatchGroup<MatchGroup<MatchGroup<bool>>>;
+type ShipMatches = MatchGroup<MatchGroup<MatchGroup<ShipMatch>>>;
 
 /// Models by nation, kind and sub-kind, in [`ModelTreeIndex`] order.
 type ModelMatches = MatchGroup<MatchGroup<MatchGroup<MatchGroup<ModelMatch>>>>;
@@ -144,7 +151,7 @@ impl SearchMatches {
                 nation
                     .classes
                     .iter()
-                    .map(|class| class.ships.iter().map(|ship| ship.search_name.contains(query)).collect())
+                    .map(|class| class.ships.iter().map(|ship| ship_match(ship, sources.ship_parts, query)).collect())
                     .collect()
             })
             .collect();
@@ -175,6 +182,29 @@ impl SearchMatches {
     }
 }
 
+/// How a search names one ship.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShipMatch {
+    Miss,
+    /// The ship itself, whatever its parts are called.
+    Name,
+    /// Only one or more of its parts.
+    Parts,
+}
+
+fn ship_match(ship: &ShipEntry, ship_parts: &HashMap<VehicleParamIndex, ShipPartRows>, query: &str) -> ShipMatch {
+    if ship.search_key.matches(query) {
+        return ShipMatch::Name;
+    }
+
+    let parts = ship_parts.get(ship.param_index.as_str());
+    if parts.is_some_and(|parts| parts.any_matches(query)) {
+        return ShipMatch::Parts;
+    }
+
+    ShipMatch::Miss
+}
+
 /// The matches under one folder, in its listing order.
 pub(super) struct MatchGroup<T> {
     count: usize,
@@ -198,9 +228,12 @@ trait MatchCount {
     fn match_count(&self) -> usize;
 }
 
-impl MatchCount for bool {
+impl MatchCount for ShipMatch {
     fn match_count(&self) -> usize {
-        usize::from(*self)
+        match self {
+            ShipMatch::Miss => 0,
+            ShipMatch::Name | ShipMatch::Parts => 1,
+        }
     }
 }
 
@@ -225,7 +258,7 @@ pub(super) fn build_tree(
     search: Option<&SearchMatches>,
     expansion: &mut Expansion<'_>,
 ) -> BuiltTree {
-    let mut builder = Builder { search, rows: HashMap::new(), expansion, sources };
+    let mut builder = Builder { search, rows: HashMap::new(), notes: HashMap::new(), expansion, sources };
     let mut items = Vec::new();
 
     let ship_matches = search.map(|search| &search.ships);
@@ -251,7 +284,7 @@ pub(super) fn build_tree(
         }
     }
 
-    BuiltTree { items, rows: builder.rows }
+    BuiltTree { items, rows: builder.rows, notes: builder.notes }
 }
 
 /// The row id `open` is drawn on.
@@ -365,6 +398,7 @@ fn variant_label(kind: &ModelVariantKind, path: &ModelPath) -> String {
 struct Builder<'q, 'e, 's, 'd> {
     search: Option<&'q SearchMatches>,
     rows: HashMap<SharedString, RowKind>,
+    notes: HashMap<SharedString, SharedString>,
     expansion: &'e mut Expansion<'s>,
     sources: &'q TreeSources<'d>,
 }
@@ -372,6 +406,15 @@ struct Builder<'q, 'e, 's, 'd> {
 impl Builder<'_, '_, '_, '_> {
     fn opens_ships(&self) -> bool {
         self.search.is_some_and(|search| opens(&search.ships))
+    }
+
+    /// Whether a search opens the ships it names only by their parts. Each
+    /// opened ship adds a row per matching part, so fewer ships are opened
+    /// than other folders.
+    fn opens_ship_parts(&self) -> bool {
+        const SHIP_PARTS_OPEN_LIMIT: usize = 20;
+
+        self.search.is_some_and(|search| search.ships.match_count() <= SHIP_PARTS_OPEN_LIMIT)
     }
 
     fn opens_models(&self) -> bool {
@@ -405,7 +448,23 @@ impl Builder<'_, '_, '_, '_> {
         self.leaf(MODELS_STATUS_ID.into(), label, RowKind::ModelsStatus).disabled(true)
     }
 
-    fn ship_nation(&mut self, nation: &NationGroup, matches: Option<&MatchGroup<MatchGroup<bool>>>) -> TreeItem {
+    /// Records the field of `key` the search found row `id` by, unless it is
+    /// the first, which is the name the row shows.
+    fn note(&mut self, id: &SharedString, key: &SearchKey) {
+        let Some(search) = self.search else {
+            return;
+        };
+        let Some(field) = key.matched_field(&search.query) else {
+            return;
+        };
+        if key.fields().next() == Some(field) {
+            return;
+        }
+
+        self.notes.insert(id.clone(), field.to_string().into());
+    }
+
+    fn ship_nation(&mut self, nation: &NationGroup, matches: Option<&MatchGroup<MatchGroup<ShipMatch>>>) -> TreeItem {
         let id: SharedString = format!("armor-nation-{}", nation.nation).into();
         let label = counted(nation.display_name.clone(), matches);
         let wanted = self.opens_ships();
@@ -421,7 +480,7 @@ impl Builder<'_, '_, '_, '_> {
                 items.push(b.folder(id, label, RowKind::Class(class.species), wanted, |b| {
                     paired(&class.ships, matches)
                         .filter(|(_, found)| shown(*found))
-                        .map(|(ship, _)| b.ship_row(ship))
+                        .map(|(ship, found)| b.ship_row(ship, found.copied()))
                         .collect()
                 }));
             }
@@ -430,10 +489,14 @@ impl Builder<'_, '_, '_, '_> {
         })
     }
 
-    fn ship_row(&mut self, ship: &ShipEntry) -> TreeItem {
+    /// `found` is `None` when listing everything.
+    fn ship_row(&mut self, ship: &ShipEntry, found: Option<ShipMatch>) -> TreeItem {
         let id = ship_row_id(&ship.param_index);
         let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
         let kind = RowKind::Ship { param_index: ship.param_index.clone(), display_name: ship.display_name.clone() };
+        if found == Some(ShipMatch::Name) {
+            self.note(&id, &ship.search_key);
+        }
 
         let vehicle = VehicleParamIndex::new(ship.param_index.clone());
         let ship_parts = self.sources.ship_parts;
@@ -441,42 +504,61 @@ impl Builder<'_, '_, '_, '_> {
             return self.leaf(id, label, kind);
         };
 
-        self.folder(id, label, kind, false, |b| b.ship_parts(&vehicle, parts))
+        // A search that names only parts opens the ship to list them; one
+        // that names the ship leaves its parts folded.
+        let part_query = match found {
+            Some(ShipMatch::Parts) => self.search.map(|search| search.query.as_str()),
+            Some(ShipMatch::Name | ShipMatch::Miss) | None => None,
+        };
+        let wanted = part_query.is_some() && self.opens_ship_parts();
+        self.folder(id, label, kind, wanted, |b| b.ship_parts(&vehicle, parts, part_query))
     }
 
-    fn ship_parts(&mut self, ship: &VehicleParamIndex, parts: &ShipPartRows) -> Vec<TreeItem> {
+    /// `query` lists only the parts it names, in opened folders; `None` lists
+    /// every part.
+    fn ship_parts(&mut self, ship: &VehicleParamIndex, parts: &ShipPartRows, query: Option<&str>) -> Vec<TreeItem> {
+        let listed = |key: &SearchKey| query.is_none_or(|query| key.matches(query));
+        let wanted = query.is_some() && self.opens_ship_parts();
         let mut items = Vec::new();
 
-        if !parts.hull.is_empty() {
+        let hull: Vec<&HullRow> = parts.hull.iter().filter(|row| listed(&row.search_key)).collect();
+        if !hull.is_empty() {
             let id: SharedString = format!("armor-part-{ship}-group-hull").into();
-            items.push(self.folder(id, t!("ui.models.part.hull").into_owned(), RowKind::PartFolder, false, |b| {
-                parts.hull.iter().map(|model| b.hull_row(ship, model)).collect()
+            items.push(self.folder(id, t!("ui.models.part.hull").into_owned(), RowKind::PartFolder, wanted, |b| {
+                hull.iter().map(|row| b.hull_row(ship, row)).collect()
             }));
         }
 
         for group in &parts.mounts {
+            let rows: Vec<&PartRow> = group.parts.iter().filter(|part| listed(&part.search_key)).collect();
+            if rows.is_empty() {
+                continue;
+            }
+
             let id: SharedString = format!("armor-part-{ship}-group-{:?}", group.group).into();
-            items.push(self.folder(id, mount_group_label(group.group), RowKind::PartFolder, false, |b| {
-                group.parts.iter().map(|part| b.part_row(ship, part)).collect()
+            items.push(self.folder(id, mount_group_label(group.group), RowKind::PartFolder, wanted, |b| {
+                rows.iter().map(|part| b.part_row(ship, part)).collect()
             }));
         }
 
-        if !parts.misc.is_empty() {
+        let misc: Vec<&PartRow> = parts.misc.iter().filter(|part| listed(&part.search_key)).collect();
+        if !misc.is_empty() {
             let id: SharedString = format!("armor-part-{ship}-group-misc").into();
-            items.push(self.folder(id, t!("ui.models.part.misc").into_owned(), RowKind::PartFolder, false, |b| {
-                parts.misc.iter().map(|part| b.part_row(ship, part)).collect()
+            items.push(self.folder(id, t!("ui.models.part.misc").into_owned(), RowKind::PartFolder, wanted, |b| {
+                misc.iter().map(|part| b.part_row(ship, part)).collect()
             }));
         }
 
         items
     }
 
-    fn hull_row(&mut self, ship: &VehicleParamIndex, model: &ModelPath) -> TreeItem {
-        let part = ShipPartKey::HullSection(model.clone());
+    fn hull_row(&mut self, ship: &VehicleParamIndex, row: &HullRow) -> TreeItem {
+        let part = ShipPartKey::HullSection(row.model.clone());
         let id = part_row_id(ship, &part);
-        let kind = RowKind::ShipPart { ship: ship.clone(), part, model: model.clone(), node: None };
+        let kind = RowKind::ShipPart { ship: ship.clone(), part, model: row.model.clone(), node: None };
+        self.note(&id, &row.search_key);
 
-        self.leaf(id, model.stem().to_string(), kind)
+        self.leaf(id, row.model.stem().to_string(), kind)
     }
 
     fn part_row(&mut self, ship: &VehicleParamIndex, part: &PartRow) -> TreeItem {
@@ -487,6 +569,7 @@ impl Builder<'_, '_, '_, '_> {
             model: part.model.clone(),
             node: Some(part.node.as_str().to_string().into()),
         };
+        self.note(&id, &part.search_key);
 
         self.leaf(id, format!("{} {}", part.node, part.model.stem()), kind)
     }
@@ -560,6 +643,10 @@ impl Builder<'_, '_, '_, '_> {
         let id = model_row_id(&model.path);
         let label = model.path.stem().to_string();
         let kind = RowKind::Model(model.path.clone());
+        if found == Some(ModelMatch::Name) {
+            self.note(&id, &model.search_key);
+        }
+
         if model.variants.is_empty() {
             return self.leaf(id, label, kind);
         }
@@ -662,7 +749,10 @@ pub(super) mod fixture {
     use super::super::catalog::ShipCatalog;
     use super::super::catalog::ShipEntry;
     use super::super::model_refs::VehicleParamIndex;
+    use super::super::model_tree::ModelReferences;
+    use super::super::model_tree::PartKeys;
     use super::super::model_tree::ShipPartRows;
+    use super::super::search_key::SearchKey;
 
     pub const IOWA_INDEX: &str = "PASB018";
     pub const IOWA: &str = "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945.model";
@@ -671,33 +761,60 @@ pub(super) mod fixture {
     const SECONDARY: &str = "content/gameplay/usa/gun/secondary/AGS010_5in38_Mk32_Mod12/AGS010_5in38_Mk32_Mod12.model";
     const DIRECTOR: &str = "content/gameplay/usa/director/AD001_Director_Mk37/AD001_Director_Mk37.model";
     const BOLLARD: &str = "content/gameplay/usa/misc/AM2061/AM2061.model";
+    const YAMATO: &str = "content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model";
 
     pub fn path(raw: &str) -> ModelPath {
         ModelPath::parse(raw).expect("a model path")
     }
 
-    fn ship(param_index: &str, display_name: &str, tier: u32) -> ShipEntry {
+    /// A ship as `ShipCatalog::build` lists it, with real GameParams data.
+    fn ship(param_index: &str, short_name: &str, full_name: &str, param_name: &str, id: u64, tier: u32) -> ShipEntry {
         ShipEntry {
             param_index: param_index.to_string(),
-            display_name: display_name.to_string(),
-            search_name: display_name.to_lowercase(),
+            display_name: short_name.to_string(),
+            search_name: short_name.to_lowercase(),
+            search_key: key(&[short_name, full_name, param_index, param_name, &id.to_string()]),
             tier,
         }
     }
 
+    fn key(fields: &[&str]) -> SearchKey {
+        fields.iter().map(|field| field.to_string()).collect()
+    }
+
     pub fn ships() -> ShipCatalog {
-        let nation = |nation: &str, display_name: &str, ship: ShipEntry| NationGroup {
+        let nation = |nation: &str, display_name: &str, ships: Vec<ShipEntry>| NationGroup {
             nation: nation.to_string(),
             display_name: display_name.to_string(),
-            classes: vec![ClassGroup { species: Species::Battleship, ships: vec![ship] }],
+            classes: vec![ClassGroup { species: Species::Battleship, ships }],
         };
+        let yamato = ship("PJSB018", "Yamato", "Yamato", "PJSB018_Yamato_1944", 4276041424, 10);
+        let south_carolina = ship("PASB001", "S. Carolina", "South Carolina", "PASB001_Michigan_1916", 4293867504, 3);
+        let iowa = ship(IOWA_INDEX, "Iowa", "Iowa", "PASB018_Iowa_1944", 4276041712, 9);
 
         ShipCatalog {
-            nations: vec![
-                nation("Japan", "Japan", ship("PJSB018", "Yamato", 10)),
-                nation("USA", "U.S.A.", ship(IOWA_INDEX, "Iowa", 9)),
-            ],
+            nations: vec![nation("Japan", "Japan", vec![yamato]), nation("USA", "U.S.A.", vec![south_carolina, iowa])],
         }
+    }
+
+    /// The ships' hull models and Iowa's mounts, with the game's names for
+    /// the guns.
+    pub fn references(ships: &ShipCatalog) -> ModelReferences {
+        let ship_key = |index: &str| {
+            ships.ships().find(|ship| ship.param_index == index).map(|ship| ship.search_key.clone()).expect("listed")
+        };
+        let mut references = ModelReferences::new();
+        references.insert(IOWA, &ship_key(IOWA_INDEX));
+        references.insert(YAMATO, &ship_key("PJSB018"));
+        references
+            .insert(IOWA_TURRET, &key(&["406 mm/50 Mk.7 in a turret", "PAGM034", "PAGM034_16in50_Mk7", "4258916336"]));
+        references.insert(
+            SECONDARY,
+            &key(&["127 mm/38 Mk.12 on a Mk.32 mount", "PAGS010", "PAGS010_5in38_Mk32_Mod12", "4283885552"]),
+        );
+        references.insert(DIRECTOR, &key(&["PAD001", "PAD001_Director_Mk37", "4293063664"]));
+
+        references
     }
 
     pub fn catalog() -> ModelCatalog {
@@ -714,7 +831,7 @@ pub(super) mod fixture {
             SECONDARY,
             DIRECTOR,
             BOLLARD,
-            "content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model",
+            YAMATO,
             "content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model",
             "content/gameplay/events/director/XD006_Lazarus_Director/XD006_Lazarus_Director.model",
         ];
@@ -724,7 +841,10 @@ pub(super) mod fixture {
     }
 
     /// Iowa's parts; Yamato lists none.
-    pub fn ship_parts(catalog: &ModelCatalog) -> HashMap<VehicleParamIndex, ShipPartRows> {
+    pub fn ship_parts(
+        catalog: &ModelCatalog,
+        references: &ModelReferences,
+    ) -> HashMap<VehicleParamIndex, ShipPartRows> {
         let mount = |hp: &str, model: &str, group: PartGroup| ListedMount {
             hp: HardpointName::new(hp),
             model: path(model),
@@ -751,7 +871,9 @@ pub(super) mod fixture {
             }],
         };
 
-        HashMap::from([(VehicleParamIndex::new(IOWA_INDEX), ShipPartRows::from_listing(&listing, catalog))])
+        let rows = ShipPartRows::from_listing(&listing, catalog, &mut PartKeys::new(references));
+
+        HashMap::from([(VehicleParamIndex::new(IOWA_INDEX), rows)])
     }
 }
 
@@ -769,8 +891,9 @@ mod tests {
         rust_i18n::set_locale("en");
         let ships = fixture::ships();
         let catalog = fixture::catalog();
-        let index = ModelTreeIndex::build(&catalog, &ships);
-        let parts = fixture::ship_parts(&catalog);
+        let references = fixture::references(&ships);
+        let index = ModelTreeIndex::build(&catalog, &ships, &references);
+        let parts = fixture::ship_parts(&catalog, &references);
 
         Data { ships, index, parts }
     }
@@ -788,7 +911,7 @@ mod tests {
             })
         });
         let catalog = wowsunpack::export::model_catalog::ModelCatalog::from_paths(guns, &[]);
-        let index = ModelTreeIndex::build(&catalog, &ships);
+        let index = ModelTreeIndex::build(&catalog, &ships, &super::super::model_tree::ModelReferences::new());
 
         Data { ships, index, parts: HashMap::new() }
     }
@@ -798,7 +921,7 @@ mod tests {
             TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
         let search = SearchMatches::from_query(&sources, query);
 
-        build_tree(&sources, search.as_ref(), &mut Expansion { set, auto })
+        build_tree(&sources, search.as_ref(), &mut Expansion { set, closed: &HashSet::new(), auto })
     }
 
     fn is_placeholder(item: &TreeItem) -> bool {
@@ -872,6 +995,7 @@ mod tests {
             "    X Yamato",
             "U.S.A.",
             "  Battleship",
+            "    III S. Carolina",
             "    IX Iowa",
             "      Hull",
             "        ASB028_Iowa_1945",
@@ -976,7 +1100,19 @@ mod tests {
         );
         assert_eq!(
             search(&data, "stern"),
-            ["Models", "U.S.A. (1)", "  Ships (1)", "    Battleships (1)", "      ASB028_Iowa_1945", "        Stern"]
+            [
+                "U.S.A. (1)",
+                "  Battleship (1)",
+                "    IX Iowa",
+                "      Hull",
+                "        ASB028_Iowa_1945_Stern",
+                "Models",
+                "U.S.A. (1)",
+                "  Ships (1)",
+                "    Battleships (1)",
+                "      ASB028_Iowa_1945",
+                "        Stern",
+            ]
         );
         assert_eq!(
             search(&data, "halloween_dead"),
@@ -999,6 +1135,112 @@ mod tests {
         for query in ["content", "gameplay", "events/director", "gun/main", "battleship/asb028"] {
             assert_eq!(search(&data, query), ["Models"], "{query}");
         }
+    }
+
+    fn note(built: &BuiltTree, id: &SharedString) -> Option<String> {
+        built.notes.get(id).map(|note| note.to_string())
+    }
+
+    #[test]
+    fn a_search_finds_ships_and_their_hull_models_by_game_params_index_name_and_id() {
+        let data = data();
+        let iowa = ship_row_id(fixture::IOWA_INDEX);
+        let iowa_model = model_row_id(&fixture::path(fixture::IOWA));
+
+        for (query, field) in [("pasb018", "PASB018"), ("iowa_1944", "PASB018_Iowa_1944"), ("4276041712", "4276041712")]
+        {
+            let built = build(&data, query, &mut HashSet::new(), true);
+
+            assert_eq!(
+                outline(&built.items),
+                [
+                    "U.S.A. (1)",
+                    "  Battleship (1)",
+                    "    IX Iowa +",
+                    "Models",
+                    "U.S.A. (1)",
+                    "  Ships (1)",
+                    "    Battleships (1)",
+                    "      ASB028_Iowa_1945 +",
+                ],
+                "{query}"
+            );
+            assert_eq!(note(&built, &iowa).as_deref(), Some(field), "{query} names the field it matched");
+            assert_eq!(note(&built, &iowa_model).as_deref(), Some(field), "{query} on the hull model");
+        }
+    }
+
+    #[test]
+    fn a_search_finds_a_ship_by_its_full_and_its_short_name() {
+        let data = data();
+        let south_carolina = ship_row_id("PASB001");
+
+        for query in ["south carolina", "s. carolina"] {
+            let built = build(&data, query, &mut HashSet::new(), true);
+
+            assert_eq!(
+                outline(&built.items),
+                ["U.S.A. (1)", "  Battleship (1)", "    III S. Carolina", "Models"],
+                "{query}"
+            );
+        }
+
+        let built = build(&data, "south carolina", &mut HashSet::new(), true);
+        assert_eq!(note(&built, &south_carolina).as_deref(), Some("South Carolina"), "the full name is noted");
+        let built = build(&data, "s. carolina", &mut HashSet::new(), true);
+        assert_eq!(note(&built, &south_carolina), None, "the short name is the row's own");
+    }
+
+    #[test]
+    fn a_search_finds_models_and_ship_parts_by_stem_and_by_the_mount_using_them() {
+        let data = data();
+        let turret = model_row_id(&fixture::path(fixture::IOWA_TURRET));
+        let iowa = VehicleParamIndex::new(fixture::IOWA_INDEX);
+        let mount =
+            part_row_id(&iowa, &ShipPartKey::Mount(wowsunpack::export::hardpoint::HardpointName::new("HP_AGM_1")));
+        let turret_rows = [
+            "U.S.A. (1)",
+            "  Battleship (1)",
+            "    IX Iowa",
+            "      Main battery",
+            "        HP_AGM_1 AGM034_16in50_Mk7",
+            "        HP_AGM_2 AGM034_16in50_Mk7",
+            "Models",
+            "U.S.A. (1)",
+            "  Guns (1)",
+            "    Main battery (1)",
+            "      AGM034_16in50_Mk7 +",
+        ];
+
+        for (query, field) in [
+            ("agm034", None),
+            ("406 mm/50", Some("406 mm/50 Mk.7 in a turret")),
+            ("pagm034", Some("PAGM034")),
+            ("16in50_mk7", None),
+            ("4258916336", Some("4258916336")),
+        ] {
+            let built = build(&data, query, &mut HashSet::new(), true);
+
+            assert_eq!(outline(&built.items), turret_rows, "{query}");
+            assert_eq!(note(&built, &turret).as_deref(), field, "{query} on the model");
+            assert_eq!(note(&built, &mount).as_deref(), field, "{query} on the part");
+        }
+
+        assert_eq!(
+            search(&data, "pad001_director"),
+            [
+                "U.S.A. (1)",
+                "  Battleship (1)",
+                "    IX Iowa",
+                "      Directors",
+                "        HP_AD_1 AD001_Director_Mk37",
+                "Models",
+                "U.S.A. (1)",
+                "  Directors (1)",
+                "    AD001_Director_Mk37",
+            ],
+            "a mount the game gives no name is found by its GameParams name"
+        );
     }
 
     #[test]
@@ -1037,11 +1279,12 @@ mod tests {
         let data = data();
         let mut set = HashSet::new();
         build(&data, "agm034", &mut set, true);
+        set.remove("armor-nation-USA");
         set.remove("model-nation-usa");
 
         let built = build(&data, "agm034", &mut set, false);
 
-        assert_eq!(outline(&built.items), ["Models", "U.S.A. (1) +"]);
+        assert_eq!(outline(&built.items), ["U.S.A. (1) +", "Models", "U.S.A. (1) +"]);
     }
 
     /// The real catalogue and every ship's parts. Run the test binary with
@@ -1056,6 +1299,7 @@ mod tests {
         use wowsunpack::game_data::AssetsBin;
         use wowsunpack::game_params::provider::GameMetadataProvider;
 
+        use super::super::model_tree::ModelReferences;
         use super::super::model_tree::list_all_ship_parts;
 
         let Some(dir) = std::env::var_os("WOWS_DIR").map(std::path::PathBuf::from) else {
@@ -1067,16 +1311,28 @@ mod tests {
         let mut file = vfs.join("content/assets.bin").expect("a path").open_file().expect("assets.bin opens");
         std::io::Read::read_to_end(&mut file, &mut bytes).expect("assets.bin reads");
         let metadata = GameMetadataProvider::from_vfs(&vfs).expect("GameParams");
+        let latest_build = std::fs::read_dir(dir.join("bin"))
+            .expect("bin lists builds")
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+            .max()
+            .expect("a build");
+        let texts = dir.join(format!("bin/{latest_build}/res/texts/en/LC_MESSAGES/global.mo"));
+        let catalog = gettext::Catalog::parse(std::fs::File::open(texts).expect("global.mo opens")).expect("global.mo");
+        metadata.set_translations(catalog);
         let library = ModelLibrary::new(vfs.clone(), Arc::new(bytes), &metadata).expect("model library");
         let ships = ShipCatalog::build(&metadata);
 
         let started = Instant::now();
-        let index = ModelTreeIndex::build(library.catalog(), &ships);
+        let references = ModelReferences::build(&ships, &metadata);
+        eprintln!("[measured] model references in {:?}", started.elapsed());
+
+        let started = Instant::now();
+        let index = ModelTreeIndex::build(library.catalog(), &ships, &references);
         eprintln!("[measured] index of {} models in {:?}", index.model_count(), started.elapsed());
         assert_eq!(index.model_count(), library.catalog().listed_entries().count());
 
         let started = Instant::now();
-        let parts = list_all_ship_parts(&ships, &metadata, &library);
+        let parts = list_all_ship_parts(&ships, &metadata, &library, &references);
         let ship_count = ships.ships().count();
         eprintln!("[measured] parts of {}/{ship_count} ships in {:?}", parts.len(), started.elapsed());
         assert!(parts.len() * 10 >= ship_count * 9, "most ships list their parts");
@@ -1090,10 +1346,24 @@ mod tests {
         }
 
         let data = Data { ships, index, parts };
-        for query in ["", "a", "gun", "iowa", "agm"] {
+        let queries =
+            ["", "a", "gun", "iowa", "agm", "pasb018", "south carolina", "406 mm/50", "pagm034", "4276041712"];
+        for query in queries {
+            let sources =
+                TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
+            let started = Instant::now();
+            let matches = SearchMatches::from_query(&sources, query);
+            eprintln!("[measured] {query:?}: matched in {:?}", started.elapsed());
+            drop(matches);
+
             let started = Instant::now();
             let built = build(&data, query, &mut HashSet::new(), true);
             eprintln!("[measured] {query:?}: {} rows built in {:?}", built.rows.len(), started.elapsed());
+            let mut notes: Vec<String> = built.notes.iter().map(|(id, note)| format!("{id} [{note}]")).collect();
+            notes.sort();
+            for note in notes.iter().take(6) {
+                eprintln!("    {note}");
+            }
         }
         for query in ["a", "gun"] {
             let built = build(&data, query, &mut HashSet::new(), true);

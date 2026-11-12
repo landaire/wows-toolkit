@@ -52,9 +52,11 @@ use super::model_refs::HardpointTarget;
 use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartRef;
 use super::model_refs::VehicleParamIndex;
+use super::model_tree::ModelReferences;
 use super::model_tree::ModelTreeIndex;
 use super::model_tree::ShipPartRows;
 use super::model_tree::list_all_ship_parts;
+use super::search_key::fold;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
 use super::sidebar_tree::RowKind;
@@ -163,6 +165,8 @@ pub struct Sidebar {
     tree_state: Entity<TreeState>,
     /// Rebuilt with the tree, never per render.
     row_info: Rc<HashMap<SharedString, RowKind>>,
+    /// The field each row was found by, drawn after its name.
+    row_notes: Rc<HashMap<SharedString, SharedString>>,
     /// What the comparison panes share. Owned by `ArmorViewerPane`; kept here
     /// so the header can draw it beside the button that opens a pane.
     common: CommonPaneSettings,
@@ -175,6 +179,9 @@ pub struct Sidebar {
     browse_expanded: HashSet<SharedString>,
     /// Folders open during the current search.
     search_expanded: HashSet<SharedString>,
+    /// Folders the user closed during the current search, which a later
+    /// match leaves closed.
+    search_collapsed: HashSet<SharedString>,
 
     /// Targets whose hardpoints the pane shows.
     hardpoint_visibility: Rc<HashSet<HardpointTarget>>,
@@ -183,7 +190,6 @@ pub struct Sidebar {
 
     _search_debounce: Option<Task<()>>,
     _model_index_task: Option<Task<()>>,
-    _ship_parts_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -209,17 +215,18 @@ impl Sidebar {
             search: None,
             tree_state,
             row_info: Rc::new(HashMap::new()),
+            row_notes: Rc::new(HashMap::new()),
             common: CommonPaneSettings::default(),
             model_library: None,
             models: ModelsState::Loading,
             ship_parts: Arc::new(HashMap::new()),
             browse_expanded: HashSet::new(),
             search_expanded: HashSet::new(),
+            search_collapsed: HashSet::new(),
             hardpoint_visibility: Rc::new(HashSet::new()),
             open_model: None,
             _search_debounce: None,
             _model_index_task: None,
-            _ship_parts_task: None,
             _subscriptions: vec![search_subscription, tree_subscription],
         }
     }
@@ -324,7 +331,6 @@ impl Sidebar {
         self.models = ModelsState::Loading;
         self.ship_parts = Arc::new(HashMap::new());
         self._model_index_task = None;
-        self._ship_parts_task = None;
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
@@ -367,19 +373,30 @@ impl Sidebar {
             return;
         };
 
-        let index_bundle = Arc::clone(&bundle);
-        let index_library = Arc::clone(&library);
-        let index =
-            cx.background_spawn(async move { ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog) });
+        // The index is listed as soon as it is ready; the parts take longer.
         self._model_index_task = Some(cx.spawn(async move |this, cx| {
+            let references_bundle = Arc::clone(&bundle);
+            let references = cx
+                .background_spawn(async move {
+                    Arc::new(ModelReferences::build(&references_bundle.catalog, references_bundle.assets.metadata()))
+                })
+                .await;
+
+            let (index_bundle, index_library, index_references) =
+                (Arc::clone(&bundle), Arc::clone(&library), Arc::clone(&references));
+            let index = cx.background_spawn(async move {
+                ModelTreeIndex::build(index_library.catalog(), &index_bundle.catalog, &index_references)
+            });
+            let parts = cx.background_spawn(async move {
+                list_all_ship_parts(&bundle.catalog, bundle.assets.metadata(), &library, &references)
+            });
+
             let index = index.await;
             // An error is the sidebar having been dropped.
-            let _ = this.update(cx, |this, cx| this.adopt_model_index(index, cx));
-        }));
+            if this.update(cx, |this, cx| this.adopt_model_index(index, cx)).is_err() {
+                return;
+            }
 
-        let parts = cx
-            .background_spawn(async move { list_all_ship_parts(&bundle.catalog, bundle.assets.metadata(), &library) });
-        self._ship_parts_task = Some(cx.spawn(async move |this, cx| {
             let parts = parts.await;
             let _ = this.update(cx, |this, cx| this.adopt_ship_parts(parts, cx));
         }));
@@ -393,7 +410,9 @@ impl Sidebar {
 
     fn adopt_ship_parts(&mut self, parts: HashMap<VehicleParamIndex, ShipPartRows>, cx: &mut Context<Self>) {
         self.ship_parts = Arc::new(parts);
-        self.rebuild_tree(Rebuild::Keep, cx);
+        // A search names parts as well as ships. Folders the user closed
+        // meanwhile stay closed.
+        self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
@@ -409,7 +428,7 @@ impl Sidebar {
 
         let InputEvent::Change = event else { return };
         let text = self.search_state.read(cx).value().to_string();
-        let query = unidecode::unidecode(text.trim()).to_lowercase();
+        let query = fold(text.trim());
         if query == self.query {
             self._search_debounce = None;
             return;
@@ -430,18 +449,24 @@ impl Sidebar {
     fn apply_query(&mut self, query: String, cx: &mut Context<Self>) {
         self.query = query;
         self.search_expanded.clear();
+        self.search_collapsed.clear();
         self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
     fn on_tree_event(&mut self, _tree_state: Entity<TreeState>, event: &TreeEvent, cx: &mut Context<Self>) {
-        let expanded = if self.query.is_empty() { &mut self.browse_expanded } else { &mut self.search_expanded };
+        let searching = !self.query.is_empty();
+        let expanded = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
         match event {
             TreeEvent::Expanded(id) => {
                 expanded.insert(id.clone());
+                self.search_collapsed.remove(id);
             }
             TreeEvent::Collapsed(id) => {
                 expanded.remove(id);
+                if searching {
+                    self.search_collapsed.insert(id.clone());
+                }
             }
         }
 
@@ -451,6 +476,7 @@ impl Sidebar {
     fn rebuild_tree(&mut self, rebuild: Rebuild, cx: &mut Context<Self>) {
         let Some(bundle) = self.bundle.clone() else {
             self.row_info = Rc::new(HashMap::new());
+            self.row_notes = Rc::new(HashMap::new());
             self.tree_state.update(cx, |state, cx| state.set_items(Vec::new(), cx));
             return;
         };
@@ -467,10 +493,12 @@ impl Sidebar {
 
         let searching = !self.query.is_empty();
         let set = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
-        let mut expansion = Expansion { set, auto: rebuild == Rebuild::Rematch && searching };
+        let auto = rebuild == Rebuild::Rematch && searching;
+        let mut expansion = Expansion { set, closed: &self.search_collapsed, auto };
         let built = build_tree(&sources, self.search.as_ref(), &mut expansion);
 
         self.row_info = Rc::new(built.rows);
+        self.row_notes = Rc::new(built.notes);
         self.tree_state.update(cx, |state, cx| state.set_items(built.items, cx));
         self.highlight_open_row(cx);
     }
@@ -519,6 +547,7 @@ fn render_sidebar_item(
     entry: &TreeEntry,
     bundle: &ArmorAssetsBundle,
     row_info: &HashMap<SharedString, RowKind>,
+    notes: &HashMap<SharedString, SharedString>,
     hardpoints: &HashSet<HardpointTarget>,
     window: &mut Window,
     cx: &mut App,
@@ -585,6 +614,10 @@ fn render_sidebar_item(
             label.child(text().text_color(cx.theme().muted_foreground).child(item.label.clone()))
         }
         _ => label.child(text().child(item.label.clone())),
+    };
+    let label = match notes.get(&item.id) {
+        Some(note) => label.child(text().text_color(cx.theme().muted_foreground).child(note.clone())),
+        None => label,
     };
     row = row.child(label);
 
@@ -716,11 +749,12 @@ impl Render for Sidebar {
                 let entity = cx.entity();
                 let bundle = Arc::clone(bundle);
                 let row_info = Rc::clone(&self.row_info);
+                let notes = Rc::clone(&self.row_notes);
                 let hardpoints = Rc::clone(&self.hardpoint_visibility);
                 let menu_entity = entity.clone();
                 let menu_row_info = Rc::clone(&self.row_info);
                 tree(&self.tree_state, move |ix, entry, _selected, window, cx| {
-                    render_sidebar_item(entity.clone(), ix, entry, &bundle, &row_info, &hardpoints, window, cx)
+                    render_sidebar_item(entity.clone(), ix, entry, &bundle, &row_info, &notes, &hardpoints, window, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     row_context_menu(&menu_entity, menu_row_info.get(&entry.item().id), menu)
@@ -799,8 +833,10 @@ mod tests {
             .update(cx, |sidebar, _window, cx| {
                 sidebar.set_bundle(bundle(), cx);
                 let catalog = fixture::catalog();
-                sidebar.adopt_model_index(ModelTreeIndex::build(&catalog, &fixture::ships()), cx);
-                sidebar.adopt_ship_parts(fixture::ship_parts(&catalog), cx);
+                let ships = fixture::ships();
+                let references = fixture::references(&ships);
+                sidebar.adopt_model_index(ModelTreeIndex::build(&catalog, &ships, &references), cx);
+                sidebar.adopt_ship_parts(fixture::ship_parts(&catalog, &references), cx);
             })
             .expect("the window is open");
 
@@ -943,6 +979,27 @@ mod tests {
         let yamato_model =
             fixture::path("content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model");
         assert_eq!(row_index(&window, &model_row_id(&yamato_model), cx), None, "nor a model not matching");
+    }
+
+    #[gpui_kit::test]
+    fn a_folder_closed_during_a_search_stays_closed_when_the_ship_parts_arrive(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let iowa = ship_row_id(fixture::IOWA_INDEX);
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        assert!(row_index(&window, &iowa, cx).is_some(), "the search opens the ship found by its parts");
+
+        window
+            .update(cx, |sidebar, _window, cx| {
+                let tree_state = sidebar.tree_state.clone();
+                sidebar.on_tree_event(tree_state, &TreeEvent::Collapsed("armor-nation-USA".into()), cx);
+                let catalog = fixture::catalog();
+                let references = fixture::references(&fixture::ships());
+                sidebar.adopt_ship_parts(fixture::ship_parts(&catalog, &references), cx);
+            })
+            .expect("the window is open");
+
+        assert!(row_index(&window, &"armor-nation-USA".into(), cx).is_some(), "the nation is listed");
+        assert_eq!(row_index(&window, &iowa, cx), None, "and stays closed");
     }
 
     #[gpui_kit::test]

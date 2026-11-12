@@ -13,6 +13,8 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
+use super::search_key::SearchKey;
+
 /// Pre-built catalog of all ships, organized for the tree selector.
 pub struct ShipCatalog {
     /// Nations sorted alphabetically, each containing sorted classes.
@@ -39,6 +41,9 @@ pub struct ShipEntry {
     pub display_name: String,
     /// Lowercased, ASCII-folded display name for search matching.
     pub search_name: String,
+    /// The short and full names, GameParams index, name and id, which the
+    /// Model Viewer sidebar finds the ship by.
+    pub search_key: SearchKey,
     pub tier: u32,
 }
 
@@ -150,7 +155,18 @@ impl ShipCatalog {
             let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
 
             let search_name = unidecode::unidecode(&display_name).to_lowercase();
-            let entry = ShipEntry { param_index: param.index().to_string(), display_name, search_name, tier };
+            let full_name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}_FULL", param.index()));
+            let mut search_key = SearchKey::new();
+            search_key.push(display_name.clone());
+            if let Some(full_name) = metadata.localized_name_from_id(&full_name_key) {
+                search_key.push(full_name);
+            }
+            search_key.push(param.index());
+            search_key.push(param.name());
+            search_key.push(param.id().to_string());
+
+            let entry =
+                ShipEntry { param_index: param.index().to_string(), display_name, search_name, search_key, tier };
 
             nation_map.entry(nation).or_default().entry(species).or_default().push(entry);
         }
@@ -226,11 +242,14 @@ mod tests {
     /// `ship_catalog_build_groups_and_sorts_ships_from_a_real_provider` below.
     #[test]
     fn ship_entries_sort_by_tier_then_display_name() {
-        let mut ships = [
-            ShipEntry { param_index: "A".into(), display_name: "Zeta".into(), search_name: "zeta".into(), tier: 5 },
-            ShipEntry { param_index: "B".into(), display_name: "Alpha".into(), search_name: "alpha".into(), tier: 3 },
-            ShipEntry { param_index: "C".into(), display_name: "Beta".into(), search_name: "beta".into(), tier: 3 },
-        ];
+        let ship = |param_index: &str, display_name: &str, tier: u32| ShipEntry {
+            param_index: param_index.into(),
+            display_name: display_name.into(),
+            search_name: display_name.to_lowercase(),
+            search_key: SearchKey::new(),
+            tier,
+        };
+        let mut ships = [ship("A", "Zeta", 5), ship("B", "Alpha", 3), ship("C", "Beta", 3)];
         ships.sort_by(|a, b| a.tier.cmp(&b.tier).then(a.display_name.cmp(&b.display_name)));
         let order: Vec<&str> = ships.iter().map(|s| s.display_name.as_str()).collect();
         assert_eq!(order, ["Alpha", "Beta", "Zeta"]);
