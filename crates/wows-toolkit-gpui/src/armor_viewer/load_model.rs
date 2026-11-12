@@ -68,6 +68,8 @@ impl ModelSceneError {
         let Self::Load { report, .. } = self;
         match report.current_context() {
             ModelLoadError::GeometryAbsent { .. } => ProblemReason::GeometryAbsent,
+            ModelLoadError::NoGeometry { .. } => ProblemReason::Empty(EmptyScene::Meshless),
+            ModelLoadError::SectionStandIn { .. } => ProblemReason::SectionStandIn,
             ModelLoadError::UnknownModel { .. }
             | ModelLoadError::ModelRecord { .. }
             | ModelLoadError::MissingVisual { .. }
@@ -120,6 +122,8 @@ pub(crate) enum ProblemReason {
     GeometryAbsent,
     ModelUnreadable,
     ShipUnreadable,
+    /// A hull section the ship keeps only a stand-in box for.
+    SectionStandIn,
     Empty(EmptyScene),
 }
 
@@ -129,6 +133,7 @@ impl ProblemReason {
             Self::GeometryAbsent => t!("ui.scene_problem.geometry_absent"),
             Self::ModelUnreadable => t!("ui.scene_problem.model_unreadable"),
             Self::ShipUnreadable => t!("ui.scene_problem.ship_unreadable"),
+            Self::SectionStandIn => t!("ui.scene_problem.section_stand_in"),
             Self::Empty(EmptyScene::Meshless) => t!("ui.scene_problem.no_meshes"),
             Self::Empty(EmptyScene::MeshlessAtLod) => t!("ui.scene_problem.no_meshes_at_lod"),
             Self::Empty(EmptyScene::Invisible) => t!("ui.scene_problem.no_visible_surface"),

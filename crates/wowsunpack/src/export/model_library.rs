@@ -73,6 +73,13 @@ pub enum ModelLoadError {
     VisualRecord { path: ModelPath, visual_id: u64 },
     #[error("geometry 0x{geometry_id:016X} of {visual_path} is not in the paths store")]
     UnresolvedGeometry { visual_path: String, geometry_id: u64 },
+    /// The visual names no geometry at all, as placeholder models do.
+    #[error("{visual_path} names no geometry")]
+    NoGeometry { visual_path: String },
+    /// A hull section whose render sets are all stand-ins: the ship authors
+    /// that part of its hull in another section.
+    #[error("hull section {path} holds only stand-in geometry")]
+    SectionStandIn { path: ModelPath },
     /// The install indexes the model but ships no geometry for it: the path
     /// is absent from the packages, or listed there with no data.
     #[error("geometry {path} is not in the installed packages")]
@@ -285,6 +292,10 @@ impl ModelLibrary {
             });
         }
 
+        if self.is_section_stand_in(db, path, &meshes) {
+            return Err(Report::new(ModelLoadError::SectionStandIn { path: path.clone() }));
+        }
+
         let hardpoints = model_hardpoints(db, &sources);
 
         let mut materials = BTreeMap::new();
@@ -385,6 +396,33 @@ impl ModelLibrary {
         Ok(sources)
     }
 
+    /// Whether `path` is a hull section whose `meshes` are all stand-ins. A
+    /// ship that authors its hull in fewer sections keeps a small box in each
+    /// of the others. In build 13533378 every render set of the 780 such
+    /// sections spans under 3% of its ship's length, and the largest render
+    /// set of every other section over 5%.
+    fn is_section_stand_in(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        path: &ModelPath,
+        meshes: &[InteractiveHullMesh],
+    ) -> bool {
+        const STAND_IN_FRACTION: f32 = 0.04;
+
+        let Some(ship) = self.catalog.owning_entry(path) else {
+            return false;
+        };
+        if !ship.sections().any(|section| section == path) {
+            return false;
+        }
+        let Some(ship_visual) = self.model_visual(db, ship.path()) else {
+            return false;
+        };
+        let ship_length = largest_extent(&ship_visual.bounding_box.min, &ship_visual.bounding_box.max);
+
+        !meshes.is_empty() && meshes.iter().all(|mesh| mesh_extent(mesh) < ship_length * STAND_IN_FRACTION)
+    }
+
     fn part_group(&self, path: &ModelPath) -> PartGroup {
         self.catalog.owning_entry(path).map_or(PartGroup::Other, ModelEntry::part_group)
     }
@@ -450,10 +488,16 @@ impl ModelLibrary {
     }
 
     fn read_part(&self, db: &PrototypeDatabase<'_>, path: &ModelPath) -> Result<PartSource, Report<ModelLoadError>> {
+        // The id with every bit set stands for no geometry; no path carries it.
+        const NO_GEOMETRY: u64 = u64::MAX;
+
         let model = self.read_model_prototype(db, path)?;
         let (visual_path, visual) = self.read_visual(db, path, &model)?;
 
         let geometry_id = visual.merged_geometry_path_id;
+        if geometry_id == NO_GEOMETRY {
+            return Err(Report::new(ModelLoadError::NoGeometry { visual_path }));
+        }
         let geometry_path = self
             .self_id_index
             .get(&geometry_id)
@@ -779,6 +823,27 @@ fn model_hardpoints(db: &PrototypeDatabase<'_>, sources: &[PartSource]) -> Vec<H
     }
 
     hardpoints
+}
+
+/// The longest side of the box from `min` to `max`.
+fn largest_extent(min: &[f32; 3], max: &[f32; 3]) -> f32 {
+    (0..3).map(|axis| max[axis] - min[axis]).fold(0.0, f32::max)
+}
+
+/// The longest side of `mesh`'s bounding box, 0 for a mesh with no vertices.
+fn mesh_extent(mesh: &InteractiveHullMesh) -> f32 {
+    let Some(first) = mesh.positions.first() else {
+        return 0.0;
+    };
+    let (min, max) = mesh.positions.iter().fold((*first, *first), |(mut min, mut max), position| {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(position[axis]);
+            max[axis] = max[axis].max(position[axis]);
+        }
+        (min, max)
+    });
+
+    largest_extent(&min, &max)
 }
 
 #[derive(Debug, Error)]

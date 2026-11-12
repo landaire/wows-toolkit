@@ -35,9 +35,12 @@ static LIBRARY: LazyLock<Option<ModelLibrary>> = LazyLock::new(|| {
     Some(assets.model_library().expect("model library"))
 });
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SurveyOutcome {
     Loaded,
     GeometryAbsent,
+    NoGeometry,
+    SectionStandIn,
 }
 
 fn path(raw: &str) -> ModelPath {
@@ -268,8 +271,9 @@ fn a_model_without_shipped_geometry_reports_it_absent() {
     }
 }
 
-/// Loads every catalogued model. A load may fail only for geometry the
-/// install does not ship, and every load has finite vertices to draw.
+/// Loads every catalogued model and every hull section on its own. A load
+/// may fail only for geometry the install does not ship, a visual that names
+/// none, or a section that is a stand-in; every load has finite vertices.
 #[test]
 #[ignore = "requires a World of Warships install"]
 fn every_catalogued_model_loads_unless_its_geometry_is_absent() {
@@ -278,26 +282,31 @@ fn every_catalogued_model_loads_unless_its_geometry_is_absent() {
     };
     let threads = std::thread::available_parallelism().map_or(1, |count| (count.get() / 2).max(1));
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("thread pool");
+    let entries = library.catalog().entries();
+    let paths: Vec<&ModelPath> =
+        entries.iter().flat_map(|entry| std::iter::once(entry.path()).chain(entry.sections())).collect();
 
     let outcomes: Vec<Result<SurveyOutcome, String>> = pool.install(|| {
-        library
-            .catalog()
-            .entries()
+        paths
             .par_iter()
-            .map(|entry| {
-                let model = match library.load_model(entry.path(), &options(TextureDecode::None)) {
+            .map(|&path| {
+                let model = match library.load_model(path, &options(TextureDecode::None)) {
                     Ok(model) => model,
-                    Err(error) if matches!(error.current_context(), ModelLoadError::GeometryAbsent { .. }) => {
-                        return Ok(SurveyOutcome::GeometryAbsent);
+                    Err(error) => {
+                        return match error.current_context() {
+                            ModelLoadError::GeometryAbsent { .. } => Ok(SurveyOutcome::GeometryAbsent),
+                            ModelLoadError::NoGeometry { .. } => Ok(SurveyOutcome::NoGeometry),
+                            ModelLoadError::SectionStandIn { .. } => Ok(SurveyOutcome::SectionStandIn),
+                            _ => Err(format!("{path}: {error}")),
+                        };
                     }
-                    Err(error) => return Err(format!("{}: {error}", entry.path())),
                 };
                 if model.meshes().iter().all(|mesh| mesh.indices.is_empty()) {
-                    return Err(format!("{}: no triangles", entry.path()));
+                    return Err(format!("{path}: no triangles"));
                 }
                 let finite = model.meshes().iter().flat_map(placed_positions).flatten().all(f32::is_finite);
                 if !finite {
-                    return Err(format!("{}: a vertex is not finite", entry.path()));
+                    return Err(format!("{path}: a vertex is not finite"));
                 }
 
                 Ok(SurveyOutcome::Loaded)
@@ -306,7 +315,40 @@ fn every_catalogued_model_loads_unless_its_geometry_is_absent() {
     });
 
     let failures: Vec<&String> = outcomes.iter().filter_map(|outcome| outcome.as_ref().err()).collect();
-    let absent = outcomes.iter().filter(|outcome| matches!(outcome, Ok(SurveyOutcome::GeometryAbsent))).count();
-    eprintln!("{} models: {absent} without geometry, {} failed", outcomes.len(), failures.len());
+    let count =
+        |wanted: SurveyOutcome| outcomes.iter().filter(|outcome| outcome.as_ref().ok() == Some(&wanted)).count();
+    eprintln!(
+        "{} models and sections: {} without shipped geometry, {} naming none, {} stand-in sections, {} failed",
+        outcomes.len(),
+        count(SurveyOutcome::GeometryAbsent),
+        count(SurveyOutcome::NoGeometry),
+        count(SurveyOutcome::SectionStandIn),
+        failures.len()
+    );
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+const BEARN: &str = "content/gameplay/france/ship/aircarrier/FSA001_Bearn_1936/FSA001_Bearn_1936.model";
+const BEARN_BOW: &str = "content/gameplay/france/ship/aircarrier/FSA001_Bearn_1936/FSA001_Bearn_1936_Bow.model";
+const BEARN_MID_BACK: &str =
+    "content/gameplay/france/ship/aircarrier/FSA001_Bearn_1936/FSA001_Bearn_1936_MidBack.model";
+
+/// Bearn authors its whole hull in the bow section and keeps a stand-in box
+/// in each of the others.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_stand_in_hull_section_is_reported_rather_than_drawn() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    let Err(error) = library.load_model(&path(BEARN_MID_BACK), &options(TextureDecode::None)) else {
+        panic!("the stand-in loads");
+    };
+    let bow = library.load_model(&path(BEARN_BOW), &options(TextureDecode::None)).expect("the bow loads");
+    let ship = library.load_model(&path(BEARN), &options(TextureDecode::None)).expect("the ship loads");
+
+    assert!(matches!(error.current_context(), ModelLoadError::SectionStandIn { .. }), "{error}");
+    let (back, front) = mesh_z_range(&bow);
+    assert!(front - back > 10.0, "the bow section spans the hull: {back}..{front}");
+    assert!(ship.parts().iter().any(|part| part.model_path.as_str() == BEARN_MID_BACK), "the ship still loads it");
 }
