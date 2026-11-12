@@ -23,7 +23,6 @@ use wows_data_mgr::download_repo;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::dump::CacheStats;
 
-use crate::http;
 use crate::runtime;
 
 /// What the cache tab is doing, when it is doing something.
@@ -216,7 +215,11 @@ fn run<V, Work, Fut>(
         .detach();
 
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let outcome = match http::client(&proxy_url, reqwest::redirect::Policy::default()) {
+            let outcome = match wows_toolkit_services::http::client(
+                crate::http::USER_AGENT,
+                &proxy_url,
+                reqwest::redirect::Policy::default(),
+            ) {
                 Ok(client) => {
                     let sink = ProgressSink(progress_tx);
                     runtime::block_on(cx, move || work(client, sink)).await.unwrap_or_else(CacheOutcome::Failed)

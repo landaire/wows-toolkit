@@ -219,7 +219,7 @@ pub enum StatsError {
     #[error(transparent)]
     Refused(#[from] MatchStatsError),
     #[error(transparent)]
-    Client(#[from] crate::http::HttpError),
+    Client(#[from] wows_toolkit_services::http::HttpError),
     #[error("could not reach the stats service")]
     Transport(#[source] reqwest::Error),
 }
@@ -290,7 +290,8 @@ pub async fn fetch_stats(state: &ArenaState, proxy_url: &str) -> Result<MatchSta
 
     // No redirects: a 3xx is classified rather than followed, so the API key
     // is never forwarded to whatever a redirect names.
-    let client = crate::http::client(proxy_url, reqwest::redirect::Policy::none())?;
+    let client =
+        wows_toolkit_services::http::client(crate::http::USER_AGENT, proxy_url, reqwest::redirect::Policy::none())?;
 
     let response = client
         .post(match_stats::ENDPOINT)

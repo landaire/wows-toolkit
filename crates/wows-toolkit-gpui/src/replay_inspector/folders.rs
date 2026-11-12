@@ -19,12 +19,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::paths::folder_name;
+use wows_toolkit_services::supervision::NextStep;
+use wows_toolkit_services::supervision::RestartPolicy;
 
 use super::*;
 use crate::replay_inspector::browser_view::WatchState;
 use crate::replay_inspector::browser_view::WatchStopCause;
-use crate::supervision::NextStep;
-use crate::supervision::RestartPolicy;
 use crate::toast::Level;
 use crate::toast::Stay;
 
@@ -1214,6 +1214,7 @@ mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::test::TestWindowExt as _;
     use rust_i18n::t;
+    use wows_toolkit_services::supervision::NextStep;
     use wows_toolkit_viewmodel::listing_row::ListedReplay;
 
     use super::FOLDER_HISTORY;
@@ -1230,7 +1231,6 @@ mod tests {
     use crate::replay_inspector::browser_view::WatchState;
     use crate::replay_inspector::browser_view::WatchStopCause;
     use crate::replay_inspector::simulated_watch;
-    use crate::supervision::NextStep;
 
     /// A real replay, so a reported change is read as the game's would be.
     fn fixture() -> PathBuf {

@@ -50,6 +50,9 @@ wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 # Game-data loading, replay parsing and the replay model, shared with the
 # other desktop front end.
 wows-toolkit-replay-data = { workspace = true }
+# The HTTP client, tokio runtime, logging, updates and the Twitch poll, shared
+# with the other desktop front end.
+wows-toolkit-services = { workspace = true }
 # The Launcher tab's state and background work, shared with the egui app, and
 # the launcher crates whose types the tab shows.
 wows-toolkit-launcher = { workspace = true }
@@ -84,14 +87,6 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 # Only to install the process-wide crypto provider at startup; see `main`.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
-# The chat poll behind the roster's possible-stream-sniper chip. Same version
-# and features as the egui app, so the two resolve one Twitch client.
-twitch_api = { version = "0.7.2", features = [
-    "helix",
-    "client",
-    "reqwest",
-] }
 # CBOR is what the match-stats service speaks, and one of the replay
 # export formats.
 ciborium = "0.2"
@@ -105,9 +100,6 @@ regex = "1"
 # Time periods for the Player Tracker window.
 jiff = "0.2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time"] }
-# The rotated log file a bug report is copied from.
-tracing-appender = "0.2"
 thiserror = "2.0"
 gettext = "0.4"
 # Channels for streaming extraction progress from the background pool back to

@@ -142,10 +142,11 @@ async fn send(
     let snapshot = raw_replay_snapshot_state(shareable.results, candidate.first_seen, jiff::Timestamp::now());
     let action = decide_upload_action(mode, eligible, shareable.self_confirmed_non_test, snapshot);
 
-    let client = match crate::http::client(proxy, reqwest::redirect::Policy::none()) {
-        Ok(client) => client,
-        Err(err) => return Outcome::Failed(err.to_string()),
-    };
+    let client =
+        match wows_toolkit_services::http::client(crate::http::USER_AGENT, proxy, reqwest::redirect::Policy::none()) {
+            Ok(client) => client,
+            Err(err) => return Outcome::Failed(err.to_string()),
+        };
 
     match action {
         ReplayUploadAction::Skip(reason) => {
