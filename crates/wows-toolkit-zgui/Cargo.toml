@@ -32,6 +32,12 @@ wows-toolkit-services = { workspace = true }
 # The match export formats.
 ciborium = "0.2"
 csv = "1"
+# The Player Tracker's timestamps.
+jiff = { workspace = true }
+# The live roster's ship-class icons: read from the battle's build, drawn tinted like the egui and
+# GPUI rosters draw them, and shown through an image element.
+resvg = { version = "0.47", default-features = false }
+image = { workspace = true, features = ["png"] }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
@@ -82,7 +88,3 @@ wows-toolkit-services = { workspace = true, features = ["test-support"] }
 # The sample replay and fabricated rows the player table and replay panel tests draw.
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 tempfile = "3"
-# Timestamps for the Search tab's sample results.
-jiff = { workspace = true }
-# Test frames are built from RGB images.
-image = { workspace = true }

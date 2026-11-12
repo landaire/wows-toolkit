@@ -502,12 +502,15 @@ impl PaletteControl {
                 shell.settings_drawer.close();
                 action();
             }
-            PaletteRun::Request(request) => {
-                let tab = request.tab();
-                self.requests.update(|requests| requests.push(request));
-                shell.select(TabKey::App(tab));
-            }
+            PaletteRun::Request(request) => self.send(shell, request),
         }
+    }
+
+    /// Shows the request's tab, which takes it with [`Self::take_requests`].
+    pub fn send(self, shell: Shell, request: TabRequest) {
+        let tab = request.tab();
+        self.requests.update(|requests| requests.push(request));
+        shell.select(TabKey::App(tab));
     }
 }
 
