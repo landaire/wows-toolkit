@@ -8,6 +8,7 @@ pub mod child_process;
 pub mod dialog;
 pub mod http;
 pub mod logging;
+pub mod personal_rating;
 pub mod runtime;
 pub mod settings;
 pub mod settings_writer;
