@@ -63,7 +63,7 @@ pub fn persist(workspace: ReplayWorkspace) {
                     restore(workspace, &layout, present);
                 }
             }
-            saved.set_value(Some(workspace.dock.dump()));
+            saved.set_value(Some(workspace.dock.dump_untracked()));
             enabled.set_value(true);
         });
     });
@@ -88,7 +88,7 @@ pub(super) fn restore(workspace: ReplayWorkspace, layout: &SavedLayout, present:
     if let Err(err) = dock.restore(layout) {
         tracing::warn!("replays: the saved dock layout was not restored: {err}");
     }
-    for entry in dock.panels() {
+    for entry in dock.panels_untracked() {
         let keeps = matches!(Docked::of(&entry.id), Some(Docked::Replay(path)) if present.contains(&path));
         if !keeps {
             let _ = dock.remove(&entry.id);
