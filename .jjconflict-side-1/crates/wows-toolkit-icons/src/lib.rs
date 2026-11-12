@@ -41,6 +41,7 @@ macro_rules! glyph_list {
             Funnel => "funnel",
             Image => "image",
             Info => "info",
+            LayoutDashboard => "layout-dashboard",
             List => "list",
             Lock => "lock",
             Monitor => "monitor",
