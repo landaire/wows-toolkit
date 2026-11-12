@@ -28,6 +28,7 @@ thiserror.workspace = true
 zgui.workspace = true
 zgui-ui.workspace = true
 zgui-ui-icons.workspace = true
+zgui-ui-primitives.workspace = true
 zgui-ui-tokens.workspace = true
 
 accesskit_consumer = { workspace = true, optional = true }
