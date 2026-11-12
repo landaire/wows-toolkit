@@ -18,6 +18,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rootcause::Report;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::armor::export::ExportDefaults;
 use wows_toolkit_viewmodel::armor::export::ExportDraft;
@@ -29,15 +30,14 @@ use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::model_catalog::ModelPath;
-use wowsunpack::export::model_library::ModelLibrary;
-use wowsunpack::export::model_library::ModelLoadOptions;
-use wowsunpack::export::model_library::TextureDecode;
+use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::size_estimate::ExportSizeModel;
 use wowsunpack::export::size_estimate::SchemeLadderStatus;
 use wowsunpack::export::size_estimate::SizeEstimate;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use super::assets::ModelAssets;
 use super::load_model::ModelLoadRequest;
@@ -51,7 +51,8 @@ struct ShipMeta {
     hull_lod_count: usize,
     camo_schemes: Vec<CamoSchemeInfo>,
     context: Option<Arc<ShipModelContext>>,
-    /// Whether there is armor to export; a model may carry none.
+    /// Whether there is armor to export: a model may carry none, or plates
+    /// no ship gives a thickness.
     has_armor: bool,
 }
 
@@ -201,7 +202,10 @@ impl ExportDialogState {
                 .background_spawn(async move {
                     match &target {
                         ExportTarget::Ship { param_index, .. } => read_ship_meta(&assets.assets, param_index, hull),
-                        ExportTarget::Model { request, models } => read_model_meta(&models.library, &request.path),
+                        ExportTarget::Model { request, models } => {
+                            read_model_meta(models, assets.assets.metadata(), request)
+                                .map_err(|error| error.to_string())
+                        }
                     }
                 })
                 .await;
@@ -450,18 +454,39 @@ fn read_ship_meta(
     })
 }
 
+/// Why a model's export choices could not be read.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to read model {path}: {report}")]
+struct ModelMetaError {
+    path: ModelPath,
+    report: Report<ModelLoadError>,
+}
+
 /// The model as the dialog needs it: its levels of detail and whether it
-/// carries armor. Reads geometry but decodes no texture.
-fn read_model_meta(library: &ModelLibrary, model: &ModelPath) -> Result<ShipMeta, String> {
-    let options = ModelLoadOptions { textures: TextureDecode::None, ..ModelLoadOptions::default() };
-    let loaded = library.load_model(model, &options).map_err(|report| format!("{report:?}"))?;
+/// has armor to export. Reads headers only, no mesh or texture.
+fn read_model_meta(
+    models: &ModelAssets,
+    metadata: &GameMetadataProvider,
+    request: &ModelLoadRequest,
+) -> Result<ShipMeta, ModelMetaError> {
+    let summary = models
+        .library
+        .model_summary(&request.path)
+        .map_err(|report| ModelMetaError { path: request.path.clone(), report })?;
+    let thickness_known = super::load_model::thickness_known(models, metadata, request);
 
     Ok(ShipMeta {
-        hull_lod_count: loaded.lod_count(),
+        hull_lod_count: summary.lod_count,
         camo_schemes: Vec::new(),
         context: None,
-        has_armor: loaded.has_armor(),
+        has_armor: model_exports_armor(summary.has_armor, thickness_known),
     })
+}
+
+/// Whether a model's armor is offered. Plates no ship gives a thickness
+/// would be written as 0 mm, which the viewer shows as unknown.
+fn model_exports_armor(has_armor: bool, thickness_known: bool) -> bool {
+    has_armor && thickness_known
 }
 
 /// The hull upgrades this ship offers, in the pane's own vocabulary.
@@ -815,11 +840,24 @@ fn offered_contents(has_armor: bool) -> impl Iterator<Item = ExportContents> {
 mod tests {
     use wowsunpack::export::ship::ExportContents;
 
+    use super::model_exports_armor;
     use super::offered_contents;
 
     #[test]
     fn a_model_without_armor_is_offered_only_its_meshes() {
         assert_eq!(offered_contents(false).collect::<Vec<_>>(), vec![ExportContents::Mesh]);
         assert_eq!(offered_contents(true).count(), 3);
+    }
+
+    #[test]
+    fn armor_of_unknown_thickness_is_not_offered() {
+        let unknown = offered_contents(model_exports_armor(true, false)).collect::<Vec<_>>();
+        assert_eq!(unknown, vec![ExportContents::Mesh]);
+
+        let known = offered_contents(model_exports_armor(true, true)).collect::<Vec<_>>();
+        assert_eq!(known, vec![ExportContents::Mesh, ExportContents::Armor, ExportContents::MeshAndArmor]);
+
+        let absent = offered_contents(model_exports_armor(false, true)).collect::<Vec<_>>();
+        assert_eq!(absent, vec![ExportContents::Mesh]);
     }
 }

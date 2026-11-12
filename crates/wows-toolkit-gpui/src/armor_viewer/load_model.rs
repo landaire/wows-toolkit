@@ -214,6 +214,15 @@ fn thickness_choices(
         .collect()
 }
 
+/// Whether `request`'s plates have a thickness to show or export.
+pub(crate) fn thickness_known(
+    models: &ModelAssets,
+    metadata: &GameMetadataProvider,
+    request: &ModelLoadRequest,
+) -> bool {
+    thickness_ref(&models.mount_armor, metadata, request).is_some()
+}
+
 /// Loads `request` from `models`, resolving armor thickness from `metadata`.
 /// Synchronous and CPU/IO-bound; callers run it off the UI thread.
 pub(crate) fn load_model_scene(
