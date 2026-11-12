@@ -585,6 +585,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
 fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: impl Fn() + 'static) -> impl IntoView {
     let copied = path.display().to_string();
     let file = path.clone();
+    let (rendered, clipped) = (path.clone(), path.clone());
     view! {
         Show(when = move || !exists) {
             MenuLabel {{t!("ui.search.open_missing").into_owned()}}
@@ -592,6 +593,18 @@ fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: im
         }
         MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| open())) {
             {t!("ui.search.open").into_owned()}
+        }
+        MenuItem(
+            disabled = !exists,
+            on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderReplay(rendered.clone())))
+        ) {
+            {t!("ui.replay.context.render_replay").into_owned()}
+        }
+        MenuItem(
+            disabled = !exists,
+            on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone())))
+        ) {
+            {t!("ui.replay.context.render_to_clipboard").into_owned()}
         }
         MenuSeparator()
         MenuItem(

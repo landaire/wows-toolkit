@@ -112,6 +112,8 @@ pub enum ListingEvent {
     WatchWithdrawn,
     /// The listed replays need these builds, which nothing on this machine can read.
     BuildsMissing(Vec<MissingBuild>),
+    /// The builds the listed replays were recorded on, with the version each one's replays name.
+    BuildsListed(Vec<(u32, Option<String>)>),
 }
 
 /// One directory's listing, as a `Copy` handle. Made in a component's body; everything it
@@ -511,12 +513,35 @@ impl Listing {
         }
     }
 
-    /// Reports the builds the listed replays need that nothing here can read, if any.
+    /// Reports the builds the listed replays were recorded on, and those of them that nothing here
+    /// can read.
     fn report_missing_builds(self) {
-        let missing = self.missing_builds();
+        let listed = self.listed_builds();
+        if !listed.is_empty() {
+            self.say(ListingEvent::BuildsListed(listed));
+        }
+
+        // Before the settings name a cache nothing is offered unasked, as in the GPUI listing.
+        let Some(cache) = self.work.with_value(|work| work.services.game_data.cache_untracked()) else { return };
+        let missing = self.files.with_untracked(|files| missing_builds(files, &cache));
         if !missing.is_empty() {
             self.say(ListingEvent::BuildsMissing(missing));
         }
+    }
+
+    /// Every build a listed replay was recorded on, once, with the version its replays name.
+    pub fn listed_builds(self) -> Vec<(u32, Option<String>)> {
+        let mut builds: std::collections::BTreeMap<u32, Option<String>> = std::collections::BTreeMap::new();
+        self.files.with_untracked(|files| {
+            for file in files {
+                let Some(build) = file.listed.build else { continue };
+                let entry = builds.entry(build).or_default();
+                if entry.is_none() {
+                    *entry = file.version.as_ref().map(wows_toolkit_replay_data::force_reindex::version_said);
+                }
+            }
+        });
+        builds.into_iter().collect()
     }
 
     /// The builds the listed replays need that nothing here can read. With no cache yet, every

@@ -44,6 +44,8 @@ pub(crate) fn returning_reader(runtime: &Runtime) {
 pub(crate) fn open_shell(options: HeadlessOptions) -> HeadlessWindow {
     let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
     returning_reader(&runtime);
+    // As `main` does: anything that fetches over TLS needs a provider.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let mut window = HeadlessWindow::open(options, move || {
         let runtime = Some(Arc::clone(&runtime));

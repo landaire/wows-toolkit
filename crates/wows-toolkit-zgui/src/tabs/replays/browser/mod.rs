@@ -30,6 +30,8 @@ use zgui::view::IntoView;
 
 use crate::tabs::replays::browser::listing::Listing;
 
+pub(crate) use crate::tabs::replays::browser::actions::cache_base;
+pub(crate) use crate::tabs::replays::browser::actions::proxy_url;
 pub use crate::tabs::replays::browser::folders::BrowserControl;
 
 /// What the reader asked of the listed replays, for the replays tab to carry out.
@@ -59,11 +61,16 @@ pub enum ReplayBrowserEvent {
     ReplayRemoved(PathBuf),
     /// The listed replays need builds nothing here can read.
     BuildsMissing(Vec<MissingBuild>),
+    /// The builds the listed replays were recorded on, with the version each one's replays name,
+    /// so a result mapping can be fetched for each.
+    BuildsListed(Vec<(u32, Option<String>)>),
     /// The reader asked which builds the listed replays need.
     CheckGameData(Vec<MissingBuild>),
     /// A result mapping was imported for `build`, so the open replays read through it are worth
     /// reading again.
-    ConstantsImported { build: u32 },
+    ConstantsImported {
+        build: u32,
+    },
 }
 
 /// Where a listing sends what the reader asks of it.

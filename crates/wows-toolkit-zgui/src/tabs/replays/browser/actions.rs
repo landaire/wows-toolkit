@@ -483,12 +483,12 @@ fn install_replays_root(services: Services) -> Option<PathBuf> {
 }
 
 /// Where downloaded game data goes. `None` when there is no storage directory to fall back on.
-fn cache_base(services: Services) -> Option<PathBuf> {
+pub(crate) fn cache_base(services: Services) -> Option<PathBuf> {
     let cache_dir = services.settings.read_untracked(|settings| settings.game_data_cache_dir.clone())?;
     game_data_cache::base(&cache_dir)
 }
 
-fn proxy_url(services: Services) -> String {
+pub(crate) fn proxy_url(services: Services) -> String {
     // No proxy until the settings are read, which is the setting's own default.
     services.settings.read_untracked(|settings| settings.proxy_url.clone()).unwrap_or_default()
 }
@@ -755,6 +755,13 @@ fn relist_listed(control: BrowserControl) {
         if let Some(listing) = control.listing(id) {
             listing.relist();
         }
+    }
+}
+
+impl BrowserControl {
+    /// Reads every listed directory again, for game data that has since arrived.
+    pub fn relist(self) {
+        relist_listed(self);
     }
 }
 
