@@ -78,8 +78,8 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::game_types::GameParamId;
 
-use crate::viewport::camera::ArcballCamera;
-use crate::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
+use wows_toolkit_armor::viewport::types::Vec3;
 
 use super::hull_picking::HullPickIndex;
 use super::hull_picking::MeshSource;

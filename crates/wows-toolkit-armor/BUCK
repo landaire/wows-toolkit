@@ -1,0 +1,38 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+ARMOR_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:bytemuck",
+    "//third-party/rust:nalgebra",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:wgpu",
+]
+
+workspace_library(
+    name = "wows_toolkit_armor",
+    crate = "wows_toolkit_armor",
+    package = "wows-toolkit-armor",
+    version = "0.1.0",
+    deps = ARMOR_DEPS,
+)
+
+# The headless test device, for the tests of crates that host the viewport.
+workspace_library(
+    name = "wows_toolkit_armor_test_support",
+    crate = "wows_toolkit_armor",
+    package = "wows-toolkit-armor",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = ARMOR_DEPS + ["//third-party/rust:pollster"],
+)
+
+workspace_test(
+    name = "wows_toolkit_armor_test",
+    crate = "wows_toolkit_armor",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-armor",
+    version = "0.1.0",
+    deps = ARMOR_DEPS,
+    test_deps = ["//third-party/rust:pollster", "//third-party/rust:serde_json"],
+)

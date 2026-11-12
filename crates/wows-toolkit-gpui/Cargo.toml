@@ -16,8 +16,8 @@ gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch 
 # GPUI's wgpu renderer (library `gpui_wgpu`): the armor viewport draws on
 # GPUI's own device into a texture GPUI samples, releases what it made there
 # when GPUI reports the device lost, and the command line steers the adapter
-# GPUI picks. Its `wgpu` re-export is the one the viewport uses, so the two
-# cannot drift.
+# GPUI picks. Its `wgpu` is the workspace's, the one the armor viewport
+# engine draws with, so a device passes between the two.
 gpui-fast-wgpu = "0.1.14"
 anyhow = "1"
 # Matches gpui's own `image` version so Cargo unifies both into one crate
@@ -52,6 +52,9 @@ wows-toolkit-replay-data = { workspace = true }
 # The HTTP client, tokio runtime, logging, updates and the Twitch poll, shared
 # with the other desktop front end.
 wows-toolkit-services = { workspace = true }
+# The Armor Viewer's scene logic and wgpu viewport engine, shared with the
+# other front ends.
+wows-toolkit-armor = { workspace = true }
 # The Launcher tab's state and background work, shared with the egui app, and
 # the launcher crates whose types the tab shows.
 wows-toolkit-launcher = { workspace = true }
@@ -158,6 +161,8 @@ wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-suppo
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
+# The headless test device.
+wows-toolkit-armor = { workspace = true, features = ["test-support"] }
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"

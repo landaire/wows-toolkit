@@ -9,6 +9,7 @@ members = [
     "crates/wows-toolkit-viewmodel",
     "crates/wows-toolkit-replay-data",
     "crates/wows-toolkit-services",
+    "crates/wows-toolkit-armor",
     "crates/wows-toolkit-launcher",
     "crates/wows-toolkit-icons",
     "crates/wows-core",
@@ -69,6 +70,7 @@ wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
 wows-toolkit-replay-data = { path = "crates/wows-toolkit-replay-data" }
 wows-toolkit-services = { path = "crates/wows-toolkit-services" }
+wows-toolkit-armor = { path = "crates/wows-toolkit-armor" }
 wows-toolkit-launcher = { path = "crates/wows-toolkit-launcher" }
 wows-toolkit-icons = { path = "crates/wows-toolkit-icons" }
 landaire-ui = { path = "crates/landaire-ui" }

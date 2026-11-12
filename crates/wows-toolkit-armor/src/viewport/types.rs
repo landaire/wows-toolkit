@@ -1,5 +1,4 @@
 extern crate nalgebra as na;
-use gpui_wgpu::wgpu;
 
 /// 3D vector type used throughout the crate. Alias for `nalgebra::Vector3<f32>`.
 pub type Vec3 = na::Vector3<f32>;
@@ -130,6 +129,14 @@ impl TargetSize {
 /// Opaque handle to a mesh uploaded to the GPU.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MeshId(pub(crate) u64);
+
+#[cfg(feature = "test-support")]
+impl MeshId {
+    /// An id no viewport handed out, for tests that match hits against ids.
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+}
 
 /// Result of a picking (hover) query.
 #[derive(Clone, Debug)]

@@ -10,7 +10,7 @@ use nalgebra::Vector3;
 use wows_replay_insights::hull_impact;
 use wows_replay_insights::timeline::PreExtractedHit;
 
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 type Vec3 = Vector3<f32>;
 

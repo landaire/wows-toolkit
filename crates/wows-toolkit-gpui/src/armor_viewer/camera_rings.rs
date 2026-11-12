@@ -13,7 +13,7 @@ use nalgebra::Vector3;
 use wowsunpack::game_params::types::CameraRing;
 use wowsunpack::game_params::types::CameraTrajectory;
 
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 type Vec3 = Vector3<f32>;
 

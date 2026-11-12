@@ -1,0 +1,33 @@
+[package]
+name = "wows-toolkit-armor"
+description = "Armor Viewer scene logic and wgpu viewport engine, independent of any UI toolkit"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_armor"
+path = "src/lib.rs"
+
+[features]
+# The headless test device, for the tests of crates that host the viewport.
+test-support = ["dep:pollster"]
+
+[dependencies]
+bytemuck = { workspace = true }
+nalgebra = "0.34"
+# The headless test device's adapter and device requests.
+pollster = { version = "0.4", optional = true }
+# The lighting settings a host persists.
+serde = { workspace = true }
+thiserror = { workspace = true }
+# The wgpu instance GPUI's renderer uses, so a host can pass its own device in.
+wgpu = { workspace = true }
+# The ray-triangle test the picking shares with the armor export.
+wowsunpack = { workspace = true, features = ["parsing", "models"] }
+
+[dev-dependencies]
+pollster = "0.4"
+serde_json = { workspace = true }

@@ -17,7 +17,7 @@ use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::models::geometry::SplashBox;
 
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 /// A length in the ship model's own space.
 ///

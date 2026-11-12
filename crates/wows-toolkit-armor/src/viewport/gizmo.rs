@@ -3,13 +3,13 @@ use crate::viewport::camera::Axis;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::ViewRect;
 
-pub(crate) const BOX_SIZE: f32 = 64.0;
-pub(crate) const ARM_LEN: f32 = 22.0;
-pub(crate) const BALL_R: f32 = 7.0;
+pub const BOX_SIZE: f32 = 64.0;
+pub const ARM_LEN: f32 = 22.0;
+pub const BALL_R: f32 = 7.0;
 const MARGIN: f32 = 8.0;
 
 /// Top-right corner box for the gizmo, inset from the viewport edges.
-pub(crate) fn gizmo_rect(viewport: ViewRect) -> ViewRect {
+pub fn gizmo_rect(viewport: ViewRect) -> ViewRect {
     let max_x = viewport.right() - MARGIN;
     let max_y = viewport.top() + MARGIN;
     ViewRect::from_min_size((max_x - BOX_SIZE, max_y), (BOX_SIZE, BOX_SIZE))
@@ -30,7 +30,7 @@ fn axis_unit(axis: Axis, positive: bool) -> [f32; 3] {
 /// Returns the raw (un-normalized) screen-space vector (Y-down) with magnitude in [0, 1]:
 /// ~1 when the axis lies in the screen plane, ~0 when it points toward/away from the camera.
 /// Arms drawn at `center + dir * ARM_LEN` foreshorten naturally instead of collapsing to full length.
-pub(crate) fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) -> (Vec2, f32) {
+pub fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) -> (Vec2, f32) {
     let a = axis_unit(axis, positive);
     let mut out = [0.0f32; 3];
     for c in 0..3 {
@@ -44,7 +44,7 @@ pub(crate) fn axis_screen_dir(view: &[[f32; 4]; 4], axis: Axis, positive: bool) 
 
 /// The six signed axes paired with screen direction, ordered so the ball nearest
 /// the camera (largest view-space depth) comes LAST and draws on top.
-pub(crate) fn ball_draw_order(view: &[[f32; 4]; 4]) -> Vec<(Axis, bool, Vec2, f32)> {
+pub fn ball_draw_order(view: &[[f32; 4]; 4]) -> Vec<(Axis, bool, Vec2, f32)> {
     let mut balls: Vec<(Axis, bool, Vec2, f32)> = Vec::with_capacity(6);
     for axis in [Axis::X, Axis::Y, Axis::Z] {
         for positive in [true, false] {
@@ -57,7 +57,7 @@ pub(crate) fn ball_draw_order(view: &[[f32; 4]; 4]) -> Vec<(Axis, bool, Vec2, f3
 }
 
 /// Which signed axis ball (if any) is nearest to `pointer` within BALL_R.
-pub(crate) fn hit_test(rect: ViewRect, camera: &ArcballCamera, pointer: Vec2) -> Option<(Axis, bool)> {
+pub fn hit_test(rect: ViewRect, camera: &ArcballCamera, pointer: Vec2) -> Option<(Axis, bool)> {
     let view = camera.view_matrix();
     let center = rect.center();
     let mut best: Option<(Axis, bool, f32)> = None;

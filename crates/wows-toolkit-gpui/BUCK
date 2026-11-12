@@ -21,6 +21,7 @@ GPUI_DEPS = [
     "//third-party/rust:sys-locale",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-armor:wows_toolkit_armor",
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
@@ -110,6 +111,7 @@ workspace_binary(
 )
 
 _TEST_SUPPORT_VARIANTS = {
+    "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
     "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",

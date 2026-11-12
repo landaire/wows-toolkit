@@ -528,7 +528,7 @@ mod tests {
     use crate::armor_viewer::trajectory;
     use crate::armor_viewer::trajectory::TrajectoryHit;
     use crate::slider_field::SliderFieldChange;
-    use crate::viewport::types::Vec3;
+    use wows_toolkit_armor::viewport::types::Vec3;
 
     /// A shell through two plates, cast with no ship chosen.
     fn cast_from(range: f32) -> trajectory::Trajectory {

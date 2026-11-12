@@ -8,9 +8,9 @@
 //! the result into lines and markers the viewport can draw.
 
 use crate::armor_viewer::load_ship::ArmorTriangleTooltip;
-use crate::viewport::types::HitResult;
-use crate::viewport::types::MeshId;
-use crate::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::HitResult;
+use wows_toolkit_armor::viewport::types::MeshId;
+use wows_toolkit_armor::viewport::types::Vec3;
 use wowsunpack::ballistics::ArcProfile;
 use wowsunpack::ballistics::FuseDetonation;
 use wowsunpack::ballistics::ImpactResult;
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn a_hit_on_a_triangle_with_no_metadata_is_dropped() {
-        let mesh = MeshId(1);
+        let mesh = MeshId::from_raw(1);
         let ray_hits = vec![
             (HitResult { mesh_id: mesh, triangle_index: 0, distance: 1.0, world_position: Vec3::zeros() }, Vec3::x()),
             // Triangle 9 is past the end of the metadata, so nothing says how
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn hit_distances_are_measured_from_the_first_plate() {
-        let mesh = MeshId(1);
+        let mesh = MeshId::from_raw(1);
         let info = vec![(
             mesh,
             vec![

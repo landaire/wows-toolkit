@@ -7,7 +7,7 @@ use rust_i18n::t;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-use crate::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::Vec3;
 
 /// The unit a distance is written in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -22,10 +22,10 @@ use gpui_kit::size;
 use gpui_wgpu::wgpu;
 use wows_replays::types::GameClock;
 
-use crate::viewport::renderer::LAYER_HULL;
-use crate::viewport::renderer::Viewport3D;
-use crate::viewport::types::Vec3;
-use crate::viewport::types::Vertex;
+use wows_toolkit_armor::viewport::renderer::LAYER_HULL;
+use wows_toolkit_armor::viewport::renderer::Viewport3D;
+use wows_toolkit_armor::viewport::types::Vec3;
+use wows_toolkit_armor::viewport::types::Vertex;
 
 use super::length_marks::LengthMarks;
 

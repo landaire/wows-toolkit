@@ -1,16 +1,22 @@
 //! Test-only offscreen rendering with pixel readback.
 //!
-//! The application renders on GPUI's device and never reads a frame back. Tests
+//! The application renders on its host's device and never reads a frame back. Tests
 //! that assert on pixels stand up a device of their own here and copy the
 //! resolved frame to the CPU.
-
-use gpui_wgpu::wgpu;
 
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::SceneAttachments;
 use crate::viewport::renderer::SceneColorTarget;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::TargetSize;
+
+#[derive(Debug, thiserror::Error)]
+pub enum HeadlessDeviceError {
+    #[error("no suitable wgpu adapter")]
+    Adapter(#[source] wgpu::RequestAdapterError),
+    #[error("failed to create the wgpu device")]
+    Device(#[source] wgpu::RequestDeviceError),
+}
 
 /// The target a window shows: sRGB, encoded by the hardware.
 pub const SRGB_TARGET: SceneColorTarget = SceneColorTarget::Srgb(wgpu::TextureFormat::Rgba8UnormSrgb);
@@ -25,20 +31,20 @@ pub struct HeadlessDevice {
 impl HeadlessDevice {
     /// The first adapter wgpu offers, with no surface, and the pipeline
     /// rendering into `color`.
-    pub fn new(color: SceneColorTarget) -> anyhow::Result<Self> {
+    pub fn new(color: SceneColorTarget) -> Result<Self, HeadlessDeviceError> {
         let instance = wgpu::Instance::default();
-        let adapter = gpui_kit::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
             compatible_surface: None,
             apply_limit_buckets: false,
         }))
-        .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?;
-        let (device, queue) = gpui_kit::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        .map_err(HeadlessDeviceError::Adapter)?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("armor_viewport_test_device"),
             ..Default::default()
         }))
-        .map_err(|e| anyhow::anyhow!("failed to create wgpu device: {e}"))?;
+        .map_err(HeadlessDeviceError::Device)?;
         let pipeline = GpuPipeline::new(&device, &queue, color);
 
         Ok(Self { device, queue, pipeline })
@@ -108,6 +114,7 @@ impl HeadlessDevice {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::viewport::camera::ArcballCamera;
@@ -179,7 +186,7 @@ mod tests {
     /// Needs a real GPU adapter. Run with:
     ///
     /// ```text
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture headless_device_renders_cube_center_pixel
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture headless_device_renders_cube_center_pixel
     /// ```
     #[test]
     #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
@@ -201,7 +208,7 @@ mod tests {
     /// Needs a real GPU adapter. Run with:
     ///
     /// ```text
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture shader_encoded_target_matches_srgb
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture shader_encoded_target_matches_srgb
     /// ```
     #[test]
     #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
@@ -321,7 +328,7 @@ mod tests {
     /// Needs a real GPU adapter. Run with:
     ///
     /// ```text
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture surface_maps_change_only_what_they_name
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture surface_maps_change_only_what_they_name
     /// ```
     #[test]
     #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
