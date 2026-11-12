@@ -73,6 +73,10 @@ pub enum ModelLoadError {
     VisualRecord { path: ModelPath, visual_id: u64 },
     #[error("geometry 0x{geometry_id:016X} of {visual_path} is not in the paths store")]
     UnresolvedGeometry { visual_path: String, geometry_id: u64 },
+    /// The install indexes the model but ships no geometry for it: the path
+    /// is absent from the packages, or listed there with no data.
+    #[error("geometry {path} is not in the installed packages")]
+    GeometryAbsent { path: String },
     #[error("geometry {path} could not be read")]
     GeometryRead { path: String },
     #[error("geometry {path} could not be parsed")]
@@ -456,10 +460,12 @@ impl ModelLibrary {
                 Report::new(ModelLoadError::UnresolvedGeometry { visual_path: visual_path.clone(), geometry_id })
             })?;
         let read_error = || ModelLoadError::GeometryRead { path: geometry_path.clone() };
+        let geometry_file = self.vfs.join(&geometry_path).context_with(read_error)?;
+        if !geometry_file.is_file().context_with(read_error)? {
+            return Err(Report::new(ModelLoadError::GeometryAbsent { path: geometry_path.clone() }));
+        }
         let mut geometry_bytes = Vec::new();
-        self.vfs
-            .join(&geometry_path)
-            .context_with(read_error)?
+        geometry_file
             .open_file()
             .context_with(read_error)?
             .read_to_end(&mut geometry_bytes)

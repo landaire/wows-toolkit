@@ -4,11 +4,15 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
+
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::hardpoint::HardpointKind;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::LoadedModel;
 use wowsunpack::export::model_library::ModelLibrary;
+use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::model_library::ModelLoadOptions;
 use wowsunpack::export::model_library::TextureDecode;
 use wowsunpack::export::model_library::TextureSource;
@@ -30,6 +34,11 @@ static LIBRARY: LazyLock<Option<ModelLibrary>> = LazyLock::new(|| {
     let assets = ShipAssets::from_game_dir(&dir).expect("ship assets");
     Some(assets.model_library().expect("model library"))
 });
+
+enum SurveyOutcome {
+    Loaded,
+    GeometryAbsent,
+}
 
 fn path(raw: &str) -> ModelPath {
     ModelPath::parse(raw).expect("valid model path")
@@ -237,4 +246,66 @@ fn a_summary_matches_the_loaded_model() {
         assert_eq!(summary.lod_count, loaded.lod_count(), "{raw}");
         assert_eq!(summary.has_armor, loaded.has_armor(), "{raw}");
     }
+}
+
+/// Models this install's catalogue lists without shipping their geometry:
+/// one absent from every package, one indexed with no data (build 13533378).
+const HARPOON: &str = "content/gameplay/usa/projectile/missile/API2001_RGM_84_Harpoon/API2001_RGM_84_Harpoon.model";
+const HALLOWEEN_BOMB: &str = "content/gameplay/events/projectile/bomb/XPB007_Bomb_HW2018/XPB007_Bomb_HW2018.model";
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn a_model_without_shipped_geometry_reports_it_absent() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    for raw in [HARPOON, HALLOWEEN_BOMB] {
+        let Err(error) = library.load_model(&path(raw), &options(TextureDecode::None)) else {
+            panic!("{raw} loads");
+        };
+        assert!(matches!(error.current_context(), ModelLoadError::GeometryAbsent { .. }), "{raw}: {error}");
+    }
+}
+
+/// Loads every catalogued model. A load may fail only for geometry the
+/// install does not ship, and every load has finite vertices to draw.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn every_catalogued_model_loads_unless_its_geometry_is_absent() {
+    let Some(library) = LIBRARY.as_ref() else {
+        return;
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |count| (count.get() / 2).max(1));
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("thread pool");
+
+    let outcomes: Vec<Result<SurveyOutcome, String>> = pool.install(|| {
+        library
+            .catalog()
+            .entries()
+            .par_iter()
+            .map(|entry| {
+                let model = match library.load_model(entry.path(), &options(TextureDecode::None)) {
+                    Ok(model) => model,
+                    Err(error) if matches!(error.current_context(), ModelLoadError::GeometryAbsent { .. }) => {
+                        return Ok(SurveyOutcome::GeometryAbsent);
+                    }
+                    Err(error) => return Err(format!("{}: {error}", entry.path())),
+                };
+                if model.meshes().iter().all(|mesh| mesh.indices.is_empty()) {
+                    return Err(format!("{}: no triangles", entry.path()));
+                }
+                let finite = model.meshes().iter().flat_map(placed_positions).flatten().all(f32::is_finite);
+                if !finite {
+                    return Err(format!("{}: a vertex is not finite", entry.path()));
+                }
+
+                Ok(SurveyOutcome::Loaded)
+            })
+            .collect()
+    });
+
+    let failures: Vec<&String> = outcomes.iter().filter_map(|outcome| outcome.as_ref().err()).collect();
+    let absent = outcomes.iter().filter(|outcome| matches!(outcome, Ok(SurveyOutcome::GeometryAbsent))).count();
+    eprintln!("{} models: {absent} without geometry, {} failed", outcomes.len(), failures.len());
+    assert!(failures.is_empty(), "{failures:#?}");
 }
