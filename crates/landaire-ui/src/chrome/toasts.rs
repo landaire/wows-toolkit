@@ -28,7 +28,8 @@ const SHEET: &str = "landaire-ui-toasts";
 /// The mark sits on the message's first line rather than beside the middle of a message that
 /// wraps; the title's line is one and a half times its size. The stack stays a list, each message
 /// readable, rather than collapsing into a deck while the pointer is elsewhere: a message the
-/// reader has to hover to read is one they miss.
+/// reader has to hover to read is one they miss. The region declares its own duration rather than
+/// reading a motion token, so reduced motion zeroes it here.
 const CSS: &str = css!(
     ".lui-toasts .zui-toast {
         align-items: flex-start;
@@ -46,6 +47,9 @@ const CSS: &str = css!(
     }
     .lui-toasts.zui-toast__region[data-expanded=\"false\"] .zui-toast__slot[data-front=\"false\"] .zui-toast > * {
         opacity: 1;
+    }
+    :root[reduced-motion] .lui-toasts.zui-toast__region {
+        --zui-toast-move: 0ms;
     }"
 );
 
