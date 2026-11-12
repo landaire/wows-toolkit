@@ -402,8 +402,8 @@ mod tests {
     use crate::interaction_tests::open_app_in_root;
     use crate::interaction_tests::open_index;
     use crate::replay_inspector::ReplayInspectorView;
-    use crate::replay_inspector::browser_view::DirChange;
-    use crate::replay_inspector::simulated_watch;
+    use wows_toolkit_replay_data::replay_dir::DirChange;
+    use wows_toolkit_replay_data::simulated_watch;
 
     const SEARCH: &str = "replay-listing-search";
     const INDEX: &str = "replay-listing-index";

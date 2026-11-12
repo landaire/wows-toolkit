@@ -29,10 +29,6 @@ pub mod table;
 mod team_bands;
 pub mod view;
 
-#[cfg(test)]
-pub(crate) mod simulated_watch;
-
-pub use browser_view::MissingBuild;
 pub use browser_view::ReplayBrowser;
 pub use browser_view::ReplayBrowserEvent;
 pub use chat::ChatPanel;
