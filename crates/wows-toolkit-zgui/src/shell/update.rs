@@ -12,6 +12,7 @@ use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::Update;
 use zgui::task::blocking;
 use zgui::task::spawn_detached;
 use zgui::view;
@@ -143,7 +144,8 @@ pub fn check_for_update(services: Services, shell: Shell, asked: Asked) {
     spawn_detached(async move {
         let found = found.await;
         drop(job);
-        let UpdateStatus::Checking(asked) = flow.status.get_untracked() else { return };
+        // Read with `try_`, as the shell may be gone by the time the check answers.
+        let Some(UpdateStatus::Checking(asked)) = flow.status.try_get_untracked() else { return };
         flow.status.set(UpdateStatus::Idle);
 
         let found = match found {
@@ -267,7 +269,10 @@ fn install_update(services: Services, shell: Shell, asset_url: String) {
         };
         let (installed, ()) = futures::future::join(installing, listening).await;
 
-        flow.status.set(UpdateStatus::Idle);
+        // `try_`, as the shell may be gone by the time the install answers.
+        if flow.status.try_update(|status| *status = UpdateStatus::Idle).is_none() {
+            return;
+        }
         if let Err(error) = installed {
             let reason = format!("{}", error.format_with(&DefaultReportFormatter::ASCII));
             tracing::warn!("Update installation failed: {reason}");

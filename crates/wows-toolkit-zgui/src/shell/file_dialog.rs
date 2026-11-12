@@ -15,7 +15,9 @@ impl Shell {
         // be an unreachable pattern.
         asked.await.unwrap_or_else(|err| {
             tracing::error!("file dialog could not be opened: {err}");
-            self.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+            if let Some(toasts) = self.try_toasts() {
+                toasts.failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+            }
             None
         })
     }

@@ -568,7 +568,9 @@ pub(crate) async fn chosen(shell: Shell, asked: impl Future<Output = Answer>) ->
     // an unreachable pattern.
     asked.await.unwrap_or_else(|err| {
         tracing::error!("file dialog could not be opened: {err}");
-        shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+        if let Some(toasts) = shell.try_toasts() {
+            toasts.failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+        }
         None
     })
 }

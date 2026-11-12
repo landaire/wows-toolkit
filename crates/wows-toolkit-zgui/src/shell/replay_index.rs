@@ -131,6 +131,10 @@ impl Shell {
             })
             .await;
             drop(held);
+            // `try_`, as the shell may be gone by the time the build answers.
+            if index.progress.try_with_untracked(|_| ()).is_none() {
+                return;
+            }
 
             index.progress.set(None);
             index.cancel.set_value(None);

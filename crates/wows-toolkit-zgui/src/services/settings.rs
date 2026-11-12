@@ -161,9 +161,10 @@ impl Settings {
     }
 
     /// The open config pool, for the readers that query it directly. `None` before the startup
-    /// read has opened it.
+    /// read has opened it, and once the services are gone: a secondary window can outlive the main
+    /// window that owns them.
     pub fn pool(self) -> Option<SqlitePool> {
-        self.writer.get_value().map(|writer| writer.pool().clone())
+        self.writer.try_get_value().flatten().map(|writer| writer.pool().clone())
     }
 }
 

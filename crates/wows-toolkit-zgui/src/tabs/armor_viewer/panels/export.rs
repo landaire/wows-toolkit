@@ -482,7 +482,9 @@ pub fn open_export_dialog(shell: Shell, request: ExportRequest, assets: Arc<Ship
         }
     });
 
-    spawn_local(async move {
+    // Detached: the dialog is the shell's, and a row menu that asked for it can close before the
+    // read answers.
+    spawn_detached(async move {
         let defaults = loading.await.unwrap_or_else(|err| {
             tracing::warn!("armor viewer: the export defaults could not be read: {err}");
             ExportDefaults::default()
@@ -497,6 +499,9 @@ pub fn open_export_dialog(shell: Shell, request: ExportRequest, assets: Arc<Ship
                 (ExportTarget::Model { request, models }, display_name, None)
             }
         };
+        if shell.is_unmounted() {
+            return;
+        }
         shell.dialogs.open(move |handle| {
             let model = ExportModel::new(target.clone(), display_name.clone(), seed_hull.clone(), defaults);
             let dialog =
@@ -885,9 +890,13 @@ pub fn write_glb(
     // Detached: the export outlives the dialog that asked for it.
     spawn_detached(async move {
         let Some(path) = shell.chosen_path(asked).await else { return };
-        let _job = services.jobs.start(Job {
-            name: t!("ui.armor.export.exporting", ship = display_name.as_str()).into_owned(),
-            progress: None,
+        // The services go with the shell, which can be unmounted while the dialog is open; the
+        // file is written either way.
+        let _job = (!shell.is_unmounted()).then(|| {
+            services.jobs.start(Job {
+                name: t!("ui.armor.export.exporting", ship = display_name.as_str()).into_owned(),
+                progress: None,
+            })
         });
         let written = blocking(move || {
             write(path.clone())?;
@@ -904,6 +913,7 @@ pub fn write_glb(
 /// Reports a finished export: what was written and how large it is, or why it was not. The
 /// destination is logged rather than shown: the reader chose it in the save dialog.
 fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlbError>, ship: &str) {
+    let toasts = shell.try_toasts();
     match written {
         Ok((path, size)) => {
             tracing::info!("armor viewer: exported {ship} to {}", path.display());
@@ -913,11 +923,15 @@ fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlb
                 }
                 None => t!("ui.armor.export.exported", ship = ship).into_owned(),
             };
-            shell.toasts().ok(message);
+            if let Some(toasts) = toasts {
+                toasts.ok(message);
+            }
         }
         Err(err) => {
             tracing::error!("armor viewer: failed to export {ship}: {err}");
-            shell.toasts().failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
+            if let Some(toasts) = toasts {
+                toasts.failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
+            }
         }
     }
 }

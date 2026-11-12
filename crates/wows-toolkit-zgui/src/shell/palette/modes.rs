@@ -244,6 +244,9 @@ fn browse_folder(shell: Shell) {
     // Detached: the palette that asked has closed before the reader answers.
     spawn_detached(async move {
         let Some(directory) = chosen(shell, asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         shell.request_replay(ReplayRequest::OpenFolder(directory));
     });
 }

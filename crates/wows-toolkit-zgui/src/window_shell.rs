@@ -124,11 +124,44 @@ fn store(services: Services, kind: WindowKind, geometry: WindowSettings) -> bool
 /// For a window going away: the process may exit straight after, and a background write would be
 /// lost with it. One row, so the UI thread waits only for that.
 fn store_before_exit(services: Services, kind: WindowKind, geometry: WindowSettings) {
-    let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else {
-        return;
-    };
+    // The pool first: `None` once the services are gone, which a secondary window outlives.
+    let Some(pool) = services.settings.pool() else { return };
+    let Some(runtime) = services.runtime() else { return };
 
     if let Err(err) = runtime.block_on(wows_toolkit_config::store_window_settings(&pool, kind, geometry)) {
         tracing::error!("window geometry: {kind:?} could not be written as the window closed: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use wows_toolkit_config::WindowKind;
+    use wows_toolkit_config::WindowSettings;
+    use wows_toolkit_services::settings::StartupSettings;
+    use zgui::reactive::Mounted;
+
+    use super::store;
+    use super::store_before_exit;
+    use crate::services::Services;
+
+    /// A secondary window outlives the main window that owns the services when the app exits. Its
+    /// geometry poll and its cleanup then find no database rather than a freed value.
+    #[test]
+    fn geometry_is_not_stored_once_the_services_are_gone() {
+        zgui::reactive::install().expect("the reactive runtime installs");
+        let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
+        let main = Mounted::new();
+        let services = main.with(|| Services::provide(Some(Arc::clone(&runtime))));
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        let settings = runtime.block_on(StartupSettings::load(&pool));
+        services.settings.adopt(settings, pool);
+        assert!(services.settings.pool().is_some(), "the database is open while the main window is");
+
+        main.unmount();
+        let geometry = WindowSettings { inner_size_points: Some([640.0, 480.0]), ..WindowSettings::default() };
+        assert!(!store(services, WindowKind::ReplayRenderer, geometry), "nothing is left to store into");
+        store_before_exit(services, WindowKind::ReplayRenderer, geometry);
     }
 }

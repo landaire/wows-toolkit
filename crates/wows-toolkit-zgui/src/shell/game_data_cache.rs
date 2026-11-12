@@ -275,6 +275,10 @@ where
         .await;
 
         drop(held);
+        // `try_`, as the shell may be gone by the time the job answers.
+        if cache.state.try_with_untracked(|_| ()).is_none() {
+            return;
+        }
         // What a job found belongs to the directory it ran against; shown against another, its
         // update and repair lists would be fetched into the wrong cache.
         if shell.cache_base().as_ref() != Some(&asked) {
