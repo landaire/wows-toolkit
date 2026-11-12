@@ -13,30 +13,11 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::controls::CommandGroup;
-use wows_toolkit_viewmodel::controls::parse_commands_scheme;
-use wowsunpack::vfs::VfsPath;
-
-/// Where the game keeps the scheme.
-const SCHEME_PATH: &str = "system/data/commands.scheme.xml";
 
 /// The reference is a reading list, so it gets a column wide enough for a
 /// command name beside its keys rather than the dialog's default.
 const DIALOG_WIDTH: Pixels = px(560.);
 const KEY_COLUMN_WIDTH: Pixels = px(180.);
-
-/// Reads and parses the scheme out of `vfs`.
-///
-/// `None` when the build carries no scheme, or one this parse makes nothing
-/// of: there is then no reference to show rather than an empty window.
-pub fn read_scheme(vfs: &VfsPath) -> Option<Vec<CommandGroup>> {
-    let mut file = vfs.join(SCHEME_PATH).and_then(|path| path.open_file()).ok()?;
-    let mut bytes = Vec::new();
-    if file.read_to_end(&mut bytes).is_err() || bytes.is_empty() {
-        return None;
-    }
-    let groups = parse_commands_scheme(&bytes);
-    (!groups.is_empty()).then_some(groups)
-}
 
 /// Shows `groups` over the window.
 pub fn open(groups: Vec<CommandGroup>, window: &mut Window, cx: &mut App) {
