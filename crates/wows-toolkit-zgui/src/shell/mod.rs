@@ -693,6 +693,11 @@ fn shell_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifier
             shell.debug_mode.update(|debug| *debug = !*debug);
             true
         }
+        // In the Armor Viewer, ctrl+p goes straight to the ship list.
+        (false, "p") if shell.selected_untracked() == Some(TabKey::App(AppTab::ArmorViewer)) => {
+            shell.palette.open_mode(wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips);
+            true
+        }
         // Both, as the egui app takes both.
         (false, "k" | "p") => {
             shell.palette.open_root();
