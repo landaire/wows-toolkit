@@ -40,6 +40,7 @@ use crate::grid::copy;
 use crate::grid::layout;
 use crate::grid::layout::ColumnLayout;
 use crate::grid::mode::RowDetail;
+use crate::grid::mode::RowGroups;
 use crate::grid::selection::GridSelectionMode;
 use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
@@ -176,6 +177,7 @@ where
     pub(crate) cursor: RwSignal<Option<K>, LocalStorage>,
     pub(crate) expanded: RwSignal<HashSet<K>, LocalStorage>,
     pub(crate) detail: Option<RowDetail<T>>,
+    pub(crate) groups: Option<RowGroups<T>>,
     pub(crate) fixed: Option<RowHeight>,
     /// The rows a fixed-height grid builds, and where each row sits.
     pub(crate) window: Option<Signal<VirtualWindow, LocalStorage>>,
@@ -197,8 +199,8 @@ where
     /// Each built row's filler cell, whose top and bottom are the row's.
     pub(crate) row_cells: RefCell<HashMap<K, NodeRef>>,
     pub(crate) header_height: RwSignal<f32, LocalStorage>,
-    /// How wide the grid's view is, as CSS text, for a detail region to stay that wide and in
-    /// view while the columns scroll. Watched only when rows have a detail.
+    /// How wide the grid's view is, as CSS text, for a detail region or group heading to stay that
+    /// wide and in view while the columns scroll. Watched only when rows have either.
     pub(crate) view_width: Signal<Option<String>, LocalStorage>,
     pub(crate) timers: Option<Timers>,
 }
