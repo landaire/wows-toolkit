@@ -51,6 +51,8 @@ use super::figures::personal_rating_label;
 use super::loaded_from_model;
 use super::write_export;
 use crate::shell::ShellHarnessProps;
+use crate::tabs::replays::player_table_slot;
+use crate::tabs::replays::table::PlayerDetailCx;
 
 thread_local! {
     /// The battle the next panel built on this thread shows instead of reading its replay.
@@ -114,12 +116,12 @@ fn fake_table() -> TableSlot {
     Rc::new(|table: PanelTable| {
         let PanelTable { model, detail, on_view_raw_json, .. } = table;
         let current = model.get();
-        let rows: super::expanded::Rows = Arc::from(current.rows.clone());
+        let rows: Arc<[PlayerRow]> = Arc::from(current.rows.clone());
         let row =
             Arc::new(current.rows.iter().find(|row| row.is_self).cloned().unwrap_or_else(|| current.rows[0].clone()));
         let columns: Rc<[ReplayColumn]> =
             Rc::from(vec![ReplayColumn::Name, ReplayColumn::Skills, ReplayColumn::ActualDamage]);
-        let expanded = detail(row, rows, columns);
+        let expanded = detail(PlayerDetailCx { row, rows, columns: Signal::stored_local(columns) });
         AnyView::new(view! {
             column(attr:data-testid = "fake-table") {
                 Button(attr:data-testid = "fake-raw", on:click = move |_| on_view_raw_json.run("{\"id\": 1}".to_string())) {"raw"}
@@ -137,6 +139,8 @@ struct Opened {
 struct Opening {
     seed: Option<Loaded>,
     events: PanelEvents,
+    /// The table slot; a stand-in table without one.
+    table: Option<TableSlot>,
     rating: Option<Signal<Option<Arc<PersonalRatingData>>, LocalStorage>>,
     theme: Option<ThemeChoice>,
     drawing: Option<Drawing>,
@@ -144,7 +148,8 @@ struct Opening {
 }
 
 fn open(opening: Opening) -> Opened {
-    let Opening { seed, events, rating, theme, drawing, size } = opening;
+    let Opening { seed, events, table, rating, theme, drawing, size } = opening;
+    let table = table.unwrap_or_else(fake_table);
     SEED.with(|slot| *slot.borrow_mut() = seed);
     let mut options = HeadlessOptions::new(size.unwrap_or(WindowSize { width: 1100.0, height: 700.0 }));
     if let Some(drawing) = drawing {
@@ -158,15 +163,16 @@ fn open(opening: Opening) -> Opened {
             personal_rating: None,
         };
         let events = events.clone();
+        let table = Rc::clone(&table);
         match rating {
             Some(rating) => AnyView::new(view! {
                 ShellHarness(theme = theme) {
-                    ReplayPanel(setup = setup, table = fake_table(), events = events, personal_rating = rating)
+                    ReplayPanel(setup = setup, table = table, events = events, personal_rating = rating)
                 }
             }),
             None => AnyView::new(view! {
                 ShellHarness(theme = theme) {
-                    ReplayPanel(setup = setup, table = fake_table(), events = events)
+                    ReplayPanel(setup = setup, table = table, events = events)
                 }
             }),
         }
@@ -199,6 +205,24 @@ fn the_header_names_the_match_and_flags_missing_results() {
     let Opened { window } =
         open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
     assert!(window.by_test_id("replay-incomplete-results").is_none());
+}
+
+/// The Replays tab's table slot draws the battle's player table, whose rows open the expanded
+/// detail.
+#[test]
+fn the_player_table_slot_draws_the_table_and_opens_a_rows_detail() {
+    let Opened { mut window } = open(Opening {
+        seed: Some(loaded(sample_model(), true)),
+        table: Some(player_table_slot()),
+        ..Opening::default()
+    });
+    assert!(window.by_test_id("fake-table").is_none());
+    let name = window.by_test_id("player-name-2").expect("the table draws the second player");
+    assert!(window.by_test_id("replay-expanded-row").is_none(), "no row starts open");
+
+    window.double_click(name).expect("the row takes a double click");
+    window.advance(Duration::from_millis(600));
+    assert!(window.by_test_id("replay-expanded-row").is_some(), "the row's detail opens");
 }
 
 fn rated() -> ReplayReportModel {
@@ -369,6 +393,7 @@ fn the_replay_panel_renders_in_dark_and_light() {
             theme: Some(theme),
             drawing: Some(Drawing::Device),
             size: Some(WindowSize { width: 1400.0, height: 900.0 }),
+            table: Some(player_table_slot()),
             ..Opening::default()
         });
         let toggle = window.by_test_id("replay-chat-toggle").expect("the toggle is shown");
