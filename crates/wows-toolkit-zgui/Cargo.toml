@@ -11,7 +11,7 @@ zgui = { workspace = true }
 zgui-ui = { workspace = true }
 zgui-ui-icons = { workspace = true }
 zgui-ui-tokens = { workspace = true }
-# In-memory pictures, such as nation flags read from the game files.
+# In-memory pictures, such as nation flags read from the game files and map thumbnails.
 zgui-image = { workspace = true }
 # The placement a hover card is asked for.
 zgui-ui-primitives = { workspace = true }
@@ -48,6 +48,10 @@ wgc-download = { workspace = true }
 wgc-install = { workspace = true }
 # The process mitigations, applied before a window exists.
 wows-toolkit-hardening = { workspace = true }
+# Map art for the replay listing's thumbnails.
+wows_minimap_renderer = { workspace = true }
+# Copying replay files puts a file list on the clipboard, which zgui's clipboard does not write.
+arboard = "3.6.1"
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }
 wt-translations = { workspace = true }
@@ -88,7 +92,8 @@ landaire-ui = { workspace = true, features = ["test-support"] }
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
-# The sample replay and fabricated rows the player table and replay panel tests draw.
+# The sample replay and fabricated rows the player table and replay panel tests draw; directory
+# watches are reported by the tests instead of the filesystem.
 wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 # The launcher's state is set by its events rather than by the network, the keyring or a scan.
 wows-toolkit-launcher = { workspace = true, features = ["test-support"] }
