@@ -141,11 +141,47 @@ Where `elementCount = EncodedBufferHeader.elementCount` from the ENCD header.
 ```
 Offset  Size  Type         Field
 ------  ----  ----         -----
-0x00    8     i64          cmDataPtr            # relative to this struct -> raw data blob
-0x08    16    PackedString collisionModelName   # e.g. "CM_something"
-0x18    4     u32          sizeInBytes          # total byte size
-0x1C    4     ---          (padding)
+0x00    8     u64          sizeInBytes          # byte size of the data blob
+0x08    16    PackedString collisionModelName   # "default" or "hit_locations"
+0x18    8     i64          cmDataPtr            # relative to this struct -> data blob
 ```
+
+The game writes the data blobs right after the prototype array, each
+followed by its name.
+
+### Collision Model Data (convex hulls)
+
+All little-endian:
+
+```
+u32  magic = 0x24022012
+u32  hullCount
+per hull:
+  u32  vertexCount
+  f32[3] × vertexCount       # model space, left-handed like the armor
+  u32  edgeCount
+  u32[2] × edgeCount         # vertex index pairs
+  u32  polygonCount
+  per polygon (convex, corners counter-clockwise seen from outside):
+    u32  n
+    u32  vertexIndex[n]
+    u32  edgeIndex[n]
+    u32  materialKey          # (layer << 16) | collisionMaterialId
+```
+
+Of the 32,419 geometry files in build 13533378, 6,463 carry a `default`
+model and 31 a `hit_locations` model, all of them building models
+(`content/location/gameplay/building`, `content/location/nature/gameplay`).
+
+- `default`: every `materialKey` is 0. It is the physics body.
+- `hit_locations`: every polygon carries the GameParams key of its plate in
+  the building's `hull.armor` map, e.g. `0x0001004D` (`OCit_Belt`, layer 1)
+  or `0x0002004E` (`OCit_Deck`, layer 2). The client builds the building's
+  shell hit test from it (`BuildingPhysics`: `Lesta.HitLocation`), as it
+  builds a ship's from its armor model. Buildings have no armor model, so
+  this is their armor. For a geometry without an armor model,
+  `parse_geometry` puts it in `armor_models`, fan-triangulated and wound like
+  armor model triangles.
 
 ## ArmorModelPrototype (0x20 bytes each)
 
@@ -154,10 +190,9 @@ Same layout as CollisionModelPrototype:
 ```
 Offset  Size  Type         Field
 ------  ----  ----         -----
-0x00    8     i64          armorDataPtr       # relative to this struct -> raw data blob
+0x00    8     u64          sizeInBytes        # byte size of the data blob
 0x08    16    PackedString armorModelName     # e.g. "CM_PA_united.armor"
-0x18    4     u32          sizeInBytes        # total byte size
-0x1C    4     ---          (padding)
+0x18    8     i64          armorDataPtr       # relative to this struct -> data blob
 ```
 
 ## File Layout Example
@@ -173,15 +208,10 @@ For a typical ship model (`BSA013_Colossus_1945.geometry`, 192,311 bytes):
 0x0119F-0x011AE  formatName[0] text (16 bytes: "set3/xyznuvtbpc\0")
 0x011AF-0x011BE  IndicesPrototype[1] (16 bytes)
 0x011BF-0x012C3  indexData[0] blob (261 bytes, ENCD-encoded)
-0x012C4-0x012E3  ArmorModelPrototype[1] (32 bytes)
-0x012E4-0x2EF03  (unmapped region - 187,424 bytes)
-0x2EF04-0x2EF23  armorData[0] blob (32 bytes)
+0x012C4-0x012E3  ArmorModelPrototype[1] (32 bytes; sizeInBytes 187,456, armorDataPtr 0x20)
+0x012E4-0x2EF23  armorData[0] blob (187,456 bytes)
 0x2EF24-0x2EF36  armorModelName[0] text (19 bytes: "CM_PA_united.armor\0")
 ```
-
-The large unmapped region likely contains additional mesh data (primitive groups,
-bounding boxes, etc.) referenced by the `.visual` file system rather than the
-`.geometry` header.
 
 ## Binary Ninja Annotations
 
@@ -635,8 +665,8 @@ version. The entire table must be treated as version-dependent.
 ## Armor Geometry (BVH Format)
 
 Armor data in each `ArmorModelPrototype` is a BVH tree with interleaved triangle soup.
-Data starts right after the struct (`struct_base + 0x20`) and extends to
-`resolve_relptr(struct_base, data_relptr) + size_in_bytes`.
+Data runs from `struct_base + armorDataPtr` for `sizeInBytes` bytes; with one
+armor model that is right after the struct (`armorDataPtr` 0x20).
 
 ### Entry Format
 

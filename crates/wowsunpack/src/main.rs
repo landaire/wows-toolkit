@@ -1357,7 +1357,7 @@ fn run_geometry(file_data: &[u8], name: &str, decode: bool) -> Result<(), Report
 
     println!("Collision models: {}", geom.collision_models.len());
     for (i, cm) in geom.collision_models.iter().enumerate() {
-        println!("  [{i}] name=\"{}\" size={}", cm.name, cm.size_in_bytes);
+        println!("  [{i}] name=\"{}\" size={}", cm.name, cm.data.len());
     }
     println!();
 
