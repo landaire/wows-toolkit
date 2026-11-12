@@ -34,12 +34,6 @@ impl UnpackerWindow {
         let mut window = open_shell(options);
         let tab = window.by_test_id("unpacker").expect("the strip has an Unpacker tab");
         window.click(tab).expect("the tab can be pressed");
-        // The status bar misses a tab's toggles on the tab's first showing until the shell's
-        // `selected_chrome` tracks the chrome map; leaving and returning shows them.
-        for id in ["launcher", "unpacker"] {
-            let tab = window.by_test_id(id).expect("the strip has the tab");
-            window.click(tab).expect("the tab can be pressed");
-        }
         settle_in_real_time(&mut window);
         let model = built_model().expect("the Unpacker tab was built");
         Self { window, model }
