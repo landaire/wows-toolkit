@@ -48,10 +48,10 @@ use wowsunpack::vfs::VfsPath;
 
 use crate::replay_inspector::icons::IconCache;
 use crate::replay_inspector::icons::decode_ship_class_svg;
-use crate::replay_inspector::load::LoadedGameData;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 /// Class-icon tint: the replay table tints ship-class icons by team/division
-/// color (`replay_inspector::columns::class_icon_tint`), but the armor
+/// color (`replay_inspector::player_colors::class_icon_tint`), but the armor
 /// sidebar has no per-row team context, so this renders the icon undyed
 /// (`0xffffff` leaves every channel at full intensity in `decode_ship_class_svg`'s
 /// tint multiply -- see `icons.rs`), matching the icon's own white source art.
@@ -121,7 +121,7 @@ fn load_catalog_icons(catalog: &ShipCatalog, vfs: &VfsPath, svg_renderer: &SvgRe
 }
 
 /// Kicks off the Armor Viewer's ship-data load on the background executor.
-/// `loaded` is expected to come from the same [`GameDataCache`](super::super::replay_inspector::GameDataCache)
+/// `loaded` is expected to come from the same [`GameDataCache`](wows_toolkit_replay_data::load::GameDataCache)
 /// the replay inspector preloads at startup, so this never triggers a
 /// second VFS/`GameParams` load for the same build.
 pub fn spawn_load_armor_assets(
@@ -188,7 +188,7 @@ mod tests {
     /// nation-flag/class-icon bytes, neither of which can be cheaply
     /// fabricated. Exercises the exact synchronous path
     /// `spawn_load_armor_assets` wraps, against a real install's latest
-    /// build (mirrors `replay_inspector::load`'s real-install test, which
+    /// build (mirrors `wows_toolkit_replay_data::load`'s real-install test, which
     /// resolves a build the same way via `list_available_builds`). Run with:
     ///
     /// ```text

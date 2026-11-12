@@ -10,11 +10,6 @@ use gpui_kit::WeakEntity;
 use rust_i18n::t;
 use wows_toolkit_services::dialog::Answer;
 
-// Removed once armor viewer and replay renderer import from the shared crate.
-pub use wows_toolkit_services::dialog::Filter;
-pub use wows_toolkit_services::dialog::GLB;
-pub use wows_toolkit_services::dialog::save_file;
-
 /// Awaits a dialog's answer. A dialog that could not be opened is logged and
 /// reported over `view`'s window, and answers `None` like a dismissed one.
 pub async fn chosen<V, C>(asked: impl Future<Output = Answer>, view: &WeakEntity<V>, cx: &mut C) -> Option<PathBuf>

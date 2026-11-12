@@ -25,7 +25,6 @@ mod icons;
 mod interaction_tests;
 mod launcher;
 mod loading;
-mod minimap_preview;
 mod motion;
 mod notices;
 mod palette;

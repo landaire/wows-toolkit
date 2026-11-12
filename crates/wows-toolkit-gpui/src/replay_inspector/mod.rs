@@ -40,6 +40,3 @@ pub use panel::ReplayPanel;
 pub use table::PlayerTable;
 pub use view::InspectorSettings;
 pub use view::ReplayInspectorView;
-
-// Removed once armor viewer and replay renderer import from the shared crate.
-pub use wows_toolkit_replay_data::load::GameDataCache;

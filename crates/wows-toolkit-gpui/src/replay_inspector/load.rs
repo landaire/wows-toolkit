@@ -9,15 +9,12 @@ use gpui_kit::AppContext;
 use gpui_kit::Task;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::heap_profile;
+use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::GameDataStatus;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::load::load_current_build;
 use wows_toolkit_replay_data::load::parse_replay_with_alts;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
-
-// Removed once armor viewer and replay renderer import from the shared crate.
-pub use wows_toolkit_replay_data::load::GameDataCache;
-pub use wows_toolkit_replay_data::load::LoadedGameData;
 
 /// Kicks off the startup game-data preload on the background executor.
 /// Callers await the returned task (typically via `cx.spawn`, to fold the
