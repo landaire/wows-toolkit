@@ -17,6 +17,7 @@ use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
 use landaire_ui::MotionPreference;
 use landaire_ui::RowHeight;
+use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
 use landaire_ui::SortDirection;
 use landaire_ui::ThemeRootProps;
@@ -33,12 +34,14 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::view;
+use zgui::view::AnyView;
 use zgui::view::NodeRef;
 use zgui::view::ScrollBehavior;
 use zgui::view::ScrollTarget;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
+use zgui_ui::MenuItemProps;
 
 const SIZE: WindowSize = WindowSize { width: 420.0, height: 300.0 };
 
@@ -166,6 +169,65 @@ fn a_column_dragged_narrower_than_its_minimum_stops_at_it() {
     assert_eq!(width(&window, cell(&window, "name-0")).min(40.0), width(&window, cell(&window, "name-0")));
     let layout = handles.layout.get().expect("the layout").get_untracked();
     assert_eq!(layout.width(&ColumnId::from("name")), Some(ColumnWidth(40.0)));
+}
+
+#[test]
+fn a_pinned_column_dragged_wider_stops_at_the_pinned_share_of_the_view() {
+    let handles = Rc::new(Handles::default());
+    let mut window =
+        open_with(items(5), RowMode::natural, Rc::clone(&handles), MotionPreference::Full, |mut layout| {
+            layout.pin(&ColumnId::from("name"));
+            layout
+        });
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Name").expect("the grip is announced");
+    let from = window.bounds(grip).expect("the grip has a box");
+
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 + 400.0), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+
+    // The pinned columns may take 60% of the 420px view, 252px.
+    let name = header(&mut window, "Name");
+    assert!(width(&window, name) < 252.5, "the pinned column is {} wide", width(&window, name));
+    let layout = handles.layout.get().expect("the layout").get_untracked();
+    let stored = layout.width(&ColumnId::from("name")).expect("the drag stored a width");
+    assert!(stored.0 > 240.0 && stored.0 < 252.5, "the stored width is {}", stored.0);
+}
+
+#[test]
+fn the_menu_key_opens_the_row_menu_at_the_start_of_the_row() {
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), || {
+        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(4)),
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        row_menu = row_menu,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let row = cell(&window, "name-2");
+    let row_box = window.bounds(row).expect("the cell has a box");
+
+    window.click(row).expect("the cell has a box");
+    window.press_key(NamedKey::F10, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(300));
+
+    let item = window.by_role_and_label(Role::MenuItem, "Open 2").expect("the row menu is open");
+    let item_box = window.bounds(item).expect("the item has a box");
+    assert!(
+        item_box.origin.x.0 < row_box.origin.x.0 + 40.0,
+        "the menu opens at the row start: {}",
+        item_box.origin.x.0
+    );
+    assert!(item_box.origin.y.0 >= row_box.origin.y.0 + row_box.size.height.0, "the menu opens under the row");
 }
 
 #[test]
