@@ -147,13 +147,15 @@ impl GameData {
             })
             .await;
 
-            if self.generation.get_value() != generation {
+            // Read with `try_`, as the services may be gone by the time the load answers.
+            if self.generation.try_get_value() != Some(generation) {
                 return;
             }
-            match loaded {
-                Ok(loaded) => self.state.set(GameDataState::Ready(loaded)),
-                Err(reason) => self.state.set(GameDataState::Failed(reason)),
-            }
+            let state = match loaded {
+                Ok(loaded) => GameDataState::Ready(loaded),
+                Err(reason) => GameDataState::Failed(reason),
+            };
+            self.state.try_set(state);
         });
     }
 
