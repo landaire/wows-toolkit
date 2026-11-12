@@ -133,6 +133,8 @@ zgui-platform-headless = { path = "../zgui-wows/crates/zgui-platform-headless" }
 zgui-render-wgpu = { path = "../zgui-wows/crates/zgui-render-wgpu" }
 zgui-render-vector-vello = { path = "../zgui-wows/crates/zgui-render-vector-vello" }
 zgui-testkit-scene = { path = "../zgui-wows/crates/zgui-testkit-scene" }
+# The accessibility tree zgui publishes, read back as a screen reader reads it.
+accesskit_consumer = "0.38"
 
 [patch.crates-io]
 # zgui's copy of fontique, which keeps resolved font families across queries

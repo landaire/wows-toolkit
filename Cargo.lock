@@ -7275,8 +7275,14 @@ dependencies = [
 name = "landaire-ui"
 version = "0.1.0"
 dependencies = [
+ "accesskit_consumer 0.38.0",
+ "image",
  "thiserror 2.0.20",
  "zgui",
+ "zgui-platform-headless",
+ "zgui-render-vector-vello",
+ "zgui-render-wgpu",
+ "zgui-testkit-scene",
  "zgui-ui",
  "zgui-ui-icons",
  "zgui-ui-tokens",
@@ -17893,6 +17899,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zgui-platform-headless"
+version = "0.1.0"
+dependencies = [
+ "accesskit 0.24.1",
+ "zgui-geom",
+ "zgui-platform",
+ "zgui-vocab",
+]
+
+[[package]]
 name = "zgui-platform-wayland"
 version = "0.1.0"
 dependencies = [
@@ -18153,6 +18169,23 @@ dependencies = [
  "thiserror 2.0.20",
  "usvg 0.46.0",
  "zgui-color",
+]
+
+[[package]]
+name = "zgui-testkit-scene"
+version = "0.1.0"
+dependencies = [
+ "smallvec",
+ "zgui-atlas",
+ "zgui-bits",
+ "zgui-color",
+ "zgui-geom",
+ "zgui-platform",
+ "zgui-profile",
+ "zgui-render",
+ "zgui-scene",
+ "zgui-text",
+ "zgui-text-style",
 ]
 
 [[package]]

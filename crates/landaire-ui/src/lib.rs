@@ -11,6 +11,8 @@ mod palette;
 mod root;
 mod scheme;
 mod surface;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 mod tokens;
 mod tone;
 
@@ -20,6 +22,8 @@ pub use crate::contrast::ContrastRatio;
 pub use crate::contrast::accent_foreground;
 pub use crate::contrast::readable_on;
 pub use crate::contrast::text_on;
+#[cfg(feature = "test-support")]
+pub use crate::error::HeadlessError;
 pub use crate::error::TierOrderError;
 pub use crate::motion::CubicBezier;
 pub use crate::motion::EASE_PROPERTY;
