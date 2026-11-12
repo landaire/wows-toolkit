@@ -19,6 +19,7 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::provide_local_context;
 use zgui::reactive::use_local_context;
+use zgui::slot;
 use zgui::view;
 use zgui::view::A11yBinding;
 use zgui::view::AnyView;
@@ -41,6 +42,7 @@ use zgui_ui_icons::IconData;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::mark::CROSS;
+use zgui_ui_primitives::Binding;
 
 const SHEET: &str = "landaire-ui-tab-strip";
 
@@ -102,6 +104,9 @@ const CSS: &str = css!(
     .lui-tab-strip .lui-tab-strip__list .lui-tab-strip__tab.zui-tabs__trigger:focus-visible {
         outline: 1px solid var(--lui-color-accent);
         outline-offset: -2px;
+    }
+    .lui-tab-strip__label {
+        white-space: nowrap;
     }
     .lui-tab-strip__close {
         display: inline-flex;
@@ -177,6 +182,13 @@ struct StripContext {
     selected: RwSignal<Option<SelectedTab>, LocalStorage>,
 }
 
+/// What a [`TabStrip`] shows under its tabs: a `TabsContent` for each tab whose panel it switches
+/// to.
+#[slot]
+pub struct TabStripPanels {
+    children: Children,
+}
+
 /// A row of tabs with one accent line under the selected tab.
 ///
 /// When the selection changes the line moves from where it is to the tab chosen; when the
@@ -186,13 +198,17 @@ struct StripContext {
 /// One tab stop for the whole strip. The arrow keys move between tabs and select them,
 /// <kbd>Home</kbd> and <kbd>End</kbd> go to the ends, and <kbd>Delete</kbd> closes a tab that can
 /// be closed.
-#[component]
+#[component(slot_aware)]
 pub fn TabStrip(
     /// The selected tab's value, written when a tab is chosen.
-    value: RwSignal<String, LocalStorage>,
+    #[prop(into)]
+    value: Binding<String>,
     /// What the strip is called, for a screen reader.
     #[prop(into)]
     label: String,
+    /// The panels under the tabs.
+    #[prop(optional)]
+    tab_strip_panels: Option<TabStripPanels>,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
     /// The [`TabStripTab`]s.
@@ -237,6 +253,7 @@ pub fn TabStrip(
     on_cleanup_local(move || drop(placing));
 
     let class = Classes::from("lui-tab-strip").merged(class);
+    let panels = tab_strip_panels.map(|panels| panels.children.into_view_once());
 
     view! {
         Tabs(value = value, label = label, class = class, {..attrs}) {
@@ -255,6 +272,7 @@ pub fn TabStrip(
                     )
                 }
             }
+            {panels}
         }
     }
 }
@@ -327,7 +345,7 @@ pub fn TabStripTab(
             {..attrs}
         ) {
             {mark}
-            text {{children.into_view_once()}}
+            box(class = "lui-tab-strip__label") {{children.into_view_once()}}
             {close}
         }
     }
