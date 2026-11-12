@@ -241,8 +241,11 @@ impl ModelTreeIndex {
     }
 }
 
-/// Lists the stock parts of every ship in `ships`. A ship whose parts cannot
-/// be listed has no entry, and its row stays a plain ship row.
+/// Lists the parts of every ship in `ships` on its default hull, the first
+/// hull upgrade by name, which is the hull a ship opens on. The sidebar does
+/// not see a pane's hull selection, so a mount only an upgraded hull carries
+/// is not listed. A ship whose parts cannot be listed has no entry, and its
+/// row stays a plain ship row.
 pub fn list_all_ship_parts(
     ships: &ShipCatalog,
     metadata: &GameMetadataProvider,
@@ -258,6 +261,7 @@ pub fn list_all_ship_parts(
             continue;
         };
 
+        // `None` is the default hull, as for a ship load with no hull selected.
         match library.list_ship_parts(vehicle, None, &no_overrides) {
             Ok(listing) => {
                 let rows = ShipPartRows::from_listing(&listing, library.catalog());
@@ -372,5 +376,80 @@ mod tests {
         assert!(same_nation("commonwealth", "Commonwealth"));
         assert!(!same_nation("common", "Commonwealth"));
         assert!(!same_nation("events", "USA"));
+    }
+
+    /// Run the test binary with `WOWS_DIR=<install> <binary> --ignored default_hull`.
+    #[test]
+    #[ignore = "needs a game install named by WOWS_DIR"]
+    fn ship_parts_follow_the_default_hull() {
+        use std::collections::BTreeSet;
+        use std::sync::Arc;
+
+        use wowsunpack::export::ship::ShipAssets;
+        use wowsunpack::export::ship::ShipExportOptions;
+        use wowsunpack::game_data::AssetsBin;
+
+        fn row_keys(rows: &ShipPartRows) -> BTreeSet<ShipPartKey> {
+            let hull = rows.hull.iter().cloned().map(ShipPartKey::HullSection);
+            let mounts = rows.mounts.iter().flat_map(|group| &group.parts).map(|part| part.key.clone());
+            let miscs = rows.misc.iter().map(|part| part.key.clone());
+
+            hull.chain(mounts).chain(miscs).collect()
+        }
+
+        let Some(dir) = std::env::var_os("WOWS_DIR").map(std::path::PathBuf::from) else {
+            eprintln!("skipped: WOWS_DIR is not set");
+            return;
+        };
+        let vfs = wowsunpack::game_data::build_game_vfs(&dir, AssetsBin::Omit).expect("game vfs");
+        let mut bytes = Vec::new();
+        let mut file = vfs.join("content/assets.bin").expect("a path").open_file().expect("assets.bin opens");
+        std::io::Read::read_to_end(&mut file, &mut bytes).expect("assets.bin reads");
+        let bytes = Arc::new(bytes);
+        let metadata = Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("GameParams"));
+        let library = ModelLibrary::new(vfs.clone(), Arc::clone(&bytes), &metadata).expect("model library");
+        let assets = ShipAssets::from_parts(&vfs, Arc::clone(&metadata), bytes);
+        let ships = ShipCatalog::build(&metadata);
+        let listed = list_all_ship_parts(&ships, &metadata, &library);
+
+        let no_overrides = HashMap::new();
+        let options = ShipExportOptions { textures: false, ..ShipExportOptions::default() };
+        let mut checked = Vec::new();
+        for ship in ships.ships() {
+            if checked.len() == 5 {
+                break;
+            }
+
+            let Some(param) = metadata.game_param_by_index(&ship.param_index) else {
+                continue;
+            };
+            let Some(vehicle) = param.vehicle() else {
+                continue;
+            };
+            let Some(rows) = listed.get(&VehicleParamIndex::new(ship.param_index.clone())) else {
+                continue;
+            };
+            let listed_keys = row_keys(rows);
+
+            // Only a ship whose hulls mount different parts shows which hull was listed.
+            let hulls_differ = vehicle.hull_upgrades().into_iter().flat_map(|upgrades| upgrades.keys()).any(|hull| {
+                library
+                    .list_ship_parts(vehicle, Some(hull.as_str()), &no_overrides)
+                    .is_ok_and(|listing| listing.keys().collect::<BTreeSet<_>>() != listed_keys)
+            });
+            if !hulls_differ {
+                continue;
+            }
+
+            let Ok(loaded) = assets.load_ship_from_vehicle(vehicle, &options) else {
+                continue;
+            };
+            let loaded_keys: BTreeSet<ShipPartKey> = loaded.parts().iter().map(|part| part.key.clone()).collect();
+            assert_eq!(listed_keys, loaded_keys, "{} lists the parts it opens with", ship.param_index);
+            checked.push(ship.param_index.clone());
+        }
+
+        eprintln!("checked {checked:?}");
+        assert!(!checked.is_empty(), "some ship mounts different parts on another hull");
     }
 }
