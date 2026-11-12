@@ -83,11 +83,7 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
         services.locale.choose(LanguageCode::new(code));
     }
 
-    let invalid = is_wows_dir_invalid(&settings.wows_dir);
-    shell.settings_drawer.wows_dir_invalid.set(invalid);
-    if invalid {
-        warn_wows_dir_invalid(shell);
-    }
+    check_wows_dir(shell, settings.wows_dir.clone());
     services.game_data.adopt(game_data_request(&settings));
 
     let check_for_updates = settings.check_for_updates;
@@ -102,6 +98,25 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
         update::check_for_update(services, shell, Asked::AtStartup);
     }
     shell.restart_twitch_poll();
+}
+
+/// Marks the game directory read at startup when it holds no install, off the UI thread: the
+/// directory may be on a share that is slow to answer.
+pub(crate) fn check_wows_dir(shell: Shell, wows_dir: String) {
+    let check = shell.settings_drawer.begin_wows_dir_check();
+    // Detached: started once the settings land, outside any component. The check generation
+    // drops the answer once the shell is gone or a directory has been looked at since.
+    spawn_detached(async move {
+        let invalid = blocking(move || is_wows_dir_invalid(&wows_dir)).await;
+        if shell.settings_drawer.is_latest_wows_dir_check(check) != Some(true) {
+            return;
+        }
+
+        shell.settings_drawer.wows_dir_invalid.set(invalid);
+        if invalid {
+            warn_wows_dir_invalid(shell);
+        }
+    });
 }
 
 /// Puts up the message that stays until the game directory is fixed, with a way to fix it.

@@ -105,10 +105,24 @@ impl GameData {
             .with_auto_dump(request.auto_dump);
         self.cache.set(Some(cache.clone()));
 
-        // A file read rather than a build load, so it can be named while the load runs.
-        let version = wows_toolkit_replay_data::install::installed_version(&wows_dir)
-            .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch));
-        self.state.set(GameDataState::Loading { version });
+        self.state.set(GameDataState::Loading { version: None });
+
+        // A file read rather than a build load, so it can be named while the load runs. Off the
+        // UI thread, since the install may be on a share that is slow to answer.
+        let version_dir = wows_dir.clone();
+        spawn_detached(async move {
+            let version = blocking(move || {
+                wows_toolkit_replay_data::install::installed_version(&version_dir)
+                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch))
+            })
+            .await;
+
+            // Read with `try_`, as the services may be gone by the time the read answers.
+            let loading = matches!(self.state.try_get_untracked(), Some(GameDataState::Loading { .. }));
+            if self.generation.try_get_value() == Some(generation) && loading {
+                self.state.try_set(GameDataState::Loading { version });
+            }
+        });
 
         // The per-build caches for builds nothing can open any more, which is gigabytes after a
         // year of game updates.

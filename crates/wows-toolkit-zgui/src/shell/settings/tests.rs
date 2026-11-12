@@ -325,6 +325,63 @@ fn opening_at_a_setting_brings_it_to_the_top() {
     assert!(at_top_of_scroll(&window, &row_test_id(Setting::WowsDirectory)), "at the setting it is about");
 }
 
+/// An auto-export directory that is not there is marked once it has been looked for.
+#[test]
+fn a_missing_auto_export_directory_is_marked() {
+    let mut settings = test_settings();
+    settings.replay.auto_export_data = true;
+    settings.replay.auto_export_path = "/nonexistent/auto export".to_owned();
+    let mut window = open(None, Some(settings), HeadlessOptions::new(REVIEW_SIZE));
+    shell().settings_drawer.open_at(Setting::AutoExport);
+    settle(&mut window);
+
+    let path = find(&window, "settings-auto-export-path");
+    // The directory is looked for off the UI thread.
+    for _ in 0..80 {
+        if window.by_attribute("data-error", "") == Some(path) {
+            break;
+        }
+        window.advance(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(window.by_attribute("data-error", ""), Some(path), "the directory is marked");
+}
+
+/// A game directory read at startup that holds no install marks the gear once it has been looked
+/// for.
+#[test]
+fn a_startup_game_directory_with_no_install_is_marked() {
+    let wows_dir = "/nonexistent/World_of_Warships".to_owned();
+    let mut settings = test_settings();
+    settings.wows_dir = wows_dir.clone();
+    let mut window = open(None, Some(settings), HeadlessOptions::new(REVIEW_SIZE));
+    crate::shell::startup::check_wows_dir(shell(), wows_dir);
+
+    let invalid = shell().settings_drawer.wows_dir_invalid;
+    assert!(wait(&mut window, move || invalid.get_untracked()), "the gear is marked");
+}
+
+/// A game directory refused while the startup directory is still being looked for stays marked
+/// once the startup look answers.
+#[test]
+fn a_late_startup_check_leaves_a_later_refusal_marked() {
+    let install = tempfile::tempdir().expect("a temporary directory can be made");
+    std::fs::create_dir(install.path().join("bin")).expect("the bin directory can be made");
+    let wows_dir = install.path().to_string_lossy().into_owned();
+    let mut settings = test_settings();
+    settings.wows_dir = wows_dir.clone();
+    let mut window = open(None, Some(settings), HeadlessOptions::new(REVIEW_SIZE));
+
+    crate::shell::startup::check_wows_dir(shell(), wows_dir);
+    shell().apply_wows_dir("/nonexistent/World_of_Warships".to_owned());
+    for _ in 0..10 {
+        window.advance(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    assert!(shell().settings_drawer.wows_dir_invalid.get_untracked(), "the refused directory stays marked");
+}
+
 /// Advances the window in real time until `done` holds, for work on the tokio runtime.
 fn wait(window: &mut HeadlessWindow, mut done: impl FnMut() -> bool) -> bool {
     for _ in 0..80 {
