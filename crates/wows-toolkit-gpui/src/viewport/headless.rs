@@ -112,7 +112,10 @@ mod tests {
     use super::*;
     use crate::viewport::camera::ArcballCamera;
     use crate::viewport::renderer::AlbedoUv;
+    use crate::viewport::renderer::HighlightDepth;
     use crate::viewport::renderer::LAYER_DEFAULT;
+    use crate::viewport::renderer::LAYER_HIGHLIGHT;
+    use crate::viewport::renderer::LAYER_OVERLAY;
     use crate::viewport::renderer::MaterialBinding;
     use crate::viewport::renderer::MipChain;
     use crate::viewport::renderer::TextureEncoding;
@@ -212,6 +215,56 @@ mod tests {
                 "the {which} pixel is {encoded:?} shader-encoded and {srgb:?} sRGB"
             );
         }
+    }
+
+    /// The center pixel of an opaque green cube under a white highlight
+    /// cube `scale` times its size on `layer`, drawn in `depth`.
+    fn highlighted_cube_center(headless: &HeadlessDevice, scale: f32, layer: i32, depth: HighlightDepth) -> [u8; 4] {
+        let mut viewport = Viewport3D::new();
+        let (vertices, indices) = unit_cube([0.0, 0.8, 0.0, 1.0]);
+        viewport.add_mesh(&headless.device, &vertices, &indices, LAYER_DEFAULT);
+        let (mut highlight, indices) = unit_cube([1.0, 1.0, 1.0, 0.35]);
+        for vertex in &mut highlight {
+            vertex.position = vertex.position.map(|axis| axis * scale);
+        }
+        viewport.add_non_pickable_mesh(&headless.device, &highlight, &indices, layer);
+        viewport.set_highlight_depth(depth);
+        viewport.camera = ArcballCamera::from_bounds(Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
+        let size = TargetSize::new(64, 64).expect("a nonzero size");
+
+        let rgba = headless.render_rgba(&viewport, size);
+        let center = ((size.height() / 2 * size.width() + size.width() / 2) * 4) as usize;
+
+        [rgba[center], rgba[center + 1], rgba[center + 2], rgba[center + 3]]
+    }
+
+    /// A hover highlight inside the cube shows through it only in x-ray, one
+    /// on the cube's own surface shows depth-tested too, and a row highlight
+    /// on the overlay layer shows through whatever the hover depth.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture a_tested_highlight_shows_where_its_surface_is_visible
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn a_tested_highlight_shows_where_its_surface_is_visible() {
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let inside_xray = highlighted_cube_center(&headless, 0.5, LAYER_HIGHLIGHT, HighlightDepth::XRay);
+        let inside_tested = highlighted_cube_center(&headless, 0.5, LAYER_HIGHLIGHT, HighlightDepth::Tested);
+        let surface_tested = highlighted_cube_center(&headless, 1.0, LAYER_HIGHLIGHT, HighlightDepth::Tested);
+        let row_tested = highlighted_cube_center(&headless, 0.5, LAYER_OVERLAY, HighlightDepth::Tested);
+        eprintln!(
+            "inside x-ray {inside_xray:?} inside tested {inside_tested:?} surface tested {surface_tested:?} row {row_tested:?}"
+        );
+
+        // The white highlight lifts red off the green cube's zero.
+        let highlighted = |[r, ..]: [u8; 4]| r > 100;
+        assert!(highlighted(inside_xray), "x-ray shows the highlight through the cube: {inside_xray:?}");
+        assert!(!highlighted(inside_tested), "the cube hides a tested highlight: {inside_tested:?}");
+        assert!(highlighted(surface_tested), "a tested highlight shows on its own surface: {surface_tested:?}");
+        assert!(highlighted(row_tested), "a row highlight ignores the hover depth: {row_tested:?}");
     }
 
     /// Renders a lit, textured quad facing the camera with the given normal

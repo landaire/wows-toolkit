@@ -450,6 +450,7 @@ pub(crate) fn test_settings() -> GpuiSettings {
         output_dir: String::new(),
         armor_defaults: None,
         model_opening_layer: Default::default(),
+        model_xray_highlight: Default::default(),
         auto_dump_game_data: false,
         game_data_cache_dir: String::new(),
         game_data_repo_commit: None,
@@ -552,6 +553,66 @@ async fn the_opening_layer_is_read_from_the_settings_store() {
         .await
         .expect("the setting is written");
     assert_eq!(GpuiSettings::load(&pool).await.model_opening_layer, OpeningLayer::Mesh);
+}
+
+/// The Ships list's settings menu carries when the hover highlight shows
+/// through. The saved mode is what the menu starts on, and choosing
+/// another is saved.
+#[gpui_kit::test]
+fn the_xray_highlight_choice_restores_and_saves(cx: &mut TestAppContext) {
+    use crate::armor_viewer::xray::XrayHighlight;
+    use wows_toolkit_viewmodel::settings::keys;
+
+    const XRAY: &str = "armor-pane-xray-highlight";
+
+    let window = open_wide_app(cx);
+    let mut settings = test_settings();
+    settings.model_xray_highlight = XrayHighlight::Off;
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+    let pane = window.update(cx, |app, _window, _cx| app.armor_pane().clone()).expect("the test window stays open");
+    assert_eq!(cx.update(|cx| pane.read(cx).xray_highlight()), XrayHighlight::Off, "restored from the settings");
+
+    let checked = |window: &mut gpui_kit::Window| -> Vec<Option<bool>> {
+        (0..XrayHighlight::ALL.len()).map(|index| window.within(XRAY).find(index).checked()).collect()
+    };
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+        window.click("armor-sidebar-common-trigger", cx);
+        window.render_frame(cx);
+        assert_eq!(checked(window), [Some(false), Some(false), Some(true)], "the menu shows the saved mode");
+        window.within(XRAY).click(1usize, cx);
+    })
+    .expect("the test window stays open");
+    // The pane hears the menu once the click's update has ended.
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(checked(window), [Some(false), Some(true), Some(false)]);
+    })
+    .expect("the test window stays open");
+
+    assert_eq!(cx.update(|cx| pane.read(cx).xray_highlight()), XrayHighlight::WhileHeld);
+    let saved = crate::settings_store::saved_for_test()
+        .into_iter()
+        .rev()
+        .find(|(key, _)| *key == keys::MODEL_VIEWER_XRAY_HIGHLIGHT)
+        .map(|(_, json)| json);
+    assert_eq!(saved.as_deref(), Some("\"while_held\""));
+}
+
+/// The saved mode is read back at startup, and always is the default.
+#[tokio::test]
+async fn the_xray_highlight_is_read_from_the_settings_store() {
+    use crate::armor_viewer::xray::XrayHighlight;
+    use wows_toolkit_viewmodel::settings::keys;
+
+    let pool = wows_toolkit_config::test_pool().await;
+    assert_eq!(GpuiSettings::load(&pool).await.model_xray_highlight, XrayHighlight::Always);
+    wows_toolkit_config::queries::set_setting(&pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT, &XrayHighlight::WhileHeld)
+        .await
+        .expect("the setting is written");
+    assert_eq!(GpuiSettings::load(&pool).await.model_xray_highlight, XrayHighlight::WhileHeld);
 }
 
 /// The penetration checker is a section of the options rail, not a panel of

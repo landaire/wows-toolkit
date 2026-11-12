@@ -105,6 +105,7 @@ use crate::armor_viewer::visibility::SidebarHighlightKey;
 use crate::armor_viewer::visibility::VisibilityFilter;
 use crate::armor_viewer::visibility::VisibilitySnapshot;
 use crate::armor_viewer::visibility::VisibilityUndoStack;
+use crate::armor_viewer::xray::XrayHighlight;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -1008,10 +1009,10 @@ pub struct ViewportView {
     /// An orbit takes the tooltip from the plate behind it, which still
     /// picks for a click.
     hovered_ring: Option<(SharedString, Point<Pixels>)>,
-    /// The overlay mesh highlighting `hovered`'s plate, if any, so it can be
+    /// The highlight mesh over `hovered`'s plate, if any, so it can be
     /// removed/replaced when the hovered plate changes.
     hover_highlight: Option<(PlateKey, MeshId)>,
-    /// The overlay mesh highlighting a hovered Zone/Part/Plate row in the
+    /// The highlight mesh over a hovered Zone/Part/Plate row in the
     /// visibility popover, if any. Tracked separately from `hover_highlight`
     /// (raycast-driven) so the two don't fight each other; cleared when the
     /// hovered row changes, the popover closes, or a visibility mutation
@@ -1020,7 +1021,7 @@ pub struct ViewportView {
     /// The mesh under the pointer when no plate is. A plate hit takes the
     /// hover from any mesh, so the plate tools keep working through the hull.
     hovered_mesh: Option<MeshHover>,
-    /// The overlay mesh highlighting every mesh named as `hovered_mesh` is,
+    /// The highlight mesh over every mesh named as `hovered_mesh` is,
     /// by that name.
     mesh_highlight: Option<(String, MeshId)>,
     /// Which hull meshes the last hull upload drew, by [`HullMeshIndex`]:
@@ -1036,6 +1037,9 @@ pub struct ViewportView {
     /// owns this. Carried so the viewport's context menu can offer the pane's
     /// own controls -- the options rail and the penetration checker.
     pane: Option<WeakEntity<ArmorViewerPane>>,
+    /// When the hover highlights show through what is in front of them.
+    /// The pane's, pushed in.
+    xray_highlight: XrayHighlight,
     /// Live display settings (plate edges, zero-mm plates, armor
     /// opacity) mutable via the display-settings popover (`popover.rs`, Task
     /// 7b); changing any field re-uploads the armor since they affect
@@ -1263,6 +1267,7 @@ impl ViewportView {
             mesh_triangle_info: Vec::new(),
             last_plate: None,
             pane: None,
+            xray_highlight: XrayHighlight::default(),
             display_settings,
             display_sliders,
             _display_slider_subscriptions: display_slider_subscriptions,
@@ -2506,6 +2511,15 @@ impl ViewportView {
         self.pane.as_ref().and_then(|pane| pane.upgrade())
     }
 
+    /// Adopts when the hover highlights show through what is in front of
+    /// them.
+    pub(crate) fn set_xray_highlight(&mut self, mode: XrayHighlight, cx: &mut Context<Self>) {
+        if self.xray_highlight != mode {
+            self.xray_highlight = mode;
+            cx.notify();
+        }
+    }
+
     /// The last plate the pointer was over: its zone and its thickness.
     pub(crate) fn last_plate(&self) -> Option<(SharedString, f32)> {
         self.last_plate.clone()
@@ -3500,7 +3514,7 @@ impl ViewportView {
             scene.device(),
             &armor.hull_meshes,
             &names,
-            picking_ui::HOVER_HIGHLIGHT_COLOR,
+            picking_ui::HighlightOrigin::ViewHover,
         );
         let [name] = names;
         self.mesh_highlight = Some((name, mesh_id));
@@ -3623,12 +3637,14 @@ impl ViewportView {
             key,
             visibility,
             show_zero_mm,
+            picking_ui::HighlightOrigin::ViewHover,
         );
         self.hover_highlight = Some((key.clone(), mesh_id));
         self.viewport.mark_dirty();
     }
 
-    /// Replaces the sidebar-hover highlight overlay mesh for `key`, via
+    /// Replaces the row-hover highlight mesh for `key`, always drawn through
+    /// what is in front of it whatever the x-ray setting, via
     /// `picking_ui::upload_zone_highlight`/`upload_part_highlight`/
     /// `upload_plate_highlight`. A no-op (leaves no highlight) if the GPU
     /// device isn't ready or there is no armor loaded. Also used by
@@ -3671,13 +3687,14 @@ impl ViewportView {
                 pk,
                 visibility,
                 show_zero_mm,
+                picking_ui::HighlightOrigin::Row,
             ),
             SidebarHighlightKey::HullMeshes(names) => hull_picking::upload_hull_highlight(
                 &mut self.viewport,
                 scene.device(),
                 &armor.hull_meshes,
                 names,
-                picking_ui::SIDEBAR_HIGHLIGHT_COLOR,
+                picking_ui::HighlightOrigin::Row,
             ),
         };
         self.sidebar_highlight = Some((key, mesh_id));
@@ -4659,8 +4676,12 @@ impl ViewportView {
 }
 
 impl Render for ViewportView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_gpu(cx);
+        // Read every frame: the app root draws one whenever a modifier
+        // changes, so the key takes effect without a pointer move.
+        let key_held = crate::status_bar::is_held(XrayHighlight::KEY, window, cx);
+        self.viewport.set_highlight_depth(self.xray_highlight.depth(key_held));
 
         let status: Option<String> = match &self.gpu {
             GpuState::Waiting => Some(t!("ui.armor.initializing").into_owned().to_string()),
@@ -5740,8 +5761,10 @@ mod hover_tests {
     use gpui_kit::Entity;
     use gpui_kit::InputEvent as _;
     use gpui_kit::Modifiers;
+    use gpui_kit::ModifiersChangedEvent;
     use gpui_kit::MouseButton;
     use gpui_kit::MouseUpEvent;
+    use gpui_kit::PlatformInput;
     use gpui_kit::TestAppContext;
     use gpui_kit::WindowHandle;
     use gpui_kit::point;
@@ -5762,6 +5785,8 @@ mod hover_tests {
     use super::PlateKey;
     use super::ViewportView;
     use crate::armor_viewer::pane::ArmorViewerPane;
+    use crate::armor_viewer::xray::XrayHighlight;
+    use crate::viewport::renderer::HighlightDepth;
 
     const TOOLTIPS: [&str; 3] = ["armor-plate-tooltip", "armor-mesh-tooltip", "armor-ring-tooltip"];
 
@@ -5881,6 +5906,40 @@ mod hover_tests {
         })
         .expect("the test window stays open");
         assert!(viewport.read_with(cx, |view, _cx| view.drag.is_none()), "the release outside ends the drag");
+    }
+
+    /// Each mode chooses whether the highlight shows through what is in
+    /// front of it, and in the while-held mode pressing and letting go of
+    /// the key flips it with no pointer move between.
+    #[gpui_kit::test]
+    fn the_xray_mode_and_the_held_key_choose_the_highlight_depth(cx: &mut TestAppContext) {
+        let (window, viewport) = open(cx);
+        // An inactive window holds no keys.
+        cx.update_window(window.into(), |_, window, _cx| window.activate_window()).expect("the test window stays open");
+        cx.run_until_parked();
+
+        let cases = [
+            (XrayHighlight::Always, HighlightDepth::XRay, HighlightDepth::XRay),
+            (XrayHighlight::WhileHeld, HighlightDepth::Tested, HighlightDepth::XRay),
+            (XrayHighlight::Off, HighlightDepth::Tested, HighlightDepth::Tested),
+        ];
+        for (mode, released, held) in cases {
+            window
+                .update(cx, |pane, _window, cx| pane.set_xray_highlight(mode, cx))
+                .expect("the test window stays open");
+            for (key_held, expected) in [(false, released), (true, held), (false, released)] {
+                cx.update_window(window.into(), |_, window, cx| {
+                    let modifiers = if key_held { Modifiers::secondary_key(cx) } else { Modifiers::none() };
+                    let event = ModifiersChangedEvent { modifiers, ..Default::default() };
+                    window.dispatch_event(PlatformInput::ModifiersChanged(event), cx);
+                    window.render_frame(cx);
+                })
+                .expect("the test window stays open");
+
+                let depth = viewport.read_with(cx, |view, _cx| view.viewport.highlight_depth());
+                assert_eq!(depth, expected, "{mode:?}, key held: {key_held}");
+            }
+        }
     }
 }
 

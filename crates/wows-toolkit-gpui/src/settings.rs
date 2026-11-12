@@ -16,6 +16,7 @@ use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
 use crate::armor_viewer::viewport_view::OpeningLayer;
+use crate::armor_viewer::xray::XrayHighlight;
 use crate::zoom::ZoomFactor;
 
 /// Settings read from the shared config DB, applied once at startup.
@@ -66,6 +67,8 @@ pub struct GpuiSettings {
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
     /// What a model opens showing in the Model Viewer.
     pub model_opening_layer: OpeningLayer,
+    /// When a hovered part's highlight shows through what is in front of it.
+    pub model_xray_highlight: XrayHighlight,
     /// Whether game data is cached on load so old replays still open after a
     /// game update. The port does not dump; it reports and manages the cache
     /// the egui app writes.
@@ -157,6 +160,9 @@ impl GpuiSettings {
         let model_opening_layer = OpeningLayer::from_show_armor(
             queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true),
         );
+        // Absent until the reader chooses a mode, and always is the default.
+        let model_xray_highlight =
+            queries::get_setting::<XrayHighlight>(pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT).await.unwrap_or_default();
 
         let auto_dump_game_data = queries::get_setting::<bool>(pool, keys::AUTO_DUMP_GAME_DATA).await.unwrap_or(false);
         let game_data_cache_dir =
@@ -203,6 +209,7 @@ impl GpuiSettings {
             output_dir,
             armor_defaults,
             model_opening_layer,
+            model_xray_highlight,
             auto_dump_game_data,
             game_data_cache_dir,
             game_data_repo_commit,

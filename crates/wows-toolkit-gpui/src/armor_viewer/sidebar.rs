@@ -36,6 +36,7 @@ use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::radio::RadioGroup;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderEvent;
 use gpui_kit::component::slider::SliderState;
@@ -84,6 +85,7 @@ use super::sidebar_tree::build_tree;
 use super::sidebar_tree::model_building_row_id;
 use super::sidebar_tree::open_row_id;
 use super::viewport_view::OpeningLayer;
+use super::xray::XrayHighlight;
 use crate::text_filter::FilterQuery;
 use crate::text_filter::MarkedLabel;
 use crate::text_filter::MarkedQuery;
@@ -112,6 +114,9 @@ pub struct CommonPaneSettings {
     pub stack_panes: bool,
     /// What a newly opened model shows first. Not a comparison setting.
     pub opening_layer: OpeningLayer,
+    /// When a hovered part's highlight shows through what is in front of
+    /// it. Not a comparison setting.
+    pub xray_highlight: XrayHighlight,
 }
 
 /// Asks for a new comparison pane.
@@ -334,6 +339,7 @@ impl Sidebar {
                 let sync_entity = entity.clone();
                 let stack_entity = entity.clone();
                 let layer_entity = entity.clone();
+                let xray_entity = entity.clone();
                 let hidden_entity = entity.clone();
                 v_flex()
                     .w(COMMON_MENU_WIDTH)
@@ -350,6 +356,25 @@ impl Sidebar {
                                     cx.emit(CommonPaneSettings { opening_layer, ..sidebar.common })
                                 });
                             }),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(div().text_sm().child(t!("ui.armor.xray_highlight").into_owned()))
+                            .child(
+                                RadioGroup::vertical("armor-pane-xray-highlight")
+                                    .children(XrayHighlight::ALL.map(|mode| mode.label(cx)))
+                                    .selected_index(
+                                        XrayHighlight::ALL.iter().position(|mode| *mode == common.xray_highlight),
+                                    )
+                                    .on_click(move |index, _window, cx| {
+                                        let Some(&xray_highlight) = XrayHighlight::ALL.get(*index) else { return };
+
+                                        xray_entity.update(cx, |sidebar, cx| {
+                                            cx.emit(CommonPaneSettings { xray_highlight, ..sidebar.common })
+                                        });
+                                    }),
+                            ),
                     )
                     .child(
                         Checkbox::new("armor-pane-mirror-cameras")

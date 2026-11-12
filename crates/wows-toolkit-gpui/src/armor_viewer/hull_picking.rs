@@ -37,6 +37,7 @@ use crate::viewport::types::Vec3;
 use crate::viewport::types::Vertex;
 
 use super::load_ship::transform_normal;
+use super::picking_ui::HighlightOrigin;
 use super::sidebar_tree::model_sub_kind_label;
 
 /// A mesh's position in `LoadedShipArmor::hull_meshes`.
@@ -377,16 +378,14 @@ impl HighlightChange {
     }
 }
 
-/// Overlay geometry for every mesh named in `names`, offset along its
-/// normals so it draws in front of the mesh it covers.
+/// Highlight geometry for every mesh named in `names`, on the very vertices
+/// the hull upload draws, so a depth-tested highlight passes where the mesh
+/// is visible.
 pub fn highlight_geometry(
     meshes: &[InteractiveHullMesh],
     names: &[String],
     color: [f32; 4],
 ) -> (Vec<Vertex>, Vec<u32>) {
-    // Matches the plate highlight's own offset in `picking_ui`.
-    const NORMAL_OFFSET: f32 = 0.01;
-
     let named = || meshes.iter().filter(|mesh| names.contains(&mesh.name));
     let corner_count: usize = named().map(|mesh| mesh.indices.len() / 3 * 3).sum();
     let mut vertices: Vec<Vertex> = Vec::with_capacity(corner_count);
@@ -400,11 +399,6 @@ pub fn highlight_geometry(
                 Some(transform) => (transform_point(transform, position), transform_normal(transform, normal)),
                 None => (position, normal),
             };
-            let position = [
-                position[0] + normal[0] * NORMAL_OFFSET,
-                position[1] + normal[1] * NORMAL_OFFSET,
-                position[2] + normal[2] * NORMAL_OFFSET,
-            ];
 
             Some(Vertex { position, normal, color, uv: [0.0, 0.0], tangent: [0.0; 4] })
         };
@@ -422,17 +416,17 @@ pub fn highlight_geometry(
     (vertices, indices)
 }
 
-/// Uploads [`highlight_geometry`] as an overlay mesh.
+/// Uploads [`highlight_geometry`] as a highlight mesh for `origin`.
 pub fn upload_hull_highlight(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     meshes: &[InteractiveHullMesh],
     names: &[String],
-    color: [f32; 4],
+    origin: HighlightOrigin,
 ) -> MeshId {
-    let (vertices, indices) = highlight_geometry(meshes, names, color);
+    let (vertices, indices) = highlight_geometry(meshes, names, origin.color());
 
-    viewport.add_overlay_mesh(device, &vertices, &indices)
+    viewport.add_non_pickable_mesh(device, &vertices, &indices, origin.layer())
 }
 
 /// What the mesh tooltip says. Held untranslated and written in the reader's
@@ -660,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn the_highlight_covers_every_mesh_of_the_name_placed_and_raised_off_it() {
+    fn the_highlight_covers_every_mesh_of_the_name_on_its_surface() {
         let meshes = vec![
             quad("Turret", 0.0, Some(translation(10.0, 0.0, 0.0))),
             quad("Hull", 0.0, None),
@@ -672,7 +666,7 @@ mod tests {
         assert_eq!(indices.len(), 12, "both turrets' two triangles");
         assert_eq!(vertices.len(), 12);
         assert!(vertices.iter().all(|vertex| vertex.position[0].abs() >= 9.0), "no hull vertex");
-        assert!(vertices.iter().all(|vertex| (vertex.position[2] - 0.01).abs() < 1e-6), "raised along the normal");
+        assert!(vertices.iter().all(|vertex| vertex.position[2] == 0.0), "on the mesh's own surface");
     }
 
     #[test]

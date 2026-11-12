@@ -27,6 +27,8 @@ use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::thickness_to_color;
 
+use crate::viewport::renderer::LAYER_HIGHLIGHT;
+use crate::viewport::renderer::LAYER_OVERLAY;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::MeshId;
@@ -40,15 +42,37 @@ use super::load_ship::transform_normal;
 use super::upload;
 use super::visibility::VisibilityFilter;
 
-/// `armor_viewer::constants::TRAJECTORY_NORMAL_OFFSET`: offsets the hover
-/// highlight overlay along each vertex normal so it renders in front of the
-/// plate it highlights instead of z-fighting with it. The egui original
-/// reuses the trajectory-overlay constant for this same purpose (`tab.rs:2903`).
-const TRAJECTORY_NORMAL_OFFSET: f32 = 0.01;
-
 /// Fixed highlight overlay color/opacity, matching the egui call site
 /// (`tab.rs:5427`: `upload_plate_highlight(pane, &armor, key, device, [1.0, 1.0, 1.0, 0.35])`).
 pub const HOVER_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
+
+/// What asked for a highlight, which decides its color and whether it shows
+/// through the geometry in front of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HighlightOrigin {
+    /// A plate or mesh under the pointer in the view. Follows the x-ray
+    /// setting.
+    ViewHover,
+    /// A hovered listing row. Always drawn through, as the part it names may
+    /// be anywhere on the model.
+    Row,
+}
+
+impl HighlightOrigin {
+    pub fn layer(self) -> i32 {
+        match self {
+            Self::ViewHover => LAYER_HIGHLIGHT,
+            Self::Row => LAYER_OVERLAY,
+        }
+    }
+
+    pub fn color(self) -> [f32; 4] {
+        match self {
+            Self::ViewHover => HOVER_HIGHLIGHT_COLOR,
+            Self::Row => SIDEBAR_HIGHLIGHT_COLOR,
+        }
+    }
+}
 
 /// Looks up the tooltip for a pick hit: finds the `(MeshId, Vec<ArmorTriangleTooltip>)`
 /// entry whose id matches the hit's mesh, then indexes by `triangle_index`.
@@ -72,9 +96,8 @@ pub fn plate_key_of(tooltip: &ArmorTriangleTooltip) -> PlateKey {
     }
 }
 
-/// Uploads one overlay mesh containing every visible triangle whose plate key
-/// matches `key`, offset along its normal so it renders in front of the
-/// plate. Applies the same 0mm/part/plate filtering as `upload.rs`'s main
+/// Uploads one highlight mesh containing every visible triangle whose plate
+/// key matches `key`. Applies the same 0mm/part/plate filtering as `upload.rs`'s main
 /// upload (via `upload::plate_is_visible`), so a hidden plate highlights to
 /// an (empty) no-op mesh. Ports `armor_viewer::ui::tab::upload_plate_highlight`
 /// verbatim.
@@ -85,8 +108,9 @@ pub fn upload_plate_highlight(
     key: &PlateKey,
     visibility: VisibilityFilter,
     show_zero_mm: bool,
+    origin: HighlightOrigin,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, HOVER_HIGHLIGHT_COLOR, |info| {
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, origin, |info| {
         &upload::derive_plate_key(info) == key
     })
 }
@@ -99,7 +123,7 @@ pub fn upload_plate_highlight(
 /// `viewport_view.rs` as `hover_highlight`/`sidebar_highlight`).
 pub const SIDEBAR_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
 
-/// Uploads a highlight overlay for every visible armor triangle in `zone`.
+/// Uploads a row highlight for every visible armor triangle in `zone`.
 /// Ports `armor_viewer::ui::tab::upload_zone_highlight` verbatim.
 pub fn upload_zone_highlight(
     viewport: &mut Viewport3D,
@@ -109,12 +133,12 @@ pub fn upload_zone_highlight(
     visibility: VisibilityFilter,
     show_zero_mm: bool,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, HighlightOrigin::Row, |info| {
         info.zone == zone
     })
 }
 
-/// Uploads a highlight overlay for every visible armor triangle matching
+/// Uploads a row highlight for every visible armor triangle matching
 /// `(zone, material)`. Ports `armor_viewer::ui::tab::upload_part_highlight` verbatim.
 pub fn upload_part_highlight(
     viewport: &mut Viewport3D,
@@ -125,24 +149,25 @@ pub fn upload_part_highlight(
     visibility: VisibilityFilter,
     show_zero_mm: bool,
 ) -> MeshId {
-    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, SIDEBAR_HIGHLIGHT_COLOR, |info| {
+    upload_highlight_mesh(viewport, device, armor, visibility, show_zero_mm, HighlightOrigin::Row, |info| {
         info.zone == zone && info.material.name() == material
     })
 }
 
 /// Shared highlight-mesh builder: every visible triangle (per `visibility`
 /// and `show_zero_mm`, same 0mm/part/plate filtering as the main upload)
-/// that also matches `matches`, offset along its normal so the overlay
-/// renders in front of the plate it highlights instead of z-fighting with it.
+/// that also matches `matches`, on the very vertices the plate is drawn
+/// with, so a depth-tested highlight passes where the plate is visible.
 fn upload_highlight_mesh(
     viewport: &mut Viewport3D,
     device: &wgpu::Device,
     armor: &LoadedShipArmor,
     visibility: VisibilityFilter,
     show_zero_mm: bool,
-    color: [f32; 4],
+    origin: HighlightOrigin,
     matches: impl Fn(&wowsunpack::export::gltf_export::ArmorTriangleInfo) -> bool,
 ) -> MeshId {
+    let color = origin.color();
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
@@ -172,10 +197,6 @@ fn upload_highlight_mesh(
                         norm = transform_normal(t, norm);
                     }
 
-                    pos[0] += norm[0] * TRAJECTORY_NORMAL_OFFSET;
-                    pos[1] += norm[1] * TRAJECTORY_NORMAL_OFFSET;
-                    pos[2] += norm[2] * TRAJECTORY_NORMAL_OFFSET;
-
                     vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
                 }
             }
@@ -183,7 +204,7 @@ fn upload_highlight_mesh(
         }
     }
 
-    viewport.add_overlay_mesh(device, &vertices, &indices)
+    viewport.add_non_pickable_mesh(device, &vertices, &indices, origin.layer())
 }
 
 /// A small filled, rounded color swatch, matching `legend.rs`'s own swatch

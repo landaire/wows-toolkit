@@ -35,6 +35,9 @@ pub mod keys {
     pub const AUTO_DUMP_GAME_DATA: &str = "auto_dump_game_data";
     /// Whether a model opens with its armor in view rather than its hull.
     pub const MODEL_VIEWER_SHOW_ARMOR: &str = "model_viewer_show_armor";
+    /// When a hovered part's highlight in the Model Viewer shows through
+    /// what is in front of it.
+    pub const MODEL_VIEWER_XRAY_HIGHLIGHT: &str = "model_viewer_xray_highlight";
     /// The ship tiers the Model Viewer sidebar lists, as `[lowest, highest]`.
     pub const MODEL_VIEWER_SHIP_TIERS: &str = "model_viewer_ship_tiers";
     /// Whether the Model Viewer sidebar also lists the ships its list leaves

@@ -123,6 +123,7 @@ use super::viewport_view::LoadGeneration;
 use super::viewport_view::OpeningLayer;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
+use super::xray::XrayHighlight;
 use wowsunpack::game_params::types::Millimeters;
 
 /// The status strip above the split. Fixed, so what it says never moves the
@@ -208,6 +209,10 @@ pub struct ArmorViewerPane {
     /// What a model opened in this pane shows first. Persisted under
     /// `keys::MODEL_VIEWER_SHOW_ARMOR`.
     opening_layer: OpeningLayer,
+    /// When a hovered part's highlight shows through what is in front of
+    /// it, in every viewport of the dock. Persisted under
+    /// `keys::MODEL_VIEWER_XRAY_HIGHLIGHT`.
+    xray_highlight: XrayHighlight,
     /// The penetration checker's own state.
     pen: PenetrationState,
     /// Whether the options rail is up. Open by default: it holds the viewport
@@ -404,6 +409,7 @@ impl ArmorViewerPane {
             mirror_cameras: false,
             sync_options: false,
             opening_layer: OpeningLayer::default(),
+            xray_highlight: XrayHighlight::default(),
             pen,
             show_options: true,
             sidebar_collapsed: false,
@@ -459,6 +465,7 @@ impl ArmorViewerPane {
             sync_options: self.sync_options,
             stack_panes: dock.split_axis() == Axis::Vertical,
             opening_layer: self.opening_layer,
+            xray_highlight: self.xray_highlight,
         };
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
     }
@@ -748,6 +755,10 @@ impl ArmorViewerPane {
             self.opening_layer = event.opening_layer;
             crate::settings_store::save(keys::MODEL_VIEWER_SHOW_ARMOR, &event.opening_layer.shows_armor(), cx);
         }
+        if event.xray_highlight != self.xray_highlight {
+            crate::settings_store::save(keys::MODEL_VIEWER_XRAY_HIGHLIGHT, &event.xray_highlight, cx);
+            self.apply_xray_highlight(event.xray_highlight, cx);
+        }
         let split = if event.stack_panes { Axis::Vertical } else { Axis::Horizontal };
         self.dock.update(cx, |dock, cx| dock.set_split(split, cx));
         self.push_common_settings(cx);
@@ -786,7 +797,11 @@ impl ArmorViewerPane {
         let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
         self._subscriptions.push(viewport_event_sub);
         let targets = self.hardpoint_targets.clone();
-        viewport.update(cx, |view, cx| view.set_hardpoint_targets(targets, cx));
+        let xray_highlight = self.xray_highlight;
+        viewport.update(cx, |view, cx| {
+            view.set_hardpoint_targets(targets, cx);
+            view.set_xray_highlight(xray_highlight, cx);
+        });
 
         viewport
     }
@@ -911,6 +926,23 @@ impl ArmorViewerPane {
     /// What the next model opened in this pane shows first.
     pub fn opening_layer(&self) -> OpeningLayer {
         self.opening_layer
+    }
+
+    /// Adopts the saved choice of when the hover highlight shows through.
+    pub fn set_xray_highlight(&mut self, mode: XrayHighlight, cx: &mut Context<Self>) {
+        self.apply_xray_highlight(mode, cx);
+        self.push_common_settings(cx);
+    }
+
+    pub fn xray_highlight(&self) -> XrayHighlight {
+        self.xray_highlight
+    }
+
+    fn apply_xray_highlight(&mut self, mode: XrayHighlight, cx: &mut Context<Self>) {
+        self.xray_highlight = mode;
+        for viewport in self.viewports(cx) {
+            viewport.update(cx, |view, cx| view.set_xray_highlight(mode, cx));
+        }
     }
 
     /// Common-settings toggle (`Render`): flips `sync_options`. Turning it on

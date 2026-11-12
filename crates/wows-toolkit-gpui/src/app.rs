@@ -2427,9 +2427,11 @@ impl App {
         let game_data = self.replay_inspector.read(cx).game_data();
         self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
         let opening_layer = settings.model_opening_layer;
+        let xray_highlight = settings.model_xray_highlight;
         self.armor_pane.update(cx, |pane, cx| {
             pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx);
             pane.set_opening_layer(opening_layer, cx);
+            pane.set_xray_highlight(xray_highlight, cx);
         });
         // The shared strings follow the saved language, and the combo shows
         // it, both from the moment the settings land.

@@ -71,7 +71,9 @@ struct VertexInput {
 };
 
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
+    // Invariant so a highlight drawn over the same vertices as a surface
+    // passes a depth test against it, whatever pipeline drew the surface.
+    @invariant @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) normal_vs: vec3<f32>,
     @location(2) position_vs: vec3<f32>,
@@ -223,8 +225,12 @@ pub struct GpuPipeline {
     pipeline: wgpu::RenderPipeline,
     /// Pipeline without depth writes — used for transparent hull geometry.
     pipeline_no_depth_write: wgpu::RenderPipeline,
-    /// Pipeline that ignores depth — used for highlight overlays (always on top).
+    /// Pipeline that ignores depth: overlays, row highlights, and hover
+    /// highlights in [`HighlightDepth::XRay`].
     pipeline_overlay: wgpu::RenderPipeline,
+    /// Pipeline for hover highlights in [`HighlightDepth::Tested`]: hidden
+    /// behind what is in front, never written to depth.
+    pipeline_highlight_tested: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     /// Shared sampler for all diffuse textures.
@@ -375,28 +381,34 @@ impl GpuPipeline {
             cache: None,
         });
 
-        // Pipeline for overlays — ignores depth so highlights are always visible.
-        let pipeline_overlay = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_3d_pipeline_overlay"),
-            layout: Some(&pipeline_layout),
-            vertex: vertex_state,
-            fragment: Some(fragment_state),
-            primitive: primitive_state,
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLE_COUNT,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        // Overlays and highlights read depth without writing it.
+        let depth_read_pipeline = |label: &str, depth_compare: wgpu::CompareFunction| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: vertex_state.clone(),
+                fragment: Some(fragment_state.clone()),
+                primitive: primitive_state,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(depth_compare),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: MSAA_SAMPLE_COUNT,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline_overlay = depth_read_pipeline("viewport_3d_pipeline_overlay", wgpu::CompareFunction::Always);
+        // Equal passes: a highlight lies on the very surface it marks.
+        let pipeline_highlight_tested =
+            depth_read_pipeline("viewport_3d_pipeline_highlight_tested", wgpu::CompareFunction::LessEqual);
 
         // Create shared sampler (repeat wrapping, linear filtering).
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -438,6 +450,7 @@ impl GpuPipeline {
             pipeline,
             pipeline_no_depth_write,
             pipeline_overlay,
+            pipeline_highlight_tested,
             uniform_bind_group_layout,
             texture_bind_group_layout,
             default_sampler,
@@ -448,6 +461,18 @@ impl GpuPipeline {
 
     pub fn color(&self) -> SceneColorTarget {
         self.color
+    }
+
+    /// The pipeline `kind` draws with while hover highlights are in `highlight`.
+    fn layer_pipeline(&self, kind: LayerKind, highlight: HighlightDepth) -> &wgpu::RenderPipeline {
+        match kind {
+            LayerKind::Opaque => &self.pipeline,
+            LayerKind::Translucent => &self.pipeline_no_depth_write,
+            LayerKind::Overlay | LayerKind::Highlight => match kind.depth_state(highlight) {
+                DepthState::Ignored => &self.pipeline_overlay,
+                DepthState::Written | DepthState::Tested => &self.pipeline_highlight_tested,
+            },
+        }
     }
 
     /// Uploads RGBA8 pixels and the lower levels of their mip chain, so a
@@ -762,13 +787,74 @@ impl SceneAttachments {
 /// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
 /// - Layers <= LAYER_OPAQUE_MAX: depth-writing pipeline (opaque armor).
 /// - LAYER_HULL: no-depth-write pipeline with depth test (transparent hull, behind armor).
-/// - LAYER_OVERLAY: no depth test at all (highlight overlays, always visible on top).
+/// - LAYER_OVERLAY: no depth test at all (overlays and row highlights, always visible on top).
+/// - LAYER_HIGHLIGHT: hover highlights, depth-tested or not per [`HighlightDepth`].
 pub const LAYER_DEFAULT: i32 = 0;
 pub const LAYER_HULL: i32 = 1;
 pub const LAYER_OVERLAY: i32 = 2;
+pub const LAYER_HIGHLIGHT: i32 = 3;
 
 /// Layers at or below this value write to the depth buffer (opaque pass).
 const LAYER_OPAQUE_MAX: i32 = 0;
+
+/// Whether a hover highlight shows through the geometry in front of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HighlightDepth {
+    /// Drawn over everything.
+    #[default]
+    XRay,
+    /// Hidden where other geometry is in front, as any surface is. A
+    /// translucent hull writes no depth, so what shows through it stays lit.
+    Tested,
+}
+
+/// How a layer's meshes meet the depth buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DepthState {
+    /// Tested and written.
+    Written,
+    /// Tested, not written.
+    Tested,
+    /// Neither tested nor written: drawn over everything.
+    Ignored,
+}
+
+/// How meshes on `layer` meet the depth buffer while hover highlights are in
+/// `highlight`.
+pub fn layer_depth_state(layer: i32, highlight: HighlightDepth) -> DepthState {
+    LayerKind::of(layer).depth_state(highlight)
+}
+
+/// Which pipeline a layer draws with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LayerKind {
+    Opaque,
+    Translucent,
+    Overlay,
+    Highlight,
+}
+
+impl LayerKind {
+    fn of(layer: i32) -> Self {
+        if layer <= LAYER_OPAQUE_MAX {
+            Self::Opaque
+        } else if layer < LAYER_OVERLAY {
+            Self::Translucent
+        } else if layer < LAYER_HIGHLIGHT {
+            Self::Overlay
+        } else {
+            Self::Highlight
+        }
+    }
+
+    fn depth_state(self, highlight: HighlightDepth) -> DepthState {
+        match (self, highlight) {
+            (Self::Opaque, _) => DepthState::Written,
+            (Self::Translucent, _) | (Self::Highlight, HighlightDepth::Tested) => DepthState::Tested,
+            (Self::Overlay, _) | (Self::Highlight, HighlightDepth::XRay) => DepthState::Ignored,
+        }
+    }
+}
 
 /// Per-mesh GPU buffers.
 struct GpuMesh {
@@ -822,6 +908,8 @@ pub struct Viewport3D {
     pub cursor_ndc: Option<[f32; 2]>,
     /// Hull lighting parameters used when building per-frame uniforms.
     pub lighting: LightingSettings,
+    /// How [`LAYER_HIGHLIGHT`] meshes meet the geometry in front of them.
+    highlight_depth: HighlightDepth,
 }
 
 impl Default for Viewport3D {
@@ -850,6 +938,7 @@ impl Viewport3D {
             model_yaw: 0.0,
             cursor_ndc: None,
             lighting: LightingSettings::default(),
+            highlight_depth: HighlightDepth::default(),
         }
     }
 
@@ -1164,6 +1253,19 @@ impl Viewport3D {
         self.needs_redraw = false;
     }
 
+    pub fn highlight_depth(&self) -> HighlightDepth {
+        self.highlight_depth
+    }
+
+    /// Sets how highlights meet the geometry in front of them, redrawing
+    /// when that changes.
+    pub fn set_highlight_depth(&mut self, depth: HighlightDepth) {
+        if self.highlight_depth != depth {
+            self.highlight_depth = depth;
+            self.needs_redraw = true;
+        }
+    }
+
     /// Returns true if the viewport has any meshes to render.
     pub fn has_meshes(&self) -> bool {
         !self.meshes.borrow().is_empty()
@@ -1304,30 +1406,20 @@ impl Viewport3D {
         // Start with fallback texture; per-mesh textures override below.
         pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
-        // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
+        // Sort meshes by layer: armor (opaque, depth-write) first, then hull, overlays and highlights (no depth-write).
         let meshes = self.meshes.borrow();
         let mut sorted: Vec<(MeshId, &GpuMesh)> =
             meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
         sorted.sort_by_key(|(_, m)| m.layer);
 
-        let mut current_layer_kind: i32 = -1; // force first set_pipeline
+        let mut current_layer_kind: Option<LayerKind> = None;
         let mut has_custom_texture = false; // track whether we need to rebind fallback
         let mut current_bind = BindKind::ModelUnlit;
         for (_id, mesh) in sorted {
-            let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
-                0 // opaque
-            } else if mesh.layer < LAYER_OVERLAY {
-                1 // transparent (hull)
-            } else {
-                2 // overlay (always on top)
-            };
-            if layer_kind != current_layer_kind {
-                match layer_kind {
-                    0 => pass.set_pipeline(&pipeline.pipeline),
-                    1 => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
-                    _ => pass.set_pipeline(&pipeline.pipeline_overlay),
-                }
-                current_layer_kind = layer_kind;
+            let layer_kind = LayerKind::of(mesh.layer);
+            if current_layer_kind != Some(layer_kind) {
+                pass.set_pipeline(pipeline.layer_pipeline(layer_kind, self.highlight_depth));
+                current_layer_kind = Some(layer_kind);
             }
 
             // Pick the uniform bind group: world-space (always unlit), model-space lit

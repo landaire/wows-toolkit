@@ -76,6 +76,7 @@ pub mod upload;
 pub mod upload_hull;
 pub mod viewport_view;
 pub mod visibility;
+pub mod xray;
 
 pub use assets::ArmorAssetsBundle;
 pub use assets::ArmorAssetsError;
