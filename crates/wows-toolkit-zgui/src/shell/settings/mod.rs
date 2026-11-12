@@ -373,12 +373,15 @@ pub fn SettingsDrawer(shell: Shell) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     #[cfg(test)]
     tests::capture(shell);
+    let locale = Services::current().locale;
 
+    // The forwarded label replaces the fixed one, so a change of language reaches the drawer.
     view! {
         Drawer(
             open = shell.settings_drawer.open,
             label = t!("ui.tabs.settings").into_owned(),
             width = DRAWER_WIDTH,
+            a11y:label = locale.text("ui.tabs.settings"),
             attr:data-testid = "settings-drawer"
         ) {
             DrawerContent(shell = shell)

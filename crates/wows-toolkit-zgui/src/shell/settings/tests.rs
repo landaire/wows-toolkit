@@ -11,6 +11,7 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -23,6 +24,7 @@ use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 
+use crate::i18n::LanguageCode;
 use crate::shell::AppRootProps;
 use crate::shell::Shell;
 use crate::shell::settings::Setting;
@@ -323,6 +325,24 @@ fn opening_at_a_setting_brings_it_to_the_top() {
     settle(&mut window);
     settle(&mut window);
     assert!(at_top_of_scroll(&window, &row_test_id(Setting::WowsDirectory)), "at the setting it is about");
+}
+
+/// The drawer's name follows a change of language.
+#[test]
+fn the_drawer_label_follows_the_language() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    let english = label(&mut window, "settings-drawer");
+
+    let locale = shell().services().locale;
+    locale.choose(LanguageCode::new("de"));
+    settle(&mut window);
+    let german = t!("ui.tabs.settings").into_owned();
+    let shown = label(&mut window, "settings-drawer");
+    locale.choose(LanguageCode::new("en"));
+
+    assert_ne!(english.as_deref(), Some(german.as_str()), "German names the drawer differently");
+    assert_eq!(shown, Some(german));
 }
 
 /// An auto-export directory that is not there is marked once it has been looked for.
