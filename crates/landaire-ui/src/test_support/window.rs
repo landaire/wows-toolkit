@@ -214,6 +214,25 @@ impl HeadlessWindow {
         self.first_in_document(|node| dom.classes(node).contains(&class))
     }
 
+    /// The text of every element whose class list holds `class`, overlays included, in document
+    /// order.
+    pub fn texts_by_class(&self, class: &str) -> Vec<String> {
+        let dom = self.window().dom();
+        let class = ClassName::new(class);
+
+        let mut texts = Vec::new();
+        let mut pending = self.roots();
+        pending.reverse();
+        while let Some(node) = pending.pop() {
+            if dom.classes(node).contains(&class) {
+                texts.push(dom.text_content(node));
+            }
+            pending.extend(dom.children(node).into_iter().rev());
+        }
+
+        texts
+    }
+
     /// The first element, in reading order, whose accessible name is `label`.
     pub fn by_label(&mut self, label: &str) -> Option<Element> {
         self.find_a11y(|node| node.label().as_deref() == Some(label)).into_iter().next()
