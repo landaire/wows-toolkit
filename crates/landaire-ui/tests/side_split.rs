@@ -23,6 +23,7 @@ use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::view;
@@ -60,6 +61,32 @@ fn Split(open: RwSignal<bool, LocalStorage>, edge: SideEdge) -> impl IntoView {
                 }
                 column(attr:data-testid = "main", style = "flex: 1 1 auto") {
                     Counter()
+                }
+            }
+        }
+    }
+}
+
+/// What a test drives a split of a set width through.
+#[derive(Clone, Copy)]
+struct Room {
+    split: RwSignal<f32, LocalStorage>,
+    width: RwSignal<PanelWidth, LocalStorage>,
+}
+
+#[component]
+fn Bounded(room: Room) -> impl IntoView {
+    let Room { split, width } = room;
+    let open = RwSignal::new_local(true);
+
+    view! {
+        ThemeRoot {
+            row(style = "height: 300px", style:width = move || Some(format!("{}px", split.get()))) {
+                SideSplit(open = open, width = width, range = RANGE, resize_label = "Resize panel") {
+                    SidePanel(slot) {
+                        box(attr:data-testid = "panel", style = "flex: 1 1 auto")
+                    }
+                    column(attr:data-testid = "main", style = "flex: 1 1 auto")
                 }
             }
         }
@@ -132,4 +159,33 @@ fn the_main_area_keeps_its_state_and_lays_out_once_per_toggle() {
     window.click(count).expect("the counter has a box");
     let label = window.a11y(count).and_then(|state| state.label);
     assert_eq!(label.as_deref(), Some("count 2"), "what the main area held survived the toggle");
+}
+
+#[test]
+fn a_width_asked_for_in_a_narrow_split_is_kept_for_when_it_grows() {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let mut window =
+        HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 800.0, height: 300.0 }), move || {
+            let room = Room { split: RwSignal::new_local(800.0), width: RwSignal::new_local(PanelWidth(200.0)) };
+            sent.set(Some(room));
+            view! { Bounded(room = room) }
+        })
+        .expect("opens");
+    let room = handed.get().expect("the view was built");
+    let main = window.by_test_id("main").expect("the main area is built");
+
+    room.split.set(360.0);
+    window.advance(SETTLE);
+    assert_eq!(width_of(&window, main), 160.0, "the narrowed split leaves the main area its minimum");
+
+    let splitter = window.by_role_and_label(Role::Splitter, "Resize panel").expect("the edge is announced");
+    window.drag(splitter, Point::<DevicePx, Device>::new(DevicePx(795.0), DevicePx(150.0)), 4).expect("drags");
+    window.advance(Duration::from_millis(32));
+    assert_eq!(width_of(&window, main), 160.0, "the panel is still held to what the split leaves it");
+    assert_eq!(room.width.get_untracked(), RANGE.max, "the width asked for is kept, within its range");
+
+    room.split.set(800.0);
+    window.advance(Duration::from_millis(32));
+    assert_eq!(width_of(&window, main), 280.0, "grown again, the panel takes the width asked for");
 }
