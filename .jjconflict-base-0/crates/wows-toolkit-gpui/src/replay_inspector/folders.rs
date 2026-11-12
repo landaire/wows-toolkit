@@ -1244,7 +1244,7 @@ mod tests {
     fn hold_constants_for_fixture() {
         let meta = wows_replays::ReplayFile::meta_from_file(&fixture()).expect("the fixture is a replay");
         let build = ListedReplay::from_meta(&meta).build.expect("the fixture names its build");
-        let path = crate::constants::cached_path(build).expect("tests have a storage directory");
+        let path = wows_toolkit_services::constants::cached_path(build).expect("tests have a storage directory");
         if !path.exists() {
             std::fs::write(path, "{}").expect("the mapping is written");
         }
