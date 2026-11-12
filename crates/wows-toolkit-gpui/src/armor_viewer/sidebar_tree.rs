@@ -5,6 +5,10 @@
 //! one placeholder child so it still draws as a folder, and the sidebar
 //! rebuilds when it is expanded. This keeps a rebuild proportional to what is
 //! on screen rather than to the 15000-row catalogue.
+//!
+//! A search is matched once into [`SearchMatches`]. Folders without matches
+//! are dropped and the rest show their match counts. A section with few
+//! matches has its folders opened; a broad search leaves them closed.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -29,6 +33,7 @@ use super::model_refs::OpenTarget;
 use super::model_refs::ShipPartKey;
 use super::model_refs::VehicleParamIndex;
 use super::model_tree::ModelKindGroup;
+use super::model_tree::ModelMatch;
 use super::model_tree::ModelNationGroup;
 use super::model_tree::ModelRow;
 use super::model_tree::ModelSubKindGroup;
@@ -106,15 +111,127 @@ pub(super) struct BuiltTree {
     pub rows: HashMap<SharedString, RowKind>,
 }
 
-/// Builds the tree for `query`, which is already lowercased; empty lists
-/// everything.
-pub(super) fn build_tree(sources: &TreeSources<'_>, query: &str, expansion: &mut Expansion<'_>) -> BuiltTree {
-    let mut builder = Builder { query, rows: HashMap::new(), expansion, sources };
+/// What a search names, worked out once per query and per change to the
+/// listed ships or models. Opening or closing a folder during the search
+/// reuses it and tests no name again.
+pub(super) struct SearchMatches {
+    /// Lowercased and non-empty.
+    query: String,
+    ships: ShipMatches,
+    /// `None` until the model catalogue is listed.
+    models: Option<ModelMatches>,
+}
+
+/// Ships by nation and class, in [`ShipCatalog`] order.
+type ShipMatches = MatchGroup<MatchGroup<MatchGroup<bool>>>;
+
+/// Models by nation, kind and sub-kind, in [`ModelTreeIndex`] order.
+type ModelMatches = MatchGroup<MatchGroup<MatchGroup<MatchGroup<ModelMatch>>>>;
+
+impl SearchMatches {
+    /// `None` for an empty `query`, which lists everything. `query` is
+    /// already lowercased.
+    pub(super) fn from_query(sources: &TreeSources<'_>, query: &str) -> Option<Self> {
+        if query.is_empty() {
+            return None;
+        }
+
+        let ships = sources
+            .ships
+            .nations
+            .iter()
+            .map(|nation| {
+                nation
+                    .classes
+                    .iter()
+                    .map(|class| class.ships.iter().map(|ship| ship.search_name.contains(query)).collect())
+                    .collect()
+            })
+            .collect();
+
+        let models = match sources.models {
+            ModelSection::Ready(index) => Some(
+                index
+                    .nations
+                    .iter()
+                    .map(|nation| {
+                        nation
+                            .kinds
+                            .iter()
+                            .map(|kind| {
+                                kind.sub_kinds
+                                    .iter()
+                                    .map(|sub_kind| sub_kind.models.iter().map(|model| model.search(query)).collect())
+                                    .collect()
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            ModelSection::Loading | ModelSection::Unavailable => None,
+        };
+
+        Some(Self { query: query.to_string(), ships, models })
+    }
+}
+
+/// The matches under one folder, in its listing order.
+pub(super) struct MatchGroup<T> {
+    count: usize,
+    members: Vec<T>,
+}
+
+impl<T> FromIterator<T> for MatchGroup<T>
+where
+    T: MatchCount,
+{
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let members: Vec<T> = iter.into_iter().collect();
+        let count = members.iter().map(MatchCount::match_count).sum();
+
+        Self { count, members }
+    }
+}
+
+/// How many listed ships or models a search names under a node.
+trait MatchCount {
+    fn match_count(&self) -> usize;
+}
+
+impl MatchCount for bool {
+    fn match_count(&self) -> usize {
+        usize::from(*self)
+    }
+}
+
+impl MatchCount for ModelMatch {
+    fn match_count(&self) -> usize {
+        match self {
+            ModelMatch::Miss => 0,
+            ModelMatch::Name | ModelMatch::Variant => 1,
+        }
+    }
+}
+
+impl<T> MatchCount for MatchGroup<T> {
+    fn match_count(&self) -> usize {
+        self.count
+    }
+}
+
+/// Builds the tree. `search` is `None` when listing everything.
+pub(super) fn build_tree(
+    sources: &TreeSources<'_>,
+    search: Option<&SearchMatches>,
+    expansion: &mut Expansion<'_>,
+) -> BuiltTree {
+    let mut builder = Builder { search, rows: HashMap::new(), expansion, sources };
     let mut items = Vec::new();
 
-    for nation in &sources.ships.nations {
-        if let Some(item) = builder.ship_nation(nation) {
-            items.push(item);
+    let ship_matches = search.map(|search| &search.ships);
+    for (nation, matches) in paired(&sources.ships.nations, ship_matches) {
+        if shown(matches) {
+            items.push(builder.ship_nation(nation, matches));
         }
     }
 
@@ -125,9 +242,10 @@ pub(super) fn build_tree(sources: &TreeSources<'_>, query: &str, expansion: &mut
         ModelSection::Loading => items.push(builder.status_row(t!("ui.models.loading").into_owned())),
         ModelSection::Unavailable => items.push(builder.status_row(t!("ui.models.unavailable").into_owned())),
         ModelSection::Ready(index) => {
-            for nation in &index.nations {
-                if let Some(item) = builder.model_nation(nation) {
-                    items.push(item);
+            let model_matches = search.and_then(|search| search.models.as_ref());
+            for (nation, matches) in paired(&index.nations, model_matches) {
+                if shown(matches) {
+                    items.push(builder.model_nation(nation, matches));
                 }
             }
         }
@@ -245,23 +363,19 @@ fn variant_label(kind: &ModelVariantKind, path: &ModelPath) -> String {
 }
 
 struct Builder<'q, 'e, 's, 'd> {
-    query: &'q str,
+    search: Option<&'q SearchMatches>,
     rows: HashMap<SharedString, RowKind>,
     expansion: &'e mut Expansion<'s>,
     sources: &'q TreeSources<'d>,
 }
 
 impl Builder<'_, '_, '_, '_> {
-    fn searching(&self) -> bool {
-        !self.query.is_empty()
+    fn opens_ships(&self) -> bool {
+        self.search.is_some_and(|search| opens(&search.ships))
     }
 
-    fn ship_matches(&self, ship: &ShipEntry) -> bool {
-        !self.searching() || ship.search_name.contains(self.query)
-    }
-
-    fn model_matches(&self, model: &ModelRow) -> bool {
-        !self.searching() || model.matches(self.query) || model.any_variant_matches(self.query)
+    fn opens_models(&self) -> bool {
+        self.search.and_then(|search| search.models.as_ref()).is_some_and(opens)
     }
 
     /// A folder row. `children` runs only when the folder is expanded.
@@ -291,31 +405,29 @@ impl Builder<'_, '_, '_, '_> {
         self.leaf(MODELS_STATUS_ID.into(), label, RowKind::ModelsStatus).disabled(true)
     }
 
-    fn ship_nation(&mut self, nation: &NationGroup) -> Option<TreeItem> {
-        let has_match = nation.classes.iter().flat_map(|class| &class.ships).any(|ship| self.ship_matches(ship));
-        if !has_match {
-            return None;
-        }
-
+    fn ship_nation(&mut self, nation: &NationGroup, matches: Option<&MatchGroup<MatchGroup<bool>>>) -> TreeItem {
         let id: SharedString = format!("armor-nation-{}", nation.nation).into();
-        let searching = self.searching();
-        Some(self.folder(id, nation.display_name.clone(), RowKind::Nation(nation.nation.clone()), searching, |b| {
+        let label = counted(nation.display_name.clone(), matches);
+        let wanted = self.opens_ships();
+        self.folder(id, label, RowKind::Nation(nation.nation.clone()), wanted, |b| {
             let mut items = Vec::new();
-            for class in &nation.classes {
-                if !class.ships.iter().any(|ship| b.ship_matches(ship)) {
+            for (class, matches) in paired(&nation.classes, matches) {
+                if !shown(matches) {
                     continue;
                 }
 
                 let id: SharedString = format!("armor-class-{}-{:?}", nation.nation, class.species).into();
-                items.push(b.folder(id, species_name(&class.species), RowKind::Class(class.species), searching, |b| {
-                    let query = b.query;
-                    let ships = class.ships.iter().filter(|ship| query.is_empty() || ship.search_name.contains(query));
-                    ships.map(|ship| b.ship_row(ship)).collect()
+                let label = counted(species_name(&class.species), matches);
+                items.push(b.folder(id, label, RowKind::Class(class.species), wanted, |b| {
+                    paired(&class.ships, matches)
+                        .filter(|(_, found)| shown(*found))
+                        .map(|(ship, _)| b.ship_row(ship))
+                        .collect()
                 }));
             }
 
             items
-        }))
+        })
     }
 
     fn ship_row(&mut self, ship: &ShipEntry) -> TreeItem {
@@ -379,49 +491,47 @@ impl Builder<'_, '_, '_, '_> {
         self.leaf(id, format!("{} {}", part.node, part.model.stem()), kind)
     }
 
-    fn model_nation(&mut self, nation: &ModelNationGroup) -> Option<TreeItem> {
-        let has_match = nation
-            .kinds
-            .iter()
-            .flat_map(|kind| &kind.sub_kinds)
-            .flat_map(|sub_kind| &sub_kind.models)
-            .any(|model| self.model_matches(model));
-        if !has_match {
-            return None;
-        }
-
+    fn model_nation(
+        &mut self,
+        nation: &ModelNationGroup,
+        matches: Option<&MatchGroup<MatchGroup<MatchGroup<ModelMatch>>>>,
+    ) -> TreeItem {
         let id: SharedString = format!("model-nation-{}", nation.nation).into();
         let kind = RowKind::ModelNation { flag: nation.ship_nation.clone() };
-        let searching = self.searching();
-        Some(self.folder(id, nation.display_name.clone(), kind, searching, |b| {
-            nation.kinds.iter().filter_map(|kind| b.model_kind(nation, kind)).collect()
-        }))
+        let label = counted(nation.display_name.clone(), matches);
+        let wanted = self.opens_models();
+        self.folder(id, label, kind, wanted, |b| {
+            paired(&nation.kinds, matches)
+                .filter(|(_, found)| shown(*found))
+                .map(|(kind, found)| b.model_kind(nation, kind, found))
+                .collect()
+        })
     }
 
-    fn model_kind(&mut self, nation: &ModelNationGroup, kind: &ModelKindGroup) -> Option<TreeItem> {
-        let has_match =
-            kind.sub_kinds.iter().flat_map(|sub_kind| &sub_kind.models).any(|model| self.model_matches(model));
-        if !has_match {
-            return None;
-        }
-
+    fn model_kind(
+        &mut self,
+        nation: &ModelNationGroup,
+        kind: &ModelKindGroup,
+        matches: Option<&MatchGroup<MatchGroup<ModelMatch>>>,
+    ) -> TreeItem {
         let id: SharedString = format!("model-kind-{}-{:?}", nation.nation, kind.kind).into();
-        let searching = self.searching();
-        Some(self.folder(id, model_kind_label(kind.kind), RowKind::ModelGroup, searching, |b| {
+        let label = counted(model_kind_label(kind.kind), matches);
+        let wanted = self.opens_models();
+        self.folder(id, label, RowKind::ModelGroup, wanted, |b| {
             let mut items = Vec::new();
-            for sub_kind in &kind.sub_kinds {
+            for (sub_kind, matches) in paired(&kind.sub_kinds, matches) {
+                if !shown(matches) {
+                    continue;
+                }
+
                 match &sub_kind.sub_kind {
-                    Some(name) => {
-                        if let Some(item) = b.model_sub_kind(nation, kind, sub_kind, name) {
-                            items.push(item);
-                        }
-                    }
-                    None => items.extend(b.model_rows(&sub_kind.models)),
+                    Some(name) => items.push(b.model_sub_kind(nation, kind, sub_kind, name, matches)),
+                    None => items.extend(b.model_rows(&sub_kind.models, matches)),
                 }
             }
 
             items
-        }))
+        })
     }
 
     fn model_sub_kind(
@@ -430,32 +540,23 @@ impl Builder<'_, '_, '_, '_> {
         kind: &ModelKindGroup,
         sub_kind: &ModelSubKindGroup,
         name: &ModelSubKind,
-    ) -> Option<TreeItem> {
-        if !sub_kind.models.iter().any(|model| self.model_matches(model)) {
-            return None;
-        }
-
+        matches: Option<&MatchGroup<ModelMatch>>,
+    ) -> TreeItem {
         let id: SharedString = format!("model-sub-{}-{:?}-{name:?}", nation.nation, kind.kind).into();
-        let searching = self.searching();
-        Some(
-            self.folder(id, model_sub_kind_label(name), RowKind::ModelGroup, searching, |b| {
-                b.model_rows(&sub_kind.models)
-            }),
-        )
+        let label = counted(model_sub_kind_label(name), matches);
+        let wanted = self.opens_models();
+        self.folder(id, label, RowKind::ModelGroup, wanted, |b| b.model_rows(&sub_kind.models, matches))
     }
 
-    fn model_rows(&mut self, models: &[ModelRow]) -> Vec<TreeItem> {
-        let mut items = Vec::new();
-        for model in models {
-            if self.model_matches(model) {
-                items.push(self.model_row(model));
-            }
-        }
-
-        items
+    fn model_rows(&mut self, models: &[ModelRow], matches: Option<&MatchGroup<ModelMatch>>) -> Vec<TreeItem> {
+        paired(models, matches)
+            .filter(|(_, found)| shown(*found))
+            .map(|(model, found)| self.model_row(model, found.copied()))
+            .collect()
     }
 
-    fn model_row(&mut self, model: &ModelRow) -> TreeItem {
+    /// `found` is `None` when listing everything.
+    fn model_row(&mut self, model: &ModelRow, found: Option<ModelMatch>) -> TreeItem {
         let id = model_row_id(&model.path);
         let label = model.path.stem().to_string();
         let kind = RowKind::Model(model.path.clone());
@@ -465,13 +566,16 @@ impl Builder<'_, '_, '_, '_> {
 
         // A search that names only a variant opens the model to show it; one
         // that names the model leaves its variants folded.
-        let base_matches = self.query.is_empty() || model.matches(self.query);
-        self.folder(id, label, kind, !base_matches, |b| b.variant_rows(&model.variants, base_matches))
+        let base_matches = found.is_none_or(|found| found == ModelMatch::Name);
+        let wanted = self.opens_models() && !base_matches;
+        self.folder(id, label, kind, wanted, |b| b.variant_rows(&model.variants, base_matches))
     }
 
     /// `show_all` lists every variant, for a parent the search names itself.
+    /// Variants are tested here rather than in [`SearchMatches`]: only those
+    /// of a model being drawn are, so the cost follows the rows built.
     fn variant_rows(&mut self, variants: &[VariantRow], show_all: bool) -> Vec<TreeItem> {
-        let query = self.query;
+        let query = self.search.map_or("", |search| search.query.as_str());
         let mut items = Vec::new();
         for variant in variants {
             let matches = variant.matches(query);
@@ -488,11 +592,53 @@ impl Builder<'_, '_, '_, '_> {
             }
 
             let show_nested = show_all || matches;
-            items.push(self.folder(id, label, kind, !show_nested, |b| b.variant_rows(&variant.variants, show_nested)));
+            let wanted = self.opens_models() && !show_nested;
+            items.push(self.folder(id, label, kind, wanted, |b| b.variant_rows(&variant.variants, show_nested)));
         }
 
         items
     }
+}
+
+/// `items` beside their matches; each has `None` when listing everything.
+fn paired<'a, I, M>(
+    items: &'a [I],
+    matches: Option<&'a MatchGroup<M>>,
+) -> impl Iterator<Item = (&'a I, Option<&'a M>)> {
+    let mut members = matches.map(|group| group.members.iter());
+    items.iter().map(move |item| (item, members.as_mut().and_then(Iterator::next)))
+}
+
+/// Whether a row is listed. Every row is when listing everything.
+fn shown<M>(matches: Option<&M>) -> bool
+where
+    M: MatchCount,
+{
+    matches.is_none_or(|matches| matches.match_count() > 0)
+}
+
+/// `label`, followed during a search by the number of matches under it.
+fn counted<M>(label: impl Into<String>, matches: Option<&M>) -> String
+where
+    M: MatchCount,
+{
+    let label = label.into();
+    match matches {
+        Some(matches) => format!("{label} ({})", matches.match_count()),
+        None => label,
+    }
+}
+
+/// Whether a search opens the folders holding a section's matches. A broad
+/// search leaves them closed with their counts shown, so that one query does
+/// not build a row for most of the 15000-model catalogue.
+fn opens<M>(section: &M) -> bool
+where
+    M: MatchCount,
+{
+    const AUTO_OPEN_LIMIT: usize = 200;
+
+    section.match_count() <= AUTO_OPEN_LIMIT
 }
 
 /// A small ship catalog, model catalogue and part listing with real paths.
@@ -629,11 +775,30 @@ mod tests {
         Data { ships, index, parts }
     }
 
+    /// A catalogue far larger than a search opens: 3000 main battery guns in
+    /// each of two nations.
+    fn large_data() -> Data {
+        rust_i18n::set_locale("en");
+        let ships = fixture::ships();
+        let guns = [("usa", "AGM"), ("japan", "JGM")].into_iter().flat_map(|(nation, prefix)| {
+            (0..3000).map(move |idx| {
+                fixture::path(&format!(
+                    "content/gameplay/{nation}/gun/main/{prefix}{idx:04}_Gun/{prefix}{idx:04}_Gun.model"
+                ))
+            })
+        });
+        let catalog = wowsunpack::export::model_catalog::ModelCatalog::from_paths(guns, &[]);
+        let index = ModelTreeIndex::build(&catalog, &ships);
+
+        Data { ships, index, parts: HashMap::new() }
+    }
+
     fn build(data: &Data, query: &str, set: &mut HashSet<SharedString>, auto: bool) -> BuiltTree {
         let sources =
             TreeSources { ships: &data.ships, ship_parts: &data.parts, models: ModelSection::Ready(&data.index) };
+        let search = SearchMatches::from_query(&sources, query);
 
-        build_tree(&sources, query, &mut Expansion { set, auto })
+        build_tree(&sources, search.as_ref(), &mut Expansion { set, auto })
     }
 
     fn is_placeholder(item: &TreeItem) -> bool {
@@ -775,55 +940,95 @@ mod tests {
         assert_eq!(
             search(&data, "iowa"),
             [
-                "U.S.A.",
-                "  Battleship",
+                "U.S.A. (1)",
+                "  Battleship (1)",
                 "    IX Iowa +",
                 "Models",
-                "U.S.A.",
-                "  Ships",
-                "    Battleships",
+                "U.S.A. (1)",
+                "  Ships (1)",
+                "    Battleships (1)",
                 "      ASB028_Iowa_1945 +",
             ]
         );
         assert_eq!(
             search(&data, "yamato"),
             [
-                "Japan",
-                "  Battleship",
+                "Japan (1)",
+                "  Battleship (1)",
                 "    X Yamato",
                 "Models",
-                "Japan",
-                "  Ships",
-                "    Battleships",
+                "Japan (1)",
+                "  Ships (1)",
+                "    Battleships (1)",
                 "      JSB018_Yamato_1944"
             ]
         );
     }
 
     #[test]
-    fn a_search_matches_model_paths_and_opens_a_model_to_a_matching_variant() {
+    fn a_search_matches_model_names_and_opens_a_model_to_a_matching_variant() {
         let data = data();
 
-        assert_eq!(search(&data, "events/director"), ["Models", "events", "  Directors", "    XD006_Lazarus_Director"]);
+        assert_eq!(search(&data, "lazarus"), ["Models", "events (1)", "  Directors (1)", "    XD006_Lazarus_Director"]);
         assert_eq!(
             search(&data, "mk7_dead"),
-            ["Models", "U.S.A.", "  Guns", "    Main battery", "      AGM034_16in50_Mk7", "        Wreck"]
+            ["Models", "U.S.A. (1)", "  Guns (1)", "    Main battery (1)", "      AGM034_16in50_Mk7", "        Wreck"]
         );
         assert_eq!(
             search(&data, "stern"),
-            ["Models", "U.S.A.", "  Ships", "    Battleships", "      ASB028_Iowa_1945", "        Stern"]
+            ["Models", "U.S.A. (1)", "  Ships (1)", "    Battleships (1)", "      ASB028_Iowa_1945", "        Stern"]
         );
         assert_eq!(
             search(&data, "halloween_dead"),
             [
                 "Models",
-                "U.S.A.",
-                "  Ships",
-                "    Battleships",
+                "U.S.A. (1)",
+                "  Ships (1)",
+                "    Battleships (1)",
                 "      ASB028_Iowa_1945",
                 "        ASB128_Iowa_Halloween",
                 "          Wreck",
             ]
+        );
+    }
+
+    #[test]
+    fn a_search_naming_only_directories_matches_no_model() {
+        let data = data();
+
+        for query in ["content", "gameplay", "events/director", "gun/main", "battleship/asb028"] {
+            assert_eq!(search(&data, query), ["Models"], "{query}");
+        }
+    }
+
+    #[test]
+    fn a_broad_search_leaves_its_folders_closed_with_their_counts() {
+        let data = large_data();
+        let mut set = HashSet::new();
+
+        let built = build(&data, "gun", &mut set, true);
+
+        assert_eq!(outline(&built.items), ["Models", "Japan (3000) +", "U.S.A. (3000) +"]);
+        assert_eq!(built.rows.len(), 3, "the heading and two nations");
+        assert!(set.is_empty(), "nothing was opened for the search");
+
+        set.insert("model-nation-usa".into());
+        let built = build(&data, "gun", &mut set, false);
+
+        assert_eq!(
+            outline(&built.items),
+            ["Models", "Japan (3000) +", "U.S.A. (3000)", "  Guns (3000) +"],
+            "opening a folder lists only its own children"
+        );
+    }
+
+    #[test]
+    fn a_narrow_search_in_a_large_catalogue_opens_the_folders_holding_its_matches() {
+        let data = large_data();
+
+        assert_eq!(
+            search(&data, "agm0042_"),
+            ["Models", "U.S.A. (1)", "  Guns (1)", "    Main battery (1)", "      AGM0042_Gun"]
         );
     }
 
@@ -836,7 +1041,7 @@ mod tests {
 
         let built = build(&data, "agm034", &mut set, false);
 
-        assert_eq!(outline(&built.items), ["Models", "U.S.A. +"]);
+        assert_eq!(outline(&built.items), ["Models", "U.S.A. (1) +"]);
     }
 
     /// The real catalogue and every ship's parts. Run the test binary with
@@ -885,10 +1090,14 @@ mod tests {
         }
 
         let data = Data { ships, index, parts };
-        for query in ["", "a", "iowa", "agm"] {
+        for query in ["", "a", "gun", "iowa", "agm"] {
             let started = Instant::now();
             let built = build(&data, query, &mut HashSet::new(), true);
             eprintln!("[measured] {query:?}: {} rows built in {:?}", built.rows.len(), started.elapsed());
+        }
+        for query in ["a", "gun"] {
+            let built = build(&data, query, &mut HashSet::new(), true);
+            assert!(built.rows.len() < 100, "{query:?} builds {} rows", built.rows.len());
         }
     }
 }

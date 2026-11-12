@@ -1,6 +1,6 @@
 //! The Model Viewer sidebar's model listing: the catalogue grouped by nation,
-//! kind and sub-kind, with every row's search key lowercased once so a search
-//! only runs substring tests.
+//! kind and sub-kind, with every row's name lowercased once so a search only
+//! runs substring tests.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -52,7 +52,8 @@ pub struct ModelSubKindGroup {
 
 pub struct ModelRow {
     pub path: ModelPath,
-    /// Lowercased path, which holds the name.
+    /// Lowercased stem. A search names models, not the directories they sit
+    /// in, which nearly every query would match.
     pub search_key: String,
     pub variants: Vec<VariantRow>,
 }
@@ -60,18 +61,33 @@ pub struct ModelRow {
 pub struct VariantRow {
     pub kind: ModelVariantKind,
     pub path: ModelPath,
+    /// Lowercased stem, as [`ModelRow::search_key`].
     pub search_key: String,
     /// A skin's own dead and section variants; empty for the other kinds.
     pub variants: Vec<VariantRow>,
 }
 
-impl ModelRow {
-    pub fn matches(&self, query: &str) -> bool {
-        self.search_key.contains(query)
-    }
+/// How a search names one catalogue model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelMatch {
+    Miss,
+    /// The model itself, whatever its variants are called.
+    Name,
+    /// Only one or more of its variants.
+    Variant,
+}
 
-    pub fn any_variant_matches(&self, query: &str) -> bool {
-        self.variants.iter().any(|variant| variant.matches(query) || variant.any_variant_matches(query))
+impl ModelRow {
+    pub fn search(&self, query: &str) -> ModelMatch {
+        if self.search_key.contains(query) {
+            return ModelMatch::Name;
+        }
+
+        if self.variants.iter().any(|variant| variant.matches(query) || variant.any_variant_matches(query)) {
+            return ModelMatch::Variant;
+        }
+
+        ModelMatch::Miss
     }
 }
 
@@ -323,13 +339,13 @@ fn insert_entry(nation: &mut ModelNationGroup, entry: &ModelEntry, catalog: &Mod
         .collect();
     kind.sub_kinds[sub_kind_idx].models.push(ModelRow {
         path: entry.path().clone(),
-        search_key: entry.path().as_str().to_lowercase(),
+        search_key: entry.path().stem().to_lowercase(),
         variants,
     });
 }
 
 fn variant_row(kind: &ModelVariantKind, path: &ModelPath, variants: Vec<VariantRow>) -> VariantRow {
-    VariantRow { kind: kind.clone(), path: path.clone(), search_key: path.as_str().to_lowercase(), variants }
+    VariantRow { kind: kind.clone(), path: path.clone(), search_key: path.stem().to_lowercase(), variants }
 }
 
 /// Whether model directory `directory` (`usa`, `uk`, `panasia`) names

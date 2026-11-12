@@ -4,8 +4,8 @@
 //!
 //! Built on the same gpui-component `tree` the Replay Inspector's file browser
 //! uses, with a side id-to-row map the row renderer consults. Folders are
-//! collapsed until opened; a search opens every folder holding a match and
-//! drops the folders that hold none. The tree is rebuilt from
+//! collapsed until opened; a search drops the folders holding no match and
+//! opens the rest when it names few enough rows. The tree is rebuilt from
 //! [`sidebar_tree::build_tree`] on every search, expansion or data change,
 //! which only materializes the expanded folders.
 //!
@@ -58,6 +58,7 @@ use super::model_tree::list_all_ship_parts;
 use super::sidebar_tree::Expansion;
 use super::sidebar_tree::ModelSection;
 use super::sidebar_tree::RowKind;
+use super::sidebar_tree::SearchMatches;
 use super::sidebar_tree::TreeSources;
 use super::sidebar_tree::build_tree;
 use super::sidebar_tree::open_row_id;
@@ -142,11 +143,23 @@ enum ModelsState {
     Ready(Arc<ModelTreeIndex>),
 }
 
+/// What a tree rebuild keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rebuild {
+    /// The search or the listed ships or models changed: match again and
+    /// open the folders holding matches.
+    Rematch,
+    /// Keep the matches and the folders the user opened or closed.
+    Keep,
+}
+
 pub struct Sidebar {
     bundle: Option<Arc<ArmorAssetsBundle>>,
     search_state: Entity<InputState>,
     /// The search as applied to the tree: ASCII-folded and lowercased.
     query: String,
+    /// `query` matched against the listing; `None` when not searching.
+    search: Option<SearchMatches>,
     tree_state: Entity<TreeState>,
     /// Rebuilt with the tree, never per render.
     row_info: Rc<HashMap<SharedString, RowKind>>,
@@ -193,6 +206,7 @@ impl Sidebar {
             bundle: None,
             search_state,
             query: String::new(),
+            search: None,
             tree_state,
             row_info: Rc::new(HashMap::new()),
             common: CommonPaneSettings::default(),
@@ -311,7 +325,7 @@ impl Sidebar {
         self.ship_parts = Arc::new(HashMap::new());
         self._model_index_task = None;
         self._ship_parts_task = None;
-        self.rebuild_tree(true, cx);
+        self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
@@ -325,7 +339,7 @@ impl Sidebar {
     /// Marks the Models section unavailable: the library could not be built.
     pub fn set_model_library_failed(&mut self, cx: &mut Context<Self>) {
         self.models = ModelsState::Unavailable;
-        self.rebuild_tree(true, cx);
+        self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
@@ -373,13 +387,13 @@ impl Sidebar {
 
     fn adopt_model_index(&mut self, index: ModelTreeIndex, cx: &mut Context<Self>) {
         self.models = ModelsState::Ready(Arc::new(index));
-        self.rebuild_tree(true, cx);
+        self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
     fn adopt_ship_parts(&mut self, parts: HashMap<VehicleParamIndex, ShipPartRows>, cx: &mut Context<Self>) {
         self.ship_parts = Arc::new(parts);
-        self.rebuild_tree(false, cx);
+        self.rebuild_tree(Rebuild::Keep, cx);
         cx.notify();
     }
 
@@ -416,7 +430,7 @@ impl Sidebar {
     fn apply_query(&mut self, query: String, cx: &mut Context<Self>) {
         self.query = query;
         self.search_expanded.clear();
-        self.rebuild_tree(true, cx);
+        self.rebuild_tree(Rebuild::Rematch, cx);
         cx.notify();
     }
 
@@ -431,13 +445,10 @@ impl Sidebar {
             }
         }
 
-        self.rebuild_tree(false, cx);
+        self.rebuild_tree(Rebuild::Keep, cx);
     }
 
-    /// Rebuilds the tree items. `reopen_matches` opens every folder the
-    /// search matches inside; it is off when the user has just opened or
-    /// closed one, so that choice stands.
-    fn rebuild_tree(&mut self, reopen_matches: bool, cx: &mut Context<Self>) {
+    fn rebuild_tree(&mut self, rebuild: Rebuild, cx: &mut Context<Self>) {
         let Some(bundle) = self.bundle.clone() else {
             self.row_info = Rc::new(HashMap::new());
             self.tree_state.update(cx, |state, cx| state.set_items(Vec::new(), cx));
@@ -450,10 +461,14 @@ impl Sidebar {
             ModelsState::Ready(index) => ModelSection::Ready(index),
         };
         let sources = TreeSources { ships: &bundle.catalog, ship_parts: &self.ship_parts, models };
+        if rebuild == Rebuild::Rematch {
+            self.search = SearchMatches::from_query(&sources, &self.query);
+        }
+
         let searching = !self.query.is_empty();
         let set = if searching { &mut self.search_expanded } else { &mut self.browse_expanded };
-        let mut expansion = Expansion { set, auto: reopen_matches && searching };
-        let built = build_tree(&sources, &self.query, &mut expansion);
+        let mut expansion = Expansion { set, auto: rebuild == Rebuild::Rematch && searching };
+        let built = build_tree(&sources, self.search.as_ref(), &mut expansion);
 
         self.row_info = Rc::new(built.rows);
         self.tree_state.update(cx, |state, cx| state.set_items(built.items, cx));
@@ -726,6 +741,7 @@ mod tests {
     use gpui_kit::SharedString;
     use gpui_kit::TestAppContext;
     use gpui_kit::WindowHandle;
+    use gpui_kit::component::tree::TreeEvent;
     use gpui_kit::px;
     use gpui_kit::size;
     use gpui_kit::test::TestAppContextExt;
@@ -745,12 +761,17 @@ mod tests {
     use super::super::model_refs::ShipPartRef;
     use super::super::model_refs::VehicleParamIndex;
     use super::super::model_tree::ModelTreeIndex;
+    use super::super::sidebar_tree::ModelSection;
+    use super::super::sidebar_tree::SearchMatches;
+    use super::super::sidebar_tree::TreeSources;
     use super::super::sidebar_tree::fixture;
     use super::super::sidebar_tree::model_row_id;
     use super::super::sidebar_tree::part_row_id;
     use super::super::sidebar_tree::ship_row_id;
     use super::HardpointsToggled;
     use super::ModelSelected;
+    use super::ModelsState;
+    use super::Rebuild;
     use super::ShipSelected;
     use super::Sidebar;
 
@@ -885,6 +906,42 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn opening_a_folder_during_a_search_lists_from_the_matches_already_found(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let yamato_model =
+            fixture::path("content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model");
+        let turret = fixture::path(fixture::IOWA_TURRET);
+
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.apply_query("agm034".to_string(), cx);
+
+                // Matches for another query stand in for the stored ones, so a
+                // rebuild that matched "agm034" again would list the turret.
+                let stand_in = {
+                    let ModelsState::Ready(index) = &sidebar.models else { panic!("the model index is adopted") };
+                    let bundle = sidebar.bundle.clone().expect("a bundle is set");
+                    let sources = TreeSources {
+                        ships: &bundle.catalog,
+                        ship_parts: &sidebar.ship_parts,
+                        models: ModelSection::Ready(index),
+                    };
+                    SearchMatches::from_query(&sources, "yamato")
+                };
+                sidebar.search = stand_in;
+
+                for id in ["model-nation-japan", "model-kind-japan-Ship", "model-sub-japan-Ship-Battleship"] {
+                    let tree_state = sidebar.tree_state.clone();
+                    sidebar.on_tree_event(tree_state, &TreeEvent::Expanded(id.into()), cx);
+                }
+            })
+            .expect("the window is open");
+
+        assert!(row_index(&window, &model_row_id(&yamato_model), cx).is_some(), "the stored matches are listed");
+        assert_eq!(row_index(&window, &model_row_id(&turret), cx), None, "the query is not matched again");
+    }
+
+    #[gpui_kit::test]
     fn a_ship_row_loads_the_ship_and_a_part_row_opens_the_part_model(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
         let ships = record::<ShipSelected>(&window, cx);
@@ -895,7 +952,7 @@ mod tests {
                 for id in ["armor-nation-USA", "armor-class-USA-Battleship", "armor-part-PASB018-group-MainBattery"] {
                     sidebar.browse_expanded.insert(id.into());
                 }
-                sidebar.rebuild_tree(false, cx);
+                sidebar.rebuild_tree(Rebuild::Keep, cx);
             })
             .expect("the window is open");
         let ship_row = row_index(&window, &iowa, cx).expect("the ship is listed");
