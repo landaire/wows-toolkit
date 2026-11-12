@@ -8,6 +8,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::palette::PaletteMode;
@@ -76,6 +77,7 @@ use crate::shell::palette::ModeRow;
 use crate::shell::palette::ModeRows;
 use crate::shell::palette::ModeSource;
 use crate::shell::palette::ModeSpec;
+use crate::shell::palette::Marks;
 use crate::shell::palette::Opening;
 use crate::shell::palette::RootRow;
 use crate::shell::palette::builtin;
@@ -148,7 +150,9 @@ impl ListedRow {
         RowKey {
             index: self.index,
             label: self.row.label.clone(),
+            marks: self.row.marks.clone(),
             detail: self.row.detail.clone(),
+            detail_marks: self.row.detail_marks.clone(),
             missing: self.row.missing,
         }
     }
@@ -158,7 +162,9 @@ impl ListedRow {
 struct RowKey {
     index: usize,
     label: String,
+    marks: Marks,
     detail: Option<String>,
+    detail_marks: Marks,
     missing: bool,
 }
 
@@ -245,7 +251,7 @@ fn RootList(shell: Shell, query: RwSignal<String, LocalStorage>) -> impl IntoVie
                         a11y:label = row.label.clone(),
                         attr:data-testid = format!("palette-item-{}", row.item.value())
                     ) {
-                        text {{row.label.clone()}}
+                        MarkedText(text = row.label.clone(), ranges = row.marks.clone())
                     }
                 }
                 CommandEmpty {{locale.text("ui.search.no_matches")}}
@@ -449,12 +455,13 @@ fn ModeHeader(mode: PaletteMode, back: UnsyncCallback<()>) -> impl IntoView {
 /// One row of a mode: its icon, its label, and the detail dimmed after it.
 #[component]
 fn ModeRowView(row: ModeRow) -> impl IntoView {
-    let ModeRow { label, detail, glyph, missing, .. } = row;
+    let ModeRow { label, marks, detail, detail_marks, glyph, missing, .. } = row;
+    let name = AnyView::new(view! { MarkedText(class = "wt-palette__name", text = label, ranges = marks) });
 
     view! {
         row(class = "wt-palette__row", attr:data-missing = missing.then(|| "true".to_owned())) {
             {glyph.map_or_else(|| AnyView::new(()), |glyph| AnyView::new(view! { AppIcon(glyph = glyph) }))}
-            text(class = "wt-palette__name") {{label}}
+            {name}
             {if missing {
                 AnyView::new(view! {
                     AppIcon(
@@ -468,7 +475,7 @@ fn ModeRowView(row: ModeRow) -> impl IntoView {
             }}
             {detail.map_or_else(
                 || AnyView::new(()),
-                |detail| AnyView::new(view! { text(class = "wt-palette__detail") {{detail}} }),
+                |detail| AnyView::new(view! { MarkedText(class = "wt-palette__detail", text = detail, ranges = detail_marks) }),
             )}
         }
     }

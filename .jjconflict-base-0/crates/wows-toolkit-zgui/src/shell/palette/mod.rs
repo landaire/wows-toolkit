@@ -18,6 +18,7 @@ pub mod modes;
 mod tests;
 mod view;
 
+use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -27,6 +28,8 @@ use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::dialog::Answer;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wows_toolkit_viewmodel::text_filter::FilterKey;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -267,8 +270,12 @@ impl PaletteRun {
 #[derive(Clone)]
 pub struct ModeRow {
     pub label: String,
+    /// Where the query matched `label`.
+    pub marks: Marks,
     /// Drawn dimmed after the label, such as a directory's whole path.
     pub detail: Option<String>,
+    /// Where the query matched `detail`.
+    pub detail_marks: Marks,
     pub glyph: Option<Glyph>,
     /// Drawn dimmed and marked, for a recent directory that is gone.
     pub missing: bool,
@@ -277,8 +284,24 @@ pub struct ModeRow {
 
 impl ModeRow {
     pub fn new(label: String, run: PaletteRun) -> Self {
-        Self { label, detail: None, glyph: None, missing: false, run }
+        Self { label, marks: Marks::default(), detail: None, detail_marks: Marks::default(), glyph: None, missing: false, run }
     }
+}
+
+/// Byte ranges of a text a query matched.
+pub type Marks = Rc<[Range<usize>]>;
+
+/// Where `query` matched `text`; none for an inactive query or a text it did not match.
+pub fn marks(query: &FilterQuery, text: &str) -> Marks {
+    query.ranges(text).map(Marks::from).unwrap_or_default()
+}
+
+/// Where `query` matched `part`, as ranges of `label`, which holds it. For a row filtered on part
+/// of what it says, such as a ship's name.
+pub fn marks_within(query: &FilterQuery, label: &str, part: &str) -> Marks {
+    let Some(offset) = label.find(part) else { return Marks::default() };
+
+    query.ranges(part).unwrap_or_default().into_iter().map(|range| range.start + offset..range.end + offset).collect()
 }
 
 /// What a mode lists for one query.
@@ -347,6 +370,7 @@ struct Offered<K, V> {
 struct RootRow {
     item: RootItem,
     label: String,
+    marks: Marks,
 }
 
 /// Whether the palette is open and on which list, and what it offers.
@@ -482,7 +506,8 @@ impl PaletteControl {
         })
     }
 
-    /// The root list's entries whose label holds `query`, ignoring case, in list order.
+    /// The root list's entries whose label matches `query`: every entry in list order for an
+    /// inactive query, else the matches best first, each marked where it matched.
     fn root_rows(self, query: &str) -> Vec<RootRow> {
         let mut items: Vec<RootItem> =
             self.commands.with(|commands| commands.iter().map(|offered| RootItem::Command(offered.key)).collect());
@@ -490,11 +515,15 @@ impl PaletteControl {
         items.sort_by_key(|item| item.position());
         items.dedup();
 
-        let needle = query.to_lowercase();
-        items
+        let query = FilterQuery::new(query);
+        let keyed = items.into_iter().map(|item| {
+            let label = item.label();
+            (FilterKey::new(&label), RootRow { item, label, marks: Marks::default() })
+        });
+        query
+            .rank(keyed, |(key, _)| key)
             .into_iter()
-            .map(|item| RootRow { item, label: item.label() })
-            .filter(|row| row.label.to_lowercase().contains(&needle))
+            .map(|(_, row)| RootRow { marks: marks(&query, &row.label), ..row })
             .collect()
     }
 
