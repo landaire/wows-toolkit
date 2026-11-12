@@ -378,6 +378,7 @@ fn push_edge(
                 normal: across,
                 color,
                 uv: [0.0, 0.0],
+                tangent: [0.0; 4],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

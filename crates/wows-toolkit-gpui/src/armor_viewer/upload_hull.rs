@@ -23,18 +23,25 @@ use std::collections::HashMap;
 use gpui_wgpu::wgpu;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::camouflage::UvTransform;
+use wowsunpack::export::gltf_export::InteractiveHullMesh;
 use wowsunpack::export::material_alpha::AlphaMode;
 
+use crate::viewport::renderer::AlbedoUv;
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
 use crate::viewport::renderer::LAYER_HULL;
+use crate::viewport::renderer::MaterialBinding;
+use crate::viewport::renderer::TextureEncoding;
 use crate::viewport::renderer::TextureImage;
 use crate::viewport::renderer::Viewport3D;
+use crate::viewport::tangents::vertex_tangents;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
 
+use super::camo::RgbaTexture;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::transform_normal;
+use super::surface_maps::SurfaceTextures;
 
 /// Hull-mesh brightness boost for a mesh with no texture; the lighting
 /// shader multiplies this base by `(flat + key*halfLambert)`. Matches the
@@ -97,35 +104,111 @@ enum TextureKey {
     Camo(String),
 }
 
+/// An albedo and the `.mfm` path whose surface maps are drawn with it, if
+/// that material has any.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct MaterialKey {
+    albedo: TextureKey,
+    surface: Option<String>,
+}
+
 /// The GPU textures one scene's hull meshes sample, made once per material
 /// and shared by every mesh using it. Valid for one device, one scene and one
 /// active camo: clear it when any of them changes.
 #[derive(Default)]
 pub(crate) struct HullTextureCache {
-    textures: HashMap<TextureKey, CachedTexture>,
+    albedos: HashMap<TextureKey, UploadedAlbedo>,
+    /// By `.mfm` path.
+    surface_maps: HashMap<String, UploadedSurfaceMaps>,
+    materials: HashMap<MaterialKey, CachedMaterial>,
 }
 
 impl HullTextureCache {
     pub(crate) fn clear(&mut self) {
-        self.textures.clear();
+        self.albedos.clear();
+        self.surface_maps.clear();
+        self.materials.clear();
     }
 
     /// Drops the active camo's textures, keeping the materials' own.
     pub(crate) fn forget_camo(&mut self) {
-        self.textures.retain(|key, _| matches!(key, TextureKey::Base(_)));
+        self.albedos.retain(|key, _| matches!(key, TextureKey::Base(_)));
+        self.materials.retain(|key, _| matches!(key.albedo, TextureKey::Base(_)));
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.textures.len()
+        self.materials.len()
+    }
+
+    fn upload_albedo(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &GpuPipeline,
+        key: &TextureKey,
+        texture: &RgbaTexture,
+    ) {
+        if self.albedos.contains_key(key) {
+            return;
+        }
+
+        let view = upload(device, queue, pipeline, texture, TextureEncoding::Srgb);
+        self.albedos.insert(key.clone(), UploadedAlbedo { view, brightness: tex_brightness(&texture.pixels) });
+    }
+
+    fn upload_surface_maps(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &GpuPipeline,
+        mfm_path: &str,
+        textures: &SurfaceTextures,
+    ) {
+        if self.surface_maps.contains_key(mfm_path) {
+            return;
+        }
+
+        let upload = |texture: &RgbaTexture| upload(device, queue, pipeline, texture, TextureEncoding::Linear);
+        let uploaded = UploadedSurfaceMaps {
+            normal: textures.normal.as_ref().map(upload),
+            metal_gloss: textures.metal_gloss.as_ref().map(upload),
+        };
+        self.surface_maps.insert(mfm_path.to_string(), uploaded);
     }
 }
 
-/// One uploaded hull texture and how its material draws alpha.
+/// One uploaded albedo and the brightness boost its pixels call for.
+struct UploadedAlbedo {
+    view: wgpu::TextureView,
+    brightness: f32,
+}
+
+/// One material's uploaded surface maps.
+struct UploadedSurfaceMaps {
+    normal: Option<wgpu::TextureView>,
+    metal_gloss: Option<wgpu::TextureView>,
+}
+
+/// One material's bind group and what its meshes need to know of it.
 #[derive(Clone)]
-struct CachedTexture {
+struct CachedMaterial {
     bind_group: wgpu::BindGroup,
     brightness: f32,
     alpha: AlphaMode,
+    normal_mapped: bool,
+}
+
+fn upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &GpuPipeline,
+    texture: &RgbaTexture,
+    encoding: TextureEncoding,
+) -> wgpu::TextureView {
+    let mips = texture.take_mips();
+    let image = TextureImage { pixels: &texture.pixels, width: texture.width, height: texture.height, mips: &mips };
+
+    pipeline.upload_texture(device, queue, image, encoding)
 }
 
 /// Re-uploads `armor`'s hull meshes: removes every previously-uploaded hull
@@ -136,7 +219,8 @@ struct CachedTexture {
 /// translucent ones draw on [`LAYER_HULL`] (no depth write, behind armor).
 /// `active_camo_textures`/`active_camo_uvs` are `ViewportView`'s decoded
 /// active-camo state (see the module doc); pass empty maps for base albedo
-/// only.
+/// only. A textured mesh whose material has surface maps draws them under
+/// whichever albedo it shows.
 ///
 /// Shares `viewport`'s mesh pool with the armor upload (`upload.rs`) but
 /// never calls [`Viewport3D::clear`] itself, so an armor-only change never
@@ -165,6 +249,7 @@ pub fn upload_hull_meshes(
 
     let hull_alpha: f32 = if hull_opaque { 1.0 } else { 0.7 };
     let hull_layer = if hull_opaque { LAYER_DEFAULT } else { LAYER_HULL };
+    let surface_maps = armor.surface_maps();
 
     for mesh in &armor.hull_meshes {
         let visible = hull_visibility.get(&mesh.name).copied().unwrap_or(false);
@@ -189,60 +274,49 @@ pub fn upload_hull_meshes(
         // Only apply a tiled UV transform when this stem actually has an
         // active camo texture; otherwise the mesh falls back to base albedo
         // with its own UVs.
-        let camo_uv = camo_texture.and_then(|(s, _)| active_camo_uvs.get(s));
+        let albedo_uv = camo_texture
+            .and_then(|(s, _)| active_camo_uvs.get(s))
+            .map_or(AlbedoUv::IDENTITY, |t| AlbedoUv { scale: t.scale, offset: t.offset });
+        let surface = mesh.mfm_path.as_ref().and_then(|path| surface_maps?.get(path).map(|maps| (path, maps)));
         let bound = texture.map(|(key, texture, alpha)| {
-            texture_cache
-                .textures
-                .entry(key)
-                .or_insert_with(|| {
-                    let mips = texture.take_mips();
-                    let image = TextureImage {
-                        pixels: &texture.pixels,
-                        width: texture.width,
-                        height: texture.height,
-                        mips: &mips,
-                    };
-                    CachedTexture {
-                        bind_group: pipeline.create_texture_bind_group(device, queue, image, alpha.cutoff()),
-                        brightness: tex_brightness(&texture.pixels),
-                        alpha,
-                    }
-                })
-                .clone()
-        });
-        let has_texture = bound.is_some();
+            let material_key = MaterialKey { albedo: key.clone(), surface: surface.map(|(path, _)| path.clone()) };
+            if let Some(cached) = texture_cache.materials.get(&material_key) {
+                return cached.clone();
+            }
 
-        let brightness = bound.as_ref().map_or(FALLBACK_TEX_BRIGHTNESS, |cached| cached.brightness);
+            texture_cache.upload_albedo(device, queue, pipeline, &key, texture);
+            if let Some((path, maps)) = surface {
+                texture_cache.upload_surface_maps(device, queue, pipeline, path, maps);
+            }
+            let albedo = &texture_cache.albedos[&key];
+            let maps = surface.and_then(|(path, _)| texture_cache.surface_maps.get(path));
+            let binding = MaterialBinding {
+                albedo: &albedo.view,
+                normal: maps.and_then(|maps| maps.normal.as_ref()),
+                metal_gloss: maps.and_then(|maps| maps.metal_gloss.as_ref()),
+                alpha_cutoff: alpha.cutoff(),
+                albedo_uv,
+            };
+            let cached = CachedMaterial {
+                normal_mapped: binding.normal.is_some(),
+                brightness: albedo.brightness,
+                bind_group: pipeline.create_material_bind_group(device, binding),
+                alpha,
+            };
+            texture_cache.materials.insert(material_key, cached.clone());
+
+            cached
+        });
+
+        let color = match &bound {
+            Some(cached) => [cached.brightness, cached.brightness, cached.brightness, hull_alpha],
+            None => [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha],
+        };
         // Blended texels are drawn without depth writes, behind which the
         // opaque hull still shows, like the see-through hull.
         let blended = bound.as_ref().is_some_and(|cached| cached.alpha == AlphaMode::Blend);
         let layer = if blended { LAYER_HULL } else { hull_layer };
-        let fallback_color: [f32; 4] =
-            [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
-
-        let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
-        for i in 0..mesh.positions.len() {
-            let mut pos = mesh.positions[i];
-            let mut norm = if i < mesh.normals.len() { mesh.normals[i] } else { [0.0, 1.0, 0.0] };
-
-            if let Some(t) = &mesh.transform {
-                pos = transform_point(t, pos);
-                norm = transform_normal(t, norm);
-            }
-
-            let uv = if has_uvs {
-                let base_uv = mesh.uvs[i];
-                match camo_uv {
-                    Some(t) => [base_uv[0] * t.scale[0] + t.offset[0], base_uv[1] * t.scale[1] + t.offset[1]],
-                    None => base_uv,
-                }
-            } else {
-                [0.0, 0.0]
-            };
-
-            let color = if has_texture { [brightness, brightness, brightness, hull_alpha] } else { fallback_color };
-            vertices.push(Vertex { position: pos, normal: norm, color, uv });
-        }
+        let vertices = hull_vertices(mesh, color, bound.as_ref().is_some_and(|cached| cached.normal_mapped));
 
         if mesh.indices.is_empty() {
             continue;
@@ -260,12 +334,85 @@ pub fn upload_hull_meshes(
     viewport.mark_dirty();
 }
 
+/// `mesh`'s vertices placed by its transform and colored `color`. Tangents
+/// are derived only for a normal-mapped material, the one reader of them.
+fn hull_vertices(mesh: &InteractiveHullMesh, color: [f32; 4], with_tangents: bool) -> Vec<Vertex> {
+    let has_uvs = mesh.uvs.len() == mesh.positions.len();
+    let mut vertices: Vec<Vertex> = mesh
+        .positions
+        .iter()
+        .enumerate()
+        .map(|(i, &position)| {
+            let normal = mesh.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
+            let (position, normal) = match &mesh.transform {
+                Some(t) => (transform_point(t, position), transform_normal(t, normal)),
+                None => (position, normal),
+            };
+            let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
+
+            Vertex { position, normal, color, uv, tangent: [0.0; 4] }
+        })
+        .collect();
+
+    if with_tangents && has_uvs {
+        let positions: Vec<[f32; 3]> = vertices.iter().map(|vertex| vertex.position).collect();
+        let normals: Vec<[f32; 3]> = vertices.iter().map(|vertex| vertex.normal).collect();
+        let tangents = vertex_tangents(&positions, &normals, &mesh.uvs, &mesh.indices);
+        for (vertex, tangent) in vertices.iter_mut().zip(tangents) {
+            vertex.tangent = tangent;
+        }
+    }
+
+    vertices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn solid_rgba(pixel: [u8; 4], count: usize) -> Vec<u8> {
         pixel.iter().copied().cycle().take(count * 4).collect()
+    }
+
+    /// A quad in the XY plane facing +Z with an upright texture, moved one
+    /// unit along X by its transform.
+    fn moved_quad() -> InteractiveHullMesh {
+        InteractiveHullMesh {
+            name: "Hull".to_string(),
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            mfm_path: Some("content/Hull.mfm".to_string()),
+            mfm_path_id: 0,
+            transform: Some([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0]),
+            group: wowsunpack::export::part_group::PartGroup::Hull,
+            part: None,
+        }
+    }
+
+    #[test]
+    fn a_material_without_surface_maps_uploads_its_mesh_as_it_is_stored() {
+        let mesh = moved_quad();
+        let color = [2.0, 2.0, 2.0, 1.0];
+
+        let vertices = hull_vertices(&mesh, color, false);
+
+        assert_eq!(vertices.len(), 4);
+        for (vertex, (position, uv)) in vertices.iter().zip(mesh.positions.iter().zip(&mesh.uvs)) {
+            assert_eq!(vertex.position, [position[0] + 1.0, position[1], position[2]]);
+            assert_eq!(vertex.normal, [0.0, 0.0, 1.0]);
+            assert_eq!(vertex.color, color);
+            assert_eq!(vertex.uv, *uv, "the albedo transform is applied when sampling, not here");
+            assert_eq!(vertex.tangent, [0.0; 4]);
+        }
+    }
+
+    #[test]
+    fn a_normal_mapped_material_gets_tangents_from_the_placed_mesh() {
+        let vertices = hull_vertices(&moved_quad(), [1.0; 4], true);
+
+        assert!(vertices.iter().all(|vertex| vertex.tangent == [1.0, 0.0, 0.0, 1.0]), "{vertices:?}");
     }
 
     #[test]

@@ -34,7 +34,8 @@
 //!
 //! **Stages.** A load returns a [`FirstStage`]: the scene with everything
 //! the opening view draws, and the background jobs (`scene_load::RestJob`)
-//! that add the hover-picking index and the camo list once it is on screen.
+//! that add the hover-picking index, the camo list and the surface maps
+//! once it is on screen.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -88,6 +89,7 @@ use super::scene_load::FirstStage;
 use super::scene_load::LoadCancel;
 use super::scene_load::LoadCancelled;
 use super::scene_load::RestJob;
+use super::surface_maps::SurfaceMapsByPart;
 use super::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
@@ -275,6 +277,10 @@ pub struct LoadedShipArmor {
     /// The alpha mode of each hull material that tests or blends alpha, by
     /// `.mfm` path. A material not listed draws opaque.
     pub hull_alpha: HashMap<String, AlphaMode>,
+    /// The normal and metal-gloss maps of each hull material, by `.mfm`
+    /// path. A ship's are read by the background stage of its load; unset
+    /// until they land.
+    pub(crate) hull_surface_maps: OnceLock<SurfaceMapsByPart>,
     pub hull_lod_count: usize,
     pub hull_lod: usize,
     /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
@@ -324,6 +330,11 @@ impl LoadedShipArmor {
 
     pub(crate) fn camo_texture_source(&self) -> Option<&CamoTextureSource> {
         self.camo_source.get()
+    }
+
+    /// The hull's normal and metal-gloss maps, once they have landed.
+    pub(crate) fn surface_maps(&self) -> Option<&SurfaceMapsByPart> {
+        self.hull_surface_maps.get()
     }
 
     pub fn is_ship(&self) -> bool {
@@ -529,8 +540,8 @@ fn reload_load_options(
 }
 
 /// The first stage of a ship load: everything the opening view draws. The
-/// hover-picking index and the camouflage list are left to the background
-/// jobs returned with it. Ports
+/// hover-picking index, the camouflage list and the surface maps are left to
+/// the background jobs returned with it. Ports
 /// `armor_viewer::common::load_ship_armor`.
 fn load_ship_armor(
     param_index: &str,
@@ -573,7 +584,12 @@ fn load_ship_armor(
     let hull_lod_count = ctx.hull_lod_count();
     let pick_sources = MeshSource::for_ship(&hull_meshes, ctx.parts());
     let parts = ctx.parts().to_vec();
-    let rest = vec![RestJob::Pick(pick_sources), RestJob::Camo(Arc::new(ctx))];
+    let ctx = Arc::new(ctx);
+    let rest = vec![
+        RestJob::Pick(pick_sources),
+        RestJob::Camo(Arc::clone(&ctx)),
+        RestJob::SurfaceMaps { ctx, lod: export_options.texture_lod },
+    ];
 
     let scene = LoadedShipArmor {
         subject: SceneSubject::Ship(ShipSubject { vehicle_param_index: VehicleParamIndex::new(param_index), parts }),
@@ -589,6 +605,7 @@ fn load_ship_armor(
         hull_pick: OnceLock::new(),
         hull_textures: albedos.textures,
         hull_alpha: albedos.alpha,
+        hull_surface_maps: OnceLock::new(),
         hull_lod_count,
         hull_lod: options.lod,
         hull_upgrade_names: options.hull_upgrade_names,
@@ -1217,7 +1234,7 @@ mod tests {
     /// Needs a local game install: the first stage of a ship load holds all
     /// the opening view draws -- every mount, every hull mesh and the stock
     /// albedo of every material -- and the background stage adds only the
-    /// picking index and the camo list. Prints how long
+    /// picking index, the camo list and the surface maps. Prints how long
     /// each stage took. Run as
     /// `load_ship_armor_against_a_real_install_produces_a_renderable_model`
     /// documents.
@@ -1284,6 +1301,7 @@ mod tests {
             assert_eq!(scene.hull_textures.len(), first_albedos.len());
             assert!(scene.hull_pick_index().is_some(), "{param_index}: picking lands");
             assert!(!scene.camo_schemes().is_empty(), "{param_index}: the camo list lands");
+            assert!(scene.surface_maps().is_some(), "{param_index}: the surface maps land");
 
             println!("{param_index}: first stage {first_stage:?}, background stage {background_stage:?}");
         }

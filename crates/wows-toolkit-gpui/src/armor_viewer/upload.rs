@@ -211,7 +211,7 @@ fn upload_armor_meshes(
 
                     let mut color = mesh.colors[orig_idx];
                     color[3] = display.armor_opacity;
-                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0] });
+                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
                 }
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
@@ -427,6 +427,7 @@ fn upload_plate_boundary_edges(
                         normal: vert_normal,
                         color: EDGE_COLOR,
                         uv: [0.0, 0.0],
+                        tangent: [0.0; 4],
                     });
                 }
             }

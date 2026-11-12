@@ -76,6 +76,10 @@ pub struct Vertex {
     pub normal: [f32; 3],
     pub color: [f32; 4],
     pub uv: [f32; 2],
+    /// Direction of increasing U in xyz; w is the sign that turns
+    /// `cross(normal, tangent)` toward the top of the texture. Read only
+    /// where a normal map is bound.
+    pub tangent: [f32; 4],
 }
 
 impl Vertex {
@@ -91,6 +95,8 @@ impl Vertex {
             wgpu::VertexAttribute { offset: 24, shader_location: 2, format: wgpu::VertexFormat::Float32x4 },
             // uv
             wgpu::VertexAttribute { offset: 40, shader_location: 3, format: wgpu::VertexFormat::Float32x2 },
+            // tangent
+            wgpu::VertexAttribute { offset: 48, shader_location: 4, format: wgpu::VertexFormat::Float32x4 },
         ],
     };
 }

@@ -174,7 +174,7 @@ fn upload_highlight_mesh(
                     pos[1] += norm[1] * TRAJECTORY_NORMAL_OFFSET;
                     pos[2] += norm[2] * TRAJECTORY_NORMAL_OFFSET;
 
-                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0] });
+                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
                 }
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);

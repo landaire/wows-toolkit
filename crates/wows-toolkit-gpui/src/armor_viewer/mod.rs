@@ -68,6 +68,7 @@ mod scene_load;
 pub mod sidebar;
 mod sidebar_tree;
 pub mod splash;
+mod surface_maps;
 pub mod trajectory;
 mod trajectory_panel;
 mod tree_filter;

@@ -59,6 +59,8 @@ use super::scene_load::FirstStage;
 use super::scene_load::LoadCancel;
 use super::scene_load::LoadCancelled;
 use super::scene_load::RestJob;
+use super::surface_maps::SurfaceMapsByPart;
+use super::surface_maps::model_surface_textures;
 
 /// Longest texture edge decoded for display. The viewport has no use for the
 /// 4096 hull atlases at full size, and each costs 64 MiB as RGBA.
@@ -408,13 +410,15 @@ pub(crate) fn load_model_scene(
     Ok(model_scene(subject, meshes, parts.meshes, sources, textures, lods))
 }
 
-/// How a model is loaded for display at `lod`.
+/// How a model is loaded for display at `lod`. A model's surface maps come
+/// with its albedos: they are read from the same materials, which a later
+/// stage would read a second time.
 fn display_options(lod: usize) -> ModelLoadOptions {
     ModelLoadOptions {
         lod,
         damaged: false,
         texture_lod: TextureLod::from_max_edge(Some(DISPLAY_TEXTURE_EDGE)),
-        textures: TextureDecode::Albedo,
+        textures: TextureDecode::AllMaps,
     }
 }
 
@@ -514,18 +518,23 @@ struct SceneLods {
     shown: usize,
 }
 
-/// A model's decoded albedos and the alpha modes of those that are not
-/// opaque, by `.mfm` path.
+/// A model's decoded albedos and surface maps, and the alpha modes of the
+/// albedos that are not opaque, by `.mfm` path.
 #[derive(Default)]
 struct HullTextures {
     textures: super::camo::TexturesByPart,
     alpha: HashMap<String, AlphaMode>,
+    surface: SurfaceMapsByPart,
 }
 
 impl HullTextures {
-    /// Adds the decoded albedo of each of `materials`, keyed by `.mfm` path.
+    /// Adds the decoded albedo and surface maps of each of `materials`, keyed
+    /// by `.mfm` path.
     fn extend(&mut self, materials: BTreeMap<String, ModelMaterial>) {
-        for (mfm_path, material) in materials {
+        for (mfm_path, mut material) in materials {
+            if let Some(maps) = model_surface_textures(&mut material) {
+                self.surface.insert(mfm_path.clone(), maps);
+            }
             let Some(image) = material.albedo.and_then(|albedo| albedo.image) else { continue };
             if material.alpha != AlphaMode::Opaque {
                 self.alpha.insert(mfm_path.clone(), material.alpha);
@@ -564,6 +573,7 @@ fn model_scene(
         hull_pick: OnceLock::new(),
         hull_textures: hull_textures.textures,
         hull_alpha: hull_textures.alpha,
+        hull_surface_maps: OnceLock::from(hull_textures.surface),
         hull_lod_count: lods.count,
         hull_lod: lods.shown,
         hull_upgrade_names: Vec::new(),

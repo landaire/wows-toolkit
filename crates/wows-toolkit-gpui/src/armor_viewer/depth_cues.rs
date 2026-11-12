@@ -164,7 +164,13 @@ pub(crate) fn build_waterline_grid(marks: &LengthMarks, layers: GridLayers) -> (
         ];
         for (x, z, faded) in corners {
             let color = [color[0], color[1], color[2], color[3] * faded];
-            vertices.push(Vertex { position: [x, plane_y, z], normal: [0., 1., 0.], color, uv: [0., 0.] });
+            vertices.push(Vertex {
+                position: [x, plane_y, z],
+                normal: [0., 1., 0.],
+                color,
+                uv: [0., 0.],
+                tangent: [0.0; 4],
+            });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     };

@@ -318,10 +318,34 @@ fn push_segment(
     for perpendicular in [across, up] {
         let offset = perpendicular * (LINE_WIDTH * 0.5);
         let base = vertices.len() as u32;
-        vertices.push(Vertex { position: (from - offset).into(), normal, color: color_from, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (from + offset).into(), normal, color: color_from, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (to + offset).into(), normal, color: color_to, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: (to - offset).into(), normal, color: color_to, uv: [0.0, 0.0] });
+        vertices.push(Vertex {
+            position: (from - offset).into(),
+            normal,
+            color: color_from,
+            uv: [0.0, 0.0],
+            tangent: [0.0; 4],
+        });
+        vertices.push(Vertex {
+            position: (from + offset).into(),
+            normal,
+            color: color_from,
+            uv: [0.0, 0.0],
+            tangent: [0.0; 4],
+        });
+        vertices.push(Vertex {
+            position: (to + offset).into(),
+            normal,
+            color: color_to,
+            uv: [0.0, 0.0],
+            tangent: [0.0; 4],
+        });
+        vertices.push(Vertex {
+            position: (to - offset).into(),
+            normal,
+            color: color_to,
+            uv: [0.0, 0.0],
+            tangent: [0.0; 4],
+        });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 }

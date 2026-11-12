@@ -2620,6 +2620,7 @@ impl ViewportView {
             RestPiece::Pick => self.hover_again(),
             // Read by the next draw of the camo picker.
             RestPiece::Camo => {}
+            RestPiece::SurfaceMaps => self.surface_maps_arrived(),
         }
         cx.notify();
     }
@@ -2631,6 +2632,12 @@ impl ViewportView {
         if over_view && self.drag.is_none() && self.camera_is_free() {
             self.update_plate_hover(at);
         }
+    }
+
+    /// Draws the hull again with the surface maps that have landed. A
+    /// material's cache key names its maps, so the uploaded albedos are reused.
+    fn surface_maps_arrived(&mut self) {
+        self.reupload_hull();
     }
 
     /// Shows `problem` in place of the scene. The scene stays loaded, so the

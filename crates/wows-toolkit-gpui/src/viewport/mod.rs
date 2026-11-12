@@ -22,4 +22,5 @@ pub mod gizmo;
 pub mod headless;
 pub mod picking;
 pub mod renderer;
+pub mod tangents;
 pub mod types;

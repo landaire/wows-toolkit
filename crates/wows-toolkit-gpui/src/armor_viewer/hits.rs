@@ -100,7 +100,7 @@ fn push_bar(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, axis: 
         let offset = perpendicular * (THICKNESS * 0.5);
         let base = vertices.len() as u32;
         for corner in [from - offset, from + offset, to + offset, to - offset] {
-            vertices.push(Vertex { position: corner.into(), normal, color, uv: [0.0, 0.0] });
+            vertices.push(Vertex { position: corner.into(), normal, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

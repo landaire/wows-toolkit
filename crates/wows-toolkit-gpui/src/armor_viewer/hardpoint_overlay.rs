@@ -147,7 +147,7 @@ fn push_diamond(center: [f32; 3], radius: f32, color: [f32; 4], vertices: &mut V
         [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
     for offset in offsets {
         let position = [center[0] + offset[0] * radius, center[1] + offset[1] * radius, center[2] + offset[2] * radius];
-        vertices.push(Vertex { position, normal: offset, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position, normal: offset, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
     }
     for face in FACES {
         indices.extend(face.iter().map(|&corner| base + corner as u32));
@@ -179,7 +179,7 @@ fn push_needle(
                 (side[2] * s + up[2] * u) * half_width,
             ];
             let position = [end[0] + offset[0], end[1] + offset[1], end[2] + offset[2]];
-            vertices.push(Vertex { position, normal: normalized(offset), color, uv: [0.0, 0.0] });
+            vertices.push(Vertex { position, normal: normalized(offset), color, uv: [0.0, 0.0], tangent: [0.0; 4] });
         }
     }
     for side in SIDES {

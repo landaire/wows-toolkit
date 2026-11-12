@@ -111,7 +111,13 @@ impl HeadlessDevice {
 mod tests {
     use super::*;
     use crate::viewport::camera::ArcballCamera;
+    use crate::viewport::renderer::AlbedoUv;
     use crate::viewport::renderer::LAYER_DEFAULT;
+    use crate::viewport::renderer::MaterialBinding;
+    use crate::viewport::renderer::MipChain;
+    use crate::viewport::renderer::TextureEncoding;
+    use crate::viewport::renderer::TextureImage;
+    use crate::viewport::tangents::vertex_tangents;
     use crate::viewport::types::Vec3;
     use crate::viewport::types::Vertex;
 
@@ -131,7 +137,7 @@ mod tests {
         ];
         let vertices: Vec<Vertex> = corners
             .iter()
-            .map(|&position| Vertex { position, normal: [0.0, 0.0, 1.0], color, uv: [0.0, 0.0] })
+            .map(|&position| Vertex { position, normal: [0.0, 0.0, 1.0], color, uv: [0.0, 0.0], tangent: [0.0; 4] })
             .collect();
         #[rustfmt::skip]
         let indices: Vec<u32> = vec![
@@ -206,5 +212,84 @@ mod tests {
                 "the {which} pixel is {encoded:?} shader-encoded and {srgb:?} sRGB"
             );
         }
+    }
+
+    /// Renders a lit, textured quad facing the camera with the given normal
+    /// and metal-gloss texels, and returns its center pixel.
+    fn lit_quad_center(headless: &HeadlessDevice, normal: Option<[u8; 4]>, metal_gloss: Option<[u8; 4]>) -> [u8; 4] {
+        let positions = [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.5, 0.5, 0.0], [-0.5, 0.5, 0.0]];
+        let normals = [[0.0, 0.0, 1.0]; 4];
+        let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        let indices = vec![0, 1, 2, 0, 2, 3];
+        let tangents = vertex_tangents(&positions, &normals, &uvs, &indices);
+        let vertices: Vec<Vertex> = (0..4)
+            .map(|i| Vertex {
+                position: positions[i],
+                normal: normals[i],
+                color: [1.0; 4],
+                uv: uvs[i],
+                tangent: tangents[i],
+            })
+            .collect();
+
+        let no_mips = MipChain::default();
+        let texel = |pixels: &[u8; 4], encoding| {
+            let image = TextureImage { pixels, width: 1, height: 1, mips: &no_mips };
+            headless.pipeline.upload_texture(&headless.device, &headless.queue, image, encoding)
+        };
+        let albedo = texel(&[128, 128, 128, 255], TextureEncoding::Srgb);
+        let normal = normal.map(|pixels| texel(&pixels, TextureEncoding::Linear));
+        let metal_gloss = metal_gloss.map(|pixels| texel(&pixels, TextureEncoding::Linear));
+        let binding = MaterialBinding {
+            albedo: &albedo,
+            normal: normal.as_ref(),
+            metal_gloss: metal_gloss.as_ref(),
+            alpha_cutoff: 0.0,
+            albedo_uv: AlbedoUv::IDENTITY,
+        };
+        let bind_group = headless.pipeline.create_material_bind_group(&headless.device, binding);
+
+        let mut viewport = Viewport3D::new();
+        let mesh =
+            viewport.add_textured_non_pickable_mesh(&headless.device, &vertices, &indices, LAYER_DEFAULT, bind_group);
+        viewport.set_lit(mesh, true);
+        viewport.camera = ArcballCamera::from_bounds(Vec3::new(-0.5, -0.5, -0.1), Vec3::new(0.5, 0.5, 0.1));
+        let size = TargetSize::new(64, 64).expect("a nonzero size");
+
+        let rgba = headless.render_rgba(&viewport, size);
+        let center = ((size.height() / 2 * size.width() + size.width() / 2) * 4) as usize;
+        [rgba[center], rgba[center + 1], rgba[center + 2], rgba[center + 3]]
+    }
+
+    /// A material without surface maps shades as one with a flat normal map
+    /// and no metal-gloss map; a tilted normal changes the shading, and under
+    /// a highlight so do gloss and metalness.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture surface_maps_change_only_what_they_name
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn surface_maps_change_only_what_they_name() {
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+
+        let plain = lit_quad_center(&headless, None, None);
+        let flat = lit_quad_center(&headless, Some([128, 128, 0, 255]), None);
+        let tilted = lit_quad_center(&headless, Some([230, 128, 0, 255]), None);
+        // Tilted toward the default key light's highlight, so gloss and metal show.
+        let toward_highlight = Some([255, 204, 0, 255]);
+        let matte = lit_quad_center(&headless, toward_highlight, Some([0, 0, 0, 255]));
+        let glossy = lit_quad_center(&headless, toward_highlight, Some([255, 0, 0, 255]));
+        let glossy_metal = lit_quad_center(&headless, toward_highlight, Some([255, 255, 0, 255]));
+        eprintln!("plain {plain:?} flat {flat:?} tilted {tilted:?}");
+        eprintln!("matte {matte:?} glossy {glossy:?} glossy metal {glossy_metal:?}");
+
+        assert!(plain.iter().zip(&flat).all(|(p, f)| p.abs_diff(*f) <= 1), "{plain:?} != {flat:?}");
+        let differs = |a: [u8; 4], b: [u8; 4]| a.iter().zip(&b).take(3).any(|(a, b)| a.abs_diff(*b) > 4);
+        assert!(differs(plain, tilted), "{plain:?} ~ {tilted:?}");
+        assert!(differs(matte, glossy), "gloss narrows the highlight: {matte:?} ~ {glossy:?}");
+        assert!(differs(glossy, glossy_metal), "metal tints it by the gray albedo: {glossy:?} ~ {glossy_metal:?}");
     }
 }

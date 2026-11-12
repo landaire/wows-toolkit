@@ -12,10 +12,12 @@ use std::sync::atomic::Ordering;
 use rootcause::Report;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::ship::ShipModelContext;
+use wowsunpack::export::texture::TextureLod;
 
 use super::hull_picking::HullPickIndex;
 use super::hull_picking::MeshSource;
 use super::load_ship::LoadedShipArmor;
+use super::surface_maps::decode_ship_surface_maps;
 
 /// Asks a running load to stop. Clones share one flag.
 #[derive(Clone, Debug)]
@@ -40,6 +42,8 @@ pub(crate) enum RestPiece {
     Pick,
     /// The camouflage schemes a ship can wear.
     Camo,
+    /// The hull's normal and metal-gloss maps.
+    SurfaceMaps,
 }
 
 /// A job of the background stage, with what it reads from.
@@ -49,6 +53,9 @@ pub(crate) enum RestJob {
     Pick(Vec<MeshSource>),
     /// Lists a ship's camouflage schemes.
     Camo(Arc<ShipModelContext>),
+    /// Decodes the surface maps of a ship's hull materials at the detail its
+    /// albedos were decoded at.
+    SurfaceMaps { ctx: Arc<ShipModelContext>, lod: TextureLod },
 }
 
 /// Why a background job stored nothing.
@@ -139,6 +146,7 @@ impl RestJob {
         match self {
             Self::Pick(_) => RestPiece::Pick,
             Self::Camo(_) => RestPiece::Camo,
+            Self::SurfaceMaps { .. } => RestPiece::SurfaceMaps,
         }
     }
 
@@ -162,6 +170,11 @@ impl RestJob {
                 cancel.checkpoint()?;
                 let _ = scene.camo_source.set(source);
                 let _ = scene.camo_scheme_infos.set(infos);
+            }
+            Self::SurfaceMaps { ctx, lod } => {
+                let maps = decode_ship_surface_maps(&ctx, &scene.hull_meshes, lod, cancel)?;
+                cancel.checkpoint()?;
+                let _ = scene.hull_surface_maps.set(maps);
             }
         }
 

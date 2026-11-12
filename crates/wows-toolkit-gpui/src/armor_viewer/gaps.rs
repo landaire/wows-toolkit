@@ -181,6 +181,7 @@ fn ribbons(edges: &[EdgeData]) -> (Vec<Vertex>, Vec<u32>) {
                         normal,
                         color: GAP_COLOR,
                         uv: [0.0, 0.0],
+                        tangent: [0.0; 4],
                     });
                 }
             }

@@ -51,13 +51,23 @@ fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
 @group(1) @binding(0) var diffuse_texture: texture_2d<f32>;
 @group(1) @binding(1) var diffuse_sampler: sampler;
 
-@group(1) @binding(2) var<uniform> texture_params: vec4<f32>;
+struct MaterialParams {
+    // x: alpha cutoff, y: 1 with a normal map, z: 1 with a metal-gloss map.
+    flags: vec4<f32>,
+    // xy: albedo UV scale, zw: albedo UV offset.
+    albedo_uv: vec4<f32>,
+};
+
+@group(1) @binding(2) var<uniform> material: MaterialParams;
+@group(1) @binding(3) var normal_texture: texture_2d<f32>;
+@group(1) @binding(4) var metal_gloss_texture: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
     @location(3) uv: vec2<f32>,
+    @location(4) tangent: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -66,6 +76,7 @@ struct VertexOutput {
     @location(1) normal_vs: vec3<f32>,
     @location(2) position_vs: vec3<f32>,
     @location(3) uv: vec2<f32>,
+    @location(4) tangent_vs: vec4<f32>,
 };
 
 @vertex
@@ -76,18 +87,44 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.position_vs = (uniforms.model_view * vec4(in.position, 1.0)).xyz;
     out.color = in.color;
     out.uv = in.uv;
+    out.tangent_vs = vec4((uniforms.model_view * vec4(in.tangent.xyz, 0.0)).xyz, in.tangent.w);
     return out;
+}
+
+// The normal a tangent-space map sample gives. The map stores X and Y only;
+// Z is rebuilt. A vertex without a tangent keeps the geometric normal.
+fn mapped_normal(n: vec3<f32>, tangent: vec4<f32>, encoded: vec2<f32>) -> vec3<f32> {
+    let along_u = tangent.xyz - n * dot(n, tangent.xyz);
+    let length_u = length(along_u);
+    if (length_u < 1e-5) {
+        return n;
+    }
+    let t = along_u / length_u;
+    let b = cross(n, t) * tangent.w;
+    let xy = encoded * 2.0 - 1.0;
+    let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
+    return normalize(t * xy.x + b * xy.y + n * z);
 }
 
 @fragment
 fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // Sample texture and multiply with vertex color.
     // Non-textured meshes bind a 1x1 white fallback, so this is a passthrough.
-    let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    // Maps are sampled before the discard, where derivatives are defined, and
+    // only when the material has them; the flags are uniform per draw.
+    let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv * material.albedo_uv.xy + material.albedo_uv.zw);
+    var normal_sample = vec4<f32>(0.5, 0.5, 1.0, 1.0);
+    if (material.flags.y > 0.5) {
+        normal_sample = textureSample(normal_texture, diffuse_sampler, in.uv);
+    }
+    var metal_gloss = vec4<f32>(0.0);
+    if (material.flags.z > 0.5) {
+        metal_gloss = textureSample(metal_gloss_texture, diffuse_sampler, in.uv);
+    }
     // A sample under the texture's alpha cutoff draws nothing, so the cut-out
     // parts of an alpha-tested texture neither show nor hide what lies behind
-    // them. x holds the cutoff.
-    if (tex_color.a < texture_params.x) {
+    // them.
+    if (tex_color.a < material.flags.x) {
         discard;
     }
     let base_color = tex_color * in.color;
@@ -99,6 +136,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
         // The hull is double-sided; flip the normal on back faces so both sides shade
         // consistently and the see-through hull does not show a hard front/back seam.
         var N = normalize(in.normal_vs);
+        if (material.flags.y > 0.5) {
+            N = mapped_normal(N, in.tangent_vs, normal_sample.xy);
+        }
         if (!front_facing) {
             N = -N;
         }
@@ -106,7 +146,19 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
         let L = normalize(uniforms.light_dir.xyz);
         let half_lambert = dot(N, L) * 0.5 + 0.5;
         let H = normalize(L + V);
-        let spec = pow(max(dot(N, H), 0.0), uniforms.params.w) * uniforms.params.z;
+
+        // Gloss scales the set shininess from a quarter (matte) to four times
+        // (glossy) and strengthens the highlight; metal tints it by the albedo.
+        var shininess = uniforms.params.w;
+        var spec_strength = uniforms.params.z;
+        var spec_color = vec3<f32>(1.0, 1.0, 1.0);
+        if (material.flags.z > 0.5) {
+            let gloss = metal_gloss.r;
+            shininess = shininess * exp2((gloss - 0.5) * 4.0);
+            spec_strength = spec_strength * (0.5 + gloss);
+            spec_color = mix(spec_color, min(base_color.rgb, vec3<f32>(1.0)), metal_gloss.g);
+        }
+        let spec = pow(max(dot(N, H), 0.0), shininess) * spec_strength;
         let rim = pow(1.0 - max(dot(N, V), 0.0), uniforms.params.y) * uniforms.params.x;
         // Fade the directional terms (key, rim, specular) as the surface becomes
         // transparent. A see-through hull shows its near and far walls at once, and a
@@ -114,9 +166,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
         // Leaning on the seamless flat ambient term for transparent surfaces hides it;
         // opaque geometry occludes its far wall via depth and keeps full directional.
         let dir_factor = smoothstep(0.5, 1.0, base_color.a);
-        let directional = (rim + spec) * dir_factor;
+        let directional = (vec3<f32>(rim) + spec_color * spec) * dir_factor;
         let lighting = uniforms.flat_color.rgb + uniforms.key_color.rgb * half_lambert * dir_factor;
-        color = base_color.rgb * lighting + vec3<f32>(directional, directional, directional);
+        color = base_color.rgb * lighting + directional;
     }
 
     if (ENCODE_SRGB) {
@@ -128,8 +180,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MSAA_SAMPLE_COUNT: u32 = 4;
-/// Bytes of the per-texture uniform: the alpha cutoff, padded to a `vec4`.
-const TEXTURE_PARAMS_SIZE: u64 = 16;
+/// Bytes of the per-material uniform the fragment shader reads.
+const MATERIAL_PARAMS_SIZE: u64 = std::mem::size_of::<MaterialUniform>() as u64;
 
 /// The color format the scene is drawn in, and where its sRGB encoding happens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,6 +231,9 @@ pub struct GpuPipeline {
     default_sampler: wgpu::Sampler,
     /// 1x1 white texture bind group — bound for non-textured meshes.
     fallback_texture_bind_group: wgpu::BindGroup,
+    /// 1x1 flat normal, bound where a material lacks a surface map. The
+    /// material's flags keep the shader from reading it.
+    absent_map_view: wgpu::TextureView,
 }
 
 impl GpuPipeline {
@@ -202,19 +257,20 @@ impl GpuPipeline {
             }],
         });
 
+        let texture_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("viewport_3d_texture_bgl"),
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
+                texture_entry(0),
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -227,10 +283,12 @@ impl GpuPipeline {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(TEXTURE_PARAMS_SIZE),
+                        min_binding_size: wgpu::BufferSize::new(MATERIAL_PARAMS_SIZE),
                     },
                     count: None,
                 },
+                texture_entry(3),
+                texture_entry(4),
             ],
         });
 
@@ -352,39 +410,28 @@ impl GpuPipeline {
             ..Default::default()
         });
 
-        // Create 1x1 white fallback texture.
-        let fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_fallback_texture"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &fallback_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255u8, 255, 255, 255],
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        // 1x1 white albedo for non-textured meshes, and a 1x1 flat normal for
+        // absent surface maps.
+        let no_mips = MipChain::default();
+        let white = TextureImage { pixels: &[255, 255, 255, 255], width: 1, height: 1, mips: &no_mips };
+        let fallback_view = upload_texture(device, queue, white, TextureEncoding::Srgb);
+        let flat_normal = TextureImage { pixels: &[128, 128, 255, 255], width: 1, height: 1, mips: &no_mips };
+        let absent_map_view = upload_texture(device, queue, flat_normal, TextureEncoding::Linear);
+        // The fallback is opaque white, which no cutoff discards.
+        let fallback_binding = MaterialBinding {
+            albedo: &fallback_view,
+            normal: None,
+            metal_gloss: None,
+            alpha_cutoff: 0.0,
+            albedo_uv: AlbedoUv::IDENTITY,
+        };
+        let fallback_texture_bind_group = material_bind_group(
+            device,
+            &texture_bind_group_layout,
+            &default_sampler,
+            &absent_map_view,
+            fallback_binding,
         );
-        let fallback_view = fallback_texture.create_view(&Default::default());
-        let fallback_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewport_3d_fallback_texture_bg"),
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&fallback_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&default_sampler) },
-                // The fallback is opaque white, which no cutoff discards.
-                wgpu::BindGroupEntry { binding: 2, resource: texture_params_buffer(device, 0.0).as_entire_binding() },
-            ],
-        });
 
         Self {
             color,
@@ -395,6 +442,7 @@ impl GpuPipeline {
             texture_bind_group_layout,
             default_sampler,
             fallback_texture_bind_group,
+            absent_map_view,
         }
     }
 
@@ -402,59 +450,27 @@ impl GpuPipeline {
         self.color
     }
 
-    /// Create a texture bind group from RGBA8 pixels and the lower levels of
-    /// their mip chain, so a texture seen from afar is filtered rather than
-    /// aliased. Samples with alpha below `alpha_cutoff` are not drawn.
-    pub fn create_texture_bind_group(
+    /// Uploads RGBA8 pixels and the lower levels of their mip chain, so a
+    /// texture seen from afar is filtered rather than aliased.
+    pub fn upload_texture(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         image: TextureImage<'_>,
-        alpha_cutoff: f32,
-    ) -> wgpu::BindGroup {
-        let TextureImage { pixels, width, height, mips } = image;
-        let top = (width, height, pixels);
-        let lower = mips.levels.iter().map(|level| (level.width, level.height, level.pixels.as_slice()));
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_3d_hull_texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1 + mips.levels.len() as u32,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        encoding: TextureEncoding,
+    ) -> wgpu::TextureView {
+        upload_texture(device, queue, image, encoding)
+    }
 
-        for (mip_level, (level_width, level_height, pixels)) in (0u32..).zip(std::iter::once(top).chain(lower)) {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                pixels,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * level_width),
-                    rows_per_image: Some(level_height),
-                },
-                wgpu::Extent3d { width: level_width, height: level_height, depth_or_array_layers: 1 },
-            );
-        }
-
-        let view = texture.create_view(&Default::default());
-        let cutoff = texture_params_buffer(device, alpha_cutoff);
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewport_3d_texture_bg"),
-            layout: &self.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
-                wgpu::BindGroupEntry { binding: 2, resource: cutoff.as_entire_binding() },
-            ],
-        })
+    /// The bind group a mesh draws `material` with.
+    pub fn create_material_bind_group(&self, device: &wgpu::Device, material: MaterialBinding<'_>) -> wgpu::BindGroup {
+        material_bind_group(
+            device,
+            &self.texture_bind_group_layout,
+            &self.default_sampler,
+            &self.absent_map_view,
+            material,
+        )
     }
 }
 
@@ -467,17 +483,141 @@ pub struct TextureImage<'a> {
     pub mips: &'a MipChain,
 }
 
-/// The per-texture uniform the fragment shader reads: `x` is the alpha
-/// cutoff, the rest pads it to the 16 bytes a uniform binding takes.
-fn texture_params_buffer(device: &wgpu::Device, alpha_cutoff: f32) -> wgpu::Buffer {
+/// How a texture's bytes are read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextureEncoding {
+    /// sRGB-encoded color, linearized by the sampler.
+    Srgb,
+    /// Data read as stored, such as normal and metal-gloss maps.
+    Linear,
+}
+
+impl TextureEncoding {
+    fn format(self) -> wgpu::TextureFormat {
+        match self {
+            Self::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+            Self::Linear => wgpu::TextureFormat::Rgba8Unorm,
+        }
+    }
+}
+
+/// A scale then offset applied to the UVs the albedo is sampled at. The
+/// surface maps keep the mesh's own UVs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AlbedoUv {
+    pub scale: [f32; 2],
+    pub offset: [f32; 2],
+}
+
+impl AlbedoUv {
+    pub const IDENTITY: Self = Self { scale: [1.0, 1.0], offset: [0.0, 0.0] };
+}
+
+/// What one material binds: its albedo, the surface maps it has, and how
+/// the albedo is sampled. Samples with alpha below `alpha_cutoff` are not
+/// drawn.
+pub struct MaterialBinding<'a> {
+    pub albedo: &'a wgpu::TextureView,
+    pub normal: Option<&'a wgpu::TextureView>,
+    pub metal_gloss: Option<&'a wgpu::TextureView>,
+    pub alpha_cutoff: f32,
+    pub albedo_uv: AlbedoUv,
+}
+
+impl MaterialBinding<'_> {
+    fn uniform(&self) -> MaterialUniform {
+        let present = |map: Option<&wgpu::TextureView>| if map.is_some() { 1.0 } else { 0.0 };
+        let AlbedoUv { scale, offset } = self.albedo_uv;
+
+        MaterialUniform {
+            flags: [self.alpha_cutoff, present(self.normal), present(self.metal_gloss), 0.0],
+            albedo_uv: [scale[0], scale[1], offset[0], offset[1]],
+        }
+    }
+}
+
+/// The per-material uniform the fragment shader reads as `MaterialParams`.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+struct MaterialUniform {
+    /// Alpha cutoff, normal map present, metal-gloss map present, unused.
+    flags: [f32; 4],
+    /// Albedo UV scale, then offset.
+    albedo_uv: [f32; 4],
+}
+
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: TextureImage<'_>,
+    encoding: TextureEncoding,
+) -> wgpu::TextureView {
+    let TextureImage { pixels, width, height, mips } = image;
+    let top = (width, height, pixels);
+    let lower = mips.levels.iter().map(|level| (level.width, level.height, level.pixels.as_slice()));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewport_3d_texture"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1 + mips.levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: encoding.format(),
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    for (mip_level, (level_width, level_height, pixels)) in (0u32..).zip(std::iter::once(top).chain(lower)) {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * level_width),
+                rows_per_image: Some(level_height),
+            },
+            wgpu::Extent3d { width: level_width, height: level_height, depth_or_array_layers: 1 },
+        );
+    }
+
+    texture.create_view(&Default::default())
+}
+
+fn material_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    absent_map: &wgpu::TextureView,
+    material: MaterialBinding<'_>,
+) -> wgpu::BindGroup {
     use wgpu::util::DeviceExt;
 
-    let params: [f32; 4] = [alpha_cutoff, 0.0, 0.0, 0.0];
-
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("viewport_3d_texture_params"),
-        contents: bytemuck::cast_slice(&params),
+    let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("viewport_3d_material_params"),
+        contents: bytemuck::bytes_of(&material.uniform()),
         usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("viewport_3d_material_bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(material.albedo) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: params.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(material.normal.unwrap_or(absent_map)),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(material.metal_gloss.unwrap_or(absent_map)),
+            },
+        ],
     })
 }
 

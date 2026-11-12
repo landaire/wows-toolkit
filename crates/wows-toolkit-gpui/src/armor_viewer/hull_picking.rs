@@ -404,7 +404,7 @@ pub fn highlight_geometry(
                 position[2] + normal[2] * NORMAL_OFFSET,
             ];
 
-            Some(Vertex { position, normal, color, uv: [0.0, 0.0] })
+            Some(Vertex { position, normal, color, uv: [0.0, 0.0], tangent: [0.0; 4] })
         };
         for corners in mesh.indices.chunks_exact(3) {
             let (Some(a), Some(b), Some(c)) = (vertex(corners[0]), vertex(corners[1]), vertex(corners[2])) else {
