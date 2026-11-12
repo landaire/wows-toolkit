@@ -9,7 +9,7 @@ use std::cmp::Reverse;
 use wows_replays::types::TeamId;
 use wowsunpack::game_params::types::Species;
 
-use super::model::PlayerRow;
+use crate::model::PlayerRow;
 
 /// Internal sort key that allows comparison across different value types.
 /// Mirrors `sorting.rs::SortKey`.
@@ -171,7 +171,7 @@ mod tests {
     use wows_replays::types::Relation;
 
     use super::*;
-    use crate::replay_inspector::test_support::base_row;
+    use crate::test_support::base_row;
 
     fn row_with(db_id: i64, team: i64, relation: Relation, is_self: bool, actual_damage: Option<u64>) -> PlayerRow {
         PlayerRow {

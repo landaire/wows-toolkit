@@ -1,8 +1,8 @@
-//! Presentation layer for the replay inspector: the file-browser grouping
-//! model and tree view (`browser`/`browser_view`), the row model, column
-//! formatting, sort, and the custom player table (`model`/`columns`/`sort`/
-//! `table`/`expanded`). Colors are represented as `ColorRole` and resolved to
-//! real colors by the render layer (`table.rs`, `browser_view.rs`). `load`
+//! Presentation layer for the replay inspector: the file-browser tree view
+//! (`browser_view`) and the custom player table (`table`/`expanded`) over the
+//! row model, columns and sort of `wows_toolkit_replay_data`. Colors arrive as
+//! `ColorRole` and are resolved to real colors here (`table.rs`,
+//! `browser_view.rs`, `player_colors.rs`). `load`
 //! runs the background replay parse (`spawn_parse`) that produces a
 //! `ReplayReportModel` from a `.wowsreplay` file; `panel`/`view` tie it all
 //! together into the dock tab `app.rs` mounts (one `ReplayPanel` per open
@@ -13,45 +13,29 @@
 // later milestone).
 #![allow(unused_imports)]
 
-pub mod browser;
 pub mod browser_view;
 pub mod chat;
-pub mod columns;
 pub mod controls;
 pub mod damage_mix;
 mod debug_view;
 mod empty_map;
 pub mod expanded;
 pub mod icons;
-pub mod links;
 pub mod load;
 mod map_thumbnails;
-pub mod model;
 pub mod panel;
-pub mod sample;
-pub mod sort;
+pub(crate) mod player_colors;
 pub mod table;
 mod team_bands;
 pub mod view;
 
 #[cfg(test)]
 pub(crate) mod simulated_watch;
-#[cfg(test)]
-pub(crate) mod test_support;
 
-pub use browser::BrowserNode;
-pub use browser::ReplayLite;
-pub use browser::build_browser_tree;
 pub use browser_view::MissingBuild;
 pub use browser_view::ReplayBrowser;
 pub use browser_view::ReplayBrowserEvent;
 pub use chat::ChatPanel;
-pub use columns::CellValue;
-pub use columns::ColorRole;
-pub use columns::ReplayColumn;
-pub use columns::cell_value;
-pub use columns::default_columns;
-pub use columns::separate_number;
 pub use debug_view::RawJsonPanel;
 pub use icons::IconCache;
 pub use load::GameDataCache;
@@ -61,14 +45,7 @@ pub use load::ReplayLoadError;
 pub use load::load_game_params;
 pub use load::spawn_parse;
 pub use load::spawn_startup_preload;
-pub use model::ChatMessage;
-pub use model::PlayerRow;
-pub use model::ReplayReportModel;
 pub use panel::ReplayPanel;
-pub use sample::sample_model;
-pub use sort::SortColumn;
-pub use sort::SortOrder;
-pub use sort::sort_rows;
 pub use table::PlayerTable;
 pub use view::InspectorSettings;
 pub use view::ReplayInspectorView;

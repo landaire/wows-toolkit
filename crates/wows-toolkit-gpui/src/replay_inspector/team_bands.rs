@@ -9,9 +9,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_replays::types::TeamId;
-
-use super::model::PlayerRow;
-use super::model::separate_number;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::separate_number;
 
 /// Width of the side stripe in a row's left gutter.
 const STRIPE_WIDTH: Pixels = px(3.);
@@ -174,8 +173,8 @@ pub fn heading(run: TeamRun, damage: TeamDamage, cx: &App) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use wows_replays::types::Relation;
+    use wows_toolkit_replay_data::test_support::base_row;
 
-    use super::super::test_support::base_row;
     use super::PlayerRow;
     use super::TeamDamage;
     use super::TeamId;

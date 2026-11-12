@@ -23,6 +23,7 @@ GPUI_DEPS = [
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-client:wt_collab_client",
@@ -35,7 +36,6 @@ GPUI_DEPS = [
     "//third-party/rust:clap",
     "//third-party/rust:windows-sys",
     "//third-party/rust:csv",
-    "//third-party/rust:escaper",
     "//third-party/rust:fontdb",
     "//third-party/rust:futures",
     "//third-party/rust:gettext",
@@ -121,6 +121,7 @@ workspace_binary(
 
 _TEST_SUPPORT_VARIANTS = {
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 }
 

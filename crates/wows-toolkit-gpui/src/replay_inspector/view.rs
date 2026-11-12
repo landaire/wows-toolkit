@@ -44,13 +44,13 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
 use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
-use super::columns::default_columns;
 use super::empty_map::sample_map;
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
@@ -2751,7 +2751,7 @@ mod tests {
             file_mtime: None,
             outcome: MatchOutcome::Win,
             self_account_id: None,
-            self_ship_id: Some(GameParamId::from(crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID)),
+            self_ship_id: Some(GameParamId::from(wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID)),
             self_survived: Some(true),
             self_damage: Some(50_000),
             self_kills: Some(1),
@@ -2780,7 +2780,7 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| browser.read(cx).listed_rating_for_test(&path)), None, "no rating yet");
 
-        let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+        let table = std::sync::Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
         view.update(cx, |view, cx| view.set_personal_rating(table, cx));
         cx.run_until_parked();
 

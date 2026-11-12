@@ -8,12 +8,10 @@ use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
-use wows_replays::types::Relation;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::breakdown;
 
-use super::model::PlayerRow;
-pub use super::model::separate_number;
+use crate::model::PlayerRow;
 
 /// All displayable columns in the replay player list, in the same
 /// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus
@@ -339,7 +337,7 @@ pub enum BattleOutcome {
     Draw,
 }
 
-pub(crate) const NDA: &str = "NDA";
+pub const NDA: &str = "NDA";
 const DASH: &str = "-";
 
 /// Display text, optional color role, and optional hover text for one cell.
@@ -366,55 +364,9 @@ impl CellValue {
     }
 }
 
-/// Packed `0xRRGGBB` color for the self/ally/enemy team-relation triad.
-///
-/// The tones are the app's own (`crate::theme::semantic`), so they follow the
-/// palette on screen rather than being a second set of literals: self is
-/// emphasised body text, an ally reads as a win and an enemy as a loss, which
-/// is what the egui table colours them (`ui/replay_parser/models.rs`).
-pub(crate) fn relation_color_rgb(relation: Relation) -> u32 {
-    let semantic = crate::theme::semantic();
-    if relation.is_self() {
-        semantic.text_strong
-    } else if relation.is_ally() {
-        semantic.win
-    } else {
-        semantic.loss
-    }
-}
-
-/// Packed `0xRRGGBB` color for a `PlayerColorKind` in the palette on screen.
-/// `table.rs::resolve_color`'s `ColorRole::Player` arm resolves through it
-/// for the name text and stat cells.
-pub(crate) fn player_color_kind_rgb(kind: PlayerColorKind) -> u32 {
-    player_tone(kind, crate::theme::semantic())
-}
-
-/// The tint a ship-class icon takes for `kind`, in either theme: the dark
-/// theme's tones. The tint multiplies the icon's white body, so a dark tone
-/// leaves the body the shade of its outline and the icon reads as a solid
-/// shape; a bright one keeps the body and the outline apart.
-pub(crate) fn class_icon_tint(kind: PlayerColorKind) -> u32 {
-    player_tone(kind, &crate::theme::DARK_SEMANTIC)
-}
-
-/// The tone `kind` takes in `tones`: self is emphasised body text, an ally
-/// reads as a win and an enemy as a loss, as `relation_color_rgb` colours
-/// them.
-fn player_tone(kind: PlayerColorKind, tones: &crate::theme::Semantic) -> u32 {
-    match kind {
-        PlayerColorKind::SelfPlayer => tones.text_strong,
-        PlayerColorKind::Ally => tones.win,
-        PlayerColorKind::Enemy => tones.loss,
-        PlayerColorKind::DivisionMate => tones.division,
-        PlayerColorKind::Abuser => tones.abuser,
-    }
-}
-
 /// The team/division-relative color of a row: the ship-class icon tint and
-/// the actions menu heading. `pub(crate)` for the
-/// render layer (`table.rs`).
-pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
+/// the actions menu heading.
+pub fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_self_division_mate {
         return PlayerColorKind::DivisionMate;
     }
@@ -428,8 +380,8 @@ pub(crate) fn player_color_kind(row: &PlayerRow) -> PlayerColorKind {
 }
 
 /// The actions menu heading's name color: pink for abusers, otherwise the
-/// row's team/division color. `pub(crate)`; see `player_color_kind`.
-pub(crate) fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
+/// row's team/division color; see `player_color_kind`.
+pub fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
     if row.is_abuser { PlayerColorKind::Abuser } else { player_color_kind(row) }
 }
 
@@ -577,15 +529,9 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
 mod tests {
     use wows_replay_insights::personal_rating::PersonalRatingResult;
     use wows_replays::types::Relation;
-    use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 
     use super::*;
-    use crate::replay_inspector::test_support::base_row;
-
-    #[test]
-    fn separate_number_is_reexported_and_groups_by_thousands() {
-        assert_eq!(separate_number(1_234_567i64), "1,234,567");
-    }
+    use crate::test_support::base_row;
 
     #[test]
     fn default_columns_always_on_only() {

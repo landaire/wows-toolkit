@@ -47,6 +47,9 @@ humansize = "2.1.3"
 # extraction, search), shared with the egui app so the two front ends cannot
 # drift apart on what they show.
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
+# Game-data loading, replay parsing and the replay model, shared with the
+# other desktop front end.
+wows-toolkit-replay-data = { workspace = true }
 # The Launcher tab's state and background work, shared with the egui app, and
 # the launcher crates whose types the tab shows.
 wows-toolkit-launcher = { workspace = true }
@@ -107,7 +110,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", 
 # The rotated log file a bug report is copied from.
 tracing-appender = "0.2"
 thiserror = "2.0"
-escaper = "0.1.1"
 gettext = "0.4"
 # Channels for streaming extraction progress from the background pool back to
 # the view. Already in the graph under GPUI; this names it directly.
@@ -178,6 +180,8 @@ jiff = "0.2"
 # Lets the tests point `storage_dir` at a temporary directory, so no test
 # reads or writes the running user's own data.
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
+# Row and battle-report fixtures.
+wows-toolkit-replay-data = { workspace = true, features = ["test-support"] }
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"
