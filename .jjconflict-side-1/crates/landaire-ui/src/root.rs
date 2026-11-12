@@ -12,6 +12,7 @@ use zgui_ui_tokens::ThemeProviderProps;
 use crate::motion::MotionPreference;
 use crate::motion::REDUCED_MOTION_ATTRIBUTE;
 use crate::scheme::ThemeChoice;
+use crate::surface;
 use crate::tokens;
 
 /// What the `--lui-*` properties are installed under.
@@ -33,6 +34,8 @@ pub fn ThemeRoot(
     zoom: Option<Signal<Zoom, LocalStorage>>,
     children: Children,
 ) -> impl IntoView {
+    install_stylesheet(surface::SHEET, surface::CSS);
+
     let sheet = Stylesheet::install(SHEET, &tokens::lui_sheet(choice.get_untracked()));
     let installed = RenderEffect::new(move |previous: Option<()>| {
         let css = tokens::lui_sheet(choice.get());
