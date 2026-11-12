@@ -1887,6 +1887,7 @@ loading = "A carregar modelos..."
 unavailable = "Modelos indisponíveis"
 search = "Pesquisar navios e modelos..."
 open = "Abrir"
+export = "Exportar modelo"
 copy_path = "Copiar caminho do modelo"
 hardpoints_tooltip = "Mostrar pontos de fixação"
 

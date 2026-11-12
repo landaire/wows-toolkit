@@ -1887,6 +1887,7 @@ loading = "Wczytywanie modeli..."
 unavailable = "Modele niedostępne"
 search = "Szukaj okrętów i modeli..."
 open = "Otwórz"
+export = "Eksportuj model"
 copy_path = "Kopiuj ścieżkę modelu"
 hardpoints_tooltip = "Pokaż punkty mocowania"
 

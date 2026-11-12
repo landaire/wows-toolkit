@@ -1933,6 +1933,7 @@ loading = "Chargement des modèles..."
 unavailable = "Modèles indisponibles"
 search = "Rechercher des navires et des modèles..."
 open = "Ouvrir"
+export = "Exporter le modèle"
 copy_path = "Copier le chemin du modèle"
 hardpoints_tooltip = "Afficher les points d'attache"
 

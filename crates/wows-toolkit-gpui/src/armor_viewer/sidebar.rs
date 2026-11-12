@@ -10,7 +10,7 @@
 //! which only materializes the expanded folders.
 //!
 //! A ship row's context menu offers "Compare (split view)" ([`CompareSplit`])
-//! and "Export model" ([`ExportModelRequested`]); a model or part row's offers
+//! and "Export ship model" ([`ExportModelRequested`]); a model or part row's offers
 //! "Open", "Export model" ([`ExportCatalogModelRequested`]) and "Copy model
 //! path".
 
@@ -99,7 +99,7 @@ pub struct CompareSplit {
     pub ship: Option<ExportModelRequested>,
 }
 
-/// Emitted when the user picks "Export model" from a ship row's right-click
+/// Emitted when the user picks "Export ship model" from a ship row's right-click
 /// context menu: `pane.rs` responds by exporting this ship at stock
 /// hull/default LOD, independent of any pane's own selection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -659,7 +659,7 @@ fn row_context_menu(sidebar: &Entity<Sidebar>, kind: Option<&RowKind>, menu: Pop
         let request = selection.clone();
         open_entity.update(cx, |_sidebar, cx| cx.emit(request));
     }))
-    .item(PopupMenuItem::new(t!("ui.armor.export_model").into_owned()).on_click(move |_event, _window, cx| {
+    .item(PopupMenuItem::new(t!("ui.models.export").into_owned()).on_click(move |_event, _window, cx| {
         let request = export.clone();
         export_entity.update(cx, |_sidebar, cx| cx.emit(request));
     }))
@@ -824,6 +824,40 @@ mod tests {
         window
             .update(cx, |sidebar, _window, cx| sidebar.tree_state.read(cx).selected_index())
             .expect("the window is open")
+    }
+
+    /// Opens row `row`'s context menu and lists the labels it offers, sorted.
+    fn row_menu_labels(window: WindowHandle<Sidebar>, row: usize, cx: &mut TestAppContext) -> Vec<String> {
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.right_click(("armor-sidebar-row", row), cx);
+        })
+        .expect("the window is open");
+        // The menu opens through a deferred effect.
+        cx.run_until_parked();
+
+        let mut labels: Vec<String> = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                crate::interaction_tests::menu_items(window)
+                    .into_iter()
+                    .filter_map(|(_, item)| item.label().map(str::to_owned))
+                    .collect()
+            })
+            .expect("the window is open");
+        labels.sort();
+
+        labels
+    }
+
+    #[gpui_kit::test]
+    fn a_catalogue_model_row_offers_to_export_the_model(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        window.update(cx, |sidebar, _window, cx| sidebar.apply_query("agm034".to_string(), cx)).expect("open");
+        let turret = fixture::path(fixture::IOWA_TURRET);
+        let row = row_index(&window, &model_row_id(&turret), cx).expect("the search lists the turret");
+
+        assert_eq!(row_menu_labels(window, row, cx), ["Copy model path", "Export Model", "Open"]);
     }
 
     #[gpui_kit::test]

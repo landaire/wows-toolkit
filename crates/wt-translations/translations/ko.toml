@@ -1933,6 +1933,7 @@ loading = "모델 불러오는 중..."
 unavailable = "모델을 사용할 수 없음"
 search = "함선 및 모델 검색..."
 open = "열기"
+export = "모델 내보내기"
 copy_path = "모델 경로 복사"
 hardpoints_tooltip = "부착 지점 표시"
 

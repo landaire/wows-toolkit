@@ -1933,6 +1933,7 @@ loading = "กำลังโหลดโมเดล..."
 unavailable = "ไม่มีโมเดล"
 search = "ค้นหาเรือและโมเดล..."
 open = "เปิด"
+export = "ส่งออกโมเดล"
 copy_path = "คัดลอกพาธโมเดล"
 hardpoints_tooltip = "แสดงจุดยึด"
 

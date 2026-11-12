@@ -1887,6 +1887,7 @@ loading = "Modeller yükleniyor..."
 unavailable = "Modeller kullanılamıyor"
 search = "Gemi ve model ara..."
 open = "Aç"
+export = "Modeli Dışa Aktar"
 copy_path = "Model yolunu kopyala"
 hardpoints_tooltip = "Bağlantı noktalarını göster"
 

@@ -1933,6 +1933,7 @@ loading = "モデルを読み込み中..."
 unavailable = "モデルを利用できません"
 search = "艦艇とモデルを検索..."
 open = "開く"
+export = "モデルをエクスポート"
 copy_path = "モデルパスをコピー"
 hardpoints_tooltip = "取り付け位置を表示"
 

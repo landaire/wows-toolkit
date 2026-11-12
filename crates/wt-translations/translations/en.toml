@@ -1959,6 +1959,7 @@ loading = "Loading models..."
 unavailable = "Models unavailable"
 search = "Search ships and models..."
 open = "Open"
+export = "Export Model"
 copy_path = "Copy model path"
 hardpoints_tooltip = "Show attachment points"
 

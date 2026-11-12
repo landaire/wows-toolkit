@@ -1933,6 +1933,7 @@ loading = "正在載入模型..."
 unavailable = "模型無法使用"
 search = "搜尋艦船與模型..."
 open = "開啟"
+export = "匯出模型"
 copy_path = "複製模型路徑"
 hardpoints_tooltip = "顯示掛載點"
 
