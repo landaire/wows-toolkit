@@ -45,3 +45,5 @@ serde_json.workspace = true
 [[example]]
 name = "gallery"
 required-features = ["test-support"]
+# Its tests open every section.
+test = true

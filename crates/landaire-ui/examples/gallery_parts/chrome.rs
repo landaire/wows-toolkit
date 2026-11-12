@@ -23,6 +23,7 @@ use landaire_ui::ToastHostProps;
 use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
 use landaire_ui::WidthRange;
+use landaire_ui::test_support::WindowSize;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::RwSignal;
@@ -30,6 +31,7 @@ use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::view;
+use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
@@ -41,9 +43,14 @@ use zgui_ui_icons::set::ui::ELLIPSIS;
 use zgui_ui_icons::set::ui::PANEL_LEFT;
 use zgui_ui_icons::set::ui::SEARCH;
 
+use crate::Section;
+
+pub const SECTION: Section =
+    Section { name: "chrome", title: "Chrome", page: WindowSize { width: 1280.0, height: 360.0 }, view };
+
 const SHEET: &str = css!(
     ".gallery-chrome { display: flex; flex-direction: row; gap: 12px; align-items: flex-start; }
-     .gallery-chrome__frame { display: flex; flex-direction: column; width: 560px; height: 240px;
+     .gallery-chrome__frame { display: flex; flex-direction: column; width: 430px; height: 240px;
                               overflow: hidden; border: 1px solid var(--lui-color-border);
                               border-radius: var(--lui-radius-lg); background-color: var(--lui-color-surface); }
      .gallery-chrome__body { position: relative; display: flex; flex: 1 1 auto; min-height: 0;
@@ -55,22 +62,6 @@ const SHEET: &str = css!(
                                     color: var(--lui-color-text-bright); }
      .gallery-chrome__grow { flex: 1 1 auto; }"
 );
-
-/// Two frames of chrome side by side, and messages in the window's corner.
-#[component]
-pub fn Chrome() -> impl IntoView {
-    install_stylesheet("landaire-ui-gallery-chrome", SHEET);
-
-    view! {
-        ToastHost(limit = 4) {
-            row(class = "gallery-chrome") {
-                SplitFrame()
-                DrawerFrame()
-                Messages()
-            }
-        }
-    }
-}
 
 /// A tab strip over a side split, and a status bar under it.
 #[component]
@@ -167,4 +158,19 @@ fn Messages() -> impl IntoView {
     }
 
     view! { box() }
+}
+
+/// Two frames of chrome side by side, and messages in the window's corner.
+fn view() -> AnyView {
+    install_stylesheet("landaire-ui-gallery-chrome", SHEET);
+
+    AnyView::new(view! {
+        ToastHost(limit = 4) {
+            row(class = "gallery-chrome") {
+                SplitFrame()
+                DrawerFrame()
+                Messages()
+            }
+        }
+    })
 }
