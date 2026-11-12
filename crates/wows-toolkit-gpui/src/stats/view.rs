@@ -56,14 +56,14 @@ use wows_toolkit_viewmodel::stats::setting_keys;
 
 use crate::ui::selectable;
 
-use super::chart_panel::ChartId;
-use super::chart_panel::ChartSettings;
 use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
 use super::directory::DirectoryScope;
 use super::overview::StatsOverviewPanel;
 use super::ships::ShipsPanelEvent;
 use super::ships::StatsShipsPanel;
+use wows_toolkit_viewmodel::stats::chart::ChartId;
+use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 
 /// Games shown when the limit is switched on without a saved count. The egui
 /// drag value opens at this and clamps to 1..=999.

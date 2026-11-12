@@ -35,8 +35,10 @@ use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::all_match_groups;
 use wows_toolkit_viewmodel::stats::chart::ChartBar;
+use wows_toolkit_viewmodel::stats::chart::ChartId;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSeries;
+use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
 use wows_toolkit_viewmodel::stats::chart::line_chart_series;
@@ -58,39 +60,6 @@ use super::plot_image;
 const SETTINGS_MIN_WIDTH: Pixels = px(240.);
 const SETTINGS_MAX_WIDTH: Pixels = px(320.);
 const SETTINGS_MAX_HEIGHT: Pixels = px(420.);
-
-/// Distinguishes one chart pane's element ids from another's.
-pub type ChartId = usize;
-
-/// One chart pane as a settings row remembers it.
-///
-/// The games themselves are not here: they come from the session, and a
-/// chart is a way of looking at them rather than a copy.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ChartSettings {
-    #[serde(default)]
-    pub id: Option<ChartId>,
-    #[serde(default)]
-    pub stat: ChartableStat,
-    #[serde(default)]
-    pub mode: ChartMode,
-    #[serde(default)]
-    pub running: bool,
-    #[serde(default)]
-    pub combined: bool,
-    #[serde(default)]
-    pub show_values: bool,
-    /// The chart's own narrowing, when it was taken off the tab's.
-    #[serde(default)]
-    pub own_filters: Option<StatsFilters>,
-    /// The ships plotted, when the reader picked them. Empty follows the
-    /// session in older settings rows.
-    #[serde(default)]
-    pub selected_ships: Vec<u64>,
-    /// Distinguishes an explicit empty selection from an older empty list.
-    #[serde(default)]
-    pub selection_touched: bool,
-}
 
 pub struct StatsChartPanel {
     id: ChartId,
@@ -1033,44 +1002,5 @@ impl Render for StatsChartPanel {
                     .child(self.value_label()),
             )
             .child(div().flex_1().min_h(px(0.)).p_2().child(body))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ChartSettings;
-    use wows_toolkit_viewmodel::stats::DivisionFilter;
-    use wows_toolkit_viewmodel::stats::GameLimit;
-    use wows_toolkit_viewmodel::stats::StatsFilters;
-    use wows_toolkit_viewmodel::stats::chart::ChartMode;
-    use wows_toolkit_viewmodel::stats::chart::ChartableStat;
-
-    /// A chart comes back set up the way it was left, override and ship
-    /// selection included.
-    #[test]
-    fn a_chart_round_trips_through_the_settings_row() {
-        let saved = ChartSettings {
-            id: Some(7),
-            stat: ChartableStat::Frags,
-            mode: ChartMode::Bar,
-            running: true,
-            combined: true,
-            show_values: true,
-            own_filters: Some(StatsFilters {
-                limit: GameLimit::Recent(25),
-                division: DivisionFilter::DivOnly,
-                game_modes: ["RandomBattle".to_string()].into_iter().collect(),
-            }),
-            selected_ships: vec![4288575440, 3541279184],
-            selection_touched: true,
-        };
-
-        let json = serde_json::to_string(&saved).expect("a chart serializes");
-        let read: ChartSettings = serde_json::from_str(&json).expect("and reads back");
-        assert_eq!(read, saved);
-
-        // A row written before a field existed still reads, on the defaults.
-        let older: ChartSettings = serde_json::from_str("{}").expect("an empty row reads");
-        assert_eq!(older, ChartSettings::default());
     }
 }
