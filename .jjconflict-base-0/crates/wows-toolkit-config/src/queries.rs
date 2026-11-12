@@ -253,7 +253,7 @@ pub async fn delete_stale_chart_configs(pool: &SqlitePool, current_ids: &[i64]) 
 }
 
 /// A row from the armor_viewer_defaults table.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ArmorViewerDefaultsRow {
     pub show_plate_edges: bool,
     pub show_waterline: bool,
