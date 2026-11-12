@@ -16665,6 +16665,7 @@ dependencies = [
  "image",
  "jiff",
  "notify",
+ "parking_lot",
  "rkyv",
  "rootcause",
  "rust-i18n 3.1.5",
@@ -16679,11 +16680,13 @@ dependencies = [
  "wows-data-mgr",
  "wows-replay-insights",
  "wows-toolkit-config",
+ "wows-toolkit-icons",
  "wows-toolkit-services",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-client",
  "wt-translations",
 ]
 
