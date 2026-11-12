@@ -11,7 +11,6 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 mod app;
 mod armor_viewer;
-mod cap_layout_store;
 mod cli;
 mod collab;
 mod collab_popover;
