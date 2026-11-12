@@ -16,7 +16,7 @@ use zgui::view;
 use crate::shell::AppRootProps;
 
 /// The size the GPUI shell is reviewed at.
-const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
+pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
 
 /// Points `storage_dir` at a temporary directory for the whole process, with every first-run
 /// question answered and the update check off, so the shell opens as a returning reader sees it.
@@ -40,30 +40,50 @@ fn returning_reader(runtime: &Runtime) {
     });
 }
 
-/// Opens the shell on the graphics device with the desktop in `appearance`, lets the settings
-/// load, and writes it to `target/zgui-shots/<name>.png`.
-fn shoot(appearance: Appearance, name: &str) -> PathBuf {
+/// Opens the shell headlessly as a returning reader sees it, and lets the settings load.
+pub(crate) fn open_shell(options: HeadlessOptions) -> HeadlessWindow {
     let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
     returning_reader(&runtime);
 
-    let options =
-        HeadlessOptions { drawing: Drawing::Device, desktop: Some(appearance), ..HeadlessOptions::new(REVIEW_SIZE) };
-    let shown = Arc::clone(&runtime);
     let mut window = HeadlessWindow::open(options, move || {
-        let runtime = Some(Arc::clone(&shown));
+        let runtime = Some(Arc::clone(&runtime));
         view! { AppRoot(runtime = runtime) }
     })
     .expect("the shell opens headlessly");
 
     // The settings are read on the tokio runtime, in real time rather than the window's clock.
+    settle_in_real_time(&mut window);
+
+    window
+}
+
+/// Runs two seconds of frames, letting work on the tokio runtime land as it goes.
+pub(crate) fn settle_in_real_time(window: &mut HeadlessWindow) {
     for _ in 0..20 {
         window.advance(Duration::from_millis(100));
         std::thread::sleep(Duration::from_millis(25));
     }
+}
 
+/// The shell's review size, drawn on the graphics device with the desktop in `appearance`.
+pub(crate) fn review_options(appearance: Appearance) -> HeadlessOptions {
+    HeadlessOptions { drawing: Drawing::Device, desktop: Some(appearance), ..HeadlessOptions::new(REVIEW_SIZE) }
+}
+
+/// Writes what `window` shows to `target/zgui-shots/<name>.png`.
+pub(crate) fn save_shot(window: &mut HeadlessWindow, name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots").join(format!("{name}.png"));
-    window.save_png(&path).expect("the shell is drawn to a PNG");
+    window.save_png(&path).expect("the window is drawn to a PNG");
+
     path
+}
+
+/// Opens the shell on the graphics device with the desktop in `appearance`, and writes it to
+/// `target/zgui-shots/<name>.png`.
+fn shoot(appearance: Appearance, name: &str) -> PathBuf {
+    let mut window = open_shell(review_options(appearance));
+
+    save_shot(&mut window, name)
 }
 
 #[test]

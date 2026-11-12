@@ -31,6 +31,12 @@
 //! `set_toggles` puts its side panel toggles in the status bar and `set_mode` names the view a
 //! held modifier key switches to. The status bar shows the selected tab's.
 //!
+//! A tab offers its commands on the palette as it is built: `Shell::palette.offer` for a root
+//! command and `offer_mode` for a list the root leads into, with the builders in
+//! [`shell::palette::modes`]. An offer lasts as long as the scope that made it. A command meant
+//! for a tab that may not be built yet is a `PaletteRun::Request`, which the tab takes with
+//! `palette.take_requests`.
+//!
 //! # Background work
 //!
 //! Work runs off the UI thread, and its result comes back in a task spawned with `spawn_local`

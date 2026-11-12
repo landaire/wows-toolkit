@@ -68,3 +68,5 @@ wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
 tempfile = "3"
+# Game versions, for the palette's version list tests.
+wowsunpack = { workspace = true }
