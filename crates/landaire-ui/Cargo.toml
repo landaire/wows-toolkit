@@ -12,4 +12,6 @@ name = "landaire_ui"
 path = "src/lib.rs"
 
 [dependencies]
+thiserror.workspace = true
 zgui.workspace = true
+zgui-ui-tokens.workspace = true
