@@ -21,8 +21,10 @@
 //!
 //! - `Services`: `settings`, `game_data`, `jobs`, `locale`, and `on_tokio`.
 //! - `Shell`: tab selection and directory stats tabs, `request_replay`/`take_replay_requests`,
-//!   `dialogs`, `toasts()`, `copy_text`, `settings_drawer`, `palette`, `set_theme`, `set_zoom`,
-//!   `set_locale`, `debug_mode`.
+//!   `dialogs`, `toasts()`, `copy_text`, `chosen_path` (a file dialog's answer), `settings_drawer`,
+//!   `palette`, `set_theme`, `set_zoom`, `set_locale`, `apply_wows_dir`, `debug_mode`, and the jobs
+//!   that outlive the drawer: `cache` (game-data cache maintenance), `replay_index`
+//!   (`build_replay_index`) and `twitch` (the chat poll).
 //!
 //! # Tabs
 //!

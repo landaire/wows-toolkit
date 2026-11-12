@@ -11,13 +11,16 @@ mod dialogs;
 mod drop;
 mod file_dialog;
 mod first_run;
+mod game_data_cache;
 mod menu;
 mod notices;
 pub mod palette;
+mod replay_index;
 pub mod settings;
 mod startup;
 mod status_bar;
 pub mod tabs;
+mod twitch;
 mod update;
 mod wows_dir;
 
@@ -81,9 +84,11 @@ use crate::shell::dialogs::DialogHostProps;
 use crate::shell::drop::DropIntent;
 use crate::shell::drop::DropScrimProps;
 use crate::shell::drop::DropScrimState;
+use crate::shell::game_data_cache::GameDataCacheJobs;
 use crate::shell::menu::AppMenuProps;
 use crate::shell::palette::CommandPaletteProps;
 use crate::shell::palette::PaletteControl;
+use crate::shell::replay_index::ReplayIndexJobs;
 use crate::shell::settings::SettingsButtonProps;
 use crate::shell::settings::SettingsDrawerControl;
 use crate::shell::settings::SettingsDrawerProps;
@@ -93,6 +98,7 @@ use crate::shell::tabs::DirectoryStatsId;
 use crate::shell::tabs::DirectoryStatsTab;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::TabKey;
+use crate::shell::twitch::TwitchLink;
 use crate::shell::update::UpdateFlow;
 use crate::tabs::TabBodyProps;
 use crate::theme::SemanticTokensProps;
@@ -231,6 +237,10 @@ pub struct Shell {
     replay_requests: RwSignal<Vec<ReplayRequest>, LocalStorage>,
     pub appearance: Appearance,
     pub settings_drawer: SettingsDrawerControl,
+    /// The game-data cache's maintenance jobs and what they found.
+    pub cache: GameDataCacheJobs,
+    pub replay_index: ReplayIndexJobs,
+    pub twitch: TwitchLink,
     pub palette: PaletteControl,
     pub dialogs: Dialogs,
     drop_scrim: DropScrimState,
@@ -256,6 +266,9 @@ impl Shell {
             replay_requests: RwSignal::new_local(Vec::new()),
             appearance,
             settings_drawer: SettingsDrawerControl::new(),
+            cache: GameDataCacheJobs::new(),
+            replay_index: ReplayIndexJobs::new(),
+            twitch: TwitchLink::new(),
             palette: PaletteControl::new(),
             dialogs: Dialogs::new(),
             drop_scrim: DropScrimState::new(),

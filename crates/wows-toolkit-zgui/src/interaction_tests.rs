@@ -21,7 +21,7 @@ pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 8
 /// Points `storage_dir` at a temporary directory for the whole process, with every first-run
 /// question answered and the update check off, so the shell opens as a returning reader sees it.
 /// The directory is leaked: it has to outlive every test in the process.
-fn returning_reader(runtime: &Runtime) {
+pub(crate) fn returning_reader(runtime: &Runtime) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let dir = tempfile::tempdir().expect("a temporary directory can be made");
