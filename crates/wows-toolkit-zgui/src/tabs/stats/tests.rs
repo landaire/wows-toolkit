@@ -177,9 +177,6 @@ fn the_status_bar_hides_and_shows_the_chart_dock() {
             .expect("the saved charts are forgotten");
     });
     click(&mut window, "stats");
-    // Workaround for Shell::selected_chrome missing a tab's first visit; remove with its fix.
-    click(&mut window, "launcher");
-    click(&mut window, "stats");
     // The saved charts are read on the tokio runtime and replace the dock when they land.
     settle_in_real_time(&mut window);
     assert!(window.by_test_id("stats-dock-toggle-left").is_none(), "an empty dock has no toggle");
