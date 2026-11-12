@@ -454,10 +454,10 @@ mod tests {
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::ArenaId;
     use wows_replays::types::GameParamId;
+    use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+    use wows_toolkit_replay_data::test_support::fixture_normalized_battle_report;
 
     use super::*;
-    use crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
-    use crate::replay_inspector::test_support::fixture_normalized_battle_report;
 
     fn touch(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);

@@ -838,8 +838,8 @@ mod tests {
     fn a_rating_table_arriving_late_still_rates_the_ships(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(900.), px(600.)), StatsShipsPanel::new);
-        let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
-        let rated_ship = crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
+        let table = std::sync::Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
+        let rated_ship = wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
         let games = [game("Yamato", rated_ship, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window

@@ -29,12 +29,12 @@ use gpui_kit::relative;
 use gpui_kit::rgb;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_toolkit_replay_data::columns::BattleOutcome;
+use wows_toolkit_replay_data::columns::ColorRole;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 
-use crate::replay_inspector::columns::BattleOutcome;
-use crate::replay_inspector::columns::ColorRole;
-use crate::replay_inspector::model::PlayerRow;
-use crate::replay_inspector::model::separate_number;
 use crate::replay_inspector::table::resolve_color;
 
 /// The PR tile's element id, so a test can assert on its presence and label.

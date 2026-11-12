@@ -20,11 +20,11 @@ use wowsunpack::game_params::types::Species;
 
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
-use super::model::PlayerRow;
+use crate::model::PlayerRow;
 
 /// An effective-fire-chance result with enough behind it to state a rate: 3
 /// fires out of 40 eligible hits, against 4.2 expected.
-pub(crate) fn fire_chance_result() -> wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
+pub fn fire_chance_result() -> wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
     use std::collections::BTreeMap;
 
     wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
@@ -51,7 +51,7 @@ pub(crate) fn fire_chance_result() -> wows_replay_insights::fire_chance::analysi
 /// A minimal `PlayerRow` with every field at its "absent/zero" default.
 /// Callers override the handful of fields relevant to what they're testing
 /// via struct-update syntax: `PlayerRow { actual_damage: Some(1), ..base_row(1, Relation::new(2), false) }`.
-pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
+pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
     PlayerRow {
         db_id: AccountId(db_id),
         team_id: TeamId::from(0i64),
@@ -136,7 +136,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
 
 /// A minimal `NormalizedPlayer` with every field at its "absent/zero"
 /// default, for `ReplayReportModel::build` tests.
-pub(crate) fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> NormalizedPlayer {
+pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> NormalizedPlayer {
     NormalizedPlayer {
         entity_id: EntityId::from(db_id as u32),
         ship_id: 1u64.into(),
@@ -181,7 +181,7 @@ pub(crate) fn base_normalized_player(db_id: i64, relation: Relation, is_self: bo
 /// server results (nonzero damage, an interaction breakdown) and an enemy
 /// player with none, matching the brief's request for a fixture that shows
 /// "a breakdown Option populated only when server results exist".
-pub(crate) fn fixture_normalized_battle_report() -> NormalizedBattleReport {
+pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
     use std::collections::BTreeMap;
 
     use wows_replay_insights::battle_report::Damage;
@@ -241,13 +241,13 @@ pub(crate) fn fixture_normalized_battle_report() -> NormalizedBattleReport {
 /// The same report with no roster, for the export tests: `Match::new` zips
 /// the normalized players against the battle report's own, and those tests
 /// have no raw players to zip against.
-pub(crate) fn fixture_empty_battle_report() -> NormalizedBattleReport {
+pub fn fixture_empty_battle_report() -> NormalizedBattleReport {
     let mut report = fixture_normalized_battle_report();
     report.players.clear();
     report
 }
 
-pub(crate) fn fixture_replay_meta() -> ReplayMeta {
+pub fn fixture_replay_meta() -> ReplayMeta {
     serde_json::from_value(serde_json::json!({
         "matchGroup": "pvp",
         "gameMode": 1,
@@ -276,7 +276,7 @@ pub(crate) fn fixture_replay_meta() -> ReplayMeta {
 
 /// A one-ship expected-values table, matching `wows_replay_insights`'s own
 /// fixture: playing exactly at these values scores 1150 (Average).
-pub(crate) fn fixture_personal_rating_data() -> PersonalRatingData {
+pub fn fixture_personal_rating_data() -> PersonalRatingData {
     let json = format!(
         r#"{{"time":0,"data":{{"{FIXTURE_PR_SHIP_ID}":{{"average_damage_dealt":50000.0,"average_frags":1.0,"win_rate":50.0}}}}}}"#
     );
@@ -286,4 +286,4 @@ pub(crate) fn fixture_personal_rating_data() -> PersonalRatingData {
 }
 
 /// The only ship `fixture_personal_rating_data` carries expected values for.
-pub(crate) const FIXTURE_PR_SHIP_ID: u64 = 3374266064;
+pub const FIXTURE_PR_SHIP_ID: u64 = 3374266064;

@@ -1113,7 +1113,7 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
 #[gpui_kit::test]
 fn the_session_rating_table_reaches_the_replay_inspector(cx: &mut TestAppContext) {
     let window = open_app(cx);
-    let table = Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+    let table = Arc::new(wows_toolkit_replay_data::test_support::fixture_personal_rating_data());
     let session = SessionData { personal_rating: Some(table), ..SessionData::default() };
 
     window

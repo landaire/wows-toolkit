@@ -1583,6 +1583,7 @@ impl App {
         // and the shared strings are set separately.
         rust_i18n::set_locale(&code);
         wows_toolkit_viewmodel::set_locale(&code);
+        wows_toolkit_replay_data::set_locale(&code);
 
         self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code.clone()), cx));
         self.stats.update(cx, |view, cx| view.set_locale(cx));
@@ -2438,6 +2439,7 @@ impl App {
         if let Some(code) = settings.locale.as_deref() {
             rust_i18n::set_locale(code);
             wows_toolkit_viewmodel::set_locale(code);
+            wows_toolkit_replay_data::set_locale(code);
         }
         let language_ix = language_index(settings.locale.as_deref());
         self.language_select

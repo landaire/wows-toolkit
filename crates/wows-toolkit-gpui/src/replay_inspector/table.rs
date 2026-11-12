@@ -41,41 +41,41 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use wows_toolkit_replay_data::columns::BattleOutcome;
+use wows_toolkit_replay_data::columns::CaptainPointsTier;
+use wows_toolkit_replay_data::columns::CellValue;
+use wows_toolkit_replay_data::columns::ColorRole;
+use wows_toolkit_replay_data::columns::ColumnArrangement;
+use wows_toolkit_replay_data::columns::Placement;
+use wows_toolkit_replay_data::columns::PlayerColorKind;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::columns::Section;
+use wows_toolkit_replay_data::columns::ShownColumns;
+use wows_toolkit_replay_data::columns::StoredArrangement;
+use wows_toolkit_replay_data::columns::cell_value;
+use wows_toolkit_replay_data::columns::name_color_kind;
+use wows_toolkit_replay_data::columns::player_color_kind;
+use wows_toolkit_replay_data::damage_mix::DamageLine;
+use wows_toolkit_replay_data::damage_mix::DamageMix;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::SkillWarning;
+use wows_toolkit_replay_data::sort::SortColumn;
+use wows_toolkit_replay_data::sort::SortOrder;
+use wows_toolkit_replay_data::sort::sort_rows;
 
-use super::columns::BattleOutcome;
-use super::columns::CaptainPointsTier;
-use super::columns::CellValue;
-use super::columns::ColorRole;
-use super::columns::ColumnArrangement;
-use super::columns::Placement;
-use super::columns::PlayerColorKind;
-use super::columns::ReplayColumn;
-use super::columns::Section;
-use super::columns::ShownColumns;
-use super::columns::StoredArrangement;
-use super::columns::cell_value;
-use super::columns::class_icon_tint;
-use super::columns::name_color_kind;
-use super::columns::player_color_kind;
-use super::columns::player_color_kind_rgb;
-use super::columns::relation_color_rgb;
 use super::damage_mix;
-use super::damage_mix::DamageLine;
-use super::damage_mix::DamageMix;
 use super::expanded;
 use super::icons::IconCache;
 use super::icons::nation_flag_key;
-use super::model::MatchContext;
-use super::model::PlayerRow;
-use super::model::ReplayReportModel;
-use super::model::SkillWarning;
-use super::sort::SortColumn;
-use super::sort::SortOrder;
-use super::sort::sort_rows;
 use super::team_bands;
 use super::team_bands::RowMark;
 use super::team_bands::TeamDamage;
 use super::team_bands::TeamSide;
+use crate::replay_inspector::player_colors::class_icon_tint;
+use crate::replay_inspector::player_colors::player_color_kind_rgb;
+use crate::replay_inspector::player_colors::relation_color_rgb;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
@@ -2443,7 +2443,7 @@ fn share_bar_cell(
             )
         })
         .child(element)
-        .when_some(mix, |cell, mix| cell.child(div().px_1().child(mix.stacked_bar())))
+        .when_some(mix, |cell, mix| cell.child(div().px_1().child(damage_mix::stacked_bar(mix))))
         .into_any_element()
 }
 
@@ -2518,7 +2518,7 @@ impl TeamTotals {
 /// type in a band under the figure and listed with its colour key on hover.
 /// The plain number cell when there is no split to show.
 fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
-    let Some(lines) = damage_mix::shown_lines(row, col, layout.debug) else {
+    let Some(lines) = wows_toolkit_replay_data::damage_mix::shown_lines(row, col, layout.debug) else {
         return number_cell(ix, col, row, layout, width);
     };
     let Some(mix) = DamageMix::of(lines) else {
@@ -2544,7 +2544,7 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
             Tooltip::element(move |_window, _cx| {
                 v_flex()
                     .gap_1()
-                    .child(mix.listing(&lines))
+                    .child(damage_mix::listing(&mix, &lines))
                     .children(share_text.clone().map(|text| div().text_xs().child(text)))
             })
             .build(window, cx)
@@ -3146,16 +3146,16 @@ mod tests {
     use gpui_kit::test::TestWindowExt as _;
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::TeamId;
+    use wows_toolkit_replay_data::columns::ReplayColumn;
+    use wows_toolkit_replay_data::damage_mix::DamageKind;
+    use wows_toolkit_replay_data::damage_mix::DamageLine;
+    use wows_toolkit_replay_data::model::MatchContext;
+    use wows_toolkit_replay_data::model::ReplayReportModel;
+    use wows_toolkit_replay_data::sort::SortColumn;
+    use wows_toolkit_replay_data::test_support::base_row;
     use wowsunpack::vfs::MemoryFS;
     use wowsunpack::vfs::VfsPath;
 
-    use super::super::columns::ReplayColumn;
-    use super::super::damage_mix::DamageKind;
-    use super::super::damage_mix::DamageLine;
-    use super::super::model::MatchContext;
-    use super::super::model::ReplayReportModel;
-    use super::super::sort::SortColumn;
-    use super::super::test_support::base_row;
     use super::ConnectionNote;
     use super::PlayerTable;
     use super::TeamDamage;

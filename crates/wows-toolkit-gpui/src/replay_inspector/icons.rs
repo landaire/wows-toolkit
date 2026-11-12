@@ -30,14 +30,14 @@ use std::sync::Arc;
 use gpui_kit::RenderImage;
 use gpui_kit::SvgRenderer;
 use image::Frame;
+use wows_toolkit_replay_data::columns::player_color_kind;
+use wows_toolkit_replay_data::model::PlayerRow;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
-use super::columns::class_icon_tint;
-use super::columns::player_color_kind;
-use super::model::PlayerRow;
+use crate::replay_inspector::player_colors::class_icon_tint;
 
 /// Decodes raw image bytes (whatever format `image::load_from_memory` can
 /// sniff; every icon kind except ship-class ships as PNG) into a
@@ -101,7 +101,7 @@ fn tint_bgra_pixels(buffer: &mut image::RgbaImage, tint: u32) {
 
 /// Id-keyed cache of decoded icons: ship-class icons keyed by `(Species,
 /// tint)` -- `tint` is the row's packed `0xRRGGBB` team/division color (see
-/// `columns::class_icon_tint`), since the same species renders in a
+/// `player_colors::class_icon_tint`), since the same species renders in a
 /// different color per row (egui's `Image::tint(report.color)`) -- and every
 /// other icon kind (achievement, ribbon, subribbon, consumable,
 /// modernization, signal, captain-skill, nation flag) keyed by a
@@ -399,8 +399,8 @@ mod tests {
         // out to them for keys a row actually carries, and `base_row` (see
         // `test_support.rs`) carries none. This exercises the "nothing to
         // resolve" path without needing a real game install.
-        use crate::replay_inspector::test_support::base_row;
         use wows_replays::types::Relation;
+        use wows_toolkit_replay_data::test_support::base_row;
 
         let mut cache = IconCache::new();
         let rows = vec![base_row(1, Relation::new(0), true)];
@@ -435,8 +435,8 @@ mod tests {
     fn populate_from_rows_resolves_subribbon_icons_under_the_sub_prefixed_filename() {
         use wows_replay_insights::battle_report::RibbonResult;
 
-        use crate::replay_inspector::test_support::base_row;
         use wows_replays::types::Relation;
+        use wows_toolkit_replay_data::test_support::base_row;
 
         let dir = std::env::temp_dir().join("wtk-gpui-icons-test-subribbon-prefix");
         let _ = std::fs::remove_dir_all(&dir);

@@ -71,6 +71,13 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_toolkit_replay_data::columns::BattleOutcome;
+use wows_toolkit_replay_data::columns::ColorRole;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::model::MatchContext;
+use wows_toolkit_replay_data::model::ReplayReportModel;
+use wows_toolkit_replay_data::model::battle_title;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -81,19 +88,12 @@ use crate::icons;
 use header_figures::OwnFigures;
 
 use super::chat::ChatPanel;
-use super::columns::BattleOutcome;
-use super::columns::ColorRole;
-use super::columns::ReplayColumn;
 use super::debug_view::RawJsonPanel;
 use super::load::GameDataCache;
 use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
 use super::load::spawn_parse_with_alts;
-use super::model::MatchContext;
-use super::model::ReplayReportModel;
-use super::model::battle_title;
-use super::model::separate_number;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
@@ -767,7 +767,12 @@ impl ReplayPanel {
             personal_rating,
             // Stands in for the document the parse builds: the Export menu's
             // gate is that there is one, not what is in it.
-            export: Some(ExportedMatch::new(&super::test_support::fixture_empty_battle_report(), &[], &[], true)),
+            export: Some(ExportedMatch::new(
+                &wows_toolkit_replay_data::test_support::fixture_empty_battle_report(),
+                &[],
+                &[],
+                true,
+            )),
             export_status: None,
             path: PathBuf::from("test.wowsreplay"),
             alts: Vec::new(),
@@ -1544,6 +1549,13 @@ impl Render for ReplayPanel {
 
 #[cfg(test)]
 mod tests {
+    use wows_toolkit_replay_data::columns::ReplayColumn;
+    use wows_toolkit_replay_data::model::PlayerRow;
+    use wows_toolkit_replay_data::model::ReplayReportModel;
+    use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+    use wows_toolkit_replay_data::test_support::base_row;
+    use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
+
     use super::MatchContext;
     use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
@@ -1564,12 +1576,6 @@ mod tests {
     use super::header_figures::PR_TILE_ID as PR_BADGE_ID;
     use super::header_figures::personal_rating_label;
     use super::write_export;
-    use crate::replay_inspector::columns::ReplayColumn;
-    use crate::replay_inspector::model::PlayerRow;
-    use crate::replay_inspector::model::ReplayReportModel;
-    use crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
-    use crate::replay_inspector::test_support::base_row;
-    use crate::replay_inspector::test_support::fixture_personal_rating_data;
 
     /// A won battle whose self row dealt exactly the fixture's expected
     /// damage and frags. The win carries the win-rate term to twice expected,
@@ -1970,7 +1976,7 @@ mod tests {
     /// else's does: the statistic is about the shells this client fired.
     #[test]
     fn the_fire_chance_block_is_on_the_recording_player_s_row() {
-        let fire_chance = crate::replay_inspector::test_support::fire_chance_result();
+        let fire_chance = wows_toolkit_replay_data::test_support::fire_chance_result();
 
         let mut model = model_at_expected_values();
         model.set_fire_chance(Some(fire_chance));
@@ -2061,7 +2067,7 @@ mod tests {
     /// header row plus one row per vehicle.
     #[test]
     fn each_export_format_writes_its_own_shape() {
-        use crate::replay_inspector::test_support::fixture_empty_battle_report;
+        use wows_toolkit_replay_data::test_support::fixture_empty_battle_report;
 
         let normalized = fixture_empty_battle_report();
         let export = ExportedMatch::new(&normalized, &[], &[], true);

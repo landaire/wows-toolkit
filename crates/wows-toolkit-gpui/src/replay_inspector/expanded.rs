@@ -41,19 +41,19 @@ use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+use wows_toolkit_replay_data::columns::NDA;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::damage_mix::DamageLine;
+use wows_toolkit_replay_data::model::PlayerRow;
+use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::fire_chance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
 
-use super::columns::NDA;
-use super::columns::ReplayColumn;
 use super::damage_mix;
-use super::damage_mix::DamageLine;
 use super::icons::IconCache;
-use super::model::PlayerRow;
-use super::model::separate_number;
 use super::table::text_width;
 use crate::status_bar::ModeHint;
 use crate::status_bar::ModifierKey;
@@ -1747,6 +1747,8 @@ mod tests {
     use wows_replay_insights::battle_report::DamageInteraction;
     use wows_replay_insights::battle_report::RibbonResult;
     use wows_replays::types::AccountId;
+    use wows_toolkit_replay_data::test_support::base_row;
+    use wows_toolkit_replay_data::test_support::fire_chance_result;
     use wows_toolkit_viewmodel::breakdown::BreakdownRow;
     use wowsunpack::game_params::skill_grid_data::SkillGridRow;
     use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
@@ -1775,8 +1777,6 @@ mod tests {
     use super::skill_grid_width;
     use super::spotting_target_rows;
     use super::tile_grid_width;
-    use crate::replay_inspector::test_support::base_row;
-    use crate::replay_inspector::test_support::fire_chance_result;
     use wows_replays::types::Relation;
 
     /// The block expands under Name, after the damage events, which is where

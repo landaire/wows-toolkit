@@ -54,10 +54,9 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Species;
 
-use super::columns::ReplayColumn;
-use super::columns::relation_color_rgb;
-use super::damage_mix::DamageLine;
-use super::links;
+use crate::columns::ReplayColumn;
+use crate::damage_mix::DamageLine;
+use crate::links;
 
 /// One player's presentation-ready row: scalars and formatted strings pulled
 /// from `NormalizedPlayer`/`ServerResults`. Colors are not stored here; they
@@ -282,24 +281,29 @@ pub struct ChatMessage {
     /// The sender's clan tag with no surrounding brackets (`Player::clan()`);
     /// `None` when the sender is clanless or has no resolved `Player`.
     pub clan_tag: Option<String>,
-    /// Packed `0xRRGGBB` clan-league color; `Some` exactly when `clan_tag`
-    /// is. Read from the player's raw `clanColor` property, falling back to
-    /// the player's team-relation color for older replays that omit it
-    /// (mirrors `clan_color_for_player`).
-    pub clan_color_rgb: Option<u32>,
+    /// `Some` exactly when `clan_tag` is (mirrors `clan_color_for_player`).
+    pub clan_color: Option<ClanColor>,
 }
 
-/// Mirrors `clan_color_for_player`: the clan-league color packed as
-/// `0xRRGGBB`, read from the player's raw `clanColor` property. Older
-/// replays omit that property; this falls back to the player's own
-/// team-relation color (via `Player::relation`, not the message's
-/// `sender_relation`, matching the egui original) rather than panicking.
-/// The fallback resolves through `relation_color_rgb`, the single source of
-/// truth for the self/ally/enemy triad.
-fn clan_color_for_player(player: &Player) -> u32 {
+/// The colour a chat clan tag is drawn in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClanColor {
+    /// The clan league's colour, packed as `0xRRGGBB`.
+    League(u32),
+    /// Older replays omit the league colour; the tag takes the player's own
+    /// team-relation colour (via `Player::relation`, not the message's
+    /// `sender_relation`, matching the egui original), which the front end
+    /// resolves from its palette.
+    Relation(Relation),
+}
+
+/// Mirrors `clan_color_for_player`: the clan-league color read from the
+/// player's raw `clanColor` property, or the player's relation for a replay
+/// that omits it.
+fn clan_color_for_player(player: &Player) -> ClanColor {
     match player.initial_state().raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
-        Some(clan_color) => (clan_color & 0xFF_FFFF) as u32,
-        None => relation_color_rgb(player.relation()),
+        Some(clan_color) => ClanColor::League((clan_color & 0xFF_FFFF) as u32),
+        None => ClanColor::Relation(player.relation()),
     }
 }
 
@@ -329,7 +333,7 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
 
     let decoded_text = escaper::decode_html(text.as_str()).unwrap_or_else(|_| text.clone());
 
-    let (clan_tag, clan_color_rgb) = match player {
+    let (clan_tag, clan_color) = match player {
         Some(player) if !player.initial_state().clan().is_empty() => {
             (Some(player.initial_state().clan().to_string()), Some(clan_color_for_player(player)))
         }
@@ -343,7 +347,7 @@ fn chat_message_from_game_message(message: &GameMessage, metadata_provider: &Gam
         channel: channel.clone(),
         message: translated_text.unwrap_or(decoded_text),
         clan_tag,
-        clan_color_rgb,
+        clan_color,
     }
 }
 
@@ -873,7 +877,7 @@ impl PlayerRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay_inspector::test_support;
+    use crate::test_support;
 
     #[test]
     fn separate_number_groups_by_thousands() {

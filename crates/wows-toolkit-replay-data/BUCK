@@ -1,0 +1,54 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+REPLAY_DATA_COMMON_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:escaper",
+    "//third-party/rust:jiff",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+]
+
+REPLAY_DATA_DEPS = REPLAY_DATA_COMMON_DEPS + [
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+]
+
+# The test-support builds of the shared crates, so a target that links them
+# does not also link the shipping builds.
+REPLAY_DATA_TEST_SUPPORT_DEPS = REPLAY_DATA_COMMON_DEPS + [
+    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+]
+
+workspace_library(
+    name = "wows_toolkit_replay_data",
+    crate = "wows_toolkit_replay_data",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    deps = REPLAY_DATA_DEPS,
+)
+
+# Row and battle-report fixtures, for the tests of crates that render the model.
+workspace_library(
+    name = "wows_toolkit_replay_data_test_support",
+    crate = "wows_toolkit_replay_data",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
+)
+
+workspace_test(
+    name = "wows_toolkit_replay_data_test",
+    crate = "wows_toolkit_replay_data",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
+)
