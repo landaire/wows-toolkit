@@ -46,6 +46,7 @@ thiserror = { workspace = true }
 # The index pass runs its store writes on the runtime the front end owns.
 tokio = { version = "1", features = ["rt"] }
 tracing = { workspace = true }
+walkdir = { workspace = true }
 wows-battle-world = { workspace = true }
 # Builds the game-data cache holds, and the auto-dump that writes them.
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
