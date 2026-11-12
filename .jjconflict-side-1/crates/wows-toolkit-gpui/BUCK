@@ -62,7 +62,6 @@ GPUI_DEPS = [
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
     "//third-party/rust:walkdir",
-    "//third-party/rust:web-time",
 ]
 
 # Not wows_toolkit_gpui_bin: the target name is a path component of every

@@ -179,7 +179,7 @@ pub struct ReplayInspectorView {
     /// How wide the listing is drawn, kept while it is shut.
     listing_width: Entity<SideWidth>,
     /// The collaborative session, hosted or joined from this tab's header.
-    collab: crate::collab::CollabState,
+    collab: wows_toolkit_services::collab::CollabState,
     /// The two fields the session popover writes into, held so a name typed
     /// once survives the popover closing.
     collab_name: Entity<InputState>,
@@ -306,7 +306,7 @@ pub struct ReplaySettingsChanged(pub ReplaySettings);
 
 /// The session started or stopped, for whoever owns a window this view does
 /// not: the tactics board is the app's, and it draws in the session too.
-pub struct SessionShared(pub crate::collab::CollabLink);
+pub struct SessionShared(pub wows_toolkit_services::collab::CollabLink);
 
 /// The collab popover's Tactics Board button. The board is the app's window, so
 /// the ask goes up rather than opening anything here.
@@ -462,7 +462,7 @@ impl ReplayInspectorView {
             _install_root_check: None,
             locale: None,
             listing_width: cx.new(|_| SideWidth::new(BROWSER_WIDTH, BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)),
-            collab: crate::collab::CollabState::default(),
+            collab: wows_toolkit_services::collab::CollabState::default(),
             collab_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string())),
             collab_token: cx.new(|cx| InputState::new(window, cx).placeholder("toolkit-...".to_string())),
@@ -1664,7 +1664,7 @@ impl ReplayInspectorView {
     }
 
     /// Whether a session is running, for a window this view does not own.
-    pub fn session_link(&self) -> crate::collab::CollabLink {
+    pub fn session_link(&self) -> wows_toolkit_services::collab::CollabLink {
         self.collab.link()
     }
 
@@ -1676,7 +1676,7 @@ impl ReplayInspectorView {
     /// into two panels.
     pub fn watch_shared_window(
         &mut self,
-        shared: crate::collab::SharedWindow,
+        shared: wows_toolkit_services::collab::SharedWindow,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2377,7 +2377,7 @@ impl Render for ReplayInspectorView {
         let entity = cx.entity();
 
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
-        self.collab.bind(&entity, cx);
+        crate::collab::bind(&self.collab, &entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
         // draw rather than left to grow for as long as the session runs. What it
         // raised is said after the draw: a message queued during one is not on
@@ -2386,7 +2386,7 @@ impl Render for ReplayInspectorView {
         if !notices.is_empty() {
             cx.defer_in(window, move |_this, window, cx| {
                 for notice in notices {
-                    notice.say(window, cx);
+                    crate::collab::say(&notice, window, cx);
                 }
             });
         }
@@ -2424,11 +2424,11 @@ impl Render for ReplayInspectorView {
 }
 
 impl crate::collab_popover::SessionHost for ReplayInspectorView {
-    fn collab(&self) -> &crate::collab::CollabState {
+    fn collab(&self) -> &wows_toolkit_services::collab::CollabState {
         &self.collab
     }
 
-    fn collab_mut(&mut self) -> &mut crate::collab::CollabState {
+    fn collab_mut(&mut self) -> &mut wows_toolkit_services::collab::CollabState {
         &mut self.collab
     }
 
@@ -2446,7 +2446,7 @@ impl crate::collab_popover::SessionHost for ReplayInspectorView {
 
     fn watch_shared_window(
         &mut self,
-        shared: crate::collab::SharedWindow,
+        shared: wows_toolkit_services::collab::SharedWindow,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

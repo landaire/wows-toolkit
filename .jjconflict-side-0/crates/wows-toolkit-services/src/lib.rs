@@ -5,6 +5,7 @@
 //! own executor.
 
 pub mod child_process;
+pub mod collab;
 pub mod constants;
 pub mod dialog;
 pub mod game_data_cache;
