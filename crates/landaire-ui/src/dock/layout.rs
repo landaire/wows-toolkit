@@ -15,6 +15,7 @@ use crate::dock::saved::SavedNode;
 use crate::dock::saved::SavedPart;
 use crate::dock::saved::SavedRegion;
 use crate::error::DockError;
+use crate::error::LengthError;
 use crate::error::ShareError;
 
 /// Names one panel in a dock. The application chooses it, so it can address the panel later.
@@ -108,6 +109,54 @@ impl DockRegion {
     pub const ALL: [Self; 4] = [Self::Center, Self::Left, Self::Right, Self::Bottom];
 }
 
+/// One of the regions of a dock that fold away and take a set amount of room while they show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FoldingRegion {
+    Left,
+    Right,
+    Bottom,
+}
+
+impl FoldingRegion {
+    /// The share the region takes in a new layout.
+    pub(crate) const fn default_share(self) -> Share {
+        match self {
+            Self::Left => Share(20.0),
+            Self::Right => Share(25.0),
+            Self::Bottom => Share(30.0),
+        }
+    }
+}
+
+/// A length in CSS pixels, finite and not below zero.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct CssLength(f64);
+
+impl CssLength {
+    pub fn new(pixels: f64) -> Result<Self, LengthError> {
+        if pixels.is_finite() && pixels >= 0.0 { Ok(Self(pixels)) } else { Err(LengthError { pixels }) }
+    }
+
+    pub fn pixels(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for CssLength {
+    type Error = LengthError;
+
+    fn try_from(pixels: f64) -> Result<Self, LengthError> {
+        Self::new(pixels)
+    }
+}
+
+impl From<CssLength> for f64 {
+    fn from(length: CssLength) -> Self {
+        length.0
+    }
+}
+
 /// The edge of a tab group a new group is split off at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Edge {
@@ -146,17 +195,82 @@ impl PanelEntry {
     }
 }
 
-/// How much room each folding region takes while it shows: the sides as a share of the dock's
-/// width, the bottom as a share of the height under the center.
+/// How much room one folding region takes while it shows. A drag keeps the form the region was
+/// given.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionExtent {
+    /// A share of the dock's width for a side, or of the height under the center for the bottom.
+    /// The region grows and shrinks with the dock.
+    Share(Share),
+    /// A length the region keeps however the dock is resized.
+    Length(CssLength),
+}
+
+/// How much room each folding region takes while it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RegionExtents {
-    pub left: Share,
-    pub right: Share,
-    pub bottom: Share,
+    pub left: RegionExtent,
+    pub right: RegionExtent,
+    pub bottom: RegionExtent,
 }
 
 impl RegionExtents {
-    pub const DEFAULT: Self = Self { left: Share(20.0), right: Share(25.0), bottom: Share(30.0) };
+    pub const DEFAULT: Self = Self {
+        left: RegionExtent::Share(FoldingRegion::Left.default_share()),
+        right: RegionExtent::Share(FoldingRegion::Right.default_share()),
+        bottom: RegionExtent::Share(FoldingRegion::Bottom.default_share()),
+    };
+
+    pub fn get(&self, region: FoldingRegion) -> RegionExtent {
+        match region {
+            FoldingRegion::Left => self.left,
+            FoldingRegion::Right => self.right,
+            FoldingRegion::Bottom => self.bottom,
+        }
+    }
+
+    pub fn set(&mut self, region: FoldingRegion, extent: RegionExtent) {
+        match region {
+            FoldingRegion::Left => self.left = extent,
+            FoldingRegion::Right => self.right = extent,
+            FoldingRegion::Bottom => self.bottom = extent,
+        }
+    }
+}
+
+/// The least and most room a folding region may be dragged to, beside the floor every region
+/// has. A least above the most wins.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RegionLimits {
+    pub min: Option<CssLength>,
+    pub max: Option<CssLength>,
+}
+
+/// The limits of each folding region. Set by the application rather than saved with a layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct FoldingLimits {
+    left: RegionLimits,
+    right: RegionLimits,
+    bottom: RegionLimits,
+}
+
+impl FoldingLimits {
+    pub(crate) fn get(&self, region: FoldingRegion) -> RegionLimits {
+        match region {
+            FoldingRegion::Left => self.left,
+            FoldingRegion::Right => self.right,
+            FoldingRegion::Bottom => self.bottom,
+        }
+    }
+
+    pub(crate) fn set(&mut self, region: FoldingRegion, limits: RegionLimits) {
+        match region {
+            FoldingRegion::Left => self.left = limits,
+            FoldingRegion::Right => self.right = limits,
+            FoldingRegion::Bottom => self.bottom = limits,
+        }
+    }
 }
 
 /// Panels shown one at a time behind a strip of tabs. Never empty: a group whose last panel goes
@@ -254,6 +368,7 @@ pub(crate) struct Layout {
     right: Region,
     bottom: Region,
     pub(crate) extents: RegionExtents,
+    pub(crate) limits: FoldingLimits,
     next_id: u64,
 }
 
@@ -265,6 +380,7 @@ impl Layout {
             right: Region::EMPTY,
             bottom: Region::EMPTY,
             extents: RegionExtents::DEFAULT,
+            limits: FoldingLimits::default(),
             next_id: 0,
         }
     }
@@ -521,6 +637,7 @@ impl Layout {
             right: region(&saved.right),
             bottom: region(&saved.bottom),
             extents: saved.extents,
+            limits: FoldingLimits::default(),
             next_id: 0,
         };
 
