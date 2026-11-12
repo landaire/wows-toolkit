@@ -23,9 +23,7 @@ use gpui_kit::Size;
 use gpui_kit::Window;
 use gpui_kit::canvas;
 use gpui_kit::point;
-
-// Removed once armor viewer and replay renderer import from the shared crate.
-pub use wows_toolkit_replay_data::frame::BgraFrame;
+use wows_toolkit_replay_data::frame::BgraFrame;
 
 /// Shows a stream of [`BgraFrame`]s through one dynamic texture.
 ///

@@ -57,7 +57,6 @@ use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::motion;
-use crate::replay_inspector::load::LoadedGameData;
 use crate::side_split::SideSplit;
 use crate::side_split::SideWidth;
 use crate::status_bar;
@@ -66,6 +65,7 @@ use crate::status_bar::ModifierKey;
 use crate::text_filter::MarkedQuery;
 use crate::text_filter::TypedQuery;
 use crate::viewport::device::SharedSceneDevice;
+use wows_toolkit_replay_data::load::LoadedGameData;
 
 use gpui_kit::component::WindowExt as _;
 
@@ -964,7 +964,7 @@ impl ArmorViewerPane {
     /// current pane's display settings (plate edges, zero-mm
     /// plates, armor opacity -- Task 7b), from the persisted
     /// `armor_viewer_defaults` row, the same way `app.rs` threads the rest of
-    /// `GpuiSettings` into its child views on startup. Called once, before
+    /// `StartupSettings` into its child views on startup. Called once, before
     /// the ship catalog itself has loaded, so `dock` only ever holds its
     /// single initial pane at this point -- no "Compare" pane can exist yet.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
@@ -1442,10 +1442,10 @@ impl ArmorViewerPane {
         self.export_dialog = None;
         self._export_dialog_subscription = None;
 
-        let asked = crate::dialog::save_file(
+        let asked = wows_toolkit_services::dialog::save_file(
             None,
             &load_ship::default_export_filename(&display_name),
-            Some(crate::dialog::GLB),
+            Some(wows_toolkit_services::dialog::GLB),
         );
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };

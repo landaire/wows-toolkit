@@ -4443,10 +4443,10 @@ impl ViewportView {
     pub(crate) fn confirm_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(snapshot) = self.export_confirm.take() else { return };
         cx.notify();
-        let asked = crate::dialog::save_file(
+        let asked = wows_toolkit_services::dialog::save_file(
             None,
             &load_ship::default_export_filename(&snapshot.display_name),
-            Some(crate::dialog::GLB),
+            Some(wows_toolkit_services::dialog::GLB),
         );
 
         let bundle = snapshot.bundle;
