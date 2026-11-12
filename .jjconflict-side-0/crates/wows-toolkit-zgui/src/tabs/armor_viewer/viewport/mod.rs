@@ -13,30 +13,32 @@
 //! and shared by every viewport; a new device generation drops it with every mesh made on it, and
 //! each viewport uploads its scene again.
 
+mod casts;
+mod depth_cues;
+mod host;
+mod hull;
+mod input;
 mod model;
+mod overlay;
+mod picking;
+mod scene;
 mod state;
+#[cfg(test)]
+mod tests;
 mod types;
+mod view;
 
 pub use model::ViewportModel;
 pub use state::ArmorViewportState;
 pub use state::PaneMenu;
 pub use types::Agreement;
-pub use types::AllVisible;
 pub use types::ArcSummary;
 pub use types::CameraRingSettings;
 pub use types::CastShell;
-pub use types::GapState;
 pub use types::Isolate;
 pub use types::LoadGeneration;
-pub use types::MeshSeed;
 pub use types::OpeningLayer;
-pub use types::OpeningLoad;
-pub use types::PerspectiveSettings;
 pub use types::SceneFeatures;
 pub use types::SceneSource;
-pub use types::SimAgreement;
-pub use types::SplashState;
-pub use types::SyncedSettings;
-pub use types::TrajectoryState;
 pub use types::ViewportChange;
-pub use types::agreement;
+pub use view::ArmorViewportProps;
