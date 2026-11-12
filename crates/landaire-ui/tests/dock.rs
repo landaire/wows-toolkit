@@ -27,6 +27,10 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::vocab::Modifiers;
@@ -292,4 +296,46 @@ fn a_dumped_layout_restores_to_itself_and_unknown_panels_are_reported() {
     assert_eq!(report.skipped[0].reason, SkipReason::UnknownKind);
     assert_eq!(ids(state), ["a", "b", "c"]);
     assert!(window.by_role_and_label(Role::Tab, "plot").is_none());
+}
+
+#[test]
+fn a_change_of_language_reaches_dock_tabs_and_their_close_buttons() {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let french = RwSignal::new_local(false);
+        sent.set(Some(french));
+        let say = move |english: &'static str, other: &'static str| {
+            Signal::derive_local(move || if french.get() { other } else { english }.to_owned())
+        };
+        let mut registry = PanelRegistry::new();
+        registry.register(
+            kind(),
+            PanelFactory::new(
+                move |_: &PanelId| if french.get() { "Journal" } else { "Log" }.to_owned(),
+                |_: &PanelId| AnyView::new(view! { box {"content"} }),
+            ),
+        );
+        let state = DockState::new(registry);
+        state.add_panel(DockTarget::Region(DockRegion::Center), entry("log")).expect("adds");
+
+        view! {
+            ThemeRoot {
+                Dock(state = state, close_label = say("Close", "Fermer"), tabs_label = say("Panels", "Panneaux"))
+            }
+        }
+    })
+    .expect("opens");
+    let french = handed.get().expect("the view was built");
+    assert!(window.by_role_and_label(Role::Tab, "Log").is_some());
+    assert!(window.by_role_and_label(Role::Button, "Close Log").is_some());
+    assert!(window.by_role_and_label(Role::Group, "Panels").is_some());
+
+    french.set(true);
+    window.advance(FRAME);
+
+    assert!(window.by_role_and_label(Role::Tab, "Journal").is_some(), "the tab is renamed");
+    assert!(window.by_role_and_label(Role::Tab, "Log").is_none());
+    assert!(window.by_role_and_label(Role::Button, "Fermer Journal").is_some(), "the close button is renamed");
+    assert!(window.by_role_and_label(Role::Group, "Panneaux").is_some(), "the strip is renamed");
 }

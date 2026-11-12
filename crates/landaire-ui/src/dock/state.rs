@@ -41,7 +41,7 @@ pub struct PanelFactory {
 
 impl PanelFactory {
     /// `label` names the panel to a reader and is its tab's title; `content` is what the panel
-    /// shows.
+    /// shows. The label is read where it is shown, so one that reads a signal follows it.
     pub fn new(label: impl Fn(&PanelId) -> String + 'static, content: impl Fn(&PanelId) -> AnyView + 'static) -> Self {
         Self { label: Rc::new(label), title: None, content: Rc::new(content) }
     }
@@ -58,7 +58,11 @@ impl PanelFactory {
     pub(crate) fn title(&self, id: &PanelId) -> AnyView {
         match &self.title {
             Some(title) => title(id),
-            None => AnyView::new(self.label(id)),
+            None => {
+                let label = Rc::clone(&self.label);
+                let id = id.clone();
+                AnyView::new(move || label(&id))
+            }
         }
     }
 
