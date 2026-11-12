@@ -16760,6 +16760,7 @@ dependencies = [
  "clap",
  "futures",
  "humansize",
+ "image",
  "landaire-ui",
  "rootcause",
  "rust-i18n 3.1.5",
@@ -16789,6 +16790,7 @@ dependencies = [
  "zgui",
  "zgui-ui",
  "zgui-ui-icons",
+ "zgui-ui-primitives",
  "zgui-ui-tokens",
 ]
 

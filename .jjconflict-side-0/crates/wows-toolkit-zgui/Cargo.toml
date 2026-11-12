@@ -11,6 +11,8 @@ zgui = { workspace = true }
 zgui-ui = { workspace = true }
 zgui-ui-icons = { workspace = true }
 zgui-ui-tokens = { workspace = true }
+# The placement a hover card is asked for.
+zgui-ui-primitives = { workspace = true }
 # Palettes, the theme root and the window chrome shared with other zgui front ends.
 landaire-ui = { workspace = true }
 # The icon set, shared with the other desktop front end.
@@ -70,3 +72,5 @@ wows-toolkit-services = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # Game versions, for the palette's version list tests.
 wowsunpack = { workspace = true }
+# Test frames are built from RGB images.
+image = { workspace = true }
