@@ -1,0 +1,15 @@
+[package]
+name = "landaire-ui"
+description = "Themed surfaces and test tooling for zgui applications"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "landaire_ui"
+path = "src/lib.rs"
+
+[dependencies]
+zgui.workspace = true
