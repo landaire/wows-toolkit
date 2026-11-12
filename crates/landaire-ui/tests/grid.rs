@@ -4,6 +4,7 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -574,6 +575,161 @@ fn a_fixed_height_grid_builds_only_the_rows_in_view() {
     assert!(window.by_test_id("name-0").is_none(), "the rows scrolled away from are not");
     let built = window.by_role(Role::Row).len() - 1;
     assert!(built <= 24, "{built} rows built after the scroll");
+}
+
+/// How tall row `id`'s tall cell is: 20, 45 or 70px.
+fn tall(id: u32) -> f32 {
+    20.0 + (id % 3) as f32 * 25.0
+}
+
+/// A name column and a column whose cells differ in height from row to row.
+fn tall_columns() -> Vec<GridColumn<Item>> {
+    vec![
+        GridColumn::new("name", "Name", |item: &Item| {
+            view! { text(attr:data-testid = format!("name-{}", item.id)) {{item.name.clone()}} }
+        })
+        .sizing(ColumnSizing::Fixed(ColumnWidth(100.0))),
+        GridColumn::new("tall", "Tall", |item: &Item| {
+            let style = format!("width: 10px; height: {}px", tall(item.id));
+            view! { box(attr:data-testid = format!("tall-{}", item.id), style = style) {} }
+        })
+        .sizing(ColumnSizing::Fixed(ColumnWidth(80.0))),
+    ]
+}
+
+/// What a test drives a measured grid through.
+#[derive(Clone, Copy)]
+struct Measured {
+    rows: RwSignal<Vec<Item>, LocalStorage>,
+    expanded: RwSignal<HashSet<u32>, LocalStorage>,
+    port: NodeRef,
+}
+
+fn open_measured(
+    count: u32,
+    columns: fn() -> Vec<GridColumn<Item>>,
+    mode: fn() -> RowMode<Item>,
+) -> (HeadlessWindow, Measured) {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let measured = Measured {
+            rows: RwSignal::new_local(items(count)),
+            expanded: RwSignal::new_local(HashSet::new()),
+            port: NodeRef::new(),
+        };
+        sent.set(Some(measured));
+        view! {
+            ThemeRoot(motion = MotionPreference::Reduced) {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = measured.rows,
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        mode = mode(),
+                        expanded = measured.expanded,
+                        node_ref = measured.port,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+
+    (window, handed.get().expect("the grid was built"))
+}
+
+fn bottom(window: &HeadlessWindow, element: Element) -> f32 {
+    let bounds = window.bounds(element).expect("the element has a box");
+
+    bounds.origin.y.0 + bounds.size.height.0
+}
+
+/// The ids of the rows built, in row order.
+fn built_ids(window: &HeadlessWindow, rows: &[Item]) -> Vec<u32> {
+    rows.iter().map(|item| item.id).filter(|id| window.by_test_id(&format!("name-{id}")).is_some()).collect()
+}
+
+/// Each built row starts below the tall cell of the row before it, and not far below.
+fn assert_rows_apart(window: &HeadlessWindow, built: &[u32]) {
+    for pair in built.windows(2) {
+        let gap = top(window, cell(window, &format!("tall-{}", pair[1])))
+            - top(window, cell(window, &format!("tall-{}", pair[0])));
+        let height = tall(pair[0]);
+        assert!(gap >= height && gap <= height + 16.0, "row {} is {gap}px tall for a {height}px cell", pair[0]);
+    }
+}
+
+#[test]
+fn a_measured_grid_builds_the_rows_in_view_at_their_own_heights() {
+    // An estimate well over every row's height, so rows built at it would not fill the view.
+    let (mut window, measured) = open_measured(2_000, tall_columns, || RowMode::measured(RowHeight(120.0)));
+    window.advance(Duration::from_millis(100));
+
+    let rows = measured.rows.get_untracked();
+    let built = built_ids(&window, &rows);
+    assert!(built.len() < 40, "{} rows built for a short view", built.len());
+    assert_eq!(built.first(), Some(&0));
+    assert_rows_apart(&window, &built);
+    let port = window.by_class("lui-grid__port").expect("the port is built");
+    let view_bottom = bottom(&window, port);
+    let last = *built.last().expect("rows are built");
+    assert!(bottom(&window, cell(&window, &format!("tall-{last}"))) >= view_bottom, "the built rows fill the view");
+
+    // The rows reached are measured on arrival and the end moves, so the end is asked for again.
+    let end = Point::new(DevicePx(0.0), DevicePx(1.0e7));
+    measured.port.scroll_to(ScrollTarget::Offset(end), ScrollBehavior::Instant);
+    window.advance(Duration::from_millis(200));
+    measured.port.scroll_to(ScrollTarget::Offset(end), ScrollBehavior::Instant);
+    window.advance(Duration::from_millis(200));
+    let end = cell(&window, "tall-1999");
+    let end_bottom = bottom(&window, end);
+    assert!(
+        end_bottom <= view_bottom && end_bottom >= view_bottom - 40.0,
+        "the last row ends the view at {end_bottom}"
+    );
+    assert!(window.by_test_id("name-0").is_none(), "the rows scrolled away from are not built");
+}
+
+#[test]
+fn a_measured_grid_shows_a_reorder_from_its_first_row_at_each_row_s_height() {
+    let (mut window, measured) = open_measured(300, tall_columns, || RowMode::measured(RowHeight(30.0)));
+    window.advance(Duration::from_millis(100));
+
+    let mut reversed = measured.rows.get_untracked();
+    reversed.reverse();
+    measured.rows.set(reversed.clone());
+    window.advance(Duration::from_millis(100));
+
+    let built = built_ids(&window, &reversed);
+    assert_eq!(built.first(), Some(&299), "the reorder is shown from its first row");
+    assert_rows_apart(&window, &built);
+}
+
+#[test]
+fn a_measured_row_counts_its_open_detail_as_part_of_its_height() {
+    let mode = || RowMode::Measured {
+        estimate: RowHeight(24.0),
+        overscan: 4,
+        detail: Some(Rc::new(|item: &Item| {
+            AnyView::new(view! { box(attr:data-testid = format!("detail-{}", item.id), style = "height: 120px") {} })
+        })),
+    };
+    let (mut window, measured) = open_measured(200, columns, mode);
+    window.advance(Duration::from_millis(100));
+    let line = top(&window, cell(&window, "name-1")) - top(&window, cell(&window, "name-0"));
+
+    // Row 0 above the view, and still built.
+    let scrolled = Point::new(DevicePx(0.0), DevicePx(line * 2.5));
+    measured.port.scroll_to(ScrollTarget::Offset(scrolled), ScrollBehavior::Instant);
+    window.advance(Duration::from_millis(100));
+    let held = top(&window, cell(&window, "name-5"));
+
+    measured.expanded.set(HashSet::from([0]));
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("detail-0").is_some(), "the detail is open");
+    assert_eq!(top(&window, cell(&window, "name-5")), held, "a row growing above the view moves nothing in it");
 }
 
 #[test]

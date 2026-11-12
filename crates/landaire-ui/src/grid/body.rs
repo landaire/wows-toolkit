@@ -37,6 +37,7 @@ use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
+use zgui_ui::virtualize::MeasuredVirtualize;
 
 use crate::grid::column::ColumnId;
 use crate::grid::header;
@@ -50,7 +51,7 @@ use crate::grid::state::Step;
 use crate::motion::Movement;
 use crate::surface::RowIndex;
 
-/// The rows: every one of them, or with a fixed row height only those in view and two spacers
+/// The rows: every one of them, or in a virtualized grid only those in view and two spacers
 /// standing in for the rest.
 pub(crate) fn body<T, K>(cx: Rc<GridCx<T, K>>) -> AnyView
 where
@@ -59,10 +60,37 @@ where
 {
     let order = cx.order;
 
+    if let Some(seen) = cx.measured {
+        let window = Signal::derive_local(move || seen.window());
+        // Keyed by index as well as by key, since a row measures itself under its index.
+        return AnyView::new(view! {
+            box(
+                class = "lui-grid__spacer",
+                a11y:hidden = true,
+                var:--lui-grid-spacer = move || Some(format!("{}px", window.get().lead))
+            )
+            for row in move || {
+                let window = window.get();
+                order.with(|order| {
+                    let end = window.end().min(order.len());
+                    let first = window.first.min(end);
+                    order[first..end].iter().cloned().enumerate().map(|(at, key)| (first + at, key)).collect::<Vec<_>>()
+                })
+            }, key = |row: &(usize, K)| row.clone() {
+                {body_row(Rc::clone(&cx), row.1, Some(row.0))}
+            }
+            box(
+                class = "lui-grid__spacer",
+                a11y:hidden = true,
+                var:--lui-grid-spacer = move || Some(format!("{}px", window.get().trail))
+            )
+        });
+    }
+
     let Some(window) = cx.window else {
         return AnyView::new(view! {
             for key in move || order.get().to_vec(), key = |key: &K| key.clone() {
-                {body_row(Rc::clone(&cx), key)}
+                {body_row(Rc::clone(&cx), key, None)}
             }
         });
     };
@@ -80,7 +108,7 @@ where
                 order[window.first.min(end)..end].to_vec()
             })
         }, key = |key: &K| key.clone() {
-            {body_row(Rc::clone(&cx), key)}
+            {body_row(Rc::clone(&cx), key, None)}
         }
         box(
             class = "lui-grid__spacer",
@@ -90,7 +118,8 @@ where
     })
 }
 
-fn body_row<T, K>(cx: Rc<GridCx<T, K>>, key: K) -> impl IntoView
+/// One row. `measured_at` is the index a measured grid built the row for.
+fn body_row<T, K>(cx: Rc<GridCx<T, K>>, key: K, measured_at: Option<usize>) -> impl IntoView
 where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
@@ -214,9 +243,14 @@ where
     };
 
     let ids = cx.drawn_ids;
-    let detail =
-        cx.detail.clone().map(|detail| AnyView::new(detail_region(Rc::clone(&cx), key.clone(), value, detail)));
+    let detail_height = cx.measured.map(|_| RwSignal::new_local(0.0));
+    let detail = cx
+        .detail
+        .clone()
+        .map(|detail| AnyView::new(detail_region(Rc::clone(&cx), key.clone(), value, detail, detail_height)));
     let heading = cx.groups.clone().map(|groups| AnyView::new(group_heading(&cx, index, value, groups)));
+    let gauge =
+        cx.measured.zip(measured_at).map(|(seen, at)| AnyView::new(row_gauge(&cx, seen, at, anchor, detail_height)));
 
     view! {
         box(
@@ -233,7 +267,40 @@ where
             }
             box(class = "lui-grid__filler", node_ref = anchor, a11y:hidden = true) {}
             {detail}
+            {gauge}
         }
+    }
+}
+
+/// An unseen box as tall as its row, for a measured grid to measure: the row lays its line and
+/// its detail region out in the grid's own tracks and has no box of its own.
+fn row_gauge<T, K>(
+    cx: &GridCx<T, K>,
+    seen: MeasuredVirtualize,
+    index: usize,
+    line: NodeRef,
+    detail_height: Option<RwSignal<f32, LocalStorage>>,
+) -> impl IntoView
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let gauge = NodeRef::new();
+    seen.measure(index, gauge);
+
+    let port = cx.port;
+    let line = line.observe_border_size();
+    let height = move || {
+        let scale = port.scale();
+        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let line = line.get()?.height.0 / scale;
+        let detail = detail_height.map_or(0.0, |height| height.get());
+
+        Some(format!("{}px", line + detail))
+    };
+
+    view! {
+        box(class = "lui-grid__gauge", node_ref = gauge, a11y:hidden = true, style:height = height) {}
     }
 }
 
@@ -335,12 +402,13 @@ where
 }
 
 /// The region under a row: built while the row is expanded and while it closes, and revealed by
-/// animating its height to that of its content.
+/// animating its height to that of its content. `reported` is told its height.
 fn detail_region<T, K>(
     cx: Rc<GridCx<T, K>>,
     key: K,
     value: RwSignal<Option<T>, LocalStorage>,
     detail: RowDetail<T>,
+    reported: Option<RwSignal<f32, LocalStorage>>,
 ) -> impl IntoView
 where
     T: Clone + PartialEq + 'static,
@@ -386,16 +454,18 @@ where
 
     view! {
         if move || built.get() {
-            {detail_body(open, value, Rc::clone(&detail), cx.view_width)}
+            {detail_body(open, value, Rc::clone(&detail), cx.view_width, reported)}
         } else {}
     }
 }
 
+/// `reported` is told the region's height in CSS pixels while it is built.
 fn detail_body<T>(
     open: Signal<bool, LocalStorage>,
     value: RwSignal<Option<T>, LocalStorage>,
     detail: RowDetail<T>,
     view_width: Signal<Option<String>, LocalStorage>,
+    reported: Option<RwSignal<f32, LocalStorage>>,
 ) -> impl IntoView
 where
     T: Clone + PartialEq + 'static,
@@ -415,9 +485,27 @@ where
     };
     let height = move || measured.get().map(|size| format!("{}px", (size.height.0 / scale()).ceil()));
 
+    // A measured row counts its detail region, at whatever height its reveal has it, as part of
+    // the row.
+    let outer = NodeRef::new();
+    if let Some(reported) = reported {
+        let size = outer.observe_border_size();
+        let reporting = RenderEffect::new(move |_| {
+            let height = size.get().map_or(0.0, |size| size.height.0 / scale());
+            if reported.get_untracked() != height {
+                reported.set(height);
+            }
+        });
+        on_cleanup_local(move || {
+            drop(reporting);
+            reported.set(0.0);
+        });
+    }
+
     view! {
         box(
             class = "lui-grid__detail",
+            node_ref = outer,
             attr:data-state = state,
             var:--lui-grid-detail-height = height,
             var:--lui-grid-view = move || view_width.get(),
