@@ -60,6 +60,7 @@ use super::assets::ArmorAssetsBundle;
 use super::legend::swatch_color;
 use super::options_panel::HeadDepth;
 use super::options_panel::folding_head;
+use super::tree_filter::MarkedTreeLabel;
 use super::tree_filter::RowFilter;
 use super::tree_filter::TreeFilter;
 use super::tree_filter::match_count;

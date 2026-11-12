@@ -45,5 +45,7 @@ wgpu = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "parsing", "models"] }
 
 [dev-dependencies]
+# The real-catalogue test names models in English.
+gettext = { workspace = true }
 pollster = "0.4"
 serde_json = { workspace = true }

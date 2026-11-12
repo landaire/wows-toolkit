@@ -9,7 +9,8 @@
 //! `assets` runs the armor crate's synchronous loaders on the background
 //! executor and decodes the catalog's nation flags and class icons. `sidebar`
 //! lists the ships, their parts and every catalogue model in one searchable
-//! tree (`sidebar_tree` builds it) and emits selection events. `popover`
+//! tree (built by `wows_toolkit_armor::sidebar_tree`, drawn through
+//! `sidebar_tree`) and emits selection events. `popover`
 //! builds the options rail's tools and the armor and hull visibility trees.
 //! `pane` ties these into one pane: sidebar on the left, viewport on the
 //! right. `dock` lays out one or more panes itself (see its module doc); the
