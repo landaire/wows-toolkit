@@ -65,16 +65,6 @@ GPUI_DEPS = [
     "//third-party/rust:web-time",
 ]
 
-# The cfg(target_os) dependency sections of Cargo.toml: the file dialogs.
-GPUI_PLATFORM_DEPS = os_select(
-    macos = ["//third-party/rust:rfd"],
-    linux = [
-        "//third-party/rust:ashpd",
-        "//third-party/rust:url",
-    ],
-    windows = ["//third-party/rust:rfd"],
-)
-
 # Not wows_toolkit_gpui_bin: the target name is a path component of every
 # object file a release build writes, and the longest of those already sits
 # within a dozen characters of the 260 link.exe accepts.
@@ -85,7 +75,7 @@ workspace_binary(
     version = "1.0.5",
     crate_root = "src/main.rs",
     buildscript = buildscript,
-    deps = GPUI_DEPS + GPUI_PLATFORM_DEPS,
+    deps = GPUI_DEPS,
     # gpui embeds its application manifest from its own build script, which
     # shells out to an rc.exe it discovers from host state. Buck compiles the
     # same manifest with the pinned rc.exe and links the result here instead.
@@ -112,7 +102,7 @@ workspace_binary(
     crate_root = "src/main.rs",
     buildscript = buildscript,
     features = ["dhat-heap"],
-    deps = [_DHAT_VARIANTS.get(d, d) for d in GPUI_DEPS] + GPUI_PLATFORM_DEPS + ["//third-party/rust:dhat"],
+    deps = [_DHAT_VARIANTS.get(d, d) for d in GPUI_DEPS] + ["//third-party/rust:dhat"],
     rustc_flags = os_select(
         macos = [],
         linux = LINUX_GUI_RUSTC_FLAGS,
@@ -123,6 +113,7 @@ workspace_binary(
 _TEST_SUPPORT_VARIANTS = {
     "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
     "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+    "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
 }
 
@@ -136,7 +127,7 @@ workspace_test(
     crate_root = "src/main.rs",
     buildscript = buildscript,
     # test-support lets the tests point `storage_dir` at a temporary directory.
-    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in GPUI_DEPS] + GPUI_PLATFORM_DEPS,
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in GPUI_DEPS],
     test_deps = ["//third-party/rust:filetime"],
     incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window and a graphics device. One thread per core
