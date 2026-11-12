@@ -29,6 +29,7 @@ use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::GameParamId;
 
+use super::catalog::HiddenReason;
 use super::catalog::NationGroup;
 use super::catalog::ShipCatalog;
 use super::catalog::ShipEntry;
@@ -105,6 +106,9 @@ pub(super) struct TreeSources<'a> {
     pub models: ModelSection<'a>,
     /// Armored buildings, listed after the ships; empty until listed.
     pub fortifications: &'a [FortificationRow],
+    /// Why each ship the catalog normally leaves out is left out, for the
+    /// ships listed anyway.
+    pub hidden: &'a HashMap<String, HiddenReason>,
 }
 
 /// Which folders are expanded. With `auto` set, every folder a search wants
@@ -434,6 +438,15 @@ pub(super) fn model_sub_kind_label(sub_kind: &ModelSubKind) -> String {
     t!(key).into_owned()
 }
 
+fn hidden_reason_label(reason: HiddenReason) -> String {
+    let key = match reason {
+        HiddenReason::ClanRental => "ui.armor.hidden_ship.clan_rental",
+        HiddenReason::OtherClass => "ui.armor.hidden_ship.other_class",
+    };
+
+    t!(key).into_owned()
+}
+
 fn misc_category_label(category: MiscCategory) -> String {
     let key = match category {
         MiscCategory::Crane => "ui.models.misc.crane",
@@ -682,6 +695,10 @@ impl Builder<'_, '_, '_, '_> {
         if found == Some(ShipMatch::Name) {
             self.note(&id, &ship.search_key);
         }
+        // A search note says more than the tag, which stands in otherwise.
+        if let Some(reason) = self.sources.hidden.get(&ship.param_index) {
+            self.notes.entry(id.clone()).or_insert_with(|| hidden_reason_label(*reason).into());
+        }
 
         let vehicle = VehicleParamIndex::new(ship.param_index.clone());
         let ship_parts = self.sources.ship_parts;
@@ -912,6 +929,8 @@ pub(super) mod fixture {
     use wowsunpack::game_types::GameParamId;
 
     use super::super::catalog::ClassGroup;
+    use super::super::catalog::HiddenReason;
+    use super::super::catalog::HiddenShip;
     use super::super::catalog::NationGroup;
     use super::super::catalog::ShipCatalog;
     use super::super::catalog::ShipEntry;
@@ -964,9 +983,18 @@ pub(super) mod fixture {
         let yamato = ship("PJSB018", "Yamato", "Yamato", "PJSB018_Yamato_1944", 4276041424, 10);
         let south_carolina = ship("PASB001", "S. Carolina", "South Carolina", "PASB001_Michigan_1916", 4293867504, 3);
         let iowa = ship(IOWA_INDEX, "Iowa", "Iowa", "PASB018_Iowa_1944", 4276041712, 9);
+        // A clan rental copy of Iowa, which the list leaves out.
+        let rental = HiddenShip {
+            nation: "USA".to_string(),
+            nation_display_name: "U.S.A.".to_string(),
+            species: Species::Battleship,
+            ship: ship("PASB708", "[Iowa]", "[Iowa]", "PASB708_Iowa_1944_Clan", 4276041000, 9),
+            reason: HiddenReason::ClanRental,
+        };
 
         ShipCatalog {
             nations: vec![nation("Japan", "Japan", vec![yamato]), nation("USA", "U.S.A.", vec![south_carolina, iowa])],
+            hidden: vec![rental],
         }
     }
 
@@ -1107,6 +1135,7 @@ mod tests {
         index: ModelTreeIndex,
         parts: HashMap<VehicleParamIndex, ShipPartRows>,
         fortifications: Vec<FortificationRow>,
+        hidden: HashMap<String, HiddenReason>,
     }
 
     fn data() -> Data {
@@ -1117,7 +1146,7 @@ mod tests {
         let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
         let parts = fixture::ship_parts(&catalog, &references);
 
-        Data { ships, index, parts, fortifications: Vec::new() }
+        Data { ships, index, parts, fortifications: Vec::new(), hidden: HashMap::new() }
     }
 
     /// A catalogue far larger than a search opens: 3000 main battery guns in
@@ -1136,7 +1165,7 @@ mod tests {
         let references = super::super::model_tree::ModelReferences::new();
         let index = ModelTreeIndex::build(&catalog, &ships, &references, &fixture::metadata());
 
-        Data { ships, index, parts: HashMap::new(), fortifications: Vec::new() }
+        Data { ships, index, parts: HashMap::new(), fortifications: Vec::new(), hidden: HashMap::new() }
     }
 
     fn build(data: &Data, query: &str, set: &mut HashSet<SharedString>, auto: bool) -> BuiltTree {
@@ -1155,6 +1184,7 @@ mod tests {
             ship_parts: &data.parts,
             models: ModelSection::Ready(&data.index),
             fortifications: &data.fortifications,
+            hidden: &data.hidden,
         };
         let search = SearchMatches::from_query(&sources, query, tiers);
 
@@ -1193,6 +1223,24 @@ mod tests {
             ["Fortifications", "  Fort", "    Fort of the Isles"],
             "the tiers neither filter nor count buildings"
         );
+    }
+
+    #[test]
+    fn hidden_ships_list_in_their_nation_and_class_tagged_with_why_they_are_hidden() {
+        let listed = data();
+        let hidden = listed.ships.hidden.iter().map(|ship| (ship.ship.param_index.clone(), ship.reason)).collect();
+        let data = Data { ships: listed.ships.with_hidden(), hidden, ..listed };
+        let mut set = HashSet::from(["armor-nation-USA".into(), "armor-class-USA-Battleship".into()]);
+
+        let built = build(&data, "", &mut set, false);
+
+        assert_eq!(
+            outline(&built.items)[..6],
+            ["Japan +", "U.S.A.", "  Battleship", "    III S. Carolina", "    IX Iowa +", "    IX [Iowa]"]
+        );
+        let rental = ship_row_id("PASB708");
+        assert_eq!(built.notes.get(&rental).map(|note| note.to_string()).as_deref(), Some("Clan rental"));
+        assert!(data.ships.hidden.is_empty(), "nothing is left hidden");
     }
 
     #[test]
@@ -1709,6 +1757,13 @@ mod tests {
         metadata.set_translations(catalog);
         let library = ModelLibrary::new(vfs.clone(), Arc::new(bytes), &metadata).expect("model library");
         let ships = ShipCatalog::build(&metadata);
+        eprintln!("[measured] {} listed ships, {} hidden", ships.ships().count(), ships.hidden.len());
+        for hidden in ships.hidden.iter().take(3) {
+            eprintln!(
+                "  {:?} {} {} ({:?})",
+                hidden.reason, hidden.ship.param_index, hidden.ship.display_name, hidden.species
+            );
+        }
 
         let started = Instant::now();
         let references = ModelReferences::build(&ships, &metadata);
@@ -1750,7 +1805,7 @@ mod tests {
             eprintln!("  {:?} {:?} {} ({})", row.kind, row.kind_name, row.display_name, row.param_name);
         }
 
-        let data = Data { ships, index, parts, fortifications };
+        let data = Data { ships, index, parts, fortifications, hidden: HashMap::new() };
         let queries =
             ["", "a", "gun", "iowa", "agm", "pasb018", "south carolina", "406 mm/50", "pagm034", "4276041712"];
         for query in queries {
@@ -1759,6 +1814,7 @@ mod tests {
                 ship_parts: &data.parts,
                 models: ModelSection::Ready(&data.index),
                 fortifications: &data.fortifications,
+                hidden: &data.hidden,
             };
             let started = Instant::now();
             let matches = SearchMatches::from_query(&sources, query, TierRange::ALL);

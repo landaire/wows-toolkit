@@ -1064,6 +1064,8 @@ sync_tooltip = "Synchronizuj widoczność pancerza/kadłuba oraz nakładki wyśw
 common_settings = "Wspólne ustawienia"
 tier_filter = "Poziomy od %{lowest} do %{highest}"
 fortifications = "Fortyfikacje"
+show_hidden_ships = "Pokaż ukryte okręty"
+show_hidden_ships_tooltip = "Wyświetlaj też okręty pomijane na liście, np. okręty klanowe do wypożyczenia"
 compare_split = "Porównaj w nowym panelu"
 export_model = "Eksportuj model okrętu"
 armor_thickness = "Grubość pancerza"
@@ -2008,3 +2010,7 @@ no_meshes = "Ten model nie ma siatek."
 no_meshes_at_lod = "Ten model nie ma siatek na wybranym poziomie szczegółów."
 no_visible_surface = "Ten model nie ma widocznej powierzchni do narysowania."
 section_stand_in = "Ta sekcja kadłuba nie ma własnej geometrii. Okręt rysuje tę część kadłuba w innej sekcji."
+
+[ui.armor.hidden_ship]
+clan_rental = "Wypożyczenie klanowe"
+other_class = "To nie jest klasa okrętu"

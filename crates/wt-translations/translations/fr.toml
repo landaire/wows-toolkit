@@ -1108,6 +1108,8 @@ sync_tooltip = "Garder la visibilité du blindage/coque et les surcouches d'affi
 common_settings = "Paramètres communs"
 tier_filter = "Rangs %{lowest} à %{highest}"
 fortifications = "Fortifications"
+show_hidden_ships = "Afficher les navires masqués"
+show_hidden_ships_tooltip = "Lister aussi les navires que la liste omet, comme les navires de location de clan"
 compare_split = "Comparer dans un nouveau panneau"
 export_model = "Exporter le modèle du navire"
 armor_thickness = "Épaisseur du blindage"
@@ -2054,3 +2056,7 @@ no_meshes = "Ce modèle n'a aucun maillage."
 no_meshes_at_lod = "Ce modèle n'a aucun maillage au niveau de détail choisi."
 no_visible_surface = "Ce modèle n'a aucune surface visible à dessiner."
 section_stand_in = "Cette section de coque n'a pas de géométrie propre. Le navire dessine cette partie de sa coque dans une autre section."
+
+[ui.armor.hidden_ship]
+clan_rental = "Location de clan"
+other_class = "Pas une classe de navire"

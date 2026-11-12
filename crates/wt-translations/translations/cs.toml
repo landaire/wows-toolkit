@@ -1064,6 +1064,8 @@ sync_tooltip = "Udržovat viditelnost pancíře/trupu a překryvy zobrazení (st
 common_settings = "Společná nastavení"
 tier_filter = "Úrovně %{lowest} až %{highest}"
 fortifications = "Opevnění"
+show_hidden_ships = "Zobrazit skryté lodě"
+show_hidden_ships_tooltip = "Uvést i lodě, které seznam vynechává, například klanové zápůjčky"
 compare_split = "Porovnat v novém panelu"
 export_model = "Exportovat model lodi"
 armor_thickness = "Tloušťka pancíře"
@@ -2008,3 +2010,7 @@ no_meshes = "Tento model nemá žádné sítě."
 no_meshes_at_lod = "Tento model nemá na zvolené úrovni detailů žádné sítě."
 no_visible_surface = "Tento model nemá žádný viditelný povrch k vykreslení."
 section_stand_in = "Tato část trupu nemá vlastní geometrii. Loď tuto část trupu vykresluje v jiné sekci."
+
+[ui.armor.hidden_ship]
+clan_rental = "Klanová zápůjčka"
+other_class = "Není třída lodi"

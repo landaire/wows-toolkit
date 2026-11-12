@@ -37,6 +37,9 @@ pub mod keys {
     pub const MODEL_VIEWER_SHOW_ARMOR: &str = "model_viewer_show_armor";
     /// The ship tiers the Model Viewer sidebar lists, as `[lowest, highest]`.
     pub const MODEL_VIEWER_SHIP_TIERS: &str = "model_viewer_ship_tiers";
+    /// Whether the Model Viewer sidebar also lists the ships its list leaves
+    /// out, such as clan rentals.
+    pub const MODEL_VIEWER_SHOW_HIDDEN_SHIPS: &str = "model_viewer_show_hidden_ships";
     /// Where that cache is kept. Empty means the default location.
     pub const GAME_DATA_CACHE_DIR: &str = "game_data_cache_dir";
     /// The game-data repository commit the cache was last checked against.

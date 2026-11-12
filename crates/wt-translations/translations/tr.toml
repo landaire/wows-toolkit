@@ -1064,6 +1064,8 @@ sync_tooltip = "Zırh/gövde görünürlüğünü ve görüntü kaplamalarını 
 common_settings = "Ortak Ayarlar"
 tier_filter = "Seviye %{lowest} - %{highest}"
 fortifications = "Tahkimatlar"
+show_hidden_ships = "Gizli gemileri göster"
+show_hidden_ships_tooltip = "Listenin dışarıda bıraktığı klan kiralık gemileri gibi gemileri de listele"
 compare_split = "Yeni panelde karşılaştır"
 export_model = "Gemi Modelini Dışa Aktar"
 armor_thickness = "Zırh Kalınlığı"
@@ -2008,3 +2010,7 @@ no_meshes = "Bu modelin ağı yok."
 no_meshes_at_lod = "Bu modelin seçilen ayrıntı düzeyinde ağı yok."
 no_visible_surface = "Bu modelin çizilecek görünür bir yüzeyi yok."
 section_stand_in = "Bu gövde bölümünün kendi geometrisi yok. Gemi, gövdenin bu kısmını başka bir bölümde çiziyor."
+
+[ui.armor.hidden_ship]
+clan_rental = "Klan kiralığı"
+other_class = "Bir gemi sınıfı değil"

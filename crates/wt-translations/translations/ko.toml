@@ -1108,6 +1108,8 @@ sync_tooltip = "모든 패널에서 장갑/선체 표시 및 표시 오버레이
 common_settings = "공통 설정"
 tier_filter = "%{lowest}~%{highest}단계"
 fortifications = "요새"
+show_hidden_ships = "숨겨진 함선 표시"
+show_hidden_ships_tooltip = "클랜 대여 함선처럼 목록에서 빠지는 함선도 표시합니다"
 compare_split = "새 분할로 비교"
 export_model = "함선 모델 내보내기"
 armor_thickness = "장갑 두께"
@@ -2054,3 +2056,7 @@ no_meshes = "이 모델에는 메시가 없습니다."
 no_meshes_at_lod = "선택한 세부 수준에서 이 모델에는 메시가 없습니다."
 no_visible_surface = "이 모델에는 그릴 수 있는 보이는 표면이 없습니다."
 section_stand_in = "이 선체 구역에는 자체 지오메트리가 없습니다. 함선은 이 부분의 선체를 다른 구역에서 그립니다."
+
+[ui.armor.hidden_ship]
+clan_rental = "클랜 대여"
+other_class = "함종이 아님"

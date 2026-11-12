@@ -1108,6 +1108,8 @@ sync_tooltip = "在所有面板之間同步裝甲/船體可見性與顯示覆蓋
 common_settings = "通用設定"
 tier_filter = "%{lowest} 至 %{highest} 階"
 fortifications = "要塞"
+show_hidden_ships = "顯示隱藏的艦船"
+show_hidden_ships_tooltip = "同時列出清單略去的艦船，例如公會租借艦船"
 compare_split = "在新分割中比較"
 export_model = "匯出艦船模型"
 armor_thickness = "裝甲厚度"
@@ -2054,3 +2056,7 @@ no_meshes = "此模型沒有網格。"
 no_meshes_at_lod = "此模型在所選細節等級下沒有網格。"
 no_visible_surface = "此模型沒有可繪製的可見表面。"
 section_stand_in = "此船體分段沒有自己的幾何資料。艦船在另一個分段中繪製這部分船體。"
+
+[ui.armor.hidden_ship]
+clan_rental = "公會租借"
+other_class = "不是艦種"

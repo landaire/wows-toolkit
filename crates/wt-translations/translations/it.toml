@@ -1108,6 +1108,8 @@ sync_tooltip = "Mantieni sincronizzati tra tutti i pannelli la visibilità coraz
 common_settings = "Impostazioni comuni"
 tier_filter = "Livelli da %{lowest} a %{highest}"
 fortifications = "Fortificazioni"
+show_hidden_ships = "Mostra navi nascoste"
+show_hidden_ships_tooltip = "Elenca anche le navi che l'elenco omette, come quelle a noleggio del clan"
 compare_split = "Confronta in nuovo pannello"
 export_model = "Esporta modello nave"
 armor_thickness = "Spessore corazza"
@@ -2054,3 +2056,7 @@ no_meshes = "Questo modello non ha mesh."
 no_meshes_at_lod = "Questo modello non ha mesh al livello di dettaglio scelto."
 no_visible_surface = "Questo modello non ha alcuna superficie visibile da disegnare."
 section_stand_in = "Questa sezione dello scafo non ha una geometria propria. La nave disegna questa parte dello scafo in un'altra sezione."
+
+[ui.armor.hidden_ship]
+clan_rental = "Noleggio del clan"
+other_class = "Non è una classe di nave"

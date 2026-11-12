@@ -16,11 +16,16 @@ use wowsunpack::game_params::types::Species;
 use super::search_key::SearchKey;
 
 /// Pre-built catalog of all ships, organized for the tree selector.
+#[derive(Clone)]
 pub struct ShipCatalog {
     /// Nations sorted alphabetically, each containing sorted classes.
     pub nations: Vec<NationGroup>,
+    /// The ships left out of `nations`, which the Model Viewer lists on
+    /// request.
+    pub hidden: Vec<HiddenShip>,
 }
 
+#[derive(Clone)]
 pub struct NationGroup {
     /// The raw nation key (`usa`, `united_kingdom`), which is what the flag
     /// icons and the tree's row ids are keyed on.
@@ -30,9 +35,29 @@ pub struct NationGroup {
     pub classes: Vec<ClassGroup>,
 }
 
+#[derive(Clone)]
 pub struct ClassGroup {
     pub species: Species,
     pub ships: Vec<ShipEntry>,
+}
+
+/// A ship the list leaves out, with the nation and class it belongs in.
+#[derive(Clone)]
+pub struct HiddenShip {
+    pub nation: String,
+    pub nation_display_name: String,
+    pub species: Species,
+    pub ship: ShipEntry,
+    pub reason: HiddenReason,
+}
+
+/// Why the ship list leaves a ship out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HiddenReason {
+    /// A clan rental copy (`group` `clan`) of a ship listed on its own.
+    ClanRental,
+    /// A species that is not one of the classes ships are grouped by.
+    OtherClass,
 }
 
 #[derive(Clone)]
@@ -52,6 +77,55 @@ impl ShipCatalog {
     pub fn ships(&self) -> impl Iterator<Item = &ShipEntry> {
         self.nations.iter().flat_map(|nation| nation.classes.iter()).flat_map(|class| class.ships.iter())
     }
+
+    /// This catalog with its hidden ships listed in their nations and
+    /// classes, and none left hidden.
+    pub fn with_hidden(&self) -> ShipCatalog {
+        let listed = self.nations.iter().flat_map(|nation| {
+            nation.classes.iter().flat_map(move |class| {
+                class
+                    .ships
+                    .iter()
+                    .map(move |ship| (nation.nation.clone(), nation.display_name.clone(), class.species, ship.clone()))
+            })
+        });
+        let hidden = self.hidden.iter().map(|hidden| {
+            (hidden.nation.clone(), hidden.nation_display_name.clone(), hidden.species, hidden.ship.clone())
+        });
+
+        ShipCatalog { nations: group_ships(listed.chain(hidden)), hidden: Vec::new() }
+    }
+}
+
+/// Groups `ships`, each with its nation key, nation name and class, by
+/// nation then class, sorted as the tree lists them.
+fn group_ships(ships: impl IntoIterator<Item = (String, String, Species, ShipEntry)>) -> Vec<NationGroup> {
+    let mut nation_map: HashMap<String, (String, HashMap<Species, Vec<ShipEntry>>)> = HashMap::new();
+    for (nation, display_name, species, ship) in ships {
+        let (_, classes) = nation_map.entry(nation).or_insert_with(|| (display_name, HashMap::new()));
+        classes.entry(species).or_default().push(ship);
+    }
+
+    let mut nations: Vec<NationGroup> = nation_map
+        .into_iter()
+        .map(|(nation, (display_name, class_map))| {
+            let mut classes: Vec<ClassGroup> = class_map
+                .into_iter()
+                .map(|(species, mut ships)| {
+                    ships.sort_by(|a, b| a.tier.cmp(&b.tier).then(a.display_name.cmp(&b.display_name)));
+                    ClassGroup { species, ships }
+                })
+                .collect();
+            classes.sort_by_key(|c| species_order(&c.species));
+            NationGroup { nation, display_name, classes }
+        })
+        .collect();
+
+    // By the name shown, not the key behind it, matching the egui tree
+    // (`armor_viewer/ui/tab.rs:377`).
+    nations.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    nations
 }
 
 /// The ship tiers the Model Viewer sidebar lists, inclusive and never empty.
@@ -178,73 +252,60 @@ pub fn translate_material_key(metadata: &GameMetadataProvider, key: &str, specie
 }
 
 impl ShipCatalog {
-    /// Build from GameMetadataProvider. Filters to only ship species.
+    /// Build from GameMetadataProvider. Lists the ship classes' vehicles;
+    /// clan rentals and vehicles of other species go to [`Self::hidden`].
     pub fn build(metadata: &GameMetadataProvider) -> Self {
-        let mut nation_map: HashMap<String, HashMap<Species, Vec<ShipEntry>>> = HashMap::new();
-
+        let mut nation_names: HashMap<String, String> = HashMap::new();
+        let mut listed = Vec::new();
+        let mut hidden = Vec::new();
         for param in metadata.params() {
-            let species = match param.species() {
-                Some(r) => match r.known() {
-                    Some(s) if SHIP_SPECIES.contains(s) => *s,
-                    _ => continue,
-                },
-                None => continue,
-            };
-
-            let vehicle = match param.vehicle() {
-                Some(v) => v,
-                None => continue,
-            };
-
-            // Skip clan rental ships (duplicates of real ships).
-            if vehicle.group() == "clan" {
+            let Some(vehicle) = param.vehicle() else {
                 continue;
-            }
+            };
+            // A species the game names but this build does not know cannot be
+            // placed in a class.
+            let Some(species) = param.species().and_then(|species| species.known().copied()) else {
+                continue;
+            };
 
-            let tier = vehicle.level();
+            let reason = if !SHIP_SPECIES.contains(&species) {
+                Some(HiddenReason::OtherClass)
+            } else if vehicle.group() == "clan" {
+                Some(HiddenReason::ClanRental)
+            } else {
+                None
+            };
+
             let nation = param.nation().to_string();
-
-            let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
-
-            let search_name = unidecode::unidecode(&display_name).to_lowercase();
-            let full_name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}_FULL", param.index()));
-            let mut search_key = SearchKey::new();
-            search_key.push(display_name.clone());
-            if let Some(full_name) = metadata.localized_name_from_id(&full_name_key) {
-                search_key.push(full_name);
+            let nation_display_name =
+                nation_names.entry(nation.clone()).or_insert_with(|| translate_name(metadata, &nation)).clone();
+            let entry = ship_entry(param, vehicle.level(), metadata);
+            match reason {
+                Some(reason) => hidden.push(HiddenShip { nation, nation_display_name, species, ship: entry, reason }),
+                None => listed.push((nation, nation_display_name, species, entry)),
             }
-            search_key.push(param.index());
-            search_key.push(param.name());
-            search_key.push(param.id().to_string());
-
-            let entry =
-                ShipEntry { param_index: param.index().to_string(), display_name, search_name, search_key, tier };
-
-            nation_map.entry(nation).or_default().entry(species).or_default().push(entry);
         }
 
-        let mut nations: Vec<NationGroup> = nation_map
-            .into_iter()
-            .map(|(nation, class_map)| {
-                let mut classes: Vec<ClassGroup> = class_map
-                    .into_iter()
-                    .map(|(species, mut ships)| {
-                        ships.sort_by(|a, b| a.tier.cmp(&b.tier).then(a.display_name.cmp(&b.display_name)));
-                        ClassGroup { species, ships }
-                    })
-                    .collect();
-                classes.sort_by_key(|c| species_order(&c.species));
-                let display_name = translate_name(metadata, &nation);
-                NationGroup { nation, display_name, classes }
-            })
-            .collect();
-
-        // By the name shown, not the key behind it, matching the egui tree
-        // (`armor_viewer/ui/tab.rs:377`).
-        nations.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-
-        ShipCatalog { nations }
+        ShipCatalog { nations: group_ships(listed), hidden }
     }
+}
+
+/// The entry for ship `param` at tier `tier`.
+fn ship_entry(param: &wowsunpack::game_params::types::Param, tier: u32, metadata: &GameMetadataProvider) -> ShipEntry {
+    let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
+
+    let search_name = unidecode::unidecode(&display_name).to_lowercase();
+    let full_name_key = wowsunpack::data::TranslationKey::new(format!("IDS_{}_FULL", param.index()));
+    let mut search_key = SearchKey::new();
+    search_key.push(display_name.clone());
+    if let Some(full_name) = metadata.localized_name_from_id(&full_name_key) {
+        search_key.push(full_name);
+    }
+    search_key.push(param.index());
+    search_key.push(param.name());
+    search_key.push(param.id().to_string());
+
+    ShipEntry { param_index: param.index().to_string(), display_name, search_name, search_key, tier }
 }
 
 #[cfg(test)]

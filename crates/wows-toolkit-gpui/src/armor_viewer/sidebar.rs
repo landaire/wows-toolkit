@@ -57,6 +57,8 @@ use wowsunpack::game_types::GameParamId;
 
 use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
+use super::catalog::HiddenReason;
+use super::catalog::ShipCatalog;
 use super::catalog::TierRange;
 use super::catalog::tier_roman;
 use super::model_refs::HardpointTarget;
@@ -224,13 +226,23 @@ pub struct Sidebar {
     /// The tiers the Ships section lists, and the slider choosing them.
     tiers: TierRange,
     tier_slider: Entity<SliderState>,
-    /// The saved tiers are read once, with the first bundle: the config
+    /// Whether the ships the catalog leaves out are listed too, the catalog
+    /// listing them while they are, and why each is left out.
+    show_hidden: bool,
+    with_hidden: Option<Arc<ShipCatalog>>,
+    hidden_reasons: Arc<HashMap<String, HiddenReason>>,
+    /// The saved settings are read once, with the first bundle: the config
     /// database is not open yet when the sidebar is made.
-    tiers_restored: bool,
+    settings_restored: bool,
+    /// Whether the reader set the tiers or the hidden-ship choice this
+    /// session, which a saved value read later does not undo.
+    tiers_chosen: bool,
+    hidden_chosen: bool,
 
     _search_debounce: Option<Task<()>>,
     _model_index_task: Option<Task<()>>,
     _tiers_restore: Option<Task<()>>,
+    _hidden_restore: Option<Task<()>>,
     _tier_slider_subscription: Subscription,
     _subscriptions: Vec<Subscription>,
 }
@@ -273,10 +285,16 @@ impl Sidebar {
             open_model: None,
             tiers: TierRange::ALL,
             tier_slider,
-            tiers_restored: false,
+            show_hidden: false,
+            with_hidden: None,
+            hidden_reasons: Arc::new(HashMap::new()),
+            tiers_chosen: false,
+            hidden_chosen: false,
+            settings_restored: false,
             _search_debounce: None,
             _model_index_task: None,
             _tiers_restore: None,
+            _hidden_restore: None,
             _tier_slider_subscription: tier_slider_subscription,
             _subscriptions: vec![search_subscription, tree_subscription],
         }
@@ -291,6 +309,7 @@ impl Sidebar {
     fn common_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let common = self.common;
         let tiers = self.tiers;
+        let show_hidden = self.show_hidden;
         let tier_slider = self.tier_slider.clone();
         let entity = cx.entity();
         Popover::new("armor-sidebar-common")
@@ -305,6 +324,7 @@ impl Sidebar {
                 let sync_entity = entity.clone();
                 let stack_entity = entity.clone();
                 let layer_entity = entity.clone();
+                let hidden_entity = entity.clone();
                 v_flex()
                     .w(COMMON_MENU_WIDTH)
                     .gap_2()
@@ -378,6 +398,16 @@ impl Sidebar {
                             )
                             .child(Slider::new(&tier_slider)),
                     )
+                    .child(
+                        Checkbox::new("armor-sidebar-show-hidden-ships")
+                            .label(t!("ui.armor.show_hidden_ships").to_string())
+                            .checked(show_hidden)
+                            .tooltip(t!("ui.armor.show_hidden_ships_tooltip").to_string())
+                            .on_click(move |checked, _window, cx| {
+                                let show = *checked;
+                                hidden_entity.update(cx, |sidebar, cx| sidebar.choose_show_hidden(show, cx));
+                            }),
+                    )
                     .into_any_element()
             })
     }
@@ -397,9 +427,13 @@ impl Sidebar {
     /// library belongs to the previous bundle, so the Models section waits
     /// for the one built over this bundle.
     pub fn set_bundle(&mut self, bundle: Arc<ArmorAssetsBundle>, cx: &mut Context<Self>) {
+        self.hidden_reasons = Arc::new(
+            bundle.catalog.hidden.iter().map(|hidden| (hidden.ship.param_index.clone(), hidden.reason)).collect(),
+        );
+        self.with_hidden = self.show_hidden.then(|| Arc::new(bundle.catalog.with_hidden()));
         self.bundle = Some(bundle);
-        if !std::mem::replace(&mut self.tiers_restored, true) {
-            self.restore_tiers(cx);
+        if !std::mem::replace(&mut self.settings_restored, true) {
+            self.restore_settings(cx);
         }
         self.model_library = None;
         self.models = ModelsState::Loading;
@@ -410,23 +444,69 @@ impl Sidebar {
         cx.notify();
     }
 
-    /// Reads back the tiers saved by an earlier session.
-    fn restore_tiers(&mut self, cx: &mut Context<Self>) {
+    /// Reads back the tiers and hidden-ship choice saved by an earlier
+    /// session.
+    fn restore_settings(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else {
             return;
         };
 
+        let tiers_pool = pool.clone();
         self._tiers_restore = Some(cx.spawn(async move |this, cx| {
             let stored = crate::runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::get_setting::<TierRange>(&pool, keys::MODEL_VIEWER_SHIP_TIERS).await
+                wows_toolkit_config::queries::get_setting::<TierRange>(&tiers_pool, keys::MODEL_VIEWER_SHIP_TIERS).await
             })
             .await;
             let Ok(Some(tiers)) = stored else {
                 return;
             };
 
-            let _ = this.update(cx, |this, cx| this.adopt_tiers(tiers, cx));
+            let _ = this.update(cx, |this, cx| {
+                // A choice the reader made before the read finished stands.
+                if !this.tiers_chosen {
+                    this.adopt_tiers(tiers, cx);
+                }
+            });
         }));
+
+        self._hidden_restore = Some(cx.spawn(async move |this, cx| {
+            let stored = crate::runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<bool>(&pool, keys::MODEL_VIEWER_SHOW_HIDDEN_SHIPS).await
+            })
+            .await;
+            let Ok(Some(show)) = stored else {
+                return;
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                if !this.hidden_chosen {
+                    this.set_show_hidden(show, cx);
+                }
+            });
+        }));
+    }
+
+    /// The reader ticked or cleared "Show hidden ships".
+    fn choose_show_hidden(&mut self, show: bool, cx: &mut Context<Self>) {
+        // The reader's choice wins over a saved one still being read.
+        self.hidden_chosen = true;
+        self._hidden_restore = None;
+        self.set_show_hidden(show, cx);
+        crate::settings_store::save(keys::MODEL_VIEWER_SHOW_HIDDEN_SHIPS, &show, cx);
+    }
+
+    fn set_show_hidden(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_hidden == show {
+            return;
+        }
+
+        self.show_hidden = show;
+        self.with_hidden = match (&self.bundle, show) {
+            (Some(bundle), true) => Some(Arc::new(bundle.catalog.with_hidden())),
+            (Some(_), false) | (None, _) => None,
+        };
+        self.rebuild_tree(Rebuild::Rematch, cx);
+        cx.notify();
     }
 
     /// Shows `tiers` on the slider and lists only their ships.
@@ -439,6 +519,7 @@ impl Sidebar {
 
     fn on_tier_slider(&mut self, _slider: Entity<SliderState>, event: &SliderEvent, cx: &mut Context<Self>) {
         // The reader's choice wins over a saved one still being read.
+        self.tiers_chosen = true;
         self._tiers_restore = None;
 
         match event {
@@ -503,9 +584,13 @@ impl Sidebar {
         // The index is listed as soon as it is ready; the parts take longer.
         self._model_index_task = Some(cx.spawn(async move |this, cx| {
             let references_bundle = Arc::clone(&bundle);
-            let references = cx
+            // Hidden ships list their parts and name their models too, for
+            // when the reader shows them.
+            let (all_ships, references) = cx
                 .background_spawn(async move {
-                    Arc::new(ModelReferences::build(&references_bundle.catalog, references_bundle.assets.metadata()))
+                    let all_ships = Arc::new(references_bundle.catalog.with_hidden());
+                    let references = ModelReferences::build(&all_ships, references_bundle.assets.metadata());
+                    (all_ships, Arc::new(references))
                 })
                 .await;
 
@@ -517,7 +602,7 @@ impl Sidebar {
             });
             let (fortifications_bundle, fortifications_library) = (Arc::clone(&bundle), Arc::clone(&library));
             let parts = cx.background_spawn(async move {
-                list_all_ship_parts(&bundle.catalog, bundle.assets.metadata(), &library, &references)
+                list_all_ship_parts(&all_ships, bundle.assets.metadata(), &library, &references)
             });
             let fortifications = cx.background_spawn(async move {
                 let metadata = fortifications_bundle.assets.metadata();
@@ -752,10 +837,11 @@ impl Sidebar {
             ModelsState::Ready(index) => ModelSection::Ready(index),
         };
         let sources = TreeSources {
-            ships: &bundle.catalog,
+            ships: self.with_hidden.as_deref().unwrap_or(&bundle.catalog),
             ship_parts: &self.ship_parts,
             models,
             fortifications: &self.fortifications,
+            hidden: &self.hidden_reasons,
         };
         if rebuild == Rebuild::Rematch {
             self.search = SearchMatches::from_query(&sources, &self.query, self.tiers);
@@ -1538,6 +1624,37 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn show_hidden_ships_lists_them_tagged_and_saves_the_choice(cx: &mut TestAppContext) {
+        let window = open_sidebar(cx);
+        let rental = ship_row_id("PASB708");
+        window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.browse_expanded.extend(["armor-nation-USA".into(), "armor-class-USA-Battleship".into()]);
+                sidebar.rebuild_tree(Rebuild::Keep, cx);
+            })
+            .expect("the window is open");
+        assert_eq!(row_index(&window, &rental, cx), None, "the clan rental is left out");
+
+        let note = window
+            .update(cx, |sidebar, _window, cx| {
+                sidebar.choose_show_hidden(true, cx);
+                sidebar.row_notes.get(&rental).map(|note| note.to_string())
+            })
+            .expect("the window is open");
+        assert!(row_index(&window, &rental, cx).is_some(), "the toggle lists it");
+        assert_eq!(note.as_deref(), Some("Clan rental"), "tagged with why it is normally left out");
+
+        window.update(cx, |sidebar, _window, cx| sidebar.choose_show_hidden(false, cx)).expect("the window is open");
+        assert_eq!(row_index(&window, &rental, cx), None, "and clearing it leaves it out again");
+        let saved: Vec<String> = crate::settings_store::saved_for_test()
+            .into_iter()
+            .filter(|(key, _)| *key == keys::MODEL_VIEWER_SHOW_HIDDEN_SHIPS)
+            .map(|(_, json)| json)
+            .collect();
+        assert_eq!(saved, ["true", "false"]);
+    }
+
+    #[gpui_kit::test]
     fn a_fortification_row_opens_its_building_by_click_and_by_enter(cx: &mut TestAppContext) {
         let window = open_sidebar(cx);
         let buildings = record::<BuildingSelected>(&window, cx);
@@ -1668,6 +1785,7 @@ mod tests {
                         ship_parts: &sidebar.ship_parts,
                         models: ModelSection::Ready(index),
                         fortifications: &sidebar.fortifications,
+                        hidden: &sidebar.hidden_reasons,
                     };
                     SearchMatches::from_query(&sources, "yamato", TierRange::ALL)
                 };

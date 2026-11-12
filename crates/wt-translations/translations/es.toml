@@ -1064,6 +1064,8 @@ sync_tooltip = "Mantener sincronizadas la visibilidad del blindaje/casco y las s
 common_settings = "Configuración común"
 tier_filter = "Niveles %{lowest} a %{highest}"
 fortifications = "Fortificaciones"
+show_hidden_ships = "Mostrar barcos ocultos"
+show_hidden_ships_tooltip = "Listar también los barcos que la lista omite, como los de alquiler de clan"
 compare_split = "Comparar en nuevo panel"
 export_model = "Exportar modelo del buque"
 armor_thickness = "Grosor del blindaje"
@@ -2008,3 +2010,7 @@ no_meshes = "Este modelo no tiene mallas."
 no_meshes_at_lod = "Este modelo no tiene mallas en el nivel de detalle elegido."
 no_visible_surface = "Este modelo no tiene ninguna superficie visible que dibujar."
 section_stand_in = "Esta sección del casco no tiene geometría propia. El barco dibuja esta parte del casco en otra sección."
+
+[ui.armor.hidden_ship]
+clan_rental = "Alquiler de clan"
+other_class = "No es una clase de barco"

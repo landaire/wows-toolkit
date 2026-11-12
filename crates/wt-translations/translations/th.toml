@@ -1108,6 +1108,8 @@ sync_tooltip = "รักษาการแสดงเกราะ/ตัวเ
 common_settings = "การตั้งค่าทั่วไป"
 tier_filter = "ระดับ %{lowest} ถึง %{highest}"
 fortifications = "ป้อมปราการ"
+show_hidden_ships = "แสดงเรือที่ซ่อนอยู่"
+show_hidden_ships_tooltip = "แสดงเรือที่รายการละไว้ด้วย เช่น เรือเช่าของแคลน"
 compare_split = "เปรียบเทียบในส่วนแยกใหม่"
 export_model = "ส่งออกโมเดลเรือ"
 armor_thickness = "ความหนาเกราะ"
@@ -2054,3 +2056,7 @@ no_meshes = "โมเดลนี้ไม่มีเมช"
 no_meshes_at_lod = "โมเดลนี้ไม่มีเมชในระดับรายละเอียดที่เลือก"
 no_visible_surface = "โมเดลนี้ไม่มีพื้นผิวที่มองเห็นได้ให้วาด"
 section_stand_in = "ส่วนตัวเรือนี้ไม่มีรูปทรงเรขาคณิตของตัวเอง เรือวาดส่วนนี้ของตัวเรือไว้ในส่วนอื่น"
+
+[ui.armor.hidden_ship]
+clan_rental = "เรือเช่าของแคลน"
+other_class = "ไม่ใช่ประเภทเรือ"

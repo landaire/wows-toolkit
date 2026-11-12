@@ -1108,6 +1108,8 @@ sync_tooltip = "全ペイン間で装甲/船体の表示と表示オーバーレ
 common_settings = "共通設定"
 tier_filter = "Tier %{lowest} から %{highest}"
 fortifications = "要塞"
+show_hidden_ships = "非表示の艦艇を表示"
+show_hidden_ships_tooltip = "クラン貸与艦など、一覧から除外されている艦艇も表示します"
 compare_split = "新しい分割で比較"
 export_model = "艦船モデルをエクスポート"
 armor_thickness = "装甲厚"
@@ -2054,3 +2056,7 @@ no_meshes = "このモデルにはメッシュがありません。"
 no_meshes_at_lod = "選択した詳細レベルではこのモデルにメッシュがありません。"
 no_visible_surface = "このモデルには描画できる可視面がありません。"
 section_stand_in = "この船体セクションには独自のジオメトリがありません。艦艇はこの部分の船体を別のセクションで描画します。"
+
+[ui.armor.hidden_ship]
+clan_rental = "クラン貸与"
+other_class = "艦種ではありません"

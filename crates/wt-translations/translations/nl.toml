@@ -1108,6 +1108,8 @@ sync_tooltip = "Houd pantser-/rompzichtbaarheid en weergave-overlays (scheepscen
 common_settings = "Algemene instellingen"
 tier_filter = "Tiers %{lowest} tot %{highest}"
 fortifications = "Versterkingen"
+show_hidden_ships = "Verborgen schepen tonen"
+show_hidden_ships_tooltip = "Ook de schepen tonen die de lijst weglaat, zoals clanhuurschepen"
 compare_split = "Vergelijken in nieuw paneel"
 export_model = "Scheepsmodel exporteren"
 armor_thickness = "Pantserdikte"
@@ -2054,3 +2056,7 @@ no_meshes = "Dit model heeft geen meshes."
 no_meshes_at_lod = "Dit model heeft geen meshes op het gekozen detailniveau."
 no_visible_surface = "Dit model heeft geen zichtbaar oppervlak om te tekenen."
 section_stand_in = "Dit rompdeel heeft geen eigen geometrie. Het schip tekent dit deel van de romp in een ander deel."
+
+[ui.armor.hidden_ship]
+clan_rental = "Clanhuurschip"
+other_class = "Geen scheepsklasse"
