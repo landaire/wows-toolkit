@@ -1,0 +1,73 @@
+---
+source: crates/wowsunpack/src/export/model_catalog.rs
+expression: listed
+---
+[
+    (
+        "RM492_Crane_Mount",
+        [
+            ModelVariant {
+                kind: Dead,
+                path: ModelPath(
+                    "content/gameplay/russia/misc/RM492_Crane_Mount/RM492_dead.model",
+                ),
+            },
+        ],
+    ),
+    (
+        "AGM034_16in50_Mk7",
+        [
+            ModelVariant {
+                kind: Dead,
+                path: ModelPath(
+                    "content/gameplay/usa/gun/main/AGM034_16in50_Mk7/AGM034_16in50_Mk7_dead.model",
+                ),
+            },
+        ],
+    ),
+    (
+        "AM901_Part",
+        [],
+    ),
+    (
+        "AM902_Part",
+        [],
+    ),
+    (
+        "ASB028_Iowa_1945",
+        [
+            ModelVariant {
+                kind: Section(
+                    "Bow",
+                ),
+                path: ModelPath(
+                    "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_Bow.model",
+                ),
+            },
+            ModelVariant {
+                kind: Section(
+                    "MidBack",
+                ),
+                path: ModelPath(
+                    "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_MidBack.model",
+                ),
+            },
+            ModelVariant {
+                kind: Section(
+                    "MidFront",
+                ),
+                path: ModelPath(
+                    "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_MidFront.model",
+                ),
+            },
+            ModelVariant {
+                kind: Section(
+                    "Stern",
+                ),
+                path: ModelPath(
+                    "content/gameplay/usa/ship/battleship/ASB028_Iowa_1945/ASB028_Iowa_1945_Stern.model",
+                ),
+            },
+        ],
+    ),
+]

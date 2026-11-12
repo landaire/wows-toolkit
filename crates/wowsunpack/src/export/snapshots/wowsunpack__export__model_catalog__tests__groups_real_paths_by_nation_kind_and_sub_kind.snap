@@ -1,0 +1,24 @@
+---
+source: crates/wowsunpack/src/export/model_catalog.rs
+expression: summary
+---
+[
+    "CH001_Sailor | common | Other | None | Other",
+    "XD006_Lazarus_Director | events | Director | None | FireControl",
+    "JGB107_Depth_Charge_Thrower_450mm | japan | Gun | Some(DepthChargeLauncher) | DepthCharges",
+    "JGM178_460mm_45_Type94 | japan | Gun | Some(MainBattery) | MainBattery",
+    "JGT012_610mm4_Type_93 | japan | Gun | Some(TorpedoTubes) | Torpedoes",
+    "AAF001_Grumman_F3F | usa | Aircraft | Some(Fighter) | Other",
+    "AC001_Catapult_1 | usa | Catapult | None | Other",
+    "AD001_Director_Mk37 | usa | Director | None | FireControl",
+    "AF312_Rangefinder_18ft | usa | Finder | None | FireControl",
+    "AGA002_40mm_Bofors_Mk1 | usa | Gun | Some(AntiAircraft) | AaGuns",
+    "AGR001_Test | usa | Gun | Some(Unrecognized(\"railgun\")) | Other",
+    "AGS010_5in38_Mk32_Mod12 | usa | Gun | Some(SecondaryBattery) | SecondaryBattery",
+    "AM2061 | usa | Misc | None | Misc",
+    "APJ001_Jato_14AS_1000 | usa | Projectile | Some(Jato) | Other",
+    "APT003_Avia_Torpedo_Mk13 | usa | Projectile | Some(Torpedo) | Other",
+    "ARF322_Radar_Mk27_Black | usa | Radar | Some(FireControlRadar) | Radar",
+    "ARS310_Radar | usa | Radar | Some(SearchRadar) | Radar",
+    "ASB028_Iowa_1945 | usa | Ship | Some(Battleship) | Hull",
+]

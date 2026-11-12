@@ -14,6 +14,8 @@ pub mod camouflage;
 #[cfg(feature = "models")]
 pub mod gltf_export;
 #[cfg(feature = "models")]
+pub mod model_catalog;
+#[cfg(feature = "models")]
 pub mod part_group;
 #[cfg(feature = "models")]
 pub mod ship;
