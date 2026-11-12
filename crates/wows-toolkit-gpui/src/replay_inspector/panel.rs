@@ -1855,9 +1855,7 @@ mod tests {
     #[gpui_kit::test]
     fn a_rows_actions_are_on_the_row_rather_than_in_a_column(cx: &mut TestAppContext) {
         assert!(
-            !ReplayColumn::ALL
-                .iter()
-                .any(|col| crate::replay_inspector::table::column_label_key(*col) == "ui.replay.actions"),
+            !ReplayColumn::ALL.iter().any(|col| col.label_key() == "ui.replay.actions"),
             "no column carries the egui app's Actions heading, so no width is charged for one"
         );
 

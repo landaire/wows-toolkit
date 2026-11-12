@@ -36,5 +36,6 @@ pub mod shareable;
 #[cfg(any(test, feature = "test-support"))]
 pub mod simulated_watch;
 pub mod sort;
+pub mod team_totals;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
