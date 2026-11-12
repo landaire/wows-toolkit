@@ -2,10 +2,10 @@
 //!
 //! Post-battle results are read through a per-build mapping published in
 //! `padtrack/wows-constants`, cached as `constants_{build}.json` under the shared
-//! storage directory. Reading that file is `replay_inspector::load`; what is here
-//! is everything that puts it there: the check for a newer published mapping, the
-//! fetch of a build's own mapping, and the reader's own file when they have one
-//! the repository does not.
+//! storage directory. Reading that file is `wows_toolkit_replay_data::load`;
+//! what is here is everything that puts it there: the check for a newer
+//! published mapping, the fetch of a build's own mapping, and the reader's own
+//! file when they have one the repository does not.
 //!
 //! The egui app does the same three things from its networking thread
 //! (`task/networking.rs`'s `FetchLatestConstants` and `FetchVersionedConstants`,
@@ -14,10 +14,6 @@
 
 use std::path::Path;
 use std::path::PathBuf;
-
-use gpui_kit::App;
-use gpui_kit::AppContext as _;
-use gpui_kit::Task;
 
 /// What a check of the published constants came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,26 +69,21 @@ pub enum Cached {
 /// it for `build` when it has.
 ///
 /// `build` is the installed one, which is what the newest published mapping is
-/// for; an older replay's own build is fetched by [`fetch_for_build`] instead.
-pub fn check_latest(build: u32, known_commit: Option<String>, cx: &App) -> Task<Checked> {
-    let runtime = crate::runtime::runtime(cx);
+/// for; an older replay's own build is fetched by [`fetch_for_builds`] instead.
+/// A future for the tokio runtime.
+pub async fn check_latest(build: u32, known_commit: Option<String>) -> Checked {
     // A build with no mapping at all is not up to date whatever the commit says,
     // so the shortcut is skipped for it.
     let known_commit = known_commit.filter(|_| is_cached(build));
 
-    cx.background_spawn(async move {
-        let Some(runtime) = runtime else { return Checked::Failed("no runtime to fetch on".to_owned()) };
-        runtime.block_on(async move {
-            match wows_data_mgr::constants::fetch_latest_constants(known_commit.as_deref()).await {
-                Ok(Some(latest)) => match write_cached(build, &latest.data) {
-                    Ok(()) => Checked::Written { build, commit: latest.commit },
-                    Err(err) => Checked::Failed(err),
-                },
-                Ok(None) => Checked::UpToDate,
-                Err(err) => Checked::Failed(err.to_string()),
-            }
-        })
-    })
+    match wows_data_mgr::constants::fetch_latest_constants(known_commit.as_deref()).await {
+        Ok(Some(latest)) => match write_cached(build, &latest.data) {
+            Ok(()) => Checked::Written { build, commit: latest.commit },
+            Err(err) => Checked::Failed(err),
+        },
+        Ok(None) => Checked::UpToDate,
+        Err(err) => Checked::Failed(err.to_string()),
+    }
 }
 
 /// How many builds one sweep asks the repository about.
@@ -113,49 +104,48 @@ pub const BUILDS_PER_SWEEP: usize = 8;
 /// what is left of it.
 ///
 /// Returns what became of each build it reached, in the order it reached them.
-pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached, cx: &App) -> Task<Vec<(u32, Fetched)>> {
-    cx.background_spawn(async move {
-        let mut outcomes = Vec::new();
-        let mut fetcher = None;
+/// Blocks for as long as the requests take.
+pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached) -> Vec<(u32, Fetched)> {
+    let mut outcomes = Vec::new();
+    let mut fetcher = None;
 
-        for (build, version) in wanted.into_iter().take(BUILDS_PER_SWEEP) {
-            if cached == Cached::Keep && is_cached(build) {
-                outcomes.push((build, Fetched::AlreadyOnDisk));
-                continue;
-            }
-
-            // Built on the first build that actually needs one: a sweep where
-            // everything is already cached asks the repository nothing.
-            if fetcher.is_none() {
-                match wows_data_mgr::constants::ConstantsFetcher::new() {
-                    Ok(built) => fetcher = Some(built),
-                    Err(err) => {
-                        outcomes.push((build, Fetched::Failed(err.to_string())));
-                        break;
-                    }
-                }
-            }
-            let Some(asking) = fetcher.as_ref() else { break };
-
-            let Some((data, actual)) = asking.fetch(build, version.as_deref()) else {
-                outcomes.push((build, Fetched::Failed("the repository published nothing for it".to_owned())));
-                break;
-            };
-            // Written under the build that asked, so the next read of that
-            // replay finds it whichever build it was published under.
-            let written =
-                serde_json::to_vec(&data).map_err(|err| err.to_string()).and_then(|bytes| write_cached(build, &bytes));
-            outcomes.push((
-                build,
-                match written {
-                    Ok(()) => Fetched::Written { build, actual },
-                    Err(err) => Fetched::Failed(err),
-                },
-            ));
+    for (build, version) in wanted.into_iter().take(BUILDS_PER_SWEEP) {
+        if cached == Cached::Keep && is_cached(build) {
+            outcomes.push((build, Fetched::AlreadyOnDisk));
+            continue;
         }
 
-        outcomes
-    })
+        // Built on the first build that actually needs one: a sweep where
+        // everything is already cached asks the repository nothing.
+        if fetcher.is_none() {
+            match wows_data_mgr::constants::ConstantsFetcher::new() {
+                Ok(built) => fetcher = Some(built),
+                Err(err) => {
+                    outcomes.push((build, Fetched::Failed(err.to_string())));
+                    break;
+                }
+            }
+        }
+        let Some(asking) = fetcher.as_ref() else { break };
+
+        let Some((data, actual)) = asking.fetch(build, version.as_deref()) else {
+            outcomes.push((build, Fetched::Failed("the repository published nothing for it".to_owned())));
+            break;
+        };
+        // Written under the build that asked, so the next read of that
+        // replay finds it whichever build it was published under.
+        let written =
+            serde_json::to_vec(&data).map_err(|err| err.to_string()).and_then(|bytes| write_cached(build, &bytes));
+        outcomes.push((
+            build,
+            match written {
+                Ok(()) => Fetched::Written { build, actual },
+                Err(err) => Fetched::Failed(err),
+            },
+        ));
+    }
+
+    outcomes
 }
 
 /// Takes a `constants.json` the reader points at as `build`'s mapping.

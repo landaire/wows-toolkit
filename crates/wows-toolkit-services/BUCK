@@ -7,6 +7,7 @@ SERVICES_COMMON_DEPS = [
     "//third-party/rust:jiff",
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
+    "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",
     "//third-party/rust:tempfile",
     "//third-party/rust:thiserror",

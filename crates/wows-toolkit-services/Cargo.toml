@@ -23,6 +23,8 @@ jiff = { workspace = true }
 # Matches the egui app's feature set so both resolve one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 rootcause = { workspace = true }
+# The constants mapping a sweep writes.
+serde_json = { workspace = true }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # The update is staged beside the running executable.
 tempfile = "3"

@@ -1681,12 +1681,19 @@ impl App {
         self.constants_checked = true;
 
         let build = loaded.build();
-        let checked = crate::constants::check_latest(build, known, cx);
+        let runtime = crate::runtime::runtime(cx);
+        let checked = cx.background_spawn(async move {
+            let Some(runtime) = runtime else {
+                return wows_toolkit_services::constants::Checked::Failed("no runtime to fetch on".to_owned());
+            };
+
+            runtime.block_on(wows_toolkit_services::constants::check_latest(build, known))
+        });
 
         cx.spawn_in(window, async move |this, cx| {
             let outcome = checked.await;
             let _ = this.update_in(cx, |this, window, cx| match outcome {
-                crate::constants::Checked::Written { build, commit } => {
+                wows_toolkit_services::constants::Checked::Written { build, commit } => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
                     );
@@ -1700,12 +1707,12 @@ impl App {
                     crate::toast::info(t!("ui.replay.constants_latest_written").into_owned(), window, cx);
                     this.replay_inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
                 }
-                crate::constants::Checked::UpToDate => {
+                wows_toolkit_services::constants::Checked::UpToDate => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Succeeded,
                     );
                 }
-                crate::constants::Checked::Failed(reason) => {
+                wows_toolkit_services::constants::Checked::Failed(reason) => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
                         wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus::Failed(reason.clone()),
                     );
