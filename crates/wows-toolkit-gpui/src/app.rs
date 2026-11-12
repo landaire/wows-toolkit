@@ -2087,7 +2087,12 @@ impl App {
     }
 
     /// Fills the palette with one of the cascading modes and reopens it.
-    fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+    fn enter_palette_mode(
+        &mut self,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let _ = owner.update(cx, |this, cx| this.open_palette_mode(mode, window, cx));
@@ -2097,27 +2102,28 @@ impl App {
     /// Opens the palette on one of its second-layer lists.
     pub(crate) fn open_palette_mode(
         &mut self,
-        mode: crate::palette::PaletteMode,
+        mode: wows_toolkit_viewmodel::palette::PaletteMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        use wows_toolkit_viewmodel::palette::IndexList;
+        use wows_toolkit_viewmodel::palette::PaletteMode;
+
         let source = match mode {
-            crate::palette::PaletteMode::ArmorShips => {
+            PaletteMode::ArmorShips => {
                 crate::palette::ModeSource::Ships(self.armor_ship_list(window, cx))
             }
-            crate::palette::PaletteMode::Players => {
-                crate::palette::ModeSource::index(crate::palette::IndexList::Players)
+            PaletteMode::Players => crate::palette::ModeSource::index(IndexList::Players),
+            PaletteMode::MyShips => {
+                crate::palette::ModeSource::index(IndexList::MyShips)
             }
-            crate::palette::PaletteMode::MyShips => {
-                crate::palette::ModeSource::index(crate::palette::IndexList::MyShips)
-            }
-            crate::palette::PaletteMode::ReindexVersions => {
+            PaletteMode::ReindexVersions => {
                 let candidates = self.listed_reindex_candidates(cx);
                 crate::palette::ModeSource::Versions(
                     wows_toolkit_replay_data::force_reindex::versions(&candidates).into(),
                 )
             }
-            crate::palette::PaletteMode::ReplayFolders => {
+            PaletteMode::ReplayFolders => {
                 let history = self.replay_inspector.read(cx).folder_history();
                 let rows: Vec<crate::palette::FolderRow> =
                     history.folders().iter().cloned().map(crate::palette::FolderRow::new).collect();
@@ -3512,7 +3518,7 @@ impl Render for App {
                     // Both, as the egui app takes both. On the Armor Viewer,
                     // ctrl+p goes straight to the ship list.
                     (false, "p") if this.active_tab == AppTab::ArmorViewer => {
-                        this.open_palette_mode(crate::palette::PaletteMode::ArmorShips, window, cx)
+                        this.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ArmorShips, window, cx)
                     }
                     (false, "p") | (false, "k") => this.open_palette(window, cx),
                     _ => {}

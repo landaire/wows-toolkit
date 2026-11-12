@@ -3360,7 +3360,9 @@ fn the_palette_offers_versions_newest_first_and_asks_before_reindexing(cx: &mut 
     });
 
     cx.update_window(window.into(), |_, window, cx| {
-        app.update(cx, |app, cx| app.open_palette_mode(crate::palette::PaletteMode::ReindexVersions, window, cx));
+        app.update(cx, |app, cx| {
+            app.open_palette_mode(wows_toolkit_viewmodel::palette::PaletteMode::ReindexVersions, window, cx)
+        });
     })
     .expect("the test window stays open");
     settle(cx, window);

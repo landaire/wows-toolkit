@@ -51,8 +51,10 @@ use wows_toolkit_replay_data::force_reindex::ReindexScope;
 use wows_toolkit_replay_data::force_reindex::VersionCount;
 use wows_toolkit_replay_data::force_reindex::version_said;
 use wows_toolkit_replay_data::paths::shown_path;
-use wows_toolkit_viewmodel::name_lookup::PlayerLookup;
-use wows_toolkit_viewmodel::name_lookup::ShipLookup;
+use wows_toolkit_viewmodel::palette::IndexList;
+use wows_toolkit_viewmodel::palette::IndexLookup;
+use wows_toolkit_viewmodel::palette::PaletteMode;
+use wows_toolkit_viewmodel::palette::seeded_searches;
 use wowsunpack::game_params::types::Species;
 
 use crate::app::App;
@@ -113,63 +115,6 @@ pub enum PaletteAction {
     /// once the reader has confirmed it.
     ForceReindex(ReindexScope),
 }
-
-/// Which cascading list the palette is showing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteMode {
-    /// Players the index has seen, most met first.
-    Players,
-    /// Ships the reader has played, most played first.
-    MyShips,
-    /// Every ship in the loaded build, to open in the Armor Viewer.
-    ArmorShips,
-    /// The game versions the listing holds, to force a re-index of one.
-    ReindexVersions,
-    /// "Browse..." and the directories most recently opened, to open one in
-    /// the listing.
-    ReplayFolders,
-}
-
-impl PaletteMode {
-    /// The modes the root list leads into from its searches. The version list
-    /// is offered beside the other re-index command instead.
-    pub const ALL: [PaletteMode; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
-
-    /// What the root entry that enters this mode is called.
-    pub const fn label_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.search_players",
-            Self::MyShips => "ui.palette.my_matches_in_ship",
-            Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
-            Self::ReindexVersions => "ui.reindex.palette_by_version",
-            Self::ReplayFolders => "ui.replay.open_directory",
-        }
-    }
-
-    /// What the layer is called in its header, after the root's name.
-    pub const fn title_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_title",
-            Self::MyShips => "ui.palette.my_ships_title",
-            Self::ArmorShips => "ui.palette.armor_ships_title",
-            Self::ReindexVersions => "ui.reindex.versions_title",
-            Self::ReplayFolders => "ui.replay_folders.recent_title",
-        }
-    }
-
-    pub const fn placeholder_key(self) -> &'static str {
-        match self {
-            Self::Players => "ui.palette.players_placeholder",
-            Self::MyShips => "ui.palette.my_ships_placeholder",
-            Self::ArmorShips => "ui.palette.armor_ships_placeholder",
-            Self::ReindexVersions => "ui.reindex.versions_placeholder",
-            Self::ReplayFolders => "ui.replay_folders.recent_placeholder",
-        }
-    }
-}
-
-/// Maximum rows one index-backed layer lists.
-pub const MODE_LIMIT: usize = 50;
 
 /// One entry: what it is called and what it does.
 #[derive(Clone)]
@@ -390,38 +335,8 @@ impl ModeSource {
     }
 }
 
-/// What an index-backed layer lists.
-#[derive(Clone, Copy, Debug)]
-pub enum IndexList {
-    Players,
-    /// The ships the reader has played.
-    MyShips,
-}
-
-/// An index-backed layer's rows, read once and ranked for each query.
-pub enum IndexLookup {
-    Players(PlayerLookup),
-    Ships(ShipLookup),
-}
-
 /// The one read of an index-backed layer's rows.
 type LookupRead = Shared<Task<Result<Arc<IndexLookup>, String>>>;
-
-impl IndexList {
-    /// Reads the rows `self` ranks.
-    pub async fn load(self, pool: &sqlx::sqlite::SqlitePool) -> Result<IndexLookup, String> {
-        match self {
-            Self::Players => PlayerLookup::load(pool)
-                .await
-                .map(IndexLookup::Players)
-                .map_err(|err| format!("The indexed players could not be read: {err}")),
-            Self::MyShips => ShipLookup::load_played(pool)
-                .await
-                .map(IndexLookup::Ships)
-                .map_err(|err| format!("The indexed ships could not be read: {err}")),
-        }
-    }
-}
 
 /// Stands in for the ship catalogue in tests, which have no game data to
 /// build one from, and records the ships the palette asked the viewer to open.
@@ -579,7 +494,9 @@ impl ModeDialog {
             Some(read) => read,
             None => {
                 let read = cx
-                    .background_spawn(async move { runtime.handle().block_on(list.load(&pool)).map(Arc::new) })
+                    .background_spawn(async move {
+                        runtime.handle().block_on(list.load(&pool)).map(Arc::new).map_err(|err| err.to_string())
+                    })
                     .shared();
                 if let ModeSource::Index { read: held, .. } = &mut self.source {
                     *held = Some(read.clone());
@@ -941,33 +858,10 @@ fn entry_marks(entry: &PaletteEntry, query: &MarkedQuery) -> Rc<[Range<usize>]> 
 
 /// The rows `lookup` offers for `query`, best first.
 pub fn mode_entries(lookup: &IndexLookup, query: &FilterQuery) -> Vec<PaletteEntry> {
-    use wows_toolkit_config::index::query_text::print_query;
-    use wows_toolkit_viewmodel::query_bar::seed;
-
-    match lookup {
-        IndexLookup::Players(players) => players
-            .find(query, MODE_LIMIT)
-            .into_iter()
-            .map(|player| {
-                let named = match player.clan.as_str() {
-                    "" => player.latest_name.clone(),
-                    clan => format!("[{clan}] {}", player.latest_name),
-                };
-                PaletteEntry {
-                    label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
-                    action: PaletteAction::SearchFor(print_query(&seed::matches_with_player(player.account_id))),
-                }
-            })
-            .collect(),
-        IndexLookup::Ships(ships) => ships
-            .find(query, MODE_LIMIT)
-            .into_iter()
-            .map(|ship| PaletteEntry {
-                label: format!("{} -- {}", ship.ship_name, t!("ui.palette.matches_found", count = ship.match_count)),
-                action: PaletteAction::SearchFor(print_query(&seed::my_matches_in_ship(ship.ship_id))),
-            })
-            .collect(),
-    }
+    seeded_searches(lookup, query)
+        .into_iter()
+        .map(|row| PaletteEntry { label: row.label, action: PaletteAction::SearchFor(row.query) })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1122,7 +1016,8 @@ mod tests {
 
         let ship =
             |id: u64, name: &str| ShipFacet { ship_id: GameParamId::from(id), ship_name: name.into(), match_count: 1 };
-        let mut ships: Vec<ShipFacet> = (0..super::MODE_LIMIT as u64).map(|id| ship(id, "Filler")).collect();
+        let mut ships: Vec<ShipFacet> =
+            (0..wows_toolkit_viewmodel::palette::MODE_LIMIT as u64).map(|id| ship(id, "Filler")).collect();
         ships.extend([ship(100, "Yamato"), ship(101, "Sm\u{e5}land")]);
         let lookup = IndexLookup::Ships(ShipLookup::new(ships));
         let found = |typed: &str| -> Vec<String> {
