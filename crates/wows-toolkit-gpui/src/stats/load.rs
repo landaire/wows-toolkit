@@ -23,7 +23,7 @@ pub struct SessionData {
     pub filters: StatsFilters,
     /// The expected-values table personal rating is computed against.
     /// Refreshed on the shared disk cache when it is missing or stale (see
-    /// `crate::personal_rating`), so the two apps keep one copy between them.
+    /// `wows_toolkit_services::personal_rating`), so the two apps keep one copy between them.
     /// Absent when the fetch fails and there is no cache to fall back on.
     pub personal_rating: Option<Arc<PersonalRatingData>>,
 }
@@ -40,7 +40,7 @@ impl SessionData {
             }
         };
 
-        let personal_rating = crate::personal_rating::load_refreshed(proxy_url).await.map(Arc::new);
+        let personal_rating = wows_toolkit_services::personal_rating::load_refreshed(crate::http::USER_AGENT, proxy_url).await.map(Arc::new);
 
         Self { games, filters: load_filters(pool).await, personal_rating }
     }
