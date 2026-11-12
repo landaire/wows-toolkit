@@ -22,11 +22,15 @@ dhat-heap = ["dep:dhat"]
 dhat = { version = "0.3", optional = true }
 # HTML entities in game chat, which the chat model decodes.
 escaper = "0.1.1"
+# The directory scan and watch report over channels.
+futures = "0.3"
 # The game's own translation catalogs.
 gettext = { workspace = true }
 # The minimap preview is rasterised to images.
 image = { workspace = true, features = ["png"] }
 jiff = { workspace = true }
+# Watches a replays directory for the game's new recordings.
+notify = "8.2.0"
 # The stored capture-point layouts.
 rkyv = { workspace = true }
 # A preview that cannot be read reports its cause chain.
@@ -50,6 +54,8 @@ wows_minimap_renderer = { workspace = true, features = ["rendering"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-toolkit-config = { workspace = true }
+# A directory watch that stops reports why, panics included.
+wows-toolkit-services = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wowsunpack = { workspace = true, features = ["arc", "parsing", "vfs-mmap", "rkyv"] }
 wt-translations = { workspace = true }

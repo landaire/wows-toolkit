@@ -23,10 +23,10 @@ use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::RestartPolicy;
 
 use super::*;
-use crate::replay_inspector::browser_view::WatchState;
-use crate::replay_inspector::browser_view::WatchStopCause;
 use crate::toast::Level;
 use crate::toast::Stay;
+use wows_toolkit_replay_data::replay_dir::WatchState;
+use wows_toolkit_replay_data::replay_dir::WatchStopCause;
 
 /// The settings row the pinned directories are kept in, in tab order.
 pub(crate) const PINNED_FOLDERS: &str = "gpui.pinned_replay_directories";
@@ -1227,10 +1227,10 @@ mod tests {
     use crate::interaction_tests::open_app_in_root;
     use crate::replay_inspector::ReplayBrowser;
     use crate::replay_inspector::ReplayInspectorView;
-    use crate::replay_inspector::browser_view::DirChange;
-    use crate::replay_inspector::browser_view::WatchState;
-    use crate::replay_inspector::browser_view::WatchStopCause;
-    use crate::replay_inspector::simulated_watch;
+    use wows_toolkit_replay_data::replay_dir::DirChange;
+    use wows_toolkit_replay_data::replay_dir::WatchState;
+    use wows_toolkit_replay_data::replay_dir::WatchStopCause;
+    use wows_toolkit_replay_data::simulated_watch;
 
     /// A real replay, so a reported change is read as the game's would be.
     fn fixture() -> PathBuf {
