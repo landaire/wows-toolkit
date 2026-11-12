@@ -449,6 +449,7 @@ pub(crate) fn test_settings() -> GpuiSettings {
         auto_load_latest_replay: false,
         output_dir: String::new(),
         armor_defaults: None,
+        model_opening_layer: Default::default(),
         auto_dump_game_data: false,
         game_data_cache_dir: String::new(),
         game_data_repo_commit: None,
@@ -495,6 +496,62 @@ fn the_autoload_checkbox_reflects_the_loaded_setting(cx: &mut TestAppContext) {
         assert_eq!(window.find(AUTOLOAD).checked(), Some(true), "and it is still live after seeding");
     })
     .expect("the test window stays open");
+}
+
+/// The Ships list's settings menu carries what a model opens showing. The
+/// saved choice is what the checkbox starts on, and changing it is saved.
+#[gpui_kit::test]
+fn the_show_armor_checkbox_restores_and_saves_the_opening_layer(cx: &mut TestAppContext) {
+    use crate::armor_viewer::viewport_view::OpeningLayer;
+    use wows_toolkit_viewmodel::settings::keys;
+
+    const SHOW_ARMOR: &str = "armor-pane-show-armor-by-default";
+
+    let window = open_wide_app(cx);
+    let mut settings = test_settings();
+    settings.model_opening_layer = OpeningLayer::Mesh;
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+    let pane = window.update(cx, |app, _window, _cx| app.armor_pane().clone()).expect("the test window stays open");
+    assert_eq!(cx.update(|cx| pane.read(cx).opening_layer()), OpeningLayer::Mesh, "restored from the settings");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+        window.click("armor-sidebar-common-trigger", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find(SHOW_ARMOR).checked(), Some(false), "the checkbox shows the saved choice");
+        window.click(SHOW_ARMOR, cx);
+    })
+    .expect("the test window stays open");
+    // The pane hears the checkbox once the click's update has ended.
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find(SHOW_ARMOR).checked(), Some(true));
+    })
+    .expect("the test window stays open");
+
+    assert_eq!(cx.update(|cx| pane.read(cx).opening_layer()), OpeningLayer::Armor);
+    let saved = crate::settings_store::saved_for_test()
+        .into_iter()
+        .rev()
+        .find(|(key, _)| *key == keys::MODEL_VIEWER_SHOW_ARMOR)
+        .map(|(_, json)| json);
+    assert_eq!(saved.as_deref(), Some("true"));
+}
+
+/// The saved choice is read back at startup, and armor is the default.
+#[tokio::test]
+async fn the_opening_layer_is_read_from_the_settings_store() {
+    use crate::armor_viewer::viewport_view::OpeningLayer;
+    use wows_toolkit_viewmodel::settings::keys;
+
+    let pool = wows_toolkit_config::test_pool().await;
+    assert_eq!(GpuiSettings::load(&pool).await.model_opening_layer, OpeningLayer::Armor);
+    wows_toolkit_config::queries::set_setting(&pool, keys::MODEL_VIEWER_SHOW_ARMOR, &false)
+        .await
+        .expect("the setting is written");
+    assert_eq!(GpuiSettings::load(&pool).await.model_opening_layer, OpeningLayer::Mesh);
 }
 
 /// The penetration checker is a section of the options rail, not a panel of

@@ -80,6 +80,7 @@ use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::SelectEvent;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
+use wows_toolkit_viewmodel::settings::keys;
 
 use super::analysis::PenetrationState;
 use super::dock::DockEvent;
@@ -97,6 +98,7 @@ use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::CastShell;
+use super::viewport_view::OpeningLayer;
 use super::viewport_view::ViewportChange;
 use super::viewport_view::ViewportView;
 use wowsunpack::game_params::types::Millimeters;
@@ -182,6 +184,9 @@ pub struct ArmorViewerPane {
     /// changed its own (`on_viewport_event`). Off by default, matching the
     /// egui app's own `sync_options` default.
     sync_options: bool,
+    /// What a model opened in this pane shows first. Persisted under
+    /// `keys::MODEL_VIEWER_SHOW_ARMOR`.
+    opening_layer: OpeningLayer,
     /// The penetration checker's own state.
     pen: PenetrationState,
     /// Whether the options rail is up. Open by default: it holds the viewport
@@ -362,6 +367,7 @@ impl ArmorViewerPane {
             ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
+            opening_layer: OpeningLayer::default(),
             pen,
             show_options: true,
             sidebar_collapsed: false,
@@ -405,6 +411,7 @@ impl ArmorViewerPane {
             mirror_cameras: self.mirror_cameras,
             sync_options: self.sync_options,
             stack_panes: dock.split_axis() == Axis::Vertical,
+            opening_layer: self.opening_layer,
         };
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
     }
@@ -670,6 +677,10 @@ impl ArmorViewerPane {
         if event.sync_options != self.sync_options {
             self.set_sync_options(event.sync_options, cx);
         }
+        if event.opening_layer != self.opening_layer {
+            self.opening_layer = event.opening_layer;
+            crate::settings_store::save(keys::MODEL_VIEWER_SHOW_ARMOR, &event.opening_layer.shows_armor(), cx);
+        }
         let split = if event.stack_panes { Axis::Vertical } else { Axis::Horizontal };
         self.dock.update(cx, |dock, cx| dock.set_split(split, cx));
         self.push_common_settings(cx);
@@ -733,7 +744,7 @@ impl ArmorViewerPane {
                 if let Some((bundle, param_index, display_name)) = reload_source {
                     view.set_reload_source(bundle, param_index, display_name);
                 }
-                view.show_armor(armor, cx);
+                view.show_armor(armor, self.opening_layer, cx);
                 view.set_camera(camera, cx);
                 view.apply_synced(&synced, cx);
             });
@@ -813,6 +824,17 @@ impl ArmorViewerPane {
             self.push_camera_from(&active, cx);
         }
         cx.notify();
+    }
+
+    /// Adopts the saved choice of what a model opens showing.
+    pub fn set_opening_layer(&mut self, layer: OpeningLayer, cx: &mut Context<Self>) {
+        self.opening_layer = layer;
+        self.push_common_settings(cx);
+    }
+
+    /// What the next model opened in this pane shows first.
+    pub fn opening_layer(&self) -> OpeningLayer {
+        self.opening_layer
     }
 
     /// Common-settings toggle (`Render`): flips `sync_options`. Turning it on
@@ -1185,7 +1207,7 @@ impl ArmorViewerPane {
                     // (`upload_armor_now`) is what clears the hull/LOD/module
                     // selection for this (possibly new) ship.
                     viewport.set_reload_source(bundle, param_index, display_name.clone());
-                    viewport.show_armor(Arc::new(armor), cx);
+                    viewport.show_armor(Arc::new(armor), self.opening_layer, cx);
                     // After the armor, because showing it starts the ship
                     // again and would drop them.
                     let hits = std::mem::take(&mut self.pending_hits);

@@ -15,6 +15,7 @@ use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
+use crate::armor_viewer::viewport_view::OpeningLayer;
 use crate::zoom::ZoomFactor;
 
 /// Settings read from the shared config DB, applied once at startup.
@@ -63,6 +64,8 @@ pub struct GpuiSettings {
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
+    /// What a model opens showing in the Model Viewer.
+    pub model_opening_layer: OpeningLayer,
     /// Whether game data is cached on load so old replays still open after a
     /// game update. The port does not dump; it reports and manages the cache
     /// the egui app writes.
@@ -150,6 +153,10 @@ impl GpuiSettings {
                 None
             }
         };
+        // Absent until the reader turns it off, and armor is the default.
+        let model_opening_layer = OpeningLayer::from_show_armor(
+            queries::get_setting::<bool>(pool, keys::MODEL_VIEWER_SHOW_ARMOR).await.unwrap_or(true),
+        );
 
         let auto_dump_game_data = queries::get_setting::<bool>(pool, keys::AUTO_DUMP_GAME_DATA).await.unwrap_or(false);
         let game_data_cache_dir =
@@ -195,6 +202,7 @@ impl GpuiSettings {
             auto_load_latest_replay,
             output_dir,
             armor_defaults,
+            model_opening_layer,
             auto_dump_game_data,
             game_data_cache_dir,
             game_data_repo_commit,

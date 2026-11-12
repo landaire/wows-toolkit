@@ -64,6 +64,7 @@ use super::assets::ArmorAssetsBundle;
 use super::assets::CLASS_ICON_TINT;
 use super::catalog::species_name;
 use super::catalog::tier_roman;
+use super::viewport_view::OpeningLayer;
 
 /// Emitted when the user clicks a ship row: the sidebar's caller (`pane.rs`)
 /// starts the ship's background armor load in response.
@@ -86,6 +87,8 @@ pub struct CommonPaneSettings {
     pub sync_options: bool,
     /// Whether the panes are stacked rather than side by side.
     pub stack_panes: bool,
+    /// What a newly opened model shows first. Not a comparison setting.
+    pub opening_layer: OpeningLayer,
 }
 
 /// Asks for a new comparison pane.
@@ -180,10 +183,23 @@ impl Sidebar {
                 let mirror_entity = entity.clone();
                 let sync_entity = entity.clone();
                 let stack_entity = entity.clone();
+                let layer_entity = entity.clone();
                 v_flex()
                     .w(COMMON_MENU_WIDTH)
                     .gap_2()
                     .p_2()
+                    .child(
+                        Checkbox::new("armor-pane-show-armor-by-default")
+                            .label(t!("ui.armor.show_armor_by_default").to_string())
+                            .checked(common.opening_layer.shows_armor())
+                            .tooltip(t!("ui.armor.show_armor_by_default_tooltip").to_string())
+                            .on_click(move |checked, _window, cx| {
+                                let opening_layer = OpeningLayer::from_show_armor(*checked);
+                                layer_entity.update(cx, |sidebar, cx| {
+                                    cx.emit(CommonPaneSettings { opening_layer, ..sidebar.common })
+                                });
+                            }),
+                    )
                     .child(
                         Checkbox::new("armor-pane-mirror-cameras")
                             .label(t!("ui.armor.mirror_cameras").to_string())

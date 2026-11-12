@@ -337,6 +337,76 @@ pub(crate) struct AllVisible {
     pub(crate) armor: bool,
 }
 
+/// Which layer of a model is in view when it opens.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpeningLayer {
+    /// The armor, with the hull as the saved defaults leave it.
+    #[default]
+    Armor,
+    /// The hull meshes, with the armor loaded but hidden.
+    Mesh,
+}
+
+impl OpeningLayer {
+    pub fn from_show_armor(show_armor: bool) -> Self {
+        if show_armor { Self::Armor } else { Self::Mesh }
+    }
+
+    pub fn shows_armor(self) -> bool {
+        self == Self::Armor
+    }
+}
+
+/// The visibility a newly opened model starts with.
+///
+/// An absent part is shown and an absent hull mesh is hidden (see the
+/// `ViewportView` field docs), so only the other outcome gets entries.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct OpeningVisibility {
+    parts: HashMap<(String, String), bool>,
+    hull: HashMap<String, bool>,
+}
+
+impl OpeningVisibility {
+    fn new(armor: &LoadedShipArmor, saved: AllVisible, layer: OpeningLayer) -> Self {
+        Self::from_groups(&armor.zone_parts, &armor.hull_part_groups, saved, layer)
+    }
+
+    fn from_groups(
+        zone_parts: &[(String, Vec<String>)],
+        hull_part_groups: &[(String, Vec<String>)],
+        saved: AllVisible,
+        layer: OpeningLayer,
+    ) -> Self {
+        let mut opening = Self::default();
+        if !saved.armor || layer == OpeningLayer::Mesh {
+            for (zone, parts) in zone_parts {
+                for part in parts {
+                    opening.parts.insert((zone.clone(), part.clone()), false);
+                }
+            }
+        }
+        if saved.hull || layer == OpeningLayer::Mesh {
+            for (_group, names) in hull_part_groups {
+                for name in names {
+                    opening.hull.insert(name.clone(), true);
+                }
+            }
+        }
+        opening
+    }
+}
+
+/// Which visibility maps still hold the `OpeningLayer::Mesh` seed, untouched
+/// by the reader. A seeded map stands for the saved default rather than a
+/// choice: `all_visible` reports the default for it, and a reload seeds the
+/// reloaded model's parts the same way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MeshSeed {
+    armor: bool,
+    hull: bool,
+}
+
 /// How far the hull may be heeled over from the display popover, in
 /// degrees, matching the egui slider's own range.
 const ROLL_LIMIT_DEG: f32 = 25.0;
@@ -598,6 +668,7 @@ pub(crate) struct SyncedSettings {
     camera_rings: CameraRingSettings,
     /// Whether the camera is locked to the ship's orbit, and how it aims.
     perspective: PerspectiveSettings,
+    mesh_seed: MeshSeed,
 }
 
 pub struct ViewportView {
@@ -631,7 +702,8 @@ pub struct ViewportView {
     key_ticking: bool,
     /// A ship picked in the sidebar while GPUI's device was unavailable.
     /// `sync_gpu` uploads this once the device is back, then clears it.
-    pending_armor: Option<Arc<LoadedShipArmor>>,
+    pending_armor: Option<(Arc<LoadedShipArmor>, OpeningLayer)>,
+    mesh_seed: MeshSeed,
     /// The ship being loaded into this viewport, if one is. Set by the pane
     /// (`set_ship_loading`), which owns the load; the viewport shows it in
     /// place of whatever it was drawing, matching the egui pane
@@ -963,6 +1035,7 @@ impl ViewportView {
             sim_verdicts: HashMap::new(),
             sim_unchecked: 0,
             pending_armor: None,
+            mesh_seed: MeshSeed::default(),
             ship_loading: None,
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
@@ -1337,6 +1410,7 @@ impl ViewportView {
             lighting: self.viewport.lighting.clone(),
             camera_rings: self.camera_rings.clone(),
             perspective: self.perspective,
+            mesh_seed: self.mesh_seed,
         }
     }
 
@@ -1350,8 +1424,13 @@ impl ViewportView {
     /// mesh re-upload) still redraws.
     pub(crate) fn apply_synced(&mut self, settings: &SyncedSettings, cx: &mut Context<Self>) {
         self.part_visibility = settings.part_visibility.clone();
+        self.mesh_seed = settings.mesh_seed;
         self.plate_visibility = settings.plate_visibility.clone();
         self.hull_visibility = settings.hull_visibility.clone();
+        // The source's names are another ship's when the panes differ.
+        if let Some(armor) = self.current_armor.clone() {
+            self.reseed_mesh(&armor);
+        }
         self.display_settings = settings.display_settings;
         self.viewport.lighting = settings.lighting.clone();
         self.camera_rings = settings.camera_rings.clone();
@@ -1365,19 +1444,31 @@ impl ViewportView {
         cx.notify();
     }
 
+    /// Rebuilds each map `mesh_seed` marks from `armor`'s own names.
+    fn reseed_mesh(&mut self, armor: &LoadedShipArmor) {
+        let saved = AllVisible { hull: self.hull_all_visible, armor: self.armor_all_visible };
+        let reseed = OpeningVisibility::new(armor, saved, OpeningLayer::Mesh);
+        if self.mesh_seed.armor {
+            self.part_visibility = reseed.parts;
+        }
+        if self.mesh_seed.hull {
+            self.hull_visibility = reseed.hull;
+        }
+    }
+
     /// Shows `armor`'s armor meshes in this viewport: clears any previous
     /// meshes, uploads the new ones (`upload::upload_armor_to_viewport`,
     /// which also frames the camera on the model's bounds and marks the
     /// viewport dirty), and updates `model_bounds` so double-click-to-reset
     /// frames the new ship. While GPUI's device is unavailable, stashes
     /// `armor` in `pending_armor` instead; `sync_gpu` uploads it once the
-    /// device is back.
-    pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, cx: &mut Context<Self>) {
+    /// device is back. `layer` picks what is in view once it is up.
+    pub fn show_armor(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut Context<Self>) {
         if self.scene().is_some() {
-            self.upload_armor_now(armor);
+            self.upload_armor_now(armor, layer);
             self.pending_armor = None;
         } else {
-            self.pending_armor = Some(armor);
+            self.pending_armor = Some((armor, layer));
         }
         cx.notify();
     }
@@ -1401,14 +1492,12 @@ impl ViewportView {
     /// already captured the pre-bump value, so `apply_reload_result`'s
     /// generation guard discards its result instead of overwriting this
     /// (possibly different) ship's freshly uploaded armor.
-    fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>) {
+    fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer) {
         let Some(scene) = self.scene() else { return };
         let device = scene.device();
         let queue = scene.queue();
         self.reload_generation += 1;
-        self.part_visibility.clear();
         self.plate_visibility.clear();
-        self.hull_visibility.clear();
         self.hull_mesh_ids.clear();
         self.expanded_hull_groups.clear();
         self.expanded_camo_groups.clear();
@@ -1430,23 +1519,12 @@ impl ViewportView {
         self.hit_pulses.clear();
         self.ring_hovers.clear();
         self.sidebar_highlight = None;
-        // `part_visibility` absent means visible and `hull_visibility`
-        // absent means hidden (see their field docs), so only the
-        // non-default outcome needs explicit entries here.
-        if !self.armor_all_visible {
-            for (zone, parts) in &armor.zone_parts {
-                for part in parts {
-                    self.part_visibility.insert((zone.clone(), part.clone()), false);
-                }
-            }
-        }
-        if self.hull_all_visible {
-            for (_group, names) in &armor.hull_part_groups {
-                for name in names {
-                    self.hull_visibility.insert(name.clone(), true);
-                }
-            }
-        }
+        let saved = AllVisible { hull: self.hull_all_visible, armor: self.armor_all_visible };
+        let opening = OpeningVisibility::new(&armor, saved, layer);
+        self.part_visibility = opening.parts;
+        self.hull_visibility = opening.hull;
+        let mesh = layer == OpeningLayer::Mesh;
+        self.mesh_seed = MeshSeed { armor: mesh, hull: mesh };
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
             plate: &self.plate_visibility,
@@ -1537,11 +1615,11 @@ impl ViewportView {
             return;
         }
 
-        let Some(armor) = self.pending_armor.take() else {
+        let Some((armor, layer)) = self.pending_armor.take() else {
             self.reupload_current_armor(cx);
             return;
         };
-        self.upload_armor_now(armor);
+        self.upload_armor_now(armor, layer);
         // The comparison needs a hull, and the one it was asked for arrived
         // while there was no device, so it found none and did nothing.
         if let Some((taken, shells)) = self.pane.as_ref().and_then(|pane| pane.upgrade()).and_then(|pane| {
@@ -1583,9 +1661,17 @@ impl ViewportView {
     /// `hull_visibility` means no hull mesh is.
     pub(crate) fn all_visible(&self) -> AllVisible {
         AllVisible {
-            hull: !self.hull_visibility.is_empty() && self.hull_visibility.values().all(|visible| *visible),
-            armor: self.part_visibility.values().all(|visible| *visible)
-                && !self.plate_visibility.values().any(|hidden| *hidden),
+            hull: if self.mesh_seed.hull {
+                self.hull_all_visible
+            } else {
+                !self.hull_visibility.is_empty() && self.hull_visibility.values().all(|visible| *visible)
+            },
+            armor: if self.mesh_seed.armor {
+                self.armor_all_visible
+            } else {
+                self.part_visibility.values().all(|visible| *visible)
+                    && !self.plate_visibility.values().any(|hidden| *hidden)
+            },
         }
     }
 
@@ -2614,6 +2700,7 @@ impl ViewportView {
             plate_visibility: self.plate_visibility.clone(),
         });
         self.part_visibility.clear();
+        self.mesh_seed.armor = false;
         self.plate_visibility.clear();
         if let Some(armor) = self.current_armor.clone() {
             let zones: Vec<ZoneShape<'_>> = armor
@@ -2981,6 +3068,7 @@ impl ViewportView {
             plate_visibility: self.plate_visibility.clone(),
         });
         mutate(self);
+        self.mesh_seed.armor = false;
         self.reupload_current_armor(cx);
         cx.emit(ViewportChange::Settings);
     }
@@ -3172,6 +3260,7 @@ impl ViewportView {
         let current = self.current_visibility_snapshot();
         let Some(prev) = self.undo_stack.undo(current) else { return };
         self.part_visibility = prev.part_visibility;
+        self.mesh_seed.armor = false;
         self.plate_visibility = prev.plate_visibility;
         self.reupload_current_armor(cx);
         cx.emit(ViewportChange::Settings);
@@ -3183,6 +3272,7 @@ impl ViewportView {
         let current = self.current_visibility_snapshot();
         let Some(next) = self.undo_stack.redo(current) else { return };
         self.part_visibility = next.part_visibility;
+        self.mesh_seed.armor = false;
         self.plate_visibility = next.plate_visibility;
         self.reupload_current_armor(cx);
         cx.emit(ViewportChange::Settings);
@@ -3363,6 +3453,7 @@ impl ViewportView {
         mutate: impl FnOnce(&mut HashMap<String, bool>),
     ) {
         mutate(&mut self.hull_visibility);
+        self.mesh_seed.hull = false;
         self.reupload_hull();
         cx.emit(ViewportChange::Settings);
         cx.notify();
@@ -3677,6 +3768,7 @@ impl ViewportView {
             self.camera_rings.mode = first_camera_mode(&armor);
         }
 
+        self.reseed_mesh(&armor);
         visibility::retain_hull_visibility(&mut self.hull_visibility, &armor.hull_part_groups);
         visibility::retain_part_visibility(&mut self.part_visibility, &armor.zone_parts);
         visibility::retain_plate_visibility(&mut self.plate_visibility, &armor.zone_part_plates);
@@ -4707,6 +4799,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
+            mesh_seed: Default::default(),
         }
     }
 
@@ -4728,5 +4821,42 @@ mod tests {
         let mut other = sample_synced_settings();
         other.hull_visibility.insert("Deck".to_string(), false);
         assert_ne!(sample_synced_settings(), other);
+    }
+}
+
+#[cfg(test)]
+mod opening_visibility_tests {
+    use super::AllVisible;
+    use super::OpeningLayer;
+    use super::OpeningVisibility;
+    use std::collections::HashMap;
+
+    fn zone_parts() -> Vec<(String, Vec<String>)> {
+        vec![("Citadel".to_string(), vec!["Belt".to_string(), "Deck".to_string()])]
+    }
+
+    fn hull_groups() -> Vec<(String, Vec<String>)> {
+        vec![("Hull".to_string(), vec!["Hull_A".to_string(), "Hull_B".to_string()])]
+    }
+
+    const SAVED: AllVisible = AllVisible { hull: false, armor: true };
+
+    #[test]
+    fn the_armor_layer_follows_the_saved_defaults() {
+        let opening = OpeningVisibility::from_groups(&zone_parts(), &hull_groups(), SAVED, OpeningLayer::Armor);
+        assert_eq!(opening, OpeningVisibility::default());
+    }
+
+    #[test]
+    fn the_mesh_layer_shows_the_hull_and_hides_the_armor() {
+        let opening = OpeningVisibility::from_groups(&zone_parts(), &hull_groups(), SAVED, OpeningLayer::Mesh);
+        let parts: HashMap<_, _> = [
+            (("Citadel".to_string(), "Belt".to_string()), false),
+            (("Citadel".to_string(), "Deck".to_string()), false),
+        ]
+        .into_iter()
+        .collect();
+        let hull: HashMap<_, _> = [("Hull_A".to_string(), true), ("Hull_B".to_string(), true)].into_iter().collect();
+        assert_eq!(opening, OpeningVisibility { parts, hull });
     }
 }

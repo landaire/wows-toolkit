@@ -33,6 +33,8 @@ pub mod keys {
     /// Whether game data is cached on load so old replays still open after a
     /// game update.
     pub const AUTO_DUMP_GAME_DATA: &str = "auto_dump_game_data";
+    /// Whether a model opens with its armor in view rather than its hull.
+    pub const MODEL_VIEWER_SHOW_ARMOR: &str = "model_viewer_show_armor";
     /// Where that cache is kept. Empty means the default location.
     pub const GAME_DATA_CACHE_DIR: &str = "game_data_cache_dir";
     /// The game-data repository commit the cache was last checked against.

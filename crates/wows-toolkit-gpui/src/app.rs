@@ -1847,6 +1847,12 @@ impl App {
         &self.replay_inspector
     }
 
+    /// Test-only: the app itself reaches the field directly.
+    #[cfg(test)]
+    pub(crate) fn armor_pane(&self) -> &Entity<ArmorViewerPane> {
+        &self.armor_pane
+    }
+
     /// The Search tab, so its hover and preview behaviour can be asserted
     /// without reaching through the rendered frame. Test-only.
     #[cfg(test)]
@@ -2402,7 +2408,11 @@ impl App {
         self.watch_live_matches(&wows_dir, proxy_url, cx);
         let game_data = self.replay_inspector.read(cx).game_data();
         self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
-        self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
+        let opening_layer = settings.model_opening_layer;
+        self.armor_pane.update(cx, |pane, cx| {
+            pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx);
+            pane.set_opening_layer(opening_layer, cx);
+        });
         // The shared strings follow the saved language, and the combo shows
         // it, both from the moment the settings land.
         if let Some(code) = settings.locale.as_deref() {
