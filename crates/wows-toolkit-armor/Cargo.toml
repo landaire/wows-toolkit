@@ -27,6 +27,9 @@ rust-i18n = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
+# Replay hits and health over time, for the shot overlays.
+wows-replay-insights = { workspace = true, features = ["arc", "build"] }
+wows_replays = { workspace = true, features = ["arc"] }
 # The typed-text filter matching shared with the other listings.
 wows-toolkit-viewmodel = { workspace = true }
 wt-translations = { workspace = true }

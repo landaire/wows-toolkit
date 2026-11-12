@@ -16550,7 +16550,9 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "wgpu",
+ "wows-replay-insights",
  "wows-toolkit-viewmodel",
+ "wows_replays",
  "wowsunpack",
  "wt-translations",
 ]

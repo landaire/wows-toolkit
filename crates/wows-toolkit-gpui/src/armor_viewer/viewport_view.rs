@@ -49,13 +49,11 @@ use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
 use super::analysis::SimAgreement;
-use super::camera_rings;
 use super::depth_cues;
 use super::gaps;
 use super::length_marks::LengthMarks;
 use super::length_marks::MarkLabels;
 use super::length_marks::Reading;
-use super::splash;
 use super::trajectory;
 use super::trajectory::ArcColor;
 use super::trajectory::ArcId;
@@ -105,8 +103,10 @@ use crate::armor_viewer::visibility::VisibilitySnapshot;
 use crate::armor_viewer::visibility::VisibilityUndoStack;
 use crate::armor_viewer::xray::XrayHighlight;
 use crate::armor_viewer::xray::XrayHighlightView;
+use wows_toolkit_armor::camera_rings;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
+use wows_toolkit_armor::splash;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
@@ -2167,7 +2167,11 @@ impl ViewportView {
         }
 
         let rect = view_rect_from_bounds(bounds);
-        let color = rgb_color([super::hits::COLOR[0], super::hits::COLOR[1], super::hits::COLOR[2]]);
+        let color = rgb_color([
+            wows_toolkit_armor::hits::COLOR[0],
+            wows_toolkit_armor::hits::COLOR[1],
+            wows_toolkit_armor::hits::COLOR[2],
+        ]);
         for pulse in &self.hit_pulses {
             let anchor = self.viewport.pos_to_world_space(pulse.at);
             let Some(at) = self.viewport.camera.project_to_screen(anchor, rect).filter(|at| rect.contains(*at)) else {
@@ -4031,12 +4035,12 @@ impl ViewportView {
         }
 
         if self.display_settings.show_ship_center {
-            let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
+            let (vertices, indices) = wows_toolkit_armor::hits::build_center_marker(armor.bounds);
             self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
         }
 
         if !self.hits.is_empty() {
-            let (vertices, indices) = super::hits::build_markers(
+            let (vertices, indices) = wows_toolkit_armor::hits::build_markers(
                 &self.hits,
                 armor.center(),
                 Some(armor.bounds),

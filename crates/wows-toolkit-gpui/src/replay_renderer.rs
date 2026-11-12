@@ -343,7 +343,7 @@ pub struct ReplayRendererPanel {
     /// was last told. Kept so playback only disturbs the viewer when the set
     /// of hits actually changes: showing them again rebuilds the hull's
     /// meshes, which is far too much work for every frame.
-    armor_following: Option<(EntityId, crate::armor_viewer::realtime::RealtimeArmorFeed)>,
+    armor_following: Option<(EntityId, wows_toolkit_armor::realtime::RealtimeArmorFeed)>,
     _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
@@ -1240,7 +1240,7 @@ impl ReplayRendererPanel {
         let Some((param_index, display_name)) = self.armor_target(entity_id) else { return };
         let Some(timeline) = self.shots.get(&entity_id).cloned() else { return };
 
-        let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(timeline);
+        let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(timeline);
         feed.advance_to(GameClock(self.clock_of(self.at)));
         let mut incoming = self.incoming_context(entity_id);
         // The log reads the whole battle, not the part played so far: scrubbing
@@ -1331,8 +1331,8 @@ impl ReplayRendererPanel {
         let Some((_, feed)) = self.armor_following.as_mut() else { return };
         let moved = feed.advance_to(clock);
         let changed = match moved {
-            crate::armor_viewer::realtime::Advance::Rewound => true,
-            crate::armor_viewer::realtime::Advance::Gained(gained) => !gained.is_empty(),
+            wows_toolkit_armor::realtime::Advance::Rewound => true,
+            wows_toolkit_armor::realtime::Advance::Gained(gained) => !gained.is_empty(),
         };
         if !changed {
             return;
@@ -6690,7 +6690,7 @@ mod tests {
                 panel.shots.insert(ship, ShipShotTimeline { hits: Vec::new(), health_history });
                 // Following starts without a viewer, which is what the
                 // menu's own guard is for; seeded here directly.
-                let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(
+                let mut feed = wows_toolkit_armor::realtime::RealtimeArmorFeed::new(
                     panel.shots.get(&ship).expect("just inserted").clone(),
                 );
                 feed.advance_to(GameClock(0.0));

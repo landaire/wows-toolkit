@@ -42,14 +42,12 @@
 
 pub mod analysis;
 pub mod assets;
-pub mod camera_rings;
 pub(crate) mod camo;
 mod depth_cues;
 pub mod dock;
 mod export_dialog;
 mod gaps;
 mod hardpoint_overlay;
-mod hits;
 mod hull_picking;
 pub mod legend;
 mod length_marks;
@@ -59,11 +57,9 @@ pub mod options_panel;
 pub mod pane;
 pub mod picking_ui;
 pub mod popover;
-pub mod realtime;
 mod scene_load;
 pub mod sidebar;
 mod sidebar_tree;
-pub mod splash;
 mod surface_maps;
 pub mod trajectory;
 mod trajectory_panel;

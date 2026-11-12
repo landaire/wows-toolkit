@@ -13,7 +13,7 @@ use nalgebra::Vector3;
 use wowsunpack::game_params::types::CameraRing;
 use wowsunpack::game_params::types::CameraTrajectory;
 
-use wows_toolkit_armor::viewport::types::Vertex;
+use crate::viewport::types::Vertex;
 
 type Vec3 = Vector3<f32>;
 
@@ -48,7 +48,7 @@ const EXTREME_ALPHA: f32 = 0.25;
 const HOVER_THRESHOLD_PX: f32 = 8.0;
 
 /// One drawn orbit and what it reads as, for a pointer resting on it.
-pub(crate) struct RingHover {
+pub struct RingHover {
     pub label: String,
     pub ring: CameraRing,
     pub waterline_dy: f32,
@@ -56,7 +56,7 @@ pub(crate) struct RingHover {
 
 /// What an orbit reads as: which mode it belongs to, which of the two orbits
 /// it is, at which field of view, and the numbers behind it.
-pub(crate) fn ring_label(mode: &str, kind: &str, fov_tag: &str, ring: &CameraRing) -> String {
+pub fn ring_label(mode: &str, kind: &str, fov_tag: &str, ring: &CameraRing) -> String {
     format!(
         "{mode} {kind} ({fov_tag})
 y {:.2}  semiH {:.2}  semiV {:.2}",
@@ -70,7 +70,7 @@ y {:.2}  semiH {:.2}  semiV {:.2}",
 /// answers `None` for one behind the camera. The distance is measured to the
 /// drawn curve rather than to the orbit's centre, so resting on the far side
 /// of a ring reads it just as the near side does.
-pub(crate) fn nearest_ring_label(
+pub fn nearest_ring_label(
     hovers: &[RingHover],
     project: impl Fn(Vec3) -> Option<[f32; 2]>,
     cursor: [f32; 2],
@@ -109,7 +109,7 @@ fn distance_to_segment(point: [f32; 2], from: [f32; 2], to: [f32; 2]) -> f32 {
 }
 
 /// What to draw for one mode, and how it was asked for.
-pub(crate) struct RingRequest<'a> {
+pub struct RingRequest<'a> {
     /// The mode these orbits belong to, which is what a hover names them by.
     pub mode: &'a str,
     pub trajectory: &'a CameraTrajectory,
@@ -134,7 +134,7 @@ pub(crate) struct RingRequest<'a> {
 ///
 /// The orbits are handed back alongside the mesh so a pointer resting on one
 /// can be told which it is without the caller laying them out again.
-pub(crate) fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>, Vec<RingHover>) {
+pub fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>, Vec<RingHover>) {
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut hovers: Vec<RingHover> = Vec::new();
@@ -200,7 +200,7 @@ fn at_alpha(color: [f32; 4], alpha: f32) -> [f32; 4] {
 
 /// One orbit as a closed ellipse, optionally with its centre marked and a
 /// line dropped to the waterline.
-pub(crate) fn build_ring_mesh(
+pub fn build_ring_mesh(
     ring: &CameraRing,
     waterline_dy: f32,
     color: [f32; 4],
@@ -237,7 +237,7 @@ pub(crate) fn build_ring_mesh(
 /// Where the locked camera is looking, which is the only thing on screen that
 /// says how far down the view is tilted. World space, since it is a point on
 /// the water rather than a point on the ship.
-pub(crate) fn build_water_marker(center: Vec3, radius: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
+pub fn build_water_marker(center: Vec3, radius: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
@@ -259,7 +259,7 @@ pub(crate) fn build_water_marker(center: Vec3, radius: f32, color: [f32; 4]) -> 
 
 /// The straight lines the camera eye travels between the two orbits, at
 /// evenly spaced bearings.
-pub(crate) fn build_zoom_path_mesh(
+pub fn build_zoom_path_mesh(
     inner: &CameraRing,
     outer: &CameraRing,
     waterline_dy: f32,
@@ -279,7 +279,7 @@ pub(crate) fn build_zoom_path_mesh(
 }
 
 /// `count` points evenly spaced around `ring`.
-pub(crate) fn sample_ring(ring: &CameraRing, waterline_dy: f32, count: usize) -> Vec<Vec3> {
+pub fn sample_ring(ring: &CameraRing, waterline_dy: f32, count: usize) -> Vec<Vec3> {
     let center = ring_center(ring, waterline_dy);
     (0..count)
         .map(|step| {

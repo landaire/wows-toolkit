@@ -1,6 +1,8 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
 ARMOR_DEPS = [
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
