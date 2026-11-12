@@ -16538,6 +16538,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-armor"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "nalgebra",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "wgpu",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows-toolkit-config"
 version = "0.1.0"
 dependencies = [
@@ -16600,6 +16614,7 @@ dependencies = [
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",
+ "wows-toolkit-armor",
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-icons",

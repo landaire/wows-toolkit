@@ -4,7 +4,6 @@ use std::rc::Rc;
 use std::rc::Weak;
 
 extern crate nalgebra as na;
-use gpui_wgpu::wgpu;
 use na::Rotation3;
 use na::Vector3;
 
