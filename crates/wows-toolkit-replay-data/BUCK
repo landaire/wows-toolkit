@@ -14,7 +14,9 @@ REPLAY_DATA_COMMON_DEPS = [
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-icons:wows_toolkit_icons",
     "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-client:wt_collab_client",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:escaper",
     "//third-party/rust:futures",
@@ -28,6 +30,7 @@ REPLAY_DATA_COMMON_DEPS = [
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",
+    "//third-party/rust:tempfile",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
@@ -90,6 +93,6 @@ workspace_test(
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
     test_deps = [
         "//third-party/rust:filetime",
-        "//third-party/rust:tempfile",
+        "//third-party/rust:parking_lot",
     ],
 )
