@@ -1,6 +1,6 @@
 //! Team structure in the player table: a stripe in each row's gutter for
 //! the player's side, and a heading over each team's run of rows with that
-//! team's damage against the other's.
+//! team's damage.
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
@@ -15,10 +15,6 @@ use super::model::separate_number;
 
 /// Width of the side stripe in a row's left gutter.
 const STRIPE_WIDTH: Pixels = px(3.);
-
-/// Size of the bar comparing the two teams' damage.
-const SPLIT_BAR_WIDTH: Pixels = px(96.);
-const SPLIT_BAR_HEIGHT: Pixels = px(4.);
 
 /// Which side of the battle a row stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,14 +130,6 @@ impl TeamDamage {
             TeamSide::Enemies => self.enemies,
         }
     }
-
-    /// The allies' share of both teams' damage, from 0 to 1. `None` unless
-    /// both teams have a figure and together they dealt some damage.
-    pub fn allies_share(self) -> Option<f32> {
-        let (allies, enemies) = (self.allies?, self.enemies?);
-        let total = u128::from(allies) + u128::from(enemies);
-        (total > 0).then(|| (allies as f64 / total as f64) as f32)
-    }
 }
 
 /// The stripe in a row's left gutter. Absolute, so the row it is placed in
@@ -150,11 +138,10 @@ pub fn stripe(mark: RowMark, cx: &App) -> impl IntoElement {
     div().absolute().left_0().top_0().bottom_0().w(STRIPE_WIDTH).bg(mark.color(cx))
 }
 
-/// The heading drawn over a team's first row: the team's name, its damage,
-/// and a bar of the allies' damage against the enemies'.
+/// The heading drawn over a team's first row: the team's name and its
+/// damage. The match header compares the two teams already.
 pub fn heading(run: TeamRun, damage: TeamDamage, cx: &App) -> AnyElement {
     let total = damage.side(run.side).map(separate_number);
-    let split = damage.allies_share().map(|share| split_bar(share, cx));
 
     h_flex()
         .id(("replay-team-heading", run.start))
@@ -181,18 +168,7 @@ pub fn heading(run: TeamRun, damage: TeamDamage, cx: &App) -> AnyElement {
                     .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx)),
             )
         })
-        .children(split)
         .into_any_element()
-}
-
-/// Two segments in the teams' colours, the allies' on the left.
-fn split_bar(allies_share: f32, cx: &App) -> impl IntoElement {
-    h_flex()
-        .flex_none()
-        .w(SPLIT_BAR_WIDTH)
-        .h(SPLIT_BAR_HEIGHT)
-        .child(div().h_full().w(relative(allies_share)).bg(RowMark::Ally.color(cx)))
-        .child(div().h_full().flex_1().bg(RowMark::Enemy.color(cx)))
 }
 
 #[cfg(test)]
@@ -236,16 +212,14 @@ mod tests {
         let damage = TeamDamage::summing(&rows, TeamId::from(0i64), |row| row.actual_damage);
 
         assert_eq!(damage, TeamDamage { allies: Some(4_000), enemies: Some(4_000) });
-        assert_eq!(damage.allies_share(), Some(0.5));
     }
 
     #[test]
-    fn a_team_without_figures_has_no_total_and_no_split() {
+    fn a_team_without_figures_has_no_total() {
         let rows = [row(1, 0, Some(3_000)), row(2, 1, None)];
 
         let damage = TeamDamage::summing(&rows, TeamId::from(0i64), |row| row.actual_damage);
 
-        assert_eq!(damage.enemies, None);
-        assert_eq!(damage.allies_share(), None);
+        assert_eq!(damage.side(TeamSide::Enemies), None);
     }
 }
