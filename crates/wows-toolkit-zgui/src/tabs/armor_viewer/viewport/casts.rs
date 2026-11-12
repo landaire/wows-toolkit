@@ -318,11 +318,6 @@ impl ViewportModel {
         cx.notify();
     }
 
-    /// The zones the burst on screen reached, for the list beside it.
-    pub(super) fn splash_zones(&self) -> &[splash::SplashZoneHit] {
-        self.splash_result.as_ref().map(|result| result.hit_zones.as_slice()).unwrap_or(&[])
-    }
-
     /// Bursts a shell where the pointer is.
     ///
     /// The burst is sized by the largest high-explosive or semi-armour-piercing shell the chosen
@@ -716,16 +711,9 @@ impl ArmorViewportState {
         self.read(|this| this.hits_drawn()).unwrap_or_default()
     }
 
-    pub fn shot_log(self) -> Vec<LoggedHit> {
-        self.read(|this| this.shot_log()).unwrap_or_default()
-    }
-
+    #[cfg(test)]
     pub fn hit_readout(self) -> Option<String> {
         self.read(|this| this.hit_readout()).flatten()
-    }
-
-    pub fn length_readout(self) -> Option<String> {
-        self.read(|this| this.length_readout()).flatten()
     }
 
     pub fn gaps(self) -> GapState {
@@ -766,10 +754,6 @@ impl ArmorViewportState {
         self.update(|this, cx| this.set_show_splash_boxes(show, cx));
     }
 
-    pub fn splash_zones(self) -> Vec<splash::SplashZoneHit> {
-        self.read(|this| this.splash_zones().to_vec()).unwrap_or_default()
-    }
-
     pub fn set_continue_on_ricochet(self, on: bool) {
         self.update(|this, cx| this.set_continue_on_ricochet(on, cx));
     }
@@ -791,6 +775,7 @@ impl ArmorViewportState {
     }
 
     /// Keeps a cast shell and selects it. `None` once the state is gone.
+    #[cfg(test)]
     pub fn add_arc(self, approach: Vec3, trajectory: trajectory::Trajectory) -> Option<ArcId> {
         self.update(|this, cx| this.add_arc(approach, trajectory, cx))
     }

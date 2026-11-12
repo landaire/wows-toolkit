@@ -169,10 +169,6 @@ impl BrowserTree {
     pub fn order(&self) -> &[PathBuf] {
         &self.order
     }
-
-    pub fn holds(&self, path: &Path) -> bool {
-        self.leaves.contains_key(path)
-    }
 }
 
 impl TreeModel for BrowserTree {

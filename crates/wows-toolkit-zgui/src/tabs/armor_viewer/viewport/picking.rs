@@ -577,14 +577,6 @@ impl ArmorViewportState {
     pub fn toggle_hull_group_expanded(self, group: String) {
         self.update(|this, cx| this.toggle_hull_group_expanded(group, cx));
     }
-
-    pub fn undo_visibility(self) {
-        self.update(|this, cx| this.undo_visibility(cx));
-    }
-
-    pub fn redo_visibility(self) {
-        self.update(|this, cx| this.redo_visibility(cx));
-    }
 }
 
 #[cfg(test)]

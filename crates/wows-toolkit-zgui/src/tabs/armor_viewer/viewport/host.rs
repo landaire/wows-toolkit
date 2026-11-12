@@ -172,6 +172,7 @@ fn current_device(cx: &SurfaceRenderCx<'_>, waiter: &SurfaceInvalidator) -> Devi
 pub enum ScreenshotError {
     #[error("the viewport has no scene drawn to take")]
     NothingDrawn,
+    #[cfg(test)]
     #[error("the viewport was closed before it drew again")]
     Closed,
     #[error("the frame could not be read back: {0}")]
@@ -466,6 +467,7 @@ impl ViewportModel {
 impl ArmorViewportState {
     /// The scene as it is drawn now, as a PNG the size of the viewport in device pixels. Answered
     /// by the next frame, which this asks for.
+    #[cfg(test)]
     pub fn screenshot(self) -> impl Future<Output = Result<Vec<u8>, ScreenshotError>> {
         let (send, receive) = oneshot::channel();
         let asked = self.ask_screenshot(send);
@@ -475,16 +477,6 @@ impl ArmorViewportState {
             }
             receive.await.unwrap_or(Err(ScreenshotError::Closed))
         }
-    }
-
-    /// Puts the camera back where the scene opened.
-    pub fn reset_camera(self) {
-        self.update(|model, cx| {
-            let Some(home) = model.home_camera.clone() else { return };
-            model.viewport.camera = home;
-            model.viewport.mark_dirty();
-            cx.emit(super::types::ViewportChange::Camera);
-        });
     }
 }
 
