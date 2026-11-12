@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
+use wows_core::Version;
 use wows_core::units::Percent;
 use wows_ship_stats::Build;
 use wows_ship_stats::BuildEffects;
@@ -182,6 +183,17 @@ impl GameData {
         ship: &Ship,
         loadout: &ResolvedLoadout,
     ) -> Result<ResolvedEffects, QueryError> {
+        self.effective_modifiers_at_version(ship, loadout, self.version())
+    }
+
+    /// Folds the loadout using the modifier and trigger semantics from
+    /// `version`. Ship parameters and metadata still come from `self`.
+    pub(crate) fn effective_modifiers_at_version(
+        &self,
+        ship: &Ship,
+        loadout: &ResolvedLoadout,
+        version: Version,
+    ) -> Result<ResolvedEffects, QueryError> {
         // Abilities apply like upgrades: always on, each under its own name.
         let combined: Vec<(String, Vec<CrewSkillModifier>)>;
         let modernizations = if loadout.abilities.is_empty() {
@@ -202,7 +214,7 @@ impl GameData {
             triggers: &loadout.triggers,
             health: loadout.hp_percent.map(|percent| HealthFraction::new(percent.to_fraction())),
         };
-        let effects = build.effects(self.provider(), self.version()).map_err(build_failed(ship))?;
+        let effects = build.effects(self.provider(), version).map_err(build_failed(ship))?;
         let active_conditions = effects
             .active_conditions
             .iter()

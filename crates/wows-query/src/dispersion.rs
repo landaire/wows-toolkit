@@ -13,9 +13,11 @@ use std::cmp::Ordering;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::Version;
 use wows_core::units::Km;
 use wows_core::units::Meters;
 use wows_core::units::Percent;
+use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::constants::DispersionCurve;
 use wowsunpack::game_params::ttx::constants::clamped_dispersion_coeff;
@@ -45,6 +47,14 @@ const PRIORITY_TARGET_ACCURACY: &str = "GSPriorityTargetIdealRadius";
 
 /// Condition of the priority target accuracy of Manual Secondary Battery Aiming.
 const PRIORITY_TARGET_CONDITION: &str = "at the priority target within secondary range, after sustained fire";
+
+const FORMULA_NOTE: &str = "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion.";
+const MAIN_RANGE_NOTE: &str = "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured.";
+const SECONDARY_NOTE: &str = "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled.";
+const SIGMA_NOTE: &str = "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread.";
+const TAPER_NOTE: &str = "Below the gun's taperDist, 4 to 5 km for most guns, the game narrows horizontal dispersion further toward the muzzle; values at these distances do not apply it and overstate dispersion.";
+/// Distances below this may fall under a gun's taperDist.
+const TAPER_REACH_KM: f32 = 5.0;
 
 /// Arguments for `dispersion_at_range`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -317,6 +327,9 @@ pub struct DispersionAtRange {
 
     pub battery: DispersionBattery,
     pub range_km: Km,
+    /// Game version that supplied an explicitly selected historical mechanic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mechanics_version: Option<Version>,
     pub conclusion: String,
     pub guns: Vec<GunCurve>,
     /// The row of the build asked about.
@@ -579,18 +592,22 @@ impl Battery<'_> {
     }
 }
 
+fn dispersion_notes(kind: DispersionBattery, range: Km) -> Vec<&'static str> {
+    let mut notes = vec![FORMULA_NOTE, SIGMA_NOTE];
+    notes.push(match kind {
+        DispersionBattery::MainBattery => MAIN_RANGE_NOTE,
+        DispersionBattery::Secondary => SECONDARY_NOTE,
+    });
+    if range.value() < TAPER_REACH_KM {
+        notes.push(TAPER_NOTE);
+    }
+    notes
+}
+
 impl GameData {
     /// Horizontal and vertical dispersion at one distance on the base build
     /// and with each range or accuracy modifier the ship can use.
     pub fn dispersion_at_range(&self, args: &DispersionAtRangeArgs) -> Result<DispersionAtRange, QueryError> {
-        const FORMULA_NOTE: &str = "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion.";
-        const MAIN_RANGE_NOTE: &str = "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured.";
-        const SECONDARY_NOTE: &str = "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled.";
-        const SIGMA_NOTE: &str = "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread.";
-        const TAPER_NOTE: &str = "Below the gun's taperDist, 4 to 5 km for most guns, the game narrows horizontal dispersion further toward the muzzle; values at these distances do not apply it and overstate dispersion.";
-        /// Distances below this may fall under a gun's taperDist.
-        const TAPER_REACH_KM: f32 = 5.0;
-
         let range = args.range_km;
         if !range.value().is_finite() || range.value() <= 0.0 {
             return Err(QueryError::InvalidArguments { reason: "range_km must be more than 0" });
@@ -621,14 +638,7 @@ impl GameData {
         if let Some(group) = &group {
             conclusion.push_str(&group_sentence(ship, range, group));
         }
-        let mut notes = vec![FORMULA_NOTE, SIGMA_NOTE];
-        notes.push(match kind {
-            DispersionBattery::MainBattery => MAIN_RANGE_NOTE,
-            DispersionBattery::Secondary => SECONDARY_NOTE,
-        });
-        if range.value() < TAPER_REACH_KM {
-            notes.push(TAPER_NOTE);
-        }
+        let notes = dispersion_notes(kind, range);
 
         Ok(DispersionAtRange {
             interpretations,
@@ -636,9 +646,104 @@ impl GameData {
             modules: modules.chosen,
             battery: kind,
             range_km: range,
+            mechanics_version: None,
             conclusion,
             guns: computed.guns,
             headline: headline.map(|index| computed.rows[index].build.clone()),
+            builds: computed.rows,
+            group,
+            notes,
+        })
+    }
+
+    /// Dispersion for this game-data build with the captain skill named by
+    /// `args.build` selected from another build. Ship, module, and base-build
+    /// data come from `self`; only the skill and its mechanics come from
+    /// `skill_data`.
+    pub fn dispersion_at_range_with_skill(
+        &self,
+        args: &DispersionAtRangeArgs,
+        skill_data: &GameData,
+    ) -> Result<DispersionAtRange, QueryError> {
+        let range = args.range_km;
+        if !range.value().is_finite() || range.value() <= 0.0 {
+            return Err(QueryError::InvalidArguments { reason: "range_km must be more than 0" });
+        }
+        let skill_query = args.build.as_deref().ok_or(QueryError::InvalidArguments {
+            reason: "build must name the captain skill selected from skill_data",
+        })?;
+
+        let mut interpretations = Interpretations::default();
+        let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
+        let modules = self.resolve_modules(ship, args.modules.as_deref().unwrap_or_default())?;
+        self.check_hull_fit(ship, &modules)?;
+        let kind = args.battery.unwrap_or_default();
+        let battery = self.dispersion_battery(ship, kind, &modules.selection)?;
+        let stock_loadout = self.stock_loadout();
+        let stock_effects = self.effective_modifiers(ship, &stock_loadout)?;
+        let stock = stock_effects.build.modifiers.bundle();
+        let Some(base) = battery.profiles(stock, &battery.selection, RangeCoefficient::NONE) else {
+            return Err(QueryError::WeaponNotFound { ship: ship.name.clone(), weapon: kind.noun().to_owned() });
+        };
+
+        let (skill, _) =
+            skill_data.resolve_skill_for_class(skill_query, ship.class, &ship.name, &mut interpretations)?;
+        let skill_name = skill_data.skill_name(skill);
+        let mut skill_loadout = stock_loadout;
+        skill_loadout.skills.push(skill.clone());
+        skill_loadout.triggers = Triggers::Skills(vec![skill.internal_name().clone()]);
+        let skill_effects = self.effective_modifiers_at_version(ship, &skill_loadout, skill_data.version())?;
+        let skill_build = skill_effects.build.modifiers.bundle();
+        let Some(skill_profiles) = battery.profiles(skill_build, &battery.selection, RangeCoefficient::NONE) else {
+            return Err(QueryError::WeaponNotFound { ship: ship.name.clone(), weapon: kind.noun().to_owned() });
+        };
+        let Some(row_kind) = change_kind(&base[0], &skill_profiles[0]) else {
+            return Err(QueryError::InvalidArguments {
+                reason: "the selected skill does not change this battery's range or accuracy",
+            });
+        };
+
+        let condition = if kind == DispersionBattery::Secondary && skill_build.coef(PRIORITY_TARGET_ACCURACY) != 1.0 {
+            Some(PRIORITY_TARGET_CONDITION.to_owned())
+        } else {
+            skill_data.skill_trigger_sentence(skill)
+        };
+        let mut skill_row = row(skill_name, row_kind, &skill_profiles, Some(&base), range);
+        skill_row.condition = condition;
+        let guns = base.iter().map(|mount| gun_curve(&mount.mount, &mount.profile.curve)).collect();
+        let computed = ShipRows {
+            rows: vec![row("base".to_owned(), RowKind::Base, &base, None, range), skill_row],
+            sources: Vec::new(),
+            guns,
+        };
+        let headline = 1;
+        let group = match &args.compare {
+            Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, Some(headline))?),
+            None => None,
+        };
+        let mut conclusion = headline_sentence(ship, kind, range, &computed.rows[headline]);
+        if let Some(condition) = &computed.rows[headline].condition {
+            conclusion.push_str(" Condition: ");
+            conclusion.push_str(condition);
+            if !condition.ends_with(['.', '!', '?']) {
+                conclusion.push('.');
+            }
+        }
+        if let Some(group) = &group {
+            conclusion.push_str(&group_sentence(ship, range, group));
+        }
+        let notes = dispersion_notes(kind, range);
+
+        Ok(DispersionAtRange {
+            interpretations,
+            ship: ship.summary(),
+            modules: modules.chosen,
+            battery: kind,
+            range_km: range,
+            mechanics_version: Some(skill_data.version()),
+            conclusion,
+            guns: computed.guns,
+            headline: Some(computed.rows[headline].build.clone()),
             builds: computed.rows,
             group,
             notes,
