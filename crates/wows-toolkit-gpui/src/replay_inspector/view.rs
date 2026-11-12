@@ -511,7 +511,7 @@ impl ReplayInspectorView {
             game_data.set_locale(locale.as_deref().unwrap_or("en"));
         }
         // Kept preview tracks carry ship names in the previous language.
-        crate::minimap_preview::forget_kept_previews();
+        wows_toolkit_replay_data::minimap_preview::forget_kept_previews();
         self.locale = locale.clone();
         for browser in self.browsers() {
             browser.update(cx, |browser, cx| browser.set_locale(locale.clone(), cx));
@@ -558,7 +558,7 @@ impl ReplayInspectorView {
         // The kept preview renderers hold art read out of the previous
         // install's VFS, and the kept tracks names in its language. Both
         // branches below replace the cache that produced them.
-        crate::minimap_preview::forget_kept_previews();
+        wows_toolkit_replay_data::minimap_preview::forget_kept_previews();
         self.install_dir = wows_dir.clone();
         if wows_dir.is_empty() {
             let cache = GameDataCache::without_install()

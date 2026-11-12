@@ -24,12 +24,16 @@ dhat = { version = "0.3", optional = true }
 escaper = "0.1.1"
 # The game's own translation catalogs.
 gettext = { workspace = true }
+# The minimap preview is rasterised to images.
+image = { workspace = true, features = ["png"] }
 jiff = { workspace = true }
+# The stored capture-point layouts.
+rkyv = { workspace = true }
+# A preview that cannot be read reports its cause chain.
+rootcause = { workspace = true }
 # The column hovers are user-facing strings. `i18n!` generates its lookup per
 # crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }
-# The stored capture-point layouts.
-rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The replay index store.

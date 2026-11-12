@@ -28,9 +28,9 @@ use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
 
 use crate::frame_texture::FrameTexture;
-use crate::minimap_preview::FRAME_INTERVAL;
-use crate::minimap_preview::PreviewEdge;
-use crate::minimap_preview::PreviewFrames;
+use wows_toolkit_replay_data::minimap_preview::FRAME_INTERVAL;
+use wows_toolkit_replay_data::minimap_preview::PreviewEdge;
+use wows_toolkit_replay_data::minimap_preview::PreviewFrames;
 
 /// A baked preview and where it is in its loop.
 struct Shown {
@@ -248,7 +248,7 @@ impl PreviewHover {
 
         // A battle walked recently plays without the dwell, as the egui popup
         // plays a cached track: what the dwell holds back is the walk.
-        if crate::minimap_preview::is_walked(&path) {
+        if wows_toolkit_replay_data::minimap_preview::is_walked(&path) {
             self.bake(path, map_name, game_data, cx, field);
             return;
         }
@@ -358,7 +358,7 @@ impl PreviewHover {
                 let path = path.clone();
                 let game_data = game_data.clone();
                 async move {
-                    crate::minimap_preview::bake_from_file(
+                    wows_toolkit_replay_data::minimap_preview::bake_from_file(
                         &path,
                         &game_data,
                         edge,
@@ -377,9 +377,9 @@ impl PreviewHover {
             // runs: it costs one image decode, where the bake may cost a
             // build load. The first map put up stays (`show_map`).
             if let Some(name) = map_name {
-                let drawn = cx
-                    .background_executor()
-                    .spawn(async move { crate::minimap_preview::map_frame(&name, &game_data, edge) });
+                let drawn = cx.background_executor().spawn(async move {
+                    wows_toolkit_replay_data::minimap_preview::map_frame(&name, &game_data, edge)
+                });
                 if let Some(frames) = drawn.await {
                     let _ = view.update(cx, |view, cx| field(view).show_map(frames, cx));
                 }
@@ -432,7 +432,7 @@ impl PreviewHover {
                 }
                 Ok(()) => None,
             };
-            let superseded = matches!(baked, Err(crate::minimap_preview::PreviewError::Cancelled));
+            let superseded = matches!(baked, Err(wows_toolkit_replay_data::minimap_preview::PreviewError::Cancelled));
 
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
