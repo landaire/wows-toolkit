@@ -35,6 +35,7 @@ use zgui::geom::Rect;
 use zgui::platform::CursorStyle;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::view;
@@ -78,6 +79,15 @@ fn open(fill: impl Fn(DockState) + 'static) -> (HeadlessWindow, DockState) {
 
 /// [`open`], with a menu on each tab group when `menu` is given.
 fn open_dock(menu: Option<DockMenuStrings>, fill: impl Fn(DockState) + 'static) -> (HeadlessWindow, DockState) {
+    open_with(registry, menu, fill)
+}
+
+/// [`open_dock`], with panels made by the registry `registry` returns.
+fn open_with(
+    registry: impl Fn() -> PanelRegistry + 'static,
+    menu: Option<DockMenuStrings>,
+    fill: impl Fn(DockState) + 'static,
+) -> (HeadlessWindow, DockState) {
     let held = Rc::new(Cell::new(None));
     let window = {
         let held = Rc::clone(&held);
@@ -100,6 +110,33 @@ fn open_dock(menu: Option<DockMenuStrings>, fill: impl Fn(DockState) + 'static) 
     let state = held.get().expect("the view was built");
 
     (window, state)
+}
+
+/// How many panel views were built and how many were taken down.
+#[derive(Clone, Default)]
+struct ViewCounts {
+    built: Rc<Cell<u32>>,
+    dropped: Rc<Cell<u32>>,
+}
+
+/// A registry of text panels that counts in `counts`.
+fn counting_registry(counts: ViewCounts) -> PanelRegistry {
+    let mut registry = PanelRegistry::new();
+    registry.register(
+        kind(),
+        PanelFactory::new(
+            |id: &PanelId| id.as_str().to_owned(),
+            move |id: &PanelId| {
+                counts.built.set(counts.built.get() + 1);
+                let dropped = Rc::clone(&counts.dropped);
+                on_cleanup_local(move || dropped.set(dropped.get() + 1));
+                let test_id = format!("content-{}", id.as_str());
+                AnyView::new(view! { box(attr:data-testid = test_id, style = "height: 40px") {"content"} })
+            },
+        ),
+    );
+
+    registry
 }
 
 fn three_tabs(state: DockState) {
@@ -214,6 +251,43 @@ fn a_folded_region_comes_back_at_the_width_it_had() {
     window.advance(FRAME);
     let back = width(&window, "content-side").expect("the side panel is laid out again");
     assert!((back - side).abs() < 1.0, "came back at {back}, was {side}");
+}
+
+#[test]
+fn a_panel_keeps_its_view_while_its_region_changes_shape_until_it_is_removed() {
+    let counts = ViewCounts::default();
+    let (mut window, state) = {
+        let counts = counts.clone();
+        open_with(
+            move || counting_registry(counts.clone()),
+            None,
+            |state| {
+                let group = state.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+                state.add_panel(DockTarget::Group(group), entry("b")).expect("adds");
+            },
+        )
+    };
+    window.advance(FRAME);
+    assert_eq!(counts.built.get(), 2);
+    let a = window.by_test_id("content-a").expect("a is built");
+
+    let group = state.group_of(&PanelId::new("a")).expect("a is in the dock");
+    state.add_panel(DockTarget::Beside { group, edge: Edge::Right }, entry("c")).expect("splits");
+    state.add_panel(DockTarget::Region(DockRegion::Bottom), entry("d")).expect("adds");
+    window.advance(FRAME);
+    assert_eq!(counts.built.get(), 4, "only the new panels were built");
+    assert_eq!(window.by_test_id("content-a"), Some(a), "a kept its view through the split");
+    assert_eq!(counts.dropped.get(), 0);
+
+    state.remove(&PanelId::new("a")).expect("removes");
+    window.advance(FRAME);
+    assert_eq!(counts.dropped.get(), 1, "a removed panel's view is taken down");
+    assert!(window.by_test_id("content-a").is_none());
+
+    state.restore(&state.dump()).expect("the dock is alive");
+    window.advance(FRAME);
+    assert_eq!(counts.dropped.get(), 4, "a restore takes down every view");
+    assert_eq!(counts.built.get(), 7, "and builds them again");
 }
 
 /// The dividers that take room, each with its box.

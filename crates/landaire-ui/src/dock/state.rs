@@ -15,6 +15,8 @@ use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::view::AnyView;
 
+use crate::dock::kept;
+use crate::dock::kept::KeptPanels;
 use crate::dock::layout::DockRegion;
 use crate::dock::layout::DockTarget;
 use crate::dock::layout::FoldingRegion;
@@ -119,6 +121,7 @@ pub struct DockState {
     registry: StoredValue<PanelRegistry, LocalStorage>,
     pub(crate) generation: RwSignal<LayoutGeneration, LocalStorage>,
     zoomed: RwSignal<Option<GroupId>, LocalStorage>,
+    pub(crate) kept: StoredValue<KeptPanels, LocalStorage>,
 }
 
 impl DockState {
@@ -129,6 +132,7 @@ impl DockState {
             registry: StoredValue::new_local(registry),
             generation: RwSignal::new_local(LayoutGeneration(0)),
             zoomed: RwSignal::new_local(None),
+            kept: StoredValue::new_local(KeptPanels::default()),
         }
     }
 
@@ -260,8 +264,9 @@ impl DockState {
         self.layout.with_untracked(Layout::dump)
     }
 
-    /// Puts the dock back as `saved` describes it. Panels whose kind has no factory, and second
-    /// panels with an id already used, are left out and listed in the report.
+    /// Puts the dock back as `saved` describes it, building every panel's view again. Panels whose
+    /// kind has no factory, and second panels with an id already used, are left out and listed in
+    /// the report.
     pub fn restore(self, saved: &SavedLayout) -> Result<RestoreReport, DockError> {
         let (mut layout, skipped) = self
             .registry
@@ -271,6 +276,7 @@ impl DockState {
 
         self.layout.set(layout);
         self.zoomed.set(None);
+        kept::clear(self.kept);
         self.generation.update(|generation| generation.0 += 1);
 
         Ok(RestoreReport { skipped })

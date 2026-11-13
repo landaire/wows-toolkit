@@ -7,6 +7,7 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
+use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
@@ -53,6 +54,8 @@ use crate::chrome::tab_strip::TabStripPanels;
 use crate::chrome::tab_strip::TabStripProps;
 use crate::chrome::tab_strip::TabStripStrings;
 use crate::chrome::tab_strip::TabStripTabProps;
+use crate::dock::kept;
+use crate::dock::kept::KeptView;
 use crate::dock::layout::CssLength;
 use crate::dock::layout::DockRegion;
 use crate::dock::layout::FoldingLimits;
@@ -498,9 +501,9 @@ impl FrameGroup {
 /// Lays out a [`DockState`]: a left, center, right and bottom region, the side ones folding away
 /// when closed or empty, each holding splits of tab groups.
 ///
-/// Panels keep their views while their tab is not shown and while their region is closed. A
-/// change to the shape of a region's tree builds that region's views again, and
-/// [`restore`](DockState::restore) builds the whole dock again.
+/// A panel's view is built once and kept for as long as the panel is in the dock: while its tab
+/// is not shown, while its region is closed, and when it moves to another group or region.
+/// [`restore`](DockState::restore) builds every view again. One `Dock` draws a state at a time.
 #[component]
 pub fn Dock(
     state: DockState,
@@ -528,6 +531,9 @@ pub fn Dock(
         strings: strings.unwrap_or(english.strings),
         menu,
     });
+    // Panel views are built in this scope, so they outlast the groups that show them.
+    state.kept.update_value(|kept| kept.set_scope(Owner::current()));
+    on_cleanup_local(move || kept::clear(state.kept));
 
     view! {
         box(class = "lui-dock", {..attrs}, class = class) {
@@ -866,12 +872,11 @@ fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
 
 #[component]
 fn DockContent(state: DockState, entry: PanelEntry) -> impl IntoView {
-    let factory = state.factory(&entry.kind);
-    let id = entry.id.clone();
+    let value = entry.id.as_str().to_owned();
 
     view! {
-        TabsContent(value = entry.id.as_str(), keep_mounted = true, class = "lui-dock__content") {
-            {factory.as_ref().map(|factory| factory.content(&id))}
+        TabsContent(value = value, keep_mounted = true, class = "lui-dock__content") {
+            {KeptView { state, entry: entry.clone() }}
         }
     }
 }

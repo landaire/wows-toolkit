@@ -350,10 +350,10 @@ fn a_restored_layout_keeps_what_can_be_put_back() {
     assert_eq!(docked, [Docked::Replay(kept)], "the missing replay and the watched panel are left out");
 }
 
-/// Splitting the dock builds the region's views again, and an open replay shows what it read
-/// rather than reading the file again.
+/// Splitting the dock keeps an open replay's view, which neither reads the file again nor forgets
+/// what it read.
 #[test]
-fn a_split_does_not_read_an_open_replay_again() {
+fn a_split_keeps_an_open_replays_view() {
     let (mut window, workspace) = open();
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = dir.path().join("unreadable.wowsreplay");
@@ -361,6 +361,7 @@ fn a_split_does_not_read_an_open_replay_again() {
     workspace.open(path.clone(), OpenTarget::ShowingTab);
     settle_in_real_time(&mut window);
     let read = workspace.read_failure_for_test(&path).expect("the replay was read");
+    let shown = window.by_test_id("replay-panel-failed").expect("the view shows the read");
 
     // Gone, so a second read would fail for another reason.
     std::fs::remove_file(&path).expect("the replay is removed");
@@ -369,7 +370,8 @@ fn a_split_does_not_read_an_open_replay_again() {
     workspace.dock.add_panel(DockTarget::Beside { group, edge: Edge::Right }, beside).expect("a panel docks beside it");
     settle_in_real_time(&mut window);
 
-    assert!(laid_out(&window, "replay-panel-failed"), "the view built again shows the read");
+    assert!(laid_out(&window, "replay-panel-failed"), "the view still shows the read");
+    assert_eq!(window.by_test_id("replay-panel-failed"), Some(shown), "and is the view it was");
     assert_eq!(workspace.read_failure_for_test(&path), Some(read), "and the file was not read again");
 }
 
