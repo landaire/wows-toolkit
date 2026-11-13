@@ -5,11 +5,16 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
+use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
 use zgui::view;
 use zgui::view::AnyView;
@@ -37,11 +42,17 @@ const SHEET: &str = "wt-hover-preview";
 // because the water is dark in every theme.
 const CSS: &str = css!(
     ".wt-preview-card {
+        padding: 4px;
+    }
+    .wt-preview-card__body {
         display: flex;
         flex-direction: column;
+        align-items: center;
         gap: 4px;
-        padding: 4px;
-        max-width: 392px;
+        width: 384px;
+    }
+    .wt-preview-facts {
+        align-self: stretch;
     }
     .wt-preview-card--instant.zui-surface { animation: none; }
     .wt-preview-map {
@@ -50,8 +61,8 @@ const CSS: &str = css!(
         align-items: center;
         justify-content: center;
         flex: none;
-        width: 384px;
-        height: 384px;
+        width: min(384px, calc(var(--zui-popper-available-height, 400px) - 16px - var(--wt-preview-facts-height, 0px)));
+        height: min(384px, calc(var(--zui-popper-available-height, 400px) - 16px - var(--wt-preview-facts-height, 0px)));
         overflow: hidden;
         background-color: #06272e;
         color: rgba(255, 255, 255, 0.9);
@@ -60,8 +71,8 @@ const CSS: &str = css!(
         position: absolute;
         left: 0;
         top: 0;
-        width: 384px;
-        height: 384px;
+        width: 100%;
+        height: 100%;
     }
     .wt-preview-map .zui-spinner {
         position: relative;
@@ -151,6 +162,21 @@ fn PreviewCard(
     let class = if replaced { "wt-preview-card wt-preview-card--instant" } else { "wt-preview-card" };
     let placement: Signal<Placement, LocalStorage> = Signal::stored_local(placement);
     let facts = StoredValue::new_local(children);
+    // The map gives up height so a card with no room either side of its row still fits the
+    // window, and the row stays uncovered.
+    let facts_box = NodeRef::new();
+    let facts_size = facts_box.observe_border_size();
+    let facts_height = RwSignal::new_local(None);
+    let following = RenderEffect::new(move |_| {
+        let Some(size) = facts_size.get() else { return };
+        let shown = facts_height.get_untracked();
+        let next = settled_facts_height(shown, size.height.0, size.width.0);
+        if next != shown {
+            facts_height.set(next);
+        }
+    });
+    on_cleanup_local(move || drop(following));
+    let facts_height = move || facts_height.get().map(|height: f32| format!("{height}px"));
 
     view! {
         AnchoredSurface(
@@ -161,9 +187,30 @@ fn PreviewCard(
             class = class,
             attr:data-testid = "hover-preview"
         ) {
-            PreviewMap(preview = preview)
-            box(class = "wt-preview-facts") {{facts.get_value().view()}}
+            box(class = "wt-preview-card__body", var:--wt-preview-facts-height = facts_height) {
+                PreviewMap(preview = preview)
+                box(class = "wt-preview-facts", node_ref = facts_box) {{facts.get_value().view()}}
+            }
         }
+    }
+}
+
+/// The facts' height in CSS pixels, from their measured box at any scale or transform: the facts
+/// are as wide as the card's body, so the ratio of the two sides gives the height. A change of a
+/// pixel or two is the text settling at a new position as the card moves, and is not followed,
+/// since the card moving is what following it would cause.
+fn settled_facts_height(shown: Option<f32>, measured_height: f32, measured_width: f32) -> Option<f32> {
+    const BODY_WIDTH: f32 = 384.0;
+    const SETTLED: f32 = 2.0;
+
+    if measured_width <= 0.0 {
+        return shown;
+    }
+    let height = (measured_height / measured_width * BODY_WIDTH).round();
+
+    match shown {
+        Some(shown) if (shown - height).abs() <= SETTLED => Some(shown),
+        _ => Some(height),
     }
 }
 
@@ -225,5 +272,22 @@ fn PreviewMap(preview: HoverPreview) -> impl IntoView {
                 }
             })),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_facts_height_ignores_scale_and_small_wobble() {
+        // At a display scale of 1.15 and mid-entrance, 98.5% of full size.
+        let scale = 1.15 * 0.985;
+        let measured = settled_facts_height(None, 120.0 * scale, 384.0 * scale);
+        assert_eq!(measured, Some(120.0));
+
+        assert_eq!(settled_facts_height(measured, 121.4, 384.0), Some(120.0), "a pixel of wobble is not followed");
+        assert_eq!(settled_facts_height(measured, 140.0, 384.0), Some(140.0), "a new row's facts are");
+        assert_eq!(settled_facts_height(measured, 10.0, 0.0), measured, "an unmeasured box changes nothing");
     }
 }

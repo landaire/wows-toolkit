@@ -443,6 +443,35 @@ fn the_card_goes_above_a_row_at_the_foot_of_the_window() {
     assert!(card.origin.y.0 + card.size.height.0 <= row.origin.y.0, "card {card:?} is over the row {row:?}");
 }
 
+/// With no room for the whole card above or below its row, the map shrinks so the card stays in
+/// the window without covering the row.
+#[test]
+fn a_card_with_no_room_either_side_shrinks_to_fit_the_window() {
+    let height = 620.0;
+    let mut window = open_with_losses(1700.0, height, 60);
+    let body = window.by_test_id("search-results").expect("the results are drawn");
+    let body = window.bounds(body).expect("the results have a box");
+    let middle = body.origin.y.0 + body.size.height.0 / 2.0;
+    let cell = window
+        .all_by_attribute("data-outcome", "loss")
+        .into_iter()
+        .filter_map(|cell| window.bounds(cell).map(|bounds| (cell, bounds)))
+        .min_by(|(_, a), (_, b)| (a.origin.y.0 - middle).abs().total_cmp(&(b.origin.y.0 - middle).abs()))
+        .map(|(cell, _)| cell)
+        .expect("a row sits in the middle of the results");
+
+    let (card, row, _) = hover_for_card(&mut window, cell);
+
+    let bottom = card.origin.y.0 + card.size.height.0;
+    assert!(card.origin.y.0 >= 0.0 && bottom <= height, "card {card:?} stays in the window");
+    let below = card.origin.y.0 >= row.origin.y.0 + row.size.height.0;
+    let above = bottom <= row.origin.y.0;
+    assert!(below || above, "card {card:?} leaves the row {row:?} uncovered");
+    let map = window.by_class("wt-preview-map").expect("the card holds the map's square");
+    let map = window.bounds(map).expect("the map has a box");
+    assert!(map.size.height.0 < 384.0, "the map {map:?} gave up height");
+}
+
 #[test]
 fn a_result_row_carries_the_dots_that_open_its_actions() {
     let (window, search) = open_with_hits(HeadlessOptions::new(REVIEW_SIZE), sample_hits());
