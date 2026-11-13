@@ -13,6 +13,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 
+use landaire_ui::LoadingProps;
 use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::viewport::MapViewport;
@@ -43,7 +44,6 @@ use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui::view::set_interval;
-use zgui_ui::SpinnerProps;
 
 use crate::frames::FrameSink;
 use crate::frames::FrameViewProps;
@@ -72,16 +72,7 @@ const CSS: &str = css!(
     .wt-watched__fill { height: 100%; border-radius: var(--lui-radius); background-color: var(--lui-color-accent); }
     .wt-watched__rule { flex: none; height: 1px; background-color: var(--lui-color-border); }
     .wt-watched__body { position: relative; flex: 1; min-height: 0; }
-    .wt-watched__frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
-    .wt-watched__waiting {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 4px;
-        height: 100%;
-        font-size: 14px;
-    }"
+    .wt-watched__frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }"
 );
 
 /// How often the frames the session has sent are looked for.
@@ -305,11 +296,8 @@ pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView 
                     FrameView(sink = sink.clone(), class = "wt-watched__frame")
                 }
                 Show(when = move || !watch.drawn.get()) {
-                    column(class = "wt-watched__waiting", attr:data-testid = "watched-playback-waiting") {
-                        // The host may never send a frame, so the wait has no end.
-                        Spinner(label = t!("ui.collab.waiting_for_frames").into_owned())
-                        text {{t!("ui.collab.waiting_for_frames").into_owned()}}
-                    }
+                    // The host may never send a frame, so the wait has no end.
+                    Loading(label = t!("ui.collab.waiting_for_frames").into_owned(), attr:data-testid = "watched-playback-waiting")
                 }
             }
         }

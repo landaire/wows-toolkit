@@ -9,6 +9,8 @@ mod tests;
 mod zoom_anchor;
 
 use landaire_ui::DrawerProps;
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::PanelWidth;
 use landaire_ui::TooltipContentProps;
@@ -55,7 +57,6 @@ use zgui_ui::InputGroupButtonProps;
 use zgui_ui::InputGroupButtonSize;
 use zgui_ui::InputGroupInputProps;
 use zgui_ui::InputGroupProps;
-use zgui_ui::SpinnerProps;
 
 use crate::icons::AppIconProps;
 use crate::services::Services;
@@ -99,14 +100,6 @@ const CSS: &str = css!(
         flex-direction: column;
         gap: 4px;
         padding: 0 16px;
-    }
-    .wt-settings__loading {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        padding: 0 16px;
-        color: var(--lui-color-text-dim);
     }
     .wt-settings__failed { font-weight: 700; }
     .wt-settings__reason { color: var(--lui-color-text-dim); }
@@ -475,10 +468,11 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
         }
         {move || match loaded.get() {
             SettingsRead::Loading => AnyView::new(view! {
-                row(class = "wt-settings__loading", attr:data-testid = "settings-loading") {
-                    Spinner(label = t!("ui.settings.loading").into_owned())
-                    text {{locale.text("ui.settings.loading")}}
-                }
+                Loading(
+                    label = Signal::derive_local(locale.text("ui.settings.loading")),
+                    placement = LoadingPlacement::Top,
+                    attr:data-testid = "settings-loading"
+                )
             }),
             SettingsRead::Failed(reason) => AnyView::new(view! {
                 column(class = "wt-settings__status") {

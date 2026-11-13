@@ -19,6 +19,7 @@ use landaire_ui::ColumnWidth;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
+use landaire_ui::LoadingProps;
 use landaire_ui::RowHeight;
 use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
@@ -71,7 +72,6 @@ use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::ui::ELLIPSIS;
 use zgui_ui_primitives::Align;
@@ -132,7 +132,6 @@ const CSS: &str = css!(
         font-size: var(--zui-type-size-sm);
         color: var(--lui-color-text-dim);
     }
-    .wt-search-status .zui-spinner { width: 20px; height: 20px; }
     .wt-search-footer {
         flex: none;
         min-height: 16px;
@@ -290,6 +289,8 @@ fn SearchBody(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) -> i
     });
     let showing_results = Memo::new(move |_| status.with(Option::is_none));
     let running = Memo::new(move |_| search.status.with(|status| matches!(status, Status::Running)));
+    // A settings failure keeps the plain status, which carries its retry.
+    let waiting = Memo::new(move |_| running.get() && search.load_error.with(Option::is_none));
 
     move || {
         // The status carries the retry in place of the results; beside them, a strip does.
@@ -306,11 +307,12 @@ fn SearchBody(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) -> i
                 ResultsTable(search = search, layout = layout)
             });
         }
+        if waiting.get() {
+            let label = Signal::derive_local(move || status.get().unwrap_or_default());
+            return AnyView::new(view! { Loading(label = label, attr:data-testid = "search-status") });
+        }
         AnyView::new(view! {
             box(class = "wt-search-status", attr:data-testid = "search-status") {
-                Show(when = move || running.get() && search.load_error.with(Option::is_none)) {
-                    Spinner()
-                }
                 text {{move || status.get().unwrap_or_default()}}
                 Show(when = move || search.load_error.with(Option::is_some)) {
                     Button(variant = ButtonVariant::Outline, size = ButtonSize::Xs, on:click = move |_| search.retry_load()) {

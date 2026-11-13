@@ -189,12 +189,13 @@ fn open(opening: Opening) -> Opened {
 #[test]
 fn a_replay_being_read_shows_that_it_is_loading() {
     let Opened { mut window } = open(Opening::default());
-    let loading = window.by_test_id("replay-panel-loading").expect("the outline is drawn");
+    assert!(window.by_test_id("replay-panel-loading").is_some(), "the outline is drawn");
     assert!(window.by_test_id("replay-table-slot").is_none());
-    assert_eq!(window.a11y(loading).and_then(|state| state.label).as_deref(), Some("Loading..."));
-    assert_eq!(window.texts_by_class("wt-skeleton__label"), ["Loading..."]);
-    let outline = window.by_class("wt-skeleton__outline").expect("the outline is drawn");
-    assert!(window.running_animations(outline) > 0, "the outline pulses");
+    let card = window.by_class("lui-loading").expect("the card is drawn");
+    assert_eq!(window.a11y(card).and_then(|state| state.label).as_deref(), Some("Loading..."));
+    assert_eq!(window.texts_by_class("lui-loading__label"), ["Loading..."]);
+    let block = window.by_class("zui-skeleton").expect("the outline is drawn");
+    assert!(window.running_animations(block) > 0, "the outline pulses");
 }
 
 /// The header names the match and says when the results are missing.

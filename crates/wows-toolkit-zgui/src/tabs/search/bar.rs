@@ -1,6 +1,7 @@
 //! The query bar: the committed query drawn as pills, the box the next term is typed in, and the
 //! completions or calendar hanging under it.
 
+use landaire_ui::LoadingLineProps;
 use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_config::index::query_ast::MatchExpr;
@@ -61,7 +62,6 @@ use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuSeparatorProps;
 use zgui_ui::OverlayState;
-use zgui_ui::SpinnerProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::ui::SEARCH;
 use zgui_ui_primitives::Align;
@@ -161,16 +161,7 @@ const CSS: &str = css!(
     }
     .wt-search-completion__label { font-size: var(--zui-type-size-sm); }
     .wt-search-completion__context { font-size: var(--zui-type-size-xs); color: var(--lui-color-text-dim); }
-    .wt-search-looking-up {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 8px;
-        font-size: var(--zui-type-size-xs);
-        color: var(--lui-color-text-dim);
-    }
-    .wt-search-looking-up .zui-spinner { width: 12px; height: 12px; }
+    .wt-search-looking-up { padding: 4px 8px; }
     .wt-search-calendar { padding: 4px; }
     .wt-search-parse-error {
         display: flex;
@@ -623,10 +614,7 @@ fn CompletionRows(search: Search) -> impl IntoView {
             attr:data-testid = "search-completions"
         ) {
             Show(when = move || search.value_lookup_running.get()) {
-                row(class = "wt-search-looking-up") {
-                    Spinner()
-                    text {{t!("ui.search.looking_up_values").into_owned()}}
-                }
+                LoadingLine(label = t!("ui.search.looking_up_values").into_owned(), class = "wt-search-looking-up")
             }
             {rows}
         }

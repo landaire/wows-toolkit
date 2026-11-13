@@ -19,12 +19,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use wows_toolkit_launcher::LauncherEvents;
 use wows_toolkit_launcher::LauncherSettings;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
@@ -36,7 +39,6 @@ use zgui::view::Children;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
-use zgui_ui::SpinnerProps;
 
 use crate::services::Job;
 use crate::services::JobHandle;
@@ -64,14 +66,6 @@ const CSS: &str = css!(
         flex-direction: column;
         gap: 24px;
         padding: 16px;
-    }
-    .wt-launcher__loading {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        padding: 16px;
-        color: var(--wt-color-text-dim);
     }
     .wt-launcher__section {
         display: flex;
@@ -182,10 +176,11 @@ pub fn LauncherTab() -> impl IntoView {
                     GamesSection(model = model, shell = shell)
                 }
             } else {
-                row(class = "wt-launcher__loading", attr:data-testid = "launcher-loading") {
-                    Spinner(label = locale.text("ui.launcher.loading")())
-                    text {{locale.text("ui.launcher.loading")}}
-                }
+                Loading(
+                    label = Signal::derive_local(locale.text("ui.launcher.loading")),
+                    placement = LoadingPlacement::Top,
+                    attr:data-testid = "launcher-loading"
+                )
             }
         }
     }

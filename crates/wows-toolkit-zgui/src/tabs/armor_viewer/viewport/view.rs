@@ -3,6 +3,7 @@
 
 use std::time::Instant;
 
+use landaire_ui::LoadingProps;
 use landaire_ui::OverlaySurfaceProps;
 use rust_i18n::t;
 use wows_toolkit_armor::catalog::translate_name;
@@ -47,7 +48,6 @@ use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::SpinnerProps;
 
 use crate::i18n::Locale;
 use crate::services::Services;
@@ -123,10 +123,6 @@ const CSS: &str = css!(
         gap: 4px;
         font-size: var(--zui-type-size-sm);
         pointer-events: none;
-    }
-    .wt-armor-viewport__said .zui-spinner {
-        width: 14px;
-        height: 14px;
     }
     .wt-armor-viewport__dim {
         color: var(--wt-color-text-dim);
@@ -451,19 +447,13 @@ fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
         StandIn::Loading(name) => {
             let label = t!("ui.armor.loading_named_ship", ship = name).into_owned();
             AnyView::new(view! {
-                box(class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-loading") {
-                    Spinner(label = label.clone())
-                    text {{label}}
-                }
+                Loading(label = label, class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-loading")
             })
         }
         StandIn::Initializing => {
             let label = t!("ui.armor.initializing").into_owned();
             AnyView::new(view! {
-                box(class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-initializing") {
-                    Spinner(label = label.clone())
-                    text {{label}}
-                }
+                Loading(label = label, class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-initializing")
             })
         }
         StandIn::Problem { headline, explanation } => AnyView::new(view! {

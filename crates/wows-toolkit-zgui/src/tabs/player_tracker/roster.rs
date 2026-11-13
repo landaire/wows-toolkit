@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 
 use jiff::Timestamp;
+use landaire_ui::LoadingLineProps;
+use landaire_ui::LoadingProps;
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
@@ -54,7 +56,6 @@ use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuItemProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::ui::ELLIPSIS;
@@ -133,10 +134,12 @@ pub fn CurrentMatchSection(model: TrackerModel) -> impl IntoView {
 
     let body = move || {
         if let Some((text, waiting)) = status() {
+            if waiting {
+                return AnyView::new(view! { Loading(label = text, attr:data-testid = "tracker-live-status") });
+            }
             return AnyView::new(view! {
                 row(class = "wt-tracker-status", attr:data-testid = "tracker-live-status") {
-                    {waiting.then(|| view! { Spinner(label = text.clone()) }.into_view())}
-                    text {{text.clone()}}
+                    text {{text}}
                 }
             });
         }
@@ -274,8 +277,11 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
         column(class = "wt-tracker-roster") {
             {move || note().map(|(text, waiting)| view! {
                 row(class = "wt-tracker-roster__note wt-tracker-small wt-tracker-dim", attr:data-testid = "tracker-live-note") {
-                    {waiting.then(|| view! { Spinner(label = text.clone()) }.into_view())}
-                    text {{text}}
+                    {if waiting {
+                        AnyView::new(view! { LoadingLine(label = text) })
+                    } else {
+                        AnyView::new(view! { text {{text}} })
+                    }}
                 }
             }.into_view())}
             scroll(class = "wt-tracker-roster__scroll") {

@@ -1,5 +1,6 @@
 //! The renderer's view: the map, what is drawn over it, and the transport under it.
 
+use landaire_ui::LoadingProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -172,10 +173,7 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
 
     let body = move || match session.status.get() {
         Status::Baking => AnyView::new(view! {
-            column(class = "wt-renderer__state", attr:data-testid = "replay-renderer-baking") {
-                Spinner(label = t!("ui.replay.renderer.baking").into_owned())
-                text {{t!("ui.replay.renderer.baking").into_owned()}}
-            }
+            Loading(label = t!("ui.replay.renderer.baking").into_owned(), attr:data-testid = "replay-renderer-baking")
         }),
         Status::Failed(reason) => AnyView::new(view! {
             column(class = "wt-renderer__state", attr:data-testid = "replay-renderer-failed") {

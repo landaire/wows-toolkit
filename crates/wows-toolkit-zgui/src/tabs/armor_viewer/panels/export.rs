@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use landaire_ui::LoadingLineProps;
 use rootcause::Report;
 use rust_i18n::t;
 use wows_toolkit_armor::assets::ModelAssets;
@@ -71,7 +72,6 @@ use zgui_ui::DialogContentProps;
 use zgui_ui::DialogFooterProps;
 use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui_primitives::Binding;
@@ -651,10 +651,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
     let size = move || match model.with(|model| model.size_line().0) {
         SizeLine::Silent => AnyView::new(()),
         SizeLine::Waiting => AnyView::new(view! {
-            row(class = "wt-armor-export__line", attr:data-testid = "armor-export-size-waiting") {
-                Spinner(label = t!("ui.armor.export.loading_details").into_owned())
-                text(class = "wt-armor-export__dim") {{t!("ui.armor.export.loading_details").into_owned()}}
-            }
+            LoadingLine(label = t!("ui.armor.export.loading_details").into_owned(), attr:data-testid = "armor-export-size-waiting")
         }),
         SizeLine::Known(estimate) => {
             let total = humansize::format_size(estimate.total(), humansize::BINARY);

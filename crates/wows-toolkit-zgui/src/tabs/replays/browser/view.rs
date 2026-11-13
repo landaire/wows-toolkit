@@ -2,12 +2,16 @@
 //! preview.
 
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use landaire_ui::BranchClick;
+use landaire_ui::Fraction;
 use landaire_ui::LeafLead;
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TreeMenu;
@@ -27,6 +31,7 @@ use wows_toolkit_viewmodel::personal_rating::chip_text;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
@@ -55,8 +60,6 @@ use zgui_ui::AlertDialogProps;
 use zgui_ui::AlertDialogTitleProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::ProgressProps;
-use zgui_ui::SpinnerProps;
 
 use crate::icons::AppIconProps;
 use crate::preview::HoverPreview;
@@ -101,16 +104,6 @@ const CSS: &str = css!(
         font-size: 14px;
     }
     .wt-listing__state-hint { font-size: 12px; color: var(--wt-color-text-dim); }
-    .wt-listing__loading {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        padding: 16px 8px;
-        font-size: 12px;
-        color: var(--wt-color-text-dim);
-    }
-    .wt-listing__loading .zui-progress { width: 160px; }
     .wt-row {
         position: relative;
         display: flex;
@@ -241,10 +234,7 @@ pub fn ListingView(listing: Listing, events: BrowserEvents) -> impl IntoView {
                     _ => t!("ui.replay.loading_game_data").into_owned(),
                 };
                 AnyView::new(view! {
-                    column(class = "wt-listing__loading", attr:data-testid = "replay-listing-loading") {
-                        Spinner(label = said.clone())
-                        text {{said}}
-                    }
+                    Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-loading")
                 })
             }
             ScanStatus::Loaded => AnyView::new(view! {
@@ -290,7 +280,7 @@ fn follow_thumbnails(listing: Listing, thumbnails: Thumbnails, services: Service
     on_cleanup_local(move || drop(effect));
 }
 
-/// The scan's spinner, with how far it has read once it knows how much there is.
+/// The scan's wait, with how far it has read once it knows how much there is.
 #[component]
 fn ScanLoading(listing: Listing) -> impl IntoView {
     let caption = move || match listing.progress.get() {
@@ -300,20 +290,24 @@ fn ScanLoading(listing: Listing) -> impl IntoView {
         _ => t!("ui.replay.scanning").into_owned(),
     };
     let fraction = move || {
-        listing
-            .progress
-            .get()
-            .filter(|progress| progress.total > 0)
-            .map(|progress| progress.done as f64 / progress.total as f64 * 100.0)
+        let progress = listing.progress.get()?;
+        let total = NonZeroU64::new(progress.total as u64)?;
+        Some(Fraction::of(progress.done as u64, total))
     };
+    let counted = Memo::new(move |_| fraction().is_some());
 
-    view! {
-        column(class = "wt-listing__loading", attr:data-testid = "replay-listing-scan") {
-            Spinner(label = t!("ui.replay.scanning").into_owned())
-            text(class = TABULAR_CLASS) {{caption}}
-            Show(when = move || fraction().is_some()) {
-                Progress(value = Signal::derive_local(fraction))
-            }
+    move || {
+        let label = Signal::derive_local(caption);
+        if counted.get() {
+            // A scan restarted without a count remounts the indeterminate bar.
+            let done = Signal::derive_local(move || fraction().unwrap_or(Fraction::NONE));
+            AnyView::new(view! {
+                Loading(label = label, done = done, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-scan")
+            })
+        } else {
+            AnyView::new(view! {
+                Loading(label = label, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-scan")
+            })
         }
     }
 }

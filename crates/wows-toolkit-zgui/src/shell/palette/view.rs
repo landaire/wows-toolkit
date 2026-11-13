@@ -8,6 +8,8 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
@@ -127,13 +129,6 @@ const CSS: &str = css!(
         white-space: nowrap;
         font-size: var(--zui-type-size-xs);
         color: var(--lui-color-text-dim);
-    }
-    .wt-palette__waiting {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
     }"
 );
 
@@ -345,10 +340,7 @@ fn empty_message(rows: &ModeRows, searching: bool) -> AnyView {
         ModeRows::Loading(message) => {
             let message = message.clone();
             AnyView::new(view! {
-                row(class = "wt-palette__waiting") {
-                    Spinner()
-                    text {{message}}
-                }
+                Loading(label = message, placement = LoadingPlacement::Top)
             })
         }
         ModeRows::Unavailable(reason) => AnyView::new(view! { text {{reason.clone()}} }),

@@ -19,7 +19,6 @@ pub mod chat;
 pub mod expanded;
 mod figures;
 mod raw_json;
-mod skeleton;
 #[cfg(test)]
 mod tests;
 
@@ -29,6 +28,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use landaire_ui::FadeInProps;
+use landaire_ui::LoadingLineProps;
+use landaire_ui::TableSkeletonProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -88,7 +89,6 @@ use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
@@ -105,7 +105,6 @@ use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
 use crate::tabs::replays::panel::raw_json::RawJsonPanelProps;
-use crate::tabs::replays::panel::skeleton::TableSkeletonProps;
 use crate::tabs::replays::table::PlayerDetail;
 use crate::tabs::replays::table::PlayerDetailCx;
 
@@ -759,7 +758,9 @@ pub fn ReplayPanel(
     });
 
     let body = move || match kind.get() {
-        StateKind::Loading => AnyView::new(view! { TableSkeleton(label = t!("ui.replay.loading").into_owned()) }),
+        StateKind::Loading => AnyView::new(view! {
+            TableSkeleton(label = t!("ui.replay.loading").into_owned(), attr:data-testid = "replay-panel-loading")
+        }),
         StateKind::Failed => {
             let reason = move || {
                 state.with(|state| match state {
@@ -1067,7 +1068,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
             }
             row(class = "wt-rp-header__end") {
                 Show(when = move || parsing.get()) {
-                    Spinner(label = t!("ui.replay.loading").into_owned())
+                    LoadingLine(label = t!("ui.replay.loading").into_owned())
                 }
                 {move || export_status.get().map(|status| AnyView::new(view! { text(class = "wt-rp-status", attr:data-testid = "replay-export-status") {{status}} }))}
                 ActionsMenu(header = header.clone())

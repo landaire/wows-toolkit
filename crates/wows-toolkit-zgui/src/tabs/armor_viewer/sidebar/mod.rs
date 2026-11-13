@@ -25,6 +25,8 @@ use std::sync::Arc;
 
 use landaire_ui::BranchClick;
 use landaire_ui::LeafLead;
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use landaire_ui::RowHeight;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
@@ -64,7 +66,6 @@ use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
 use zgui::vocab::NamedKey;
 use zgui_ui::InputProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
@@ -96,15 +97,6 @@ const CSS: &str = css!(
     .wt-armor-sidebar__field { flex: 1 1 auto; min-width: 0; }
     .wt-armor-sidebar__list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
     .wt-armor-sidebar__list .lui-tree-area, .wt-armor-sidebar__list .lui-tree { flex: 1; min-height: 0; }
-    .wt-armor-sidebar__loading {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        padding: 12px;
-        font-size: 13px;
-        color: var(--wt-color-text-dim);
-    }
     .wt-armor-row-host { display: flex; flex: 1; min-width: 0; height: 100%; }
     .wt-armor-row {
         display: flex;
@@ -298,10 +290,11 @@ pub fn ArmorSidebar(
 
     let body = move || match state.catalog() {
         None => AnyView::new(view! {
-            row(class = "wt-armor-sidebar__loading", attr:data-testid = "armor-sidebar-loading") {
-                Spinner(label = t!("ui.armor.loading_catalog").into_owned())
-                text {{services.locale.text("ui.armor.loading_catalog")}}
-            }
+            Loading(
+                label = Signal::derive_local(services.locale.text("ui.armor.loading_catalog")),
+                placement = LoadingPlacement::Top,
+                attr:data-testid = "armor-sidebar-loading"
+            )
         }),
         Some(_) => AnyView::new(view! {
             Tree(

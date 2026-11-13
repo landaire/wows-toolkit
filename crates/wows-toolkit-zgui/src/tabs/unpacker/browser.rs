@@ -7,6 +7,7 @@ use landaire_ui::BranchClick;
 use landaire_ui::CollapseButtonProps;
 use landaire_ui::ExpandRailProps;
 use landaire_ui::LeafLead;
+use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::NodeKind;
 use landaire_ui::PanelSide;
@@ -55,7 +56,6 @@ use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
 use zgui_ui::MenuItemProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
@@ -162,10 +162,7 @@ pub fn BrowserPane(model: UnpackerModel, pane: Pane) -> impl IntoView {
             }
         }),
         PaneState::Loading => AnyView::new(view! {
-            box(class = "wt-pane__state", attr:data-testid = format!("unpacker-{fragment}-loading")) {
-                Spinner(label = t!("ui.replay.loading").into_owned())
-                text {{t!("ui.replay.loading").into_owned()}}
-            }
+            Loading(label = t!("ui.replay.loading").into_owned(), attr:data-testid = format!("unpacker-{fragment}-loading"))
         }),
         PaneState::Failed(reason) => AnyView::new(view! {
             box(class = "wt-pane__state", attr:data-testid = format!("unpacker-{fragment}-failed")) {

@@ -1,5 +1,6 @@
 //! The map itself: the drawn frame, the pointer on it, its menu and the turning handle.
 
+use landaire_ui::LoadingProps;
 use rust_i18n::t;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::ElementPos;
@@ -15,6 +16,7 @@ use zgui::component;
 use zgui::css;
 use zgui::geom::CssPx;
 use zgui::reactive::Memo;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
@@ -35,7 +37,6 @@ use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::SpinnerProps;
 
 use crate::frames::FrameViewProps;
 use crate::services::Services;
@@ -69,10 +70,6 @@ const CSS: &str = css!(
         gap: 8px;
         font-size: var(--zui-type-size-sm);
         color: var(--wt-color-text-dim);
-    }
-    .wt-tactics-map__said .zui-spinner {
-        width: 14px;
-        height: 14px;
     }
     .wt-tactics-map__overlay {
         position: absolute;
@@ -137,10 +134,10 @@ pub fn BoardMap(model: BoardModel) -> impl IntoView {
                 }
             }),
             Some(Placeholder::Drawing) => AnyView::new(view! {
-                box(class = "wt-tactics-map__said", attr:data-testid = "tactics-drawing") {
-                    Spinner(label = t!("ui.tactics.drawing").into_owned())
-                    text {{locale.text("ui.tactics.drawing")}}
-                }
+                Loading(
+                    label = Signal::derive_local(locale.text("ui.tactics.drawing")),
+                    attr:data-testid = "tactics-drawing"
+                )
             }),
             None => AnyView::new(view! { MapSurface(model = model) }),
         }}

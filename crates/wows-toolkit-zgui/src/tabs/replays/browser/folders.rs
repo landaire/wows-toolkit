@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::LoadingPlacement;
+use landaire_ui::LoadingProps;
 use landaire_ui::MotionPreference;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
@@ -72,7 +74,6 @@ use zgui_ui::ContextMenuContentProps;
 use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::MenuItemProps;
-use zgui_ui::SpinnerProps;
 
 use crate::icons::AppIconProps;
 use crate::services::Services;
@@ -1080,10 +1081,7 @@ fn folder_notice(control: BrowserControl) -> Option<AnyView> {
         FolderState::Checking => {
             let said = t!("ui.replay_folders.checking", dir = shown_path(&root)).into_owned();
             Some(AnyView::new(view! {
-                column(class = "wt-folder-notice", attr:data-testid = "replay-folder-checking") {
-                    Spinner(label = said.clone())
-                    text {{said}}
-                }
+                Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-folder-checking")
             }))
         }
         FolderState::Missing => {

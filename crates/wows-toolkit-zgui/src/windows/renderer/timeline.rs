@@ -1,5 +1,6 @@
 //! The transport's event timeline: what happened, filtered, and clickable.
 
+use landaire_ui::LoadingLineProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
@@ -38,7 +39,6 @@ use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
 use zgui_ui::SeparatorProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Placement;
@@ -228,10 +228,7 @@ fn TimelineRows(session: RendererSession) -> impl IntoView {
 
     move || match listing() {
         Listing::Reading => AnyView::new(view! {
-            row(class = "wt-renderer-timeline__said") {
-                Spinner(label = t!("ui.replay.timeline_parsing").into_owned())
-                text {{t!("ui.replay.timeline_parsing").into_owned()}}
-            }
+            LoadingLine(label = t!("ui.replay.timeline_parsing").into_owned(), class = "wt-renderer-timeline__said")
         }),
         Listing::NothingHappened => AnyView::new(view! {
             text(class = "wt-renderer-timeline__said") {{t!("ui.replay.timeline_no_events").into_owned()}}

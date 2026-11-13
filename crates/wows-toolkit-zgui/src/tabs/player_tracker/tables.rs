@@ -6,6 +6,7 @@
 //! established install's thousands of players.
 
 use jiff::Timestamp;
+use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::RowIndex;
 use landaire_ui::TABULAR_CLASS;
@@ -47,7 +48,6 @@ use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::InputProps;
-use zgui_ui::SpinnerProps;
 use zgui_ui::VirtualListProps;
 use zgui_ui::virtualize::MeasuredRows;
 use zgui_ui_icons::IconProps;
@@ -230,10 +230,7 @@ fn table_body(
         let loading = state.with(|state| *state == LoadState::Loading);
         match state.with(|state| table_status(state, count.get(), loading_key, empty_key)) {
             Some(status) if loading => AnyView::new(view! {
-                row(class = "wt-tracker-status", attr:data-testid = "tracker-status") {
-                    Spinner(label = status.clone())
-                    text {{status}}
-                }
+                Loading(label = status, attr:data-testid = "tracker-status")
             }),
             Some(status) => AnyView::new(view! {
                 row(class = "wt-tracker-status", attr:data-testid = "tracker-status") { text {{status}} }
