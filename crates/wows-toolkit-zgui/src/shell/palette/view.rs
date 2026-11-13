@@ -83,6 +83,7 @@ use crate::shell::palette::Opening;
 use crate::shell::palette::RootRow;
 use crate::shell::palette::builtin;
 use crate::shell::palette::mode_name;
+use crate::shell::zoom_shortcut;
 use crate::text_marks::Marks;
 
 const SHEET: &str = "wt-palette";
@@ -203,7 +204,14 @@ pub fn CommandPalette(shell: Shell) -> impl IntoView {
                 dismiss_on_escape = escape_closes,
                 dismiss_control = false,
                 class = "zui-command__dialog wt-palette",
-                attr:data-testid = "palette"
+                attr:data-testid = "palette",
+                on:key_down = move |ev| {
+                    let modifiers = ev.modifiers;
+                    if zoom_shortcut(shell, ev, modifiers) {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                    }
+                }
             ) {
                 DialogTitle {{locale.text("ui.palette.title")}}
                 {move || match shown.get() {

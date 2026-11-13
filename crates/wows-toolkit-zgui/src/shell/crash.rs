@@ -144,3 +144,37 @@ pub fn copy_latest_log(shell: Shell) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use zgui::reactive::prelude::GetUntracked;
+
+    use super::show_crash_report;
+    use crate::interaction_tests::REVIEW_SIZE;
+    use crate::interaction_tests::open_bare_shell;
+    use crate::interaction_tests::shell;
+
+    /// The report box's `max-height`.
+    const REPORT_HEIGHT: f32 = 260.0;
+
+    #[test]
+    fn a_long_crash_report_scrolls_inside_the_dialog() {
+        let mut window = open_bare_shell();
+        let report: String = (0..200).map(|line| format!("  {line}: frame::in::the::backtrace\n")).collect();
+
+        show_crash_report(shell(), report);
+        window.advance(Duration::from_millis(400));
+
+        let details = window.by_test_id("crash-report-scroll").expect("the report is shown");
+        let details = window.bounds(details).expect("the report has a box");
+        let zoom = shell().appearance.zoom.get_untracked().get();
+        assert!(
+            details.size.height.0 <= REPORT_HEIGHT * zoom + 0.5,
+            "the report box is held to its height, got {details:?}"
+        );
+        let bottom = details.origin.y.0 + details.size.height.0;
+        assert!(bottom < REVIEW_SIZE.height, "and the dialog ends inside the window");
+    }
+}

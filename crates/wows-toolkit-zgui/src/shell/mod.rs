@@ -232,7 +232,7 @@ pub struct Appearance {
 }
 
 impl Appearance {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             theme: RwSignal::new_local(ThemeChoice::default()),
             theme_preview: RwSignal::new_local(None),
@@ -790,19 +790,29 @@ fn hear_unfocused_keys(root: NodeRef) {
     });
 }
 
+/// Runs the zoom step `key` with `modifiers` is, and says whether it was one. A step repeats while
+/// its key is held. Also called from dialogs over the shell, whose keys do not reach its root.
+pub(crate) fn zoom_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifiers) -> bool {
+    let Some(step) = ZoomStep::of(key, modifiers) else {
+        return false;
+    };
+
+    // The zoom waits for the settings, which hold the zoom it steps from.
+    if shell.services.settings.read_untracked(|_| ()).is_some() {
+        let zoom = step.applied_to(shell.appearance.zoom.get_untracked());
+        shell.set_zoom(zoom);
+        // Said, since the tab with the zoom slider may not be the one open.
+        let said = rust_i18n::t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
+        shell.toasts().show(landaire_ui::Notice::info(said).keyed(landaire_ui::ToastKey::new(ZOOM_TOAST)));
+    }
+
+    true
+}
+
 /// Runs the window-wide shortcut `key` with `modifiers` is, and says whether it was one. Only a
 /// zoom step repeats while its key is held.
 fn shell_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifiers) -> bool {
-    if let Some(step) = ZoomStep::of(key, modifiers) {
-        // The zoom waits for the settings, which hold the zoom it steps from.
-        let services = shell.services;
-        if services.settings.read_untracked(|_| ()).is_some() {
-            let zoom = step.applied_to(shell.appearance.zoom.get_untracked());
-            shell.set_zoom(zoom);
-            // Said, since the tab with the zoom slider may not be the one open.
-            let said = rust_i18n::t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
-            shell.toasts().show(landaire_ui::Notice::info(said).keyed(landaire_ui::ToastKey::new(ZOOM_TOAST)));
-        }
+    if zoom_shortcut(shell, key, modifiers) {
         return true;
     }
 

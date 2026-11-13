@@ -107,3 +107,51 @@ pub(crate) fn WindowSurface(children: Children) -> impl IntoView {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    use landaire_ui::Toasts;
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::HeadlessWindow;
+    use landaire_ui::test_support::WindowSize;
+
+    use super::*;
+
+    thread_local! {
+        static TOASTS: Cell<Option<Toasts>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn Panel() -> impl IntoView {
+        TOASTS.set(Toasts::current());
+
+        view! { box {} }
+    }
+
+    #[component]
+    fn SecondaryUnderTest() -> impl IntoView {
+        let services = Services::provide(None);
+        let content = AnyView::new(view! { Panel() });
+
+        view! { WindowRoot(services = services, appearance = Appearance::new(), title = "Panel".to_owned(), content = content) }
+    }
+
+    /// A secondary window has a message host of its own, so a toast raised in it reaches its screen.
+    #[test]
+    fn a_toast_reaches_a_secondary_windows_screen() {
+        let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 400.0, height: 200.0 }), || {
+            view! { SecondaryUnderTest() }
+        })
+        .expect("the window opens headlessly");
+        window.advance(Duration::from_millis(50));
+
+        TOASTS.get().expect("the content sits inside a message host").ok("exported");
+        window.advance(Duration::from_millis(400));
+
+        let shown = window.texts_by_class("zui-toast").concat();
+        assert!(shown.contains("exported"), "the toast is on screen, got {shown:?}");
+    }
+}

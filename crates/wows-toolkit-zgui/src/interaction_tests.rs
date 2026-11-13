@@ -9,12 +9,22 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_toolkit_viewmodel::settings::keys;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
+use zgui::vocab::Modifiers;
 
+use crate::services::Job;
+use crate::services::Progress;
 use crate::shell::AppRootProps;
 use crate::shell::Shell;
+use crate::shell::tabs::TabKey;
+
+const DEBUG_NOTICE: &str = "app-debug-notice";
+const WORK: &str = "app-status-work";
+const SCRIM: &str = "app-drop-scrim";
 
 /// The size the GPUI shell is reviewed at.
 pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
@@ -124,4 +134,163 @@ fn the_shell_renders_in_dark_and_light() {
         let path = shoot(appearance, name);
         println!("{}", path.display());
     }
+}
+
+fn settle(window: &mut HeadlessWindow) {
+    window.advance(Duration::from_millis(400));
+}
+
+/// What a screen reader is told the element `id` is called.
+fn label(window: &mut HeadlessWindow, id: &str) -> Option<String> {
+    let element = window.by_test_id(id)?;
+    window.a11y(element)?.label
+}
+
+fn tab_selected(window: &mut HeadlessWindow, tab: TabKey) -> Option<bool> {
+    let element = window.by_test_id(&tab.value())?;
+    window.a11y(element)?.selected
+}
+
+#[test]
+fn clicking_a_tab_moves_the_selection_to_it() {
+    let mut window = open_bare_shell();
+    let tabs = shell().tab_order();
+
+    for &tab in &tabs {
+        let element = window.by_test_id(&tab.value()).expect("every tab is on the strip");
+        window.click(element).expect("the tab is shown");
+        settle(&mut window);
+        for &other in &tabs {
+            assert_eq!(tab_selected(&mut window, other), Some(other == tab), "after clicking {tab:?}, {other:?}");
+        }
+    }
+}
+
+#[test]
+fn hovering_a_tab_leaves_the_selection_alone() {
+    let mut window = open_bare_shell();
+    let startup = shell().selected_untracked().expect("a tab is selected at startup");
+    let other = shell().tab_order().into_iter().find(|tab| *tab != startup).expect("there is another tab");
+
+    let element = window.by_test_id(&other.value()).expect("the tab is on the strip");
+    window.hover(element).expect("the tab is shown");
+    settle(&mut window);
+
+    assert_eq!(tab_selected(&mut window, startup), Some(true), "hover must not move the selection");
+    assert_eq!(tab_selected(&mut window, other), Some(false));
+}
+
+#[test]
+fn the_debug_shortcut_toggles_the_debug_strip() {
+    let mut window = open_bare_shell();
+    assert!(window.by_test_id(DEBUG_NOTICE).is_none(), "the debug strip is hidden until the shortcut fires");
+
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    settle(&mut window);
+    assert!(window.by_test_id(DEBUG_NOTICE).is_some(), "the shortcut shows the debug strip");
+
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    settle(&mut window);
+    assert!(window.by_test_id(DEBUG_NOTICE).is_none(), "the shortcut toggles rather than latching");
+}
+
+#[test]
+fn an_unmodified_d_does_not_toggle_the_debug_strip() {
+    let mut window = open_bare_shell();
+
+    for modifiers in [Modifiers::NONE, Modifiers::PRIMARY, Modifiers::SHIFT] {
+        window.press_character('d', modifiers);
+        settle(&mut window);
+    }
+    assert!(window.by_test_id(DEBUG_NOTICE).is_none(), "only the primary modifier with shift is the shortcut");
+
+    // Absence above has to mean hidden, not unobservable.
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    settle(&mut window);
+    assert!(window.by_test_id(DEBUG_NOTICE).is_some());
+}
+
+#[test]
+fn the_status_bar_names_one_job_and_counts_several() {
+    let mut window = open_bare_shell();
+    let jobs = shell().services().jobs;
+    assert!(window.by_test_id(WORK).is_none(), "nothing is running");
+
+    let first = jobs.start(Job { name: "First job".to_owned(), progress: Progress::new(1, 4) });
+    settle(&mut window);
+    let one_of_four = format!("First job {}", t!("ui.app.status_of", done = 1, total = 4));
+    assert_eq!(label(&mut window, WORK), Some(one_of_four));
+
+    first.report(Job { name: "First job".to_owned(), progress: Progress::new(2, 4) });
+    settle(&mut window);
+    let two_of_four = format!("First job {}", t!("ui.app.status_of", done = 2, total = 4));
+    assert_eq!(label(&mut window, WORK), Some(two_of_four), "a later report replaces the earlier one");
+
+    let second = jobs.start(Job { name: "Second job".to_owned(), progress: None });
+    settle(&mut window);
+    assert_eq!(label(&mut window, WORK), Some(t!("ui.app.status_tasks", count = 2).into_owned()));
+
+    drop(first);
+    settle(&mut window);
+    assert_eq!(label(&mut window, WORK).as_deref(), Some("Second job"), "finishing one job leaves the other");
+
+    drop(second);
+    settle(&mut window);
+    assert!(window.by_test_id(WORK).is_none(), "finished work leaves the bar");
+}
+
+/// A task dropped with its view drops its handle, and the work leaves the bar with it.
+#[test]
+fn work_leaves_the_status_bar_with_its_owner() {
+    let mut window = open_bare_shell();
+    let owner = zgui::reactive::Owner::new();
+    owner.with(|| {
+        let handle = shell().services().jobs.start(Job { name: "Contributing".to_owned(), progress: None });
+        zgui::reactive::on_cleanup_local(move || drop(handle));
+    });
+    settle(&mut window);
+    assert!(window.by_test_id(WORK).is_some(), "the work is on the bar");
+
+    drop(owner);
+    settle(&mut window);
+    assert!(window.by_test_id(WORK).is_none(), "and leaves with its owner");
+}
+
+#[test]
+fn a_hovering_file_is_named_on_the_scrim() {
+    let mut window = open_bare_shell();
+    assert!(window.by_test_id(SCRIM).is_none(), "nothing hovers, so nothing is drawn over the window");
+
+    shell().drag_entered(vec![PathBuf::from("G:/replays/20260928_105501_PJSB018-Yamato.wowsreplay")]);
+    settle(&mut window);
+    let said = label(&mut window, SCRIM).expect("the scrim names what letting go would do");
+    assert!(said.contains("Yamato"), "the file it would open is named, got {said:?}");
+
+    shell().drag_entered(vec![PathBuf::from("one.wowsreplay"), PathBuf::from("two.wowsreplay")]);
+    settle(&mut window);
+    let said = label(&mut window, SCRIM).expect("the scrim says two files are refused");
+    assert!(!said.contains("one.wowsreplay"), "two files are not an open, got {said:?}");
+
+    shell().drag_left();
+    settle(&mut window);
+    assert!(window.by_test_id(SCRIM).is_none(), "and the scrim goes with the drag");
+}
+
+/// The zoom shortcuts are the shell's, and still reach it with the palette open over it.
+#[test]
+fn the_zoom_shortcuts_work_from_inside_the_palette() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    let before = shell().appearance.zoom.get_untracked();
+
+    window.press_character('k', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert!(window.by_test_id("palette").is_some(), "the palette is open");
+
+    window.press_character('=', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert_eq!(shell().appearance.zoom.get_untracked(), before.zoomed_in());
+
+    // The zoom is saved to settings every test in the process reads.
+    shell().set_zoom(before);
+    settle_in_real_time(&mut window);
 }
