@@ -42,6 +42,7 @@ use zgui::view::AnyView;
 use zgui::view::Children;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
@@ -56,6 +57,7 @@ use zgui_ui::ComboboxInputProps;
 use zgui_ui::ComboboxItemProps;
 use zgui_ui::ComboboxProps;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
@@ -587,15 +589,30 @@ fn RangeCheck(
         if enabled > 0 && enabled < total { format!("{} ({enabled}/{total})", t!(key)) } else { t!(key).into_owned() }
     };
 
+    let control = NodeRef::new();
+    let toggle = move || {
+        if !locked.get_untracked() {
+            set(Checked::from(checked.get_untracked() != Checked::Yes));
+        }
+    };
+
     view! {
         row(class = "wt-tactics-panel__row") {
             Checkbox(
                 checked = Binding::controlled(checked, set),
                 disabled = locked,
+                node_ref = control,
                 attr:data-testid = format!("tactics-range-{}", circle as u8),
                 a11y:label = t!(key).into_owned()
             )
-            text(class = "wt-tactics-panel__text") {{label}}
+            Label(
+                control = control,
+                class = "wt-tactics-panel__text",
+                attr:data-testid = format!("tactics-range-{}-name", circle as u8),
+                on:click = move |_| toggle()
+            ) {
+                {label}
+            }
         }
     }
 }

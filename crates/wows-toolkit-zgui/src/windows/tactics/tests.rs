@@ -16,6 +16,7 @@ use landaire_ui::test_support::WindowSize;
 use tokio::runtime::Runtime;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::MapChoice;
+use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
 use zgui::component;
 use zgui::reactive::Signal;
 use zgui::view;
@@ -186,6 +187,20 @@ fn a_fresh_board_has_nothing_to_take_back() {
     assert!(!board.has("tactics-clear-drawing"));
     assert!(!board.has("tactics-clear-caps"));
     assert!(board.model.with_untracked(|board| !board.can_undo()));
+}
+
+/// A range circle's name toggles it as its checkbox does.
+#[test]
+fn a_range_circle_name_toggles_it() {
+    let mut board = BoardWindow::open();
+    let (circle, _) = RANGE_CIRCLES[0];
+    let on = |board: &BoardWindow| board.model.with_untracked(|board| circle.is_on(board.range_filter()));
+    let was = on(&board);
+    board.press("tactics-ranges");
+    board.press(&format!("tactics-range-{}-name", circle as u8));
+    assert_eq!(on(&board), !was, "the name toggled it");
+    board.press(&format!("tactics-range-{}-name", circle as u8));
+    assert_eq!(on(&board), was, "and back");
 }
 
 /// The board's window from a real install, set on a map with a capture point added and a line
