@@ -110,9 +110,10 @@ const CSS: &str = css!(
     .wt-chart__toolbar {
         display: flex;
         flex-direction: row;
+        flex-wrap: wrap;
         flex: none;
         align-items: center;
-        gap: 8px;
+        gap: 4px 8px;
         padding: 4px 8px;
         border-bottom: 1px solid var(--lui-color-border);
     }
