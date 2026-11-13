@@ -33,6 +33,9 @@ search_these_replays_unavailable = "These replays have not been indexed yet"
 zoom_in_panel = "Zoom In"
 zoom_out_panel = "Zoom Out"
 close_panel = "Close"
+close_tab = "Close"
+close_other_tabs = "Close Others"
+close_tabs_to_the_right = "Close to the Right"
 
 # -- Common buttons --
 
