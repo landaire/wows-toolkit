@@ -1573,6 +1573,29 @@ dumped_at = "2026-01-01T00:00:00Z"
         }
     }
 
+    /// Parses a replay whose ships send model `effects`, such as
+    /// `20261112_193510_PXSC999-Siegfried-1510_e15_Bermuda_Triangle_2.wowsreplay`
+    /// (15.10, build 13533378), which ended the parse with a panic. Run with:
+    ///
+    /// ```text
+    /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// WOWS_REPLAY_INSPECTOR_EFFECTS_REPLAY="C:\Downloads\20261112_193510_PXSC999-Siegfried-1510_e15_Bermuda_Triangle_2.wowsreplay" \
+    /// cargo test -p wows-toolkit-replay-data -- --ignored a_replay_with_model_effects_parses
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install and a replay with model effects; see the doc comment for the run command"]
+    fn a_replay_with_model_effects_parses() {
+        let wows_dir = std::env::var("WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR")
+            .expect("set WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR to a WoWs install directory");
+        let replay_path = std::env::var("WOWS_REPLAY_INSPECTOR_EFFECTS_REPLAY")
+            .expect("set WOWS_REPLAY_INSPECTOR_EFFECTS_REPLAY to a replay whose ships send model effects");
+
+        let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
+        let parsed = parse_replay(Path::new(&replay_path), &game_data, None).expect("the replay parses");
+
+        assert!(!parsed.model.rows.is_empty(), "the replay lists its players");
+    }
+
     /// Loads a real install's decoded parameters and writes them out in the
     /// minimal format, which is what the Unpacker's dump menu does. Needs a
     /// local game install. Run with:

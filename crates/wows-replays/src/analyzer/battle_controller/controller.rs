@@ -485,6 +485,51 @@ impl CrewModifiersCompactParams {
     }
 }
 
+/// The id of an effect a model plays, as the game's `ENTITY_CLIENT_ACTION_STATE` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ClientActionId(i16);
+
+impl ClientActionId {
+    pub fn raw(self) -> i16 {
+        self.0
+    }
+}
+
+/// One entry of a model's `effects` property: an `ENTITY_CLIENT_ACTION_STATE`
+/// FIXED_DICT naming an effect and the model node it plays at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModelEffect {
+    id: ClientActionId,
+    name: String,
+    node: String,
+}
+
+impl ModelEffect {
+    /// `None` when `value` is not an `ENTITY_CLIENT_ACTION_STATE`.
+    fn from_arg(value: &ArgValue<'_>) -> Option<Self> {
+        let fields = value.fixed_dict_ref()?;
+        let id = ClientActionId(*fields.get("id")?.int_16_ref()?);
+        let text = |key: &str| -> Option<String> {
+            let bytes = fields.get(key)?.string_ref()?;
+            String::from_utf8(bytes.to_vec()).ok()
+        };
+
+        Some(Self { id, name: text("name")?, node: text("node")? })
+    }
+
+    pub fn id(&self) -> ClientActionId {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn node(&self) -> &str {
+        &self.node
+    }
+}
+
 /// A property update's arguments: either the decoded `props` map an entity
 /// create carries, or the single named value an entity property packet carries.
 ///
@@ -506,10 +551,6 @@ impl<'a, 'argtype> PropertyArgs<'a, 'argtype> {
             Self::Map(map) => map.get(key),
             Self::Single { name, value } => (name == key).then_some(value),
         }
-    }
-
-    fn contains_key(&self, key: &str) -> bool {
-        self.get(key).is_some()
     }
 }
 
@@ -563,63 +604,25 @@ macro_rules! apply_prop_value {
     };
 }
 
-macro_rules! arg_value_to_type {
-    ($args:ident, $key:expr, String) => {
-        arg_value_to_type!($args, $key, string_ref, String).clone()
-    };
-    ($args:ident, $key:expr, i8) => {
-        *arg_value_to_type!($args, $key, int_8_ref, i8)
-    };
-    ($args:ident, $key:expr, i16) => {
-        *arg_value_to_type!($args, $key, int_16_ref, i16)
-    };
-    ($args:ident, $key:expr, i32) => {
-        *arg_value_to_type!($args, $key, int_32_ref, i32)
-    };
-    ($args:ident, $key:expr, u8) => {
-        *arg_value_to_type!($args, $key, uint_8_ref, u8)
-    };
-    ($args:ident, $key:expr, u16) => {
-        *arg_value_to_type!($args, $key, uint_16_ref, u16)
-    };
-    ($args:ident, $key:expr, u32) => {
-        *arg_value_to_type!($args, $key, uint_32_ref, u32)
-    };
-    ($args:ident, $key:expr, bool) => {
-        (*arg_value_to_type!($args, $key, uint_8_ref, u8)) != 0
-    };
-    ($args:ident, $key:expr, &[()]) => {
-        arg_value_to_type!($args, $key, array_ref, &[()])
-    };
-    ($args:ident, $key:expr, &[u8]) => {
-        arg_value_to_type!($args, $key, blob_ref, &[()]).as_ref()
-    };
-    ($args:ident, $key:expr, HashMap<(), ()>) => {
-        arg_value_to_type!($args, $key, fixed_dict_ref, HashMap<(), ()>)
-    };
-    ($args:ident, $key:expr, $conversion_func:ident, $ty:ty) => {
-        $args
-            .get($key)
-            .unwrap_or_else(|| panic!("could not get {}", $key))
-            .$conversion_func()
-            .unwrap_or_else(|| panic!("{} is not a {}", $key, stringify!($ty)))
-    };
-}
-
 impl UpdateFromReplayArgs for CrewModifiersCompactParams {
     fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, _constants: &GameConstants) {
         const PARAMS_ID_KEY: &str = "paramsId";
         const IS_IN_ADAPTATION_KEY: &str = "isInAdaptation";
         const LEARNED_SKILLS_KEY: &str = "learnedSkills";
 
-        if args.contains_key(PARAMS_ID_KEY) {
-            // The game writes 0 before a commander is assigned (e.g. the
-            // recording player before the server sends the crew).
-            let raw = arg_value_to_type!(args, PARAMS_ID_KEY, u32);
-            self.params_id = (raw != 0).then(|| GameParamId::from(raw));
+        if let Some(value) = args.get(PARAMS_ID_KEY) {
+            match value.as_u32() {
+                // The game writes 0 before a commander is assigned (e.g. the
+                // recording player before the server sends the crew).
+                Some(raw) => self.params_id = (raw != 0).then(|| GameParamId::from(raw)),
+                None => skip_property(PARAMS_ID_KEY, value),
+            }
         }
-        if args.contains_key(IS_IN_ADAPTATION_KEY) {
-            self.is_in_adaptation = Some(arg_value_to_type!(args, IS_IN_ADAPTATION_KEY, bool));
+        if let Some(value) = args.get(IS_IN_ADAPTATION_KEY) {
+            match value.uint_8_ref() {
+                Some(flag) => self.is_in_adaptation = Some(*flag != 0),
+                None => skip_property(IS_IN_ADAPTATION_KEY, value),
+            }
         }
 
         // The captain-skill rework changed the `learnedSkills` shape. Gate on the
@@ -679,7 +682,7 @@ pub struct VehicleProps {
     death_settings: Vec<u8>,
     owner: u32,
     atba_targets: Vec<u32>,
-    effects: Vec<String>,
+    effects: Vec<ModelEffect>,
     crew_modifiers_compact_params: CrewModifiersCompactParams,
     laser_target_local_pos: u16,
     anti_air_auras: Vec<AAAura>,
@@ -836,7 +839,7 @@ impl VehicleProps {
         self.atba_targets.as_ref()
     }
 
-    pub fn effects(&self) -> &[String] {
+    pub fn effects(&self) -> &[ModelEffect] {
         self.effects.as_ref()
     }
 
@@ -1079,38 +1082,33 @@ impl VehicleProps {
             "ignoreMapBorders" => apply_prop_value!(self.ignore_map_borders, value, bool),
             "airDefenseDispRadius" => apply_prop_value!(self.air_defense_dispersion_radius, value, f32),
             "deathSettings" => apply_prop_value!(self.death_settings, value, Vec<u8>),
-            "owner" => {
-                self.owner = *value.int_32_ref().unwrap_or_else(|| panic!("owner is not a i32")) as u32;
-            }
+            "owner" => match value.as_i32() {
+                Some(owner) => self.owner = owner as u32,
+                None => skip_property(name, value),
+            },
+            // ENTITY_ID elements, which are INT32.
             "atbaTargets" => {
-                self.atba_targets = value
-                    .array_ref()
-                    .unwrap_or_else(|| panic!("atbaTargets is not an array"))
-                    .iter()
-                    .map(|elem| *elem.uint_32_ref().expect("atbaTargets elem is not a u32"))
-                    .collect();
+                if let Some(targets) = decode_array(name, value, |target| target.as_u32()) {
+                    self.atba_targets = targets;
+                }
             }
             "effects" => {
-                self.effects = value
-                    .array_ref()
-                    .unwrap_or_else(|| panic!("effects is not an array"))
-                    .iter()
-                    .map(|elem| {
-                        String::from_utf8(elem.string_ref().expect("effects elem is not a string").to_vec())
-                            .expect("could not convert effects elem to string")
-                    })
-                    .collect();
+                if let Some(effects) = decode_array(name, value, ModelEffect::from_arg) {
+                    self.effects = effects;
+                }
             }
-            "crewModifiersCompactParams" => {
-                let dict = value.fixed_dict_ref().unwrap_or_else(|| panic!("crewModifiersCompactParams is not a dict"));
-                self.crew_modifiers_compact_params.update_from_args(PropertyArgs::Map(dict), version, constants);
-            }
+            "crewModifiersCompactParams" => match value.fixed_dict_ref() {
+                Some(dict) => {
+                    self.crew_modifiers_compact_params.update_from_args(PropertyArgs::Map(dict), version, constants);
+                }
+                None => skip_property(name, value),
+            },
             "laserTargetLocalPos" => apply_prop_value!(self.laser_target_local_pos, value, u16),
             // TODO: AntiAirAuras
-            "selectedWeapon" => {
-                let id = *value.uint_32_ref().unwrap_or_else(|| panic!("selectedWeapon is not a u32"));
-                self.selected_weapon = WeaponType::from_id(id as i32, constants.ships(), version);
-            }
+            "selectedWeapon" => match value.as_i32() {
+                Some(id) => self.selected_weapon = WeaponType::from_id(id, constants.ships(), version),
+                None => skip_property(name, value),
+            },
             "isOnForsage" => apply_prop_value!(self.is_on_forsage, value, bool),
             "isInRageMode" => apply_prop_value!(self.is_in_rage_mode, value, bool),
             "hasAirTargetsInRange" => apply_prop_value!(self.has_air_targets_in_range, value, bool),
@@ -1181,12 +1179,14 @@ impl VehicleProps {
             "engineDir" => apply_prop_value!(self.engine_dir, value, i8),
             // TODO: state
             "teamId" => apply_prop_value!(self.team_id, value, i8),
-            "buoyancyCurrentState" => {
-                let id = *value.uint_8_ref().unwrap_or_else(|| panic!("buoyancyCurrentState is not a u8"));
-                if let Some(ds) = BuoyancyState::from_id(id as i32, constants.battle(), version) {
-                    self.buoyancy_current_state = ds;
+            "buoyancyCurrentState" => match value.as_i32() {
+                Some(id) => {
+                    if let Some(ds) = BuoyancyState::from_id(id, constants.battle(), version) {
+                        self.buoyancy_current_state = ds;
+                    }
                 }
-            }
+                None => skip_property(name, value),
+            },
             "uiEnabled" => apply_prop_value!(self.ui_enabled, value, bool),
             "respawnTime" => apply_prop_value!(self.respawn_time, value, u16),
             "enginePower" => apply_prop_value!(self.engine_power, value, u8),
@@ -1408,6 +1408,61 @@ impl Entity {
     }
 }
 
+/// The wire type of `value`, for a log line about a value of an unexpected type.
+fn arg_kind(value: &ArgValue<'_>) -> &'static str {
+    match value {
+        ArgValue::Uint8(_) => "UINT8",
+        ArgValue::Uint16(_) => "UINT16",
+        ArgValue::Uint32(_) => "UINT32",
+        ArgValue::Uint64(_) => "UINT64",
+        ArgValue::Int8(_) => "INT8",
+        ArgValue::Int16(_) => "INT16",
+        ArgValue::Int32(_) => "INT32",
+        ArgValue::Int64(_) => "INT64",
+        ArgValue::Float32(_) => "FLOAT32",
+        ArgValue::Float64(_) => "FLOAT64",
+        ArgValue::Vector2(_) => "VECTOR2",
+        ArgValue::Vector3(_) => "VECTOR3",
+        ArgValue::String(_) => "STRING",
+        ArgValue::UnicodeString(_) => "UNICODE_STRING",
+        ArgValue::Blob(_) => "BLOB",
+        ArgValue::Array(_) => "ARRAY",
+        ArgValue::FixedDict(_) => "FIXED_DICT",
+        ArgValue::NullableFixedDict(_) => "nullable FIXED_DICT",
+        ArgValue::Tuple(_) => "TUPLE",
+    }
+}
+
+/// Logs a property left as it was because `found`, its value or an element of it, has a type
+/// this decode does not expect.
+fn skip_property(property: &str, found: &ArgValue<'_>) {
+    warn!(property, found = arg_kind(found), "skipping a property of an unexpected type");
+}
+
+/// Decodes every element of the array `value` with `decode`. `None`, after logging the value or
+/// element that did not decode, when `value` is not an array or an element does not decode.
+fn decode_array<T>(
+    property: &str,
+    value: &ArgValue<'_>,
+    decode: impl Fn(&ArgValue<'_>) -> Option<T>,
+) -> Option<Vec<T>> {
+    let Some(elements) = value.array_ref() else {
+        skip_property(property, value);
+        return None;
+    };
+
+    let mut decoded = Vec::with_capacity(elements.len());
+    for element in elements {
+        let Some(item) = decode(element) else {
+            skip_property(property, element);
+            return None;
+        };
+        decoded.push(item);
+    }
+
+    Some(decoded)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1419,7 +1474,85 @@ mod tests {
     use crate::types::BurningFlags;
     use crate::types::GameParamId;
 
+    use super::ClientActionId;
+    use super::ModelEffect;
     use super::VehicleProps;
+
+    fn action_state<'a>(id: i16, name: &'a str, node: &'a str) -> ArgValue<'a> {
+        ArgValue::FixedDict(HashMap::from([
+            ("id", ArgValue::Int16(id)),
+            ("name", ArgValue::String(name.as_bytes())),
+            ("node", ArgValue::String(node.as_bytes())),
+        ]))
+    }
+
+    /// `effects` is `ARRAY<of>ENTITY_CLIENT_ACTION_STATE</of>` (ModelOwner.def), as event ships
+    /// such as the Bermuda Triangle Siegfried send it.
+    #[test]
+    fn effects_decode_entity_client_action_states() {
+        let version = Version::from_client_exe("15,10,0,13533378");
+        let constants = GameConstants::defaults();
+        let mut props = VehicleProps::default();
+        let effects = ArgValue::Array(vec![action_state(3, "smoke", "HP_Funnel_1"), action_state(-1, "glow", "")]);
+        props.update_by_name("effects", &effects, version, &constants);
+
+        assert_eq!(
+            props.effects(),
+            [
+                ModelEffect { id: ClientActionId(3), name: "smoke".to_owned(), node: "HP_Funnel_1".to_owned() },
+                ModelEffect { id: ClientActionId(-1), name: "glow".to_owned(), node: String::new() },
+            ]
+        );
+    }
+
+    /// A property whose value has a type its def does not give it is skipped, leaving what was
+    /// there, rather than ending the parse.
+    #[test]
+    fn wrong_typed_properties_are_skipped() {
+        let version = Version::from_client_exe("15,10,0,13533378");
+        let constants = GameConstants::defaults();
+        let mut props = VehicleProps::default();
+        let good: HashMap<&str, ArgValue<'_>> = [
+            ("owner", ArgValue::Int32(7)),
+            ("atbaTargets", ArgValue::Array(vec![ArgValue::Int32(11), ArgValue::Int32(12)])),
+            ("effects", ArgValue::Array(vec![action_state(3, "smoke", "HP_Funnel_1")])),
+            (
+                "crewModifiersCompactParams",
+                ArgValue::FixedDict(HashMap::from([
+                    ("paramsId", ArgValue::Uint32(123)),
+                    ("isInAdaptation", ArgValue::Uint8(1)),
+                ])),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        props.update_from_args(&good, version, &constants);
+        let before = format!("{props:?}");
+
+        let wrong = [
+            ("owner", ArgValue::String(b"seven")),
+            ("atbaTargets", ArgValue::Uint8(1)),
+            ("atbaTargets", ArgValue::Array(vec![ArgValue::Int32(13), ArgValue::Float32(1.0)])),
+            ("effects", ArgValue::Uint8(1)),
+            ("effects", ArgValue::Array(vec![ArgValue::String(b"smoke")])),
+            ("effects", ArgValue::Array(vec![ArgValue::FixedDict(HashMap::from([("id", ArgValue::Int16(3))]))])),
+            ("crewModifiersCompactParams", ArgValue::Uint8(1)),
+            (
+                "crewModifiersCompactParams",
+                ArgValue::FixedDict(HashMap::from([
+                    ("paramsId", ArgValue::Float32(1.0)),
+                    ("isInAdaptation", ArgValue::Float32(1.0)),
+                ])),
+            ),
+            ("selectedWeapon", ArgValue::Float32(1.0)),
+            ("buoyancyCurrentState", ArgValue::Blob(&[1])),
+        ];
+        for (name, value) in &wrong {
+            props.update_by_name(name, value, version, &constants);
+        }
+
+        assert_eq!(format!("{props:?}"), before, "a wrong-typed value changed the props");
+    }
 
     #[test]
     fn update_from_args_sets_regeneration_health() {
