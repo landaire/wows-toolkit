@@ -86,8 +86,8 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
     view! {
         Popover {
             PopoverTrigger(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::IconXs,
                 attr:data-testid = "replay-renderer-timeline-toggle",
                 a11y:label = label.clone()
             ) {

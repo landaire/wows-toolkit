@@ -90,8 +90,8 @@ fn OptionsGear(session: RendererSession) -> impl IntoView {
     view! {
         Popover {
             PopoverTrigger(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::IconXs,
                 attr:data-testid = "replay-renderer-settings-toggle",
                 a11y:label = label.clone()
             ) {

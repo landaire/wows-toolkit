@@ -143,6 +143,7 @@ const CSS: &str = css!(
     .wt-renderer__spacer { flex: 1; min-width: 0; }
     .wt-renderer__zoom { flex: none; width: 90px; }
     .wt-renderer__speed { flex: none; width: 72px; }
+    .wt-renderer__speed .wt-renderer__speed-trigger { width: 100%; height: 24px; padding: 0 8px; }
     .wt-renderer__rule { flex: none; width: 1px; align-self: stretch; margin: 4px 0; background-color: var(--lui-color-border); }"
 );
 
@@ -345,8 +346,8 @@ pub(super) fn TransportButton(
         Tooltip {
             TooltipTrigger {
                 Button(
-                    variant = ButtonVariant::Ghost,
-                    size = ButtonSize::IconSm,
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::IconXs,
                     disabled = disabled,
                     attr:data-testid = test_id,
                     a11y:label = label.clone(),
@@ -464,8 +465,8 @@ fn Transport(session: RendererSession) -> impl IntoView {
                     )
                 }
                 Button(
-                    variant = ButtonVariant::Ghost,
-                    size = ButtonSize::Sm,
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Xs,
                     disabled = Signal::derive_local(move || !ready() || whole_map()),
                     attr:data-testid = "replay-renderer-zoom-reset",
                     on:click = move |_| session.set_view(MapViewport::default())
@@ -481,7 +482,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                             }
                         })
                     ) {
-                        SelectTrigger(a11y:label = t!("ui.renderer.controls.speed").into_owned()) {
+                        SelectTrigger(class = "wt-renderer__speed-trigger", a11y:label = t!("ui.renderer.controls.speed").into_owned()) {
                             SelectValue()
                         }
                         SelectContent {

@@ -90,8 +90,8 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
             TooltipTrigger {
                 Popover {
                     PopoverTrigger(
-                        variant = ButtonVariant::Ghost,
-                        size = ButtonSize::IconSm,
+                        variant = ButtonVariant::Outline,
+                        size = ButtonSize::IconXs,
                         attr:data-testid = "replay-renderer-tools-toggle",
                         state:disabled = move || refused.get(),
                         a11y:disabled = move || refused.get(),
