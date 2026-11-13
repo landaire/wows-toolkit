@@ -21,6 +21,8 @@ use wowsunpack::game_params::ttx::model::Hp;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::MountPoint;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::recognized::Recognized;
 
 use crate::aircraft::OrdnanceKind;
 use crate::aircraft::Squadron;
@@ -36,6 +38,7 @@ use crate::modules::Module;
 use crate::modules::ModuleKind;
 use crate::shells::shell_ammo;
 use crate::ships::Ship;
+use crate::ships::ShipClass;
 use crate::text::clean;
 
 /// A category of armament the ship either carries or lacks. Serializes as the
@@ -139,6 +142,12 @@ pub struct Torpedo {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caliber_mm: Option<Millimeters>,
+
+    /// The only classes the torpedo can hit, for torpedoes that pass under
+    /// the others, such as deep-water torpedoes (`ignoreClasses`). Absent
+    /// when it hits every class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hits_only_classes: Option<Vec<ShipClass>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -551,6 +560,7 @@ impl GameData {
                 name: self.projectile_name(param),
                 param: param.clone(),
                 caliber_mm: self.projectile_caliber(param),
+                hits_only_classes: self.torpedo_targets(param),
             })
             .collect();
 
@@ -618,6 +628,24 @@ impl GameData {
     /// Caliber of the first shell a gun mount fires.
     fn mount_caliber(&self, mount: &MountPoint) -> Option<Millimeters> {
         mount.ammo().iter().find_map(|name| self.projectile_caliber(name))
+    }
+
+    /// The playable classes `param` can hit when its `ignoreClasses` leaves
+    /// some out, as the port's `canHitClasses` (FactoryTorpedoes.py).
+    fn torpedo_targets(&self, param: &str) -> Option<Vec<ShipClass>> {
+        let entry = self.provider().game_param_by_name(param)?;
+        let ignored: Vec<ShipClass> = entry
+            .projectile()?
+            .ignore_classes()?
+            .iter()
+            .filter_map(|name| match Species::from_name(name) {
+                Recognized::Known(species) => ShipClass::from_species(species),
+                _ => None,
+            })
+            .collect();
+        let hits: Vec<ShipClass> = ShipClass::ALL.into_iter().filter(|class| !ignored.contains(class)).collect();
+
+        (hits.len() < ShipClass::ALL.len()).then_some(hits)
     }
 
     fn projectile_caliber(&self, name: &str) -> Option<Millimeters> {
