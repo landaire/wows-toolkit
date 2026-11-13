@@ -675,7 +675,11 @@ pub fn ReplayPanel(
             let result = blocking(move || parse_replay_with_alts(&primary, &alts_now, &cache, rating.as_deref())).await;
             underway.set_value(None);
             parsing.set(false);
-            apply_result(ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause }, result);
+            let again =
+                apply_result(ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause }, result);
+            if let Some(again) = again {
+                queued.update_value(|queued| *queued = Some(queued.map_or(again, |queued| queued.with(again))));
+            }
             if let Some(next) = queued.get_value() {
                 queued.set_value(None);
                 control.reparse(next);
@@ -864,7 +868,8 @@ struct ApplyCx {
     cause: Option<ReparseCause>,
 }
 
-fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) {
+/// Folds a landed read into the panel. Returns the read it asks for next, if any.
+fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> Option<ReparseCause> {
     let ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause } = cx;
     // A battle the client left early gets its results when the game rewrites the file; that
     // re-read is worth saying.
@@ -885,19 +890,24 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) {
                 shell.toasts().info(t!("ui.replay.results_arrived", battle = loaded.title.clone()).into_owned());
             }
             state.set(LoadState::Loaded(Rc::new(loaded)));
+            None
         }
         Err(err) => {
-            // A read that failed only because of the recording just added drops it. The battle
-            // on screen is the one read without it.
+            // A read that failed only because of the recording just added drops it and reads the
+            // battle again without it: that read also answered whatever was asked alongside the
+            // recording, which the battle on screen predates.
             if let Some(refused) = trial {
                 alts.update(|kept| kept.retain(|kept| !same_file(kept, &refused)));
                 shell
                     .toasts()
                     .failed(t!("ui.replay.load_alt_perspective_failed", error = err.to_string()).into_owned());
-                return;
+                return Some(
+                    cause.map_or(ReparseCause::AltPerspective, |cause| ReparseCause::AltPerspective.with(cause)),
+                );
             }
             shell.toasts().failed(t!("ui.messages.replay_load_failed").into_owned());
             state.set(LoadState::Failed(err.to_string()));
+            None
         }
     }
 }

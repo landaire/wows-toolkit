@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -15,6 +16,7 @@ use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
@@ -27,30 +29,39 @@ use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use zgui::component;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::IntoView;
 use zgui_ui::ButtonProps;
 
+use super::ApplyCx;
 use super::DebugPayloads;
+use super::LoadState;
 use super::Loaded;
 use super::PanelEvents;
 use super::PanelSetup;
 use super::PanelTable;
 use super::RenderRequest;
+use super::ReparseCause;
 use super::ReplayPanelProps;
 use super::TableSlot;
+use super::apply_result;
 use super::export_extension;
 use super::figures::PR_TILE_ID;
 use super::figures::personal_rating_label;
 use super::loaded_from_model;
 use super::write_export;
+use crate::shell::Shell;
 use crate::shell::ShellHarnessProps;
 use crate::tabs::replays::player_table_slot;
 use crate::tabs::replays::table::PlayerDetailCx;
@@ -58,6 +69,8 @@ use crate::tabs::replays::table::PlayerDetailCx;
 thread_local! {
     /// The battle the next panel built on this thread shows instead of reading its replay.
     pub(super) static SEED: RefCell<Option<Loaded>> = const { RefCell::new(None) };
+    /// The read [`RefusedAlt`] asked for next.
+    static ASKED_AGAIN: Cell<Option<ReparseCause>> = const { Cell::new(None) };
 }
 
 /// A won battle whose self row dealt exactly the fixture's expected damage and frags, so it
@@ -464,4 +477,39 @@ fn the_replay_panel_renders_in_dark_and_light() {
         let path = crate::interaction_tests::save_shot(&mut window, name);
         println!("{}", path.display());
     }
+}
+
+/// Lands a read, asked for with `cause`, that failed on the recording it had on trial.
+#[component]
+fn RefusedAlt(cause: ReparseCause, alts: RwSignal<Vec<PathBuf>, LocalStorage>) -> impl IntoView {
+    let cx = ApplyCx {
+        state: RwSignal::new_local(LoadState::Loaded(Rc::new(loaded(model_at_expected_values(), false)))),
+        alts,
+        trial: Some(PathBuf::from("alt.wowsreplay")),
+        columns_now: StoredValue::new(ReplayColumn::ALL.to_vec()),
+        rating_now: StoredValue::new(None),
+        events: StoredValue::new_local(PanelEvents::default()),
+        shell: Shell::current(),
+        cause: Some(cause),
+    };
+    ASKED_AGAIN.set(apply_result(cx, Err(ReplayLoadError::Parse("not this battle".to_owned()))));
+}
+
+/// A refused recording is dropped and the battle read again without it, since the failed read
+/// also answered the file change asked for alongside it.
+#[test]
+fn a_refused_recording_is_dropped_and_the_battle_read_again() {
+    let alts = RwSignal::new_local(vec![PathBuf::from("alt.wowsreplay")]);
+    let options = HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 });
+    let _window = HeadlessWindow::open(options, move || {
+        view! {
+            ShellHarness(theme = ThemeChoice::Dark) {
+                RefusedAlt(cause = ReparseCause::FileRewritten, alts = alts)
+            }
+        }
+    })
+    .expect("the harness opens");
+
+    assert!(alts.get_untracked().is_empty(), "the refused recording is dropped");
+    assert_eq!(ASKED_AGAIN.get(), Some(ReparseCause::FileRewritten), "the file change is read again");
 }
