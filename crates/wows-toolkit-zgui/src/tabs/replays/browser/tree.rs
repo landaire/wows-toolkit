@@ -15,6 +15,7 @@ use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
+use wows_toolkit_replay_data::replay_dir::UnreadableReplay;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::hover_facts;
@@ -30,13 +31,15 @@ pub struct GroupId(String);
 pub enum NodeKey {
     Group(GroupId),
     Leaf(PathBuf),
+    /// A named replay whose header could not be read.
+    Unreadable(PathBuf),
 }
 
 impl NodeKey {
     pub fn leaf_path(&self) -> Option<&Path> {
         match self {
             Self::Leaf(path) => Some(path),
-            Self::Group(_) => None,
+            Self::Group(_) | Self::Unreadable(_) => None,
         }
     }
 }
@@ -64,6 +67,14 @@ pub struct LeafRow {
     pub personal_rating: Option<PersonalRatingResult>,
 }
 
+/// What a row for a replay that could not be read draws.
+#[derive(Clone, Debug)]
+pub struct UnreadableRow {
+    /// The file's name.
+    pub label: String,
+    pub error: String,
+}
+
 /// The listing's rows, grouped as the reader chose.
 #[derive(Debug, Default)]
 pub struct BrowserTree {
@@ -72,6 +83,7 @@ pub struct BrowserTree {
     parents: HashMap<NodeKey, NodeKey>,
     groups: HashMap<GroupId, GroupRow>,
     leaves: HashMap<PathBuf, LeafRow>,
+    unreadable: HashMap<PathBuf, UnreadableRow>,
     /// The visible order of the replays, for a shift-click run.
     order: Vec<PathBuf>,
 }
@@ -79,6 +91,8 @@ pub struct BrowserTree {
 /// What the rows are named and reported from.
 pub struct TreeInputs<'a> {
     pub files: &'a [ScannedReplay],
+    /// Named replays that could not be read, listed after the rest.
+    pub unreadable: &'a [UnreadableReplay],
     pub summaries: &'a HashMap<PathBuf, RowSummary>,
     pub cache: Option<&'a GameDataCache>,
     pub fallback: Option<&'a GameMetadataProvider>,
@@ -149,6 +163,12 @@ impl BrowserTree {
                 work.extend(children.into_iter().rev().map(|child| (child, Some(key.clone()), id.clone())));
             }
         }
+        for unreadable in inputs.unreadable {
+            let path = &unreadable.path;
+            let label = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
+            tree.unreadable.insert(path.clone(), UnreadableRow { label, error: unreadable.error.to_string() });
+            tree.roots.push(NodeKey::Unreadable(path.clone()));
+        }
 
         tree
     }
@@ -159,6 +179,10 @@ impl BrowserTree {
 
     pub fn leaf(&self, path: &Path) -> Option<&LeafRow> {
         self.leaves.get(path)
+    }
+
+    pub fn unreadable(&self, path: &Path) -> Option<&UnreadableRow> {
+        self.unreadable.get(path)
     }
 
     pub fn groups(&self) -> impl Iterator<Item = &GroupId> {
@@ -194,6 +218,7 @@ impl TreeModel for BrowserTree {
         match key {
             NodeKey::Group(id) => self.groups.get(id).map(|group| group.label.as_str()),
             NodeKey::Leaf(path) => self.leaves.get(path).map(|leaf| leaf.label.as_str()),
+            NodeKey::Unreadable(path) => self.unreadable.get(path).map(|row| row.label.as_str()),
         }
     }
 }

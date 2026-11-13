@@ -366,7 +366,9 @@ pub fn search_offer(control: BrowserControl) -> Offer {
     if install {
         return Offer::Enabled;
     }
-
+    if is_dropped(control, selected) {
+        return Offer::Disabled(t!("ui.replay_folders.dropped_no_source").into_owned());
+    }
     match control.work.source(selected) {
         Some(FolderSourceState::Resolved { .. }) => Offer::Enabled,
         Some(FolderSourceState::Unavailable(err)) => {
@@ -399,6 +401,9 @@ pub fn index_offer(control: BrowserControl) -> Offer {
     }
 
     let selected = control.selected.get();
+    if is_dropped(control, selected) {
+        return Offer::Disabled(t!("ui.replay_folders.dropped_no_source").into_owned());
+    }
     if let Some(FolderSourceState::Unavailable(err)) = work.source(selected) {
         return Offer::Disabled(t!("ui.replay_folders.source_failed", error = err.to_string()).into_owned());
     }
@@ -412,6 +417,14 @@ pub fn index_offer(control: BrowserControl) -> Offer {
     Offer::Enabled
 }
 
+/// Whether tab `id` lists dropped replays, which have no one source to search or index.
+/// Subscribes to the tabs.
+fn is_dropped(control: BrowserControl, id: FolderId) -> bool {
+    control
+        .folders
+        .with(|folders| folders.iter().any(|tab| tab.id == id && matches!(tab.source, FolderSource::Dropped { .. })))
+}
+
 /// Opens the Search tab over the selected tab's own source.
 ///
 /// A directory still being indexed is searched all the same: what its source holds is correct as
@@ -422,7 +435,7 @@ pub fn search_selected_folder(control: BrowserControl) {
     let services = shell.services();
     let Some(pool) = services.settings.pool() else { return };
     let indexing = control.work.passes.with_untracked(|passes| passes.contains_key(&control.selected.get_untracked()));
-    let scope = listing.index_scope();
+    let Some(scope) = listing.index_scope() else { return };
 
     let found = services.on_tokio(async move { scope.existing(&pool).await });
     control.work.spawn(async move {
@@ -470,7 +483,7 @@ pub fn index_selected_folder(control: BrowserControl) {
         return;
     };
 
-    let scope = listing.index_scope();
+    let Some(scope) = listing.index_scope() else { return };
     let reading = scope.clone();
     let held = services.on_tokio(async move {
         match reading.existing(&pool).await? {
@@ -1092,7 +1105,7 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
     let Some(listing) = control.listing(id) else { return };
     // Roots the Live source when this battle is the first thing it holds.
     let Some(live_root) = path.parent().map(Path::to_path_buf) else { return };
-    let scope = listing.index_scope();
+    let Some(scope) = listing.index_scope() else { return };
     let path = path.to_path_buf();
     let proxy = proxy_url(services);
 

@@ -207,7 +207,9 @@ const CSS: &str = css!(
     .wt-hover-facts { display: flex; flex-direction: column; max-width: 384px; padding: 2px 4px; }
     .wt-hover-fact { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
     .wt-hover-fact__label { flex: none; width: 58px; color: var(--wt-color-text-dim); }
-    .wt-hover-fact__value { flex: 1; min-width: 0; }"
+    .wt-hover-fact__value { flex: 1; min-width: 0; }
+    .wt-row__unreadable-icon { flex: none; margin: 0 8px; color: var(--wt-color-error); }
+    .wt-row__unreadable-error { font-size: 12px; color: var(--wt-color-error); white-space: nowrap; overflow: hidden; }"
 );
 
 /// The row height: the theme font size of 12.5px times 2.8.
@@ -350,6 +352,7 @@ fn ListingRows(
                 expanded.insert(group);
             }
         }),
+        NodeKey::Unreadable(_) => {}
     });
     let menu_events = events.clone();
     // The selection marks the open replay, and the menu acts on its own row without moving it.
@@ -416,6 +419,22 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
                     {content}
                 }
             })
+        }
+        NodeKey::Unreadable(path) => {
+            let content = move || {
+                let unreadable = listing.tree.with(|tree| tree.unreadable(&path).cloned())?;
+                let said = t!("ui.replay_folders.unreadable_replay", error = unreadable.error).into_owned();
+                Some(view! {
+                    row(class = "wt-row", attr:data-testid = format!("replay-row-unreadable-{}", path.display())) {
+                        AppIcon(glyph = Glyph::TriangleAlert, class = "wt-row__unreadable-icon")
+                        column(class = "wt-row__lines") {
+                            text(class = "wt-row__label") {{unreadable.label}}
+                            text(class = "wt-row__unreadable-error") {{said}}
+                        }
+                    }
+                })
+            };
+            AnyView::new(view! { box(class = "wt-row-host", style:display = "contents") {{content}} })
         }
     }
 }
@@ -520,6 +539,20 @@ fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey
         NodeKey::Leaf(path) => {
             let path = path.to_path_buf();
             Some(MenuItems::new(move || leaf_menu(shell, listing, events.clone(), &path)))
+        }
+        NodeKey::Unreadable(path) => {
+            let (listed, revealed) = (path.to_path_buf(), path.to_path_buf());
+            Some(MenuItems::new(move || {
+                let (listed, revealed) = (listed.clone(), revealed.clone());
+                view! {
+                    MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
+                        {t!("ui.replay.context.copy_path").into_owned()}
+                    }
+                    MenuItem(on_select = UnsyncCallback::new(move |()| wows_toolkit_services::child_process::reveal_in_file_manager(&revealed))) {
+                        {t!("ui.replay.context.show_in_explorer").into_owned()}
+                    }
+                }
+            }))
         }
     }
 }

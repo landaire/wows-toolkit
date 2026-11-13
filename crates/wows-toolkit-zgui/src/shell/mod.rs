@@ -211,6 +211,8 @@ const CSS: &str = css!(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayRequest {
     OpenReplay(PathBuf),
+    /// Lists replays dropped together in a folder tab of their own.
+    ListReplays(Vec<PathBuf>),
     /// Lists the directory in a folder tab of the replays tab.
     OpenFolder(PathBuf),
     /// Lists a directory from the recent list, or says it is gone and drops it from the list.
@@ -540,12 +542,18 @@ impl Shell {
 
     /// Does what dropping files on the window asked for.
     fn apply_drop(self, intent: DropIntent) {
-        match intent {
-            DropIntent::OpenReplay(path) => self.request_replay(ReplayRequest::OpenReplay(path)),
-            DropIntent::OpenFolder(path) => self.request_replay(ReplayRequest::OpenFolder(path)),
-            refused @ (DropIntent::NotAReplay | DropIntent::TooMany) => {
-                self.toasts.warn(refused.said());
-            }
+        if let Some(refusal) = intent.refusal() {
+            self.toasts.warn(refusal);
+        }
+
+        let DropIntent { mut replays, folders, skipped: _ } = intent;
+        for folder in folders {
+            self.request_replay(ReplayRequest::OpenFolder(folder));
+        }
+        match replays.len() {
+            0 => {}
+            1 => self.request_replay(ReplayRequest::OpenReplay(replays.remove(0))),
+            _ => self.request_replay(ReplayRequest::ListReplays(replays)),
         }
     }
 

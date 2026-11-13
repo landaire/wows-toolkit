@@ -13,8 +13,10 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::replay_dir::DirChange;
+use wows_toolkit_replay_data::replay_dir::HeaderReadError;
 use wows_toolkit_replay_data::replay_dir::ScanProgress;
 use wows_toolkit_replay_data::replay_dir::read_replay;
+use wows_toolkit_replay_data::simulated_panic;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
@@ -34,6 +36,7 @@ use super::folders::FolderState;
 use super::folders::LANDING_PULSE;
 use super::folders::MADE;
 use super::listing::Listing;
+use super::listing::ListingWatch;
 use super::tree::BrowserTree;
 use super::tree::NodeKey;
 use super::tree::TreeInputs;
@@ -41,6 +44,8 @@ use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::tabs::replays::BUILT;
+use crate::tabs::replays::workspace::ReplayWorkspace;
 
 const FIXTURES: [&str; 3] = [
     "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
@@ -134,6 +139,210 @@ fn opening_a_folder_adds_or_selects_one_tab_and_the_install_stays_first() {
     settle_in_real_time(&mut window);
     assert_eq!(tabs(control).len(), 2, "opening it again selects its tab rather than adding one");
     assert_eq!(control.pinned_folders(), PinnedFolders::default(), "and it is not pinned");
+}
+
+fn workspace() -> ReplayWorkspace {
+    BUILT.with(std::cell::Cell::get).expect("the replays tab made its workspace")
+}
+
+fn sorted(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    paths.sort();
+    paths
+}
+
+/// The tabs of dropped replays with their labels, in tab order.
+fn dropped_tabs(control: BrowserControl) -> Vec<(FolderId, String)> {
+    control.folders.with_untracked(|folders| {
+        folders
+            .iter()
+            .filter(|tab| matches!(tab.source, FolderSource::Dropped { .. }))
+            .map(|tab| (tab.id, tab.label()))
+            .collect()
+    })
+}
+
+fn has_row(window: &HeadlessWindow, path: &Path) -> bool {
+    window.by_test_id(&format!("replay-row-{}", path.display())).is_some()
+}
+
+/// Replays dropped together are listed in one tab of their own, which is selected, and none of
+/// them opens until its row is opened.
+#[test]
+fn dropped_replays_are_listed_in_one_tab_and_none_opens() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let workspace = workspace();
+    let (_dir, root) = replay_dir(3);
+    let [first, second, third] = FIXTURES.map(|name| root.join(name));
+
+    workspace.shell.dropped(vec![first.clone(), third.clone()]);
+    settle_in_real_time(&mut window);
+
+    let dropped = dropped_tabs(control);
+    assert_eq!(
+        dropped.iter().map(|(_, label)| label.as_str()).collect::<Vec<_>>(),
+        ["Dropped"],
+        "one tab lists the drop"
+    );
+    let id = dropped[0].0;
+    assert_eq!(control.selected.get_untracked(), id, "and it is selected");
+    let listing = control.listing(id).expect("the tab has a listing");
+    assert_eq!(listed(listing), sorted(vec![first.clone(), third.clone()]), "it lists exactly the dropped replays");
+    assert_eq!(listing.watch(), ListingWatch::Unwatched, "and follows no directory");
+    assert!(has_row(&window, &first) && has_row(&window, &third), "each has a row");
+    assert!(!has_row(&window, &second), "the replay beside them has none");
+    assert!(workspace.open_replays().is_empty(), "no replay opens");
+    assert!(control.history.with_untracked(|history| history.folders().is_empty()), "nothing is recent");
+    assert_eq!(control.pinned_folders(), PinnedFolders::default(), "or pinned");
+
+    window.double_click(row(&window, &third)).expect("the row has a box");
+    settle_in_real_time(&mut window);
+    assert_eq!(workspace.open_replays(), [third], "a double click opens the replay");
+}
+
+/// One dropped replay opens rather than being listed.
+#[test]
+fn one_dropped_replay_opens() {
+    let (mut window, control) = open();
+    let workspace = workspace();
+    let (_dir, root) = replay_dir(1);
+    let one = root.join(FIXTURES[0]);
+
+    workspace.shell.dropped(vec![one.clone()]);
+    settle_in_real_time(&mut window);
+
+    assert_eq!(workspace.open_replays(), [one], "the replay opens");
+    assert!(dropped_tabs(control).is_empty(), "and is not listed");
+}
+
+/// A drop of replays, directories and other files lists each directory in its own tab and the
+/// replays together in another, and says once how many files it left alone.
+#[test]
+fn a_mixed_drop_lists_folders_and_replays_and_counts_what_it_skipped() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let workspace = workspace();
+    let (_first_dir, first_folder) = replay_dir(1);
+    let (_second_dir, second_folder) = replay_dir(1);
+    let (_dir, root) = replay_dir(2);
+    let one = root.join(FIXTURES[0]);
+    let two = root.join(FIXTURES[1]);
+    let notes = root.join("notes.txt");
+    let more = root.join("more.txt");
+    std::fs::write(&notes, b"notes").expect("the file is written");
+    std::fs::write(&more, b"more").expect("the file is written");
+
+    workspace.shell.dropped(vec![first_folder.clone(), one.clone(), notes, second_folder.clone(), more, two.clone()]);
+    settle_in_real_time(&mut window);
+
+    let listed_sources: Vec<FolderSource> = tabs(control).into_iter().map(|(source, _, _)| source).collect();
+    assert!(listed_sources.contains(&FolderSource::Chosen(first_folder)), "the first directory is listed");
+    assert!(listed_sources.contains(&FolderSource::Chosen(second_folder)), "the second directory is listed");
+    let dropped = dropped_tabs(control);
+    assert_eq!(dropped.len(), 1, "the replays share one tab: {listed_sources:?}");
+    let listing = control.listing(dropped[0].0).expect("the tab has a listing");
+    assert_eq!(listed(listing), sorted(vec![one, two]), "which lists both");
+    assert_eq!(control.selected.get_untracked(), dropped[0].0, "and is selected");
+    assert!(workspace.open_replays().is_empty(), "no replay opens");
+    let toasts = window.texts_by_class("lui-toasts").concat();
+    let skipped = t!("ui.messages.drop_skipped", count = 2).into_owned();
+    assert_eq!(toasts.matches(&skipped).count(), 1, "one message counts the files left alone: {toasts:?}");
+}
+
+/// Each drop of several replays lists them in a tab of its own, numbered after the first.
+#[test]
+fn each_drop_lists_its_replays_in_a_tab_of_its_own() {
+    let (mut window, control) = open();
+    let workspace = workspace();
+    let (_dir, root) = replay_dir(3);
+    let [first, second, third] = FIXTURES.map(|name| root.join(name));
+
+    workspace.shell.dropped(vec![first.clone(), second.clone()]);
+    settle_in_real_time(&mut window);
+    workspace.shell.dropped(vec![second.clone(), third.clone()]);
+    settle_in_real_time(&mut window);
+
+    let dropped = dropped_tabs(control);
+    let labels: Vec<&str> = dropped.iter().map(|(_, label)| label.as_str()).collect();
+    assert_eq!(labels, ["Dropped", "Dropped 2"]);
+    let lists = |id| listed(control.listing(id).expect("the tab has a listing"));
+    assert_eq!(lists(dropped[0].0), sorted(vec![first, second.clone()]), "the first drop keeps its replays");
+    assert_eq!(lists(dropped[1].0), sorted(vec![second, third]), "the second lists its own");
+    assert_eq!(control.selected.get_untracked(), dropped[1].0, "the latest is selected");
+}
+
+/// A tab of dropped replays closes like a directory's, and takes its listing with it.
+#[test]
+fn closing_a_tab_of_dropped_replays_takes_its_listing() {
+    let (mut window, control) = open();
+    let workspace = workspace();
+    let (_dir, root) = replay_dir(2);
+    workspace.shell.dropped(vec![root.join(FIXTURES[0]), root.join(FIXTURES[1])]);
+    settle_in_real_time(&mut window);
+    let id = dropped_tabs(control)[0].0;
+
+    let close = window.by_test_id(&format!("replay-folder-close-{}", id.raw())).expect("the tab can be closed");
+    window.click(close).expect("the close button takes a click");
+    settle_in_real_time(&mut window);
+
+    assert!(dropped_tabs(control).is_empty(), "the tab is gone");
+    assert!(control.listing(id).is_none(), "with its listing");
+    assert_eq!(control.selected.get_untracked(), FolderId::INSTALL, "and the install's tab is selected");
+}
+
+/// A dropped replay whose header cannot be read, or whose read panics, is listed as a row saying
+/// so, beside the replays that read.
+#[test]
+fn a_dropped_replay_that_cannot_be_read_has_a_row_saying_so() {
+    let (mut window, control) = open();
+    let workspace = workspace();
+    let (_dir, root) = replay_dir(2);
+    let good = root.join(FIXTURES[0]);
+    let faulty = root.join(FIXTURES[1]);
+    let broken = root.join("broken.wowsreplay");
+    std::fs::write(&broken, b"not a replay").expect("the file is written");
+    simulated_panic::panic_on_parse(&faulty);
+
+    workspace.shell.dropped(vec![good.clone(), broken.clone(), faulty.clone()]);
+    settle_in_real_time(&mut window);
+
+    let listing = control.listing(dropped_tabs(control)[0].0).expect("the tab has a listing");
+    assert_eq!(listed(listing), std::slice::from_ref(&good), "the readable replay is listed");
+    let unreadable = listing.unreadable.with_untracked(Clone::clone);
+    let paths: Vec<&Path> = unreadable.iter().map(|replay| replay.path.as_path()).collect();
+    assert_eq!(paths, [broken.as_path(), faulty.as_path()], "the others are listed as unreadable");
+    assert!(matches!(unreadable[0].error, HeaderReadError::Failed { .. }), "{:?}", unreadable[0].error);
+    assert!(matches!(unreadable[1].error, HeaderReadError::Panicked { .. }), "{:?}", unreadable[1].error);
+    assert!(has_row(&window, &good), "the replay has its row");
+    for path in [&broken, &faulty] {
+        let id = format!("replay-row-unreadable-{}", path.display());
+        assert!(window.by_test_id(&id).is_some(), "{} has a row saying it cannot be read", path.display());
+    }
+}
+
+/// Real replays dropped together, such as the 15.10 Siegfried replays whose parse once panicked,
+/// are each listed. Reads the replays named by `WT_DROPPED_REPLAYS`, a list separated as `PATH`
+/// is.
+#[test]
+#[ignore = "needs the replays named by WT_DROPPED_REPLAYS"]
+fn real_dropped_replays_are_each_listed() {
+    let named = std::env::var_os("WT_DROPPED_REPLAYS").expect("WT_DROPPED_REPLAYS names replays");
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&named).collect();
+    paths.push(fixture(FIXTURES[0]));
+    let (mut window, control) = open();
+    let workspace = workspace();
+
+    workspace.shell.dropped(paths.clone());
+    settle_in_real_time(&mut window);
+
+    let listing = control.listing(dropped_tabs(control)[0].0).expect("the tab has a listing");
+    assert_eq!(listing.unreadable.with_untracked(Vec::len), 0, "every replay reads");
+    assert_eq!(listed(listing), sorted(paths.clone()), "and is listed");
+    for path in &paths {
+        assert!(has_row(&window, path), "{} has a row", path.display());
+    }
 }
 
 /// The header's open button drops a menu, and its directory item lists the directory picked.
@@ -636,6 +845,7 @@ fn a_rated_row_carries_its_rating_and_outcome() {
     ]);
     let tree = BrowserTree::build(&TreeInputs {
         files: &files,
+        unreadable: &[],
         summaries: &summaries,
         cache: None,
         fallback: None,
@@ -658,6 +868,7 @@ fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
     let summaries = HashMap::new();
     let inputs = TreeInputs {
         files: &files,
+        unreadable: &[],
         summaries: &summaries,
         cache: None,
         fallback: None,

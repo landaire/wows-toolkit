@@ -299,8 +299,8 @@ fn a_hovering_file_is_named_on_the_scrim() {
 
     shell().drag_entered(vec![PathBuf::from("one.wowsreplay"), PathBuf::from("two.wowsreplay")]);
     settle(&mut window);
-    let said = label(&mut window, SCRIM).expect("the scrim says two files are refused");
-    assert!(!said.contains("one.wowsreplay"), "two files are not an open, got {said:?}");
+    let said = label(&mut window, SCRIM).expect("the scrim says both files are listed");
+    assert_eq!(said, "Drop to list 2 replays");
 
     shell().drag_left();
     settle(&mut window);

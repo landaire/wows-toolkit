@@ -1,8 +1,8 @@
-//! The directories the listing shows, one tab each under the header: the install's replays
-//! directory first, then the ones the reader opened.
+//! The listings, one tab each under the header: the install's replays directory first, then the
+//! directories the reader opened and the replays dropped together.
 //!
-//! The install's directory and pinned directories are watched; any other is read once when it
-//! is opened and again on Refresh. A watched directory that is not selected counts the replays
+//! The install's directory and pinned directories are watched; any other listing is read once when
+//! it is opened and again on Refresh. A watched directory that is not selected counts the replays
 //! added or changed in it until the reader selects it.
 
 use std::collections::HashMap;
@@ -232,13 +232,27 @@ impl FolderId {
     }
 }
 
-/// Which directory a tab lists.
+/// Numbers the tabs of dropped replays in the order they were dropped, from one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DropNumber(u32);
+
+impl DropNumber {
+    pub const FIRST: Self = Self(1);
+
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// What a tab lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FolderSource {
     /// The install's replays directory, which follows the game directory in the settings.
     Install,
     /// A directory the reader opened, by its canonical path when it exists.
     Chosen(PathBuf),
+    /// Replays dropped on the window together.
+    Dropped { number: DropNumber, files: Vec<PathBuf> },
 }
 
 /// Whether a tab's directory was there when it was last looked for.
@@ -278,7 +292,7 @@ impl FolderTab {
             (FolderSource::Install, _, _) | (FolderSource::Chosen(_), true, FolderState::Listed) => {
                 ListingWatch::Watched
             }
-            (FolderSource::Chosen(_), _, _) => ListingWatch::Unwatched,
+            (FolderSource::Chosen(_) | FolderSource::Dropped { .. }, _, _) => ListingWatch::Unwatched,
         }
     }
 
@@ -286,12 +300,16 @@ impl FolderTab {
         match &self.source {
             FolderSource::Install => t!("ui.replay_folders.install").into_owned(),
             FolderSource::Chosen(root) => folder_name(root),
+            FolderSource::Dropped { number: DropNumber::FIRST, .. } => t!("ui.replay_folders.dropped").into_owned(),
+            FolderSource::Dropped { number, .. } => {
+                t!("ui.replay_folders.dropped_numbered", number = number.0).into_owned()
+            }
         }
     }
 
     fn root(&self) -> Option<&Path> {
         match &self.source {
-            FolderSource::Install => None,
+            FolderSource::Install | FolderSource::Dropped { .. } => None,
             FolderSource::Chosen(root) => Some(root),
         }
     }
@@ -327,6 +345,8 @@ pub struct BrowserControl {
     /// The grouping every listing shows, as the settings keep it.
     pub(super) grouping: RwSignal<ReplayGrouping, LocalStorage>,
     next_id: StoredValue<u64, LocalStorage>,
+    /// The number the next tab of dropped replays is named by.
+    next_drop: StoredValue<DropNumber, LocalStorage>,
     timers: StoredValue<Option<Timers>, LocalStorage>,
     /// The landed replays each tab counts once its ring has spread, one wait per tab.
     pub(super) pending_landings: StoredValue<HashMap<FolderId, PendingLanding>, LocalStorage>,
@@ -363,6 +383,7 @@ impl BrowserControl {
             history_dropped: StoredValue::new_local(Vec::new()),
             grouping: RwSignal::new_local(ReplayGrouping::default()),
             next_id: StoredValue::new_local(1),
+            next_drop: StoredValue::new_local(DropNumber::FIRST),
             timers: StoredValue::new_local(Timers::current()),
             pending_landings: StoredValue::new_local(HashMap::new()),
             install_key: StoredValue::new_local(None),
@@ -746,6 +767,23 @@ impl BrowserControl {
         self.select_folder(id);
     }
 
+    /// Lists `files`, replays dropped together, in a tab of their own, and selects it.
+    pub fn open_dropped(self, files: Vec<PathBuf>) {
+        let id = FolderId(self.next_id.get_value());
+        self.next_id.update_value(|next| *next += 1);
+        let number = self.next_drop.get_value();
+        self.next_drop.set_value(number.next());
+        self.folders.update(|folders| {
+            folders.push(FolderTab {
+                id,
+                source: FolderSource::Dropped { number, files },
+                pinned: false,
+                state: FolderState::Listed,
+            });
+        });
+        self.select_folder(id);
+    }
+
     /// Opens a recent directory, or says it is gone and drops it from the list.
     pub fn open_recent_folder(self, root: PathBuf) {
         self.spawn(async move {
@@ -793,7 +831,7 @@ impl BrowserControl {
             return;
         }
         let Some(tab) = self.tab(id) else { return };
-        if tab.source == FolderSource::Install || tab.pinned == pinned {
+        if !matches!(tab.source, FolderSource::Chosen(_)) || tab.pinned == pinned {
             return;
         }
         if tab.state == FolderState::Missing {
@@ -818,7 +856,7 @@ impl BrowserControl {
         self.save_pinned_folders();
     }
 
-    /// Closes a chosen directory's tab; the install's tab stays.
+    /// Closes a tab; the install's tab stays.
     pub fn close_folder(self, id: FolderId) {
         let Some(tab) = self.tab(id) else { return };
         if tab.source == FolderSource::Install {
@@ -833,12 +871,12 @@ impl BrowserControl {
         }
     }
 
-    /// Reads the tab's directory again: a chosen one is looked for first.
+    /// Reads the tab's listing again: a chosen directory is looked for first.
     pub fn refresh_folder(self, id: FolderId) {
         let Some(tab) = self.tab(id) else { return };
         match tab.source {
             FolderSource::Chosen(root) => self.check_folder(id, root),
-            FolderSource::Install => {
+            FolderSource::Install | FolderSource::Dropped { .. } => {
                 if let Some(listing) = self.listing(id) {
                     listing.relist();
                 }
@@ -1029,9 +1067,10 @@ fn FolderPane(
     let source = match &tab.source {
         FolderSource::Install => ListingSource::Install,
         FolderSource::Chosen(root) => ListingSource::Chosen(root.clone()),
+        FolderSource::Dropped { files, .. } => ListingSource::Dropped(files.clone()),
     };
     // A chosen directory is scanned once it has been found: here when the check already landed,
-    // otherwise when it lands.
+    // otherwise when it lands. Dropped replays are read at once.
     let watch = tab.watch();
     let reported = events.clone();
     let report: Rc<dyn Fn(ListingEvent)> =
@@ -1043,7 +1082,7 @@ fn FolderPane(
     on_cleanup_local(move || {
         control.listings.try_update(|listings| listings.remove(&id));
     });
-    if matches!(tab.source, FolderSource::Chosen(_)) && tab.state == FolderState::Listed {
+    if !matches!(tab.source, FolderSource::Install) && tab.state == FolderState::Listed {
         listing.relist();
     }
     let grouping = RenderEffect::new(move |_| listing.set_grouping(control.grouping.get()));
@@ -1142,9 +1181,12 @@ fn FolderTabView(
     let lifted =
         move || selected() && tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state != FolderState::Checking));
     let label = move || tab.with(|tab| tab.as_ref().map(FolderTab::label).unwrap_or_default());
-    let glyph = move || match tab.with(|tab| tab.as_ref().map(|tab| tab.source == FolderSource::Install)) {
-        Some(true) => Glyph::Monitor,
-        _ => Glyph::Folder,
+    let glyph = move || {
+        tab.with(|tab| match tab.as_ref().map(|tab| &tab.source) {
+            Some(FolderSource::Install) => Glyph::Monitor,
+            Some(FolderSource::Dropped { .. }) => Glyph::Copy,
+            Some(FolderSource::Chosen(_)) | None => Glyph::Folder,
+        })
     };
     let missing = move || tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.state == FolderState::Missing));
     let pinned = move || tab.with(|tab| tab.as_ref().is_some_and(|tab| tab.pinned));
@@ -1240,7 +1282,8 @@ fn FolderTabView(
 /// The tab's menu: pin or unpin, restart a stopped watch, refresh, close.
 fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
     let tab = control.tab(id)?;
-    let chosen = tab.source != FolderSource::Install;
+    let chosen = matches!(tab.source, FolderSource::Chosen(_));
+    let closable = tab.source != FolderSource::Install;
     let pins_ready = control.pins_saved.get() == SavedList::Read;
     let pin = (chosen && !(!tab.pinned && tab.state == FolderState::Missing)).then(|| {
         let (label, pinned) = if tab.pinned {
@@ -1259,7 +1302,7 @@ fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
             }
         }
     });
-    let close = chosen.then(|| {
+    let close = closable.then(|| {
         view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| control.close_folder(id))) {
                 {t!("ui.replay_folders.close").into_owned()}
@@ -1295,7 +1338,13 @@ pub(super) fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
         FolderState::Listed => {}
     }
 
-    let mut lines: Vec<String> = shown.into_iter().collect();
+    let dropped = match &tab.source {
+        FolderSource::Dropped { files, .. } => {
+            Some(t!("ui.replay_folders.dropped_count", count = files.len()).into_owned())
+        }
+        FolderSource::Install | FolderSource::Chosen(_) => None,
+    };
+    let mut lines: Vec<String> = shown.into_iter().chain(dropped).collect();
     match tab.watch() {
         ListingWatch::Watched => {
             let state = control.listings.with(|listings| listings.get(&id).map(|listing| listing.watch_state.get()));

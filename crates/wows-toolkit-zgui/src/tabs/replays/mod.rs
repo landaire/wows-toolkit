@@ -264,6 +264,7 @@ fn carry_out(workspace: ReplayWorkspace, control: BrowserControl, request: Repla
         ReplayRequest::OpenReplay(path) => {
             workspace.open(path, OpenTarget::ShowingTab);
         }
+        ReplayRequest::ListReplays(paths) => control.open_dropped(paths),
         ReplayRequest::OpenFolder(root) => control.open_folder(root),
         ReplayRequest::OpenRecentFolder(root) => control.open_recent_folder(root),
         ReplayRequest::RenderReplay(path) => workspace.render(RenderRequest { path, alts: Vec::new() }),

@@ -437,6 +437,69 @@ pub fn read_replay(path: PathBuf) -> Option<ScannedReplay> {
     })
 }
 
+/// Why a named replay's header could not be read.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum HeaderReadError {
+    #[error("{reason}")]
+    Failed { reason: String },
+    #[error("the reader stopped on an internal error: {report}")]
+    Panicked { report: PanicReport },
+}
+
+/// A named replay whose header could not be read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnreadableReplay {
+    pub path: PathBuf,
+    pub error: HeaderReadError,
+}
+
+/// What a read of named replay files found.
+pub struct ReadReplays {
+    pub files: Vec<ScannedReplay>,
+    pub unreadable: Vec<UnreadableReplay>,
+}
+
+/// Reads the header of each of `paths`, which the reader named rather than a
+/// directory listing found, so a file that cannot be read is reported rather
+/// than skipped. A panic in the reader fails only its own file.
+pub fn read_replay_files(
+    paths: &[PathBuf],
+    reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
+) -> ReadReplays {
+    let total = paths.len();
+    let _ = reports.unbounded_send(ScanProgress { done: 0, total });
+    let mut read = ReadReplays { files: Vec::with_capacity(total), unreadable: Vec::new() };
+    for (at, path) in paths.iter().enumerate() {
+        let meta = std::panic::catch_unwind(|| {
+            #[cfg(any(test, feature = "test-support"))]
+            crate::simulated_panic::panic_if_asked(path);
+            ReplayFile::meta_from_file(path)
+        });
+        let error = match meta {
+            Ok(Ok(meta)) => {
+                read.files.push(ScannedReplay {
+                    version: Version::try_from_client_exe(&meta.clientVersionFromExe),
+                    listed: ListedReplay::from_meta(&meta),
+                    path: path.clone(),
+                });
+                None
+            }
+            Ok(Err(report)) => Some(HeaderReadError::Failed { reason: report.current_context().to_string() }),
+            Err(payload) => Some(HeaderReadError::Panicked { report: PanicReport::caught(payload.as_ref()) }),
+        };
+        if let Some(error) = error {
+            tracing::warn!(path = %path.display(), %error, "a named replay could not be read");
+            read.unreadable.push(UnreadableReplay { path: path.clone(), error });
+        }
+        let done = at + 1;
+        if done % SCAN_REPORT_EVERY == 0 || done == total {
+            let _ = reports.unbounded_send(ScanProgress { done, total });
+        }
+    }
+
+    read
+}
+
 /// Sends the replays in `dir` the scan did not walk to `messages`, as
 /// [`WatchMessage::Missed`]. They reached the directory before the watch
 /// started and after the scan read it, so neither saw them.

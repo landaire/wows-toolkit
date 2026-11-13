@@ -1,10 +1,11 @@
-//! One directory's listing: its scan, its watch, the index's facts about its replays, and the
-//! rows they make.
+//! One listing: its scan, its watch, the index's facts about its replays, and the rows they
+//! make.
 //!
-//! The install's replays directory and every directory the reader opened each have one. The scan
-//! reads every replay's header off the UI thread, then the watch, when the listing is watched,
-//! reports what changes after it. Every result is checked against the scan and watch it belongs
-//! to, since the directory may have been listed again while it was on its way.
+//! The install's replays directory and every directory the reader opened each have one, as does
+//! each set of replays dropped together. The scan reads every replay's header off the UI thread,
+//! then the watch, when the listing is watched, reports what changes after it. Every result is
+//! checked against the scan and watch it belongs to, since the listing may have been read again
+//! while it was on its way.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -18,6 +19,7 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 use wows_toolkit_config::ReplayGrouping;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
 use wows_toolkit_replay_data::install::resolve_replays_dir;
@@ -28,12 +30,14 @@ use wows_toolkit_replay_data::replay_dir::DirWatch;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_replay_data::replay_dir::ScanProgress;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
+use wows_toolkit_replay_data::replay_dir::UnreadableReplay;
 use wows_toolkit_replay_data::replay_dir::WatchMessage;
 use wows_toolkit_replay_data::replay_dir::WatchSink;
 use wows_toolkit_replay_data::replay_dir::WatchState;
 use wows_toolkit_replay_data::replay_dir::WatchStopCause;
 use wows_toolkit_replay_data::replay_dir::missing_builds;
 use wows_toolkit_replay_data::replay_dir::read_replay;
+use wows_toolkit_replay_data::replay_dir::read_replay_files;
 use wows_toolkit_replay_data::replay_dir::report_missed;
 use wows_toolkit_replay_data::replay_dir::scan_replay_files;
 use wows_toolkit_replay_data::replay_dir::start_watch;
@@ -66,13 +70,15 @@ use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::tabs::replays::browser::tree::TreeInputs;
 
-/// Which directory a listing reads.
+/// What a listing reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListingSource {
     /// The install's replays directory, found from the game directory in the settings.
     Install,
     /// A directory the reader opened.
     Chosen(PathBuf),
+    /// Replays dropped on the window together, from any directories.
+    Dropped(Vec<PathBuf>),
 }
 
 /// Whether a listing follows its directory after the scan.
@@ -122,6 +128,8 @@ pub enum ListingEvent {
 pub struct Listing {
     pub source: RwSignal<ListingSource, LocalStorage>,
     pub files: RwSignal<Vec<ScannedReplay>, LocalStorage>,
+    /// Dropped replays whose headers could not be read.
+    pub unreadable: RwSignal<Vec<UnreadableReplay>, LocalStorage>,
     pub status: RwSignal<ScanStatus, LocalStorage>,
     pub progress: RwSignal<Option<ScanProgress>, LocalStorage>,
     pub summaries: RwSignal<HashMap<PathBuf, RowSummary>, LocalStorage>,
@@ -158,6 +166,8 @@ struct Work {
     restart: Option<TimeoutHandle>,
     /// Groups seen so far, so a new one opens expanded and one the reader closed stays closed.
     known_groups: HashSet<NodeKey>,
+    /// The index scope of each dropped replay, which is its own directory's.
+    dropped_scopes: HashMap<PathBuf, SourceScope>,
 }
 
 impl Listing {
@@ -174,6 +184,7 @@ impl Listing {
         let listing = Self {
             source: RwSignal::new_local(source),
             files: RwSignal::new_local(Vec::new()),
+            unreadable: RwSignal::new_local(Vec::new()),
             status: RwSignal::new_local(ScanStatus::Loading),
             progress: RwSignal::new_local(None),
             summaries: RwSignal::new_local(HashMap::new()),
@@ -200,6 +211,7 @@ impl Listing {
                 summaries: None,
                 restart: None,
                 known_groups: HashSet::new(),
+                dropped_scopes: HashMap::new(),
             }),
         };
 
@@ -242,14 +254,17 @@ impl Listing {
                 _ => None,
             };
             let tree = self.files.with(|files| {
-                self.summaries.with(|summaries| {
-                    BrowserTree::build(&TreeInputs {
-                        files,
-                        summaries,
-                        cache: cache.as_ref(),
-                        fallback: fallback.as_deref(),
-                        grouping,
-                        locale: locale.as_deref(),
+                self.unreadable.with(|unreadable| {
+                    self.summaries.with(|summaries| {
+                        BrowserTree::build(&TreeInputs {
+                            files,
+                            unreadable,
+                            summaries,
+                            cache: cache.as_ref(),
+                            fallback: fallback.as_deref(),
+                            grouping,
+                            locale: locale.as_deref(),
+                        })
                     })
                 })
             });
@@ -269,12 +284,14 @@ impl Listing {
         on_cleanup_local(move || drop(effect));
     }
 
-    /// The index scope the listing's replays are written under.
-    pub fn index_scope(self) -> SourceScope {
-        match self.source.get_untracked() {
-            ListingSource::Install => SourceScope::Live,
-            ListingSource::Chosen(root) => SourceScope::Folder(root),
-        }
+    /// The index scope the listing's replays are written under. `None` for dropped replays, which
+    /// are each written under their own directory's.
+    pub fn index_scope(self) -> Option<SourceScope> {
+        self.source.with_untracked(|source| match source {
+            ListingSource::Install => Some(SourceScope::Live),
+            ListingSource::Chosen(root) => Some(SourceScope::Folder(root.clone())),
+            ListingSource::Dropped(_) => None,
+        })
     }
 
     /// Whether the listing holds `path`.
@@ -287,10 +304,20 @@ impl Listing {
         self.tree.with_untracked(|tree| tree.order().to_vec())
     }
 
-    /// The listed replays as a forced re-index sees them.
+    /// The listed replays as a forced re-index sees them, each under its own scope.
     pub fn reindex_candidates(self) -> Vec<ReindexCandidate> {
-        let scope = self.index_scope();
-        self.files.with_untracked(|files| files.iter().map(|file| file.reindex_candidate(&scope)).collect())
+        let shared = self.index_scope();
+        self.work.with_value(|work| {
+            self.files.with_untracked(|files| {
+                files
+                    .iter()
+                    .filter_map(|file| {
+                        let scope = shared.as_ref().or_else(|| work.dropped_scopes.get(&file.path))?;
+                        Some(file.reindex_candidate(scope))
+                    })
+                    .collect()
+            })
+        })
     }
 
     /// The selected replays, sorted. Groups in the selection add nothing.
@@ -368,7 +395,7 @@ impl Listing {
         self.relist();
     }
 
-    /// Reads the directory again from the start.
+    /// Reads the listing again from the start.
     pub fn relist(self) {
         let generation = self.work.try_update_value(|work| {
             work.scan_generation += 1;
@@ -397,6 +424,7 @@ impl Listing {
                     blocking(move || resolve_replays_dir(&wows)).await
                 }
                 ListingSource::Chosen(root) => root,
+                ListingSource::Dropped(paths) => return self.read_dropped(generation, paths, wows_dir).await,
             };
             let directory_changed = self.directory.get_untracked().as_ref() != Some(&dir);
             if directory_changed {
@@ -429,13 +457,67 @@ impl Listing {
         self.work.update_value(|work| work.scan = Some(task));
     }
 
+    /// Reads dropped replays for scan `generation`, each with the index scope it is written
+    /// under.
+    async fn read_dropped(self, generation: u64, paths: Vec<PathBuf>, wows_dir: Option<String>) {
+        let (reports, mut progress) = mpsc::unbounded();
+        let read = blocking(move || {
+            let install = wows_dir.filter(|dir| !dir.is_empty()).map(|dir| {
+                let replays = resolve_replays_dir(Path::new(&dir));
+                // A directory that does not resolve is compared by the path it was named by.
+                std::fs::canonicalize(&replays).unwrap_or(replays)
+            });
+            let read = read_replay_files(&paths, &reports);
+            let scopes: HashMap<PathBuf, SourceScope> = read
+                .files
+                .iter()
+                .filter_map(|file| Some((file.path.clone(), dropped_scope(&file.path, install.as_deref())?)))
+                .collect();
+            (read, scopes)
+        });
+        let shown = self.spawn(async move {
+            while let Some(report) = progress.next().await {
+                self.show_scan_progress(generation, report);
+            }
+        });
+        let (read, scopes) = read.await;
+        shown.cancel();
+        if !self.is_current_scan(generation) {
+            return;
+        }
+
+        self.progress.set(None);
+        self.work.update_value(|work| work.dropped_scopes = scopes);
+        self.files.set(read.files);
+        self.unreadable.set(read.unreadable);
+        self.status.set(ScanStatus::Loaded);
+        self.summaries.set(HashMap::new());
+        self.load_summaries();
+        self.report_missing_builds();
+    }
+
     /// Reads the index's facts about the listed replays, which the rows report.
     pub fn load_summaries(self) {
-        let Some(dir) = self.directory.get_untracked() else { return };
-        let scope = match self.source.get_untracked() {
-            ListingSource::Install => SourceScope::Live,
-            ListingSource::Chosen(_) => SourceScope::Folder(dir),
+        let scopes: Vec<SourceScope> = match self.index_scope() {
+            Some(SourceScope::Live) => vec![SourceScope::Live],
+            Some(SourceScope::Folder(_)) => {
+                let Some(dir) = self.directory.get_untracked() else { return };
+                vec![SourceScope::Folder(dir)]
+            }
+            None => self.work.with_value(|work| {
+                let mut scopes: Vec<SourceScope> = Vec::new();
+                for scope in work.dropped_scopes.values() {
+                    if !scopes.contains(scope) {
+                        scopes.push(scope.clone());
+                    }
+                }
+                scopes
+            }),
         };
+        let listed: Option<HashSet<PathBuf>> = self
+            .source
+            .with_untracked(|source| matches!(source, ListingSource::Dropped(_)))
+            .then(|| self.work.with_value(|work| work.dropped_scopes.keys().cloned().collect()));
         let services = self.work.with_value(|work| work.services);
         let Some(pool) = services.settings.pool() else { return };
         let generation = self.work.try_update_value(|work| {
@@ -447,12 +529,17 @@ impl Listing {
         let task = self.spawn(async move {
             let read = services
                 .on_tokio(async move {
-                    match scope.existing(&pool).await? {
-                        Some(source) => {
-                            wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await
-                        }
-                        None => Ok(HashMap::new()),
+                    let mut summaries = HashMap::new();
+                    for scope in scopes {
+                        let Some(source) = scope.existing(&pool).await? else { continue };
+                        let held = wows_toolkit_config::index::query::row_summaries_for_source(&pool, source).await?;
+                        // A dropped listing keeps its own replays' facts, not their whole directories'.
+                        summaries.extend(
+                            held.into_iter()
+                                .filter(|(path, _)| listed.as_ref().is_none_or(|listed| listed.contains(path))),
+                        );
                     }
+                    Ok::<_, IndexError>(summaries)
                 })
                 .await;
             let current = self.work.try_with_value(|work| work.summaries_generation == generation);
@@ -711,4 +798,18 @@ impl Listing {
         self.watch_state.set(WatchState::Stopped { cause: cause.clone(), next });
         self.say(ListingEvent::WatchStopped { cause, next });
     }
+}
+
+/// The index scope a dropped replay is written under: the Live source's when it is in the
+/// install's replays directory `install`, otherwise its own directory's, as a tab listing that
+/// directory would write it. `None` for a path with no directory.
+fn dropped_scope(path: &Path, install: Option<&Path>) -> Option<SourceScope> {
+    let dir = path.parent()?;
+    // A directory that does not resolve is named as it was dropped.
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if install == Some(dir.as_path()) {
+        return Some(SourceScope::Live);
+    }
+
+    Some(SourceScope::Folder(dir))
 }
