@@ -203,6 +203,9 @@ const CSS: &str = css!(
         flex-direction: row;
         align-items: center;
         gap: 4px;
+    }
+    .wt-stats__modes[data-narrowed=true] {
+        background-color: var(--zui-color-secondary);
     }"
 );
 
@@ -630,6 +633,8 @@ pub fn StatsBody(
                 state = dock,
                 class = "wt-stats__dock",
                 menu = dock_menu_strings(locale),
+                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
+                tabs_label = Signal::derive_local(locale.text("ui.tabs.stats")),
                 attr:data-testid = match scope {
                     StatsScope::Session => "stats-dock",
                     StatsScope::Directory => "directory-stats-dock",
@@ -1066,7 +1071,6 @@ fn ModeMenu(
         0 => t!("ui.stats.mode_label").into_owned(),
         count => format!("{} ({count})", t!("ui.stats.mode_label")),
     };
-    let variant = if selected() > 0 { ButtonVariant::Secondary } else { ButtonVariant::Outline };
     let all = Binding::controlled(Signal::derive_local(move || selected() == 0), move |_: bool| change.run(None));
     // The selected modes by name, or All while none narrows the games.
     let tooltip = move || {
@@ -1089,7 +1093,13 @@ fn ModeMenu(
         Tooltip {
             TooltipTrigger {
                 DropdownMenu {
-                    DropdownMenuTrigger(size = ButtonSize::Sm, variant = variant, attr:data-testid = "stats-mode-filter-trigger") {{label}}
+                    DropdownMenuTrigger(
+                        size = ButtonSize::Sm,
+                        variant = ButtonVariant::Outline,
+                        class = "wt-stats__modes",
+                        attr:data-narrowed = move || Some((selected() > 0).to_string()),
+                        attr:data-testid = "stats-mode-filter-trigger"
+                    ) {{label}}
                     DropdownMenuContent(attr:data-testid = "stats-mode-filter") {
                         MenuLabel {{t!("ui.stats.mode_label").into_owned()}}
                         MenuCheckboxItem(checked = all, close_on_select = false, attr:data-testid = "stats-mode-all") {{t!("ui.stats.div_all").into_owned()}}

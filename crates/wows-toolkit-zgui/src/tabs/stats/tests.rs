@@ -152,6 +152,24 @@ fn the_stats_division_filter_is_single_select() {
     click(&mut window, "stats-division-all");
 }
 
+/// The mode filter's button stands out while it narrows the games, and stops once it does not.
+#[test]
+fn the_mode_filter_button_shows_when_it_narrows_the_games() {
+    let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    let narrowed = |window: &HeadlessWindow| {
+        let trigger = window.by_test_id("stats-mode-filter-trigger").expect("two modes offer the mode filter");
+        window.all_by_attribute("data-narrowed", "true").contains(&trigger)
+    };
+    assert!(!narrowed(&window), "every mode is shown to begin with");
+
+    click(&mut window, "stats-mode-filter-trigger");
+    click(&mut window, "stats-mode-pvp");
+    assert!(narrowed(&window), "one mode ticked narrows the games");
+
+    click(&mut window, "stats-mode-pvp");
+    assert!(!narrowed(&window), "unticking it shows every mode again");
+}
+
 #[test]
 fn adding_a_chart_opens_another_panel_on_the_asked_statistic() {
     let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
