@@ -30,6 +30,7 @@ use wows_toolkit_viewmodel::settings::keys;
 use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Toggled;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::returning_reader;
@@ -236,6 +237,33 @@ fn a_two_factor_challenge_asks_for_the_code() {
         assert!(launcher.has(id), "{id} is shown");
     }
     assert!(!launcher.has("launcher-username"));
+}
+
+/// The words beside the backup code and safe mode boxes tick and untick them, as the boxes do.
+#[test]
+fn the_checkbox_labels_toggle_their_boxes() {
+    let mut launcher = LauncherWindow::open();
+    launcher.adopt(configured());
+    launcher.found(vec![wgc_install(Path::new("/games/World_of_Warships"))], |_| up_to_date());
+    launcher.model.update_launcher(|state| {
+        test_support::begin_sign_in(state, wgc_auth::AccountRealm::Eu, "captain".into());
+    });
+    launcher.model.apply(test_support::two_factor_required("challenge".into()));
+    launcher.settle();
+
+    let checked = |launcher: &mut LauncherWindow, id: &str| {
+        let element = launcher.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        launcher.window.a11y(element).and_then(|state| state.checked)
+    };
+    for (label, control) in
+        [("launcher-backup-code-label", "launcher-backup-code"), ("launcher-safe-mode-label", "launcher-safe-mode")]
+    {
+        assert_eq!(checked(&mut launcher, control), Some(Toggled::False), "{control} starts unticked");
+        launcher.press(label);
+        assert_eq!(checked(&mut launcher, control), Some(Toggled::True), "{label} ticks {control}");
+        launcher.press(label);
+        assert_eq!(checked(&mut launcher, control), Some(Toggled::False), "{label} unticks {control}");
+    }
 }
 
 #[test]

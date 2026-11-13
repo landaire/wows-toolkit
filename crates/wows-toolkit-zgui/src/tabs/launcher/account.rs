@@ -155,6 +155,8 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
     let locale = Services::current().locale;
     let busy = login_busy(model);
     let backup_box = NodeRef::new();
+    let backup_name = NodeRef::new();
+    let code = form.code;
 
     view! {
         column(class = "wt-launcher__column wt-launcher__column--wide") {
@@ -168,8 +170,15 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
                     attr:data-testid = "launcher-code"
                 )
                 row(class = "wt-launcher__row wt-launcher__row--tight") {
-                    Checkbox(checked = form.code, node_ref = backup_box, attr:data-testid = "launcher-backup-code")
-                    Label(control = backup_box) {{locale.text("ui.launcher.account.use_backup_code")}}
+                    Checkbox(checked = code, node_ref = backup_box, labelled_by = backup_name, attr:data-testid = "launcher-backup-code")
+                    Label(
+                        node_ref = backup_name,
+                        control = backup_box,
+                        attr:data-testid = "launcher-backup-code-label",
+                        on:click = move |_| code.set(Checked::from(!code.get_untracked().is_checked()))
+                    ) {
+                        {locale.text("ui.launcher.account.use_backup_code")}
+                    }
                 }
             }
             LoginError(model = model)

@@ -45,6 +45,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::AlertDialogActionProps;
 use zgui_ui::AlertDialogCancelProps;
@@ -57,6 +58,7 @@ use zgui_ui::AlertDialogTitleProps;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::SelectContentProps;
 use zgui_ui::SelectItemProps;
 use zgui_ui::SelectProps;
@@ -327,7 +329,9 @@ pub fn PlayerTrackerTab() -> impl IntoView {
             Dock(
                 state = dock,
                 class = "wt-tracker-dock",
-                menu = dock_menu_strings(locale)
+                menu = dock_menu_strings(locale),
+                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
+                tabs_label = Signal::derive_local(locale.text("ui.tabs.player_tracker"))
             )
         }
     }
@@ -451,6 +455,8 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
     }));
     keep(RenderEffect::new(move |_| model.set_filter(filter.get())));
     let show_division_mates = Signal::derive_local(move || Checked::from(model.show_division_mates.get()));
+    let division_mates_box = NodeRef::new();
+    let division_mates_name = NodeRef::new();
 
     let escape = EscapeClears::new(filter);
     view! {
@@ -512,9 +518,17 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                                 model.set_show_division_mates(checked == Checked::Yes);
                             }),
                             attr:data-testid = "tracker-show-division-mates",
-                            a11y:label = t!("ui.player_tracker.show_division_mates").into_owned()
+                            labelled_by = division_mates_name,
+                            node_ref = division_mates_box
                         )
-                        text {{t!("ui.player_tracker.show_division_mates").into_owned()}}
+                        Label(
+                            node_ref = division_mates_name,
+                            control = division_mates_box,
+                            attr:data-testid = "tracker-show-division-mates-label",
+                            on:click = move |_| model.set_show_division_mates(!model.show_division_mates.get_untracked())
+                        ) {
+                            {t!("ui.player_tracker.show_division_mates").into_owned()}
+                        }
                     }
                 }
                 TooltipContent {{t!("ui.player_tracker.show_division_mates_hover").into_owned()}}

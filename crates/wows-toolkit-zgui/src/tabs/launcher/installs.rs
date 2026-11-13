@@ -12,6 +12,7 @@ use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -44,6 +45,7 @@ pub fn InstallsSection(model: LauncherModel, shell: Shell) -> impl IntoView {
     // Applies to the next launch only.
     let safe_mode = RwSignal::new_local(Checked::No);
     let safe_mode_box = NodeRef::new();
+    let safe_mode_name = NodeRef::new();
     let installs = Memo::new(move |_| model.with(|state| InstallView::all(&state.launcher)));
     let discovering = Memo::new(move |_| model.with(|state| state.launcher.is_discovering()));
 
@@ -74,8 +76,15 @@ pub fn InstallsSection(model: LauncherModel, shell: Shell) -> impl IntoView {
                 }
                 box(class = "wt-launcher__spacer")
                 row(class = "wt-launcher__row wt-launcher__row--tight") {
-                    Checkbox(checked = safe_mode, node_ref = safe_mode_box, attr:data-testid = "launcher-safe-mode")
-                    Label(control = safe_mode_box) {{locale.text("ui.launcher.safe_mode")}}
+                    Checkbox(checked = safe_mode, node_ref = safe_mode_box, labelled_by = safe_mode_name, attr:data-testid = "launcher-safe-mode")
+                    Label(
+                        node_ref = safe_mode_name,
+                        control = safe_mode_box,
+                        attr:data-testid = "launcher-safe-mode-label",
+                        on:click = move |_| safe_mode.set(Checked::from(!safe_mode.get_untracked().is_checked()))
+                    ) {
+                        {locale.text("ui.launcher.safe_mode")}
+                    }
                 }
             }
             if move || installs.get().is_empty() && !discovering.get() {

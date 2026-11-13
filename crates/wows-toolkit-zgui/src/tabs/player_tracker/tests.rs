@@ -18,6 +18,7 @@ use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -225,6 +226,18 @@ fn the_filter_marks_names_and_tags() {
     let marked = tracker.window.texts_by_class(landaire_ui::MARK_CLASS);
     assert_eq!(marked.iter().filter(|piece| *piece == "WTK").count(), 2, "kept by the tag: {marked:?}");
     assert!(!marked.contains(&"Abe".to_owned()), "the names are plain");
+}
+
+/// The words beside the division mates box tick and untick it, as the box itself does.
+#[test]
+fn the_division_mates_label_toggles_its_box() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let before = tracker.model.show_division_mates.get_untracked();
+
+    tracker.press("tracker-show-division-mates-label");
+    assert_eq!(tracker.model.show_division_mates.get_untracked(), !before, "the label ticks the box");
+    tracker.press("tracker-show-division-mates-label");
+    assert_eq!(tracker.model.show_division_mates.get_untracked(), before, "and unticks it");
 }
 
 #[test]
