@@ -632,7 +632,7 @@ impl GameData {
 
     /// The playable classes `param` can hit when its `ignoreClasses` leaves
     /// some out, as the port's `canHitClasses` (FactoryTorpedoes.py).
-    fn torpedo_targets(&self, param: &str) -> Option<Vec<ShipClass>> {
+    pub(crate) fn torpedo_targets(&self, param: &str) -> Option<Vec<ShipClass>> {
         let entry = self.provider().game_param_by_name(param)?;
         let ignored: Vec<ShipClass> = entry
             .projectile()?
