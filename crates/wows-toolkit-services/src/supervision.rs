@@ -11,6 +11,9 @@ use std::panic::PanicHookInfo;
 use std::time::Duration;
 use std::time::Instant;
 
+pub mod queue;
+pub mod watchdog;
+
 /// A panic, as far as it could be read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PanicReport {
@@ -44,6 +47,23 @@ impl fmt::Display for PanicReport {
             (Some(message), None) => f.write_str(message),
             (None, Some(location)) => write!(f, "panic at {location}"),
             (None, None) => f.write_str("panic with no message"),
+        }
+    }
+}
+
+/// Why a worker thread stopped.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkerStop {
+    Panicked(PanicReport),
+    /// The thread ended without a panic while it was still wanted.
+    Exited,
+}
+
+impl fmt::Display for WorkerStop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Panicked(report) => write!(f, "it panicked: {report}"),
+            Self::Exited => f.write_str("its thread ended"),
         }
     }
 }
