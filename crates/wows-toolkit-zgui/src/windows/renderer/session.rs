@@ -1175,10 +1175,16 @@ impl RendererSession {
         let has_tool = self.annotator.with_untracked(Annotator::has_tool);
         if modifiers.primary()
             && let Key::Character(text) = unmodified
-            && let Some(tool) = tool_for_key(&text.to_lowercase())
         {
-            self.take_up(tool);
-            return true;
+            let text = text.to_lowercase();
+            if text == "z" && !modifiers.shift() {
+                self.annotate(|annotator, link| annotator.undo(link));
+                return true;
+            }
+            if let Some(tool) = tool_for_key(&text) {
+                self.take_up(tool);
+                return true;
+            }
         }
         let exporting = self.export.with_untracked(|export| export.progress.is_some());
         match key {

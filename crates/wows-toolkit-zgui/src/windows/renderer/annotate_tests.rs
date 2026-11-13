@@ -227,6 +227,57 @@ fn undo_takes_back_what_was_drawn() {
     assert!(state.lock().current_annotation_sync.as_ref().is_none_or(|sync| sync.annotations.is_empty()));
 }
 
+/// The primary modifier and Z takes back what was drawn, as the shortcut sheet says.
+#[test]
+fn the_undo_chord_takes_back_what_was_drawn() {
+    let (mut window, session) = open();
+    let state = Arc::default();
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    session.set_collab(link);
+    settle(&mut window);
+    session.annotate(|annotator, link| {
+        annotator.take_up(Tool::Line);
+        annotator.stroke(link, Stroke::Began { at: [100.0, 100.0] });
+        annotator.stroke(link, Stroke::Ended { at: [200.0, 100.0] });
+        annotator.take_up(Tool::None);
+    });
+    click(&mut window, "replay-renderer-viewport");
+
+    window.press_character('z', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert!(!session.annotator.with_untracked(|annotator| annotator.can_undo()), "the line was taken back");
+    assert!(state.lock().current_annotation_sync.as_ref().is_none_or(|sync| sync.annotations.is_empty()));
+}
+
+/// Keys typed into a search on the renderer's popovers stay with the search: the undo chord does
+/// not take back a drawing, and a space does not start playback.
+#[test]
+fn typing_in_a_search_keeps_the_keys() {
+    let (mut window, session) = open();
+    let state = Arc::default();
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    session.set_collab(link);
+    settle(&mut window);
+    session.annotate(|annotator, link| {
+        annotator.take_up(Tool::Line);
+        annotator.stroke(link, Stroke::Began { at: [100.0, 100.0] });
+        annotator.stroke(link, Stroke::Ended { at: [200.0, 100.0] });
+        annotator.take_up(Tool::None);
+    });
+    click(&mut window, "replay-renderer-timeline-toggle");
+    click(&mut window, "replay-renderer-timeline-search");
+
+    window.type_text("a b");
+    settle(&mut window);
+    let typed = session.events.with_untracked(|events| events.filter().search.clone());
+    assert_eq!(typed, "a b", "the search has the keyboard");
+    assert!(!session.playback.with_untracked(|playback| playback.is_playing()), "playback did not start");
+
+    window.press_character('z', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert!(session.annotator.with_untracked(|annotator| annotator.can_undo()), "the drawing stands");
+}
+
 /// Holding the primary modifier puts the shortcut sheet up in the corner, listing every tool's
 /// chord, and letting go takes it down.
 #[test]
@@ -329,4 +380,35 @@ fn a_picked_ship_gets_a_handle_and_a_chooser() {
     assert!(window.by_test_id("replay-renderer-ship-chooser").is_some(), "the chooser is up");
     assert!(window.by_label(&t!("ui.renderer.annotations.no_ship")).is_some(), "saying no ship is chosen yet");
     assert!(window.by_label(&t!("ui.renderer.annotations.ship_hint")).is_some(), "with a search to find one by");
+}
+
+/// A click with the primary modifier held adds to what is picked, as the shortcut sheet says; a
+/// click with Shift held picks afresh.
+#[test]
+fn the_primary_modifier_adds_to_the_picked() {
+    let (mut window, session) = open();
+    let state = Arc::default();
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let ship =
+        |pos: [f32; 2]| Annotation::Ship { pos, yaw: 0.0, species: "Cruiser".to_owned(), friendly: true, config: None };
+    state.lock().current_annotation_sync = Some(AnnotationSyncState {
+        annotations: vec![ship([300.0, 400.0]), ship([600.0, 400.0])],
+        ids: vec![11, 12],
+        owners: vec![3, 3],
+    });
+    session.set_collab(link);
+    settle(&mut window);
+    let picked = || session.annotator.with_untracked(|annotator| annotator.picked().picked().to_vec());
+
+    window.click_at(window_point(session, (300.0, 400.0)));
+    settle(&mut window);
+    assert_eq!(picked(), [0], "a plain click picks one");
+
+    window.click_at_with(window_point(session, (600.0, 400.0)), Modifiers::SHIFT);
+    settle(&mut window);
+    assert_eq!(picked(), [1], "Shift picks afresh rather than adding");
+
+    window.click_at_with(window_point(session, (300.0, 400.0)), Modifiers::PRIMARY);
+    settle(&mut window);
+    assert_eq!(picked(), [1, 0], "the primary modifier adds");
 }

@@ -1258,6 +1258,12 @@ impl ReplayRendererPanel {
         let shift = event.keystroke.modifiers.shift;
         let ctrl = event.keystroke.modifiers.secondary(cx);
 
+        if ctrl && !shift && event.keystroke.key == "z" {
+            self.undo(cx);
+            cx.stop_propagation();
+            return;
+        }
+
         // The drawing tools, which were mouse-only here: the egui board takes
         // ctrl and a digit for each (`replay/minimap_view/shapes.rs:84`), and a
         // reader drawing over a battle has one hand on the mouse.

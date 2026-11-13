@@ -279,8 +279,8 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
                 }
                 session.pointer_left();
             },
-            on:click = move |ev| session.click(window_point(ev.position), ev.modifiers.shift(), 1),
-            on:double_click = move |ev| session.click(window_point(ev.position), ev.modifiers.shift(), 2),
+            on:click = move |ev| session.click(window_point(ev.position), ev.modifiers.primary(), 1),
+            on:double_click = move |ev| session.click(window_point(ev.position), ev.modifiers.primary(), 2),
             on:context_menu = move |ev| ev.prevent_default(),
             on:wheel = move |ev| {
                 place(session, map);
