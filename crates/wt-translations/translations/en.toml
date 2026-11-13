@@ -428,6 +428,8 @@ ships_loading = "Loading the ship list..."
 ships_unavailable = "No ship list: %{reason}"
 matches_found = "%{count} match(es)"
 nothing_indexed = "Nothing is indexed yet"
+sample_stats = "Debug: show sample data in Stats"
+restore_stats = "Debug: show recorded data in Stats"
 
 [ui.settings.twitch]
 heading = "Twitch Settings"
@@ -853,6 +855,7 @@ score_excess = "Score limit exceeded"
 
 [ui.stats]
 overview = "Overview"
+sample_notice = "Sample data, not recorded games"
 limit = "Limit"
 division = "Div:"
 div_all = "All"
@@ -1048,6 +1051,7 @@ copied = "Copied %{name}"
 
 [ui.search]
 undo = "Undo the last change to the query"
+edit_value = "Edit value"
 redo = "Redo the change that was undone"
 pill_select = "Select"
 pill_deselect = "Deselect"
