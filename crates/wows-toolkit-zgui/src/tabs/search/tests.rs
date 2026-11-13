@@ -228,6 +228,24 @@ fn a_completion_marks_what_was_typed() {
     assert!(marked.iter().any(|piece| piece.eq_ignore_ascii_case("dam")), "a run is marked whole: {marked:?}");
 }
 
+/// Typed one letter at a time, as a person types, every row ends on only the letters matched.
+#[test]
+fn each_completion_marks_only_the_typed_word() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    click(&mut window, "search-query");
+    for letter in "ship".chars() {
+        window.type_text(&letter.to_string());
+        settle(&mut window);
+    }
+
+    let offered = search.offered_untracked();
+    assert!(offered.iter().any(|completion| completion.label == "Enemy ship"), "{offered:?}");
+    let marked = window.texts_by_class(MARK_CLASS);
+    assert_eq!(marked.len(), offered.len(), "one mark a row: {marked:?}");
+    assert!(marked.iter().all(|piece| piece == "ship"), "only the typed word is marked: {marked:?}");
+}
+
 /// The palette's "Games I won" puts its query in the bar and shows the tab.
 #[test]
 fn the_palette_seeds_a_search() {

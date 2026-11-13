@@ -15,12 +15,11 @@ const SHEET: &str = "landaire-ui-marked-text";
 /// The class on each marked piece of a [`MarkedText`].
 pub const MARK_CLASS: &str = "lui-mark";
 
-const CSS: &str = css!(
-    ".lui-mark {
-        font-weight: 700;
-        background-color: color-mix(in srgb, var(--lui-color-accent) 30%, transparent);
-    }"
-);
+/// The class on each unmarked piece of a [`MarkedText`].
+const UNMARKED_CLASS: &str = "lui-unmarked";
+
+// A mark keeps the text's weight, so a truncated label is cut where it would be unmarked.
+const CSS: &str = css!(".lui-mark { background-color: var(--lui-color-mark); }");
 
 /// A run of text with some of it marked, such as the letters a filter matched.
 ///
@@ -34,15 +33,13 @@ pub fn MarkedText(
     #[prop(attrs)] attrs: Attrs,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
+    // Every piece carries a class: an element rebuilt in place keeps the classes it had when the
+    // new one names none, so an unmarked piece would stay marked.
     let pieces = pieces(&text, &ranges)
         .into_iter()
         .map(|(range, marked)| {
-            let piece = text[range].to_owned();
-            if marked {
-                AnyView::new(view! { text(class = MARK_CLASS) {{piece}} })
-            } else {
-                AnyView::new(view! { text {{piece}} })
-            }
+            let class = if marked { MARK_CLASS } else { UNMARKED_CLASS };
+            AnyView::new(view! { text(class = class) {{text[range].to_owned()}} })
         })
         .collect::<Vec<AnyView>>();
 

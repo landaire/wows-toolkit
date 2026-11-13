@@ -156,6 +156,13 @@ pub fn lui_declarations(palette: &Palette) -> Declarations {
     declarations.push("--lui-color-text-faint", &tones.text_faint.to_string());
     // The dimming behind a drawer, the same black on either appearance.
     declarations.push("--lui-color-scrim", &Rgb::BLACK.with_opacity(Opacity(0.25)).to_string());
+    // Filter matches: amber stays apart from grey panels and selected rows in the dark, the
+    // accent does in the light.
+    let mark = match palette.appearance {
+        Appearance::Dark => tones.warning,
+        Appearance::Light => palette.accent,
+    };
+    declarations.push("--lui-color-mark", &mark.with_opacity(Opacity(0.3)).to_string());
     // zgui paints the text selection band in this color.
     declarations.push("--zgui-selection", &palette.text_selection().to_string());
 
