@@ -19,6 +19,7 @@ use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
+use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -350,6 +351,27 @@ fn the_dots_name_their_menu_except_while_it_is_open() {
     window.hover(dots).expect("the dots take the pointer");
     window.advance(past_delay);
     assert!(window.texts_by_class("lui-tooltip").is_empty(), "the open menu is not covered by the tip");
+}
+
+#[test]
+fn each_twitch_login_in_the_menu_is_marked_as_a_copy() {
+    let mut model = sample_model();
+    let logins = ["harvey635", "harvey_635"];
+    let row = model.rows.iter_mut().find(|row| row.db_id.raw() == 1).expect("the sample has player 1");
+    row.twitch_candidates =
+        logins.iter().map(|login| SniperCandidate { login: (*login).to_owned(), minutes: vec![3] }).collect();
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+
+    let chip = window.by_test_id("player-twitch").expect("the row has its Twitch chip");
+    window.click(chip).expect("the chip takes a click");
+    window.advance(Duration::from_millis(300));
+    let copies: Vec<_> =
+        window.all_by_attribute("data-icon", "copy").into_iter().filter_map(|icon| window.bounds(icon)).collect();
+    for login in logins {
+        let item = window.by_role_and_label(Role::MenuItem, login).expect("the menu offers each login");
+        let item = window.bounds(item).expect("the item has a box");
+        assert!(copies.iter().any(|icon| item.contains(icon.origin)), "{login} shows the copy icon");
+    }
 }
 
 #[test]

@@ -609,7 +609,12 @@ fn twitch_chip(candidates: &[SniperCandidate], cx: TableCx) -> Option<AnyView> {
                     let copy = UnsyncCallback::new(move |()| {
                         cx.copy(login.clone(), t!("ui.twitch.copied", name = login).into_owned());
                     });
-                    AnyView::new(view! { MenuItem(on_select = copy) {{shown}} })
+                    AnyView::new(view! {
+                        MenuItem(on_select = copy) {
+                            box(class = "wt-pt-item-icon") { AppIcon(glyph = Glyph::Copy) }
+                            {shown.clone()}
+                        }
+                    })
                 })
                 .collect::<Vec<_>>()
         })
