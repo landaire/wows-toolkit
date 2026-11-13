@@ -119,7 +119,7 @@ pub const CSS: &str = css!(
         margin: 0 3px;
         transform: rotate(90deg);
     }
-    .wt-pt-flag { flex: none; width: 24px; height: 14px; }
+    .wt-pt-flag { flex: none; width: 20.125px; height: 14px; }
     .wt-pt-clan { color: var(--wt-clan-light); }
     @media (prefers-color-scheme: dark) {
         .wt-pt-clan { color: var(--wt-clan-dark); }
