@@ -109,10 +109,10 @@ impl TierDrop {
 }
 
 /// Single-mip tier suffixes stacked above the `.dds` mip tail, largest first.
-const DDS_TIER_SUFFIXES: [&str; 3] = ["dd0", "dd1", "dd2"];
+pub(crate) const DDS_TIER_SUFFIXES: [&str; 3] = ["dd0", "dd1", "dd2"];
 
 /// Read a whole file from the VFS, treating an empty file as absent.
-fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
+pub(crate) fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
     let vfs_path = vfs.join(path).ok()?;
     let mut file = vfs_path.open_file().ok()?;
     let mut data = Vec::new();
