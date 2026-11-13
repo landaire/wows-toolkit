@@ -36,10 +36,12 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
     let locale = services.locale;
     let item = move |run: fn(Services, Shell)| UnsyncCallback::new(move |()| run(services, shell));
 
+    // The menu sits inside the tooltip's trigger: a tooltip holds an overlay state of its own, so a
+    // menu trigger beneath it would open the tooltip rather than the menu.
     view! {
-        DropdownMenu {
-            Tooltip {
-                TooltipTrigger {
+        Tooltip {
+            TooltipTrigger {
+                DropdownMenu {
                     DropdownMenuTrigger(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconSm,
@@ -48,39 +50,39 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
                     ) {
                         Icon(icon = ELLIPSIS)
                     }
-                }
-                TooltipContent {{locale.text("ui.menu.file")}}
-            }
-            DropdownMenuContent {
-                MenuItem(
-                    on_select = UnsyncCallback::new(move |()| shell.tactics.open()),
-                    attr:data-testid = "app-menu-tactics-board"
-                ) {
-                    {locale.text("ui.windows.tactics_board")}
-                }
-                MenuSeparator()
-                MenuItem(on_select = item(|services, shell| update::check_for_update(services, shell, Asked::ByHand))) {
-                    {locale.text("ui.menu.check_updates")}
-                }
-                MenuItem(on_select = item(|_, shell| crate::shell::about::show_about(shell))) {
-                    {locale.text("ui.menu.about")}
-                }
-                MenuSeparator()
-                MenuItem(on_select = item(|_, _| desktop::open_url(ISSUES_URL))) {
-                    {locale.text("ui.buttons.create_issue")}
-                }
-                MenuItem(on_select = item(|_, _| desktop::open_url(DISCORD_URL))) {
-                    {locale.text("ui.buttons.discord")}
-                }
-                MenuSeparator()
-                MenuItem(on_select = UnsyncCallback::new(move |()| {
-                    if let Some(windows) = try_use_windows() {
-                        windows.quit();
+                    DropdownMenuContent {
+                        MenuItem(
+                            on_select = UnsyncCallback::new(move |()| shell.tactics.open()),
+                            attr:data-testid = "app-menu-tactics-board"
+                        ) {
+                            {locale.text("ui.windows.tactics_board")}
+                        }
+                        MenuSeparator()
+                        MenuItem(on_select = item(|services, shell| update::check_for_update(services, shell, Asked::ByHand))) {
+                            {locale.text("ui.menu.check_updates")}
+                        }
+                        MenuItem(on_select = item(|_, shell| crate::shell::about::show_about(shell))) {
+                            {locale.text("ui.menu.about")}
+                        }
+                        MenuSeparator()
+                        MenuItem(on_select = item(|_, _| desktop::open_url(ISSUES_URL))) {
+                            {locale.text("ui.buttons.create_issue")}
+                        }
+                        MenuItem(on_select = item(|_, _| desktop::open_url(DISCORD_URL))) {
+                            {locale.text("ui.buttons.discord")}
+                        }
+                        MenuSeparator()
+                        MenuItem(on_select = UnsyncCallback::new(move |()| {
+                            if let Some(windows) = try_use_windows() {
+                                windows.quit();
+                            }
+                        })) {
+                            {locale.text("ui.menu.quit")}
+                        }
                     }
-                })) {
-                    {locale.text("ui.menu.quit")}
                 }
             }
+            TooltipContent {{locale.text("ui.menu.file")}}
         }
     }
 }

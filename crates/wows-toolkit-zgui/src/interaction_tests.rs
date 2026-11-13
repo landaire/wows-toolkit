@@ -181,6 +181,18 @@ fn hovering_a_tab_leaves_the_selection_alone() {
 }
 
 #[test]
+fn clicking_the_app_menu_button_opens_the_menu() {
+    let mut window = open_bare_shell();
+    assert!(window.by_test_id("app-menu-tactics-board").is_none(), "the menu is closed at startup");
+
+    let trigger = window.by_test_id("app-menu").expect("the app menu button is on the strip");
+    window.click(trigger).expect("the app menu button is shown");
+    settle(&mut window);
+
+    assert!(window.by_test_id("app-menu-tactics-board").is_some(), "the click opens the menu");
+}
+
+#[test]
 fn the_debug_shortcut_toggles_the_debug_strip() {
     let mut window = open_bare_shell();
     assert!(window.by_test_id(DEBUG_NOTICE).is_none(), "the debug strip is hidden until the shortcut fires");
