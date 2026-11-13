@@ -1,18 +1,29 @@
-//! A replay's in-game chat: sender coloured by team relation, clan tag by its league colour,
-//! message by channel, and a copy button revealed on hover.
+//! A replay's in-game chat: sender coloured by team relation, clan tag by its league colour fitted
+//! to the palette's rows, message by channel, and a copy button revealed on hover.
 
 use std::rc::Rc;
 
+use landaire_ui::Rgb;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::ClanColor;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 use zgui::component;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::Signal;
+use zgui::reactive::use_local_context;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::Attrs;
+use zgui::view::ClassName;
+use zgui::view::CustomPropertyName;
 use zgui::view::IntoView;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -20,7 +31,10 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::ScrollAreaProps;
 
 use crate::icons::AppIconProps;
+use crate::shell::Appearance;
 use crate::shell::Shell;
+use crate::theme::palette_choice;
+use crate::theme::with_clan_league_ink;
 
 /// A sender's name colour.
 fn relation_color(relation: Relation) -> &'static str {
@@ -48,10 +62,18 @@ pub fn channel_color(channel: &ChatChannel) -> &'static str {
     }
 }
 
-fn clan_color(color: ClanColor) -> String {
+/// The clan tag's colour: its league colour fitted to the rows of the palette on screen, else the
+/// team relation's colour.
+fn clan_ink(color: ClanColor, theme: Signal<landaire_ui::ThemeChoice, LocalStorage>) -> Attrs {
+    let attrs = Attrs::new().class_toggle(ClassName::new("wt-rp-chat__clan"), true);
     match color {
-        ClanColor::League(rgb) => format!("#{rgb:06x}"),
-        ClanColor::Relation(relation) => relation_color(relation).to_owned(),
+        ClanColor::League(rgb) => with_clan_league_ink(attrs, theme, Rgb::new(rgb)),
+        ClanColor::Relation(relation) => {
+            let color = relation_color(relation);
+            attrs
+                .custom_property(CustomPropertyName::new("wt-clan-light"), move || Some(color.to_owned()))
+                .custom_property(CustomPropertyName::new("wt-clan-dark"), move || Some(color.to_owned()))
+        }
     }
 }
 
@@ -73,7 +95,11 @@ pub fn transcript(messages: &[ChatMessage]) -> String {
 #[component]
 pub fn ChatPanel(messages: Rc<[ChatMessage]>, title: String) -> impl IntoView {
     let shell = Shell::current();
-    let rows: Vec<AnyView> = messages.iter().map(|message| message_row(message, shell)).collect();
+    let appearance = use_local_context::<Appearance>();
+    let theme = Signal::derive_local(move || {
+        palette_choice(appearance.map_or(ThemeChoice::System, |appearance| appearance.shown_theme()))
+    });
+    let rows: Vec<AnyView> = messages.iter().map(|message| message_row(message, shell, theme)).collect();
     let all = Rc::clone(&messages);
     let saved = Rc::clone(&messages);
 
@@ -110,37 +136,47 @@ pub fn ChatPanel(messages: Rc<[ChatMessage]>, title: String) -> impl IntoView {
     }
 }
 
-fn message_row(message: &ChatMessage, shell: Shell) -> AnyView {
-    let clan =
-        message.clan_tag.clone().zip(message.clan_color).map(|(tag, color)| (format!("[{tag}]"), clan_color(color)));
+fn message_row(message: &ChatMessage, shell: Shell, theme: Signal<landaire_ui::ThemeChoice, LocalStorage>) -> AnyView {
+    let clan = message
+        .clan_tag
+        .clone()
+        .zip(message.clan_color)
+        .map(|(tag, color)| (format!("[{tag}]"), clan_ink(color, theme)));
     let sender = format!("{}:", message.sender_name);
     let sender_color = sender_color(message.sender_relation);
     let body = message.message.clone();
     let body_color = channel_color(&message.channel);
     let copied = copy_text(message);
     let copy_label = t!("ui.replay.copy_message").into_owned();
+    let copy_tip = copy_label.clone();
 
     AnyView::new(view! {
         box(class = "wt-rp-chat__row", attr:data-testid = "chat-row") {
             column(class = "wt-rp-chat__text") {
                 row(class = "wt-rp-chat__who") {
-                    {clan.map(|(tag, color)| view! { text(style:color = color) {{tag}} })}
+                    {clan.map(|(tag, ink)| view! { text({..ink}) {{tag}} })}
                     text(style:color = sender_color) {{sender}}
                 }
                 text(class = "wt-rp-chat__body", style:color = body_color) {{body}}
             }
-            Button(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                class = "wt-rp-chat__copy",
-                attr:data-testid = "chat-copy",
-                a11y:label = copy_label,
-                on:click = move |_| {
-                    shell.copy_text(copied.clone());
-                    shell.toasts().ok(t!("ui.replay.chat_copied").into_owned());
+            box(class = "wt-rp-chat__copy") {
+                Tooltip {
+                    TooltipTrigger {
+                        Button(
+                            variant = ButtonVariant::Ghost,
+                            size = ButtonSize::IconSm,
+                            attr:data-testid = "chat-copy",
+                            a11y:label = copy_label.clone(),
+                            on:click = move |_| {
+                                shell.copy_text(copied.clone());
+                                shell.toasts().ok(t!("ui.replay.chat_copied").into_owned());
+                            }
+                        ) {
+                            AppIcon(glyph = wows_toolkit_icons::Glyph::Copy)
+                        }
+                    }
+                    TooltipContent {{copy_tip.clone()}}
                 }
-            ) {
-                AppIcon(glyph = wows_toolkit_icons::Glyph::Copy)
             }
         }
     })

@@ -276,6 +276,10 @@ const CSS: &str = css!(
     }
     .wt-rp-chat__text { display: flex; flex-direction: column; gap: 2px; padding-right: 24px; min-width: 0; }
     .wt-rp-chat__who { display: flex; flex-direction: row; gap: 4px; }
+    .wt-rp-chat__clan { color: var(--wt-clan-light); }
+    @media (prefers-color-scheme: dark) {
+        .wt-rp-chat__clan { color: var(--wt-clan-dark); }
+    }
     .wt-rp-chat__body { white-space: pre-wrap; }
     .wt-rp-chat__copy { position: absolute; top: 4px; right: 4px; visibility: hidden; }
     .wt-rp-chat__row:hover > .wt-rp-chat__copy { visibility: visible; }"

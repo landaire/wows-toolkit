@@ -18,6 +18,8 @@ use zgui::reactive::Signal;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::view::Attrs;
+use zgui::view::CustomPropertyName;
 use zgui::view::IntoView;
 use zgui::view::Stylesheet;
 
@@ -277,6 +279,18 @@ pub const fn palette_choice(choice: ThemeChoice) -> landaire_ui::ThemeChoice {
         ThemeChoice::CatppuccinMocha => landaire_ui::ThemeChoice::Fixed(Scheme::CatppuccinMocha),
         ThemeChoice::TokyoNight => landaire_ui::ThemeChoice::Fixed(Scheme::TokyoNight),
     }
+}
+
+/// `attrs` with `--wt-clan-light` and `--wt-clan-dark`: a clan's `league` colour moved until it
+/// reads on the rows of the light and the dark palette `theme` draws, since the game's league
+/// colours include pale tones made for its dark client. A sheet picks one by
+/// `prefers-color-scheme`.
+pub fn with_clan_league_ink(attrs: Attrs, theme: Signal<landaire_ui::ThemeChoice, LocalStorage>, league: Rgb) -> Attrs {
+    let readable = move |desktop: Appearance| Some(theme.get().palette(desktop).readable_on_rows(league).to_string());
+
+    attrs
+        .custom_property(CustomPropertyName::new("wt-clan-light"), move || readable(Appearance::Light))
+        .custom_property(CustomPropertyName::new("wt-clan-dark"), move || readable(Appearance::Dark))
 }
 
 /// The `--wt-*` properties for `choice`. Following the desktop puts the dark set behind
