@@ -95,9 +95,8 @@ const CSS: &str = css!(
         gap: 4px;
         font-size: 12px;
         color: var(--wt-color-text-dim);
-        user-select: text;
-        overflow-wrap: anywhere;
     }
+    .wt-listing-options__path-text { flex: 1 1 auto; min-width: 0; user-select: text; overflow-wrap: anywhere; }
     .wt-listing-options__item { display: flex; flex-direction: column; gap: 2px; }
     .wt-listing-options__action { width: 100%; justify-content: flex-start; }
     .wt-listing-options__hint { font-size: 12px; color: var(--wt-color-text-dim); }
@@ -403,15 +402,22 @@ const fn grouping_value(grouping: ReplayGrouping) -> &'static str {
     }
 }
 
-/// The selected directory's whole path, selectable for copying. It wraps rather than truncating.
+/// The selected directory's whole path, selectable for copying, with the path as its tooltip. It
+/// wraps rather than truncating.
 #[component]
 fn FolderPathLine(path: PathBuf) -> impl IntoView {
     let shown = shown_path(&path);
+    let tip = shown.clone();
 
     view! {
-        row(class = "wt-listing-options__path", attr:data-testid = "replay-listing-folder-path", a11y:label = shown.clone()) {
-            AppIcon(glyph = Glyph::Folder)
-            text {{shown}}
+        Tooltip {
+            TooltipTrigger {
+                row(class = "wt-listing-options__path", attr:data-testid = "replay-listing-folder-path", a11y:label = shown.clone()) {
+                    AppIcon(glyph = Glyph::Folder)
+                    text(class = "wt-listing-options__path-text") {{shown.clone()}}
+                }
+            }
+            TooltipContent {{tip.clone()}}
         }
     }
 }
