@@ -1047,9 +1047,9 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
     let has_chat = move || loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.chat.is_some()));
     let outcome = move || loaded.with(|loaded| loaded.as_ref().and_then(|loaded| loaded.battle_result));
     let chat_label = t!("ui.replay.chat").into_owned();
-    let tip = Signal::derive_local(move || {
-        if has_chat() { t!("ui.replay.chat").into_owned() } else { t!("ui.replay.no_chat").into_owned() }
-    });
+    // The label already names the toggle, so the tip only says why it is off.
+    let tip_wanted = RwSignal::new_local(false);
+    let tip_open = Signal::derive_local(move || tip_wanted.get() && !has_chat());
 
     view! {
         row(class = "wt-rp-header") {
@@ -1073,7 +1073,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                 }
                 {move || export_status.get().map(|status| AnyView::new(view! { text(class = "wt-rp-status", attr:data-testid = "replay-export-status") {{status}} }))}
                 ActionsMenu(header = header.clone())
-                Tooltip {
+                Tooltip(open = Binding::controlled(tip_open, move |on: bool| tip_wanted.set(on))) {
                     TooltipTrigger {
                         Button(
                             variant = ButtonVariant::Outline,
@@ -1088,7 +1088,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                             text {{chat_label}}
                         }
                     }
-                    TooltipContent {{move || tip.get()}}
+                    TooltipContent {{t!("ui.replay.no_chat").into_owned()}}
                 }
             }
         }

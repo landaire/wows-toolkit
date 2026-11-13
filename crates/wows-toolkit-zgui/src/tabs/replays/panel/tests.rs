@@ -330,6 +330,27 @@ fn the_chat_toggle_opens_the_chat_only_when_there_is_some() {
     assert!(window.by_attribute("data-selected", "").is_some(), "the toggle shows it is on");
 }
 
+/// The chat toggle's label names it, so its tooltip only says why a chat-less replay has none.
+#[test]
+fn the_chat_toggle_explains_itself_only_when_off() {
+    let past_delay = landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150);
+    let Opened { mut window } =
+        open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
+    let toggle = window.by_test_id("replay-chat-toggle").expect("the toggle is shown");
+    window.hover(toggle).expect("the toggle takes the pointer");
+    window.advance(past_delay);
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.no_chat").into_owned()]);
+
+    let mut model = model_at_expected_values();
+    model.chat = vec![chat_message()];
+    drop(window);
+    let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
+    let toggle = window.by_test_id("replay-chat-toggle").expect("the toggle is shown");
+    window.hover(toggle).expect("the toggle takes the pointer");
+    window.advance(past_delay);
+    assert!(window.texts_by_class("lui-tooltip").is_empty(), "an enabled toggle has no tooltip");
+}
+
 /// The table's request for a row's metadata opens it in the side panel, which has its own close.
 #[test]
 fn a_rows_raw_metadata_opens_in_the_side_panel_and_closes() {
