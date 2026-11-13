@@ -42,6 +42,7 @@ const CSS: &str = css!(
         font-family: var(--lui-font-family-mono);
         font-size: 11px;
         white-space: pre-wrap;
+        user-select: text;
     }"
 );
 
