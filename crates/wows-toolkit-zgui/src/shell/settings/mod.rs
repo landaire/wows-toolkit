@@ -80,7 +80,7 @@ const CSS: &str = css!(
         flex: none;
         align-items: center;
         gap: 8px;
-        padding: 16px 16px 12px 16px;
+        padding: 12px 16px 8px 16px;
     }
     .wt-settings__head .wt-icon { color: var(--lui-color-accent); }
     .wt-settings__title {
@@ -96,6 +96,14 @@ const CSS: &str = css!(
         padding: 0 16px 8px 16px;
     }
     .wt-settings__search .wt-icon { color: var(--lui-color-text-dim); }
+    .wt-settings__search .zui-input-group { min-height: 26px; }
+    .wt-settings__search .zui-field.zui-input-group__field {
+        height: 24px;
+        padding: 2px 8px;
+    }
+    .wt-settings__search .zui-input-group__addon[data-align] { padding-top: 0; padding-bottom: 0; }
+    .wt-settings__search .zui-input-group__addon[data-align=\"inline-start\"] { padding-left: 8px; }
+    .wt-settings__search .zui-input-group__addon[data-align=\"inline-end\"] { padding-right: 8px; }
     .wt-settings__status {
         display: flex;
         flex-direction: column;
@@ -122,7 +130,7 @@ const CSS: &str = css!(
         flex-wrap: wrap;
         flex: none;
         gap: 4px;
-        padding: 0 16px 12px 16px;
+        padding: 0 16px 8px 16px;
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-settings__strip .wt-icon { color: var(--lui-color-text-dim); }
@@ -428,7 +436,7 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
                 TooltipTrigger {
                     Button(
                         variant = ButtonVariant::Ghost,
-                        size = ButtonSize::IconSm,
+                        size = ButtonSize::IconXs,
                         attr:data-testid = "settings-close",
                         a11y:label = close_label,
                         on:click = move |_| control.close()
@@ -643,7 +651,7 @@ fn SectionButton(shell: Shell, section: SettingsSection, at_top: Memo<Option<Set
             TooltipTrigger {
                 Button(
                     variant = ButtonVariant::Ghost,
-                    size = ButtonSize::IconSm,
+                    size = ButtonSize::IconXs,
                     disabled = Signal::derive_local(move || !listed()),
                     attr:data-testid = category_test_id(section),
                     attr:data-selected = move || current().then(String::new),
