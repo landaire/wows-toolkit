@@ -21,12 +21,12 @@ use wows_toolkit_services::collab::CollabLink;
 use zgui::component;
 use zgui::css;
 use zgui::prelude::WindowHandle;
-use zgui::prelude::WindowOptions;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
@@ -45,6 +45,7 @@ use zgui::view::install_stylesheet;
 use crate::services::GameDataState;
 use crate::services::Services;
 use crate::window_shell::RememberGeometryProps;
+use crate::window_shell::secondary_window_options;
 use crate::windows::tactics::map::BoardMapProps;
 use crate::windows::tactics::model::BoardModel;
 use crate::windows::tactics::model::COLLAB_TICK;
@@ -94,19 +95,14 @@ impl TacticsHost {
             return;
         }
 
-        let saved = self.remembered.get_value().unwrap_or_default();
-        let [width, height] = saved.inner_size_points.unwrap_or([DEFAULT_SIZE.0, DEFAULT_SIZE.1]);
-        let mut options = WindowOptions::new(t!("ui.windows.tactics_board").into_owned())
-            .with_size(width, height)
-            .with_min_size(MIN_SIZE.0, MIN_SIZE.1);
-        if let Some([x, y]) = saved.outer_position_pixels {
-            options = options.with_position(x, y);
-        }
+        let options = secondary_window_options(
+            t!("ui.windows.tactics_board").into_owned(),
+            self.remembered.get_value(),
+            DEFAULT_SIZE,
+        )
+        .with_min_size(MIN_SIZE.0, MIN_SIZE.1);
         let host = self;
         let handle = crate::windows::open(options, move || view! { TacticsWindow(host = host) });
-        if saved.maximized {
-            handle.set_maximized(true);
-        }
         self.window.set_value(Some(handle));
     }
 
@@ -230,7 +226,10 @@ fn TacticsWindow(host: TacticsHost) -> impl IntoView {
                 }
             }
         ) {
-            RememberGeometry(kind = WindowKind::TacticsBoard)
+            RememberGeometry(
+                kind = WindowKind::TacticsBoard,
+                on_change = UnsyncCallback::new(move |geometry: WindowSettings| host.remembered.set_value(Some(geometry)))
+            )
             BoardToolbar(model = model)
             if move || peers.get() {
                 // Says why zones and shapes this reader did not put there are on the board: it is

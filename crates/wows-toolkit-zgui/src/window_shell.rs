@@ -14,8 +14,11 @@ use zgui::App;
 use zgui::component;
 use zgui::prelude::FullscreenMode;
 use zgui::prelude::WindowHandle;
+use zgui::prelude::WindowOptions;
 use zgui::prelude::try_use_window;
+use zgui::reactive::Callable;
 use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
@@ -82,6 +85,25 @@ impl MainWindowGeometry {
     }
 }
 
+/// Options for a secondary window titled `title`, opening as `saved` remembers it, at
+/// `default_size` when no size was remembered.
+pub fn secondary_window_options(
+    title: String,
+    saved: Option<WindowSettings>,
+    default_size: (f32, f32),
+) -> WindowOptions {
+    let saved = saved.unwrap_or_default();
+    let [width, height] = saved.inner_size_points.unwrap_or([default_size.0, default_size.1]);
+    let fullscreen = saved.fullscreen.then_some(FullscreenMode::Borderless);
+
+    let options =
+        WindowOptions::new(title).with_size(width, height).with_maximized(saved.maximized).with_fullscreen(fullscreen);
+    match saved.outer_position_pixels {
+        Some([x, y]) => options.with_position(x, y),
+        None => options,
+    }
+}
+
 /// What `window` would have to be opened with to come back where it is.
 ///
 /// The stored size is the egui app's `inner_size_points` and the position its
@@ -100,11 +122,15 @@ fn geometry_of(window: &WindowHandle) -> WindowSettings {
 }
 
 /// Keeps what is remembered for `kind` in step with the window it is in while it is open.
+/// `on_change` hears each new geometry, for an opener that keeps its own copy.
 ///
 /// Polled rather than driven by the window's signals: its position has no signal, and a window
 /// that is only moved changes nothing else.
 #[component]
-pub fn RememberGeometry(kind: WindowKind) -> impl IntoView {
+pub fn RememberGeometry(
+    kind: WindowKind,
+    #[prop(optional)] on_change: Option<UnsyncCallback<WindowSettings>>,
+) -> impl IntoView {
     const POLL: Duration = Duration::from_secs(1);
 
     let services = Services::current();
@@ -119,6 +145,9 @@ pub fn RememberGeometry(kind: WindowKind) -> impl IntoView {
         if geometry == last.get_value() {
             return;
         }
+        if let Some(on_change) = on_change {
+            on_change.run(geometry);
+        }
         // Not remembered as written until the database is open to take it.
         if store(services, kind, geometry) {
             last.set_value(geometry);
@@ -131,6 +160,9 @@ pub fn RememberGeometry(kind: WindowKind) -> impl IntoView {
         drop(polling);
         let geometry = geometry_of(&closing);
         if geometry != last.get_value() {
+            if let Some(on_change) = on_change {
+                on_change.run(geometry);
+            }
             store_before_exit(services, kind, geometry);
         }
     });

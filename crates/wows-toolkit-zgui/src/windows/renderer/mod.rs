@@ -40,11 +40,11 @@ pub mod watched;
 
 use wows_toolkit_config::WindowKind;
 use zgui::prelude::WindowHandle;
-use zgui::prelude::WindowOptions;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::GetUntracked;
 
 use crate::window_shell::RememberGeometryProps;
+use crate::window_shell::secondary_window_options;
 use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::view::ReplayRendererProps;
 
@@ -59,13 +59,8 @@ pub fn pop_out(session: RendererSession) -> Option<WindowHandle> {
     if !session.is_open() || session.popped_out.get_untracked() {
         return None;
     }
-    let saved = session.remembered_window().unwrap_or_default();
-    let [width, height] = saved.inner_size_points.unwrap_or([DEFAULT_SIZE.0, DEFAULT_SIZE.1]);
-    let mut options =
-        WindowOptions::new(session.title()).with_size(width, height).with_min_size(MIN_SIZE.0, MIN_SIZE.1);
-    if let Some([x, y]) = saved.outer_position_pixels {
-        options = options.with_position(x, y);
-    }
+    let options = secondary_window_options(session.title(), session.remembered_window(), DEFAULT_SIZE)
+        .with_min_size(MIN_SIZE.0, MIN_SIZE.1);
     session.mark_popped_out();
     let handle = crate::windows::open(options, move || {
         on_cleanup_local(move || session.close());
@@ -74,8 +69,5 @@ pub fn pop_out(session: RendererSession) -> Option<WindowHandle> {
             ReplayRenderer(session = session)
         }
     });
-    if saved.maximized {
-        handle.set_maximized(true);
-    }
     Some(handle)
 }
