@@ -245,6 +245,14 @@ impl LoadedGameData {
         })
     }
 
+    /// `provider` and the files in `vfs` as `build`'s game data, for a test that names what a
+    /// build holds.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_test(provider: GameMetadataProvider, vfs: VfsPath, build: u32) -> Self {
+        let base_constants = GameConstants::from_vfs(&vfs);
+        Self { provider: Arc::new(provider), base_constants, vfs, assets_vfs: OnceLock::new(), build, version: None }
+    }
+
     /// Loads `build`'s game data from `wows_dir`. Callers are expected to
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors
