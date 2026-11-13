@@ -285,6 +285,7 @@ where
     /// The rows a measured grid builds, and their heights.
     pub(crate) measured: Option<MeasuredVirtualize>,
     pub(crate) on_activate: Option<UnsyncCallback<K>>,
+    pub(crate) on_row_click: Option<UnsyncCallback<K>>,
     pub(crate) on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
 
     pub(crate) row_menu: Option<RowMenu<K>>,

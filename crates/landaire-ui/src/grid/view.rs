@@ -115,6 +115,10 @@ pub fn Grid<T, K, F>(
     /// opens or closes the detail.
     #[prop(optional)]
     on_activate: Option<UnsyncCallback<K>>,
+    /// Told the row a plain click on its line pressed. A double click there is two such clicks
+    /// and does not also activate the row.
+    #[prop(optional)]
+    on_row_click: Option<UnsyncCallback<K>>,
     /// Told when the pointer comes onto a row and when it leaves it.
     #[prop(optional)]
     on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
@@ -255,6 +259,7 @@ where
         window,
         measured,
         on_activate,
+        on_row_click,
         on_row_hover,
         row_menu,
         menu_target: RwSignal::new_local(None),

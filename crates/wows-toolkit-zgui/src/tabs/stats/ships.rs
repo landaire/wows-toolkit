@@ -519,6 +519,7 @@ fn ship_grid(
             sort = sort,
             on_sort = UnsyncCallback::new(move |next| sort.set(next)),
             expanded = cx.expanded,
+            on_row_click = UnsyncCallback::new(move |ship| cx.toggle(ship)),
             row_menu = row_menu,
             label = t!("ui.stats.ships").into_owned(),
             attr:data-testid = "stats-ships-grid"
@@ -563,15 +564,8 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
     let losses = format!("{}L", performance.losses());
     let header = row.header.clone();
 
-    // The whole header opens and closes the ship, as one press. A double click is two presses,
-    // so it is kept from the grid, which would toggle the row a third time.
     AnyView::new(view! {
-        row(
-            class = "wt-stats-ship",
-            attr:data-testid = format!("ship-header-{ship}"),
-            on:click = move |_| cx.toggle(ship),
-            on:double_click = move |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation()
-        ) {
+        row(class = "wt-stats-ship", attr:data-testid = format!("ship-header-{ship}")) {
             Button(
                 variant = ButtonVariant::Ghost,
                 size = ButtonSize::IconXs,
@@ -669,8 +663,9 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
         })
     });
 
+    // The buttons act on their own rather than also opening the ship.
     AnyView::new(view! {
-        row(class = "wt-stats-ship__actions") {
+        row(class = "wt-stats-ship__actions", on:click = |ev: &mut EventCx<'_, events::Click>| ev.stop_propagation()) {
             {copy}
             {clear}
         }

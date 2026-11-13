@@ -31,6 +31,8 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::recognized::Recognized;
 use zgui::component;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::RwSignal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Set;
@@ -288,6 +290,48 @@ fn the_whole_ship_header_opens_the_ship() {
 
     let header = window.by_test_id(&format!("ship-header-{SHIMAKAZE}")).expect("the ship is listed");
     window.click(header).expect("the header is drawn");
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(false), "another press closes it");
+}
+
+/// A press on any cell of a ship's line opens or closes it, as in GPUI; its buttons do not.
+#[test]
+fn a_number_cell_of_the_ship_line_opens_the_ship() {
+    let Opened { mut window, .. } = open_ships(true);
+
+    let header = window.by_test_id(&format!("ship-header-{SHIMAKAZE}")).expect("the ship is listed");
+    let header = window.bounds(header).expect("the header has a box");
+    let middle = header.origin.y.0 + header.size.height.0 / 2.0;
+    let mut line: Vec<_> = window
+        .all_by_class("lui-grid__cell")
+        .into_iter()
+        .filter_map(|cell| window.bounds(cell))
+        .filter(|cell| cell.origin.y.0 <= middle && middle <= cell.origin.y.0 + cell.size.height.0)
+        .collect();
+    line.sort_by(|a, b| a.origin.x.0.total_cmp(&b.origin.x.0));
+    let cell = line.get(1).expect("the line has a battles cell after the ship's");
+    assert!(cell.origin.x.0 >= header.origin.x.0 + header.size.width.0, "{cell:?} is past the ship's cell");
+    let battles = Point::new(
+        DevicePx(cell.origin.x.0 + cell.size.width.0 / 2.0),
+        DevicePx(cell.origin.y.0 + cell.size.height.0 / 2.0),
+    );
+    window.click_at(battles);
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(true), "a press on the battles cell opens the ship");
+
+    window.click_at(battles);
+    window.click_at(battles);
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(true), "a double click leaves it open");
+
+    let copy = window.by_test_id(&format!("ship-copy-{SHIMAKAZE}")).expect("the ship has a copy menu");
+    window.click(copy).expect("the copy button is drawn");
+    settle(&mut window);
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(true), "the copy menu leaves it open");
+
+    window.click_at(battles);
     settle(&mut window);
     assert_eq!(expanded(&mut window, SHIMAKAZE), Some(false), "another press closes it");
 }

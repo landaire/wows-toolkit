@@ -223,7 +223,7 @@ where
         let cx = Rc::clone(&cx);
         let key = key.clone();
         move |ev: &mut EventCx<'_, events::DoubleClick>| {
-            if !ev.modifiers.primary() && !ev.modifiers.shift() {
+            if cx.on_row_click.is_none() && !ev.modifiers.primary() && !ev.modifiers.shift() {
                 cx.activate(&key);
             }
         }
@@ -256,6 +256,7 @@ where
     let heading = cx.groups.clone().map(|groups| AnyView::new(group_heading(&cx, index, value, groups)));
     let gauge =
         cx.measured.zip(measured_at).map(|(seen, at)| AnyView::new(row_gauge(&cx, seen, at, anchor, detail_height)));
+    let filler_click = line_click(&cx, &key);
 
     view! {
         box(
@@ -268,9 +269,9 @@ where
         ) {
             {heading}
             for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
-                {body_cell(Rc::clone(&cx), id, value)}
+                {body_cell(Rc::clone(&cx), id, value, line_click(&cx, &key))}
             }
-            box(class = "lui-grid__filler", node_ref = anchor, a11y:hidden = true) {}
+            box(class = "lui-grid__filler", node_ref = anchor, a11y:hidden = true, on:click = filler_click) {}
             {detail}
             {gauge}
         }
@@ -309,7 +310,12 @@ where
     }
 }
 
-fn body_cell<T, K>(cx: Rc<GridCx<T, K>>, id: ColumnId, value: RwSignal<Option<T>, LocalStorage>) -> AnyView
+fn body_cell<T, K>(
+    cx: Rc<GridCx<T, K>>,
+    id: ColumnId,
+    value: RwSignal<Option<T>, LocalStorage>,
+    on_click: impl Fn(&mut EventCx<'_, events::Click>) + 'static,
+) -> AnyView
 where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
@@ -335,11 +341,29 @@ where
     let mark = row_mark(&cx, id, value);
 
     AnyView::new(view! {
-        box(style:translate = shift, {..own}) {
+        box(style:translate = shift, on:click = on_click, {..own}) {
             {mark}
             {move || value.with(|row| row.as_ref().map(|row| column.cell_view(row)))}
         }
     })
+}
+
+/// Tells `on_row_click` of a plain click on the row's line. The detail under the line is not part
+/// of it.
+fn line_click<T, K>(cx: &Rc<GridCx<T, K>>, key: &K) -> impl Fn(&mut EventCx<'_, events::Click>) + 'static
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let cx = Rc::clone(cx);
+    let key = key.clone();
+    move |ev: &mut EventCx<'_, events::Click>| {
+        if let Some(on_row_click) = &cx.on_row_click
+            && ev.modifiers.is_empty()
+        {
+            on_row_click.run(key.clone());
+        }
+    }
 }
 
 /// A box in `id`'s column with `class`: held at the leading edge while pinned, and shown carried
