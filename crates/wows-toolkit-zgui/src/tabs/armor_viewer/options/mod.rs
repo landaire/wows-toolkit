@@ -1,5 +1,5 @@
-//! The options rail: the viewport tools, then the trajectory, penetration, armor, hull and
-//! display sections.
+//! The options rail: the viewport tools, then the trajectory, penetration, armor, hull, textures
+//! and display sections.
 //!
 //! Everything here acts on the active pane, which the header names. A change emits from that
 //! pane, and the workspace widens it to the others when the options are synced.
@@ -11,6 +11,7 @@
 mod display;
 pub mod filter;
 mod hull;
+mod textures;
 mod tools;
 mod tree_filter;
 mod visibility;
@@ -51,6 +52,7 @@ use crate::tabs::armor_viewer::viewport::PaneMenu;
 use crate::tabs::armor_viewer::viewport::SceneFeatures;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 
+pub use crate::tabs::armor_viewer::options::textures::TextureFocus;
 pub use crate::tabs::armor_viewer::options::tools::quick_toggles;
 
 const SHEET: &str = "wt-armor-options";
@@ -108,6 +110,7 @@ pub enum OptionSection {
     PenCheck,
     Visibility,
     Hull,
+    Textures,
     Display,
     /// The camera ring and camera lock controls inside Display.
     CameraRings,
@@ -122,6 +125,7 @@ pub struct OptionSectionsOpen {
     pub pen_check: bool,
     pub visibility: bool,
     pub hull: bool,
+    pub textures: bool,
     pub display: bool,
     pub camera_rings: bool,
     pub lighting: bool,
@@ -137,6 +141,7 @@ impl Default for OptionSectionsOpen {
             pen_check: false,
             visibility: false,
             hull: false,
+            textures: false,
             display: true,
             camera_rings: false,
             lighting: false,
@@ -151,6 +156,7 @@ impl OptionSectionsOpen {
             OptionSection::PenCheck => self.pen_check,
             OptionSection::Visibility => self.visibility,
             OptionSection::Hull => self.hull,
+            OptionSection::Textures => self.textures,
             OptionSection::Display => self.display,
             OptionSection::CameraRings => self.camera_rings,
             OptionSection::Lighting => self.lighting,
@@ -163,6 +169,7 @@ impl OptionSectionsOpen {
             OptionSection::PenCheck => &mut self.pen_check,
             OptionSection::Visibility => &mut self.visibility,
             OptionSection::Hull => &mut self.hull,
+            OptionSection::Textures => &mut self.textures,
             OptionSection::Display => &mut self.display,
             OptionSection::CameraRings => &mut self.camera_rings,
             OptionSection::Lighting => &mut self.lighting,
@@ -185,6 +192,7 @@ impl OptionSectionsOpen {
             OptionSection::PenCheck => "PenCheck",
             OptionSection::Visibility => "Visibility",
             OptionSection::Hull => "Hull",
+            OptionSection::Textures => "Textures",
             OptionSection::Display => "Display",
             OptionSection::CameraRings => "CameraRings",
             OptionSection::Lighting => "Lighting",
@@ -429,6 +437,7 @@ fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> AnyView {
         sections.extend(section(&cx, OptionSection::Visibility, &t!("ui.armor.armor_options"), visibility::body));
     }
     sections.extend(section(&cx, OptionSection::Hull, &t!("ui.armor.hull_toggle"), hull::body));
+    sections.extend(section(&cx, OptionSection::Textures, &t!("ui.armor.textures.title"), textures::body));
     sections.extend(section(&cx, OptionSection::Display, &t!("ui.armor.display"), display::body));
 
     let nothing_matched = filter.is_active() && tools.is_none() && sections.is_empty();

@@ -68,6 +68,7 @@ use crate::tabs::armor_viewer::library::ArmorLibrary;
 use crate::tabs::armor_viewer::library::FeedSource;
 use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::armor_viewer::options::OptionSectionsOpen;
+use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::panels::incoming::IncomingFire;
 use crate::tabs::armor_viewer::panels::legend::LegendState;
 use crate::tabs::armor_viewer::panels::pen::PenetrationState;
@@ -267,6 +268,10 @@ pub struct ArmorWorkspace {
     pub options_filter: RwSignal<String, LocalStorage>,
     pub zone_filter: RwSignal<String, LocalStorage>,
     pub part_filter: RwSignal<String, LocalStorage>,
+    /// The mesh whose material the textures section shows open, as the viewport menu chose it.
+    pub texture_focus: RwSignal<Option<TextureFocus>, LocalStorage>,
+    /// The scenes whose textures are being read, by scene identity. A read ends by leaving it.
+    pub texture_reads: RwSignal<HashSet<usize>, LocalStorage>,
 }
 
 impl ArmorWorkspace {
@@ -303,6 +308,8 @@ impl ArmorWorkspace {
             options_filter: RwSignal::new_local(String::new()),
             zone_filter: RwSignal::new_local(String::new()),
             part_filter: RwSignal::new_local(String::new()),
+            texture_focus: RwSignal::new_local(None),
+            texture_reads: RwSignal::new_local(HashSet::new()),
         };
         super::dock::register(workspace);
         let first = workspace.fresh_pane();
@@ -681,6 +688,12 @@ impl ArmorWorkspace {
     pub fn open_section(self, section: OptionSection) {
         self.options_open.set(true);
         self.sections.update(|sections| sections.open(section));
+    }
+
+    /// Opens the textures section at the material `focus` names.
+    pub fn show_textures(self, focus: TextureFocus) {
+        self.texture_focus.set(Some(focus));
+        self.open_section(OptionSection::Textures);
     }
 
     /// Shows or hides the options rail. A zone row hovered in the rail highlights its zone, and the

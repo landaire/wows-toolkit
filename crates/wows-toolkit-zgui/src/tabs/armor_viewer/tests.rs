@@ -20,6 +20,7 @@ use wows_replays::types::GameClock;
 use wows_replays::types::ShotId;
 use wows_replays::types::WorldPos;
 use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::hull_picking::HullMeshIndex;
 use wows_toolkit_armor::load_model::ProblemReason;
 use wows_toolkit_armor::load_model::SceneProblem;
 use wows_toolkit_armor::load_model::fixtures;
@@ -32,8 +33,14 @@ use wows_toolkit_armor::load_ship::ShipSubject;
 use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::textures::LocatedTexture;
+use wows_toolkit_armor::textures::PropertyTexture;
+use wows_toolkit_armor::textures::SceneMaterial;
+use wows_toolkit_armor::textures::SceneTextures;
+use wows_toolkit_armor::textures::TextureLookup;
 use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
+use wows_toolkit_services::dialog::Asked;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -41,6 +48,10 @@ use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::hardpoint::Hardpoint;
 use wowsunpack::export::hardpoint::HardpointKind;
 use wowsunpack::export::hardpoint::HardpointName;
+use wowsunpack::export::material_textures::PropertyName;
+use wowsunpack::export::material_textures::TextureFile;
+use wowsunpack::export::material_textures::TextureFiles;
+use wowsunpack::export::material_textures::TextureSize;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::mount_armor::VehicleParamIndex;
 use wowsunpack::export::ship::ShipAssets;
@@ -67,6 +78,7 @@ use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::armor_viewer::options::OptionSectionsOpen;
+use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 use crate::tabs::armor_viewer::workspace::PaneId;
@@ -182,6 +194,7 @@ impl ArmorWindow {
             pen_check: false,
             visibility: false,
             hull: false,
+            textures: false,
             display: false,
             camera_rings: false,
             lighting: false,
@@ -1075,4 +1088,244 @@ fn wait_until_shown(armor: &mut ArmorWindow, name: &str) {
         }
     }
     assert!(shown(armor), "{name} is shown");
+}
+
+const HULL_ALBEDO: &str = "content/gameplay/usa/gun/main/textures/AGM034_a.dds";
+const HULL_MATERIAL: &str = "content/gameplay/usa/gun/main/textures/AGM034.mfm";
+
+/// The turret mesh drawn with one material, which references an albedo stored in two files and a
+/// path the path store lacks.
+fn textured_scene() -> LoadedShipArmor {
+    scene_with_material(HULL_MATERIAL)
+}
+
+/// [`textured_scene`] with its material read from `material`.
+fn scene_with_material(material: &str) -> LoadedShipArmor {
+    let mut mesh = fixtures::hull_mesh();
+    mesh.mfm_path = Some(material.to_string());
+    let scene = fixtures::hull_scene(turret(), vec![mesh], 1);
+    let file = |path: &str, edge: u32, bytes: u64| TextureFile {
+        path: path.to_string(),
+        size: TextureSize { width: edge, height: edge },
+        bytes,
+    };
+    let albedo = LocatedTexture {
+        path: HULL_ALBEDO.to_string(),
+        files: Ok(TextureFiles {
+            format: None,
+            mip_count: 10,
+            files: vec![
+                file("content/gameplay/usa/gun/main/textures/AGM034_a.dd0", 1024, 699_192),
+                file(HULL_ALBEDO, 512, 174_904),
+            ],
+        }),
+    };
+    let material = SceneMaterial {
+        mfm_path: Some(material.to_string()),
+        meshes: vec![HullMeshIndex::new(0)],
+        mesh_names: vec!["Turret".to_string()],
+        properties: Some(vec![
+            PropertyTexture { property: PropertyName::Known("diffuseMap"), texture: TextureLookup::Found(albedo) },
+            PropertyTexture { property: PropertyName::Known("normalMap"), texture: TextureLookup::Unresolved(7) },
+        ]),
+        name_matched_albedo: None,
+    };
+    let inventory = SceneTextures::from_materials(vec![material]);
+    assert!(scene.texture_inventory.set(inventory).is_ok(), "a fresh scene has no inventory");
+
+    scene
+}
+
+impl ArmorWindow {
+    /// The labels of the menu `test_id` opens on a secondary click.
+    fn menu_of(&mut self, test_id: &str) -> Vec<String> {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.right_click(element).expect("the row takes a secondary click");
+        self.settle();
+        let items = self.window.by_role(Role::MenuItem);
+
+        items.into_iter().filter_map(|item| self.window.a11y(item).and_then(|state| state.label)).collect()
+    }
+
+    fn toasts(&self) -> String {
+        self.window.texts_by_class("lui-toasts").concat()
+    }
+}
+
+#[test]
+fn the_textures_section_lists_each_material_with_its_textures() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+
+    let summary = armor.window.texts_by_class("wt-armor-textures__dim").concat();
+    assert!(summary.contains("1 materials, 1 textures"), "the summary counts what was read: {summary:?}");
+    assert!(!armor.shown("armor-textures-texture-0-0"), "materials start closed");
+
+    armor.click("armor-textures-expand-0");
+    assert!(armor.shown("armor-textures-texture-0-0"), "the albedo is listed");
+    assert!(armor.shown("armor-textures-texture-0-1"), "the unresolved normal map is listed");
+    let roles = armor.window.texts_by_class("wt-armor-textures__role");
+    assert_eq!(roles, ["Albedo (diffuseMap)", "Normal (normalMap)"]);
+    let details = armor.window.texts_by_class("wt-armor-textures__dim").concat();
+    assert!(details.contains("Unrecognized format, 1024x1024, 2 files, 853.6 KiB"), "{details:?}");
+    assert!(details.contains("The path is not in assets.bin"), "{details:?}");
+}
+
+/// A material name wider than the rail is cut to one line, so its row is as tall as its count.
+#[test]
+fn a_long_material_name_keeps_its_row_one_line_tall() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    armor.install(
+        scene_with_material("content/gameplay/france/gun/main/textures/FGM055_305mm_45_Tourelle_skinned_extended.mfm"),
+        &[OptionSection::Textures, OptionSection::Display],
+    );
+    armor.click("armor-textures-expand-0");
+    let bounds = |class: &str| {
+        let element = armor.window.by_class(class).unwrap_or_else(|| panic!("{class} is shown"));
+        armor.window.bounds(element).expect("it is laid out")
+    };
+    let (head, count) = (bounds("wt-armor-textures__head"), bounds("wt-armor-textures__count"));
+    assert!(
+        head.size.height.0 < 2.0 * count.size.height.0,
+        "the row at {head:?} is one line, as its count at {count:?} is"
+    );
+}
+
+#[test]
+fn a_texture_row_offers_the_override_actions() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+    armor.click("armor-textures-expand-0");
+
+    assert_eq!(
+        armor.menu_of("armor-textures-texture-0-0"),
+        ["Copy Path", "Copy 2 res_mods Paths", "Show in Resource Unpacker", "Extract Files..."]
+    );
+    armor.click("armor-textures-copy-path");
+    assert!(armor.toasts().contains(HULL_ALBEDO), "the message names the path: {:?}", armor.toasts());
+}
+
+#[test]
+fn an_unresolved_texture_offers_only_its_path_id() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+    armor.click("armor-textures-expand-0");
+
+    assert!(armor.menu_of("armor-textures-texture-0-1").is_empty(), "nothing is in the packages to act on");
+}
+
+#[test]
+fn copying_override_paths_without_game_data_says_why() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+    armor.click("armor-textures-expand-0");
+
+    armor.menu_of("armor-textures-texture-0-0");
+    armor.click("armor-textures-copy-override");
+
+    assert!(!armor.toasts().is_empty(), "a message says the mod folder is not known");
+    assert!(!armor.toasts().contains(HULL_ALBEDO), "no path was copied: {:?}", armor.toasts());
+}
+
+#[test]
+fn extracting_texture_files_asks_for_a_folder() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.workspace.library.adopt_for_test(Arc::new(bundle()), None);
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+    armor.click("armor-textures-expand-0");
+    wows_toolkit_services::dialog::take_asked();
+
+    armor.menu_of("armor-textures-texture-0-0");
+    armor.click("armor-textures-extract");
+
+    assert_eq!(wows_toolkit_services::dialog::take_asked(), vec![Asked::Folder]);
+}
+
+#[test]
+fn showing_a_texture_in_the_unpacker_switches_to_it() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[OptionSection::Textures]);
+    armor.click("armor-textures-expand-0");
+
+    armor.menu_of("armor-textures-texture-0-0");
+    armor.click("armor-textures-show-in-unpacker");
+    settle_in_real_time(&mut armor.window);
+
+    assert!(armor.shown("unpacker-tab"), "the Resource Unpacker is shown");
+}
+
+#[test]
+fn the_viewport_menu_opens_the_section_at_the_material_of_a_mesh() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[]);
+    let viewport = armor.workspace.active_untracked();
+    let scene = viewport.scene_key().expect("a scene is shown");
+
+    armor.workspace.show_textures(TextureFocus { viewport, scene, mesh: HullMeshIndex::new(0) });
+    armor.settle();
+
+    assert!(armor.shown("armor-options-body-Textures"), "the section is opened");
+    assert!(armor.shown("armor-textures-texture-0-0"), "the mesh's material is opened");
+}
+
+#[test]
+fn the_rail_filter_finds_a_texture_by_its_file_name() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(textured_scene(), &[]);
+
+    armor.type_into("armor-options-filter", "agm034_a");
+
+    assert!(armor.shown("armor-textures-texture-0-0"), "the albedo matches");
+    assert!(!armor.shown("armor-textures-texture-0-1"), "the normal map does not");
+    assert!(armor.marked().iter().any(|mark| mark.eq_ignore_ascii_case("agm034_a")), "{:?}", armor.marked());
+}
+
+/// A real ship's textures, read through the model library, with the material under a mesh opened
+/// and drawn for review. Needs a game install named by `WT_WOWS_DIR`.
+#[test]
+#[ignore = "needs a game install in WT_WOWS_DIR and draws on the graphics device"]
+fn a_real_ship_lists_its_textures() {
+    let wows_dir = std::env::var("WT_WOWS_DIR").expect("set WT_WOWS_DIR to a WoWs install directory");
+    let mut armor = ArmorWindow::open(review_options(Appearance::Dark));
+    let workspace = armor.workspace;
+    workspace.services.game_data.adopt(crate::services::GameDataRequest {
+        wows_dir: Some(std::path::PathBuf::from(&wows_dir)),
+        cache_dir: String::new(),
+        locale: None,
+        auto_dump: false,
+    });
+    let library = workspace.library;
+    for _ in 0..600 {
+        settle_in_real_time(&mut armor.window);
+        if library.ready_untracked().is_some() {
+            break;
+        }
+    }
+    let bundle = library.ready_untracked().expect("the ship data loads");
+    let ship = bundle.catalog.ships().find(|ship| ship.display_name == "Yamato").expect("Yamato is in the catalogue");
+    workspace.open_ship(ship.param_index.clone(), ship.display_name.clone());
+    wait_until_shown(&mut armor, "Yamato");
+    // A filter typed before the section is opened reads the textures to match against.
+    workspace.options_filter.set("_a.dds".to_string());
+    for _ in 0..600 {
+        settle_in_real_time(&mut armor.window);
+        if armor.shown("armor-textures-summary") {
+            break;
+        }
+    }
+    assert!(armor.shown("armor-textures-summary"), "the filter finds the albedos");
+    workspace.options_filter.set(String::new());
+    workspace.open_section(OptionSection::Textures);
+    settle_in_real_time(&mut armor.window);
+    assert!(armor.shown("armor-textures-summary"), "the textures are read");
+
+    let viewport = workspace.active_untracked();
+    let scene = viewport.scene_key().expect("a scene is shown");
+    workspace.show_textures(TextureFocus { viewport, scene, mesh: HullMeshIndex::new(0) });
+    settle_in_real_time(&mut armor.window);
+    let details = armor.window.texts_by_class("wt-armor-textures__dim").concat();
+    assert!(details.contains("BC"), "a block-compressed format is named: {details:?}");
+
+    let path = save_shot(&mut armor.window, "armor-textures-real");
+    println!("{}", path.display());
 }

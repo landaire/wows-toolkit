@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use landaire_ui::MotionPreference;
 use landaire_ui::motion_preference;
+use wows_toolkit_armor::hull_picking::HullMeshIndex;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -170,6 +171,15 @@ impl ArmorViewportState {
     /// Reads the model without following it.
     pub fn read_untracked<R>(self, read: impl FnOnce(&ViewportModel) -> R) -> Option<R> {
         self.model.try_with_value(read)
+    }
+
+    /// The hull mesh under the pointer while no plate is, following the pointer.
+    pub fn hovered_hull_mesh(self) -> Option<HullMeshIndex> {
+        self.read_overlay(|model| model.hovered_mesh.as_ref().map(|hover| hover.mesh)).flatten()
+    }
+
+    pub fn hovered_hull_mesh_untracked(self) -> Option<HullMeshIndex> {
+        self.read_untracked(|model| model.hovered_mesh.as_ref().map(|hover| hover.mesh)).flatten()
     }
 
     /// Changes the model, then carries out what the change asked for: the panels and the overlay

@@ -30,6 +30,7 @@ use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::armor_viewer::options::SectionCx;
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
+use crate::tabs::armor_viewer::options::textures::show_textures_item;
 use crate::tabs::armor_viewer::panels::export::ExportRequest;
 use crate::tabs::armor_viewer::panels::export::open_export_dialog;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
@@ -146,6 +147,7 @@ pub fn quick_toggles(workspace: ArmorWorkspace, viewport: ArmorViewportState) ->
             }
         }));
     }
+    items.extend(show_textures_item(workspace, viewport));
     items.push(toggle_item(
         t!("ui.armor.options_panel").into_owned(),
         Signal::derive_local(move || workspace.options_open.get()),
