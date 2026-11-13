@@ -746,6 +746,15 @@ impl ReplayPanel {
         }));
     }
 
+    /// What the tab is called: the battle once read, otherwise what the read is doing.
+    fn title_text(&self) -> String {
+        match &self.state {
+            LoadState::Loading => t!("ui.replay.loading").into_owned(),
+            LoadState::Loaded(loaded) => loaded.title.to_string(),
+            LoadState::Failed(_) => t!("ui.messages.replay_load_failed").into_owned(),
+        }
+    }
+
     /// A panel already showing `model`, with no parse behind it. Test-only:
     /// production panels always reach this state through `apply_result`.
     #[cfg(test)]
@@ -836,11 +845,7 @@ impl BasePanel for ReplayPanel {
 
 impl Panel for ReplayPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let title = match &self.state {
-            LoadState::Loading => t!("ui.replay.loading").into_owned(),
-            LoadState::Loaded(loaded) => loaded.title.to_string(),
-            LoadState::Failed(_) => t!("ui.messages.replay_load_failed").into_owned(),
-        };
+        let title = self.title_text();
         let loading = matches!(self.state, LoadState::Loading);
         let images = matches!(self.state, LoadState::Loaded(_)).then_some(self.title_icons.as_ref()).flatten();
         let nation = images.and_then(|icons| icons.nation.clone());
@@ -2218,5 +2223,59 @@ mod tests {
             assert_eq!(damage(window).as_deref(), Some("50,000"), "reduced motion shows the figure at once");
         })
         .expect("the window is open");
+    }
+
+    /// A parse that panics fails that replay's tab, naming the fault, and a
+    /// replay opened after it is still read.
+    #[gpui_kit::test]
+    fn a_parse_that_panics_fails_its_tab_and_later_replays_are_still_read(cx: &mut TestAppContext) {
+        use rust_i18n::t;
+        use wows_toolkit_replay_data::error::ReplayLoadError;
+        use wows_toolkit_replay_data::load::GameDataCache;
+
+        cx.update(gpui_kit::init);
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let open = |path: std::path::PathBuf, cx: &mut TestAppContext| {
+            let setup = super::PanelSetup {
+                path,
+                game_data: GameDataCache::new(dir.path().to_path_buf()),
+                debug: false,
+                columns: ReplayColumn::ALL.to_vec(),
+                personal_rating: None,
+            };
+            let window = cx.open_window(size(px(900.), px(600.)), |window, cx| ReplayPanel::new(setup, window, cx));
+            cx.run_until_parked();
+            cx.update(|cx| window.root(cx).expect("the panel is open"))
+        };
+
+        let faulting = dir.path().join("faulting.wowsreplay");
+        wows_toolkit_replay_data::simulated_panic::panic_on_parse(&faulting);
+        let before = crate::toast::said_for_test().len();
+        let panel = open(faulting, cx);
+
+        panel.update(cx, |panel, _cx| {
+            let super::LoadState::Failed(err) = &panel.state else {
+                panic!("the panicked read must fail the tab");
+            };
+            assert!(matches!(err, ReplayLoadError::Panicked { .. }), "the failure is the panic: {err}");
+            assert!(err.to_string().contains("a simulated decoder fault"), "the tab names the fault: {err}");
+            assert_eq!(panel.title_text(), t!("ui.messages.replay_load_failed"));
+        });
+        assert_eq!(
+            crate::toast::said_for_test().split_off(before),
+            vec![t!("ui.messages.replay_load_failed").into_owned()],
+            "the reader is told the replay failed"
+        );
+
+        let next = dir.path().join("next.wowsreplay");
+        std::fs::write(&next, b"not a replay").expect("the replay is written");
+        let panel = open(next, cx);
+
+        panel.update(cx, |panel, _cx| {
+            let super::LoadState::Failed(err) = &panel.state else {
+                panic!("a later replay must still be read to an outcome");
+            };
+            assert!(!matches!(err, ReplayLoadError::Panicked { .. }), "the later read is its own: {err}");
+        });
     }
 }
