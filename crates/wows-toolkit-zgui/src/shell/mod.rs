@@ -35,6 +35,9 @@ use landaire_ui::TabStripTabProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use landaire_ui::Toasts;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use landaire_ui::WorkspaceInsetProps;
 use tokio::runtime::Runtime;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -685,11 +688,18 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                                         close_label = Signal::derive_local(locale.text("ui.tabs.close_directory_stats")),
                                         attr:data-testid = tab.value()
                                     ) {
-                                        row(class = "wt-tab-label") {
-                                            AppIcon(glyph = AppTab::Stats.glyph())
-                                            text {{move || {
-                                                locale.track();
-                                                shell.directory_stats(id).map(|tab| tab.label()).unwrap_or_default()
+                                        Tooltip {
+                                            TooltipTrigger {
+                                                row(class = "wt-tab-label") {
+                                                    AppIcon(glyph = AppTab::Stats.glyph())
+                                                    text {{move || {
+                                                        locale.track();
+                                                        shell.directory_stats(id).map(|tab| tab.label()).unwrap_or_default()
+                                                    }}}
+                                                }
+                                            }
+                                            TooltipContent {{move || {
+                                                shell.directory_stats(id).map(|tab| tab.root.display().to_string()).unwrap_or_default()
                                             }}}
                                         }
                                     }

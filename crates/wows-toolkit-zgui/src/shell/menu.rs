@@ -1,6 +1,9 @@
 //! What the egui app's menu bar carries, at the end of the strip rather than in a row of its own:
 //! a row holding a few items above the tabs is a web page's chrome, and this is a desktop window.
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use zgui::component;
 use zgui::prelude::try_use_windows;
 use zgui::reactive::UnsyncCallback;
@@ -35,13 +38,18 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
 
     view! {
         DropdownMenu {
-            DropdownMenuTrigger(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                attr:data-testid = "app-menu",
-                a11y:label = locale.text("ui.menu.file")
-            ) {
-                Icon(icon = ELLIPSIS)
+            Tooltip {
+                TooltipTrigger {
+                    DropdownMenuTrigger(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::IconSm,
+                        attr:data-testid = "app-menu",
+                        a11y:label = locale.text("ui.menu.file")
+                    ) {
+                        Icon(icon = ELLIPSIS)
+                    }
+                }
+                TooltipContent {{locale.text("ui.menu.file")}}
             }
             DropdownMenuContent {
                 MenuItem(
