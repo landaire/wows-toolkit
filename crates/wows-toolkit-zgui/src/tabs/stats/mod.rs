@@ -53,6 +53,8 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
+use wows_toolkit_viewmodel::stats::sample;
+use wows_toolkit_viewmodel::stats::sample::SampleCatalog;
 use wows_toolkit_viewmodel::stats::setting_keys;
 use zgui::component;
 use zgui::css;
@@ -80,6 +82,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::AlertDialogActionProps;
 use zgui_ui::AlertDialogCancelProps;
@@ -111,6 +114,9 @@ use zgui_ui_primitives::Binding;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::palette::StatsSource;
+use crate::shell::palette::TabRequest;
+use crate::shell::tabs::AppTab;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
@@ -123,6 +129,9 @@ use crate::tabs::stats::ships::StatsShipsProps;
 const DEFAULT_GAME_LIMIT: usize = 25;
 const MIN_GAME_LIMIT: usize = 1;
 const MAX_GAME_LIMIT: usize = 999;
+/// Games the debug sample holds: enough for every class and tier to show and charts to have shape.
+const SAMPLE_GAMES: usize = 800;
+const SAMPLE_SEED: u64 = 0x5EED;
 
 /// The settings row the session's charts are kept in, shared with the GPUI front end.
 const CHARTS_SETTINGS_KEY: &str = "stats_charts";
@@ -202,6 +211,8 @@ pub enum StatsScope {
     Session,
     /// Every replay in one directory: read only, nothing saved.
     Directory,
+    /// Generated games shown in the session's place in debug mode: read only, nothing saved.
+    Sample,
 }
 
 /// The recorded session as the Stats tab holds it, for a [`StatsBody`] that clears its games and
@@ -268,15 +279,48 @@ pub fn StatsTab() -> impl IntoView {
         });
     });
 
-    view! {
-        StatsBody(
-            scope = StatsScope::Session,
-            games = session.games,
-            personal_rating = personal_rating,
-            session = session,
-            attr:data-testid = "stats-tab"
-        )
+    let sample = RwSignal::new(None::<Arc<[PerGameStat]>>);
+    if let Some(shell) = use_local_context::<Shell>() {
+        effect(move |_| {
+            for request in shell.palette.take_requests(AppTab::Stats) {
+                let TabRequest::ShowStats(source) = request else { continue };
+                sample.set(match source {
+                    StatsSource::Sample => Some(sample_games(services, personal_rating.get_untracked().as_deref())),
+                    StatsSource::Recorded => None,
+                });
+            }
+        });
     }
+
+    let sampled = Signal::derive(move || sample.get().unwrap_or_else(|| Arc::from(Vec::new())));
+    view! {
+        if move || sample.with(Option::is_some) {
+            StatsBody(
+                scope = StatsScope::Sample,
+                games = sampled,
+                personal_rating = personal_rating,
+                attr:data-testid = "stats-tab"
+            )
+        } else {
+            StatsBody(
+                scope = StatsScope::Session,
+                games = session.games,
+                personal_rating = personal_rating,
+                session = session,
+                attr:data-testid = "stats-tab"
+            )
+        }
+    }
+}
+
+/// Games made up from the loaded build's ships, or from placeholder ships before one loads.
+fn sample_games(services: Services, rating: Option<&PersonalRatingData>) -> Arc<[PerGameStat]> {
+    let catalog = overview::loaded_build(services)
+        .map(|data| SampleCatalog::from_build(data.provider()))
+        .filter(|catalog| !catalog.is_empty())
+        .unwrap_or_else(SampleCatalog::placeholder);
+    let end = jiff::Zoned::now().datetime();
+    Arc::from(sample::sample_games(&catalog, rating, end, SAMPLE_GAMES, SAMPLE_SEED))
 }
 
 /// Runs `run` now and whenever what it reads changes, for as long as the calling scope lives.
@@ -575,6 +619,7 @@ pub fn StatsBody(
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
                 AddChartMenu(add = UnsyncCallback::new(add_chart))
                 box(class = "wt-stats__spacer") {}
+                {(scope == StatsScope::Sample).then(|| view! { text(class = "wt-stats__dim", attr:data-testid = "stats-sample-notice") {{t!("ui.stats.sample_notice").into_owned()}} }.into_view())}
                 {charts_error_view}
                 {move || clear_error.get().map(|reason| view! { text(class = "wt-stats__error", attr:data-testid = "stats-clear-error") {{reason}} }.into_view())}
                 {clear_button}
@@ -585,6 +630,7 @@ pub fn StatsBody(
                 attr:data-testid = match scope {
                     StatsScope::Session => "stats-dock",
                     StatsScope::Directory => "directory-stats-dock",
+                    StatsScope::Sample => "stats-sample-dock",
                 }
             )
         }
@@ -1017,17 +1063,38 @@ fn ModeMenu(
     };
     let variant = if selected() > 0 { ButtonVariant::Secondary } else { ButtonVariant::Outline };
     let all = Binding::controlled(Signal::derive_local(move || selected() == 0), move |_: bool| change.run(None));
+    // The selected modes by name, or All while none narrows the games.
+    let tooltip = move || {
+        if selected() == 0 {
+            return t!("ui.stats.div_all").into_owned();
+        }
+        filters.with(|filters| {
+            modes.with(|modes| {
+                modes
+                    .iter()
+                    .filter(|mode| filters.game_modes.contains(*mode))
+                    .map(|mode| match_group_display_name(mode))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+        })
+    };
 
     view! {
-        DropdownMenu {
-            DropdownMenuTrigger(size = ButtonSize::Sm, variant = variant, attr:data-testid = "stats-mode-filter-trigger") {{label}}
-            DropdownMenuContent(attr:data-testid = "stats-mode-filter") {
-                MenuLabel {{t!("ui.stats.mode_label").into_owned()}}
-                MenuCheckboxItem(checked = all, close_on_select = false, attr:data-testid = "stats-mode-all") {{t!("ui.stats.div_all").into_owned()}}
-                for mode in move || modes.get().into_iter().collect::<Vec<_>>(), key = |mode: &String| mode.clone() {
-                    {mode_item(filters, change, mode)}
+        Tooltip {
+            TooltipTrigger {
+                DropdownMenu {
+                    DropdownMenuTrigger(size = ButtonSize::Sm, variant = variant, attr:data-testid = "stats-mode-filter-trigger") {{label}}
+                    DropdownMenuContent(attr:data-testid = "stats-mode-filter") {
+                        MenuLabel {{t!("ui.stats.mode_label").into_owned()}}
+                        MenuCheckboxItem(checked = all, close_on_select = false, attr:data-testid = "stats-mode-all") {{t!("ui.stats.div_all").into_owned()}}
+                        for mode in move || modes.get().into_iter().collect::<Vec<_>>(), key = |mode: &String| mode.clone() {
+                            {mode_item(filters, change, mode)}
+                        }
+                    }
                 }
             }
+            TooltipContent {{tooltip}}
         }
     }
 }

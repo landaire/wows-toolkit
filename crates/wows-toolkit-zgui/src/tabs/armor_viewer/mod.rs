@@ -209,7 +209,7 @@ fn take_requests(shell: Shell, workspace: ArmorWorkspace) {
             .into_iter()
             .map(|request| match request {
                 TabRequest::ViewArmor { param_index, display_name } => Waiting::Open(param_index.0, display_name),
-                TabRequest::Search(_) => Waiting::Nothing,
+                TabRequest::Search(_) | TabRequest::ShowStats(_) => Waiting::Nothing,
             })
             .collect();
         taken.extend(library.take_feed().into_iter().map(Waiting::Feed));

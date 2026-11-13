@@ -24,6 +24,7 @@ use crate::shell::crash;
 use crate::shell::palette::PaletteRun;
 use crate::shell::palette::PaletteTheme;
 use crate::shell::palette::RootCommand;
+use crate::shell::palette::StatsSource;
 use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
 use crate::shell::palette::modes;
@@ -78,6 +79,9 @@ pub fn offer(shell: Shell) {
     for theme in PaletteTheme::ALL {
         palette.offer(RootCommand::SetTheme(theme), PaletteRun::action(move || shell.set_theme(theme.choice())));
     }
+
+    palette.offer(RootCommand::SampleStats, PaletteRun::Request(TabRequest::ShowStats(StatsSource::Sample)));
+    palette.offer(RootCommand::RestoreStats, PaletteRun::Request(TabRequest::ShowStats(StatsSource::Recorded)));
 
     #[cfg(test)]
     offer_test_modes(shell);

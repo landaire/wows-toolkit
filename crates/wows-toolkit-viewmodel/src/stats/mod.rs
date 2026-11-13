@@ -15,6 +15,8 @@ pub mod plot;
 
 pub mod replay_set;
 
+pub mod sample;
+
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::battle_report::NormalizedBattleReport;

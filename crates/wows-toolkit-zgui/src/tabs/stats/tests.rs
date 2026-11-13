@@ -10,11 +10,14 @@ use landaire_ui::PanelRegistry;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use rust_i18n::t;
+use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use zgui::view::AnyView;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 use zgui::vocab::Toggled;
 
@@ -228,6 +231,104 @@ fn a_saved_layout_names_the_charts_it_holds() {
         ids.sort_unstable();
         assert_eq!(ids, vec![3, 7]);
     });
+}
+
+fn recorded_count() -> usize {
+    let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    runtime.block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+        wows_toolkit_config::queries::get_all_session_stats(&pool).await.expect("the session is read").len()
+    })
+}
+
+/// Opens the palette, types `query` and chooses the root entry `value`, or reports it is not
+/// listed. The query brings the entry into the list's visible rows.
+fn choose_command(window: &mut HeadlessWindow, value: &str, query: &str) -> bool {
+    window.press_character('k', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(400));
+    window.type_text(query);
+    window.advance(Duration::from_millis(400));
+    let listed = window.by_test_id(&format!("palette-item-{value}"));
+    match listed {
+        Some(item) => {
+            window.click(item).expect("the entry is clicked");
+            settle_in_real_time(window);
+            true
+        }
+        None => {
+            // The first Escape empties the query, the second closes the palette.
+            for _ in 0..2 {
+                window.press_key(NamedKey::Escape, Modifiers::NONE);
+                window.advance(Duration::from_millis(400));
+            }
+            false
+        }
+    }
+}
+
+#[test]
+fn debug_mode_offers_sample_data_that_replaces_the_session_until_restored() {
+    let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    let recorded = recorded_count();
+
+    assert!(!choose_command(&mut window, "sample-stats", "sample"), "the entry is hidden outside debug mode");
+
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    window.advance(Duration::from_millis(300));
+    assert!(choose_command(&mut window, "sample-stats", "sample"), "debug mode lists the entry");
+
+    assert!(window.by_test_id("stats-sample-notice").is_some(), "the bar says the games are made up");
+    assert!(window.by_test_id("stats-sample-dock").is_some());
+    assert!(window.by_test_id("stats-clear").is_none(), "made-up games cannot be cleared");
+    assert!(window.by_test_id("stats-overview-summary").is_some(), "the overview sums the games");
+    assert!(window.by_test_id("stats-chart").is_some(), "the chart plots them");
+    let ships = t!("ui.stats.ships").into_owned();
+    let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
+    window.click(tab).expect("the Ships tab is clicked");
+    window.advance(Duration::from_millis(300));
+    let count = window.texts_by_class("wt-stats-ships__count").pop().unwrap_or_default();
+    let listed: usize = count.split('/').next_back().and_then(|total| total.trim().parse().ok()).unwrap_or(0);
+    assert!(listed >= 30, "ships of every class and tier are listed, not {count:?}");
+    assert_eq!(recorded_count(), recorded, "nothing is written to the session");
+
+    assert!(choose_command(&mut window, "restore-stats", "recorded"));
+    assert!(window.by_test_id("stats-sample-notice").is_none(), "the recorded session is back");
+    assert!(window.by_test_id("stats-dock").is_some());
+    assert_eq!(recorded_count(), recorded);
+}
+
+/// The sample drawn from the ships of the install named by `WT_WOWS_DIR`.
+#[test]
+#[ignore = "needs a game install in WT_WOWS_DIR and draws on the graphics device"]
+fn the_sample_stats_render_in_dark_and_light() {
+    let wows_dir = std::env::var("WT_WOWS_DIR").expect("set WT_WOWS_DIR to a WoWs install directory");
+    let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    crate::interaction_tests::returning_reader(&runtime);
+    runtime.block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+        wows_toolkit_config::queries::set_setting(&pool, keys::WOWS_DIR, &wows_dir)
+            .await
+            .expect("a setting is written");
+    });
+
+    for (appearance, name) in [(Appearance::Dark, "stats-sample-dark"), (Appearance::Light, "stats-sample-light")] {
+        let mut window = open_stats(review_options(appearance));
+        window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+        window.advance(Duration::from_millis(300));
+        // The sample takes its ships from the build once it loads, and made-up ones before.
+        let mut from_build = false;
+        for _ in 0..60 {
+            assert!(choose_command(&mut window, "sample-stats", "sample"));
+            let names = window.texts_by_class("wt-stats-achievement__name");
+            if !names.is_empty() && !names.iter().any(|name| name.starts_with("Achievement ")) {
+                from_build = true;
+                break;
+            }
+            settle_in_real_time(&mut window);
+        }
+        assert!(from_build, "the build loads");
+        println!("{}", save_shot(&mut window, name).display());
+    }
 }
 
 #[test]

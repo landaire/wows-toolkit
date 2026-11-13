@@ -77,9 +77,18 @@ pub enum RootCommand {
     CopyLatestLog,
     CopyBugReportInfo,
     SetTheme(PaletteTheme),
+    /// Shows generated games in the Stats tab in place of the recorded session. Debug mode only.
+    SampleStats,
+    /// Shows the recorded session again after [`RootCommand::SampleStats`]. Debug mode only.
+    RestoreStats,
 }
 
 impl RootCommand {
+    /// Whether the root list shows the command only in debug mode.
+    pub const fn debug_only(self) -> bool {
+        matches!(self, Self::SampleStats | Self::RestoreStats)
+    }
+
     /// What the entry says, in the reader's language.
     pub fn label(self) -> String {
         let key = match self {
@@ -100,6 +109,8 @@ impl RootCommand {
             Self::SendAllReplaysAgain => "ui.palette.send_all_replays_again",
             Self::CopyLatestLog => "ui.replay.copy_latest_log",
             Self::CopyBugReportInfo => "ui.replay.copy_bug_report_info",
+            Self::SampleStats => "ui.palette.sample_stats",
+            Self::RestoreStats => "ui.palette.restore_stats",
         };
 
         t!(key).into_owned()
@@ -179,6 +190,8 @@ impl RootItem {
             Self::Command(RootCommand::SetTheme(PaletteTheme::System)) => 60,
             Self::Command(RootCommand::SetTheme(PaletteTheme::Dark)) => 61,
             Self::Command(RootCommand::SetTheme(PaletteTheme::Light)) => 62,
+            Self::Command(RootCommand::SampleStats) => 70,
+            Self::Command(RootCommand::RestoreStats) => 71,
         }
     }
 
@@ -228,6 +241,8 @@ fn command_name(command: RootCommand) -> &'static str {
         RootCommand::SendAllReplaysAgain => "send-all-replays-again",
         RootCommand::CopyLatestLog => "copy-latest-log",
         RootCommand::CopyBugReportInfo => "copy-bug-report-info",
+        RootCommand::SampleStats => "sample-stats",
+        RootCommand::RestoreStats => "restore-stats",
     }
 }
 
@@ -242,6 +257,15 @@ pub enum TabRequest {
     Search(String),
     /// Opens one ship in the Armor Viewer.
     ViewArmor { param_index: ShipParamIndex, display_name: String },
+    /// Shows generated games in the Stats tab, or the recorded ones again.
+    ShowStats(StatsSource),
+}
+
+/// Which games the Stats tab shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatsSource {
+    Recorded,
+    Sample,
 }
 
 impl TabRequest {
@@ -250,6 +274,7 @@ impl TabRequest {
         match self {
             Self::Search(_) => AppTab::Search,
             Self::ViewArmor { .. } => AppTab::ArmorViewer,
+            Self::ShowStats(_) => AppTab::Stats,
         }
     }
 }
@@ -502,10 +527,16 @@ impl PaletteControl {
     }
 
     /// The root list's entries whose label matches `query`: every entry in list order for an
-    /// inactive query, else the matches best first, each marked where it matched.
-    fn root_rows(self, query: &str) -> Vec<RootRow> {
-        let mut items: Vec<RootItem> =
-            self.commands.with(|commands| commands.iter().map(|offered| RootItem::Command(offered.key)).collect());
+    /// inactive query, else the matches best first, each marked where it matched. Debug-only
+    /// commands are listed only while `debug` holds.
+    fn root_rows(self, query: &str, debug: bool) -> Vec<RootRow> {
+        let mut items: Vec<RootItem> = self.commands.with(|commands| {
+            commands
+                .iter()
+                .filter(|offered| debug || !offered.key.debug_only())
+                .map(|offered| RootItem::Command(offered.key))
+                .collect()
+        });
         self.modes.with(|modes| items.extend(modes.iter().map(|offered| RootItem::Mode(offered.key))));
         items.sort_by_key(|item| item.position());
         items.dedup();

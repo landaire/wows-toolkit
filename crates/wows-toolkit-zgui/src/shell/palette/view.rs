@@ -238,7 +238,7 @@ fn RootList(shell: Shell, query: RwSignal<String, LocalStorage>) -> impl IntoVie
     let locale = shell.services().locale;
     let rows = Signal::derive_local(move || {
         locale.track();
-        palette.root_rows(&query.get())
+        palette.root_rows(&query.get(), shell.debug_mode.get())
     });
 
     view! {
