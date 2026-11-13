@@ -165,6 +165,7 @@ pub use crate::input::range_slider::RangeSliderProps;
 pub use crate::input::range_slider::SliderSpan;
 pub use crate::input::slider_field::SliderField;
 pub use crate::input::slider_field::SliderFieldProps;
+pub use crate::input::slider_field::SliderLabelPlacement;
 pub use crate::input::slider_field::SliderRange;
 pub use crate::markdown::Markdown;
 pub use crate::markdown::MarkdownProps;

@@ -42,6 +42,7 @@ const CSS: &str = css!(
         gap: 4px;
         min-width: 0;
     }
+    .lui-slider-field__label { flex: none; width: 88px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .lui-slider-field__slider { flex: 1 1 auto; min-width: 0; }
     .lui-slider-field__number { flex: none; width: 52px; height: 22px; }
     .lui-slider-field__reset.lui-slider-field__reset { flex: none; width: 22px; height: 22px; padding: 0; }"
@@ -55,6 +56,17 @@ const ROTATE_BACK: IconData = IconData::new(
      C6 15.314 8.686 18 12 18 C15.314 18 18 15.314 18 12 C18 8.686 15.314 6 12 6 Z \
      M12 1.5 L12 8.5 L7.5 5 Z",
 );
+
+/// Where a [`SliderField`] shows its label.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SliderLabelPlacement {
+    /// In front of the slider, on the same line.
+    #[default]
+    Beside,
+    /// Not drawn: the caller draws its own. The label still names the slider and the field for a
+    /// reader.
+    Outside,
+}
 
 /// The values a [`SliderField`] can take.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,9 +140,11 @@ pub fn SliderField(
     #[prop(optional)]
     reset_to: Option<f64>,
     #[prop(into, default = Signal::stored_local(false))] disabled: Signal<bool, LocalStorage>,
-    /// What the value measures, for a reader. Names both the slider and the field.
+    /// What the value measures. Shown as `label_placement` says, and names both the slider and
+    /// the field for a reader.
     #[prop(into)]
     label: String,
+    #[prop(optional)] label_placement: SliderLabelPlacement,
     #[prop(into, default = "Reset".to_owned())] reset_label: String,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
@@ -176,6 +190,12 @@ pub fn SliderField(
             label = label.clone()
         )
     };
+    let shown_label = match label_placement {
+        SliderLabelPlacement::Beside => {
+            Some(AnyView::new(view! { text(class = "lui-slider-field__label", a11y:hidden = true) {{label.clone()}} }))
+        }
+        SliderLabelPlacement::Outside => None,
+    };
 
     let slider = view! {
         Slider(
@@ -191,6 +211,7 @@ pub fn SliderField(
 
     view! {
         row(class = "lui-slider-field", {..attrs}, class = class) {
+            {shown_label}
             {slider}
             {number}
             {reset_button}

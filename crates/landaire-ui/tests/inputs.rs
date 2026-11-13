@@ -13,6 +13,7 @@ use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
 use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
+use landaire_ui::SliderLabelPlacement;
 use landaire_ui::SliderRange;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::Element;
@@ -161,6 +162,38 @@ fn the_slider_and_the_field_follow_each_other() {
     retype(&mut window, field, "0.333");
     assert_eq!(value(&held), 0.35, "a typed value lands on one of the slider's steps");
     assert_eq!(text_of(&mut window, field).as_deref(), Some("0.35"));
+}
+
+#[test]
+fn the_slider_label_is_drawn_before_the_slider_unless_the_caller_draws_it() {
+    let (window, _) = open(0.5, |value| {
+        view! {
+            ThemeRoot {
+                SliderField(value = value, range = SliderRange::new(0.0, 1.0, 0.05), label = "Opacity")
+            }
+        }
+    });
+    assert_eq!(window.texts_by_class("lui-slider-field__label"), ["Opacity"]);
+    let label = window.by_class("lui-slider-field__label").expect("the label is in the document");
+    let slider = window.by_class("lui-slider-field__slider").expect("the slider is in the document");
+    let (label, slider) = (window.bounds(label).expect("a box"), window.bounds(slider).expect("a box"));
+    assert!(label.size.width.0 > 0.0, "the label takes room: {label:?}");
+    assert!(label.origin.x.0 + label.size.width.0 <= slider.origin.x.0, "{label:?} before {slider:?}");
+    drop(window);
+
+    let (window, _) = open(0.5, |value| {
+        view! {
+            ThemeRoot {
+                SliderField(
+                    value = value,
+                    range = SliderRange::new(0.0, 1.0, 0.05),
+                    label = "Opacity",
+                    label_placement = SliderLabelPlacement::Outside
+                )
+            }
+        }
+    });
+    assert!(window.texts_by_class("lui-slider-field__label").is_empty());
 }
 
 #[test]

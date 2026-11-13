@@ -51,7 +51,6 @@ fn view() -> AnyView {
                 )
             }
             row(class = "gallery-inputs__row") {
-                text(class = "gallery-inputs__label") {"Opacity"}
                 SliderField(
                     class = "gallery-inputs__slider",
                     value = opacity,

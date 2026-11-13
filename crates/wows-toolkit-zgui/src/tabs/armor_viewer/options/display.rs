@@ -4,6 +4,7 @@
 use landaire_ui::ColorPickerProps;
 use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
+use landaire_ui::SliderLabelPlacement;
 use landaire_ui::SliderRange;
 use rust_i18n::t;
 use wows_toolkit_armor::upload::DisplaySettings;
@@ -710,6 +711,7 @@ pub(super) fn labeled_slider_row(
                 reset_to = reset_to,
                 disabled = disabled,
                 label = label,
+                label_placement = SliderLabelPlacement::Outside,
                 reset_label = t!("ui.buttons.reset").into_owned(),
                 class = "wt-armor-display__slider"
             )
