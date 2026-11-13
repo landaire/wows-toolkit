@@ -132,6 +132,7 @@ pub use crate::grid::Placement;
 pub use crate::grid::RowDetail;
 pub use crate::grid::RowGroups;
 pub use crate::grid::RowHover;
+pub use crate::grid::RowMark;
 pub use crate::grid::RowMenu;
 pub use crate::grid::RowMenuHandle;
 pub use crate::grid::RowMode;

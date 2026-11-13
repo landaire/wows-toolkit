@@ -45,6 +45,7 @@ use crate::grid::layout;
 use crate::grid::layout::ColumnLayout;
 use crate::grid::mode::RowDetail;
 use crate::grid::mode::RowGroups;
+use crate::grid::mode::RowMark;
 use crate::grid::selection::GridSelectionMode;
 use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
@@ -257,6 +258,7 @@ where
     pub(crate) expanded: RwSignal<HashSet<K>, LocalStorage>,
     pub(crate) detail: Option<RowDetail<T>>,
     pub(crate) groups: Option<RowGroups<T>>,
+    pub(crate) row_mark: Option<RowMark<T>>,
     pub(crate) fixed: Option<RowHeight>,
     /// The rows a fixed-height grid builds, and where each row sits.
     pub(crate) window: Option<Signal<VirtualWindow, LocalStorage>>,

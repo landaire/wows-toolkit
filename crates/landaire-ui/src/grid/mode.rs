@@ -3,10 +3,33 @@ use std::rc::Rc;
 use zgui::prelude::AnyView;
 use zgui::prelude::IntoView;
 
+use crate::grid::column::ColumnId;
 use crate::surface::RowHeight;
 
-/// Builds the region under an expanded row.
-pub type RowDetail<T> = Rc<dyn Fn(&T) -> AnyView>;
+/// A column's part of an expanded row.
+type ColumnDetail<T> = Rc<dyn Fn(&T, &ColumnId) -> Option<AnyView>>;
+
+/// What an expanded row shows under its line.
+pub enum RowDetail<T> {
+    /// One region under the row, as wide as the view.
+    Spanning(Rc<dyn Fn(&T) -> AnyView>),
+    /// A part under each column's own cell, laid out in that column's track, so a fitted column
+    /// widens to its part. `None` leaves the column's part empty.
+    Columns(ColumnDetail<T>),
+}
+
+impl<T> Clone for RowDetail<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Spanning(detail) => Self::Spanning(Rc::clone(detail)),
+            Self::Columns(detail) => Self::Columns(Rc::clone(detail)),
+        }
+    }
+}
+
+/// The name a row's mark goes by, for the application's styles to colour. A row with none has no
+/// mark.
+pub type RowMark<T> = Rc<dyn Fn(&T) -> Option<&'static str>>;
 
 /// Whether a row opens a run, given the row before it.
 type RunOpens<T> = Rc<dyn Fn(Option<&T>, &T) -> bool>;
@@ -87,7 +110,19 @@ impl<T: 'static> RowMode<T> {
     where
         V: IntoView + 'static,
     {
-        Self::Natural { detail: Some(Rc::new(move |row: &T| AnyView::new(detail(row)))), groups: None }
+        Self::Natural {
+            detail: Some(RowDetail::Spanning(Rc::new(move |row: &T| AnyView::new(detail(row))))),
+            groups: None,
+        }
+    }
+
+    /// Every row built, each opening under each column the part `detail` builds for it.
+    pub fn with_column_detail<V>(detail: impl Fn(&T, &ColumnId) -> Option<V> + 'static) -> Self
+    where
+        V: IntoView + 'static,
+    {
+        let detail = move |row: &T, column: &ColumnId| detail(row, column).map(AnyView::new);
+        Self::Natural { detail: Some(RowDetail::Columns(Rc::new(detail))), groups: None }
     }
 
     pub fn fixed(height: RowHeight) -> Self {

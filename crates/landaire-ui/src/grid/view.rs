@@ -45,6 +45,7 @@ use crate::grid::column::GridColumn;
 use crate::grid::header;
 use crate::grid::layout::ColumnLayout;
 use crate::grid::mode::Building;
+use crate::grid::mode::RowMark;
 use crate::grid::mode::RowMode;
 use crate::grid::mode::RowParts;
 use crate::grid::selection::GridSelectionMode;
@@ -116,6 +117,10 @@ pub fn Grid<T, K, F>(
     /// Told when the pointer comes onto a row and when it leaves it.
     #[prop(optional)]
     on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
+    /// Names each row's mark: a bar down the row's leading edge, its detail included, which the
+    /// application's styles colour by the name under `.lui-grid__mark[data-mark]`.
+    #[prop(optional)]
+    row_mark: Option<RowMark<T>>,
     /// The items of the menu a row opens, for that row.
     #[prop(optional)]
     row_menu: Option<RowMenu<K>>,
@@ -239,6 +244,7 @@ where
         expanded: expanded.unwrap_or_else(|| RwSignal::new_local(HashSet::new())),
         detail,
         groups,
+        row_mark,
         fixed,
         window,
         measured,

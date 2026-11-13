@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
@@ -314,45 +315,83 @@ where
     };
     let position = cx.drawn_ids.with_untracked(|ids| ids.iter().position(|other| *other == id));
 
-    let pins = cx.pins;
-    let carried_column = cx.carried;
-    let shifts = cx.shifts;
     let ids = cx.drawn_ids;
-    let own = {
-        let pinned = id.clone();
-        let left = id.clone();
-        let edge = id.clone();
-        let carried = id.clone();
-        let placed = id.clone();
-        let mut semantics = A11yBinding::new(Role::Cell);
-        if let Some(position) = position {
-            semantics = semantics.step(move |a11y| {
-                let index = ids.with(|ids| ids.iter().position(|other| *other == placed)).unwrap_or(position);
-                a11y.column_index(index)
-            });
-        }
-        Attrs::new()
-            .class_toggle(zgui::view::ClassName::new("lui-grid__cell"), true)
-            .attribute(AttrName::new("data-align"), Some(column.align_value().attribute().to_owned()))
-            .attribute(AttrName::new("data-pinned"), move || {
-                pins.with(|pins| pins.left_of(&pinned).is_some()).then(String::new)
-            })
-            .attribute(AttrName::new("data-pin-edge"), move || pins.with(|pins| pins.is_edge(&edge)).then(String::new))
-            .attribute(AttrName::new("data-carried"), move || {
-                carried_column.with(|column| column.as_ref() == Some(&carried)).then(String::new)
-            })
-            .custom_property(zgui::view::CustomPropertyName::new("lui-grid-left"), move || {
-                pins.with(|pins| pins.left_of(&left)).map(|left| format!("{left}px"))
-            })
-            .a11y_from(semantics)
-    };
-    let shift = move || shifts.with(|shifts| shifts.get(&id).map(|shift| format!("{shift}px 0px")));
+    let mut semantics = A11yBinding::new(Role::Cell);
+    if let Some(position) = position {
+        let at = id.clone();
+        semantics = semantics.step(move |a11y| {
+            let index = ids.with(|ids| ids.iter().position(|other| *other == at)).unwrap_or(position);
+            a11y.column_index(index)
+        });
+    }
+    let own = placed(&cx, &id, "lui-grid__cell")
+        .attribute(AttrName::new("data-align"), Some(column.align_value().attribute().to_owned()))
+        .a11y_from(semantics);
+    let shift = shift(&cx, id.clone());
+    let mark = row_mark(&cx, id, value);
 
     AnyView::new(view! {
         box(style:translate = shift, {..own}) {
+            {mark}
             {move || value.with(|row| row.as_ref().map(|row| column.cell_view(row)))}
         }
     })
+}
+
+/// A box in `id`'s column with `class`: held at the leading edge while pinned, and shown carried
+/// while its column is.
+fn placed<T, K>(cx: &GridCx<T, K>, id: &ColumnId, class: &'static str) -> Attrs
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let pins = cx.pins;
+    let carried_column = cx.carried;
+    let pinned = id.clone();
+    let left = id.clone();
+    let edge = id.clone();
+    let carried = id.clone();
+    Attrs::new()
+        .class_toggle(zgui::view::ClassName::new(class), true)
+        .attribute(AttrName::new("data-pinned"), move || {
+            pins.with(|pins| pins.left_of(&pinned).is_some()).then(String::new)
+        })
+        .attribute(AttrName::new("data-pin-edge"), move || pins.with(|pins| pins.is_edge(&edge)).then(String::new))
+        .attribute(AttrName::new("data-carried"), move || {
+            carried_column.with(|column| column.as_ref() == Some(&carried)).then(String::new)
+        })
+        .custom_property(zgui::view::CustomPropertyName::new("lui-grid-left"), move || {
+            pins.with(|pins| pins.left_of(&left)).map(|left| format!("{left}px"))
+        })
+}
+
+/// How far `id`'s column is drawn from its place while the columns slide.
+fn shift<T, K>(cx: &GridCx<T, K>, id: ColumnId) -> impl Fn() -> Option<String> + Copy + 'static
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let shifts = cx.shifts;
+    let id = StoredValue::new_local(id);
+    move || shifts.with(|shifts| id.with_value(|id| shifts.get(id).map(|shift| format!("{shift}px 0px"))))
+}
+
+/// The row's mark, drawn in the box of whichever column is drawn first.
+fn row_mark<T, K>(cx: &GridCx<T, K>, id: ColumnId, value: RwSignal<Option<T>, LocalStorage>) -> Option<AnyView>
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let mark = cx.row_mark.clone()?;
+    let ids = cx.drawn_ids;
+    let name = move || {
+        if !ids.with(|ids| ids.first() == Some(&id)) {
+            return None;
+        }
+        value.with(|row| row.as_ref().and_then(|row| mark(row))).map(str::to_owned)
+    };
+
+    Some(AnyView::new(view! { box(class = "lui-grid__mark", a11y:hidden = true, attr:data-mark = name) {} }))
 }
 
 /// The heading over a row that opens a run of its group, spanning the grid and held in view while
@@ -401,8 +440,8 @@ where
     }
 }
 
-/// The region under a row: built while the row is expanded and while it closes, and revealed by
-/// animating its height to that of its content. `reported` is told its height.
+/// What an expanded row shows: built while the row is expanded and while it closes, and revealed
+/// by animating its height to that of its content. `reported` is told its height.
 fn detail_region<T, K>(
     cx: Rc<GridCx<T, K>>,
     key: K,
@@ -454,16 +493,175 @@ where
 
     view! {
         if move || built.get() {
-            {detail_body(open, value, Rc::clone(&detail), cx.view_width, reported)}
+            {match &detail {
+                RowDetail::Spanning(detail) => {
+                    AnyView::new(detail_body(open, value, Rc::clone(detail), cx.view_width, reported))
+                }
+                RowDetail::Columns(detail) => {
+                    AnyView::new(column_details(Rc::clone(&cx), open, value, Rc::clone(detail), reported))
+                }
+            }}
         } else {}
     }
+}
+
+/// Each column's part of an open row, in a line of the grid's own tracks under the row's cells.
+/// Every part is as tall as the tallest, and the line reveals to that height.
+fn column_details<T, K>(
+    cx: Rc<GridCx<T, K>>,
+    open: Signal<bool, LocalStorage>,
+    value: RwSignal<Option<T>, LocalStorage>,
+    detail: ColumnDetail<T>,
+    reported: Option<RwSignal<f32, LocalStorage>>,
+) -> impl IntoView
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let parts: RwSignal<HashMap<ColumnId, f32>, LocalStorage> = RwSignal::new_local(HashMap::new());
+    let tallest = Memo::new(move |_| parts.with(|parts| parts.values().copied().reduce(f32::max)));
+    let line = DetailLine {
+        open,
+        height: Signal::derive_local(move || tallest.get().map(|height| format!("{}px", height.ceil()))),
+        state: Signal::derive_local(move || {
+            let shown = open.get() && tallest.get().is_some();
+            Some(if shown { "open" } else { "closed" }.to_owned())
+        }),
+    };
+
+    let filler = NodeRef::new();
+    if let Some(reported) = reported {
+        report_height(filler, reported);
+    }
+    // A fitted column widened to an open part narrows again once the part is gone.
+    let fitted = cx.fitted;
+    on_cleanup_local(move || {
+        fitted.try_update(HashMap::clear);
+    });
+
+    let ids = cx.drawn_ids;
+    view! {
+        for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
+            {column_part(&cx, id, value, Rc::clone(&detail), parts, line)}
+        }
+        box(
+            class = "lui-grid__detail-cell",
+            node_ref = filler,
+            attr:data-state = move || line.state.get(),
+            var:--lui-grid-detail-height = move || line.height.get(),
+            a11y:hidden = true
+        ) {}
+    }
+}
+
+/// Builds one column's part of an open row.
+type ColumnDetail<T> = Rc<dyn Fn(&T, &ColumnId) -> Option<AnyView>>;
+
+/// What every part of one open row shares.
+#[derive(Clone, Copy)]
+struct DetailLine {
+    open: Signal<bool, LocalStorage>,
+    /// The tallest part's height as CSS text, once measured.
+    height: Signal<Option<String>, LocalStorage>,
+    state: Signal<Option<String>, LocalStorage>,
+}
+
+/// `id`'s part of an open row. Its content is laid out at its own width, so a part wider than its
+/// column is marked cut off.
+fn column_part<T, K>(
+    cx: &GridCx<T, K>,
+    id: ColumnId,
+    value: RwSignal<Option<T>, LocalStorage>,
+    detail: ColumnDetail<T>,
+    parts: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
+    line: DetailLine,
+) -> AnyView
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + 'static,
+{
+    let inner = NodeRef::new();
+    let content = inner.observe_border_size();
+    let outer = NodeRef::new();
+    let room = outer.observe_border_size();
+    let scale = move || {
+        let scale = inner.scale();
+        if scale.is_finite() && scale > 0.0 { scale } else { 1.0 }
+    };
+
+    let noting = {
+        let id = id.clone();
+        RenderEffect::new(move |_| {
+            let Some(height) = content.get().map(|size| size.height.0 / scale()) else { return };
+            if parts.with_untracked(|parts| parts.get(&id) != Some(&height)) {
+                parts.update(|parts| {
+                    parts.insert(id.clone(), height);
+                });
+            }
+        })
+    };
+    {
+        let id = id.clone();
+        on_cleanup_local(move || {
+            drop(noting);
+            parts.try_update(|parts| parts.remove(&id));
+        });
+    }
+
+    // Within half a pixel is rounding, not content cut off.
+    let cut = move || {
+        let content = content.get()?;
+        let room = room.get()?;
+        (content.width.0 > room.width.0 + 0.5 * scale()).then(String::new)
+    };
+    let own = placed(cx, &id, "lui-grid__detail-cell");
+    let shift = shift(cx, id.clone());
+    let mark = row_mark(cx, id.clone(), value);
+    let open = line.open;
+
+    AnyView::new(view! {
+        box(
+            node_ref = outer,
+            style:translate = shift,
+            attr:data-state = move || line.state.get(),
+            attr:data-cut = cut,
+            var:--lui-grid-detail-height = move || line.height.get(),
+            a11y:hidden = move || !open.get(),
+            {..own}
+        ) {
+            {mark}
+            box(class = "lui-grid__detail-part", node_ref = inner) {
+                {move || value.with(|row| row.as_ref().and_then(|row| detail(row, &id)))}
+            }
+            if move || cut().is_some() {
+                box(class = "lui-grid__detail-fade", a11y:hidden = true) {}
+            } else {}
+        }
+    })
+}
+
+/// Tells `reported` the height of `node`, in CSS pixels, while it is built.
+fn report_height(node: NodeRef, reported: RwSignal<f32, LocalStorage>) {
+    let size = node.observe_border_size();
+    let reporting = RenderEffect::new(move |_| {
+        let scale = node.scale();
+        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let height = size.get().map_or(0.0, |size| size.height.0 / scale);
+        if reported.get_untracked() != height {
+            reported.set(height);
+        }
+    });
+    on_cleanup_local(move || {
+        drop(reporting);
+        reported.set(0.0);
+    });
 }
 
 /// `reported` is told the region's height in CSS pixels while it is built.
 fn detail_body<T>(
     open: Signal<bool, LocalStorage>,
     value: RwSignal<Option<T>, LocalStorage>,
-    detail: RowDetail<T>,
+    detail: Rc<dyn Fn(&T) -> AnyView>,
     view_width: Signal<Option<String>, LocalStorage>,
     reported: Option<RwSignal<f32, LocalStorage>>,
 ) -> impl IntoView
@@ -489,17 +687,7 @@ where
     // the row.
     let outer = NodeRef::new();
     if let Some(reported) = reported {
-        let size = outer.observe_border_size();
-        let reporting = RenderEffect::new(move |_| {
-            let height = size.get().map_or(0.0, |size| size.height.0 / scale());
-            if reported.get_untracked() != height {
-                reported.set(height);
-            }
-        });
-        on_cleanup_local(move || {
-            drop(reporting);
-            reported.set(0.0);
-        });
+        report_height(outer, reported);
     }
 
     view! {

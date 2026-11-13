@@ -211,6 +211,24 @@ impl HeadlessWindow {
         self.first_in_document(|node| dom.attribute(node, attribute).as_deref() == Some(value))
     }
 
+    /// Every element whose attribute `name` is `value`, overlays included, in document order.
+    pub fn all_by_attribute(&self, name: &str, value: &str) -> Vec<Element> {
+        let dom = self.window().dom();
+        let attribute = AttrName::new(name);
+
+        let mut found = Vec::new();
+        let mut pending = self.roots();
+        pending.reverse();
+        while let Some(node) = pending.pop() {
+            if dom.attribute(node, attribute).as_deref() == Some(value) {
+                found.push(Element(node));
+            }
+            pending.extend(dom.children(node).into_iter().rev());
+        }
+
+        found
+    }
+
     /// The first element whose class list holds `class`, overlays included, for a part a
     /// component builds itself.
     pub fn by_class(&self, class: &str) -> Option<Element> {

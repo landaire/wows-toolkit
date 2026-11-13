@@ -49,7 +49,8 @@ pub(crate) const CSS: &str = css!(
         background-color: var(--lui-color-panel);
         transition: translate var(--lui-motion-rearrange) var(--lui-motion-ease);
     }
-    .lui-grid[data-instant] .lui-grid__head, .lui-grid[data-instant] .lui-grid__cell {
+    .lui-grid[data-instant] .lui-grid__head, .lui-grid[data-instant] .lui-grid__cell,
+    .lui-grid[data-instant] .lui-grid__detail-cell {
         transition: none;
     }
     .lui-grid__head, .lui-grid__head-filler {
@@ -94,29 +95,64 @@ pub(crate) const CSS: &str = css!(
     }
     .lui-grid__grip:focus-visible { background-color: var(--lui-color-accent); }
     .lui-grid__cell { padding: 2px 4px; }
+    .lui-grid__cell, .lui-grid__detail-cell { position: relative; }
+    .lui-grid__detail-cell {
+        box-sizing: border-box;
+        min-width: 0;
+        height: 0;
+        overflow: clip;
+        --lui-grid-ground: var(--lui-color-panel);
+        background-color: var(--lui-grid-ground);
+        transition: height var(--lui-motion-reveal) var(--lui-motion-ease),
+            translate var(--lui-motion-rearrange) var(--lui-motion-ease);
+    }
+    .lui-grid__detail-cell[data-state=\"open\"] { height: var(--lui-grid-detail-height, auto); }
+    .lui-grid__detail-part { box-sizing: border-box; width: max-content; min-width: 100%; }
+    .lui-grid__detail-fade {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 24px;
+        pointer-events: none;
+        background: linear-gradient(to right, transparent, var(--lui-grid-ground));
+    }
+    .lui-grid__mark {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 3px;
+        pointer-events: none;
+    }
     .lui-grid__cell[data-align=\"end\"] { justify-content: flex-end; }
     .lui-grid__cell[data-align=\"center\"] { justify-content: center; }
-    .lui-grid__head[data-pinned], .lui-grid__cell[data-pinned] {
+    .lui-grid__head[data-pinned], .lui-grid__cell[data-pinned], .lui-grid__detail-cell[data-pinned] {
         position: sticky;
         left: var(--lui-grid-left);
     }
     .lui-grid__head[data-pinned] { z-index: 3; }
-    .lui-grid__cell[data-pinned] { z-index: 1; }
-    .lui-grid__head[data-pin-edge], .lui-grid__cell[data-pin-edge] {
+    .lui-grid__cell[data-pinned], .lui-grid__detail-cell[data-pinned] { z-index: 1; }
+    .lui-grid__head[data-pin-edge], .lui-grid__cell[data-pin-edge], .lui-grid__detail-cell[data-pin-edge] {
         box-shadow: inset -1px 0 0 0 var(--lui-color-border);
     }
-    .lui-grid__head[data-carried], .lui-grid__cell[data-carried] { opacity: 0.35; }
+    .lui-grid__head[data-carried], .lui-grid__cell[data-carried], .lui-grid__detail-cell[data-carried] {
+        opacity: 0.35;
+    }
     .lui-grid__row[data-stripe] > .lui-grid__cell, .lui-grid__row[data-stripe] > .lui-grid__filler,
     .lui-grid__row[data-stripe] > .lui-grid__detail {
         background-color: var(--lui-color-faint);
     }
+    .lui-grid__row[data-stripe] > .lui-grid__detail-cell { --lui-grid-ground: var(--lui-color-faint); }
     .lui-grid__row:hover > .lui-grid__cell, .lui-grid__row:hover > .lui-grid__filler {
         background-color: var(--lui-color-widget-hot);
     }
+    .lui-grid__row:hover > .lui-grid__detail-cell { --lui-grid-ground: var(--lui-color-widget-hot); }
     .lui-grid__row[data-selected] > .lui-grid__cell, .lui-grid__row[data-selected] > .lui-grid__filler,
     .lui-grid__row[data-selected] > .lui-grid__detail {
         background-color: var(--lui-color-selection);
     }
+    .lui-grid__row[data-selected] > .lui-grid__detail-cell { --lui-grid-ground: var(--lui-color-selection); }
     .lui-grid__port:focus-visible .lui-grid__row[data-cursor] > .lui-grid__cell,
     .lui-grid__port:focus-visible .lui-grid__row[data-cursor] > .lui-grid__filler {
         box-shadow: inset 0 1px 0 0 var(--lui-color-accent), inset 0 -1px 0 0 var(--lui-color-accent);

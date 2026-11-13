@@ -199,6 +199,31 @@ fn a_pinned_column_dragged_wider_stops_at_the_pinned_share_of_the_view() {
 }
 
 #[test]
+fn a_header_dragged_past_its_neighbour_moves_its_column_there_and_its_cells_with_it() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open(items(3), RowMode::natural, Rc::clone(&handles));
+    let name = header(&mut window, "Name");
+    let size = header(&mut window, "Size");
+    let from = window.bounds(name).expect("the header has a box");
+    let past = window.bounds(size).expect("the header has a box");
+
+    let to = Point::<DevicePx, Device>::new(
+        DevicePx(past.origin.x.0 + past.size.width.0 - 4.0),
+        DevicePx(from.origin.y.0 + from.size.height.0 / 2.0),
+    );
+    window.drag(name, to, 10).expect("the header has a box");
+    window.advance(Duration::from_millis(400));
+
+    let layout = handles.layout.get().expect("the layout").get_untracked();
+    let order = ids(&layout);
+    let at = |id: &str| order.iter().position(|other| *other == id).expect("the column is laid out");
+    assert!(at("size") < at("name"), "Name now follows Size: {order:?}");
+    let size_cell = left(&window, cell(&window, "size-0"));
+    let name_cell = left(&window, cell(&window, "name-0"));
+    assert!(size_cell < name_cell, "the cells moved with their headers ({size_cell} < {name_cell})");
+}
+
+#[test]
 fn the_menu_key_opens_the_row_menu_at_the_start_of_the_row() {
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), || {
         let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
@@ -522,6 +547,119 @@ fn an_expanded_row_grows_into_its_detail_and_pushes_the_rows_below_down() {
 }
 
 #[test]
+fn a_column_detail_opens_each_part_under_its_own_column() {
+    let handles = Rc::new(Handles::default());
+    let detail = || {
+        RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+            let height = match column.as_str() {
+                "name" => 40,
+                "second" => 70,
+                _ => return None,
+            };
+            let id = format!("part-{}-{}", column.as_str(), item.id);
+            Some(view! { box(attr:data-testid = id, style = format!("height: {height}px; width: 20px")) {} })
+        })
+    };
+    let mut window = open(items(3), detail, Rc::clone(&handles));
+    let below = top(&window, cell(&window, "name-2"));
+
+    let opened = cell(&window, "name-1");
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+
+    let name = header(&mut window, "Name");
+    let second = header(&mut window, "second");
+    let name_part = cell(&window, "part-name-1");
+    let second_part = cell(&window, "part-second-1");
+    assert_eq!(left(&window, name_part), left(&window, name), "Name's part is under Name");
+    assert_eq!(left(&window, second_part), left(&window, second), "second's part is under second");
+    assert_eq!(top(&window, name_part), top(&window, second_part), "the parts share a top edge");
+    let grown = top(&window, cell(&window, "name-2")) - below;
+    assert!(grown >= 70.0, "the row grew by its tallest part ({grown})");
+
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+    assert_eq!(top(&window, cell(&window, "name-2")), below, "the row below moved back");
+    assert!(window.by_test_id("part-name-1").is_none(), "a closed part is taken down");
+}
+
+#[test]
+fn a_fitted_column_widens_to_an_open_part_and_narrows_after_it_closes() {
+    let fitted = || {
+        let mut columns = columns();
+        columns[1] = GridColumn::new("size", "Size", |item: &Item| item.size.to_string()).min_width(ColumnWidth(40.0));
+        columns
+    };
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let rows = RwSignal::new_local(items(2));
+        let mode = RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+            (column.as_str() == "size")
+                .then(|| view! { box(attr:data-testid = format!("part-{}", item.id), style = "height: 20px; width: 200px") {} })
+        });
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(rows = rows, columns = fitted(), row_key = |item: &Item| item.id, mode = mode, label = "Items")
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+    let size = header(&mut window, "Size");
+    let narrow = width(&window, size);
+
+    let opened = cell(&window, "name-0");
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+    let size = header(&mut window, "Size");
+    assert!(width(&window, size) >= 200.0, "the column widened to its part");
+
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+    let size = header(&mut window, "Size");
+    assert_eq!(width(&window, size), narrow, "the column narrowed back");
+}
+
+#[test]
+fn a_row_mark_runs_down_the_leading_column_and_its_detail() {
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let rows = RwSignal::new_local(items(2));
+        let mode = RowMode::with_column_detail(|_: &Item, column: &ColumnId| {
+            (column.as_str() == "size").then(|| view! { box(style = "height: 50px") {} })
+        });
+        let mark: landaire_ui::RowMark<Item> = Rc::new(|item: &Item| (item.id == 0).then_some("owner"));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = rows,
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        mode = mode,
+                        row_mark = mark,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let opened = cell(&window, "name-0");
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+
+    let marks = window.all_by_attribute("data-mark", "owner");
+    assert_eq!(marks.len(), 2, "the line and its detail each carry the mark in their leading column");
+    let name = header(&mut window, "Name");
+    let line = window.bounds(marks[0]).expect("the mark has a box");
+    let detail = window.bounds(marks[1]).expect("the mark has a box");
+    assert_eq!(line.origin.x.0, left(&window, name), "the mark is at the leading edge");
+    assert_eq!(line.origin.y.0 + line.size.height.0, detail.origin.y.0, "the two meet");
+    assert!(detail.size.height.0 >= 50.0, "the mark runs down the detail");
+}
+
+#[test]
 fn a_group_heading_opens_each_run_and_follows_a_reorder() {
     let rows = RwSignal::new_local(items(5));
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
@@ -712,9 +850,9 @@ fn a_measured_row_counts_its_open_detail_as_part_of_its_height() {
     let mode = || RowMode::Measured {
         estimate: RowHeight(24.0),
         overscan: 4,
-        detail: Some(Rc::new(|item: &Item| {
+        detail: Some(landaire_ui::RowDetail::Spanning(Rc::new(|item: &Item| {
             AnyView::new(view! { box(attr:data-testid = format!("detail-{}", item.id), style = "height: 120px") {} })
-        })),
+        }))),
     };
     let (mut window, measured) = open_measured(200, columns, mode);
     window.advance(Duration::from_millis(100));
