@@ -269,8 +269,8 @@ impl PreviewHover {
         }));
     }
 
-    /// The pointer left the rows, so nothing is dwelling and whatever was
-    /// baking is abandoned.
+    /// The pointer is on no replay row, so nothing is dwelling and whatever
+    /// was baking is abandoned.
     pub fn leave<V: Render>(&mut self, cx: &mut Context<V>) {
         if !self.dwell.is_watching() && self.shown.is_none() {
             return;

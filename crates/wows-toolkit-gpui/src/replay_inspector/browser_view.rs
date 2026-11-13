@@ -1854,6 +1854,11 @@ fn render_browser_item(
             browser
                 .update(cx, |browser, cx| browser.handle_leaf_click(path.clone(), event.click_count(), modifiers, cx));
         });
+    } else {
+        // A group header has no preview, so moving onto it ends the replay row's.
+        list_item = list_item.on_mouse_enter(move |_event: &MouseMoveEvent, _window, cx: &mut App| {
+            browser.update(cx, |browser, cx| browser.preview.leave(cx));
+        });
     }
 
     crate::ui::tree_row(list_item, cx)
@@ -2773,6 +2778,57 @@ mod tests {
                 "the second row is the one previewed"
             );
         });
+    }
+
+    /// A group header has no replay of its own, so hovering it after a row
+    /// takes the row's popup down.
+    #[gpui_kit::test]
+    fn a_group_header_shows_no_preview(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::px;
+        use gpui_kit::size;
+        use std::path::PathBuf;
+
+        use gpui_kit::test::TestWindowExt as _;
+
+        cx.update(gpui_kit::init);
+        let a = PathBuf::from("a.wowsreplay");
+        let b = PathBuf::from("b.wowsreplay");
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+        browser.update(cx, |browser, cx| {
+            browser.set_game_data(
+                &wows_toolkit_replay_data::load::GameDataStatus::Failed("no install in a test".to_owned()),
+                cx,
+            );
+            browser.seed_listing_for_test(a.clone(), cx);
+            browser.seed_listing_for_test(b.clone(), cx);
+        });
+        let row = |path: &PathBuf, cx: &mut gpui_kit::TestAppContext| {
+            let row = cx.update(|cx| browser.read(cx).row_for_test(path, cx)).expect("the replay is on a row");
+            ("replay-browser-row", row)
+        };
+        let (row_a, row_b) = (row(&a, cx), row(&b, cx));
+        // Both battles are on one day, so their group's header is the first row.
+        let header = ("replay-browser-row", 0);
+        assert_ne!(row_a, header, "the replays are grouped under a header");
+        let panel = browser.clone();
+        let window = cx.open_window(size(px(1200.), px(800.)), move |_window, _cx| Panel(panel));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.within("replay-browser-rows").hover(row_a, cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-preview-card").is_some(), "the replay row has its popup");
+
+            window.within("replay-browser-rows").hover(header, cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-preview-card").is_none(), "the header has no popup");
+
+            window.within("replay-browser-rows").hover(row_b, cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-preview-card").is_some(), "the next replay row has its popup");
+        })
+        .expect("the test window stays open");
     }
 
     /// A row too near the bottom of the window for the popup below its top
