@@ -203,6 +203,10 @@ fn the_filter_narrows_the_rows_to_matching_names() {
     tracker.settle();
     assert!(tracker.has("tracker-player-8"), "the matching player stays");
     assert!(!tracker.has("tracker-player-7"), "the other goes");
+
+    tracker.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    tracker.settle();
+    assert!(tracker.has("tracker-player-7"), "Escape empties the filter and the other comes back");
 }
 
 /// A kept row marks what the filter matched in its name or its tag, and leaves the other plain.

@@ -17,6 +17,7 @@ use landaire_ui::DockProps;
 use landaire_ui::DockRegion;
 use landaire_ui::DockState;
 use landaire_ui::DockTarget;
+use landaire_ui::EscapeClears;
 use landaire_ui::PanelEntry;
 use landaire_ui::PanelFactory;
 use landaire_ui::PanelId;
@@ -449,6 +450,7 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
     keep(RenderEffect::new(move |_| model.set_filter(filter.get())));
     let show_division_mates = Signal::derive_local(move || Checked::from(model.show_division_mates.get()));
 
+    let escape = EscapeClears::new(filter);
     view! {
         row(class = "wt-tracker-toolbar") {
             Select(value = Binding::controlled(period, choose)) {
@@ -476,7 +478,10 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                     placeholder = t!("ui.player_tracker.filter_hint").into_owned(),
                     label = t!("ui.player_tracker.filter_hint").into_owned(),
                     class = "wt-tracker-toolbar__field",
-                    attr:data-testid = "tracker-filter"
+                    attr:data-testid = "tracker-filter",
+                    on:key_down = move |ev| {
+                        escape.key_down(ev);
+                    }
                 )
             }
             box(class = "wt-tracker-toolbar__spacer")

@@ -1,6 +1,7 @@
 //! The board's two toolbar rows: what it is set on, the ship picker, the range circles, the presets
 //! and the scan above; the capture point and drawing tools below.
 
+use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
@@ -421,6 +422,10 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
         matched.set(Vec::new());
         typed.set(String::new());
     };
+    let escape = EscapeClears::with(Signal::derive_local(move || typed.with(|text| !text.is_empty())), move || {
+        typed.set(String::new());
+        matched.set(Vec::new());
+    });
 
     view! {
         column(class = "wt-tactics-toolbar__ships") {
@@ -433,7 +438,10 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
                         label = t!("ui.renderer.annotations.ship_hint").into_owned(),
                         disabled = locked,
                         class = "wt-tactics-toolbar__search",
-                        attr:data-testid = "tactics-ship-search"
+                        attr:data-testid = "tactics-ship-search",
+                        on:key_down = move |ev| {
+                            escape.key_down(ev);
+                        }
                     )
                 }
                 {move || placing.get().map(|(name, friendly)| {

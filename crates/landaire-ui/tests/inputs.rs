@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use landaire_ui::ColorPickerProps;
+use landaire_ui::EscapeClears;
 use landaire_ui::NumberInputProps;
 use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
@@ -26,6 +27,10 @@ use zgui::view::IntoView;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
+use zgui_ui::InputProps;
+use zgui_ui::PopoverContentProps;
+use zgui_ui::PopoverProps;
+use zgui_ui::PopoverTriggerProps;
 use zgui_ui::prelude::Binding;
 
 const SIZE: WindowSize = WindowSize { width: 480.0, height: 480.0 };
@@ -207,4 +212,56 @@ fn a_picker_whose_caller_refuses_a_color_goes_on_showing_the_one_it_has() {
 
     assert_eq!(value(&held), Rgb::BLACK);
     assert_eq!(text_of(&mut window, area).as_deref(), Some("0%, 0%"));
+}
+
+/// Escape in a filter field inside a popover empties the field and leaves the popover open, and
+/// Escape in the empty field closes the popover.
+#[test]
+fn escape_empties_a_filter_field_before_it_closes_the_popover_around_it() {
+    let shown = Rc::new(Cell::new(None));
+    let (mut window, held) = {
+        let shown = Rc::clone(&shown);
+        open(String::new(), move |value| {
+            let open = RwSignal::new_local(true);
+            shown.set(Some(open));
+            let escape = EscapeClears::new(value);
+            view! {
+                ThemeRoot {
+                    Popover(open = open) {
+                        PopoverTrigger {"Ships"}
+                        PopoverContent(dismiss_on_escape = escape.dismiss_on_escape()) {
+                            Input(
+                                node_ref = escape.node_ref(),
+                                value = value,
+                                label = "Filter",
+                                on:key_down = move |ev| {
+                                    escape.key_down(ev);
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        })
+    };
+    let open = shown.get().expect("the view was built");
+    window.advance(Duration::from_millis(300));
+    let field = window.by_role_and_label(Role::TextInput, "Filter").expect("the popover is open");
+    window.click(field).expect("the field has a box");
+    window.type_text("yam");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), "yam");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), "", "Escape empties the field");
+    assert!(open.get_untracked(), "and leaves the popover open");
+    window.type_text("k");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), "k", "the field keeps focus");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+    assert!(!open.get_untracked(), "Escape in the empty field closes the popover");
 }
