@@ -16,11 +16,14 @@ use wows_toolkit_replay_data::test_support::fire_chance_result;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use zgui::reactive::RwSignal;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::view;
+use zgui::view::AnyView;
+use zgui_image::ImageBytes;
 
+use super::ColumnDetailProps;
 use super::DamageDirection;
-use super::ExpandedRowProps;
 use super::ShareRows;
 use super::damage_event_rows;
 use super::group_ribbons;
@@ -31,6 +34,9 @@ use super::reorder_bulge_after_main_caliber;
 use super::share_text;
 use super::shows_damage_shares;
 use super::spotting_target_rows;
+use crate::game_art::Art;
+use crate::game_art::ArtKey;
+use crate::game_art::GameArt;
 use crate::shell::ShellHarnessProps;
 
 /// The block expands under Name, after the damage events; Kills has nothing of its own.
@@ -200,6 +206,16 @@ fn open_detail(
     columns: Vec<ReplayColumn>,
     debug: bool,
 ) -> (HeadlessWindow, RwSignal<bool, zgui::reactive::LocalStorage>) {
+    open_detail_with(row, columns, debug, Rc::new(std::cell::Cell::new(None)))
+}
+
+/// Each of `columns`' parts of `row`'s detail. `art` is handed the art the parts draw from.
+fn open_detail_with(
+    row: PlayerRow,
+    columns: Vec<ReplayColumn>,
+    debug: bool,
+    art: Rc<std::cell::Cell<Option<GameArt>>>,
+) -> (HeadlessWindow, RwSignal<bool, zgui::reactive::LocalStorage>) {
     let alt = Rc::new(std::cell::Cell::new(None));
     let handed = Rc::clone(&alt);
     let window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 900.0, height: 600.0 }), move || {
@@ -207,11 +223,25 @@ fn open_detail(
         handed.set(Some(alt_held));
         let row = Arc::new(row.clone());
         let rows: super::Rows = Arc::from(vec![(*row).clone()]);
-        let columns: Rc<[ReplayColumn]> = Rc::from(columns.clone());
+        let shared = GameArt::new();
+        art.set(Some(shared));
+        let parts: Vec<AnyView> = columns
+            .iter()
+            .map(|column| {
+                AnyView::new(view! {
+                    ColumnDetail(
+                        column = *column,
+                        row = Arc::clone(&row),
+                        rows = Arc::clone(&rows),
+                        debug = debug,
+                        alt_held = alt_held,
+                        art = shared
+                    )
+                })
+            })
+            .collect();
         view! {
-            ShellHarness(theme = ThemeChoice::Dark) {
-                ExpandedRow(columns = columns, row = row, rows = rows, debug = debug, alt_held = alt_held)
-            }
+            ShellHarness(theme = ThemeChoice::Dark) {{parts}}
         }
     })
     .expect("the detail opens");
@@ -286,33 +316,78 @@ fn alt_names_a_mode_only_over_damage_shares_on_screen() {
     assert!(shows_damage_shares(&hidden, &rows, &dealt, true), "unless debug mode lifts it");
 }
 
-/// An open row tells its panel it lists damage shares while a damage column is shown, and stops
-/// when the column is put away.
+/// An open row tells its panel it lists damage shares while its damage column's part is built,
+/// and stops when the part goes.
 #[test]
 fn an_open_row_reports_its_shares_while_a_damage_column_is_shown() {
     let mut row = base_row(1, Relation::new(0), true);
     row.damage_interactions = Some([(AccountId(2), interaction(1_000, 10.0, 0, 0.0))].into_iter().collect());
     let handed = Rc::new(std::cell::Cell::new(None));
     let built = Rc::clone(&handed);
-    let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 900.0, height: 600.0 }), move || {
-        let columns = RwSignal::new_local(Rc::<[ReplayColumn]>::from([ReplayColumn::Name, ReplayColumn::ActualDamage]));
-        let share_rows = ShareRows::new();
-        built.set(Some((columns, share_rows)));
-        let row = Arc::new(row.clone());
-        let rows: super::Rows = Arc::from(vec![(*row).clone(), base_row(2, Relation::new(2), false)]);
-        view! {
-            ShellHarness(theme = ThemeChoice::Dark) {
-                ExpandedRow(columns = columns, row = row, rows = rows, debug = false, alt_held = false, share_rows = share_rows)
+    let mut window =
+        HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 900.0, height: 600.0 }), move || {
+            let shown = RwSignal::new_local(true);
+            let share_rows = ShareRows::new();
+            built.set(Some((shown, share_rows)));
+            let row = Arc::new(row.clone());
+            let rows: super::Rows = Arc::from(vec![(*row).clone(), base_row(2, Relation::new(2), false)]);
+            let art = GameArt::new();
+            let part = move || {
+                shown.get().then(|| {
+                    AnyView::new(view! {
+                        ColumnDetail(
+                            column = ReplayColumn::ActualDamage,
+                            row = Arc::clone(&row),
+                            rows = Arc::clone(&rows),
+                            debug = false,
+                            alt_held = false,
+                            art = art,
+                            share_rows = share_rows
+                        )
+                    })
+                })
+            };
+            view! {
+                ShellHarness(theme = ThemeChoice::Dark) {{part}}
             }
-        }
-    })
-    .expect("the detail opens");
-    let (columns, share_rows) = handed.get().expect("the view was built");
+        })
+        .expect("the detail opens");
+    let (shown, share_rows) = handed.get().expect("the view was built");
     assert!(share_rows.any(), "the damage column lists the row's shares");
 
-    columns.set(Rc::from([ReplayColumn::Name, ReplayColumn::Kills]));
+    shown.set(false);
     window.advance(std::time::Duration::from_millis(32));
     assert!(!share_rows.any(), "with no damage column shown there is nothing for Alt to flip");
+}
+
+/// A game icon read from the build replaces the name the tile shows until then.
+#[test]
+fn an_achievement_draws_its_icon_once_read() {
+    let mut row = base_row(1, Relation::new(0), true);
+    row.achievements = vec![AchievementResult {
+        name: "Kraken".to_string(),
+        display_name: "Kraken".to_string(),
+        description: String::new(),
+        icon_key: "kraken".to_string(),
+        count: 1,
+    }];
+    let art = Rc::new(std::cell::Cell::new(None));
+    let (mut window, _) = open_detail_with(row, vec![ReplayColumn::Name], false, Rc::clone(&art));
+    assert!(window.by_class("wt-xr-icon").is_none(), "the name stands in until the icon is read");
+
+    let art: GameArt = art.get().expect("the view was built");
+    art.insert_for_test(ArtKey::Achievement("kraken".to_string()), Art::Raster(ImageBytes::new(pixel_png())));
+    window.advance(std::time::Duration::from_millis(32));
+    assert!(window.by_class("wt-xr-icon").is_some(), "the icon is drawn");
+}
+
+/// A one-pixel PNG.
+fn pixel_png() -> Vec<u8> {
+    let mut png = Vec::new();
+    image::RgbaImage::new(1, 1)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("a pixel encodes");
+    png
 }
 
 /// Holding Alt flips every share to the other player's total.

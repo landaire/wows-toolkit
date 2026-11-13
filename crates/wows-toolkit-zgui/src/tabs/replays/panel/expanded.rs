@@ -1,10 +1,9 @@
-//! A player row's expanded detail: achievements, ribbons, damage events and the effective fire
-//! chance under Name, the build under Skills, and the damage, potential, hits and spotting
-//! breakdowns under their own columns.
+//! A player row's expanded detail, each column's part under its own header: achievements,
+//! ribbons, damage events and the effective fire chance under Name, the build under Skills, and
+//! the damage, potential, hits and spotting breakdowns under their own columns.
 //!
-//! Game icons are drawn as their names: zgui's `image` element reads a path, and the icons live in
-//! the game's packed files. That is the same fallback the GPUI front end draws for an icon it has
-//! not resolved.
+//! Game icons are drawn from the build's files once read, and as their names until then or where
+//! the build has none.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -53,6 +52,8 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SeparatorProps;
 
+use crate::game_art::ArtKey;
+use crate::game_art::GameArt;
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
@@ -60,13 +61,46 @@ use crate::shell::tabs::ModifierKey;
 
 const SHEET: &str = "wt-replay-expanded";
 
+/// Sub-ribbons are drawn larger than the build icons.
+const LARGE_ICON_SIZE: f32 = 32.0;
+const RIBBON_ICON_SIZE: f32 = 64.0;
+const MODULE_ICON_SIZE: f32 = 28.0;
+const CONSUMABLE_ICON_SIZE: f32 = 20.0;
+const RIBBON_TILE_GAP: f32 = 6.0;
+/// A tile grid never asks for less than this many tiles a line, so a narrow Name column still
+/// lays them out as a grid.
+const RIBBON_GRID_MIN_TILES: usize = 4;
+const GAME_ICON_TILE_PADDING: f32 = 2.0;
+
 const CSS: &str = css!(
-    ".wt-xr {
+    ".wt-xr-frame {
         display: flex;
-        flex-direction: row;
-        align-items: flex-start;
-        gap: 16px;
-        padding: 4px 8px 8px 8px;
+        flex-direction: column;
+        padding: 4px 2px 0 2px;
+    }
+    .wt-xr-well {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 4px;
+        font-size: 12px;
+        border: 1px solid var(--lui-color-border-bright);
+        background-color: rgba(0, 0, 0, 0.05);
+        box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.14), inset 0 2px 0 0 rgba(0, 0, 0, 0.07),
+            inset 0 -1px 0 0 rgba(255, 255, 255, 0.7);
+    }
+    .wt-pt-grid .lui-grid__detail-fade {
+        background: linear-gradient(to right, transparent, color-mix(in srgb, black 5%, var(--lui-grid-ground)));
+    }
+    @media (prefers-color-scheme: dark) {
+        .wt-xr-well {
+            background-color: rgba(0, 0, 0, 0.18);
+            box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.45), inset 0 2px 0 0 rgba(0, 0, 0, 0.22),
+                inset 0 -1px 0 0 rgba(255, 255, 255, 0.07);
+        }
+        .wt-pt-grid .lui-grid__detail-fade {
+            background: linear-gradient(to right, transparent, color-mix(in srgb, black 18%, var(--lui-grid-ground)));
+        }
     }
     .wt-xr-col {
         display: flex;
@@ -100,6 +134,7 @@ const CSS: &str = css!(
         flex-wrap: wrap;
         align-items: flex-start;
         gap: 6px;
+        min-width: 100%;
     }
     .wt-xr-tiles--end { align-items: flex-end; }
     .wt-xr-ribbons { display: flex; flex-direction: column; gap: 12px; }
@@ -118,6 +153,19 @@ const CSS: &str = css!(
         flex-direction: row;
         flex-wrap: wrap;
         gap: 4px;
+        width: 0;
+        min-width: 100%;
+    }
+    .wt-xr-cell { display: flex; flex: none; align-items: center; }
+    .wt-xr-icon { flex: none; object-fit: contain; }
+    .wt-xr-icon--dim { opacity: 0.35; }
+    .wt-xr-icon-tile {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        background-color: #2a2d33;
     }
     .wt-xr-empty-slot {
         display: flex;
@@ -133,7 +181,7 @@ const CSS: &str = css!(
     .wt-xr-skill--unlearned { color: var(--wt-color-text-faint); }
     .wt-xr-table { display: flex; flex-direction: column; gap: 4px; }
     .wt-xr-table__row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
-    .wt-xr-table__name { flex: none; width: 170px; }
+    .wt-xr-table__name { display: flex; flex-direction: row; align-items: center; gap: 4px; flex: none; width: 170px; }
     .wt-xr-table__count { flex: none; width: 64px; }
     .wt-xr-table__head { font-weight: 600; }
     .wt-xr-fire__headline { display: flex; flex-direction: row; align-items: center; gap: 8px; }
@@ -150,7 +198,7 @@ const CSS: &str = css!(
     .wt-xr-tally__count { flex: none; width: 44px; text-align: right; }
     .wt-xr-ship { display: flex; flex-direction: row; align-items: center; gap: 8px; }
     .wt-xr-ship__name { flex: none; width: 160px; }
-    .wt-xr-tip { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 280px; }
+    .wt-xr-tip { display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: 300px; }
     .wt-xr-tip__name { font-weight: 600; }
     .wt-xr-tip__text { text-align: center; white-space: pre-wrap; }"
 );
@@ -190,32 +238,33 @@ pub fn shows_damage_shares(row: &PlayerRow, rows: &[PlayerRow], columns: &[Repla
         })
 }
 
-/// The expanded rows of one panel whose detail lists damage shares.
+/// The damage columns of one panel's open rows whose part lists damage shares.
 #[derive(Clone, Copy)]
-pub struct ShareRows(RwSignal<HashSet<AccountId>, LocalStorage>);
+pub struct ShareRows(RwSignal<HashSet<(AccountId, ReplayColumn)>, LocalStorage>);
 
 impl ShareRows {
     pub fn new() -> Self {
         Self(RwSignal::new_local(HashSet::new()))
     }
 
-    pub(super) fn mark(self, row: AccountId, shows: bool) {
+    pub(super) fn mark(self, row: AccountId, column: ReplayColumn, shows: bool) {
         // `try_`, as a row's cleanup can run after the panel's control is gone.
-        if self.0.try_with_untracked(|rows| rows.contains(&row) != shows) != Some(true) {
+        let part = (row, column);
+        if self.0.try_with_untracked(|parts| parts.contains(&part) != shows) != Some(true) {
             return;
         }
-        self.0.update(|rows| {
+        self.0.update(|parts| {
             if shows {
-                rows.insert(row);
+                parts.insert(part);
             } else {
-                rows.remove(&row);
+                parts.remove(&part);
             }
         });
     }
 
-    /// Whether any row lists them. Reactive.
+    /// Whether any part lists them. Reactive.
     pub fn any(self) -> bool {
-        self.0.with(|rows| !rows.is_empty())
+        self.0.with(|parts| !parts.is_empty())
     }
 }
 
@@ -251,60 +300,9 @@ pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRo
     }
 }
 
-/// Every column's detail for `row`, side by side in `columns` order, for a table whose detail
-/// spans the whole row. A column with nothing to show takes no room. `share_rows` is told while
-/// the detail lists damage shares.
-#[component]
-pub fn ExpandedRow(
-    #[prop(into)] columns: Signal<Rc<[ReplayColumn]>, LocalStorage>,
-    row: Arc<PlayerRow>,
-    rows: Rows,
-    #[prop(into)] debug: Signal<bool, LocalStorage>,
-    #[prop(into)] alt_held: Signal<bool, LocalStorage>,
-    #[prop(optional)] share_rows: Option<ShareRows>,
-) -> impl IntoView {
-    install_stylesheet(SHEET, CSS);
-
-    if let Some(share_rows) = share_rows {
-        let player = row.db_id;
-        let marked = Arc::clone(&row);
-        let named = Arc::clone(&rows);
-        let marking = RenderEffect::new(move |_| {
-            let shows = columns.with(|columns| shows_damage_shares(&marked, &named, columns, debug.get()));
-            share_rows.mark(player, shows);
-        });
-        on_cleanup_local(move || {
-            drop(marking);
-            share_rows.mark(player, false);
-        });
-    }
-
-    view! {
-        row(class = "wt-xr", attr:data-testid = "replay-expanded-row") {
-            {move || {
-                let debug = debug.get();
-                columns
-                    .get()
-                    .iter()
-                    .filter(|column| has_column_detail(**column, &row, &rows, debug))
-                    .map(|column| {
-                        AnyView::new(view! {
-                            ColumnDetail(
-                                column = *column,
-                                row = Arc::clone(&row),
-                                rows = Arc::clone(&rows),
-                                debug = debug,
-                                alt_held = alt_held
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            }}
-        }
-    }
-}
-
-/// One column's detail for `row`; empty when the column has none.
+/// One column's part of `row`'s detail, in a sunk well under the column's own header; nothing
+/// when the column has none. A damage column's part tells `share_rows` while it lists damage
+/// shares.
 #[component]
 pub fn ColumnDetail(
     column: ReplayColumn,
@@ -312,16 +310,33 @@ pub fn ColumnDetail(
     rows: Rows,
     #[prop(into)] debug: Signal<bool, LocalStorage>,
     #[prop(into)] alt_held: Signal<bool, LocalStorage>,
+    art: GameArt,
+    #[prop(optional)] share_rows: Option<ShareRows>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let shell = use_local_context::<Shell>();
+
+    if let Some(share_rows) = share_rows
+        && matches!(column, ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage)
+    {
+        let player = row.db_id;
+        let marked = Arc::clone(&row);
+        let named = Arc::clone(&rows);
+        let marking = RenderEffect::new(move |_| {
+            share_rows.mark(player, column, shows_damage_shares(&marked, &named, &[column], debug.get()));
+        });
+        on_cleanup_local(move || {
+            drop(marking);
+            share_rows.mark(player, column, false);
+        });
+    }
 
     move || {
         let debug = debug.get();
         let hidden = row.should_hide_stats() && !debug;
         match column {
-            ReplayColumn::Name => name_section(&row, debug, shell),
-            ReplayColumn::Skills => build_section(&row, debug),
+            ReplayColumn::Name => name_section(&row, debug, shell, art),
+            ReplayColumn::Skills => build_section(&row, debug, art),
             ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage if hidden => Some(nda_text()),
             ReplayColumn::ActualDamage => damage_section(&row, &rows, DamageDirection::Dealt, alt_held),
             ReplayColumn::ReceivedDamage => damage_section(&row, &rows, DamageDirection::Received, alt_held),
@@ -334,7 +349,9 @@ pub fn ColumnDetail(
         }
         .map(|content| {
             AnyView::new(view! {
-                column(class = "wt-xr-col", attr:data-column = format!("{column:?}")) {{content}}
+                box(class = "wt-xr-frame", attr:data-column = format!("{column:?}")) {
+                    column(class = "wt-xr-well") {{content}}
+                }
             })
         })
     }
@@ -362,14 +379,83 @@ fn separator() -> AnyView {
     AnyView::new(view! { Separator() })
 }
 
-/// What a game icon's tooltip says: its name in bold over its description.
-fn icon_tip(name: String, description: Option<&str>) -> impl Fn() -> AnyView + 'static {
+/// What a game icon is drawn on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Backdrop {
+    /// Icons with their own colours and shape, such as flags and ribbons.
+    Bare,
+    /// White glyph icons, drawn for the game's dark interface, on a dark tile in every theme.
+    DarkTile,
+}
+
+/// A game icon as one place draws it.
+#[derive(Clone, Debug)]
+struct Icon {
+    key: ArtKey,
+    /// The edge of the box the icon is fitted within, in CSS pixels.
+    size: f32,
+    backdrop: Backdrop,
+}
+
+impl Icon {
+    const fn new(key: ArtKey, size: f32, backdrop: Backdrop) -> Self {
+        Self { key, size, backdrop }
+    }
+
+    /// The icon from `art`, or `None` until it is read or where the build has none. Reactive.
+    fn view(&self, art: GameArt, dimmed: bool) -> Option<AnyView> {
+        let src = art.get(&self.key)?.url()?;
+        Some(icon_image(src, self.size, self.backdrop, dimmed))
+    }
+
+    /// The icon as its tooltip draws it: twice its size, but never smaller than 64px.
+    fn preview(&self) -> Self {
+        const MIN_SIZE: f32 = 64.0;
+        Self { size: (self.size * 2.0).max(MIN_SIZE), ..self.clone() }
+    }
+}
+
+fn icon_image(src: String, size: f32, backdrop: Backdrop, dimmed: bool) -> AnyView {
+    let edge = format!("{size}px");
+    let class = if dimmed { "wt-xr-icon wt-xr-icon--dim" } else { "wt-xr-icon" };
+    match backdrop {
+        // As tall as its own proportions at the box's width, so a wide ribbon leaves no gap
+        // above its count.
+        Backdrop::Bare => AnyView::new(view! {
+            image(
+                class = class,
+                src = src,
+                style:width = edge.clone(),
+                style:height = "auto",
+                style:max-height = edge,
+                a11y:hidden = true
+            )
+        }),
+        Backdrop::DarkTile => {
+            let tile = format!("{}px", size + 2.0 * GAME_ICON_TILE_PADDING);
+            AnyView::new(view! {
+                box(class = "wt-xr-icon-tile", style:width = tile.clone(), style:height = tile) {
+                    image(class = class, src = src, style:width = edge.clone(), style:height = edge, a11y:hidden = true)
+                }
+            })
+        }
+    }
+}
+
+/// What a game icon's tooltip says: the icon drawn larger once it is read, its name in bold, and
+/// its description.
+fn icon_tip(name: String, description: Option<&str>, icon: Option<(GameArt, Icon)>) -> impl Fn() -> AnyView + 'static {
     let description = description.filter(|text| !text.trim().is_empty()).map(str::to_owned);
     move || {
         let name = name.clone();
         let description = description.clone();
+        let preview = icon.clone().map(|(art, icon)| {
+            let preview = icon.preview();
+            AnyView::new(move || preview.view(art, false))
+        });
         AnyView::new(view! {
             column(class = "wt-xr-tip") {
+                {preview}
                 text(class = "wt-xr-tip__name") {{name}}
                 {description.map(|text| view! { text(class = "wt-xr-tip__text") {{text}} })}
             }
@@ -431,7 +517,7 @@ fn has_damage_events(row: &PlayerRow) -> bool {
 }
 
 /// Name's detail: achievements, ribbons, damage events, then the effective fire chance.
-fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Option<AnyView> {
+fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>, art: GameArt) -> Option<AnyView> {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();
     let has_events = has_damage_events(row);
@@ -443,7 +529,7 @@ fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Option<An
     let mut parts: Vec<AnyView> = Vec::new();
     if has_achievements {
         parts.push(heading(t!("ui.replay.sections.achievements").into_owned()));
-        parts.push(achievements_view(&row.achievements));
+        parts.push(achievements_view(&row.achievements, art));
     }
     if has_ribbons {
         if has_achievements {
@@ -453,7 +539,7 @@ fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Option<An
         let mut ribbons: Vec<&RibbonResult> = row.ribbons.iter().collect();
         ribbons.sort_by(|a, b| a.name.cmp(&b.name));
         reorder_bulge_after_main_caliber(&mut ribbons);
-        parts.push(ribbons_view(ribbons));
+        parts.push(ribbons_view(ribbons, art));
     }
     if has_events {
         if has_achievements || has_ribbons {
@@ -533,18 +619,21 @@ fn group_ribbons(ordered: Vec<&RibbonResult>) -> RibbonGroups<'_> {
     RibbonGroups { standalone, families }
 }
 
-fn achievements_view(achievements: &[AchievementResult]) -> AnyView {
-    let tiles: Vec<AnyView> = achievements.iter().map(achievement_tile).collect();
-    AnyView::new(view! { row(class = "wt-xr-tiles") {{tiles}} })
+/// Achievement tiles in a grid that wraps to the column, top-aligned: only some carry a count.
+fn achievements_view(achievements: &[AchievementResult], art: GameArt) -> AnyView {
+    let tiles: Vec<AnyView> = achievements.iter().map(|achievement| achievement_tile(achievement, art)).collect();
+    let width = format!("{}px", tile_grid_width(achievements.len()));
+    AnyView::new(view! { row(class = "wt-xr-tiles", style:width = width) {{tiles}} })
 }
 
 /// Standalone ribbons first; each ribbon with sub-ribbons then starts a line of its own, so a
-/// family reads as one block.
-fn ribbons_view(ribbons: Vec<&RibbonResult>) -> AnyView {
+/// family reads as one block. Bottom-aligned, so the counts of one line agree.
+fn ribbons_view(ribbons: Vec<&RibbonResult>, art: GameArt) -> AnyView {
     let RibbonGroups { standalone, families } = group_ribbons(ribbons);
     let grid = |tiles: Vec<&RibbonResult>| {
-        let tiles: Vec<AnyView> = tiles.into_iter().map(ribbon_tile).collect();
-        AnyView::new(view! { row(class = "wt-xr-tiles wt-xr-tiles--end") {{tiles}} })
+        let width = format!("{}px", tile_grid_width(tiles.len()));
+        let tiles: Vec<AnyView> = tiles.into_iter().map(|ribbon| ribbon_tile(ribbon, art)).collect();
+        AnyView::new(view! { row(class = "wt-xr-tiles wt-xr-tiles--end", style:width = width) {{tiles}} })
     };
     let mut lines = Vec::new();
     if !standalone.is_empty() {
@@ -554,29 +643,49 @@ fn ribbons_view(ribbons: Vec<&RibbonResult>) -> AnyView {
     AnyView::new(view! { column(class = "wt-xr-ribbons") {{lines}} })
 }
 
-fn achievement_tile(achievement: &AchievementResult) -> AnyView {
+/// What a tile grid asks of its column: `RIBBON_GRID_MIN_TILES` tiles a line, or fewer when there
+/// are fewer. A wider column fits more, since the grid wraps to it.
+fn tile_grid_width(tiles: usize) -> f32 {
+    let tiles = tiles.min(RIBBON_GRID_MIN_TILES) as f32;
+    if tiles == 0.0 {
+        return 0.0;
+    }
+    tiles * RIBBON_ICON_SIZE + (tiles - 1.0) * RIBBON_TILE_GAP
+}
+
+/// An achievement's icon, or its name until the icon is read, over "xN" when earned more than once.
+fn achievement_tile(achievement: &AchievementResult, art: GameArt) -> AnyView {
     let name = achievement.display_name.clone();
     let count = (achievement.count > 1).then(|| format!("x{}", achievement.count));
+    let icon = Icon::new(ArtKey::Achievement(achievement.icon_key.clone()), RIBBON_ICON_SIZE, Backdrop::Bare);
+    let shown = icon.clone();
+    let label = name.clone();
     let tile = AnyView::new(view! {
-        column(class = "wt-xr-tile", attr:data-testid = "replay-achievement") {
-            text {{name.clone()}}
+        column(class = "wt-xr-tile", attr:data-testid = "replay-achievement", attr:data-name = name.clone()) {
+            {move || shown.view(art, false).unwrap_or_else(|| text(label.clone()))}
             {count.map(|count| view! { text(attr:data-testid = "replay-achievement-count", attr:data-count-of = name.clone()) {{count}} })}
         }
     });
-    with_tip(tile, icon_tip(achievement.display_name.clone(), Some(&achievement.description)))
+    with_tip(tile, icon_tip(achievement.display_name.clone(), Some(&achievement.description), Some((art, icon))))
 }
 
-/// The count reads "x20" rather than "20" so it is read as a multiplier on the ribbon.
-fn ribbon_tile(ribbon: &RibbonResult) -> AnyView {
+/// A ribbon's icon, or its name until the icon is read, over its count. The count reads "x20"
+/// rather than "20" so it is read as a multiplier on the ribbon.
+fn ribbon_tile(ribbon: &RibbonResult, art: GameArt) -> AnyView {
     let name = ribbon.display_name.clone();
     let count = format!("x{}", ribbon.count);
+    let icon = match ribbon.is_subribbon {
+        true => Icon::new(ArtKey::SubRibbon(ribbon.icon_key.clone()), LARGE_ICON_SIZE, Backdrop::Bare),
+        false => Icon::new(ArtKey::Ribbon(ribbon.icon_key.clone()), RIBBON_ICON_SIZE, Backdrop::Bare),
+    };
+    let shown = icon.clone();
     let tile = AnyView::new(view! {
-        column(class = "wt-xr-tile", attr:data-testid = "replay-ribbon") {
-            text {{name}}
+        column(class = "wt-xr-tile", attr:data-testid = "replay-ribbon", attr:data-name = name.clone()) {
+            {move || shown.view(art, false).unwrap_or_else(|| text(name.clone()))}
             text {{count}}
         }
     });
-    with_tip(tile, icon_tip(ribbon.display_name.clone(), ribbon.description.as_deref()))
+    with_tip(tile, icon_tip(ribbon.display_name.clone(), ribbon.description.as_deref(), Some((art, icon))))
 }
 
 /// Whether Skills has anything to draw: never for an enemy, unless `debug`.
@@ -588,7 +697,7 @@ fn build_has_content(row: &PlayerRow, debug: bool) -> bool {
 }
 
 /// Skills' detail: the skill-tier text, the build the replay observed, then the consumables.
-fn build_section(row: &PlayerRow, debug: bool) -> Option<AnyView> {
+fn build_section(row: &PlayerRow, debug: bool, art: GameArt) -> Option<AnyView> {
     if !build_has_content(row, debug) {
         return None;
     }
@@ -606,13 +715,13 @@ fn build_section(row: &PlayerRow, debug: bool) -> Option<AnyView> {
             parts.push(text(t!("ui.replay.sections.modules_none").into_owned()));
         } else {
             parts.push(heading(t!("ui.replay.sections.modules").into_owned()));
-            parts.push(modernization_slots_view(&build.modernization_slots));
+            parts.push(modernization_slots_view(&build.modernization_slots, art));
         }
 
         if !build.signals.is_empty() {
             parts.push(separator());
             parts.push(heading(t!("ui.replay.sections.signals").into_owned()));
-            parts.push(signals_view(&build.signals));
+            parts.push(signals_view(&build.signals, art));
         }
 
         parts.push(separator());
@@ -631,7 +740,7 @@ fn build_section(row: &PlayerRow, debug: bool) -> Option<AnyView> {
         match build.captain_skills.as_ref() {
             Some(skills) if !skills.is_empty() => {
                 parts.push(heading(t!("ui.replay.sections.captain_skills").into_owned()));
-                parts.push(captain_skill_grid_view(skills));
+                parts.push(captain_skill_grid_view(skills, art));
             }
             Some(_) => {
                 parts.push(heading(t!("ui.replay.sections.captain_skills").into_owned()));
@@ -646,7 +755,7 @@ fn build_section(row: &PlayerRow, debug: bool) -> Option<AnyView> {
             parts.push(separator());
         }
         parts.push(heading(t!("ui.replay.sections.consumables").into_owned()));
-        parts.push(consumables_view(&row.consumables));
+        parts.push(consumables_view(&row.consumables, art));
     } else if let Some(build) = row.translated_build.as_ref()
         && !build.abilities.is_empty()
     {
@@ -662,25 +771,41 @@ fn build_section(row: &PlayerRow, debug: bool) -> Option<AnyView> {
     Some(AnyView::new(view! { column(class = "wt-xr-col", attr:data-testid = "replay-build") {{parts}} }))
 }
 
-fn module_cell(module: &TranslatedModule, testid: &'static str) -> AnyView {
+/// A module or signal: its icon once read, else its name.
+fn module_cell(module: &TranslatedModule, testid: &'static str, icon: Icon, art: GameArt) -> AnyView {
     let name = module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
-    let cell = AnyView::new(view! { text(attr:data-testid = testid) {{name.clone()}} });
-    with_tip(cell, icon_tip(name, module.description.as_deref()))
+    let shown = icon.clone();
+    let label = name.clone();
+    let cell = AnyView::new(view! {
+        box(class = "wt-xr-cell", attr:data-testid = testid, attr:data-name = name.clone()) {
+            {move || shown.view(art, false).unwrap_or_else(|| text(label.clone()))}
+        }
+    });
+    with_tip(cell, icon_tip(name, module.description.as_deref(), Some((art, icon))))
 }
 
-fn modernization_slots_view(slots: &[Option<TranslatedModule>]) -> AnyView {
+fn modernization_slots_view(slots: &[Option<TranslatedModule>], art: GameArt) -> AnyView {
     let cells: Vec<AnyView> = slots
         .iter()
         .map(|slot| match slot {
-            Some(module) => module_cell(module, "replay-modernization"),
+            Some(module) => {
+                let key = ArtKey::Modernization(module.game_params_name.clone());
+                module_cell(module, "replay-modernization", Icon::new(key, MODULE_ICON_SIZE, Backdrop::DarkTile), art)
+            }
             None => AnyView::new(view! { box(class = "wt-xr-empty-slot") {"-"} }),
         })
         .collect();
     AnyView::new(view! { row(class = "wt-xr-cells") {{cells}} })
 }
 
-fn signals_view(signals: &[TranslatedModule]) -> AnyView {
-    let cells: Vec<AnyView> = signals.iter().map(|signal| module_cell(signal, "replay-signal")).collect();
+fn signals_view(signals: &[TranslatedModule], art: GameArt) -> AnyView {
+    let cells: Vec<AnyView> = signals
+        .iter()
+        .map(|signal| {
+            let key = ArtKey::SignalFlag(signal.game_params_name.clone());
+            module_cell(signal, "replay-signal", Icon::new(key, MODULE_ICON_SIZE, Backdrop::Bare), art)
+        })
+        .collect();
     AnyView::new(view! { row(class = "wt-xr-cells") {{cells}} })
 }
 
@@ -694,12 +819,12 @@ fn text_row(label: String, tip: Option<String>) -> AnyView {
 
 /// One line per skill-point tier: the point cost, then each skill in that tier, dimmed when not
 /// learned.
-fn captain_skill_grid_view(tiers: &[SkillGridRow]) -> AnyView {
+fn captain_skill_grid_view(tiers: &[SkillGridRow], art: GameArt) -> AnyView {
     let lines: Vec<AnyView> = tiers
         .iter()
         .map(|tier| {
             let cost = tier.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
-            let cells: Vec<AnyView> = tier.skills.iter().map(skill_cell).collect();
+            let cells: Vec<AnyView> = tier.skills.iter().map(|skill| skill_cell(skill, art)).collect();
             AnyView::new(view! {
                 row(class = "wt-xr-skills__tier") {
                     text(class = "wt-xr-skills__cost") {{cost}}
@@ -711,25 +836,32 @@ fn captain_skill_grid_view(tiers: &[SkillGridRow]) -> AnyView {
     AnyView::new(view! { column(class = "wt-xr-skills") {{lines}} })
 }
 
-fn skill_cell(skill: &SkillGridSkill) -> AnyView {
+/// A skill's icon on its tile, the glyph dimmed when not learned so the grid keeps its shape; its
+/// cost and name until the icon is read.
+fn skill_cell(skill: &SkillGridSkill, art: GameArt) -> AnyView {
     let name = skill.name.clone().unwrap_or_else(|| skill.internal_name.as_str().to_string());
     let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
     let label = match skill.point_cost {
         Some(c) => format!("({}) {name}", c.get()),
         None => name.clone(),
     };
-    let class = if skill.learned { "" } else { "wt-xr-skill--unlearned" };
+    let class = if skill.learned { "wt-xr-cell" } else { "wt-xr-cell wt-xr-skill--unlearned" };
     let learned = skill.learned.then(String::new);
+    let dimmed = !skill.learned;
+    let icon = Icon::new(ArtKey::CrewSkill(skill.internal_name.clone()), MODULE_ICON_SIZE, Backdrop::DarkTile);
+    let shown = icon.clone();
     let cell = AnyView::new(view! {
-        text(class = class, attr:data-testid = "replay-skill", attr:data-learned = learned) {{label}}
+        box(class = class, attr:data-testid = "replay-skill", attr:data-learned = learned, attr:data-name = name.clone()) {
+            {move || shown.view(art, dimmed).unwrap_or_else(|| text(label.clone()))}
+        }
     });
-    with_tip(cell, icon_tip(format!("{name}{cost}"), skill.description.as_deref()))
+    with_tip(cell, icon_tip(format!("{name}{cost}"), skill.description.as_deref(), Some((art, icon))))
 }
 
 /// Consumable / Remaining / Total. An unlimited consumable shows its activations under Remaining
 /// and the infinity mark under Total, as the egui inventory does.
-fn consumables_view(consumables: &[ConsumableResult]) -> AnyView {
-    let rows: Vec<AnyView> = consumables.iter().map(consumable_row).collect();
+fn consumables_view(consumables: &[ConsumableResult], art: GameArt) -> AnyView {
+    let rows: Vec<AnyView> = consumables.iter().map(|consumable| consumable_row(consumable, art)).collect();
     let remaining = t!("ui.replay.consumable_header_remaining").into_owned();
     let total = t!("ui.replay.consumable_header_total").into_owned();
     AnyView::new(view! {
@@ -763,17 +895,22 @@ fn consumable_counts(consumable: &ConsumableResult) -> (String, String, String) 
     }
 }
 
-fn consumable_row(consumable: &ConsumableResult) -> AnyView {
+fn consumable_row(consumable: &ConsumableResult, art: GameArt) -> AnyView {
     let (remaining, total, said) = consumable_counts(consumable);
     let name = consumable.display_name.clone();
+    let icon = Icon::new(ArtKey::Consumable(consumable.icon_key.clone()), CONSUMABLE_ICON_SIZE, Backdrop::DarkTile);
+    let shown = icon.clone();
     let line = AnyView::new(view! {
         row(class = "wt-xr-table__row", attr:data-testid = "replay-consumable") {
-            text(class = "wt-xr-table__name") {{name}}
+            row(class = "wt-xr-table__name") {
+                {move || shown.view(art, false)}
+                text {{name}}
+            }
             text(class = "wt-xr-table__count") {{remaining}}
             text(class = "wt-xr-table__count") {{total}}
         }
     });
-    with_tip(line, icon_tip(consumable.display_name.clone(), Some(&said)))
+    with_tip(line, icon_tip(consumable.display_name.clone(), Some(&said), Some((art, icon))))
 }
 
 /// The effective-fire-chance block. Only the recording player's row carries one.
@@ -984,7 +1121,7 @@ fn damage_interactions(row: &PlayerRow, rows: &[PlayerRow], direction: DamageDir
 /// What a damage line's share means in the mode it is shown in, then how to see the other one.
 /// While inverted the key is already down, so the hint says to let it go.
 fn share_text(direction: DamageDirection, inverted: bool, share: f64, this: &str, other: &str) -> String {
-    let key = "Alt";
+    let key = ModifierKey::Alt.label();
     let pct = format!("{share:.0}%");
     let said = match (direction, inverted) {
         (DamageDirection::Dealt, false) => t!("ui.replay.damage_share.dealt", pct = pct, ship = this, other = other),

@@ -96,9 +96,10 @@ use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
 use crate::tabs::replays::panel::chat::ChatPanelProps;
-use crate::tabs::replays::panel::expanded::ExpandedRowProps;
+use crate::tabs::replays::panel::expanded::ColumnDetailProps;
 use crate::tabs::replays::panel::expanded::SHARE_MODE;
 use crate::tabs::replays::panel::expanded::ShareRows;
+use crate::tabs::replays::panel::expanded::has_column_detail;
 use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
@@ -425,7 +426,7 @@ impl PanelControl {
     /// Marks `player`'s open row as listing damage shares, as its detail does once drawn.
     #[cfg(test)]
     pub fn note_shares_for_test(self, player: wows_replays::types::AccountId) {
-        self.share_rows.mark(player, true);
+        self.share_rows.mark(player, wows_toolkit_replay_data::columns::ReplayColumn::ActualDamage, true);
     }
 }
 
@@ -798,17 +799,21 @@ pub fn ReplayPanel(
                 let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || read.get());
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
-                    let PlayerDetailCx { row, rows, columns } = cx;
-                    AnyView::new(view! {
-                        ExpandedRow(
-                            columns = columns,
+                    let PlayerDetailCx { row, rows, column, art } = cx;
+                    if !has_column_detail(column, &row, &rows, debug.get()) {
+                        return None;
+                    }
+                    Some(AnyView::new(view! {
+                        ColumnDetail(
+                            column = column,
                             row = row,
                             rows = rows,
                             debug = debug,
                             alt_held = alt_held,
+                            art = art,
                             share_rows = control.share_rows
                         )
-                    })
+                    }))
                 });
                 Some(table.with_value(|table| table(PanelTable { model, debug, detail, on_view_raw_json })))
             };

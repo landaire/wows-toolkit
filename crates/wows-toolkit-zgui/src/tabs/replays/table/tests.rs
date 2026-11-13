@@ -57,13 +57,12 @@ fn Harness(scheme: Scheme, model: Rc<ReplayReportModel>, with_detail: bool) -> i
             return AnyView::new(view! { PlayerTable(model = model, debug = debug) });
         }
         let detail: PlayerDetail = Rc::new(|cx: PlayerDetailCx| {
-            let id = format!("detail-{}", cx.row.db_id.raw());
+            if !matches!(cx.column, ReplayColumn::Name | ReplayColumn::Kills) {
+                return None;
+            }
+            let id = format!("detail-{}-{}", cx.row.db_id.raw(), cx.column.storage_key());
             let name = cx.row.display_name.clone();
-            let columns = cx.columns;
-            let third = move || columns.get().get(2).map(|col| col.storage_key().to_owned());
-            AnyView::new(view! {
-                box(attr:data-testid = id, attr:data-third-column = third, style:padding = "8px") {{name}}
-            })
+            Some(AnyView::new(view! { box(attr:data-testid = id, style:padding = "8px") {{name}} }))
         });
         AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail) })
     };
@@ -166,13 +165,13 @@ fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
 
     window.double_click(name).expect("the row takes a double click");
     window.advance(Duration::from_millis(400));
-    assert!(window.by_test_id("detail-2").is_some(), "the row's detail is open");
+    assert!(window.by_test_id("detail-2-name").is_some(), "the row's detail is open");
 
     let caret = window.by_test_id("player-caret-2").expect("the row has a disclosure");
     window.click(caret).expect("the disclosure takes a click");
     window.advance(Duration::from_millis(600));
     assert!(expanded.with_untracked(HashSet::is_empty), "the disclosure closed the row");
-    assert!(window.by_test_id("detail-2").is_none(), "the detail is gone once it has closed");
+    assert!(window.by_test_id("detail-2-name").is_none(), "the detail is gone once it has closed");
 }
 
 #[test]
@@ -260,9 +259,9 @@ fn an_open_detail_follows_a_column_pinned_after_it_opened() {
     let name = window.by_test_id("player-name-2").expect("the second player's name is drawn");
     window.double_click(name).expect("the row takes a double click");
     window.advance(Duration::from_millis(400));
-    assert!(window.by_test_id("detail-2").is_some(), "the row's detail is open");
     let kills_key = ReplayColumn::Kills.storage_key();
-    assert!(window.by_attribute("data-third-column", kills_key).is_none());
+    let part = format!("detail-2-{kills_key}");
+    assert!(window.by_test_id(&part).is_some(), "the row's detail is open");
 
     let kills = ReplayColumn::Kills.label();
     let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");
@@ -271,9 +270,13 @@ fn an_open_detail_follows_a_column_pinned_after_it_opened() {
     let pin = t!("ui.replay.context.pin_column").into_owned();
     let item = window.by_role_and_label(Role::MenuItem, &pin).expect("the header menu offers to pin");
     window.click(item).expect("the item takes a click");
-    window.advance(Duration::from_millis(300));
+    window.advance(Duration::from_millis(600));
 
-    assert!(window.by_attribute("data-third-column", kills_key).is_some(), "the detail sees Kills pinned third");
+    let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");
+    let header = window.bounds(header).expect("the header has a box");
+    let part = window.bounds(window.by_test_id(&part).expect("the part is drawn")).expect("the part has a box");
+    assert!((part.origin.x.0 - header.origin.x.0).abs() < 4.0, "Kills' part stays under Kills");
+    assert!(part.origin.y.0 > header.origin.y.0, "and below it");
 }
 
 #[test]
@@ -282,10 +285,32 @@ fn a_rows_stripe_follows_its_team_over_its_relation() {
     let self_team = model.self_team;
     let row = model.rows.iter_mut().find(|row| row.team_id == self_team && !row.is_self).expect("an ally");
     row.relation = wows_replays::types::Relation::new(2);
-    let id = row.db_id.raw();
+    let allies = model.rows.iter().filter(|row| row.team_id == self_team && !row.is_self).count();
+    let enemies = model.rows.iter().filter(|row| row.team_id != self_team).count();
 
     let (window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, true);
-    assert!(window.by_test_id(&format!("player-stripe-{id}-ally")).is_some(), "the stripe shows the row's team");
+    assert_eq!(window.all_by_attribute("data-mark", "ally").len(), allies, "the stripe shows the row's team");
+    assert_eq!(window.all_by_attribute("data-mark", "enemy").len(), enemies);
+    assert_eq!(window.all_by_attribute("data-mark", "owner").len(), 1);
+}
+
+#[test]
+fn a_rows_stripe_runs_unbroken_down_the_table() {
+    let (window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+    let mut stripes: Vec<_> = ["owner", "ally", "enemy"]
+        .into_iter()
+        .flat_map(|mark| window.all_by_attribute("data-mark", mark))
+        .filter_map(|stripe| window.bounds(stripe))
+        .collect();
+    stripes.sort_by(|a, b| a.origin.y.0.total_cmp(&b.origin.y.0));
+    assert!(stripes.len() > 2, "every row has a stripe");
+    let breaks: Vec<f32> = stripes
+        .windows(2)
+        .map(|pair| pair[1].origin.y.0 - (pair[0].origin.y.0 + pair[0].size.height.0))
+        .filter(|gap| gap.abs() >= 0.5)
+        .collect();
+    // Only the heading over the second team stands between two stripes.
+    assert!(breaks.len() <= 1, "neighbouring stripes meet: {breaks:?}");
 }
 
 #[test]

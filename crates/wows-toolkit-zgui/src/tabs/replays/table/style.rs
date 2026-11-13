@@ -88,14 +88,18 @@ pub const CSS: &str = css!(
     }
     .wt-pt-stripe {
         position: absolute;
-        left: -4px;
-        top: -2px;
-        bottom: -2px;
+        left: 0;
+        top: 0;
+        bottom: 0;
         width: 3px;
     }
-    .wt-pt-stripe[data-mark=\"owner\"] { background-color: var(--lui-color-accent); }
-    .wt-pt-stripe[data-mark=\"ally\"] { background-color: var(--wt-color-win); }
-    .wt-pt-stripe[data-mark=\"enemy\"] { background-color: var(--wt-color-loss); }
+    .wt-pt-grid .lui-grid__mark[data-mark=\"owner\"] { background-color: var(--lui-color-accent); }
+    .wt-pt-stripe[data-team=\"ally\"], .wt-pt-grid .lui-grid__mark[data-mark=\"ally\"] {
+        background-color: var(--wt-color-win);
+    }
+    .wt-pt-stripe[data-team=\"enemy\"], .wt-pt-grid .lui-grid__mark[data-mark=\"enemy\"] {
+        background-color: var(--wt-color-loss);
+    }
     .wt-pt-caret {
         display: flex;
         flex: none;
@@ -125,7 +129,6 @@ pub const CSS: &str = css!(
         flex-direction: row;
         align-items: center;
         gap: 8px;
-        position: relative;
         font-size: 0.75rem;
         font-weight: 400;
     }

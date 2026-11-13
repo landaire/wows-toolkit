@@ -15,12 +15,14 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::ColumnId;
 use landaire_ui::ColumnSort;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
 use landaire_ui::GridStrings;
 use landaire_ui::RowGroups;
+use landaire_ui::RowMark;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMenuHandle;
 use landaire_ui::RowMode;
@@ -73,6 +75,7 @@ use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PointerButton;
 
+use crate::game_art::GameArt;
 use crate::services::GameDataState;
 use crate::services::Services;
 use crate::shell::Appearance;
@@ -80,20 +83,20 @@ use crate::tabs::replays::table::arrangement::COLUMN_ARRANGEMENT_KEY;
 use crate::tabs::replays::table::arrangement::COLUMN_WIDTHS_KEY;
 use crate::tabs::replays::table::arrangement::Columns;
 use crate::tabs::replays::table::arrangement::column_id;
-use crate::tabs::replays::table::art::TableArt;
 use crate::theme::palette_choice;
 
-/// Builds the region under an expanded row.
-pub type PlayerDetail = Rc<dyn Fn(PlayerDetailCx) -> AnyView>;
+/// Builds one column's part of an expanded row; `None` for a column with nothing to show.
+pub type PlayerDetail = Rc<dyn Fn(PlayerDetailCx) -> Option<AnyView>>;
 
-/// What an expanded row's detail is built from.
+/// What one column's part of an expanded row is built from.
 #[derive(Clone)]
 pub struct PlayerDetailCx {
     pub row: Arc<PlayerRow>,
     /// Every player in the replay, for a detail that refers to other rows.
     pub rows: Arc<[PlayerRow]>,
-    /// The shown columns, in the order the table draws them.
-    pub columns: Signal<Rc<[ReplayColumn]>, LocalStorage>,
+    pub column: ReplayColumn,
+    /// The game art the table has read, which the detail's icons draw from.
+    pub art: GameArt,
 }
 
 /// One row as the grid holds it: the player, and what its cells draw from the rows around it.
@@ -208,7 +211,7 @@ struct TableCx {
     toasts: Option<Toasts>,
     on_view_raw_json: Option<UnsyncCallback<String>>,
     menus: RowMenuHandle<AccountId>,
-    art: TableArt,
+    art: GameArt,
     /// The palettes on screen, which a clan tag's colour is fitted to.
     theme: Signal<landaire_ui::ThemeChoice, LocalStorage>,
     /// Whether a row opens a detail region.
@@ -338,13 +341,13 @@ pub fn PlayerTable(
         });
     });
 
-    let art = TableArt::new();
+    let art = GameArt::new();
     let wanting = RenderEffect::new(move |_| {
-        let source = match services.game_data.state() {
-            GameDataState::Ready(data) => Some(art::ArtSource { build: data.build(), vfs: data.vfs().clone() }),
+        let data = match services.game_data.state() {
+            GameDataState::Ready(data) => Some(data),
             _ => None,
         };
-        model.with(|model| art.want(source, &model.rows));
+        model.with(|model| art.want(data.as_deref(), model.rows.iter().flat_map(art::row_keys)));
     });
     on_cleanup_local(move || drop(wanting));
 
@@ -411,19 +414,15 @@ pub fn PlayerTable(
 
         let grid_columns: Vec<GridColumn<TableRow>> = shown.iter().map(|col| grid_column(*col, cx)).collect();
         let mode = match detail.get_value() {
-            Some(detail) => {
-                let drawn = Signal::derive_local(move || {
-                    let shown = cx.shown.get();
-                    cx.columns.with(|columns| columns.arrangement.shown(&shown).iter().collect())
-                });
-                RowMode::with_detail(move |row: &TableRow| {
-                    detail(PlayerDetailCx {
-                        row: Arc::clone(&row.row),
-                        rows: model_rows.with_untracked(|rows| Arc::clone(&rows.all)),
-                        columns: drawn,
-                    })
+            Some(detail) => RowMode::with_column_detail(move |row: &TableRow, id: &ColumnId| {
+                let column = ReplayColumn::from_storage_key(id.as_str())?;
+                detail(PlayerDetailCx {
+                    row: Arc::clone(&row.row),
+                    rows: model_rows.with_untracked(|rows| Arc::clone(&rows.all)),
+                    column,
+                    art,
                 })
-            }
+            }),
             None => RowMode::natural(),
         };
         let mode = mode.grouped(RowGroups::new(
@@ -436,6 +435,7 @@ pub fn PlayerTable(
             ..GridStrings::new()
         };
         let row_menu: RowMenu<AccountId> = Rc::new(move |player: AccountId| AnyView::new(menu::row_menu(player, cx)));
+        let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
         let label = t!("ui.tabs.replay_parser").into_owned();
 
         view! {
@@ -450,6 +450,7 @@ pub fn PlayerTable(
                 selection_mode = GridSelectionMode::Multiple,
                 expanded = expanded,
                 row_menu = row_menu,
+                row_mark = row_mark,
                 strings = strings,
                 row_menu_handle = cx.menus,
                 label = label,

@@ -56,6 +56,7 @@ use crate::icons::AppIconProps;
 use crate::tabs::replays::table::TableCx;
 use crate::tabs::replays::table::TableRow;
 use crate::tabs::replays::table::TeamHeading;
+use crate::tabs::replays::table::art;
 use crate::tabs::replays::table::damage_mix;
 use crate::tabs::replays::table::menu;
 use crate::theme::Semantic;
@@ -138,7 +139,7 @@ pub(super) fn class_mark(row: &PlayerRow, cx: TableCx) -> AnyView {
     let kind = player_color_kind(row);
     let text = row.ship_species_text.clone();
 
-    AnyView::new(move || match cx.art.class_icon(species, kind) {
+    AnyView::new(move || match art::class_icon(cx.art, species, kind) {
         Some(svg) => AnyView::new(view! {
             vector(
                 class = "wt-pt-class",
@@ -168,7 +169,7 @@ pub(super) fn team_heading(team: TeamHeading) -> AnyView {
 
     AnyView::new(view! {
         box(class = "wt-pt-team", attr:data-testid = format!("team-heading-{mark}")) {
-            box(class = "wt-pt-stripe", attr:data-mark = mark) {}
+            box(class = "wt-pt-stripe", attr:data-team = mark) {}
             text(class = "wt-pt-team__name") {{label}}
             {total}
         }
@@ -250,7 +251,7 @@ fn figure_cell(col: ReplayColumn, row: &TableRow, cx: TableCx, cell: &CellValue,
     let text = cell_text(cell);
     let flag = (col == ReplayColumn::ShipName).then(|| row.row.ship_nation.clone()).flatten().map(|nation| {
         AnyView::new(move || {
-            cx.art.flag(&nation).map(|src| view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true) })
+            art::flag(cx.art, &nation).map(|src| view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true) })
         })
     });
     let content = match (mix, flag) {
@@ -362,7 +363,7 @@ fn skills_cell(row: &TableRow, cx: TableCx) -> AnyView {
 }
 
 /// Which side of the battle a row stands for, for the stripe at its leading edge.
-const fn row_mark(row: &PlayerRow, side: TeamSide) -> &'static str {
+pub(super) const fn row_mark(row: &PlayerRow, side: TeamSide) -> &'static str {
     match (row.is_self, side) {
         (true, _) => "owner",
         (false, TeamSide::Allies) => "ally",
@@ -375,7 +376,6 @@ const fn row_mark(row: &PlayerRow, side: TeamSide) -> &'static str {
 fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     let player = Arc::clone(&row.row);
     let db_id = player.db_id;
-    let mark = row_mark(&player, row.side);
 
     let expanded = cx.expanded;
     let open = move || expanded.with(|expanded| expanded.contains(&db_id)).then(String::new);
@@ -429,11 +429,6 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
             attr:data-testid = format!("player-name-{}", db_id.raw()),
             on:pointer_down = note
         ) {
-            box(
-                class = "wt-pt-stripe",
-                attr:data-mark = mark,
-                attr:data-testid = format!("player-stripe-{}-{mark}", db_id.raw())
-            ) {}
             box(class = "wt-pt-name") {
                 {caret}
                 {species}

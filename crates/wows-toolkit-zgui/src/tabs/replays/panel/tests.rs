@@ -119,9 +119,11 @@ fn fake_table() -> TableSlot {
         let rows: Arc<[PlayerRow]> = Arc::from(current.rows.clone());
         let row =
             Arc::new(current.rows.iter().find(|row| row.is_self).cloned().unwrap_or_else(|| current.rows[0].clone()));
-        let columns: Rc<[ReplayColumn]> =
-            Rc::from(vec![ReplayColumn::Name, ReplayColumn::Skills, ReplayColumn::ActualDamage]);
-        let expanded = detail(PlayerDetailCx { row, rows, columns: Signal::stored_local(columns) });
+        let art = crate::game_art::GameArt::new();
+        let expanded: Vec<_> = [ReplayColumn::Name, ReplayColumn::Skills, ReplayColumn::ActualDamage]
+            .into_iter()
+            .filter_map(|column| detail(PlayerDetailCx { row: Arc::clone(&row), rows: Arc::clone(&rows), column, art }))
+            .collect();
         AnyView::new(view! {
             column(attr:data-testid = "fake-table") {
                 Button(attr:data-testid = "fake-raw", on:click = move |_| on_view_raw_json.run("{\"id\": 1}".to_string())) {"raw"}
@@ -211,18 +213,24 @@ fn the_header_names_the_match_and_flags_missing_results() {
 /// detail.
 #[test]
 fn the_player_table_slot_draws_the_table_and_opens_a_rows_detail() {
-    let Opened { mut window } = open(Opening {
-        seed: Some(loaded(sample_model(), true)),
-        table: Some(player_table_slot()),
-        ..Opening::default()
-    });
+    let model = sample_model();
+    let rows = model.rows.clone();
+    let with_detail = rows
+        .iter()
+        .find(|row| {
+            ReplayColumn::ALL.into_iter().any(|column| super::expanded::has_column_detail(column, row, &rows, false))
+        })
+        .expect("a sample row has detail");
+    let Opened { mut window } =
+        open(Opening { seed: Some(loaded(model, true)), table: Some(player_table_slot()), ..Opening::default() });
     assert!(window.by_test_id("fake-table").is_none());
-    let name = window.by_test_id("player-name-2").expect("the table draws the second player");
-    assert!(window.by_test_id("replay-expanded-row").is_none(), "no row starts open");
+    let name =
+        window.by_test_id(&format!("player-name-{}", with_detail.db_id.raw())).expect("the table draws the player");
+    assert!(window.by_class("wt-xr-frame").is_none(), "no row starts open");
 
     window.double_click(name).expect("the row takes a double click");
     window.advance(Duration::from_millis(600));
-    assert!(window.by_test_id("replay-expanded-row").is_some(), "the row's detail opens");
+    assert!(window.by_class("wt-xr-frame").is_some(), "the row's detail opens");
 }
 
 fn rated() -> ReplayReportModel {
