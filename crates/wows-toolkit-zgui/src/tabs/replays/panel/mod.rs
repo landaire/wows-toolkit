@@ -254,7 +254,7 @@ const CSS: &str = css!(
         font-size: 14px;
         font-weight: 700;
     }
-    .wt-rp-chat, .wt-rp-json { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+    .wt-rp-chat { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
     .wt-rp-chat__toolbar {
         display: flex;
         flex-direction: row;
@@ -264,7 +264,7 @@ const CSS: &str = css!(
         padding: 4px 8px;
         border-bottom: 1px solid var(--lui-color-border);
     }
-    .wt-rp-chat__log, .wt-rp-json__body { flex: 1 1 auto; min-height: 0; }
+    .wt-rp-chat__log { flex: 1 1 auto; min-height: 0; }
     .wt-rp-chat__row {
         position: relative;
         display: flex;
@@ -277,9 +277,7 @@ const CSS: &str = css!(
     .wt-rp-chat__who { display: flex; flex-direction: row; gap: 4px; }
     .wt-rp-chat__body { white-space: pre-wrap; }
     .wt-rp-chat__copy { position: absolute; top: 4px; right: 4px; visibility: hidden; }
-    .wt-rp-chat__row:hover > .wt-rp-chat__copy { visibility: visible; }
-    .wt-rp-json__lines { display: flex; flex-direction: column; padding: 4px 8px; }
-    .wt-rp-json__line { font-family: monospace; font-size: 12px; white-space: pre; }"
+    .wt-rp-chat__row:hover > .wt-rp-chat__copy { visibility: visible; }"
 );
 
 /// How wide the side panel opens, and how far it may be dragged.

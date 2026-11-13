@@ -61,6 +61,12 @@ pub struct Semantic {
     pub armor_angle_good: Rgb,
     pub armor_angle_mid: Rgb,
     pub armor_angle_bad: Rgb,
+
+    /// The parts of a JSON document: object keys, strings, numbers, and `true`, `false`, `null`.
+    pub syntax_key: Rgb,
+    pub syntax_string: Rgb,
+    pub syntax_number: Rgb,
+    pub syntax_literal: Rgb,
 }
 
 impl Semantic {
@@ -87,6 +93,10 @@ impl Semantic {
         armor_angle_good: Rgb::new(0x64d98a),
         armor_angle_mid: Rgb::new(0xe0be64),
         armor_angle_bad: Rgb::new(0xe8737b),
+        syntax_key: Rgb::new(0x7fb4e8),
+        syntax_string: Rgb::new(0x9ccc7c),
+        syntax_number: Rgb::new(0xe0a070),
+        syntax_literal: Rgb::new(0xc79be8),
     };
 
     /// Mid tones rather than near-black ones, so the win and loss tones read as green and red at a
@@ -114,6 +124,10 @@ impl Semantic {
         armor_angle_good: Rgb::new(0x116b34),
         armor_angle_mid: Rgb::new(0x785808),
         armor_angle_bad: Rgb::new(0xae2230),
+        syntax_key: Rgb::new(0x1b5fa8),
+        syntax_string: Rgb::new(0x2f6b12),
+        syntax_number: Rgb::new(0x8a4b00),
+        syntax_literal: Rgb::new(0x7a2e9a),
     };
 
     pub const fn for_appearance(appearance: Appearance) -> &'static Self {
@@ -124,7 +138,7 @@ impl Semantic {
     }
 
     /// Each tone with the custom property a style sheet reads it from.
-    pub const fn properties(&self) -> [(&'static str, Rgb); 22] {
+    pub const fn properties(&self) -> [(&'static str, Rgb); 26] {
         [
             ("--wt-color-win", self.win),
             ("--wt-color-loss", self.loss),
@@ -148,6 +162,10 @@ impl Semantic {
             ("--wt-color-armor-angle-good", self.armor_angle_good),
             ("--wt-color-armor-angle-mid", self.armor_angle_mid),
             ("--wt-color-armor-angle-bad", self.armor_angle_bad),
+            ("--wt-color-syntax-key", self.syntax_key),
+            ("--wt-color-syntax-string", self.syntax_string),
+            ("--wt-color-syntax-number", self.syntax_number),
+            ("--wt-color-syntax-literal", self.syntax_literal),
         ]
     }
 
