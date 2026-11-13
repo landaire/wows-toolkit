@@ -57,6 +57,7 @@ use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
+use zgui::vocab::PropValue;
 
 use crate::services::GameDataState;
 use crate::services::Services;
@@ -123,6 +124,7 @@ const CSS: &str = css!(
     }
     .wt-replays__grid-v { position: absolute; top: 0; bottom: 0; width: 1px; background-color: var(--lui-color-border); opacity: 0.35; }
     .wt-replays__grid-h { position: absolute; left: 0; right: 0; height: 1px; background-color: var(--lui-color-border); opacity: 0.35; }
+    .wt-replays__islands { position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--lui-color-border); }
     .wt-replays__cap {
         position: absolute;
         width: 18px;
@@ -490,6 +492,7 @@ fn EmptyPane() -> impl IntoView {
             column(class = "wt-replays__drop") {
                 box(class = "wt-replays__map", a11y:hidden = true) {
                     {grid}
+                    vector(class = "wt-replays__islands", prop:svg = PropValue::from(islands_svg())) {}
                     {captures}
                 }
                 text(class = "wt-replays__title") {{t!("ui.replay.select_replay").into_owned()}}
@@ -497,4 +500,120 @@ fn EmptyPane() -> impl IntoView {
             }
         }
     }
+}
+
+/// The empty pane's islands as an SVG document over the 120 pixel map, filled faintly and
+/// outlined in `currentColor`. Each vertex pulls its coast toward it as the control point between
+/// the midpoints of its two edges, so a vertex set inward reads as a bay and one set outward as a
+/// point.
+fn islands_svg() -> String {
+    const EDGE: f32 = 120.0;
+    // Coastline vertices in fractions of the map's edge, from the top left.
+    const ISLANDS: [&[(f32, f32)]; 10] = [
+        &[
+            (0.29, 0.27),
+            (0.31, 0.21),
+            (0.35, 0.19),
+            (0.37, 0.14),
+            (0.42, 0.15),
+            (0.45, 0.12),
+            (0.50, 0.13),
+            (0.53, 0.10),
+            (0.57, 0.12),
+            (0.62, 0.13),
+            (0.64, 0.18),
+            (0.61, 0.21),
+            (0.63, 0.26),
+            (0.59, 0.29),
+            (0.56, 0.27),
+            (0.55, 0.23),
+            (0.51, 0.22),
+            (0.48, 0.25),
+            (0.49, 0.30),
+            (0.45, 0.33),
+            (0.42, 0.36),
+            (0.39, 0.32),
+            (0.35, 0.33),
+            (0.31, 0.31),
+        ],
+        &[
+            (0.28, 0.64),
+            (0.31, 0.60),
+            (0.35, 0.61),
+            (0.38, 0.58),
+            (0.42, 0.61),
+            (0.41, 0.66),
+            (0.44, 0.69),
+            (0.43, 0.73),
+            (0.39, 0.74),
+            (0.38, 0.78),
+            (0.41, 0.82),
+            (0.37, 0.86),
+            (0.33, 0.84),
+            (0.30, 0.80),
+            (0.31, 0.75),
+            (0.27, 0.71),
+        ],
+        &[
+            (0.71, 0.26),
+            (0.74, 0.21),
+            (0.79, 0.22),
+            (0.82, 0.18),
+            (0.87, 0.19),
+            (0.91, 0.23),
+            (0.92, 0.29),
+            (0.89, 0.34),
+            (0.85, 0.37),
+            (0.83, 0.33),
+            (0.86, 0.29),
+            (0.84, 0.25),
+            (0.80, 0.27),
+            (0.77, 0.31),
+            (0.73, 0.31),
+        ],
+        &[
+            (0.06, 0.20),
+            (0.09, 0.16),
+            (0.13, 0.17),
+            (0.16, 0.21),
+            (0.14, 0.25),
+            (0.15, 0.29),
+            (0.11, 0.30),
+            (0.08, 0.26),
+        ],
+        &[
+            (0.07, 0.75),
+            (0.11, 0.70),
+            (0.16, 0.72),
+            (0.19, 0.76),
+            (0.16, 0.79),
+            (0.18, 0.85),
+            (0.13, 0.88),
+            (0.09, 0.84),
+            (0.10, 0.79),
+        ],
+        &[(0.86, 0.69), (0.90, 0.66), (0.94, 0.70), (0.91, 0.75), (0.87, 0.74)],
+        &[(0.60, 0.67), (0.63, 0.65), (0.67, 0.66), (0.68, 0.70), (0.65, 0.73), (0.61, 0.72)],
+        &[(0.70, 0.78), (0.73, 0.75), (0.77, 0.76), (0.79, 0.80), (0.76, 0.82), (0.72, 0.82)],
+        &[(0.59, 0.81), (0.62, 0.80), (0.64, 0.83), (0.62, 0.86), (0.59, 0.85)],
+        &[(0.67, 0.88), (0.69, 0.87), (0.70, 0.89), (0.68, 0.90)],
+    ];
+
+    let at = |(x, y): (f32, f32)| format!("{:.2} {:.2}", x * EDGE, y * EDGE);
+    let midpoint = |from: (f32, f32), to: (f32, f32)| ((from.0 + to.0) * 0.5, (from.1 + to.1) * 0.5);
+    let mut path = String::new();
+    for island in ISLANDS {
+        let (Some(&first), Some(&last)) = (island.first(), island.last()) else { continue };
+        path.push_str(&format!("M{} ", at(midpoint(last, first))));
+        let following = island.iter().skip(1).chain([&first]);
+        for (&vertex, &next) in island.iter().zip(following) {
+            path.push_str(&format!("Q{} {} ", at(vertex), at(midpoint(vertex, next))));
+        }
+        path.push_str("Z ");
+    }
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {EDGE} {EDGE}\"><path d=\"{path}\" \
+         fill=\"currentColor\" fill-opacity=\"0.35\" stroke=\"currentColor\" stroke-width=\"1\"/></svg>"
+    )
 }
