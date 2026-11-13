@@ -7,7 +7,6 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use landaire_ui::TABULAR_CLASS;
 use rust_i18n::t;
 use syntect::parsing::ParseState;
 use syntect::parsing::ScopeStack;
@@ -19,11 +18,9 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
-use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::With;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
@@ -32,7 +29,8 @@ use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PropValue;
 use zgui_image::ImageBytes;
-use zgui_ui::VirtualListProps;
+
+use crate::tabs::unpacker::text_view::TextViewProps;
 
 const SHEET: &str = "wt-unpacker-viewer";
 
@@ -49,22 +47,6 @@ const CSS: &str = css!(
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .wt-viewer__code {
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow-x: auto;
-        font-family: ui-monospace, monospace;
-        font-size: 12px;
-    }
-    .wt-code-line { display: flex; height: 18px; align-items: center; min-width: max-content; }
-    .wt-code-line__number {
-        flex: none;
-        width: 48px;
-        padding-right: 12px;
-        text-align: right;
-        color: var(--wt-color-text-faint);
-    }
-    .wt-code-line__text { white-space: pre; }
     .wt-syn-comment { color: var(--wt-color-text-faint); }
     .wt-syn-string { color: var(--wt-color-chat-team); }
     .wt-syn-number { color: var(--wt-color-armor-ricochet); }
@@ -85,9 +67,6 @@ const CSS: &str = css!(
     }"
 );
 
-/// One line of code, and the height every line is drawn at.
-const LINE_HEIGHT: f32 = 18.0;
-
 /// Text larger than this is shown plain: highlighting holds a span per token in memory.
 const HIGHLIGHT_LIMIT: usize = 4 * 1024 * 1024;
 
@@ -105,7 +84,7 @@ pub enum TokenClass {
 }
 
 impl TokenClass {
-    const fn class(self) -> &'static str {
+    pub(super) const fn class(self) -> &'static str {
         match self {
             Self::Comment => "wt-syn-comment",
             Self::String => "wt-syn-string",
@@ -235,16 +214,7 @@ impl ViewerDoc {
 pub fn ViewerPanel(doc: ViewerDoc) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let body = match doc.shown.get_value() {
-        Shown::Text(lines) => AnyView::new(view! {
-            VirtualList(
-                count = Signal::derive_local(move || lines.with(|lines| lines.len())),
-                row_size = LINE_HEIGHT,
-                label = doc.title.get_value(),
-                class = "wt-viewer__code",
-                attr:data-testid = "unpacker-viewer-text",
-                row = move |ix: usize| code_line(lines, ix)
-            )
-        }),
+        Shown::Text(lines) => AnyView::new(view! { TextView(lines = lines, title = doc.title.get_value()) }),
         Shown::Image(bytes) => AnyView::new(view! {
             box(class = "wt-viewer__image", attr:data-testid = "unpacker-viewer-image") {
                 image(src = bytes.url())
@@ -266,26 +236,6 @@ pub fn ViewerPanel(doc: ViewerDoc) -> impl IntoView {
         column(class = "wt-viewer", attr:data-testid = "unpacker-viewer") {
             text(class = "wt-viewer__header") {{doc.title.get_value()}}
             {body}
-        }
-    }
-}
-
-fn code_line(lines: RwSignal<Rc<Vec<CodeLine>>, LocalStorage>, ix: usize) -> impl IntoView {
-    // Read through the signal, so a line drawn plain is redrawn once the highlighting lands.
-    let tokens = move || {
-        let line = lines.with(|lines| lines.get(ix).cloned()).unwrap_or_default();
-        line.into_iter()
-            .map(|token| {
-                let class = token.class.map_or("", TokenClass::class);
-                AnyView::new(view! { text(class = class) {{token.text}} })
-            })
-            .collect::<Vec<AnyView>>()
-    };
-
-    view! {
-        row(class = "wt-code-line") {
-            text(class = format!("wt-code-line__number {TABULAR_CLASS}")) {{(ix + 1).to_string()}}
-            row(class = "wt-code-line__text") {{tokens}}
         }
     }
 }

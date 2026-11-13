@@ -9,9 +9,13 @@ use landaire_ui::test_support::HeadlessWindow;
 use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 use zgui::vocab::Toggled;
 
 use crate::interaction_tests::REVIEW_SIZE;
@@ -246,6 +250,94 @@ fn double_clicking_a_file_opens_it_in_a_viewer() {
     tab.window.double_click(row).expect("the row can be pressed");
     settle_in_real_time(&mut tab.window);
     assert!(tab.shown("unpacker-viewer-text"), "the XML opens as text");
+}
+
+/// The shell with `SHIP_XML` open in a viewer.
+fn open_ship_xml(options: HeadlessOptions) -> UnpackerWindow {
+    let root: VfsPath = MemoryFS::new().into();
+    write(&root, "ship.xml", SHIP_XML);
+    let mut tab = UnpackerWindow::with_vfs(options, root.clone());
+    tab.model.open_viewer(root.join("ship.xml").expect("the path is valid"));
+    settle_in_real_time(&mut tab.window);
+    tab
+}
+
+/// The viewer with a selection across lines and the find bar marking its matches.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the viewer"]
+fn review_viewer_selection_and_find() {
+    for (appearance, name) in [(Appearance::Dark, "unpacker-viewer-dark"), (Appearance::Light, "unpacker-viewer-light")]
+    {
+        let mut tab = open_ship_xml(review_options(appearance));
+        let text = tab.window.by_test_id("unpacker-viewer-text").expect("the XML opens as text");
+        let bounds = tab.window.bounds(text).expect("the text is laid out");
+        let to = Point::new(bounds.origin.x + DevicePx(120.0), bounds.origin.y + DevicePx(27.0));
+        tab.window.drag(text, to, 8).expect("the text can be dragged across");
+        tab.window.press_character('f', Modifiers::PRIMARY);
+        tab.settle();
+        tab.window.type_text("hull");
+        settle_in_real_time(&mut tab.window);
+        println!("{}", save_shot(&mut tab.window, name).display());
+    }
+}
+
+/// A drag across the text selects its characters, ctrl+A selects all of it and Escape lets go.
+#[test]
+fn the_viewer_text_is_selected_by_dragging_and_by_select_all() {
+    let mut tab = open_ship_xml(options());
+    let text = tab.window.by_test_id("unpacker-viewer-text").expect("the XML opens as text");
+    let bounds = tab.window.bounds(text).expect("the text is laid out");
+    // From the middle of the list, below the last line, to a few characters into the first.
+    let to = Point::new(bounds.origin.x + DevicePx(80.0), bounds.origin.y + DevicePx(9.0));
+    tab.window.drag(text, to, 8).expect("the text can be dragged across");
+    tab.settle();
+    let selected = tab.window.texts_by_class("wt-code-sel").concat();
+    assert!(selected.contains("<ship>"), "the lines between the ends are selected: {selected:?}");
+    assert!(!selected.contains("<?xml"), "the first line is selected from where the drag ended: {selected:?}");
+
+    tab.window.press_character('a', Modifiers::PRIMARY);
+    tab.settle();
+    let selected = tab.window.texts_by_class("wt-code-sel").concat();
+    assert!(selected.starts_with("<?xml"), "ctrl+A selects from the first character: {selected:?}");
+
+    tab.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    tab.settle();
+    assert!(tab.window.texts_by_class("wt-code-sel").is_empty(), "Escape clears the selection");
+}
+
+/// Ctrl+F opens a find bar that marks every match and steps through them, wrapping at the ends.
+#[test]
+fn the_viewer_finds_text_and_steps_through_the_matches() {
+    let mut tab = open_ship_xml(options());
+    let text = tab.window.by_test_id("unpacker-viewer-text").expect("the XML opens as text");
+    tab.window.click(text).expect("the text can be pressed");
+    tab.window.press_character('f', Modifiers::PRIMARY);
+    tab.settle();
+    assert!(tab.shown("unpacker-find"), "ctrl+F opens the find bar");
+
+    tab.window.type_text("HULL");
+    tab.settle();
+    let count = |tab: &UnpackerWindow| tab.window.texts_by_class("wt-text__find-count").concat();
+    let marked = tab.window.texts_by_class("wt-code-match").concat();
+    assert_eq!(marked, "hullhullhull", "every match is marked, in any case");
+    assert_eq!(count(&tab), "1 of 3");
+
+    tab.window.press_key(NamedKey::Enter, Modifiers::NONE);
+    tab.settle();
+    assert_eq!(count(&tab), "2 of 3", "Enter goes to the next match");
+    tab.window.press_key(NamedKey::Enter, Modifiers::SHIFT);
+    tab.window.press_key(NamedKey::Enter, Modifiers::SHIFT);
+    tab.settle();
+    assert_eq!(count(&tab), "3 of 3", "shift+Enter goes back, wrapping to the last match");
+    assert_eq!(tab.window.texts_by_class("wt-code-current"), vec!["hull".to_owned()]);
+
+    tab.window.type_text("zzz");
+    tab.settle();
+    assert_eq!(count(&tab), "No matches");
+
+    tab.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    tab.settle();
+    assert!(!tab.shown("unpacker-find"), "Escape closes the find bar");
 }
 
 /// A listing as an install looks: nested directories, files of several kinds, some queued, a

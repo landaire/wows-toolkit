@@ -10,6 +10,8 @@ mod queue;
 mod search;
 #[cfg(test)]
 mod tests;
+mod text_select;
+mod text_view;
 mod viewer;
 
 use landaire_ui::DockProps;
