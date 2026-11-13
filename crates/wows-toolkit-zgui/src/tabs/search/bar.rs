@@ -215,8 +215,9 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
         let expr = search.reading.get()?;
         let selection = search.selection.get();
         let preferences = search.operator_preferences.get();
-        let editing = search.value_edit.with(|edit| edit.as_ref().map(|edit| edit.path.clone()));
-        Some(search.names.with(|names| pill_strip(search, &expr, names, &selection, &preferences, editing.as_ref())))
+        let path = search.value_edit.with(|edit| edit.as_ref().map(|edit| edit.path.clone()));
+        let editing = path.as_ref().map(|path| Editing { path, query: input });
+        Some(search.names.with(|names| pill_strip(search, &expr, names, &selection, &preferences, editing)))
     };
     let parse_error = move || match search.status.get() {
         crate::tabs::search::model::Status::Invalid { reason, span, text } => {
@@ -246,7 +247,7 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
                         Input(
                             node_ref = input,
                             value = search.pending,
-                            placeholder = "Add filter".to_owned(),
+                            placeholder = t!("ui.search.add_filter").into_owned(),
                             label = t!("ui.tabs.search").into_owned(),
                             attr:data-testid = "search-query"
                         )
@@ -326,6 +327,13 @@ fn handle_key(search: Search, input: NodeRef, key: &Key, modifiers: zgui::vocab:
     true
 }
 
+/// The free value being retyped, and the query box the caret goes back to afterwards.
+#[derive(Clone, Copy)]
+struct Editing<'a> {
+    path: &'a NodePath,
+    query: NodeRef,
+}
+
 /// The parsed query as a row of pills, with the connectors, negations and brackets between them.
 fn pill_strip(
     search: Search,
@@ -333,7 +341,7 @@ fn pill_strip(
     names: &NameCache,
     selection: &Selection,
     preferences: &OperatorPreferences,
-    editing: Option<&NodePath>,
+    editing: Option<Editing<'_>>,
 ) -> Vec<AnyView> {
     tokens::tokenize(expr, names)
         .into_iter()
@@ -390,7 +398,7 @@ fn segment_view(
     role: SegmentRole,
     label: String,
     offered: Vec<Choice>,
-    editing: Option<&NodePath>,
+    editing: Option<Editing<'_>>,
 ) -> AnyView {
     if !offered.is_empty() {
         return AnyView::new(view! {
@@ -420,8 +428,8 @@ fn segment_view(
     }
 
     if matches!(role, SegmentRole::Value) && select::segment_path(expr, path).is_some() {
-        if editing == Some(path) {
-            return AnyView::new(view! { ValueEditor(search = search) });
+        if let Some(editing) = editing.filter(|editing| editing.path == path) {
+            return AnyView::new(view! { ValueEditor(search = search, query = editing.query) });
         }
         let path = path.clone();
         return AnyView::new(view! {
@@ -501,9 +509,9 @@ fn pill_menu_items(search: Search, path: &NodePath, menu: PillMenuState) -> Vec<
 }
 
 /// The box a free value is retyped in, inside its pill. Enter or leaving the box writes it;
-/// Escape cancels.
+/// Escape cancels. Once the edit ends from the keyboard, the caret goes back to `query`.
 #[component]
-fn ValueEditor(search: Search) -> impl IntoView {
+fn ValueEditor(search: Search, query: NodeRef) -> impl IntoView {
     let input = NodeRef::new();
     let focusing = RenderEffect::new(move |focused: Option<bool>| {
         if focused == Some(true) {
@@ -523,10 +531,15 @@ fn ValueEditor(search: Search) -> impl IntoView {
             on:key_down = move |ev: &mut EventCx<'_, events::KeyDown>| match ev.key {
                 Key::Named(NamedKey::Enter) => {
                     search.commit_value_edit();
+                    // A value the field cannot read keeps the box open for correcting.
+                    if search.value_edit.with_untracked(Option::is_none) {
+                        query.focus();
+                    }
                     ev.stop_propagation();
                 }
                 Key::Named(NamedKey::Escape) => {
                     search.cancel_value_edit();
+                    query.focus();
                     ev.stop_propagation();
                 }
                 _ => {}

@@ -215,6 +215,37 @@ fn escape_closes_the_completions_then_empties_the_text() {
     assert!(!search.completions_open.get_untracked(), "and the dropdown stays closed");
 }
 
+fn focused(window: &mut HeadlessWindow, id: &str) -> bool {
+    let element = window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+    window.a11y(element).is_some_and(|state| state.focused)
+}
+
+/// A retyped value written with Enter, or given up with Escape, hands the caret back to the
+/// query box, so the next term can be typed straight away.
+#[test]
+fn ending_a_value_edit_from_the_keyboard_returns_to_the_query_box() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    search.set_query_text("map:ocean".to_owned());
+    settle(&mut window);
+
+    click(&mut window, "search-pill-value");
+    assert!(focused(&mut window, "search-value-input"), "the value box takes the caret");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(search.value_edit.get_untracked().is_none(), "Escape gives the edit up");
+    assert!(focused(&mut window, "search-query"), "Escape returns to the query box");
+
+    click(&mut window, "search-pill-value");
+    window.press_character('a', Modifiers::PRIMARY);
+    window.type_text("okinawa");
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    settle(&mut window);
+    let committed = search.committed.get_untracked();
+    assert!(committed.contains("okinawa") && !committed.contains("ocean"), "Enter writes the value: {committed}");
+    assert!(focused(&mut window, "search-query"), "Enter returns to the query box");
+}
+
 /// Each completion row marks the letters of its label the typed fragment matched.
 #[test]
 fn a_completion_marks_what_was_typed() {
