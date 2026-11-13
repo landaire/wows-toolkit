@@ -321,7 +321,8 @@ fn the_status_bar_toggles_the_ships_list_and_the_options_rail() {
 }
 
 /// Compare opens a copy of the active pane in a split of its own beside it, which becomes the
-/// active pane; with the panes stacked the split opens below. A press in a pane makes it active.
+/// active pane. Stacking the panes lays the open ones one above another, and the next split opens
+/// below. A press in a pane makes it active.
 #[test]
 fn compare_opens_a_split_beside_the_active_pane() {
     let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
@@ -340,9 +341,13 @@ fn compare_opens_a_split_beside_the_active_pane() {
     assert!(left.1 == right.1 && left.0 < right.0, "side by side: {left:?} {right:?}");
     assert!(armor.shown("armor-options-target"), "the rail names the pane it acts on");
 
-    let mut common = workspace.common();
-    common.stack_panes = true;
-    workspace.set_common(common);
+    armor.click("armor-sidebar-common");
+    armor.click("armor-pane-stack");
+    armor.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    armor.settle();
+    assert!(workspace.common().stack_panes, "the switch stacks the panes");
+    let (top, bottom) = (armor.drawn_at(first).expect("drawn"), armor.drawn_at(compared).expect("drawn"));
+    assert!(top.0 == bottom.0 && top.1 < bottom.1, "the open panes are stacked: {top:?} {bottom:?}");
     armor.click("armor-sidebar-compare");
     let stacked = workspace.active_id();
     let below = armor.drawn_at(stacked).expect("drawn");

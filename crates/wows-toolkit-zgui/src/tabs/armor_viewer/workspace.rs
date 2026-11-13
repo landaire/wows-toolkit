@@ -23,6 +23,7 @@ use landaire_ui::PanelEntry;
 use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
+use landaire_ui::SplitAxis;
 use rust_i18n::t;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
@@ -113,6 +114,13 @@ impl PaneSplit {
         match self {
             Self::SideBySide => Edge::Right,
             Self::Stacked => Edge::Bottom,
+        }
+    }
+
+    fn axis(self) -> SplitAxis {
+        match self {
+            Self::SideBySide => SplitAxis::Horizontal,
+            Self::Stacked => SplitAxis::Vertical,
         }
     }
 }
@@ -542,6 +550,9 @@ impl ArmorWorkspace {
         let split = if common.stack_panes { PaneSplit::Stacked } else { PaneSplit::SideBySide };
         if self.split.get_untracked() != split {
             self.split.set(split);
+            // The panes open now are the ones the switch is about: it is offered only while
+            // comparing.
+            self.dock.line_up(DockRegion::Center, split.axis());
         }
     }
 
