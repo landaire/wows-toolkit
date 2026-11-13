@@ -22,6 +22,8 @@ wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
 wows-toolkit-services = { workspace = true }
+# Game parameter ids, which key the Search tab's resolved ship names.
+wows_replays = { workspace = true }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
@@ -70,6 +72,8 @@ wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
 tempfile = "3"
+# Timestamps for the Search tab's sample results.
+jiff = { workspace = true }
 # Game versions, for the palette's version list tests.
 wowsunpack = { workspace = true }
 # Test frames are built from RGB images.
