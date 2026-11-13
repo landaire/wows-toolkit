@@ -203,6 +203,13 @@ impl ArcballCamera {
         perspective(self.fov, aspect, self.near, self.far)
     }
 
+    /// The projection the scene is drawn with: depth reversed, 1 at the near
+    /// plane and falling toward 0 with no far plane, so float depth keeps the
+    /// same relative precision at every distance.
+    pub(crate) fn render_projection_matrix(&self, aspect: f32) -> [[f32; 4]; 4] {
+        reversed_infinite_perspective(self.fov, aspect, self.near)
+    }
+
     /// Handle mouse drag for orbiting. `delta` and `viewport_size` are `(x, y)`
     /// in screen pixels.
     pub fn orbit(&mut self, delta: (f32, f32), viewport_size: (f32, f32)) {
@@ -389,6 +396,17 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
     na_to_mat4(m)
 }
 
+/// Perspective projection with reversed depth and no far plane: depth is
+/// `near / distance` (right-handed, depth [0, 1]).
+fn reversed_infinite_perspective(fov_y: f32, aspect: f32, near: f32) -> [[f32; 4]; 4] {
+    let f = 1.0 / (fov_y * 0.5).tan();
+
+    // Matrix4::new takes row-major arguments.
+    let m = Matrix4::new(f / aspect, 0.0, 0.0, 0.0, 0.0, f, 0.0, 0.0, 0.0, 0.0, 0.0, near, 0.0, 0.0, -1.0, 0.0);
+
+    na_to_mat4(m)
+}
+
 /// Multiply two 4x4 matrices (column-major layout: m[col][row]).
 pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     na_to_mat4(mat4_to_na(a) * mat4_to_na(b))
@@ -423,6 +441,29 @@ mod tests {
         let look = (c.target - c.eye_position()).normalize();
         let want = (target - eye).normalize();
         assert!((look - want).norm() < 1e-4, "look {look:?} want {want:?}");
+    }
+
+    /// The scene is drawn where picking and labels place it, with depth
+    /// `near / distance`: 1 at the near plane, halving as distance doubles,
+    /// and never clipped far away.
+    #[test]
+    fn the_render_projection_places_points_as_picking_does_with_reversed_depth() {
+        let camera = ArcballCamera::from_bounds(Vec3::new(-9.0, -1.0, -1.5), Vec3::new(9.0, 3.0, 1.5));
+        let aspect = 1.6;
+        let picked = mat4_to_na(camera.projection_matrix(aspect));
+        let drawn = mat4_to_na(camera.render_projection_matrix(aspect));
+
+        for distance in [camera.near, camera.near * 2.0, camera.distance, camera.far * 10.0] {
+            let point = Vector4::new(0.3 * distance, -0.2 * distance, -distance, 1.0);
+            let (picked, drawn) = (picked * point, drawn * point);
+            let screen = |clip: Vector4<f32>| (clip.x / clip.w, clip.y / clip.w);
+
+            let (picked_x, picked_y) = screen(picked);
+            let (drawn_x, drawn_y) = screen(drawn);
+            assert!((picked_x - drawn_x).abs() < 1e-6 && (picked_y - drawn_y).abs() < 1e-6, "at {distance}");
+            let depth = drawn.z / drawn.w;
+            assert!((depth - camera.near / distance).abs() < 1e-6, "depth {depth} at {distance}");
+        }
     }
 
     #[test]

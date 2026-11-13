@@ -120,6 +120,7 @@ mod tests {
     use crate::viewport::camera::ArcballCamera;
     use crate::viewport::renderer::AlbedoUv;
     use crate::viewport::renderer::HighlightDepth;
+    use crate::viewport::renderer::LAYER_ARMOR;
     use crate::viewport::renderer::LAYER_DEFAULT;
     use crate::viewport::renderer::LAYER_HIGHLIGHT;
     use crate::viewport::renderer::LAYER_OVERLAY;
@@ -130,6 +131,7 @@ mod tests {
     use crate::viewport::tangents::vertex_tangents;
     use crate::viewport::types::Vec3;
     use crate::viewport::types::Vertex;
+    use crate::viewport::types::ViewRect;
 
     /// A unit cube centered at the origin with one flat color on every vertex.
     /// Normals are placeholders (the cube renders unlit); winding is irrelevant
@@ -224,12 +226,18 @@ mod tests {
         }
     }
 
-    /// The center pixel of an opaque green cube under a white highlight
-    /// cube `scale` times its size on `layer`, drawn in `depth`.
-    fn highlighted_cube_center(headless: &HeadlessDevice, scale: f32, layer: i32, depth: HighlightDepth) -> [u8; 4] {
+    /// The center pixel of an opaque green cube on `cube_layer` under a white
+    /// highlight cube `scale` times its size on `layer`, drawn in `depth`.
+    fn highlighted_cube_center(
+        headless: &HeadlessDevice,
+        cube_layer: i32,
+        scale: f32,
+        layer: i32,
+        depth: HighlightDepth,
+    ) -> [u8; 4] {
         let mut viewport = Viewport3D::new();
         let (vertices, indices) = unit_cube([0.0, 0.8, 0.0, 1.0]);
-        viewport.add_mesh(&headless.device, &vertices, &indices, LAYER_DEFAULT);
+        viewport.add_mesh(&headless.device, &vertices, &indices, cube_layer);
         let (mut highlight, indices) = unit_cube([1.0, 1.0, 1.0, 0.35]);
         for vertex in &mut highlight {
             vertex.position = vertex.position.map(|axis| axis * scale);
@@ -258,12 +266,16 @@ mod tests {
     #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
     fn a_tested_highlight_shows_where_its_surface_is_visible() {
         let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
-        let inside_xray = highlighted_cube_center(&headless, 0.5, LAYER_HIGHLIGHT, HighlightDepth::XRay);
-        let inside_tested = highlighted_cube_center(&headless, 0.5, LAYER_HIGHLIGHT, HighlightDepth::Tested);
-        let surface_tested = highlighted_cube_center(&headless, 1.0, LAYER_HIGHLIGHT, HighlightDepth::Tested);
-        let row_tested = highlighted_cube_center(&headless, 0.5, LAYER_OVERLAY, HighlightDepth::Tested);
+        let inside_xray = highlighted_cube_center(&headless, LAYER_DEFAULT, 0.5, LAYER_HIGHLIGHT, HighlightDepth::XRay);
+        let inside_tested =
+            highlighted_cube_center(&headless, LAYER_DEFAULT, 0.5, LAYER_HIGHLIGHT, HighlightDepth::Tested);
+        let surface_tested =
+            highlighted_cube_center(&headless, LAYER_DEFAULT, 1.0, LAYER_HIGHLIGHT, HighlightDepth::Tested);
+        let armor_tested =
+            highlighted_cube_center(&headless, LAYER_ARMOR, 1.0, LAYER_HIGHLIGHT, HighlightDepth::Tested);
+        let row_tested = highlighted_cube_center(&headless, LAYER_DEFAULT, 0.5, LAYER_OVERLAY, HighlightDepth::Tested);
         eprintln!(
-            "inside x-ray {inside_xray:?} inside tested {inside_tested:?} surface tested {surface_tested:?} row {row_tested:?}"
+            "inside x-ray {inside_xray:?} inside tested {inside_tested:?} surface tested {surface_tested:?} armor tested {armor_tested:?} row {row_tested:?}"
         );
 
         // The white highlight lifts red off the green cube's zero.
@@ -271,7 +283,196 @@ mod tests {
         assert!(highlighted(inside_xray), "x-ray shows the highlight through the cube: {inside_xray:?}");
         assert!(!highlighted(inside_tested), "the cube hides a tested highlight: {inside_tested:?}");
         assert!(highlighted(surface_tested), "a tested highlight shows on its own surface: {surface_tested:?}");
+        assert!(highlighted(armor_tested), "a tested highlight shows on the plate drawn nearer: {armor_tested:?}");
         assert!(highlighted(row_tested), "a row highlight ignores the hover depth: {row_tested:?}");
+    }
+
+    /// A square `size` wide facing +Z at depth `z` in one color, split into
+    /// `cells` by `cells` quads whose corners lie alternately `ripple` in
+    /// front of and behind `z`.
+    fn rippled_square(size: f32, z: f32, cells: u32, ripple: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
+        let step = size / cells as f32;
+        let width = cells + 1;
+        let mut vertices = Vec::new();
+        for row in 0..width {
+            for column in 0..width {
+                let offset = if (row + column) % 2 == 0 { ripple } else { -ripple };
+                let position = [column as f32 * step - size * 0.5, row as f32 * step - size * 0.5, z + offset];
+                vertices.push(Vertex { position, normal: [0.0, 0.0, 1.0], color, uv: [0.0, 0.0], tangent: [0.0; 4] });
+            }
+        }
+        let mut indices = Vec::new();
+        for row in 0..cells {
+            for column in 0..cells {
+                let corner = row * width + column;
+                indices.extend_from_slice(&[
+                    corner,
+                    corner + 1,
+                    corner + width + 1,
+                    corner,
+                    corner + width + 1,
+                    corner + width,
+                ]);
+            }
+        }
+
+        (vertices, indices)
+    }
+
+    /// Looks straight down -Z at a square `size` wide centered on the origin,
+    /// which then fills the view's height.
+    fn facing_camera(size: f32) -> ArcballCamera {
+        let half = size * 0.5;
+        let mut camera = ArcballCamera::from_bounds(Vec3::new(-half, -half, 0.0), Vec3::new(half, half, 0.0));
+        camera.azimuth = 0.0;
+        camera.elevation = 0.0;
+
+        camera
+    }
+
+    /// The pixels of the middle half of a `side` by `side` frame.
+    fn middle_pixels(rgba: &[u8], side: u32) -> Vec<[u8; 4]> {
+        let pixels = rgba.as_chunks::<4>().0;
+        let middle = side / 4..side * 3 / 4;
+
+        middle.clone().flat_map(|y| middle.clone().map(move |x| pixels[(y * side + x) as usize])).collect()
+    }
+
+    /// Renders a blue opaque ship model square with a red armor square over
+    /// it at `armor_z`, rippling `ripple` either side, and returns the
+    /// middle of the frame.
+    fn armor_over_model(headless: &HeadlessDevice, armor_z: f32, ripple: f32) -> Vec<[u8; 4]> {
+        const SIDE: u32 = 128;
+
+        let mut viewport = Viewport3D::new();
+        viewport.lighting.enabled = false;
+        let (model, indices) = rippled_square(2.0, 0.0, 1, 0.0, [0.0, 0.0, 0.8, 1.0]);
+        let model = viewport.add_non_pickable_mesh(&headless.device, &model, &indices, LAYER_DEFAULT);
+        viewport.set_lit(model, true);
+        let (armor, indices) = rippled_square(2.0, armor_z, 16, ripple, [0.8, 0.0, 0.0, 1.0]);
+        viewport.add_mesh(&headless.device, &armor, &indices, LAYER_ARMOR);
+        viewport.camera = facing_camera(2.0);
+
+        let rgba = headless.render_rgba(&viewport, TargetSize::new(SIDE, SIDE).expect("a nonzero size"));
+
+        middle_pixels(&rgba, SIDE)
+    }
+
+    /// Armor modelled a little in front of and behind the ship model's own
+    /// surface tints it evenly, with no patches of either breaking through;
+    /// armor well inside the model is hidden by it.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture armor_on_the_model_tints_it_evenly
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn armor_on_the_model_tints_it_evenly() {
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+
+        let on_surface = armor_over_model(&headless, 0.0, 0.01);
+        let first = on_surface[0];
+        eprintln!("armor on the model {first:?}");
+        let uneven = on_surface.iter().find(|pixel| pixel.iter().zip(&first).any(|(a, b)| a.abs_diff(*b) > 2));
+        assert!(uneven.is_none(), "{uneven:?} breaks up the tint {first:?}");
+        let [r, _, b, _] = first;
+        assert!(r > 100 && b > 100, "both the armor and the model show: {first:?}");
+
+        let inside = armor_over_model(&headless, -0.2, 0.0);
+        let [r, _, b, _] = inside[0];
+        assert!(r < 20 && b > 200, "the model hides armor inside it: {:?}", inside[0]);
+    }
+
+    /// Of two translucent plates one behind the other, only the nearer is
+    /// drawn, and picking at that pixel names it.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture picking_names_the_plate_drawn
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn picking_names_the_plate_drawn() {
+        const SIDE: u32 = 64;
+
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let mut viewport = Viewport3D::new();
+        // Added first so it is also drawn first in each pass.
+        let (inner, indices) = rippled_square(2.0, -0.1, 1, 0.0, [0.0, 0.8, 0.0, 0.5]);
+        viewport.add_mesh(&headless.device, &inner, &indices, LAYER_ARMOR);
+        let (outer, indices) = rippled_square(2.0, 0.1, 1, 0.0, [0.8, 0.0, 0.0, 0.5]);
+        let outer = viewport.add_mesh(&headless.device, &outer, &indices, LAYER_ARMOR);
+        viewport.camera = facing_camera(2.0);
+
+        let rgba = headless.render_rgba(&viewport, TargetSize::new(SIDE, SIDE).expect("a nonzero size"));
+        let view = ViewRect::new(0.0, 0.0, SIDE as f32, SIDE as f32);
+        let hit = viewport.pick(view.center(), view).expect("a plate is under the middle");
+
+        assert_eq!(hit.mesh_id, outer, "picking names the nearer plate");
+        let [r, g, _, _] = middle_pixels(&rgba, SIDE)[0];
+        // Half red over the clear color: about 179 red and the clear's 69 green.
+        assert!(r > 150 && g < 90, "only the nearer plate is drawn: ({r}, {g})");
+    }
+
+    /// Translucent plates drawn over one another at the same depth blend as
+    /// one, as a single plate does.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture coplanar_plates_blend_once
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn coplanar_plates_blend_once() {
+        const SIDE: u32 = 64;
+
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let middle = |copies: usize| {
+            let mut viewport = Viewport3D::new();
+            let (plate, indices) = rippled_square(2.0, 0.0, 4, 0.0, [0.8, 0.0, 0.0, 0.5]);
+            for _ in 0..copies {
+                viewport.add_mesh(&headless.device, &plate, &indices, LAYER_ARMOR);
+            }
+            viewport.camera = facing_camera(2.0);
+            let rgba = headless.render_rgba(&viewport, TargetSize::new(SIDE, SIDE).expect("a nonzero size"));
+
+            middle_pixels(&rgba, SIDE)[0]
+        };
+
+        let (one, three) = (middle(1), middle(3));
+
+        assert!(one.iter().zip(&three).all(|(a, b)| a.abs_diff(*b) <= 1), "one plate {one:?}, three {three:?}");
+    }
+
+    /// A plate nearer the eye than its pull, just past the near plane, is
+    /// still drawn.
+    ///
+    /// Needs a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture a_plate_by_the_near_plane_is_drawn
+    /// ```
+    #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
+    fn a_plate_by_the_near_plane_is_drawn() {
+        const SIDE: u32 = 64;
+
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let mut viewport = Viewport3D::new();
+        viewport.camera = facing_camera(2.0);
+        let eye = viewport.camera.eye_position().z;
+        assert!(viewport.camera.near < 0.03, "the plate lies past the near plane");
+        let (plate, indices) = rippled_square(0.5, eye - 0.03, 1, 0.0, [0.8, 0.0, 0.0, 1.0]);
+        viewport.add_mesh(&headless.device, &plate, &indices, LAYER_ARMOR);
+
+        let rgba = headless.render_rgba(&viewport, TargetSize::new(SIDE, SIDE).expect("a nonzero size"));
+
+        let [r, g, b, _] = middle_pixels(&rgba, SIDE)[0];
+        assert!(r > 200 && g < 20 && b < 20, "the plate fills the view: ({r}, {g}, {b})");
     }
 
     /// Renders a lit, textured quad facing the camera with the given normal

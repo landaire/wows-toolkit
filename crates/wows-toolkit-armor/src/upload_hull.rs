@@ -209,8 +209,9 @@ fn upload(
 /// mesh (`hull_mesh_ids`, drained and replaced in place) and re-adds only the
 /// ones `hull_visibility` marks visible (absent/false = hidden, matching the
 /// egui app's own default). `hull_opaque` selects the alpha/layer: opaque
-/// hulls draw depth-written on [`LAYER_DEFAULT`] like armor plates,
-/// translucent ones draw on [`LAYER_HULL`] (no depth write, behind armor).
+/// hulls draw depth-written on [`LAYER_DEFAULT`] under the armor, which
+/// tints them; translucent ones draw on [`LAYER_HULL`] (no depth write, over
+/// the armor).
 /// `active_camo_textures`/`active_camo_uvs` are the host's decoded
 /// active-camo state (see the module doc); pass empty maps for base albedo
 /// only. A textured mesh whose material has surface maps draws them under
@@ -446,5 +447,108 @@ mod tests {
         let luma: f32 = (0.2126 * 128.0 + 0.7152 * 128.0 + 0.0722 * 128.0) / 255.0;
         let expected = (TARGET_HI / luma.max(0.05)).clamp(1.0, 4.0);
         assert!((tex_brightness(&rgba) - expected).abs() < 1e-4);
+    }
+
+    /// Renders real ships with their armor drawn over the full hull from
+    /// several angles, with the hull translucent and opaque, and writes each
+    /// frame as a PNG to review the two surfaces where they coincide. Needs a
+    /// game install and a real GPU adapter. Run with:
+    ///
+    /// ```text
+    /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// WOWS_ARMOR_VIEWER_SHOT_DIR=/tmp/armor-shots \
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture armor_over_the_hull_renders_for_review
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]
+    fn armor_over_the_hull_renders_for_review() {
+        use std::sync::Arc;
+
+        use crate::upload::DisplaySettings;
+        use crate::upload::upload_armor_to_viewport;
+        use crate::viewport::headless::HeadlessDevice;
+        use crate::viewport::headless::SRGB_TARGET;
+        use crate::viewport::types::TargetSize;
+        use crate::visibility::VisibilityFilter;
+
+        let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
+            .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
+        let out_dir = std::env::var("WOWS_ARMOR_VIEWER_SHOT_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("wows-toolkit-armor-shots"));
+        std::fs::create_dir_all(&out_dir).expect("the output directory is created");
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+        let available =
+            wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
+        let build = *available.last().expect("expected at least one installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the VFS");
+        let metadata = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
+                .expect("failed to build GameMetadataProvider from the VFS"),
+        );
+        let ship_assets = wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
+            .expect("failed to load ShipAssets from the VFS");
+        let headless = HeadlessDevice::new(SRGB_TARGET).expect("a wgpu adapter is available");
+        let size = TargetSize::new(1280, 720).expect("a nonzero size");
+        let empty_part = HashMap::new();
+        let empty_plate = HashMap::new();
+        let visibility = VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false };
+        // Azimuth and elevation in radians, and distance as a share of the framed distance.
+        let views: [(&str, f32, f32, f32); 4] =
+            [("side", 1.25, 0.2, 0.7), ("bow", 0.5, 0.35, 0.8), ("above", 1.9, 0.9, 0.8), ("close", 1.4, 0.1, 0.3)];
+
+        for (name, param_index) in [("Yamato", "PJSB018"), ("Des_Moines", "PASC020")] {
+            let armor = crate::load_ship::load_ship_armor_by_param(
+                &ship_assets,
+                param_index,
+                name,
+                &crate::scene_load::LoadCancel::new(),
+            )
+            .unwrap_or_else(|e| panic!("failed to load {name}: {e}"))
+            .scene;
+            println!("{name}: bounds {:?}", armor.bounds);
+            let hull_visibility: HashMap<String, bool> =
+                armor.hull_meshes.iter().map(|mesh| (mesh.name.clone(), true)).collect();
+
+            for hull_opaque in [false, true] {
+                let mut viewport = Viewport3D::new();
+                let display = DisplaySettings { hull_opaque, ..DisplaySettings::default() };
+                upload_armor_to_viewport(&mut viewport, &headless.device, &armor, visibility, display);
+                let mut hull_mesh_ids = Vec::new();
+                let mut texture_cache = HullTextureCache::default();
+                upload_hull_meshes(
+                    &mut viewport,
+                    &headless.device,
+                    &headless.queue,
+                    &headless.pipeline,
+                    &armor,
+                    &mut hull_mesh_ids,
+                    &hull_visibility,
+                    hull_opaque,
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &mut texture_cache,
+                );
+                let framed = viewport.camera.clone();
+
+                for (view, azimuth, elevation, distance) in views {
+                    viewport.camera = framed.clone();
+                    viewport.camera.azimuth = azimuth;
+                    viewport.camera.elevation = elevation;
+                    viewport.camera.distance = framed.distance * distance;
+                    let rgba = headless.render_rgba(&viewport, size);
+                    let hull = if hull_opaque { "opaque" } else { "translucent" };
+                    let path = out_dir.join(format!("{name}-{hull}-{view}.png"));
+                    image::save_buffer(&path, &rgba, size.width(), size.height(), image::ExtendedColorType::Rgba8)
+                        .expect("the frame is written");
+                    println!("{}", path.display());
+                }
+            }
+        }
     }
 }

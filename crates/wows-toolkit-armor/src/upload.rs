@@ -21,7 +21,7 @@ use wowsunpack::export::gltf_export::ArmorTriangleInfo;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 
 use crate::viewport::camera::ArcballCamera;
-use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::LAYER_ARMOR;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
@@ -44,11 +44,11 @@ pub struct DisplaySettings {
     pub show_plate_edges: bool,
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
-    /// Whether hull meshes render fully opaque with depth writes (like armor
-    /// plates) rather than semi-transparent behind them. The hull upload
-    /// (`upload_hull.rs`) reads this for `hull_alpha`/`hull_layer`; a change
-    /// to it re-uploads only the hull, not the (potentially much larger)
-    /// armor mesh set.
+    /// Whether hull meshes render opaque with depth writes, tinted by the
+    /// armor plates over them, rather than semi-transparent over the plates.
+    /// The hull upload (`upload_hull.rs`) reads this for
+    /// `hull_alpha`/`hull_layer`; a change to it re-uploads only the hull,
+    /// not the (potentially much larger) armor mesh set.
     pub hull_opaque: bool,
     /// A cross at the model's own origin, which is where the game measures the
     /// ship from rather than where its middle looks to be.
@@ -209,7 +209,7 @@ fn upload_armor_meshes(
         }
 
         if !indices.is_empty() {
-            let mesh_id = viewport.add_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+            let mesh_id = viewport.add_mesh(device, &vertices, &indices, LAYER_ARMOR);
             mesh_triangle_info.push((mesh_id, tooltips));
         }
     }
@@ -419,7 +419,7 @@ fn upload_plate_boundary_edges(
     }
 
     if !indices.is_empty() {
-        viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+        viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_ARMOR);
     }
 }
 

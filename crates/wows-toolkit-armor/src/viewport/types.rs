@@ -269,6 +269,9 @@ pub(crate) struct Uniforms {
     pub key_color: [f32; 4],
     /// rim_strength, rim_power, specular_strength, shininess.
     pub params: [f32; 4],
+    /// x = scale on every fragment's alpha; y = the distance a pulled
+    /// surface is drawn nearer the eye by; zw unused.
+    pub draw: [f32; 4],
 }
 
 #[cfg(test)]

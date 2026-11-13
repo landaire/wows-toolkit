@@ -32,6 +32,9 @@ struct Uniforms {
     flat_color: vec4<f32>,
     key_color: vec4<f32>,
     params: vec4<f32>,
+    // x: scale on every fragment's alpha. y: the distance a pulled surface
+    // is drawn nearer the eye by.
+    draw: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -39,6 +42,10 @@ struct Uniforms {
 // Set where the target has no sRGB view (GLES): the shader stores encoded color
 // itself, and blending and the MSAA resolve then act on encoded values.
 override ENCODE_SRGB: bool = false;
+
+// How many times the frame's pull distance this pipeline draws surfaces
+// nearer the eye, without moving them on screen.
+override PULL_SCALE: f32 = 0.0;
 
 fn srgb_encode(linear: vec3<f32>) -> vec3<f32> {
     let clamped = clamp(linear, vec3<f32>(0.0), vec3<f32>(1.0));
@@ -70,8 +77,8 @@ struct VertexInput {
 };
 
 struct VertexOutput {
-    // Invariant so a highlight drawn over the same vertices as a surface
-    // passes a depth test against it, whatever pipeline drew the surface.
+    // Invariant so the pipelines that draw the same vertices compute the
+    // same position, and differ in depth only by their pull.
     @invariant @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) normal_vs: vec3<f32>,
@@ -84,6 +91,20 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = uniforms.mvp * vec4(in.position, 1.0);
+    // Reversed depth with no far plane: z is the near distance and w the
+    // distance from the eye, so depth is z / w. A pulled surface stores the
+    // depth of a point nearer by `pull`, tapered toward nothing at the near
+    // plane. The taper keeps depth below 1 and in the order of distance, and
+    // a larger pull nearer at every distance. A vertex nearer than the near
+    // plane keeps its depth, so it is still clipped.
+    let pull = PULL_SCALE * uniforms.draw.y;
+    let near = out.clip_position.z;
+    let distance = out.clip_position.w;
+    if (pull > 0.0 && distance > near) {
+        let past_near = distance - near;
+        let pulled = distance - pull * past_near / (past_near + pull);
+        out.clip_position.z = near * distance / pulled;
+    }
     out.normal_vs = (uniforms.model_view * vec4(in.normal, 0.0)).xyz;
     out.position_vs = (uniforms.model_view * vec4(in.position, 1.0)).xyz;
     out.color = in.color;
@@ -175,12 +196,30 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
     if (ENCODE_SRGB) {
         color = srgb_encode(color);
     }
-    return vec4(color, base_color.a);
+    return vec4(color, base_color.a * uniforms.draw.x);
 }
 "#;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MSAA_SAMPLE_COUNT: u32 = 4;
+/// How far nearer the eye an armor plate is drawn, in model units (about
+/// 0.6 m on a ship). The armor model and the ship model draw the same plating
+/// up to this far apart, in either order, so without it the ship model
+/// breaks through the plates lying on it.
+const ARMOR_DEPTH_PULL: f32 = 0.04;
+/// The shader's `PULL_SCALE` for the armor's depth pass.
+const ARMOR_PULL_SCALE: f64 = 1.0;
+/// The shader's `PULL_SCALE` for the armor's color pass: a hundredth of the
+/// pull nearer than its depth pass, far more than float depth resolves and
+/// less than plate edges stand off their plates.
+const ARMOR_COLOR_PULL_SCALE: f64 = 1.01;
+/// The shader's `PULL_SCALE` for tested highlights: twice the armor's, so a
+/// highlight passes over the plate or model surface it lies on and over a
+/// plate drawn on that surface.
+const HIGHLIGHT_PULL_SCALE: f64 = 2.0;
+/// How much of a plate's color covers an opaque ship model, so the model
+/// shows through the armor colors as in the game's armor view.
+const ARMOR_OVER_MODEL_OPACITY: f32 = 0.6;
 /// Bytes of the per-material uniform the fragment shader reads.
 const MATERIAL_PARAMS_SIZE: u64 = std::mem::size_of::<MaterialUniform>() as u64;
 
@@ -220,16 +259,21 @@ impl SceneColorTarget {
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
     color: SceneColorTarget,
-    /// Pipeline with depth writes enabled, for opaque geometry (armor).
-    pipeline: wgpu::RenderPipeline,
-    /// Pipeline without depth writes, for transparent hull geometry.
-    pipeline_no_depth_write: wgpu::RenderPipeline,
-    /// Pipeline that ignores depth: overlays, row highlights, and hover
-    /// highlights in [`HighlightDepth::XRay`].
-    pipeline_overlay: wgpu::RenderPipeline,
-    /// Pipeline for hover highlights in [`HighlightDepth::Tested`]: hidden
-    /// behind what is in front, never written to depth.
-    pipeline_highlight_tested: wgpu::RenderPipeline,
+    /// Opaque geometry: tested and written.
+    opaque: wgpu::RenderPipeline,
+    /// Armor plates' depth, pulled toward the eye, with no color.
+    armor_depth: wgpu::RenderPipeline,
+    /// Armor plates' color where their depth pass left them nearest, once
+    /// per sample.
+    armor_color: wgpu::RenderPipeline,
+    /// Translucent geometry: tested, not written.
+    translucent: wgpu::RenderPipeline,
+    /// Ignores depth: overlays, row highlights, and hover highlights in
+    /// [`HighlightDepth::XRay`].
+    overlay: wgpu::RenderPipeline,
+    /// Hover highlights in [`HighlightDepth::Tested`]: hidden behind what is
+    /// in front, never written to depth.
+    highlight_tested: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     /// Shared sampler for all diffuse textures.
@@ -303,95 +347,46 @@ impl GpuPipeline {
             immediate_size: 0,
         });
 
-        let vertex_state = wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            buffers: &[Some(Vertex::LAYOUT)],
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        };
-
-        let encode_srgb =
-            [("ENCODE_SRGB", if matches!(color, SceneColorTarget::ShaderEncoded(_)) { 1.0 } else { 0.0 })];
-        let fragment_state = wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: color.format(),
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: wgpu::PipelineCompilationOptions { constants: &encode_srgb, ..Default::default() },
-        };
-
+        let encode_srgb = if matches!(color, SceneColorTarget::ShaderEncoded(_)) { 1.0 } else { 0.0 };
         let primitive_state = wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None, // Double-sided
             ..Default::default()
         };
-
-        // Pipeline with depth writes (for opaque armor meshes).
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_3d_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: vertex_state.clone(),
-            fragment: Some(fragment_state.clone()),
-            primitive: primitive_state,
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLE_COUNT,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
-
-        // Pipeline without depth writes (for transparent hull).
-        let pipeline_no_depth_write = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_3d_pipeline_no_depth_write"),
-            layout: Some(&pipeline_layout),
-            vertex: vertex_state.clone(),
-            fragment: Some(fragment_state.clone()),
-            primitive: primitive_state,
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState {
-                    constant: 2, // push transparent geometry slightly behind opaque
-                    slope_scale: 1.0,
-                    clamp: 0.0,
-                },
-            }),
-            multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLE_COUNT,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
-
-        // Overlays and highlights read depth without writing it.
-        let depth_read_pipeline = |label: &str, depth_compare: wgpu::CompareFunction| {
+        let make_pipeline = |state: PipelineState| {
+            let vertex_constants = [("PULL_SCALE", state.pull_scale)];
+            let fragment_constants = [("ENCODE_SRGB", encode_srgb)];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
+                label: Some(state.label),
                 layout: Some(&pipeline_layout),
-                vertex: vertex_state.clone(),
-                fragment: Some(fragment_state.clone()),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[Some(Vertex::LAYOUT)],
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &vertex_constants,
+                        ..Default::default()
+                    },
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color.format(),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: state.color_writes,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &fragment_constants,
+                        ..Default::default()
+                    },
+                }),
                 primitive: primitive_state,
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(depth_compare),
+                    depth_write_enabled: Some(state.depth_write),
+                    depth_compare: Some(state.compare),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
@@ -404,10 +399,55 @@ impl GpuPipeline {
                 cache: None,
             })
         };
-        let pipeline_overlay = depth_read_pipeline("viewport_3d_pipeline_overlay", wgpu::CompareFunction::Always);
-        // Equal passes: a highlight lies on the very surface it marks.
-        let pipeline_highlight_tested =
-            depth_read_pipeline("viewport_3d_pipeline_highlight_tested", wgpu::CompareFunction::LessEqual);
+
+        // Depth is reversed: nearer is greater.
+        let opaque = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_opaque",
+            depth_write: true,
+            compare: wgpu::CompareFunction::Greater,
+            pull_scale: 0.0,
+            color_writes: wgpu::ColorWrites::ALL,
+        });
+        let armor_depth = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_armor_depth",
+            depth_write: true,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            pull_scale: ARMOR_PULL_SCALE,
+            color_writes: wgpu::ColorWrites::empty(),
+        });
+        // Drawn a little nearer than the depth pass, a fragment passes only
+        // over the nearest plate's depth, and the depth it writes then turns
+        // away any later fragment at that depth. So each sample blends one
+        // plate color, however many plates lie behind it or over one another
+        // at the front, such as the edges where plates meet.
+        let armor_color = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_armor_color",
+            depth_write: true,
+            compare: wgpu::CompareFunction::Greater,
+            pull_scale: ARMOR_COLOR_PULL_SCALE,
+            color_writes: wgpu::ColorWrites::ALL,
+        });
+        let translucent = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_translucent",
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            pull_scale: 0.0,
+            color_writes: wgpu::ColorWrites::ALL,
+        });
+        let overlay = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_overlay",
+            depth_write: false,
+            compare: wgpu::CompareFunction::Always,
+            pull_scale: 0.0,
+            color_writes: wgpu::ColorWrites::ALL,
+        });
+        let highlight_tested = make_pipeline(PipelineState {
+            label: "viewport_3d_pipeline_highlight_tested",
+            depth_write: false,
+            compare: wgpu::CompareFunction::GreaterEqual,
+            pull_scale: HIGHLIGHT_PULL_SCALE,
+            color_writes: wgpu::ColorWrites::ALL,
+        });
 
         // Create shared sampler (repeat wrapping, linear filtering).
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -446,10 +486,12 @@ impl GpuPipeline {
 
         Self {
             color,
-            pipeline,
-            pipeline_no_depth_write,
-            pipeline_overlay,
-            pipeline_highlight_tested,
+            opaque,
+            armor_depth,
+            armor_color,
+            translucent,
+            overlay,
+            highlight_tested,
             uniform_bind_group_layout,
             texture_bind_group_layout,
             default_sampler,
@@ -462,14 +504,17 @@ impl GpuPipeline {
         self.color
     }
 
-    /// The pipeline `kind` draws with while hover highlights are in `highlight`.
-    fn layer_pipeline(&self, kind: LayerKind, highlight: HighlightDepth) -> &wgpu::RenderPipeline {
-        match kind {
-            LayerKind::Opaque => &self.pipeline,
-            LayerKind::Translucent => &self.pipeline_no_depth_write,
-            LayerKind::Overlay | LayerKind::Highlight => match kind.depth_state(highlight) {
-                DepthState::Ignored => &self.pipeline_overlay,
-                DepthState::Written | DepthState::Tested => &self.pipeline_highlight_tested,
+    /// The pipeline `pass` draws with while hover highlights are in `highlight`.
+    fn pass_pipeline(&self, pass: DrawPass, highlight: HighlightDepth) -> &wgpu::RenderPipeline {
+        match pass {
+            DrawPass::Opaque => &self.opaque,
+            DrawPass::ArmorDepth => &self.armor_depth,
+            DrawPass::ArmorColor => &self.armor_color,
+            DrawPass::Translucent => &self.translucent,
+            DrawPass::Overlay => &self.overlay,
+            DrawPass::Highlight => match highlight {
+                HighlightDepth::XRay => &self.overlay,
+                HighlightDepth::Tested => &self.highlight_tested,
             },
         }
     }
@@ -708,11 +753,13 @@ fn halve(pixels: &[u8], width: u32, height: u32) -> MipLevel {
 }
 
 /// The uniform sets one frame binds: model space with hull lighting, world
-/// space, and model space unlit.
+/// space, model space unlit, and the armor's: model space unlit at the
+/// opacity armor is drawn with.
 struct SceneUniforms {
     model_lit: Uniforms,
     world: Uniforms,
     model_unlit: Uniforms,
+    armor: Uniforms,
 }
 
 /// A uniform buffer and the bind group that exposes it to the shader.
@@ -749,6 +796,7 @@ pub struct SceneAttachments {
     model_lit: UniformSlot,
     world: UniformSlot,
     model_unlit: UniformSlot,
+    armor: UniformSlot,
 }
 
 impl SceneAttachments {
@@ -775,6 +823,7 @@ impl SceneAttachments {
             model_lit: UniformSlot::new(device, pipeline, "viewport_3d_model_lit_uniforms"),
             world: UniformSlot::new(device, pipeline, "viewport_3d_world_uniforms"),
             model_unlit: UniformSlot::new(device, pipeline, "viewport_3d_model_unlit_uniforms"),
+            armor: UniformSlot::new(device, pipeline, "viewport_3d_armor_uniforms"),
         }
     }
 
@@ -783,18 +832,20 @@ impl SceneAttachments {
     }
 }
 
-/// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
-/// - Layers <= LAYER_OPAQUE_MAX: depth-writing pipeline (opaque armor).
-/// - LAYER_HULL: no-depth-write pipeline with depth test (transparent hull, behind armor).
-/// - LAYER_OVERLAY: no depth test at all (overlays and row highlights, always visible on top).
+/// Render layers, drawn in increasing order.
+/// - LAYER_DEFAULT: opaque, depth-tested and written (an opaque ship model).
+/// - LAYER_ARMOR: armor plates and their edges. A depth pass pulled toward
+///   the eye keeps the nearest plate at each pixel, and a color pass blends
+///   that plate alone over what is behind it.
+/// - LAYER_HULL: translucent, depth-tested and not written (a see-through
+///   hull, blended materials, the waterline grid).
+/// - LAYER_OVERLAY: not depth-tested (overlays and row highlights).
 /// - LAYER_HIGHLIGHT: hover highlights, depth-tested or not per [`HighlightDepth`].
 pub const LAYER_DEFAULT: i32 = 0;
-pub const LAYER_HULL: i32 = 1;
-pub const LAYER_OVERLAY: i32 = 2;
-pub const LAYER_HIGHLIGHT: i32 = 3;
-
-/// Layers at or below this value write to the depth buffer (opaque pass).
-const LAYER_OPAQUE_MAX: i32 = 0;
+pub const LAYER_ARMOR: i32 = 1;
+pub const LAYER_HULL: i32 = 2;
+pub const LAYER_OVERLAY: i32 = 3;
+pub const LAYER_HIGHLIGHT: i32 = 4;
 
 /// Whether a hover highlight shows through the geometry in front of it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -824,10 +875,11 @@ pub fn layer_depth_state(layer: i32, highlight: HighlightDepth) -> DepthState {
     LayerKind::of(layer).depth_state(highlight)
 }
 
-/// Which pipeline a layer draws with.
+/// Which pipelines a layer draws with.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LayerKind {
     Opaque,
+    Armor,
     Translucent,
     Overlay,
     Highlight,
@@ -835,8 +887,10 @@ enum LayerKind {
 
 impl LayerKind {
     fn of(layer: i32) -> Self {
-        if layer <= LAYER_OPAQUE_MAX {
+        if layer <= LAYER_DEFAULT {
             Self::Opaque
+        } else if layer < LAYER_HULL {
+            Self::Armor
         } else if layer < LAYER_OVERLAY {
             Self::Translucent
         } else if layer < LAYER_HIGHLIGHT {
@@ -848,11 +902,43 @@ impl LayerKind {
 
     fn depth_state(self, highlight: HighlightDepth) -> DepthState {
         match (self, highlight) {
-            (Self::Opaque, _) => DepthState::Written,
+            (Self::Opaque | Self::Armor, _) => DepthState::Written,
             (Self::Translucent, _) | (Self::Highlight, HighlightDepth::Tested) => DepthState::Tested,
             (Self::Overlay, _) | (Self::Highlight, HighlightDepth::XRay) => DepthState::Ignored,
         }
     }
+
+    /// The passes a mesh on this layer is drawn in.
+    fn passes(self) -> &'static [DrawPass] {
+        match self {
+            Self::Opaque => &[DrawPass::Opaque],
+            Self::Armor => &[DrawPass::ArmorDepth, DrawPass::ArmorColor],
+            Self::Translucent => &[DrawPass::Translucent],
+            Self::Overlay => &[DrawPass::Overlay],
+            Self::Highlight => &[DrawPass::Highlight],
+        }
+    }
+}
+
+/// One pass over the meshes of a frame, in the order they are drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DrawPass {
+    Opaque,
+    ArmorDepth,
+    ArmorColor,
+    Translucent,
+    Overlay,
+    Highlight,
+}
+
+/// How one of the scene's pipelines meets the depth buffer and the target.
+struct PipelineState {
+    label: &'static str,
+    depth_write: bool,
+    compare: wgpu::CompareFunction,
+    /// The shader's `PULL_SCALE`.
+    pull_scale: f64,
+    color_writes: wgpu::ColorWrites,
 }
 
 /// Per-mesh GPU buffers.
@@ -922,6 +1008,7 @@ enum BindKind {
     World,
     ModelLit,
     ModelUnlit,
+    Armor,
 }
 
 impl Viewport3D {
@@ -1301,7 +1388,7 @@ impl Viewport3D {
             }
         };
         let view_mat = self.camera.view_matrix();
-        let proj_mat = self.camera.projection_matrix(aspect);
+        let proj_mat = self.camera.render_projection_matrix(aspect);
         let model_view = mat4_mul(view_mat, model_mat);
         let mvp = mat4_mul(proj_mat, model_view);
 
@@ -1329,7 +1416,8 @@ impl Viewport3D {
             self.lighting.shininess,
         ];
 
-        let uniforms = Uniforms { mvp, model_view, light_dir, flat_color, key_color, params };
+        let draw = [1.0, ARMOR_DEPTH_PULL, 0.0, 0.0];
+        let uniforms = Uniforms { mvp, model_view, light_dir, flat_color, key_color, params, draw };
 
         // World-space uniforms (no model rotation) - used for waterline etc. Always unlit.
         let world_mvp = mat4_mul(proj_mat, view_mat);
@@ -1340,11 +1428,27 @@ impl Viewport3D {
             flat_color,
             key_color,
             params,
+            draw,
         };
 
         let model_unlit_uniforms = Uniforms { light_dir: [light_dir[0], light_dir[1], light_dir[2], 0.0], ..uniforms };
+        let armor_opacity = if self.shows_opaque_model() { ARMOR_OVER_MODEL_OPACITY } else { 1.0 };
+        let armor_uniforms = Uniforms { draw: [armor_opacity, ARMOR_DEPTH_PULL, 0.0, 0.0], ..model_unlit_uniforms };
 
-        SceneUniforms { model_lit: uniforms, world: world_uniforms, model_unlit: model_unlit_uniforms }
+        SceneUniforms {
+            model_lit: uniforms,
+            world: world_uniforms,
+            model_unlit: model_unlit_uniforms,
+            armor: armor_uniforms,
+        }
+    }
+
+    /// Whether an opaque ship model is drawn, which the armor then tints
+    /// rather than covers. The lit meshes are the ship model.
+    fn shows_opaque_model(&self) -> bool {
+        self.meshes.borrow().values().any(|mesh| {
+            mesh.visible && mesh.lit && mesh.index_count > 0 && LayerKind::of(mesh.layer) == LayerKind::Opaque
+        })
     }
 
     /// Draws the scene into `resolve_target`, a single-sample view in the
@@ -1362,6 +1466,7 @@ impl Viewport3D {
         queue.write_buffer(&attachments.model_lit.buffer, 0, bytemuck::bytes_of(&uniforms.model_lit));
         queue.write_buffer(&attachments.world.buffer, 0, bytemuck::bytes_of(&uniforms.world));
         queue.write_buffer(&attachments.model_unlit.buffer, 0, bytemuck::bytes_of(&uniforms.model_unlit));
+        queue.write_buffer(&attachments.armor.buffer, 0, bytemuck::bytes_of(&uniforms.armor));
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("viewport_3d_encoder") });
@@ -1370,8 +1475,8 @@ impl Viewport3D {
     }
 
     /// Record the scene draw into `encoder`, resolving into `resolve_target`.
-    /// Sorts meshes by layer and binds the matching pipeline/uniform group per
-    /// mesh.
+    /// Draws the meshes pass by pass, binding the matching pipeline and
+    /// uniform group per mesh.
     fn encode_scene_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1382,6 +1487,7 @@ impl Viewport3D {
         let model_lit_bg = &attachments.model_lit.bind_group;
         let world_bg = &attachments.world.bind_group;
         let model_unlit_bg = &attachments.model_unlit.bind_group;
+        let armor_bg = &attachments.armor.bind_group;
         let clear = pipeline.color.clear_value(self.clear_color);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("viewport_3d_pass"),
@@ -1395,7 +1501,7 @@ impl Viewport3D {
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &attachments.depth,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
                 stencil_ops: None,
             }),
             ..Default::default()
@@ -1405,26 +1511,31 @@ impl Viewport3D {
         // Start with fallback texture; per-mesh textures override below.
         pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
-        // Sort meshes by layer: armor (opaque, depth-write) first, then hull, overlays and highlights (no depth-write).
+        // Ordered by pass, then by upload, so each frame draws the same way.
         let meshes = self.meshes.borrow();
-        let mut sorted: Vec<(MeshId, &GpuMesh)> =
-            meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
-        sorted.sort_by_key(|(_, m)| m.layer);
+        let mut draws: Vec<(DrawPass, u64, &GpuMesh)> = Vec::new();
+        for (id, mesh) in meshes.iter().filter(|(_, mesh)| mesh.visible && mesh.index_count > 0) {
+            for draw_pass in LayerKind::of(mesh.layer).passes() {
+                draws.push((*draw_pass, id.0, mesh));
+            }
+        }
+        draws.sort_unstable_by_key(|(draw_pass, id, _)| (*draw_pass, *id));
 
-        let mut current_layer_kind: Option<LayerKind> = None;
+        let mut current_pass: Option<DrawPass> = None;
         let mut has_custom_texture = false; // track whether we need to rebind fallback
         let mut current_bind = BindKind::ModelUnlit;
-        for (_id, mesh) in sorted {
-            let layer_kind = LayerKind::of(mesh.layer);
-            if current_layer_kind != Some(layer_kind) {
-                pass.set_pipeline(pipeline.layer_pipeline(layer_kind, self.highlight_depth));
-                current_layer_kind = Some(layer_kind);
+        for (draw_pass, _id, mesh) in draws {
+            if current_pass != Some(draw_pass) {
+                pass.set_pipeline(pipeline.pass_pipeline(draw_pass, self.highlight_depth));
+                current_pass = Some(draw_pass);
             }
 
-            // Pick the uniform bind group: world-space (always unlit), model-space lit
-            // (hull), or model-space unlit (armor/overlays).
+            // Pick the uniform bind group: world-space (always unlit), armor,
+            // model-space lit (hull), or model-space unlit (overlays).
             let desired_bg = if mesh.world_space {
                 BindKind::World
+            } else if matches!(draw_pass, DrawPass::ArmorDepth | DrawPass::ArmorColor) {
+                BindKind::Armor
             } else if mesh.lit {
                 BindKind::ModelLit
             } else {
@@ -1435,6 +1546,7 @@ impl Viewport3D {
                     BindKind::World => world_bg,
                     BindKind::ModelLit => model_lit_bg,
                     BindKind::ModelUnlit => model_unlit_bg,
+                    BindKind::Armor => armor_bg,
                 };
                 pass.set_bind_group(0, bg, &[]);
                 current_bind = desired_bg;
