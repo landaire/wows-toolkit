@@ -15,6 +15,7 @@ use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::vocab::Modifiers;
+use zgui::vocab::Role;
 
 use crate::services::Job;
 use crate::services::Progress;
@@ -190,6 +191,24 @@ fn clicking_the_app_menu_button_opens_the_menu() {
     settle(&mut window);
 
     assert!(window.by_test_id("app-menu-tactics-board").is_some(), "the click opens the menu");
+}
+
+/// A closable tab's menu speaks the reader's language rather than the strip's English.
+#[test]
+fn the_tab_menu_is_translated() {
+    let mut window = open_bare_shell();
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    shell().open_directory_stats(dir.path().to_path_buf());
+    settle(&mut window);
+    let tab = shell().selected_untracked().expect("the directory's tab is chosen");
+
+    let element = window.by_test_id(&tab.value()).expect("the tab is on the strip");
+    window.right_click(element).expect("the tab takes a right click");
+    settle(&mut window);
+
+    for key in ["ui.tabs.close_tab", "ui.tabs.close_other_tabs", "ui.tabs.close_tabs_to_the_right"] {
+        assert!(window.by_role_and_label(Role::MenuItem, &t!(key)).is_some(), "{key} is in the menu");
+    }
 }
 
 #[test]

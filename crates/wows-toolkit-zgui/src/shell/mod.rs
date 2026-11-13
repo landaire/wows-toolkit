@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use landaire_ui::MotionPreference;
 use landaire_ui::TabStripProps;
+use landaire_ui::TabStripStrings;
 use landaire_ui::TabStripTabProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
@@ -660,6 +661,11 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
         let Some(tab) = TabKey::parse(&value) else { return };
         shell.select(tab);
     });
+    let strip_strings = TabStripStrings {
+        close: Signal::derive_local(locale.text("ui.tabs.close_tab")),
+        close_others: Signal::derive_local(locale.text("ui.tabs.close_other_tabs")),
+        close_to_the_right: Signal::derive_local(locale.text("ui.tabs.close_tabs_to_the_right")),
+    };
 
     view! {
         column(
@@ -679,7 +685,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
         ) {
             row(class = "wt-shell__strip") {
                 box(class = "wt-shell__tabs") {
-                    TabStrip(value = chosen_tab, label = "Tabs", attr:data-testid = "app-tabs") {
+                    TabStrip(value = chosen_tab, label = "Tabs", strings = strip_strings, attr:data-testid = "app-tabs") {
                         for tab in move || shell.tab_order(), key = |tab: &TabKey| *tab {
                             {match tab {
                                 TabKey::App(app_tab) => AnyView::new(view! {
