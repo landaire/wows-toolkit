@@ -21,6 +21,7 @@ use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
 use wowsunpack::game_params::ttx::constants::DispersionCurve;
 use wowsunpack::game_params::ttx::constants::clamped_dispersion_coeff;
+use wowsunpack::game_params::ttx::factories::cap_artillery_range_km;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
 use wowsunpack::game_params::ttx::orchestration::artillery_dispersion;
@@ -569,8 +570,8 @@ impl Battery<'_> {
         match self.kind {
             DispersionBattery::MainBattery => {
                 let profile = artillery_dispersion(&self.ship.param, selection, bundle)?;
-                let profile =
-                    ArtilleryDispersion { max_range: Km::new(profile.max_range.value() * range.0), ..profile };
+                let max_range = cap_artillery_range_km(profile.max_range.value() * range.0, bundle);
+                let profile = ArtilleryDispersion { max_range: Km::new(max_range), ..profile };
 
                 let sigma = artillery_sigma(&self.ship.param, selection, bundle).map(SigmaCount);
 

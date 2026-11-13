@@ -45,6 +45,7 @@ use crate::game_params::ttx::model::TorpedoStats;
 use crate::game_params::ttx::model::Torpedoes;
 use crate::game_params::ttx::model::UnderwaterMobility;
 use crate::game_params::ttx::model::Visibility;
+use crate::game_params::ttx::modifiers::MAIN_BATTERY_RANGE_CAP;
 use crate::game_params::ttx::modifiers::ModifierBundle;
 use crate::game_params::ttx::module_options::ModuleSlot;
 use crate::game_params::ttx::provenance::InputId;
@@ -955,7 +956,10 @@ pub fn shell_stats<R: Recorder>(
 /// Main-battery range in km: base component `maxDist` (BigWorld m) scaled by the
 /// fire-control `maxDistCoef`, the `GMMaxDist` modifier, and an optional spotter
 /// range coefficient (FactoryArtillery.py:42; spotter extends range by its
-/// `artilleryDistCoeff`).
+/// `artilleryDistCoeff`), then held to the `GMMaxDistAbsoluteCap` meters when a
+/// source carries one (FactoryArtillery.py:34, 234). The battle client passes the
+/// cap to its range ring apart from the spotter coefficient (m979f9c73/Artillery.py:234),
+/// so it bounds the spotter-scaled range too.
 pub(crate) fn artillery_range_km(
     arty: &ArtilleryComponentStats,
     fc_max_dist_coef: f32,
@@ -964,11 +968,22 @@ pub(crate) fn artillery_range_km(
 ) -> Option<f32> {
     let max_dist = arty.max_dist?;
     let range = (max_dist.value() / KM_TO_M) * fc_max_dist_coef * modifiers.coef("GMMaxDist");
-
-    Some(match spotter_range {
+    let range = match spotter_range {
         Some(coeff) => range * coeff,
         None => range,
-    })
+    };
+
+    Some(cap_artillery_range_km(range, modifiers))
+}
+
+/// `range` km held to the `GMMaxDistAbsoluteCap` meters when a source in
+/// `modifiers` carries one. Callers that scale a computed main battery range
+/// apply this after scaling.
+pub fn cap_artillery_range_km(range: f32, modifiers: &ModifierBundle) -> f32 {
+    match modifiers.cap(MAIN_BATTERY_RANGE_CAP) {
+        Some(cap) => range.min(cap / KM_TO_M),
+        None => range,
+    }
 }
 
 /// Main-battery armament section (`ArtilleryTTX`, FactoryArtillery.py + TTXFactory.py).
@@ -1045,11 +1060,23 @@ pub fn artillery<R: Recorder>(
             let fc_src = fc_name
                 .map(|n| InputId::Module { slot: ModuleSlot::FireControl, name: n.to_string() })
                 .unwrap_or_else(arty_src);
+            // No spotter leaves the range unscaled.
+            let spotter_coeff = spotter_range.map_or(1.0, |coeff| coeff.value);
+            let uncapped = base_km * fc_max_dist_coef * modifiers.coef("GMMaxDist") * spotter_coeff;
+            // The binding cap is the smallest source; its step scales the range down to it.
+            let cap_source = sources
+                .get(MAIN_BATTERY_RANGE_CAP)
+                .iter()
+                .min_by(|left, right| left.1.total_cmp(&right.1))
+                .map(|(input, _)| input.clone());
             rec.record(TtxStat::ArtilleryRange, None, base_km, arty_src(), rng, |b| {
                 b.module(fc_src, "maxDistCoef", fc_max_dist_coef);
                 b.coef(sources, "GMMaxDist");
                 if let Some(coeff) = spotter_range {
                     b.module(coeff.source.clone(), "spotterDistCoeff", coeff.value);
+                }
+                if let Some(input) = cap_source {
+                    b.module(input, MAIN_BATTERY_RANGE_CAP, rng / uncapped);
                 }
             });
         }
@@ -3532,6 +3559,47 @@ mod tests {
         let expected_range = arty.range.expect("range").value();
         let replayed = ShipStatsProvenance::replay(range_attr);
         assert!((replayed - expected_range).abs() < 1e-3, "replay got {replayed}, expected {expected_range}");
+    }
+
+    /// A 12000 m `GMMaxDistAbsoluteCap` holds Worcester's 15.32 km * 1.2 range at
+    /// 12 km, and the cap's step replays to it.
+    #[test]
+    fn artillery_range_held_to_absolute_cap() {
+        use crate::game_params::ttx::provenance::On;
+        use crate::game_params::ttx::provenance::ShipStatsProvenance;
+
+        let mods = [modifier(MAIN_BATTERY_RANGE_CAP, 12_000.0)];
+        let bundle = ModifierBundle::from_modifiers(&mods, Species::Cruiser, VERSION).expect("the range cap is known");
+        let mode = InputId::Module { slot: ModuleSlot::Artillery, name: "ALT".into() };
+        let mut sources = ModifierSources::default();
+        sources.record(MAIN_BATTERY_RANGE_CAP, mode.clone(), 12_000.0);
+        let provider = worcester_provider();
+        let mut rec = On::default();
+        let arty = artillery(
+            &worcester_artillery(),
+            "ARTY",
+            Some("FC"),
+            &bundle,
+            &sources,
+            1.2,
+            None,
+            None,
+            10,
+            &provider,
+            &mut rec,
+        )
+        .expect("artillery computed");
+
+        let range = arty.range.expect("range").value();
+        assert_eq!(range, 12.0);
+
+        let prov = rec.into_provenance();
+        let range_attr =
+            prov.attributions.iter().find(|a| a.stat == TtxStat::ArtilleryRange).expect("ArtilleryRange recorded");
+        let cap_step = range_attr.steps.iter().find(|c| c.modifier_name == MAIN_BATTERY_RANGE_CAP);
+        assert_eq!(cap_step.map(|step| &step.input), Some(&mode));
+        let replayed = ShipStatsProvenance::replay(range_attr);
+        assert!((replayed - range).abs() < 1e-3, "replay got {replayed}, expected {range}");
     }
 
     /// `ArtilleryDispersionVertical` provenance replay must reproduce the factory value exactly
