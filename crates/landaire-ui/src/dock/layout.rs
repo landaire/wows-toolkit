@@ -195,15 +195,15 @@ impl PanelEntry {
     }
 }
 
-/// How much room one folding region takes while it shows. A drag keeps the form the region was
-/// given.
+/// How much room one folding region takes while it shows. The region keeps its share of the dock
+/// as the dock is resized, and a drag sets that share.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RegionExtent {
     /// A share of the dock's width for a side, or of the height under the center for the bottom.
-    /// The region grows and shrinks with the dock.
     Share(Share),
-    /// A length the region keeps however the dock is resized.
+    /// A length to start at. Once the dock is laid out it becomes the share of the dock that it
+    /// took then.
     Length(CssLength),
 }
 

@@ -295,6 +295,12 @@ impl Showing {
             Slot::Bottom => self.bottom,
         }
     }
+
+    /// Whether the room `slot` is given is its own share: it shows beside the middle, and a
+    /// bottom slot under the center.
+    fn owns_share(self, slot: Slot) -> bool {
+        self.slot(slot) && self.middle && (slot != Slot::Bottom || self.center)
+    }
 }
 
 /// The length of a resizable group along its axis, in CSS pixels. Unknown until it is laid out.
@@ -394,15 +400,36 @@ struct Sizing {
     extents: Vec<RegionExtent>,
 }
 
+/// Turns each length the folding regions among `slots` were given into the share of the group
+/// it is placed at for `length`, inside its limits, so the regions keep their proportions from
+/// then on. A region whose room is not its own share keeps the share its length is of the group.
+fn settle_lengths(layout: &mut Layout, showing: Showing, slots: &[Slot], length: GroupLength) {
+    if length.0.is_none_or(|group| group <= 0.0) {
+        return;
+    }
+
+    let placed = targets(layout, showing, slots, length);
+    for (slot, placed) in slots.iter().zip(placed) {
+        let Some(region) = slot.folding() else {
+            continue;
+        };
+        let RegionExtent::Length(pixels) = layout.extents.get(region) else {
+            continue;
+        };
+        let share = if showing.owns_share(*slot) { Some(placed) } else { length.share_of(pixels) };
+        if let Some(share) = share.and_then(|share| Share::new(share.min(100.0)).ok()) {
+            layout.extents.set(region, RegionExtent::Share(share));
+        }
+    }
+}
+
 /// The panels of one resizable group of the frame, as they registered, whether their sizes are
-/// being set by the frame rather than by the user, the group's last measured length, and the
-/// extents a drag last wrote.
+/// being set by the frame rather than by the user, and the extents a drag last wrote.
 #[derive(Clone, Copy)]
 struct FrameGroup {
     slots: &'static [Slot],
     members: StoredValue<Vec<(Slot, u64)>, LocalStorage>,
     applying: StoredValue<bool, LocalStorage>,
-    length: StoredValue<GroupLength, LocalStorage>,
     recorded: StoredValue<Option<Vec<RegionExtent>>, LocalStorage>,
 }
 
@@ -412,7 +439,6 @@ impl FrameGroup {
             slots,
             members: StoredValue::new_local(Vec::new()),
             applying: StoredValue::new_local(false),
-            length: StoredValue::new_local(GroupLength(None)),
             recorded: StoredValue::new_local(None),
         }
     }
@@ -443,15 +469,13 @@ impl FrameGroup {
         self.applying.set_value(false);
     }
 
-    /// Writes the sizes the user dragged the folding slots to back into the layout, each in the
-    /// form its extent was given in.
+    /// Writes the shares the user dragged the folding slots to back into the layout.
     fn record(self, state: DockState, sizes: &[f64]) {
         if self.applying.get_value() {
             return;
         }
 
         let members = self.members.get_value();
-        let length = self.length.get_value();
         state.layout.update(|layout| {
             let showing = Showing::of(layout);
             for ((slot, _), size) in members.iter().zip(sizes) {
@@ -459,18 +483,11 @@ impl FrameGroup {
                     continue;
                 };
                 // A side's share is only its own while the middle beside it shows.
-                if !showing.slot(*slot) || !showing.middle || (*slot == Slot::Bottom && !showing.center) {
+                if !showing.owns_share(*slot) {
                     continue;
                 }
-                let size = size.clamp(0.0, 100.0);
-                let extent = match layout.extents.get(region) {
-                    RegionExtent::Share(_) => Share::new(size).ok().map(RegionExtent::Share),
-                    RegionExtent::Length(_) => {
-                        length.0.and_then(|group| CssLength::new(size * group / 100.0).ok()).map(RegionExtent::Length)
-                    }
-                };
-                if let Some(extent) = extent {
-                    layout.extents.set(region, extent);
+                if let Ok(share) = Share::new(size.clamp(0.0, 100.0)) {
+                    layout.extents.set(region, RegionExtent::Share(share));
                 }
             }
             self.recorded.set_value(Some(self.extents(layout)));
@@ -641,7 +658,9 @@ fn FrameSizer(state: DockState, group: FrameGroup, showing: Memo<Showing>) -> im
             limits: limits.get(),
             extents: extents.get(),
         };
-        group.length.set_value(now.length);
+        if now.length.0.is_some() && now.extents.iter().any(|extent| matches!(extent, RegionExtent::Length(_))) {
+            state.layout.update(|layout| settle_lengths(layout, now.showing, group.slots, now.length));
+        }
         // Extents a drag wrote are where the panels already stand.
         let dragged = group.recorded.try_update_value(Option::take).flatten().as_ref() == Some(&now.extents);
         let changed = match &previous {
@@ -913,6 +932,43 @@ mod tests {
 
         assert_eq!(targets(&layout, showing(false, true, true), &ROW, GroupLength(Some(1000.0))), [0.0, 50.0, 50.0]);
         assert_eq!(targets(&layout, showing(false, true, true), &ROW, UNMEASURED), [0.0, 75.0, 25.0]);
+    }
+
+    #[test]
+    fn a_length_settles_into_the_share_it_takes_and_only_the_groups_own_regions_do() {
+        let mut layout = with_extents(20.0, 25.0, 30.0);
+        layout.extents.right = RegionExtent::Length(length(500.0));
+        layout.extents.bottom = RegionExtent::Length(length(200.0));
+        let all = Showing { left: false, middle: true, right: true, center: true, bottom: true };
+
+        settle_lengths(&mut layout, all, &ROW, UNMEASURED);
+        assert_eq!(layout.extents.right, RegionExtent::Length(length(500.0)), "nothing settles before a measure");
+
+        settle_lengths(&mut layout, all, &ROW, GroupLength(Some(2000.0)));
+        assert_eq!(layout.extents.right, share(25.0));
+        assert_eq!(layout.extents.bottom, RegionExtent::Length(length(200.0)));
+
+        settle_lengths(&mut layout, all, &COLUMN, GroupLength(Some(100.0)));
+        assert_eq!(layout.extents.bottom, share(100.0), "a length past the whole takes the whole");
+    }
+
+    #[test]
+    fn a_length_settles_at_the_share_its_limits_place_it_at() {
+        let mut layout = with_extents(20.0, 25.0, 30.0);
+        layout.extents.right = RegionExtent::Length(length(200.0));
+        layout.limits.set(FoldingRegion::Right, RegionLimits { min: Some(length(280.0)), max: None });
+        let measured = GroupLength(Some(800.0));
+
+        settle_lengths(&mut layout, showing(false, true, true), &ROW, measured);
+        assert_eq!(layout.extents.right, share(35.0));
+
+        layout.extents.right = RegionExtent::Length(length(200.0));
+        settle_lengths(&mut layout, showing(false, true, false), &ROW, measured);
+        assert_eq!(layout.extents.right, share(25.0), "a hidden region keeps the share of its length");
+
+        layout.extents.right = RegionExtent::Length(length(500.0));
+        settle_lengths(&mut layout, showing(false, false, true), &ROW, measured);
+        assert_eq!(layout.extents.right, share(62.5), "a side alone fills the row but keeps its own share");
     }
 
     #[test]

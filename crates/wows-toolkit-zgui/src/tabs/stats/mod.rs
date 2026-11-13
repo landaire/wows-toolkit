@@ -33,6 +33,7 @@ use landaire_ui::RegionExtent;
 use landaire_ui::RegionLimits;
 use landaire_ui::SavedLayout;
 use landaire_ui::SavedNode;
+use landaire_ui::Share;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -725,10 +726,12 @@ fn chart_slot(charts: RwSignal<Vec<ChartSlot>, LocalStorage>, id: ChartId, setti
     slot
 }
 
-/// A 500px right region for charts, with floors that keep a chart readable.
+/// A right region for charts taking about a third of the dock, with floors that keep a chart
+/// readable.
 fn size_regions(dock: DockState) {
     let px = |pixels| CssLength::new(pixels).expect("a finite, non-negative length");
-    dock.set_region_extent(FoldingRegion::Right, RegionExtent::Length(px(500.0)));
+    let share = Share::new(32.0).expect("a share of the dock");
+    dock.set_region_extent(FoldingRegion::Right, RegionExtent::Share(share));
     dock.set_region_limits(FoldingRegion::Right, RegionLimits { min: Some(px(280.0)), max: None });
     dock.set_region_limits(FoldingRegion::Bottom, RegionLimits { min: Some(px(200.0)), max: None });
 }

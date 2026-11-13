@@ -267,22 +267,45 @@ fn chart_dock(state: DockState) {
     state.set_region_limits(FoldingRegion::Right, RegionLimits { min: Some(pixels(280.0)), max: None });
 }
 
+fn right_share(state: DockState) -> f64 {
+    let RegionExtent::Share(share) = state.dump().extents.right else {
+        panic!("a laid out region keeps a share");
+    };
+
+    share.percent()
+}
+
+fn resize(window: &mut HeadlessWindow, width: f32) {
+    window.resize(WindowSize { width, height: SIZE.height }).expect("the window is open");
+    window.advance(FRAME);
+}
+
 #[test]
-fn a_region_given_a_length_is_laid_out_at_it() {
+fn a_region_given_a_length_starts_at_it_and_then_keeps_its_share_of_the_dock() {
     let (mut window, state) = open(chart_dock);
     window.advance(FRAME);
 
     let chart = width_of(&window, "content-chart").expect("the chart is laid out");
     assert!((chart - 500.0).abs() < 1.0, "the chart is {chart} wide");
+    assert!((right_share(state) - 62.5).abs() < 0.1, "the length became a share: {}", right_share(state));
+
+    resize(&mut window, 1600.0);
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 1000.0).abs() < 2.0, "a wider dock widens the chart: {chart}");
+
+    resize(&mut window, 640.0);
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 400.0).abs() < 2.0, "a narrower dock narrows the chart: {chart}");
 
     state.set_region_extent(FoldingRegion::Right, RegionExtent::Length(pixels(320.0)));
     window.advance(FRAME);
     let chart = width_of(&window, "content-chart").expect("the chart is laid out");
     assert!((chart - 320.0).abs() < 1.0, "a new extent reaches a drawn dock: the chart is {chart} wide");
+    assert!((right_share(state) - 50.0).abs() < 0.1, "and becomes a share: {}", right_share(state));
 }
 
 #[test]
-fn a_region_dragged_past_its_least_stops_there_and_keeps_its_length() {
+fn a_region_dragged_past_its_least_stops_there_and_keeps_that_share() {
     let (mut window, state) = open(chart_dock);
     window.advance(FRAME);
     let handle = window
@@ -299,10 +322,15 @@ fn a_region_dragged_past_its_least_stops_there_and_keeps_its_length() {
 
     let chart = width_of(&window, "content-chart").expect("the chart is laid out");
     assert!((chart - 280.0).abs() < 1.0, "the chart is {chart} wide");
-    let RegionExtent::Length(saved) = state.dump().extents.right else {
-        panic!("a region given a length is saved as one");
-    };
-    assert!((saved.pixels() - 280.0).abs() < 1.0, "saved at {}", saved.pixels());
+    assert!((right_share(state) - 35.0).abs() < 0.2, "saved at {}", right_share(state));
+
+    resize(&mut window, 1600.0);
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 560.0).abs() < 2.0, "the dragged share holds in a wider dock: {chart}");
+
+    resize(&mut window, 600.0);
+    let chart = width_of(&window, "content-chart").expect("the chart is laid out");
+    assert!((chart - 280.0).abs() < 1.0, "a narrow dock keeps the chart at its least: {chart}");
 }
 
 #[test]
@@ -419,11 +447,12 @@ fn a_group_zoomed_from_its_menu_fills_the_dock_until_zoomed_out() {
     window.advance(FRAME);
     let laid_out = width_of(&window, "content-chart").expect("the chart is laid out");
     assert!((laid_out - 500.0).abs() < 1.0, "the chart is {laid_out} wide");
+    let extents = state.dump().extents;
 
     choose(&mut window, "Zoom In");
     let zoomed = width_of(&window, "content-chart").expect("the chart is laid out");
     assert!((zoomed - SIZE.width).abs() < 1.0, "the zoomed chart takes the whole dock, {zoomed} wide");
-    assert_eq!(state.dump().extents.right, RegionExtent::Length(pixels(500.0)), "the layout is unchanged");
+    assert_eq!(state.dump().extents, extents, "the layout is unchanged");
 
     let main_tab = window.by_role_and_label(Role::Tab, "main").expect("the main tab is announced");
     assert!(window.bounds(main_tab).is_none(), "the covered group's tab leaves the screen and the focus order");
