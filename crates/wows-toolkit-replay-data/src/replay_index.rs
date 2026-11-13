@@ -205,6 +205,8 @@ impl IndexOneError {
                 ReplayLoadError::UnsupportedVersion { .. }
                 | ReplayLoadError::GameData(_)
                 | ReplayLoadError::Panicked { .. }
+                | ReplayLoadError::LoaderStopped { .. }
+                | ReplayLoadError::LoaderGone { .. }
                 | ReplayLoadError::AltRefused(_),
             )
             | Self::Store(_)

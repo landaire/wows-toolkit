@@ -23,6 +23,13 @@ pub enum ReplayLoadError {
     /// The parse stopped on a fault in the reader rather than in the file.
     #[error("failed to parse replay: the reader stopped on an internal error: {report}")]
     Panicked { report: wows_toolkit_services::supervision::PanicReport },
+    /// The replay loader's thread stopped while it was reading this replay, or gave up before
+    /// reading it.
+    #[error("the replay loader stopped while reading {}: {stop}", path.display())]
+    LoaderStopped { path: std::path::PathBuf, stop: wows_toolkit_services::supervision::WorkerStop },
+    /// The replay loader is not running, so the replay was not read.
+    #[error("the replay loader is not running, so {} was not read", path.display())]
+    LoaderGone { path: std::path::PathBuf },
     /// Another recording was offered as this battle and is not it.
     #[error("{0}")]
     AltRefused(#[from] AltRefusal),

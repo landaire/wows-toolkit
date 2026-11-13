@@ -25,6 +25,7 @@ pub mod install;
 pub mod links;
 pub mod live_match;
 pub mod load;
+pub mod loader;
 pub mod minimap_preview;
 pub mod model;
 pub mod paths;
