@@ -861,6 +861,12 @@ impl ArmorViewportState {
         self.read_untracked(|this| this.shown().cloned()).flatten()
     }
 
+    /// Makes `armor` the drawn scene as a finished upload does, for a test without a device.
+    #[cfg(test)]
+    pub(crate) fn adopt_for_test(self, armor: Arc<LoadedShipArmor>) {
+        self.update(|this, _cx| this.current_armor = Some(armor));
+    }
+
     pub fn scene_features(self) -> Option<SceneFeatures> {
         self.read(|this| this.scene_features()).flatten()
     }

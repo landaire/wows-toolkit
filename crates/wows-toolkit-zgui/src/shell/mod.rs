@@ -468,6 +468,12 @@ impl Shell {
         self.held.get()
     }
 
+    fn sync_held(self, modifiers: Modifiers) {
+        if self.held.get_untracked() != modifiers {
+            self.held.set(modifiers);
+        }
+    }
+
     /// Asks the replays tab to carry out `request`, and shows it unless the request runs in the
     /// background.
     pub fn request_replay(self, request: ReplayRequest) {
@@ -643,6 +649,9 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                 }
             },
             on:key_up = move |ev| shell.held.set(ev.modifiers),
+            // A key pressed while another window had focus is only seen on the pointer's events.
+            on:pointer_down:capture = move |ev| shell.sync_held(ev.modifiers),
+            on:pointer_move:capture = move |ev| shell.sync_held(ev.modifiers),
             on:drag_enter = move |ev| shell.drag_entered(ev.paths.clone()),
             on:drag_leave = move |_| shell.drag_left(),
             on:drop = move |ev| shell.dropped(ev.paths.clone())

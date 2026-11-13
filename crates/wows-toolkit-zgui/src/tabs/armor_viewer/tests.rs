@@ -745,6 +745,42 @@ fn the_rail_filter_clear_button_empties_the_filter() {
     assert!(!armor.shown("armor-options-filter-clear"));
 }
 
+/// A zone's box clicked with Ctrl/Cmd held shows that zone alone, every time it is clicked so; a
+/// plain click only turns the zone on or off. The key is read off the click itself, as when it was
+/// pressed while another window had focus.
+#[test]
+fn a_primary_click_on_a_zone_box_solos_the_zone() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(two_zone_scene(), &[OptionSection::Visibility]);
+    let viewport = armor.workspace.active_untracked();
+    viewport.adopt_for_test(Arc::new(two_zone_scene()));
+    let shown = |zone: &str, part: &str| {
+        viewport
+            .read_untracked(|model| model.part_visibility.get(&(zone.to_owned(), part.to_owned())).copied())
+            .flatten()
+            .unwrap_or(true)
+    };
+    let click = |armor: &mut ArmorWindow, zone: &str, modifiers: Modifiers| {
+        let id = format!("armor-vis-zone-{zone}");
+        let element = armor.window.by_test_id(&id).unwrap_or_else(|| panic!("{id} is shown"));
+        armor.window.click_with(element, modifiers).expect("the box can be pressed");
+        armor.settle();
+    };
+
+    click(&mut armor, "Bow", Modifiers::PRIMARY);
+    assert!(shown("Bow", "Bow_Belt") && shown("Bow", "Bow_Deck"), "the zone is on");
+    assert!(!shown("Stern", "Stern_Deck"), "every other zone is off");
+
+    click(&mut armor, "Bow", Modifiers::PRIMARY);
+    assert!(shown("Bow", "Bow_Belt") && !shown("Stern", "Stern_Deck"), "a second solo click solos again");
+
+    click(&mut armor, "Stern", Modifiers::NONE);
+    assert!(shown("Stern", "Stern_Deck") && shown("Bow", "Bow_Belt"), "a plain click only turns its zone on");
+
+    click(&mut armor, "Stern", Modifiers::PRIMARY);
+    assert!(shown("Stern", "Stern_Deck") && !shown("Bow", "Bow_Belt"), "solo moves to the clicked zone");
+}
+
 /// A row under a switch that is off is no match for the rail's filter, so the group holding it is
 /// dropped; turning the switch on while the filter stands finds it.
 #[test]
