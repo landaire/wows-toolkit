@@ -85,6 +85,10 @@ software_encode = "No GPU Video Encoder"
 about = "About"
 refresh_persisted_data = "Refresh Persisted Replay Data"
 tactics_board = "Tactics Board"
+minimize = "Minimize"
+maximize = "Maximize"
+restore = "Restore"
+close = "Close"
 
 # -- Dialog / message text --
 
