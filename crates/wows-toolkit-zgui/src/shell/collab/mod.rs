@@ -217,8 +217,11 @@ impl CollabHost {
             say(shell, notice);
         }
 
+        // Taken whatever the setting says, so an ask declined now does not open later.
         let forced = self.state.with_value(|state| state.link().take_forced_windows());
-        if !forced.is_empty() {
+        let declined = shell.services().settings.read_untracked(|settings| settings.disable_auto_open_session_windows)
+            == Some(true);
+        if !forced.is_empty() && !declined {
             let shared = self.state.with_value(CollabState::shared_windows);
             let opened: Vec<SharedWindow> =
                 forced.into_iter().filter_map(|id| shared.iter().find(|one| one.replay_id == id).cloned()).collect();

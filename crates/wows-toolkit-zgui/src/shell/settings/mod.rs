@@ -5,7 +5,7 @@
 mod cache;
 mod controls;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod zoom_anchor;
 
 use landaire_ui::DrawerProps;

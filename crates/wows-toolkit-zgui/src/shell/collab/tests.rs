@@ -7,6 +7,7 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wt_collab_client::ConnectedUser;
 use wt_collab_client::OpenReplay;
@@ -21,6 +22,7 @@ use zgui::view::IntoView;
 use crate::shell::Shell;
 use crate::shell::ShellHarnessProps;
 use crate::shell::dialogs::DialogHostProps;
+use crate::shell::settings::tests::test_settings;
 use crate::shell::status_bar::ShellStatusBarProps;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
@@ -202,6 +204,28 @@ fn a_guest_steers_nothing() {
     assert!(window.by_test_id("collab-open-for-everyone-7").is_none());
     assert!(window.by_test_id("collab-promote-0").is_none());
     assert!(window.by_test_id("collab-lock-annotations").is_none());
+}
+
+/// A window the host opens for everyone is watched here unless the reader turned that off, and an
+/// ask declined is not answered later when the setting changes back.
+#[test]
+fn a_window_opened_for_everyone_follows_the_auto_open_setting() {
+    let (_window, shell) = open();
+    host_a_session(shell);
+    let ask = |declined: bool| {
+        let settings = StartupSettings { disable_auto_open_session_windows: declined, ..test_settings() };
+        shell.services().settings.adopt_unsaved(settings);
+        shell.collab.edit_for_test(shell, |collab| {
+            collab.state.lock().force_open_window_ids.insert(7);
+        });
+        shell.collab.poll(shell);
+        shell.collab.take_watch_requests().into_iter().map(|window| window.replay_id).collect::<Vec<_>>()
+    };
+
+    assert_eq!(ask(true), Vec::<u64>::new(), "the reader turned auto-opening off");
+    shell.collab.poll(shell);
+    assert!(shell.collab.take_watch_requests().is_empty(), "the declined ask is gone");
+    assert_eq!(ask(false), vec![7], "auto-opening is on");
 }
 
 /// The popover opens above its button: the button is on the bar at the bottom of the window.

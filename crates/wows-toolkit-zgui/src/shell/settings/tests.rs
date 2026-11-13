@@ -52,7 +52,7 @@ fn shell() -> Shell {
 }
 
 /// A settings snapshot with values that tell a read of it from a default.
-fn test_settings() -> StartupSettings {
+pub(crate) fn test_settings() -> StartupSettings {
     StartupSettings {
         zoom: ZoomFactor::DEFAULT,
         theme: ThemeChoice::Dark,
