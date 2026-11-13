@@ -1,3 +1,4 @@
+use crate::color::Hsl;
 use crate::color::Rgb;
 use crate::contrast;
 use crate::error::TierOrderError;
@@ -141,6 +142,35 @@ impl Palette {
     pub fn accent_foreground(&self) -> Rgb {
         contrast::accent_foreground(self.accent)
     }
+
+    /// The fill behind selected text: a blue, as far off the panel as the text on it allows.
+    /// Text keeps the readable floor and dim text 3:1, since both are selected. The hue tells a
+    /// selection apart from the grey row tones where a palette leaves little room in lightness.
+    pub fn text_selection(&self) -> Rgb {
+        const HUE: f32 = 210.0 / 360.0;
+        const SATURATION: f32 = 0.8;
+        const DIM_FLOOR: f32 = 3.0;
+        const STEPS: u16 = 200;
+
+        // On the side of the panel the text is on, as a selected row's tone is.
+        let toward_text = |candidate: Rgb| {
+            let lighter = candidate.relative_luminance() > self.panel.relative_luminance();
+            lighter == (self.appearance == Appearance::Dark)
+        };
+        let text_reads = |candidate: Rgb| {
+            contrast::ContrastRatio::between(self.text, candidate) >= contrast::ContrastRatio::READABLE
+                && contrast::ContrastRatio::between(self.text_dim, candidate).value() >= DIM_FLOOR
+        };
+        let off_panel = |candidate: Rgb| contrast::ContrastRatio::between(candidate, self.panel).value();
+
+        (0..=STEPS)
+            .map(|step| {
+                Rgb::from_hsl(Hsl { hue: HUE, saturation: SATURATION, lightness: f32::from(step) / f32::from(STEPS) })
+            })
+            .filter(|candidate| toward_text(*candidate) && text_reads(*candidate))
+            .max_by(|a, b| off_panel(*a).total_cmp(&off_panel(*b)))
+            .expect("every preset has a blue beside its panel that its text reads on; each is tested")
+    }
 }
 
 #[cfg(test)]
@@ -152,6 +182,19 @@ mod tests {
     fn every_preset_stacks_its_tiers_in_order() {
         for scheme in Scheme::ALL {
             assert_eq!(scheme.palette().check_tier_order(), Ok(()), "{scheme:?}");
+        }
+    }
+
+    #[test]
+    fn every_preset_has_a_text_selection_its_text_reads_on() {
+        for scheme in Scheme::ALL {
+            let palette = scheme.palette();
+            let selection = palette.text_selection();
+            let text = contrast::ContrastRatio::between(palette.text, selection);
+            let dim = contrast::ContrastRatio::between(palette.text_dim, selection).value();
+
+            assert!(text >= contrast::ContrastRatio::READABLE && dim >= 3.0, "{scheme:?}: {selection}");
+            assert_ne!(selection, palette.panel, "{scheme:?}");
         }
     }
 
