@@ -110,6 +110,36 @@ fn closing_the_shown_tab_shows_the_next_one_and_a_fixed_tab_has_no_close_button(
 }
 
 #[test]
+fn a_middle_click_closes_a_dock_tab_and_leaves_a_fixed_one() {
+    let (mut window, state) = open(three_tabs);
+
+    let a = window.by_role_and_label(Role::Tab, "a").expect("the tab is announced");
+    window.middle_click(a).expect("the tab has a box");
+    window.advance(FRAME);
+    assert_eq!(ids(state), ["b", "c"]);
+    assert!(is_selected(&mut window, "b"), "the shown tab stayed shown");
+
+    let c = window.by_role_and_label(Role::Tab, "c").expect("the tab is announced");
+    window.middle_click(c).expect("the tab has a box");
+    window.advance(FRAME);
+    assert_eq!(ids(state), ["b", "c"]);
+}
+
+#[test]
+fn closing_the_others_from_a_dock_tab_menu_keeps_fixed_panels() {
+    let (mut window, state) = open(three_tabs);
+
+    let c = window.by_role_and_label(Role::Tab, "c").expect("the tab is announced");
+    window.right_click(c).expect("the tab has a box");
+    window.advance(Duration::from_millis(400));
+    let others = window.by_role_and_label(Role::MenuItem, "Close others").expect("the menu is open");
+    window.click(others).expect("the item has a box");
+    window.advance(FRAME);
+
+    assert_eq!(ids(state), ["c"]);
+}
+
+#[test]
 fn delete_on_a_tab_closes_it() {
     let (mut window, state) = open(three_tabs);
     let tab = window.by_role_and_label(Role::Tab, "a").expect("the tab is announced");

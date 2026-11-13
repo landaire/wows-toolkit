@@ -166,3 +166,107 @@ fn a_tab_selected_from_the_start_is_scrolled_into_view() {
     assert!(left >= 0.0 && right <= narrow.width, "the selected tab is in view at {left}..{right}");
     assert_eq!(underline(&window), under(&window, eighth), "its underline is under it");
 }
+
+/// What a test reads back from a strip of one fixed tab and three closable ones.
+#[derive(Clone, Copy)]
+struct Closing {
+    value: RwSignal<String, LocalStorage>,
+    closed: RwSignal<Vec<String>, LocalStorage>,
+    closed_together: RwSignal<Vec<Vec<String>>, LocalStorage>,
+}
+
+#[component]
+fn ClosingStrip(closing: Closing) -> impl IntoView {
+    let Closing { value, closed, closed_together } = closing;
+    let close =
+        move |name: &'static str| UnsyncCallback::new(move |()| closed.update(|closed| closed.push(name.to_owned())));
+    let together = UnsyncCallback::new(move |values: Vec<String>| closed_together.update(|all| all.push(values)));
+
+    view! {
+        ThemeRoot {
+            TabStrip(value = value, label = "Files", on_close_tabs = together) {
+                TabStripTab(value = "alpha", a11y:label = "Alpha") {"Alpha"}
+                TabStripTab(value = "bravo", on_close = close("bravo"), a11y:label = "Bravo") {"Bravo"}
+                TabStripTab(value = "charlie", on_close = close("charlie"), a11y:label = "Charlie") {"Charlie"}
+                TabStripTab(value = "delta", on_close = close("delta"), a11y:label = "Delta") {"Delta"}
+            }
+        }
+    }
+}
+
+fn open_closing() -> (HeadlessWindow, Closing) {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let closing = Closing {
+            value: RwSignal::new_local("alpha".to_owned()),
+            closed: RwSignal::new_local(Vec::new()),
+            closed_together: RwSignal::new_local(Vec::new()),
+        };
+        sent.set(Some(closing));
+        view! { ClosingStrip(closing = closing) }
+    })
+    .expect("opens");
+
+    (window, handed.get().expect("the view was built"))
+}
+
+/// Opens the context menu over the tab labelled `tab` and chooses `item`.
+fn choose_from_menu(window: &mut HeadlessWindow, tab: &str, item: &str) {
+    let tab = window.by_role_and_label(Role::Tab, tab).expect("the tab is announced");
+    window.right_click(tab).expect("the tab has a box");
+    window.advance(SETTLE);
+    let item = window.by_role_and_label(Role::MenuItem, item).expect("the menu item is announced");
+    window.click(item).expect("the menu item has a box");
+    window.advance(SETTLE);
+}
+
+#[test]
+fn a_middle_click_closes_a_tab_without_choosing_it() {
+    let (mut window, closing) = open_closing();
+    let charlie = window.by_role_and_label(Role::Tab, "Charlie").expect("the tab is announced");
+
+    window.middle_click(charlie).expect("the tab has a box");
+
+    assert_eq!(closing.closed.get_untracked(), ["charlie"]);
+    assert_eq!(closing.value.get_untracked(), "alpha", "the selection stayed where it was");
+
+    let alpha = window.by_role_and_label(Role::Tab, "Alpha").expect("the tab is announced");
+    window.middle_click(alpha).expect("the tab has a box");
+    assert_eq!(closing.closed.get_untracked(), ["charlie"], "a tab that cannot close stays");
+}
+
+#[test]
+fn the_context_menu_closes_the_other_tabs_or_those_after_skipping_fixed_ones() {
+    let (mut window, closing) = open_closing();
+
+    choose_from_menu(&mut window, "Charlie", "Close others");
+    choose_from_menu(&mut window, "Alpha", "Close to the right");
+    choose_from_menu(&mut window, "Bravo", "Close to the right");
+    choose_from_menu(&mut window, "Bravo", "Close");
+
+    assert_eq!(
+        closing.closed_together.get_untracked(),
+        [vec!["bravo", "delta"], vec!["bravo", "charlie", "delta"], vec!["charlie", "delta"]],
+    );
+    assert_eq!(closing.closed.get_untracked(), ["bravo"], "a single close goes to the tab");
+}
+
+#[test]
+fn the_context_menu_disables_what_it_cannot_close() {
+    let (mut window, closing) = open_closing();
+    let alpha = window.by_role_and_label(Role::Tab, "Alpha").expect("the tab is announced");
+    window.right_click(alpha).expect("the tab has a box");
+    window.advance(SETTLE);
+
+    let close = window.by_role_and_label(Role::MenuItem, "Close").expect("the item is announced");
+    assert_eq!(window.a11y(close).map(|state| state.disabled), Some(true), "alpha cannot close");
+    window.click(close).expect("the item has a box");
+    assert!(closing.closed.get_untracked().is_empty());
+
+    let delta = window.by_role_and_label(Role::Tab, "Delta").expect("the tab is announced");
+    window.right_click(delta).expect("the tab has a box");
+    window.advance(SETTLE);
+    let after = window.by_role_and_label(Role::MenuItem, "Close to the right").expect("the item is announced");
+    assert_eq!(window.a11y(after).map(|state| state.disabled), Some(true), "nothing follows delta");
+}
