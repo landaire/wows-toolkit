@@ -50,6 +50,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::Timers;
 use zgui::view::install_stylesheet;
@@ -69,6 +70,7 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
@@ -707,14 +709,19 @@ fn SessionToken(shell: Shell) -> impl IntoView {
         text(class = "wt-collab__hint") {{locale.text("ui.collab.session_token")}}
         row(class = "wt-collab__row") {
             text(class = "wt-collab__token", attr:data-testid = "collab-token-shown") {{shown}}
-            Button(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                attr:data-testid = "collab-reveal",
-                a11y:label = reveal_tip,
-                on:click = move |_| collab.change(shell, |state| state.token_revealed = !state.token_revealed)
-            ) {
-                AppIcon(glyph = Signal::derive_local(move || if revealed() { Glyph::EyeOff } else { Glyph::Eye }))
+            Tooltip {
+                TooltipTrigger {
+                    Button(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::IconSm,
+                        attr:data-testid = "collab-reveal",
+                        a11y:label = reveal_tip.clone(),
+                        on:click = move |_| collab.change(shell, |state| state.token_revealed = !state.token_revealed)
+                    ) {
+                        AppIcon(glyph = Signal::derive_local(move || if revealed() { Glyph::EyeOff } else { Glyph::Eye }))
+                    }
+                }
+                TooltipContent {{locale.text("ui.collab.toggle_visibility")}}
             }
         }
         row(class = "wt-collab__row wt-collab__wrap") {
@@ -848,34 +855,16 @@ fn SessionLocks(shell: Shell) -> impl IntoView {
     let collab = shell.collab;
     let locale = shell.services().locale;
     let permissions = move || collab.read(CollabState::permissions);
-    let checked = |on: bool| if on { Checked::Yes } else { Checked::No };
-    let annotations = Signal::derive_local(move || checked(permissions().annotations_locked));
-    let settings = Signal::derive_local(move || checked(permissions().settings_locked));
-    let set = move |edit: fn(&mut Permissions, bool), on: Checked| {
-        let mut next = collab.state.with_value(CollabState::permissions);
-        edit(&mut next, on == Checked::Yes);
-        collab.state.with_value(|state| state.set_permissions(next));
-    };
 
     view! {
         Separator()
         text(class = "wt-collab__title") {{locale.text("ui.collab.permissions")}}
-        row(class = "wt-collab__check") {
-            Checkbox(
-                checked = Binding::controlled(annotations, move |on: Checked| set(|p, on| p.annotations_locked = on, on)),
-                attr:data-testid = "collab-lock-annotations",
-                a11y:label = t!("ui.collab.lock_annotations").into_owned()
-            )
-            text {{locale.text("ui.collab.lock_annotations")}}
-        }
-        row(class = "wt-collab__check") {
-            Checkbox(
-                checked = Binding::controlled(settings, move |on: Checked| set(|p, on| p.settings_locked = on, on)),
-                attr:data-testid = "collab-lock-settings",
-                a11y:label = t!("ui.collab.lock_settings").into_owned()
-            )
-            text {{locale.text("ui.collab.lock_settings")}}
-        }
+        LockRow(shell = shell, label_key = "ui.collab.lock_annotations", test_id = "collab-lock-annotations",
+            locked = Signal::derive_local(move || permissions().annotations_locked),
+            set = |permissions: &mut Permissions, on| permissions.annotations_locked = on)
+        LockRow(shell = shell, label_key = "ui.collab.lock_settings", test_id = "collab-lock-settings",
+            locked = Signal::derive_local(move || permissions().settings_locked),
+            set = |permissions: &mut Permissions, on| permissions.settings_locked = on)
         Tooltip {
             TooltipTrigger {
                 Button(
@@ -888,6 +877,41 @@ fn SessionLocks(shell: Shell) -> impl IntoView {
                 }
             }
             TooltipContent {{locale.text("ui.collab.reset_overrides_tooltip")}}
+        }
+    }
+}
+
+/// One lock's checkbox and its name, either of which toggles it.
+#[component]
+fn LockRow(
+    shell: Shell,
+    label_key: &'static str,
+    test_id: &'static str,
+    locked: Signal<bool, LocalStorage>,
+    set: fn(&mut Permissions, bool),
+) -> impl IntoView {
+    let collab = shell.collab;
+    let locale = shell.services().locale;
+    let name = NodeRef::new();
+    let control = NodeRef::new();
+    let change = move |on: bool| {
+        let mut next = collab.state.with_value(CollabState::permissions);
+        set(&mut next, on);
+        collab.state.with_value(|state| state.set_permissions(next));
+    };
+    let checked = Signal::derive_local(move || Checked::from(locked.get()));
+
+    view! {
+        row(class = "wt-collab__check") {
+            Checkbox(
+                checked = Binding::controlled(checked, move |on: Checked| change(on.is_checked())),
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = test_id
+            )
+            Label(node_ref = name, control = control, on:click = move |_| change(!locked.get_untracked())) {
+                {locale.text(label_key)}
+            }
         }
     }
 }
