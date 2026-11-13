@@ -15,7 +15,8 @@
 //! portal to ask: no session bus, or no file chooser on it.
 //!
 //! With the `test-support` feature no dialog opens: each is recorded and
-//! answered as dismissed, so headless tests can assert what was asked.
+//! answered as dismissed, or as the test scripted, so headless tests can
+//! assert what was asked and what the answer led to.
 
 #[cfg(all(not(target_os = "linux"), not(feature = "test-support")))]
 mod native;
@@ -119,10 +120,17 @@ async fn ask(request: Request) -> Answer {
 #[cfg(all(not(target_os = "linux"), not(feature = "test-support")))]
 use native::ask;
 
+/// How a test has the next dialog answered.
+#[cfg(feature = "test-support")]
+enum Scripted {
+    Refuse,
+    Pick(PathBuf),
+}
+
 #[cfg(feature = "test-support")]
 thread_local! {
     static ASKED: std::cell::RefCell<Vec<Asked>> = const { std::cell::RefCell::new(Vec::new()) };
-    static REFUSE_NEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static NEXT: std::cell::RefCell<Option<Scripted>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The dialogs asked for on this thread since the last call.
@@ -134,14 +142,24 @@ pub fn take_asked() -> Vec<Asked> {
 /// Makes the next dialog asked for on this thread fail to open.
 #[cfg(feature = "test-support")]
 pub fn refuse_next() {
-    REFUSE_NEXT.set(true);
+    NEXT.set(Some(Scripted::Refuse));
 }
 
-/// Records the dialog and answers it as dismissed, or as failed after
-/// [`refuse_next`], instead of opening it.
+/// Makes the next dialog asked for on this thread answer with `path`.
+#[cfg(feature = "test-support")]
+pub fn pick_next(path: PathBuf) {
+    NEXT.set(Some(Scripted::Pick(path)));
+}
+
+/// Records the dialog and answers it as dismissed, or as [`refuse_next`] or
+/// [`pick_next`] asked, instead of opening it.
 #[cfg(feature = "test-support")]
 fn ask(request: Request) -> impl Future<Output = Answer> + use<> {
     ASKED.with_borrow_mut(|asked| asked.push(request.asked));
-    let answer = if REFUSE_NEXT.take() { Err(DialogError::Refused) } else { Ok(None) };
+    let answer = match NEXT.take() {
+        None => Ok(None),
+        Some(Scripted::Refuse) => Err(DialogError::Refused),
+        Some(Scripted::Pick(path)) => Ok(Some(path)),
+    };
     std::future::ready(answer)
 }
