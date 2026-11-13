@@ -115,6 +115,29 @@ fn the_palette_sits_near_the_top_over_an_unblurred_scrim() {
     assert!(window.by_attribute("data-wt-palette-open", "").is_none(), "the mark goes with the palette");
 }
 
+/// A modifier released while the palette holds the keyboard is seen by the shell, so the status
+/// bar does not keep naming the mode the key selected.
+#[test]
+fn a_modifier_released_in_the_palette_is_no_longer_held() {
+    let mut window = open_window(TestModes::default());
+    let shell = crate::interaction_tests::shell();
+
+    window.hold_key(NamedKey::Control, Modifiers::PRIMARY);
+    settle(&mut window);
+    assert_eq!(shell.held_modifiers(), Modifiers::PRIMARY, "the press is heard");
+    window.press_character('k', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert!(shown(&window, ROOT), "the shortcut opens the palette");
+
+    window.release_key(NamedKey::Control, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(shell.held_modifiers(), Modifiers::NONE, "the release inside the palette is heard");
+
+    window.hold_key(NamedKey::Control, Modifiers::PRIMARY);
+    settle(&mut window);
+    assert_eq!(shell.held_modifiers(), Modifiers::PRIMARY, "and so is a press inside it");
+}
+
 /// Every tab, the settings and the shell's own commands are on the root list; the Search tab is
 /// offered as the advanced search rather than by its name.
 #[test]

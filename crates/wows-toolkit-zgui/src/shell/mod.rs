@@ -72,10 +72,14 @@ use zgui::reactive::use_local_context;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::EventCx;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::ListenerGuard;
+use zgui::view::ListenerOptions;
 use zgui::view::NodeRef;
 use zgui::view::ShowProps;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
 use zgui::vocab::Modifiers;
@@ -634,6 +638,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);
+    follow_held_modifiers(shell, root);
 
     // A window that loses focus never sees the release of a key held as it went.
     let window_focused = try_use_window().map(|window| window.focused());
@@ -653,17 +658,12 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
             attr:data-testid = "app-root",
             node_ref = root,
             on:key_down = move |ev| {
-                shell.held.set(ev.modifiers);
                 let modifiers = ev.modifiers;
                 if shell_shortcut(shell, ev, modifiers) {
                     ev.prevent_default();
                     ev.stop_propagation();
                 }
             },
-            on:key_up = move |ev| shell.held.set(ev.modifiers),
-            // A key pressed while another window had focus is only seen on the pointer's events.
-            on:pointer_down:capture = move |ev| shell.sync_held(ev.modifiers),
-            on:pointer_move:capture = move |ev| shell.sync_held(ev.modifiers),
             on:drag_enter = move |ev| shell.drag_entered(ev.paths.clone()),
             on:drag_leave = move |_| shell.drag_left(),
             on:drop = move |ev| shell.dropped(ev.paths.clone())
@@ -787,6 +787,48 @@ fn hear_unfocused_keys(root: NodeRef) {
     on_cleanup_local(move || {
         drop(registering);
         held.set_value(None);
+    });
+}
+
+/// Follows the held modifier keys on the window root's capture leg, so a key pressed or released
+/// in an overlay, or under a handler that stops propagation, still reaches the shell. A key
+/// pressed while another window had focus is only seen on the pointer's events.
+fn follow_held_modifiers(shell: Shell, root: NodeRef) {
+    let guards = StoredValue::new_local(Vec::<ListenerGuard>::new());
+    let attaching = RenderEffect::new(move |_| {
+        if root.get().is_none() || guards.with_value(|held| !held.is_empty()) {
+            return;
+        }
+        let Some(window) = root.window_root() else {
+            return;
+        };
+
+        let mut held = Vec::new();
+        held.extend(window.listen(
+            events::KEY_DOWN,
+            ListenerOptions::CAPTURE,
+            move |ev: &mut EventCx<'_, events::KeyDown>| shell.sync_held(ev.modifiers),
+        ));
+        held.extend(window.listen(
+            events::KEY_UP,
+            ListenerOptions::CAPTURE,
+            move |ev: &mut EventCx<'_, events::KeyUp>| shell.sync_held(ev.modifiers),
+        ));
+        held.extend(window.listen(
+            events::POINTER_DOWN,
+            ListenerOptions::CAPTURE,
+            move |ev: &mut EventCx<'_, events::PointerDown>| shell.sync_held(ev.modifiers),
+        ));
+        held.extend(window.listen(
+            events::POINTER_MOVE,
+            ListenerOptions::CAPTURE,
+            move |ev: &mut EventCx<'_, events::PointerMove>| shell.sync_held(ev.modifiers),
+        ));
+        guards.set_value(held);
+    });
+    on_cleanup_local(move || {
+        drop(attaching);
+        guards.set_value(Vec::new());
     });
 }
 

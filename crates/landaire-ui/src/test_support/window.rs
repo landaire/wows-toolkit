@@ -451,6 +451,18 @@ impl HeadlessWindow {
         self.key(KeyEvent::character(character.to_string()), modifiers);
     }
 
+    /// Presses a named key and leaves it down. `modifiers` are those held once it is down.
+    pub fn hold_key(&mut self, key: NamedKey, modifiers: Modifiers) {
+        let event = KeyEvent::named(key, physical_key(key));
+        self.deliver(SurfaceEvent::Key { state: KeyState::Pressed, event, modifiers, timestamp: Timestamp::ORIGIN });
+    }
+
+    /// Releases a named key held by [`Self::hold_key`]. `modifiers` are those still held after it.
+    pub fn release_key(&mut self, key: NamedKey, modifiers: Modifiers) {
+        let event = KeyEvent::named(key, physical_key(key));
+        self.deliver(SurfaceEvent::Key { state: KeyState::Released, event, modifiers, timestamp: Timestamp::ORIGIN });
+    }
+
     /// The window's composed pixels, read back off the graphics device.
     pub fn pixels(&mut self) -> Result<Pixels, HeadlessError> {
         self.redraw_whole();
