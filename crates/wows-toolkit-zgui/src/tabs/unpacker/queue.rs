@@ -19,6 +19,7 @@ use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
@@ -27,6 +28,7 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::ProgressProps;
 use zgui_ui::VirtualListProps;
 use zgui_ui::prelude::Binding;
@@ -129,6 +131,11 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
         })
     };
     let output_dir = model.output_dir;
+    let decode_box = NodeRef::new();
+    let decode_name = NodeRef::new();
+    let set_decode = move |on: bool| {
+        model.prototypes.set(if on { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw });
+    };
 
     view! {
         column(class = "wt-queue", attr:data-testid = "unpacker-queue-panel") {
@@ -167,17 +174,20 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                     TooltipTrigger {
                         row(class = "wt-queue__row") {
                             Checkbox(
-                                checked = Binding::controlled(decode, move |checked: Checked| {
-                                    model.prototypes.set(if checked == Checked::Yes {
-                                        PrototypeOutput::DecodeToJson
-                                    } else {
-                                        PrototypeOutput::Raw
-                                    });
-                                }),
-                                a11y:label = t!("ui.unpacker.decode_prototypes").into_owned(),
-                                attr:data-testid = "unpacker-decode-prototypes"
+                                checked = Binding::controlled(decode, move |checked: Checked| set_decode(checked == Checked::Yes)),
+                                labelled_by = decode_name,
+                                attr:data-testid = "unpacker-decode-prototypes",
+                                node_ref = decode_box
                             )
-                            text(class = "wt-queue__dim") {{t!("ui.unpacker.decode_prototypes").into_owned()}}
+                            Label(
+                                node_ref = decode_name,
+                                control = decode_box,
+                                class = "wt-queue__dim",
+                                attr:data-testid = "unpacker-decode-prototypes-label",
+                                on:click = move |_| set_decode(!decode.get_untracked().is_checked())
+                            ) {
+                                {t!("ui.unpacker.decode_prototypes").into_owned()}
+                            }
                         }
                     }
                     TooltipContent {{t!("ui.unpacker.decode_prototypes_tooltip").into_owned()}}

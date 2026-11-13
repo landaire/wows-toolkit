@@ -192,6 +192,8 @@ pub fn UnpackerTab() -> impl IntoView {
                 state = dock,
                 class = "wt-unpacker-dock",
                 menu = dock_menu_strings(locale),
+                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
+                tabs_label = Signal::derive_local(locale.text("ui.tabs.unpacker")),
                 attr:data-testid = "unpacker-dock"
             )
         }
@@ -316,13 +318,7 @@ fn dock_toggles(dock: DockState, chrome: Option<TabChrome>) {
             .into_iter()
             .zip(opens)
             .filter(|((region, _, _), _)| !dock.is_region_empty(*region))
-            .map(|((region, side, test_id), open)| {
-                let name = match region {
-                    DockRegion::Right => t!("ui.unpacker.show_queue").into_owned(),
-                    _ => panel_side_name(side),
-                };
-                PanelToggle { test_id, name, side, open }
-            })
+            .map(|((_, side, test_id), open)| PanelToggle { test_id, name: panel_side_name(side), side, open })
             .collect();
         chrome.set_toggles(toggles);
     }));
