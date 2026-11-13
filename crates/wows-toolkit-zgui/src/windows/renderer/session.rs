@@ -1042,7 +1042,8 @@ impl RendererSession {
         }
     }
 
-    /// Opens the armor viewer on a ship and follows it from then on.
+    /// Opens the armor viewer on a ship and follows it from then on, closing the ship's menu. The
+    /// menu stays open when there is no armor to show.
     pub fn show_armor(self, entity_id: EntityId) {
         let Some(track) = self.track_untracked() else { return };
         let at = self.playback.with_untracked(Playback::at);
@@ -1060,6 +1061,7 @@ impl RendererSession {
         if let Some(listener) = listener.flatten() {
             listener.run(ArmorRequest::Show(shown));
         }
+        self.menu.set(None);
     }
 
     fn follow_armor(self) {

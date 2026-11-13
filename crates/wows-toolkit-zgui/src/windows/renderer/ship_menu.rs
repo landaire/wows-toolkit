@@ -184,10 +184,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
                 variant = ButtonVariant::Outline,
                 size = ButtonSize::Sm,
                 attr:data-testid = "replay-renderer-ship-armor",
-                on:click = move |_| {
-                    session.show_armor(entity_id);
-                    session.menu.set(None);
-                }
+                on:click = move |_| session.show_armor(entity_id)
             ) {
                 {t!("ui.renderer.context.realtime_armor").into_owned()}
             }
