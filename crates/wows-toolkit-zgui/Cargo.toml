@@ -85,9 +85,9 @@ tracing = { workspace = true }
 zgui-css = { workspace = true }
 
 # A release build has no console, so `--help`, `--version` and a refused argument are written to
-# the parent's console or shown in a message box.
+# the parent's console or shown in a message box. The shell opens links and directories.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Console", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # The executable's icon, which is what Windows shows on the window, in the taskbar and in Explorer.
 [target.'cfg(windows)'.build-dependencies]
