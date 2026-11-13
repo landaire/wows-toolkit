@@ -1,0 +1,103 @@
+---
+source: crates/wows-query/tests/gun_module_matchups.rs
+expression: output
+---
+interpretations:
+  - input: GK
+    resolved: G. Kurfürst
+    kind: ship
+    method: exact-alias
+    alternatives:
+      - "[G. Kurfürst] (clan battle rental): T10 battleship, PGSB910"
+ship: "T10 G. Kurfürst (battleship, Germany, premium)"
+ammo: AP
+range_km: 12
+aspect: broadside
+targets:
+  class: battleship
+  tiers:
+    min: 10
+    max: 10
+  ships: 43
+  test: 11
+  with_citadel: 43
+modules:
+  - module: 406 mm/52 Drh C/34 on a Drh LC/34 mount
+    stock: true
+    shell: 406 mm P.Spr.Gr. L/4.4
+    caliber_mm: 406
+    raw_penetration_mm: 566.5
+    overmatches_up_to_mm: 28
+    fuse_threshold_mm: 68
+    penetrates_armor: 40
+    citadels: 32
+    citadels_often: 16
+  - module: 420 mm/48 SK C/40 on a Drh LC/34 mount
+    stock: false
+    shell: 420 mm P.Spr.Gr. L/4.6
+    caliber_mm: 420
+    raw_penetration_mm: 597.8
+    overmatches_up_to_mm: 29
+    fuse_threshold_mm: 70
+    penetrates_armor: 43
+    citadels: 38
+    citadels_often: 19
+differences:
+  - module: 420 mm/48 SK C/40 on a Drh LC/34 mount
+    against: 406 mm/52 Drh C/34 on a Drh LC/34 mount
+    penetrates_armor:
+      gained: 3
+      gained_ships:
+        - ship: "T10 Yamato (battleship, Japan)"
+          pct: 94
+          against_pct: 84
+        - ship: "T10 Aki (battleship, Japan, premium)"
+          pct: 95
+          against_pct: 89
+        - ship: "T10 Shikishima (battleship, Japan, premium)"
+          pct: 94
+          against_pct: 84
+      lost: 0
+    citadels:
+      gained: 6
+      gained_ships:
+        - ship: "T10 C. Colombo (battleship, Italy)"
+          pct: 23
+          against_pct: 3
+        - ship: "T10 Mecklenburg (battleship, Germany, premium)"
+          pct: 14
+          against_pct: 0
+        - ship: "T10 Sicilia (battleship, Italy, premium)"
+          pct: 23
+          against_pct: 3
+        - ship: "T10 Wisconsin (battleship, USA, premium)"
+          pct: 12
+          against_pct: 3
+        - ship: "T10 A. Vespucci (battleship, Italy, test)"
+          pct: 23
+          against_pct: 3
+        - ship: "T10 New Jersey (battleship, USA, test)"
+          pct: 12
+          against_pct: 3
+      lost: 0
+    citadels_often:
+      gained: 3
+      gained_ships:
+        - ship: "T10 Montana (battleship, USA)"
+          pct: 25
+          against_pct: 7
+        - ship: "T10 Ohio (battleship, USA, premium)"
+          pct: 25
+          against_pct: 7
+        - ship: "T10 Montana 2 (battleship, USA, test)"
+          pct: 25
+          against_pct: 7
+      lost: 0
+conclusion: "At 12 km against the 43 tier 10 battleships with a citadel (broadside), AP from the 420 mm guns (597.8 against 566.5 mm raw penetration) gets through the armor over the citadel of 43 ships against 40 for AP from the 406 mm guns, citadels 38 against 32 at least sometimes and 19 against 16 often."
+assumptions:
+  - "Targets are released ships of the class and tiers, test ships included and marked \"test\", on their stock hulls. Ships sharing one armor model are traced once and each counted."
+  - "Rays 1 m apart are cast over each target along the line of fire at range_km and traced as armor_trace traces them. Only rays that cross a citadel plate count: they meet the belt, decks and slopes over the citadel. Rays whose first armor contact is below the waterline are not modelled. Shares are by area, not weighted by dispersion or aim."
+  - "penetrates_armor counts a target when the shell is stopped by armor (shatters or spends its velocity) on at most 10% of the rays over its citadel that do not ricochet. Ricochets depend on the strike angle, not on penetration; overmatch, which prevents them, shows in the citadel counts."
+  - "citadels counts a target when at least 5% of the rays over its citadel detonate inside it, the share armor_trace answers sometimes at; citadels_often when at least 25%, where it answers yes. HE and SAP are tested against the first plate only, so they reach the citadel only where citadel armor is struck first."
+  - "differences name a ship only when one module meets the threshold, the other does not, and their shares differ by at least 5 percentage points; smaller differences come from where the ray grid falls, which shifts with each shell's fall angle. The counts of each module are not filtered this way."
+  - Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.

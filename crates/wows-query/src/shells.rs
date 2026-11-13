@@ -303,6 +303,25 @@ impl GameData {
         shells
     }
 
+    /// Main battery shells the gun module `module` (`ShipUpgradeInfo` key)
+    /// fires. Empty for a module that is not a gun module of `ship`.
+    pub(crate) fn gun_module_shells(&self, ship: &Ship, module: &str) -> Vec<Shell> {
+        let Some(artillery) = ship
+            .param
+            .vehicle()
+            .and_then(|vehicle| vehicle.ttx_components())
+            .and_then(|components| components.artillery(module))
+        else {
+            return Vec::new();
+        };
+        let fired: HashSet<&str> = artillery.guns.iter().flat_map(|gun| gun.ammo.iter().map(String::as_str)).collect();
+
+        self.shells(ship)
+            .into_iter()
+            .filter(|shell| shell.battery == Battery::Main && fired.contains(shell.param.as_str()))
+            .collect()
+    }
+
     /// The most common ricochet angles of each ammo type across the distinct
     /// main and secondary shells of released ships, counted on first use.
     fn ricochet_standards(&self) -> &RicochetStandards {

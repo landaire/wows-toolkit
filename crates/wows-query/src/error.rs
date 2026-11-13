@@ -168,6 +168,18 @@ pub enum QueryError {
     #[error("modules {first} and {second} are both {kind}; a ship mounts one module of each kind")]
     ModuleSlotConflict { first: String, second: String, kind: &'static str },
 
+    #[error("{module} is {ship}'s {kind} module, not a main battery gun module; gun modules: {}", gun_modules.join(", "))]
+    NotGunModule { ship: String, module: String, kind: &'static str, gun_modules: Vec<String> },
+
+    #[error("{}", module_ammo_missing(ship, module, *ammo, fired))]
+    ModuleAmmoMissing {
+        ship: String,
+        module: String,
+        ammo: Ammo,
+        /// Ammo types the module fires; empty when the game data lists no shell for it.
+        fired: Vec<Ammo>,
+    },
+
     #[error(
         "the game data has no hull model hardpoints for {ship}, so its mount facings are unknown; the dump lacks the armor extract for this ship, which wows-data-mgr dump-renderer-data writes unless given --no-armor"
     )]
@@ -550,6 +562,17 @@ fn ammo_not_carried(
     };
 
     format!("{ship} has no {missing}; {}; {retry}", weapons.join(", "))
+}
+
+/// "G. Kurfurst's 420 mm/48 SK C/40 fires no SAP; it fires AP and HE".
+fn module_ammo_missing(ship: &str, module: &str, ammo: Ammo, fired: &[Ammo]) -> String {
+    if fired.is_empty() {
+        return format!("{ship}'s {module} has no shells in this game data");
+    }
+
+    let fired: Vec<&str> = fired.iter().map(|ammo| ammo.label()).collect();
+
+    format!("{ship}'s {module} fires no {}; it fires {}", ammo.label(), fired.join(" and "))
 }
 
 /// Why an armor extract object could not be read from a dump.

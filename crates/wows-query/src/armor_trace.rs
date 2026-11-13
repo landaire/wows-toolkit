@@ -398,9 +398,19 @@ impl FirstPlateRicochet {
     }
 }
 
+/// The guns whose shell a trace fires.
+pub(crate) enum GunChoice {
+    /// The battery's largest-caliber shell of the ammo across every gun
+    /// module, the one a trace is usually asked about.
+    Largest(Battery),
+
+    /// The main battery shell of one gun module, by `ShipUpgradeInfo` key.
+    MainModule(String),
+}
+
 /// The gun a trace fires and from how far.
 pub(crate) struct GunRequest {
-    pub(crate) battery: Battery,
+    pub(crate) guns: GunChoice,
     pub(crate) ammo: Ammo,
     pub(crate) range_km: Option<Km>,
     pub(crate) ifhe: bool,
@@ -675,15 +685,24 @@ impl GameData {
     }
 
     pub(crate) fn gun_weapon(&self, shooter: &Ship, request: &GunRequest) -> Result<Weapon, QueryError> {
-        let battery = request.battery;
-        let shells: Vec<_> = self.shells(shooter).into_iter().filter(|shell| shell.battery == battery).collect();
+        let (battery, shells) = match &request.guns {
+            GunChoice::Largest(battery) => {
+                let shells: Vec<Shell> =
+                    self.shells(shooter).into_iter().filter(|shell| shell.battery == *battery).collect();
+                (*battery, shells)
+            }
+            GunChoice::MainModule(module) => (Battery::Main, self.gun_module_shells(shooter, module)),
+        };
         let source = battery.label();
         let ammo = request.ammo;
 
         let Some(shell) = largest_shell(&shells, ammo) else {
             return Err(QueryError::WeaponNotFound {
                 ship: shooter.name.clone(),
-                weapon: format!("{source} {}", ammo.label()),
+                weapon: match &request.guns {
+                    GunChoice::Largest(_) => format!("{source} {}", ammo.label()),
+                    GunChoice::MainModule(module) => format!("{source} {} on gun module {module}", ammo.label()),
+                },
             });
         };
         let projectile = self.projectile(&shell.param)?;
@@ -955,9 +974,7 @@ pub(crate) fn cast_grid(
     Ok(grid)
 }
 
-/// The largest-caliber shell of `ammo` among `shells`. Gun modules of one
-/// ship can fire different shells of one type; the largest caliber is the one
-/// a trace is usually asked about.
+/// The largest-caliber shell of `ammo` among `shells`.
 pub(crate) fn largest_shell(shells: &[Shell], ammo: Ammo) -> Option<&Shell> {
     shells
         .iter()
@@ -966,7 +983,7 @@ pub(crate) fn largest_shell(shells: &[Shell], ammo: Ammo) -> Option<&Shell> {
 }
 
 fn gun_request(battery: Battery, ammo: Ammo, args: &ArmorTraceArgs) -> GunRequest {
-    GunRequest { battery, ammo, range_km: args.range_km, ifhe: args.ifhe.unwrap_or(false) }
+    GunRequest { guns: GunChoice::Largest(battery), ammo, range_km: args.range_km, ifhe: args.ifhe.unwrap_or(false) }
 }
 
 /// Squadrons that drop bombs, with their bombs.
@@ -1621,7 +1638,12 @@ mod tests {
         let hull = game.target_hull(target, None).expect("a stock hull");
         let meshes = game.target_meshes(target, &hull.param).expect("the dump carries Hindenburg's armor");
         let shooter = game.resolve_ship("Des Moines", &mut Interpretations::default()).expect("Des Moines exists");
-        let request = GunRequest { battery: Battery::Main, ammo: Ammo::Ap, range_km: Some(Km::new(10.0)), ifhe: false };
+        let request = GunRequest {
+            guns: GunChoice::Largest(Battery::Main),
+            ammo: Ammo::Ap,
+            range_km: Some(Km::new(10.0)),
+            ifhe: false,
+        };
         let weapon = game.gun_weapon(shooter, &request).expect("Des Moines fires AP at 10 km");
         let WeaponModel::ArmorPiercing { params, impact_velocity } = &weapon.model else {
             panic!("AP is simulated plate by plate");

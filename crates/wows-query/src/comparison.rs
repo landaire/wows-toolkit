@@ -3041,7 +3041,7 @@ pub(crate) fn default_reference_range(class: ShipClass) -> Km {
 }
 
 /// "tier 10" or "tier 9-11", as armor_assessment names its peers.
-fn tier_label(tiers: TierRange) -> String {
+pub(crate) fn tier_label(tiers: TierRange) -> String {
     if tiers.min == tiers.max {
         format!("tier {}", tiers.min.0)
     } else {

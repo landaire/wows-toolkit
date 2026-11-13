@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Include raw AP penetration and fuse-arming threshold in battle impact firepower
 - *(wows-query)* Compare dispersion with and without one named build item at a fixed 12 km default
 - *(wows-query)* Resolve PvO as Prins van Oranje
+- *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
 
 ### Bug Fixes
 

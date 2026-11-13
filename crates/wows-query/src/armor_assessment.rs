@@ -28,6 +28,7 @@ use wowsunpack::ballistics::simulate_shell_through_plates;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
+use crate::armor_trace::GunChoice;
 use crate::armor_trace::GunRequest;
 use crate::armor_trace::RayOutcome;
 use crate::armor_trace::TargetHull;
@@ -1064,7 +1065,8 @@ impl GameData {
                 if range.value() > max_range.value() {
                     continue;
                 }
-                let request = GunRequest { battery: Battery::Main, ammo, range_km: Some(range), ifhe: false };
+                let request =
+                    GunRequest { guns: GunChoice::Largest(Battery::Main), ammo, range_km: Some(range), ifhe: false };
                 samples.push(RangeSample { band, range, weapon: self.gun_weapon(ship, &request)? });
             }
         }

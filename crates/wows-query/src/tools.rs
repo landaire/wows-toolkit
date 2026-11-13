@@ -28,6 +28,7 @@ use crate::dispersion::DispersionAtRangeArgs;
 use crate::firing_arcs::FiringArcsArgs;
 use crate::game_modes::GameModeBuffsArgs;
 use crate::gameparams::GameParamsQueryArgs;
+use crate::gun_module_matchups::GunModuleMatchupsArgs;
 use crate::healing::HealingSourcesArgs;
 use crate::hit_locations::ShipHitLocationsArgs;
 use crate::penetration::PenetrationSearchArgs;
@@ -187,6 +188,12 @@ const TOOLS: &[Tool] = &[
         description: "Shape and exposure of one ship's citadel from its 3D armor model, including questions asking the total side armor or penetration needed to reach the citadel. Reports the share of the citadel face above the waterline per side, roof height, slope of the citadel plates by height band (vertical, inclined belt, sloped deck, flat deck), whether it is a turtleback, and its height along the ship. For broadside flat fire, and for a shooter's main battery AP at range_km when given, reports the armor in front of the citadel and the least, median and most armored plate stacks. A stack's plates list at most the seven plates nearest the citadel in strike order, followed by the first citadel plate; more_plates counts omitted outer plates. total_effective_mm includes every crossed plate through that citadel plate, not only the listed plates, one side plate or the thinnest citadel plate. Overmatch, ricochet and fuse events are included for a shooter. Glancing rays are counted apart.",
         schema: input_schema::<CitadelProfileArgs>,
         call: |game, arguments| run(arguments, |args| game.citadel_profile(args)),
+    },
+    Tool {
+        name: "gun_module_matchups",
+        description: "Compare one ship's main battery gun modules as the attacker, for questions such as \"GK with the 406 mm or the 420 mm guns\", \"how do their pens compare\" or \"how many tier 10 battleships does the larger gun penetrate or citadel\". Per gun module (default: every one the ship can mount, stock first): shell, caliber, raw AP penetration at range_km (default 12), overmatch and fuse threshold, and how many target ships (default: the shooter's class and tier, test ships included; broadside unless target_angle_deg is given) it penetrates the armor over the citadel of (armor stops at most 10% of the rays there that do not ricochet), citadels (at least 5% of the rays over the citadel detonate inside it) and citadels often (at least 25%). differences names the ships each module gains or loses against the first module, with both shares. For one target ship use armor_trace.",
+        schema: input_schema::<GunModuleMatchupsArgs>,
+        call: |game, arguments| run(arguments, |args| game.gun_module_matchups(args)),
     },
     Tool {
         name: "armor_assessment",
