@@ -743,6 +743,9 @@ raw_json_tooltip = "The raw battle results as serialized by WG."
 mapped_json_tooltip = "Battle results with positional arrays resolved to named fields."
 results_raw_json = "Battle Results: Raw JSON"
 results_mapped_json = "Battle Results: Mapped JSON"
+search = "Search"
+previous_match = "Previous match (Shift+Enter)"
+next_match = "Next match (Enter)"
 
 [ui.replay.results]
 victory = "Victory"
