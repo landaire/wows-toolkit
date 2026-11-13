@@ -50,6 +50,7 @@ use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 use wows_toolkit_viewmodel::stats::plot::Plot;
+use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotView;
 use wows_toolkit_viewmodel::stats::plot::image;
 
@@ -114,6 +115,8 @@ pub struct StatsChartPanel {
     /// Where the plot last drew, so a copy is the size it is on screen.
     /// `None` before the first frame, which is when there is nothing to copy.
     plot_bounds: Option<Bounds<Pixels>>,
+    /// Where the plot last drew its data, which a pan or a zoom is measured against.
+    plot_layout: Option<PlotLayout>,
     /// Where the pointer went down and where it was last seen, while a drag
     /// is panning the plot.
     drag: Option<Point<Pixels>>,
@@ -154,6 +157,7 @@ impl StatsChartPanel {
             selection_touched: false,
             view: PlotView::default(),
             plot_bounds: None,
+            plot_layout: None,
             drag: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
@@ -522,7 +526,9 @@ impl StatsChartPanel {
 
     fn drag_view(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(last) = self.drag else { return };
-        self.view.drag((event.position.x - last.x).as_f32(), (event.position.y - last.y).as_f32());
+        if let Some(layout) = self.plot_layout {
+            self.view.drag((event.position.x - last.x).as_f32(), (event.position.y - last.y).as_f32(), &layout);
+        }
         self.drag = Some(event.position);
         cx.notify();
     }
@@ -535,10 +541,11 @@ impl StatsChartPanel {
 
     fn zoom_view(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(window.line_height()).y.as_f32();
+        let Some(layout) = self.plot_layout else { return };
         if delta == 0.0 {
             return;
         }
-        self.view.wheel(delta, plot::plot_point(event.position));
+        self.view.wheel(delta, plot::plot_point(event.position), &layout);
         cx.notify();
     }
 
@@ -927,6 +934,7 @@ impl Render for StatsChartPanel {
         let view = self.view;
         let show_values = self.show_values;
         let measured = cx.entity();
+        let drawn = cx.entity();
         let surface = canvas(
             move |bounds, _window, cx| {
                 measured.update(cx, |this: &mut Self, cx| {
@@ -937,12 +945,13 @@ impl Render for StatsChartPanel {
                 });
             },
             move |bounds, _prepaint, window, cx| {
-                plot::paint(
+                let layout = plot::paint(
                     &Plot { series: &series, bars: &bars, x_label: &x_label, y_label: &value_label, show_values, view },
                     bounds,
                     window,
                     cx,
                 );
+                drawn.update(cx, |this: &mut Self, _cx| this.plot_layout = layout);
             },
         )
         .size_full();

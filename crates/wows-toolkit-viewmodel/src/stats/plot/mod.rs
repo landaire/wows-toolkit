@@ -35,11 +35,11 @@ const POINT_RADIUS: f32 = 3.0;
 const LEGEND_SWATCH: f32 = 10.0;
 const LEGEND_ROW: f32 = 16.0;
 
-/// Maximum zoom-in keeps the plot usable at extreme magnification.
-const MAX_ZOOM: f32 = 40.0;
+/// How far the view can zoom in or out from the whole plot, as a ratio of spans.
+const MAX_ZOOM: f64 = 40.0;
 
 /// How much one wheel notch zooms.
-pub const WHEEL_ZOOM_STEP: f32 = 1.1;
+pub const WHEEL_ZOOM_STEP: f64 = 1.1;
 
 /// A position on the canvas.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -124,15 +124,63 @@ pub struct PlotColors {
     pub text: PlotColor,
 }
 
-/// How far the view has been dragged and zoomed away from the whole plot.
-///
-/// The zoom is about the cursor, so a point under it stays under it, and both axes take it
-/// together: the shape of a line is what is being read, and stretching one axis alone would
-/// distort it.
+/// The part of one axis a plot shows, in data units.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlotView {
-    pub zoom: f32,
-    pub pan: PlotPoint,
+pub struct AxisRange {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl AxisRange {
+    pub const fn new(min: f64, max: f64) -> Self {
+        Self { min, max }
+    }
+
+    pub fn span(&self) -> f64 {
+        (self.max - self.min).max(f64::EPSILON)
+    }
+
+    /// How far along the range `value` is, zero at `min` and one at `max`.
+    fn fraction(&self, value: f64) -> f64 {
+        (value - self.min) / self.span()
+    }
+
+    /// The value `fraction` of the way along the range.
+    fn at(&self, fraction: f64) -> f64 {
+        self.min + self.span() * fraction
+    }
+
+    /// The range scaled to `span` about `anchor`, which stays at the same fraction of it.
+    fn scaled_about(&self, anchor: f64, span: f64) -> Self {
+        let fraction = self.fraction(anchor);
+        let min = anchor - span * fraction;
+        Self::new(min, min + span)
+    }
+
+    fn shifted(&self, by: f64) -> Self {
+        Self::new(self.min + by, self.max + by)
+    }
+}
+
+/// The data a plot shows across both axes.
+///
+/// The game axis counts games from zero for a line plot and bar slots from zero for a bar plot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DataWindow {
+    pub x: AxisRange,
+    pub y: AxisRange,
+}
+
+/// What a plot shows: the whole of its data until the reader pans or zooms, then the data window
+/// they left it on.
+///
+/// Held in data units, so the same games and values stay in view when the plot is drawn at
+/// another size. Zooming scales both axes together: the shape of a line is what is being read,
+/// and stretching one axis alone would distort it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlotView {
+    Fit,
+    Window(DataWindow),
 }
 
 impl Default for PlotView {
@@ -143,48 +191,85 @@ impl Default for PlotView {
 
 impl PlotView {
     pub const fn new() -> Self {
-        Self { zoom: 1.0, pan: PlotPoint::new(0.0, 0.0) }
+        Self::Fit
     }
 
     pub fn is_default(&self) -> bool {
-        *self == Self::new()
+        *self == Self::Fit
     }
 
-    /// Zooms by `factor` about `cursor`, which is where the pointer is in the canvas's space.
-    pub fn zoom_about(&mut self, factor: f32, cursor: PlotPoint) {
-        let zoom = (self.zoom * factor).clamp(f32::MIN_POSITIVE, MAX_ZOOM);
-        let applied = zoom / self.zoom;
-        if applied == 1.0 {
+    /// The data shown, given the window that fits all of it.
+    pub fn window(&self, fit: DataWindow) -> DataWindow {
+        match self {
+            Self::Fit => fit,
+            Self::Window(window) => *window,
+        }
+    }
+
+    /// Zooms by `factor` about `cursor`, a position in the canvas's space, over the area
+    /// `layout` drew in. The data under the cursor stays under it.
+    pub fn zoom_about(&mut self, factor: f64, cursor: PlotPoint, layout: &PlotLayout) {
+        let shown = self.window(layout.fit);
+        let span = shown.x.span();
+        let fit = layout.fit.x.span();
+        // A window kept over changed data can sit past a stop; a step toward the stops still
+        // applies whole, and only a step past one is cut short.
+        let applied = if factor >= 1.0 {
+            factor.min((span / (fit / MAX_ZOOM)).max(1.0))
+        } else {
+            factor.max((span / (fit * MAX_ZOOM)).min(1.0))
+        };
+        if applied == 1.0 || !applied.is_finite() {
             return;
         }
 
-        // The cursor is fixed: everything else moves away from it by as much as the zoom grew.
-        self.pan.x = cursor.x - (cursor.x - self.pan.x) * applied;
-        self.pan.y = cursor.y - (cursor.y - self.pan.y) * applied;
-        self.zoom = zoom;
+        let (game, value) = layout.data_at(&shown, cursor);
+        *self = Self::Window(DataWindow {
+            x: shown.x.scaled_about(game, shown.x.span() / applied),
+            y: shown.y.scaled_about(value, shown.y.span() / applied),
+        });
     }
 
     /// Zooms one wheel notch about `cursor`: in for a positive `delta`, out for a negative one.
-    pub fn wheel(&mut self, delta: f32, cursor: PlotPoint) {
+    pub fn wheel(&mut self, delta: f32, cursor: PlotPoint, layout: &PlotLayout) {
         if delta == 0.0 {
             return;
         }
         let factor = if delta > 0.0 { WHEEL_ZOOM_STEP } else { 1.0 / WHEEL_ZOOM_STEP };
-        self.zoom_about(factor, cursor);
+        self.zoom_about(factor, cursor, layout);
     }
 
-    pub fn drag(&mut self, dx: f32, dy: f32) {
-        self.pan.x += dx;
-        self.pan.y += dy;
+    /// Moves the data with a pointer that moved by `dx`, `dy` canvas pixels over the area
+    /// `layout` drew in.
+    pub fn drag(&mut self, dx: f32, dy: f32, layout: &PlotLayout) {
+        let shown = self.window(layout.fit);
+        let x = -f64::from(dx) / f64::from(layout.area.width) * shown.x.span();
+        let y = f64::from(dy) / f64::from(layout.area.height) * shown.y.span();
+        *self = Self::Window(DataWindow { x: shown.x.shifted(x), y: shown.y.shifted(y) });
     }
 
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::Fit;
     }
+}
 
-    /// Applies the pan and zoom to a painted position.
-    pub fn apply(&self, x: f32, y: f32) -> PlotPoint {
-        PlotPoint::new(x * self.zoom + self.pan.x, y * self.zoom + self.pan.y)
+/// Where a plot was drawn and what it showed, which turning a pointer into data needs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlotLayout {
+    /// The rectangle the data is drawn in, in the canvas's space.
+    pub area: PlotRect,
+    /// The data shown.
+    pub window: DataWindow,
+    /// The window that shows all of the data.
+    pub fit: DataWindow,
+}
+
+impl PlotLayout {
+    /// The data at `point` in the canvas's space, as game and value, with `window` shown.
+    fn data_at(&self, window: &DataWindow, point: PlotPoint) -> (f64, f64) {
+        let x = f64::from((point.x - self.area.x) / self.area.width);
+        let y = f64::from((self.area.bottom() - point.y) / self.area.height);
+        (window.x.at(x), window.y.at(y))
     }
 }
 
@@ -228,24 +313,18 @@ pub fn has_drawable_area(bounds: PlotRect) -> bool {
     area.width > 0.0 && area.height > 0.0
 }
 
-/// Draws `plot` into `bounds` on any canvas.
-pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
+/// Draws `plot` into `bounds` on any canvas. `None` when the bounds leave no room for the data.
+pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut dyn PlotCanvas) -> Option<PlotLayout> {
     let legend_width = legend_width(plot, bounds, canvas);
     let area = plot_area(bounds, legend_width);
     if area.width <= 0.0 || area.height <= 0.0 {
-        return;
+        return None;
     }
 
-    let (min_y, max_y) = value_range(plot);
-    let ticks = tick_values(min_y, max_y);
-    let frame = Frame {
-        area,
-        view: plot.view,
-        min: ticks.first().copied().unwrap_or(min_y),
-        max: ticks.last().copied().unwrap_or(max_y),
-    };
+    let fit = fit_window(plot);
+    let frame = Frame { area, window: plot.view.window(fit) };
 
-    paint_grid(&ticks, &frame, colors, canvas);
+    paint_grid(&frame, colors, canvas);
     if plot.bars.is_empty() {
         paint_game_ticks(plot, &frame, colors, canvas);
     }
@@ -261,6 +340,8 @@ pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut 
 
     paint_axis_titles(plot, bounds, area, colors.text, canvas);
     paint_legend(plot, bounds, legend_width, colors.text, canvas);
+
+    Some(PlotLayout { area, window: frame.window, fit })
 }
 
 /// A plotted number, at the precision the egui charts label points with.
@@ -275,19 +356,57 @@ pub fn format_value(value: f64) -> String {
     }
 }
 
-/// Where the data is drawn, how the view is placed on it, and the range the value axis covers.
+/// Where the data is drawn and which of it is shown.
 struct Frame {
     area: PlotRect,
-    view: PlotView,
-    min: f64,
-    max: f64,
+    window: DataWindow,
 }
 
 impl Frame {
-    /// Where `value` sits, at `index` of `count` points, once the view is applied.
-    fn place(&self, index: usize, count: usize, value: f64) -> PlotPoint {
-        self.view.apply(index_to_x(index, count, self.area), value_to_y(value, self.min, self.max, self.area))
+    fn x(&self, game: f64) -> f32 {
+        self.area.x + self.window.x.fraction(game) as f32 * self.area.width
     }
+
+    fn y(&self, value: f64) -> f32 {
+        self.area.bottom() - self.window.y.fraction(value) as f32 * self.area.height
+    }
+}
+
+/// The window that shows all of the data: every game or bar across the width, and the value
+/// ticks' range up the height.
+fn fit_window(plot: &Plot<'_>) -> DataWindow {
+    let (min, max) = value_range(plot);
+    let ticks = tick_values(min, max);
+    let y = AxisRange::new(ticks.first().copied().unwrap_or(min), ticks.last().copied().unwrap_or(max));
+
+    let x = if !plot.bars.is_empty() {
+        AxisRange::new(0.0, plot.bars.len() as f64)
+    } else {
+        match longest_line(plot) {
+            // A lone game is centred rather than pinned to the value axis.
+            0 | 1 => AxisRange::new(-1.0, 1.0),
+            longest => AxisRange::new(0.0, (longest - 1) as f64),
+        }
+    };
+
+    DataWindow { x, y }
+}
+
+/// The number of games in the longest line, which numbers the game axis.
+fn longest_line(plot: &Plot<'_>) -> usize {
+    plot.series.iter().map(|series| series.points.len()).max().unwrap_or(0)
+}
+
+/// Where the `index`th of a line's `count` games sits on the game axis of a plot whose longest
+/// line has `longest`. Every line is drawn across the whole width, each against its own games,
+/// which is how the egui chart plots a ship that played fewer of them.
+fn game_position(index: usize, count: usize, longest: usize) -> f64 {
+    let last = longest.saturating_sub(1) as f64;
+    if count <= 1 {
+        return last * 0.5;
+    }
+
+    index as f64 * last / (count - 1) as f64
 }
 
 /// The rectangle the data itself is drawn in, inside the gutters the axes and their titles take.
@@ -341,30 +460,19 @@ fn tick_values(min: f64, max: f64) -> Vec<f64> {
     ticks
 }
 
-/// Where a value sits vertically, before the view is applied.
-fn value_to_y(value: f64, min: f64, max: f64, area: PlotRect) -> f32 {
-    let span = (max - min).max(f64::EPSILON);
-    let fraction = ((value - min) / span) as f32;
-    area.y + area.height * (1.0 - fraction)
-}
-
-/// Where the `index`th of `count` points sits horizontally, before the view is applied. A lone
-/// point is centred rather than pinned to the left edge.
-fn index_to_x(index: usize, count: usize, area: PlotRect) -> f32 {
-    if count <= 1 {
-        return area.x + area.width * 0.5;
-    }
-    let step = area.width / (count - 1) as f32;
-    area.x + step * index as f32
-}
-
-fn paint_grid(ticks: &[f64], frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
+fn paint_grid(frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
     let area = frame.area;
-    let base_spacing = area.height / ticks.len().saturating_sub(1).max(1) as f32;
-    let stride = spacing_stride(base_spacing * frame.view.zoom, MIN_VALUE_TICK_SPACING);
+    let window = frame.window.y;
+    let ticks = tick_values(window.min, window.max);
+    let step = match ticks.as_slice() {
+        [first, second, ..] => second - first,
+        _ => window.span(),
+    };
+    let spacing = area.height * (step / window.span()) as f32;
+    let stride = spacing_stride(spacing, MIN_VALUE_TICK_SPACING);
     for tick in ticks.iter().step_by(stride) {
-        let y = frame.view.apply(0.0, value_to_y(*tick, frame.min, frame.max, area)).y;
-        if y < area.y || y > area.bottom() {
+        let y = frame.y(*tick);
+        if y < area.y - 0.5 || y > area.bottom() + 0.5 {
             continue;
         }
         canvas.fill(PlotRect::new(area.x, y, area.width, 1.0), colors.grid, 0.0);
@@ -375,23 +483,23 @@ fn paint_grid(ticks: &[f64], frame: &Frame, colors: PlotColors, canvas: &mut dyn
     }
 }
 
-/// Numbers the games under the value axis.
-///
-/// The count is the longest line's: every line is drawn across the whole width, each against its
-/// own games, which is how the egui chart plots a ship that played fewer of them.
+/// Numbers the games under the value axis, counting the longest line's.
 fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
-    let count = plot.series.iter().map(|series| series.points.len()).max().unwrap_or(0);
-    if count == 0 {
+    let longest = longest_line(plot);
+    if longest == 0 {
         return;
     }
 
     let area = frame.area;
-    let base_step = (count / TICKS).max(1);
-    let point_spacing = area.width / count.saturating_sub(1).max(1) as f32 * frame.view.zoom;
-    let step = base_step.max(spacing_stride(point_spacing, MIN_GAME_TICK_SPACING));
-    for index in (0..count).step_by(step) {
-        let x = frame.view.apply(index_to_x(index, count, area), 0.0).x;
-        if x < area.x || x > area.right() {
+    let window = frame.window.x;
+    let per_game = area.width / window.span() as f32;
+    let step =
+        ((window.span() / TICKS as f64).ceil() as usize).max(1).max(spacing_stride(per_game, MIN_GAME_TICK_SPACING));
+    let first = ((window.min.max(0.0) / step as f64).ceil() as usize).saturating_mul(step);
+    let last = (longest - 1).min(window.max.max(0.0).floor() as usize);
+    for index in (first..=last).step_by(step) {
+        let x = frame.x(game_position(index, longest, longest));
+        if x < area.x - 0.5 || x > area.right() + 0.5 {
             continue;
         }
         canvas.fill(PlotRect::new(x, area.y, 1.0, area.height), colors.grid, 0.0);
@@ -402,7 +510,7 @@ fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: 
     }
 }
 
-/// Drops axis marks whose transformed spacing would make their labels overlap.
+/// Drops axis marks whose spacing would make their labels overlap.
 fn spacing_stride(spacing: f32, minimum: f32) -> usize {
     if !spacing.is_finite() || spacing <= 0.0 { usize::MAX } else { (minimum / spacing).ceil().max(1.0) as usize }
 }
@@ -418,10 +526,15 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
         8..=15 => (1.2, 2.25, 0.82),
         _ => (1.0, 1.75, 0.68),
     };
+    let longest = longest_line(plot);
     for series in plot.series {
         let count = series.points.len();
-        let positions: Vec<PlotPoint> =
-            series.points.iter().enumerate().map(|(index, point)| frame.place(index, count, point.value)).collect();
+        let positions: Vec<PlotPoint> = series
+            .points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| PlotPoint::new(frame.x(game_position(index, count, longest)), frame.y(point.value)))
+            .collect();
         let color = PlotColor::from(series.color);
 
         canvas.polyline(&positions, line_width, color.opacity(opacity));
@@ -439,17 +552,12 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
 }
 
 fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
-    let area = frame.area;
-    let count = plot.bars.len();
-    let slot = area.width * frame.view.zoom / count.max(1) as f32;
+    let slot = frame.area.width / frame.window.x.span() as f32;
     let width = (slot * 0.7).max(1.0);
-    let baseline = frame.view.apply(0.0, value_to_y(0.0f64.max(frame.min), frame.min, frame.max, area)).y;
+    let baseline = frame.y(0.0f64.max(frame.window.y.min));
 
     for (index, bar) in plot.bars.iter().enumerate() {
-        let centre = frame.view.apply(
-            area.x + area.width / count.max(1) as f32 * (index as f32 + 0.5),
-            value_to_y(bar.value, frame.min, frame.max, area),
-        );
+        let centre = PlotPoint::new(frame.x(index as f64 + 0.5), frame.y(bar.value));
         let top = centre.y.min(baseline);
         let height = (centre.y - baseline).abs().max(1.0);
         canvas.fill(PlotRect::new(centre.x - width * 0.5, top, width, height), PlotColor::from(bar.color), 0.0);
@@ -628,49 +736,139 @@ mod tests {
         assert_eq!(tick_values(5.0, 5.0).len(), 2);
     }
 
+    /// A three-game line drawn into `bounds` through `view`, and where it went.
+    fn drawn(view: PlotView, bounds: PlotRect) -> (Recorder, PlotLayout) {
+        let lines = [series(&[1_000.0, 3_000.0, 2_000.0])];
+        let plot = Plot { series: &lines, bars: &[], x_label: "Game", y_label: "Damage", show_values: false, view };
+        let mut canvas = Recorder::default();
+        let layout = draw(&plot, bounds, grey(), &mut canvas).expect("the bounds hold a plot");
+
+        (canvas, layout)
+    }
+
+    /// Equal to within what the canvas's single-precision pixels carry.
+    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
+        (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-2
+    }
+
+    const WIDE: PlotRect = PlotRect::new(0.0, 0.0, 600.0, 300.0);
+    const SMALL: PlotRect = PlotRect::new(0.0, 0.0, 300.0, 180.0);
+
     #[test]
-    fn zooming_keeps_the_point_under_the_cursor() {
+    fn the_whole_plot_fills_its_area_at_any_size() {
+        for bounds in [WIDE, SMALL] {
+            let (canvas, layout) = drawn(PlotView::default(), bounds);
+
+            let line = &canvas.lines[0];
+            assert_eq!(line[0].x, layout.area.x, "the first game is on the value axis");
+            assert_eq!(line[2].x, layout.area.right(), "the last game is on the right edge");
+            assert_eq!(layout.window.y.min, 0.0);
+            let zero = layout.area.bottom() - layout.window.y.fraction(0.0) as f32 * layout.area.height;
+            assert_eq!(zero, layout.area.bottom(), "zero is on the game axis");
+            assert_eq!(layout.window, layout.fit);
+        }
+    }
+
+    #[test]
+    fn zooming_keeps_the_data_under_the_cursor() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let cursor = PlotPoint::new(layout.area.x + 100.0, layout.area.y + 50.0);
+        let under = layout.data_at(&layout.window, cursor);
+
         let mut view = PlotView::default();
-        view.zoom_about(2.0, PlotPoint::new(100.0, 50.0));
-        let under = view.apply(100.0, 50.0);
-        assert!(
-            (under.x - 100.0).abs() < 0.001 && (under.y - 50.0).abs() < 0.001,
-            "the cursor's own position does not move"
-        );
+        view.zoom_about(2.0, cursor, &layout);
+        let (_, zoomed) = drawn(view, WIDE);
+
+        assert!(close(zoomed.data_at(&zoomed.window, cursor), under), "the cursor's data does not move");
+        assert!((zoomed.window.x.span() - layout.window.x.span() / 2.0).abs() < 1e-9, "half the games show");
+        assert!((zoomed.window.y.span() - layout.window.y.span() / 2.0).abs() < 1e-6, "both axes zoom together");
     }
 
     #[test]
     fn a_wheel_notch_zooms_in_forward_and_out_backward() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let cursor = PlotPoint::new(layout.area.x + 10.0, layout.area.y + 10.0);
         let mut view = PlotView::default();
-        view.wheel(3.0, PlotPoint::new(10.0, 10.0));
-        assert_eq!(view.zoom, WHEEL_ZOOM_STEP);
-        view.wheel(-3.0, PlotPoint::new(10.0, 10.0));
-        assert!((view.zoom - 1.0).abs() < 1e-6);
-        view.wheel(0.0, PlotPoint::new(10.0, 10.0));
-        assert!((view.zoom - 1.0).abs() < 1e-6, "no movement, no zoom");
+
+        view.wheel(0.0, cursor, &layout);
+        assert!(view.is_default(), "no movement, no zoom");
+
+        view.wheel(3.0, cursor, &layout);
+        let (_, zoomed) = drawn(view, WIDE);
+        assert!((layout.window.x.span() / zoomed.window.x.span() - WHEEL_ZOOM_STEP).abs() < 1e-9);
+
+        view.wheel(-3.0, cursor, &zoomed);
+        let (_, back) = drawn(view, WIDE);
+        assert!((back.window.x.span() - layout.window.x.span()).abs() < 1e-9, "a notch back undoes it");
     }
 
     #[test]
-    fn zoom_in_has_a_stop_and_zoom_out_can_continue() {
+    fn zoom_has_a_stop_each_way() {
         let mut view = PlotView::default();
         for _ in 0..40 {
-            view.zoom_about(2.0, PlotPoint::default());
+            let (_, layout) = drawn(view, WIDE);
+            view.zoom_about(2.0, PlotPoint::new(200.0, 100.0), &layout);
         }
-        assert_eq!(view.zoom, MAX_ZOOM);
+        let (_, layout) = drawn(view, WIDE);
+        assert!((layout.fit.x.span() / layout.window.x.span() - MAX_ZOOM).abs() < 1e-6);
 
         let mut view = PlotView::default();
-        view.zoom_about(0.01, PlotPoint::default());
-        assert!(view.zoom < 1.0, "zooming out passes the initial view");
+        view.zoom_about(0.5, PlotPoint::new(200.0, 100.0), &drawn(view, WIDE).1);
+        let (_, layout) = drawn(view, WIDE);
+        assert!(layout.window.x.span() > layout.fit.x.span(), "zooming out passes the whole plot");
+    }
+
+    /// A window kept from a longer session sits far past the zoom-out stop of a shorter one, and
+    /// a wheel notch still zooms by one notch.
+    #[test]
+    fn a_notch_over_a_window_kept_from_other_data_zooms_by_one_notch() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let kept = DataWindow { x: AxisRange::new(0.0, 999.0), y: layout.fit.y };
+        let mut view = PlotView::Window(kept);
+
+        view.wheel(1.0, PlotPoint::new(layout.area.x, layout.area.y), &layout);
+
+        let zoomed = view.window(layout.fit);
+        assert!((kept.x.span() / zoomed.x.span() - WHEEL_ZOOM_STEP).abs() < 1e-9);
     }
 
     #[test]
-    fn a_reset_view_is_the_default_one() {
+    fn dragging_moves_the_data_with_the_pointer() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let from = PlotPoint::new(layout.area.x + 100.0, layout.area.y + 100.0);
+        let to = PlotPoint::new(from.x + 30.0, from.y - 20.0);
+        let held = layout.data_at(&layout.window, from);
+
+        // Two moves before the plot is drawn again both count.
         let mut view = PlotView::default();
-        view.drag(10.0, -4.0);
-        assert!(!view.is_default());
-        assert_eq!(view.apply(0.0, 0.0), PlotPoint::new(10.0, -4.0));
+        view.drag(10.0, -5.0, &layout);
+        view.drag(to.x - from.x - 10.0, to.y - from.y + 5.0, &layout);
+        let (_, dragged) = drawn(view, WIDE);
+
+        assert!(close(dragged.data_at(&dragged.window, to), held), "what was under the pointer is still under it");
         view.reset();
         assert!(view.is_default());
+    }
+
+    /// A resize changes how big the data is drawn, not which data is shown.
+    #[test]
+    fn a_resize_keeps_the_data_in_view() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let mut view = PlotView::default();
+        view.zoom_about(2.0, PlotPoint::new(layout.area.x + 50.0, layout.area.y + 40.0), &layout);
+        let (_, zoomed) = drawn(view, WIDE);
+        view.drag(-25.0, 10.0, &zoomed);
+        let (wide_canvas, wide) = drawn(view, WIDE);
+
+        let (small_canvas, small) = drawn(view, SMALL);
+
+        assert_eq!(small.window, wide.window, "the same games and values are shown");
+        let fraction =
+            |point: PlotPoint, area: PlotRect| ((point.x - area.x) / area.width, (point.y - area.y) / area.height);
+        for (big, little) in wide_canvas.lines[0].iter().zip(&small_canvas.lines[0]) {
+            let (a, b) = (fraction(*big, wide.area), fraction(*little, small.area));
+            assert!((a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4, "{a:?} and {b:?} sit alike");
+        }
     }
 
     #[test]

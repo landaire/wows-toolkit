@@ -32,6 +32,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::selectable_stats;
 use wows_toolkit_viewmodel::stats::chart::value_axis_label;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
+use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
 use wows_toolkit_viewmodel::stats::plot::PlotView;
@@ -353,6 +354,11 @@ impl PlotSurface {
         Some(PlotPoint::new(x_css - bounds.origin.x.0 / scale, y_css - bounds.origin.y.0 / scale))
     }
 
+    /// Where the plot last drew its data, which a pan or a zoom is measured against.
+    fn layout(&self) -> Option<PlotLayout> {
+        self.handle.with_value(|handle| handle.update(|element| element.layout))
+    }
+
     fn view(self, empty: Signal<bool, LocalStorage>, element: Element<Custom>) -> impl IntoView {
         let Self { area, view_state, pannable, drag, .. } = self;
 
@@ -378,7 +384,9 @@ impl PlotSurface {
                         }
                     };
                     let (x, y) = (ev.position.x.0, ev.position.y.0);
-                    view_state.update(|view| view.drag(x - last.x, y - last.y));
+                    if let Some(layout) = self.layout() {
+                        view_state.update(|view| view.drag(x - last.x, y - last.y, &layout));
+                    }
                     drag.set(Some(Drag::Panning(PlotPoint::new(x, y))));
                 },
                 on:pointer_up = move |ev| {
@@ -403,14 +411,16 @@ impl PlotSurface {
                     if !pannable.get_untracked() {
                         return;
                     }
-                    let Some(cursor) = self.local(ev.position.x.0, ev.position.y.0) else { return };
+                    let (Some(cursor), Some(layout)) = (self.local(ev.position.x.0, ev.position.y.0), self.layout()) else {
+                        return;
+                    };
                     // A wheel turned away from the reader reports a negative delta.
                     let delta = match ev.delta {
                         ScrollDelta::Lines { y, .. } => y,
                         ScrollDelta::Pixels(size) => size.height.0,
                         _ => 0.0,
                     };
-                    view_state.update(|view| view.wheel(-delta, cursor));
+                    view_state.update(|view| view.wheel(-delta, cursor, &layout));
                     ev.prevent_default();
                 }
             ) {

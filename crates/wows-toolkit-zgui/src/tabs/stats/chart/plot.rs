@@ -10,6 +10,7 @@ use wows_toolkit_viewmodel::stats::plot::Plot;
 use wows_toolkit_viewmodel::stats::plot::PlotCanvas;
 use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotColors;
+use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
 use wows_toolkit_viewmodel::stats::plot::PlotView;
@@ -88,6 +89,9 @@ pub(super) struct PlotElement {
     pub data: PlotData,
     /// `None` until the first layout reads the style.
     pub colors: Option<ThemeColors>,
+    /// Where the last paint put the data, which turns a pointer into data. `None` before the
+    /// first paint and while the box is too small to plot in.
+    pub layout: Option<PlotLayout>,
     shaper: Shaper,
     families: Vec<Ident>,
     shaped: HashMap<(Arc<str>, u32), Shaped>,
@@ -98,6 +102,7 @@ impl PlotElement {
         Self {
             data: PlotData::default(),
             colors: None,
+            layout: None,
             shaper,
             families: UI_FAMILIES.iter().copied().map(Ident::new).collect(),
             shaped: HashMap::new(),
@@ -128,12 +133,12 @@ impl CustomElement for PlotElement {
         let size = painter.size();
         let bounds = PlotRect::new(0.0, 0.0, size.width.0 / scale, size.height.0 / scale);
 
-        let Self { data, shaper, families, shaped, .. } = self;
+        let Self { data, layout, shaper, families, shaped, .. } = self;
         if shaped.len() > SHAPED_CACHE_LIMIT {
             shaped.clear();
         }
         let mut canvas = SceneCanvas { painter, scale, shaper, families, shaped, clip: None };
-        draw(&data.plot(), bounds, colors.plot, &mut canvas);
+        *layout = draw(&data.plot(), bounds, colors.plot, &mut canvas);
     }
 
     fn custom_properties_read(&self) -> Option<&'static [&'static str]> {

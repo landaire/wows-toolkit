@@ -14,17 +14,18 @@ use wows_toolkit_viewmodel::stats::plot::Plot;
 use wows_toolkit_viewmodel::stats::plot::PlotCanvas;
 use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotColors;
+use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
 
-/// Paints `plot` into `bounds`.
+/// Paints `plot` into `bounds`, returning where the data went in window pixels.
 ///
 /// Called from a `canvas` in the chart panel's render, which is the only place a `Window` to
 /// paint with is at hand.
-pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) -> Option<PlotLayout> {
     let colors = colors(cx);
     let mut canvas = WindowCanvas { window, cx };
-    wows_toolkit_viewmodel::stats::plot::draw(plot, plot_rect(bounds), colors, &mut canvas);
+    wows_toolkit_viewmodel::stats::plot::draw(plot, plot_rect(bounds), colors, &mut canvas)
 }
 
 /// The theme colours a plot paints with.
