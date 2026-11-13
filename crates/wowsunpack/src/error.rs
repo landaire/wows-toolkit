@@ -26,3 +26,18 @@ pub enum GameDataError {
     #[error(transparent)]
     Cbor(#[from] ciborium::ser::Error<std::io::Error>),
 }
+
+/// Why the mod folder of a build could not be found.
+#[derive(Debug, Error)]
+pub enum ModFolderError {
+    #[error("{path} could not be read")]
+    Read {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{path} is not well-formed XML")]
+    Parse { path: std::path::PathBuf },
+    #[error("{path} lists no search path")]
+    NoSearchPath { path: std::path::PathBuf },
+}
