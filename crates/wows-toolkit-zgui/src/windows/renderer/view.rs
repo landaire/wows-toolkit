@@ -1,6 +1,7 @@
 //! The renderer's view: the map, what is drawn over it, and the transport under it.
 
 use landaire_ui::LoadingProps;
+use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -154,13 +155,14 @@ const SCROLL_LINE: f32 = 20.0;
 pub const SHORTCUTS_MODE: ModeHint =
     ModeHint { key: ModifierKey::Primary, name_key: "ui.renderer.annotations.shortcuts_title" };
 
-/// A replay played back on its minimap, with its transport. `slot_tools` and the other slots are
-/// the transport's popovers, placed before the pop-out control.
+/// A replay played back on its minimap, with its transport.
 #[component]
 pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let map = NodeRef::new();
     let root = NodeRef::new();
+    // The window this view is in: a pop-out moves the session, and its messages go with the view.
+    let toasts = Toasts::current();
 
     // The frame's placement follows the element's size and the frame's. Observed once: each call
     // makes another observer.
@@ -193,7 +195,7 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
             tabindex = {Focus::Programmatic},
             on:key_down = move |ev| {
                 session.ctrl_held.set(ev.modifiers.primary());
-                if session.key(&ev.key, &ev.key_without_modifiers, ev.modifiers) {
+                if session.key(&ev.key, &ev.key_without_modifiers, ev.modifiers, toasts) {
                     ev.prevent_default();
                     ev.stop_propagation();
                 }
@@ -384,6 +386,8 @@ fn Transport(session: RendererSession) -> impl IntoView {
     let ready = move || session.is_ready() && session.export.with(|export| export.progress.is_none());
     let refused = Signal::derive_local(move || !ready());
     let press = move |act: fn(RendererSession)| UnsyncCallback::new(move |()| act(session));
+    let toasts = Toasts::current();
+    let jump = move |act: fn(RendererSession, Option<Toasts>)| UnsyncCallback::new(move |()| act(session, toasts));
     let last = move || session.track().map_or(0, |track| track.last().get());
     let has_previous = move || session.previous_event_at().is_some();
     let has_next = move || session.next_event_at().is_some();
@@ -433,7 +437,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 TransportButton(glyph = Glyph::Rewind, label_key = "ui.renderer.controls.previous_event",
                     test_id = "replay-renderer-previous-event",
                     disabled = Signal::derive_local(move || !ready() || !has_previous()),
-                    on_press = press(RendererSession::jump_to_previous_event))
+                    on_press = jump(RendererSession::jump_to_previous_event))
                 TransportButton(glyph = Glyph::RotateCcw, label_key = "ui.renderer.controls.back_10s",
                     test_id = "replay-renderer-back-10s", disabled = refused,
                     on_press = press(|session| session.seek_by(-SEEK_STEP)))
@@ -444,7 +448,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 TransportButton(glyph = Glyph::FastForward, label_key = "ui.renderer.controls.next_event",
                     test_id = "replay-renderer-next-event",
                     disabled = Signal::derive_local(move || !ready() || !has_next()),
-                    on_press = press(RendererSession::jump_to_next_event))
+                    on_press = jump(RendererSession::jump_to_next_event))
                 TransportButton(glyph = Glyph::SkipForward, label_key = "ui.renderer.controls.jump_to_end",
                     test_id = "replay-renderer-jump-to-end", disabled = refused,
                     on_press = press(|session| {

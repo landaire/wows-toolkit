@@ -6,12 +6,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::drawing::DrawnRegion;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::viewport::MapViewport;
+use wows_replay_insights::timeline::format_timeline_event;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::frame::BgraFrame;
@@ -629,23 +631,32 @@ impl RendererSession {
         self.events.with(|events| events.next(elapsed).map(|event| event.clock.0))
     }
 
-    pub fn jump_to_previous_event(self) {
-        let Some(at) = self.neighbour_event(false) else { return };
-        self.go_to_elapsed(at);
+    /// Moves playback to the event before where it is, and says on `toasts` what happened there.
+    pub fn jump_to_previous_event(self, toasts: Option<Toasts>) {
+        self.jump_to_event(false, toasts);
     }
 
-    pub fn jump_to_next_event(self) {
-        let Some(at) = self.neighbour_event(true) else { return };
-        self.go_to_elapsed(at);
+    /// Moves playback to the event after where it is, and says on `toasts` what happened there.
+    pub fn jump_to_next_event(self, toasts: Option<Toasts>) {
+        self.jump_to_event(true, toasts);
     }
 
-    /// When the event after, or before, where playback is happened.
-    fn neighbour_event(self, forward: bool) -> Option<f32> {
+    fn jump_to_event(self, forward: bool, toasts: Option<Toasts>) {
+        let Some((at, said)) = self.neighbour_event(forward) else { return };
+        self.go_to_elapsed(at);
+
+        if let Some(toasts) = toasts {
+            toasts.info(said);
+        }
+    }
+
+    /// When the event after, or before, where playback is happened, and what it was.
+    fn neighbour_event(self, forward: bool) -> Option<(f32, String)> {
         let track = self.track_untracked()?;
         let elapsed = self.playback.with_untracked(|playback| playback.elapsed(&track));
         self.events.with_untracked(|events| {
             let event = if forward { events.next(elapsed) } else { events.previous(elapsed) };
-            event.map(|event| event.clock.0)
+            event.map(|event| (event.clock.0, format_timeline_event(event)))
         })
     }
 
@@ -1167,8 +1178,9 @@ impl RendererSession {
         self.collab.with_untracked(|link| link.broadcast_frame(broadcast));
     }
 
-    /// The transport's keyboard. Returns whether the key was taken.
-    pub fn key(self, key: &Key, unmodified: &Key, modifiers: Modifiers) -> bool {
+    /// The transport's keyboard, saying on `toasts` where an event jump lands. Returns whether the
+    /// key was taken.
+    pub fn key(self, key: &Key, unmodified: &Key, modifiers: Modifiers, toasts: Option<Toasts>) -> bool {
         if !self.status.with_untracked(|status| matches!(status, Status::Ready(_))) {
             return false;
         }
@@ -1197,8 +1209,8 @@ impl RendererSession {
             Key::Named(NamedKey::ArrowDown) => self.step_speed(-1),
             Key::Named(NamedKey::ArrowLeft) if !modifiers.shift() => self.seek_by(-SEEK_STEP),
             Key::Named(NamedKey::ArrowRight) if !modifiers.shift() => self.seek_by(SEEK_STEP),
-            Key::Named(NamedKey::ArrowLeft) => self.jump_to_previous_event(),
-            Key::Named(NamedKey::ArrowRight) => self.jump_to_next_event(),
+            Key::Named(NamedKey::ArrowLeft) => self.jump_to_previous_event(toasts),
+            Key::Named(NamedKey::ArrowRight) => self.jump_to_next_event(toasts),
             // Puts the tool down and drops what was half-drawn.
             Key::Named(NamedKey::Escape) if has_tool => self.take_up(Tool::None),
             Key::Named(NamedKey::Delete | NamedKey::Backspace) => {

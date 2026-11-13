@@ -264,10 +264,27 @@ fn the_event_controls_refuse_until_the_battle_has_been_read() {
 
     click(&mut window, "replay-renderer-next-event");
     assert_eq!(at(session), 20, "which steps to the first thing that happened");
+    let said = window.texts_by_class("lui-toasts").concat();
+    assert!(said.contains("at 10"), "and says what happened there: {said:?}");
     click(&mut window, "replay-renderer-next-event");
     assert_eq!(at(session), 60);
     click(&mut window, "replay-renderer-previous-event");
     assert_eq!(at(session), 20);
+}
+
+/// Shift with an arrow walks the events as the buttons do, and says where it landed.
+#[test]
+fn shift_arrows_walk_the_events_and_say_where() {
+    let (mut window, session) = open_viewport(track(half_second_frames(60)));
+    session.events.set(events_at(&[10.0, 30.0]));
+    focus_viewport(&mut window);
+
+    window.press_key(NamedKey::ArrowRight, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(16));
+
+    assert_eq!(at(session), 20, "the first event");
+    let said = window.texts_by_class("lui-toasts").concat();
+    assert!(said.contains("at 10"), "is said: {said:?}");
 }
 
 /// The pop-out control is offered while the viewport is in a tab and withdrawn once it has a
