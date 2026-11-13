@@ -139,19 +139,23 @@ const CSS: &str = css!(
         display: flex;
         flex-direction: row;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 6px;
     }
-    .wt-settings__theme {
+    /* Over the button's own size rules, which set a fixed height and centre one line. */
+    .wt-settings__theme.zui-button[data-size] {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        gap: 4px;
-        width: 116px;
-        height: 40px;
-        padding: 4px 8px;
+        justify-content: center;
+        gap: 3px;
+        width: 118px;
+        height: auto;
+        padding: 5px 6px;
     }
     .wt-settings__theme-name {
+        flex: none;
         font-size: 11px;
+        line-height: 14px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -899,7 +903,7 @@ fn ThemeTiles(shell: Shell) -> impl IntoView {
                             },
                             on:click = move |_| shell.set_theme(choice)
                         ) {
-                            text(class = "wt-settings__theme-name") {{choice.label()}}
+                            text(class = "wt-settings__theme-name", attr:data-testid = format!("theme-name-{choice:?}")) {{choice.label()}}
                             row(class = "wt-settings__swatches") {
                                 for swatch in move || swatches(choice, desktop_appearance()).into_iter().enumerate().collect::<Vec<_>>(), key = |swatch: &(usize, landaire_ui::Rgb)| swatch.0 {
                                     box(class = "wt-settings__swatch", style:background-color = swatch.1.to_string())

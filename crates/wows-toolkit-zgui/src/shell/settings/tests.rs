@@ -283,6 +283,33 @@ fn a_theme_tile_previews_and_applies_its_palette() {
     assert_eq!(window.a11y(tile).and_then(|state| state.selected), Some(true), "its tile is marked");
 }
 
+/// Every theme tile shows its whole name: a full line box inside the tile, and no ellipsis.
+#[test]
+fn theme_tile_names_are_not_clipped() {
+    let mut window = open_unsaved();
+    shell().settings_drawer.open_at(Setting::Theme);
+    settle(&mut window);
+    settle(&mut window);
+
+    for choice in ThemeChoice::ALL {
+        let tile = find(&window, &format!("theme-choice-{choice:?}"));
+        let name = find(&window, &format!("theme-name-{choice:?}"));
+        let tile = window.bounds(tile).expect("the tile is laid out");
+        let name = window.bounds(name).expect("the name is laid out");
+        let (tile_top, tile_bottom) = (tile.origin.y.0, tile.origin.y.0 + tile.size.height.0);
+        let (name_top, name_bottom) = (name.origin.y.0, name.origin.y.0 + name.size.height.0);
+
+        assert!(name.size.height.0 >= 14.0, "{choice:?}: the name has a whole line box, {name:?}");
+        assert!(
+            name_top >= tile_top && name_bottom <= tile_bottom,
+            "{choice:?}: the name is inside {tile:?}, {name:?}"
+        );
+        // A name cut short with an ellipsis fills the tile's content box, inside a 1px border and
+        // 6px of padding on each side.
+        assert!(name.size.width.0 + 14.5 < tile.size.width.0, "{choice:?}: the name fits, {name:?} in {tile:?}");
+    }
+}
+
 /// A zoom change rescales the list, and the list scrolls so the slider stays where it was drawn.
 #[test]
 fn the_zoom_slider_stays_in_place_across_a_zoom_change() {
