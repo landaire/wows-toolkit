@@ -21,6 +21,7 @@ struct BuildEntry {
 
 /// Builds the tests refer to by number.
 const KNOWN_TEST_BUILDS: &[u32] = &[
+    3747819,  // 0.10.3, the last build with Dead Eye
     12506899, // 15.4.0
     13533378, // 15.10.0
 ];

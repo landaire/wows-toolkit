@@ -598,6 +598,11 @@ impl<'a> Planner<'a> {
         self.items.iter().copied().filter(|item| labels.contains(&self.label(*item))).collect()
     }
 
+    /// The captain skill of `Item::Skill { index, .. }`.
+    pub(crate) fn skill(&self, index: usize) -> &CrewSkill {
+        &self.skills[index]
+    }
+
     /// English name of an item.
     pub(crate) fn name(&self, item: Item) -> String {
         match item {
