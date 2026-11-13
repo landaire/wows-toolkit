@@ -24,6 +24,7 @@ use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Role;
 
 use crate::i18n::LanguageCode;
 use crate::shell::AppRootProps;
@@ -408,6 +409,23 @@ fn choosing_a_tab_shuts_the_drawer() {
 
     assert_eq!(shell().selected_untracked(), Some(other), "the tab is chosen");
     assert!(window.by_test_id("settings-search").is_none(), "and the drawer is shut");
+}
+
+/// The warning about the game directory stays up after its button opens the drawer: it is
+/// withdrawn once the directory is put right.
+#[test]
+fn the_game_directory_warning_outlasts_its_button() {
+    let mut window = open_unsaved();
+    crate::shell::startup::warn_wows_dir_invalid(shell());
+    settle(&mut window);
+    let warning = t!("ui.messages.wows_dir_invalid").into_owned();
+
+    let open = window.by_role_and_label(Role::Button, &t!("ui.settings.panel.open")).expect("the warning has a button");
+    window.click(open).expect("the button can be pressed");
+    settle(&mut window);
+
+    assert!(window.by_test_id("settings-search").is_some(), "the button opens the drawer");
+    assert!(window.texts_by_class("lui-toasts").concat().contains(&warning), "and the warning stays up");
 }
 
 /// A message about a setting opens the drawer with that setting at the top.

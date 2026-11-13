@@ -254,7 +254,7 @@ impl Shell {
             Notice::warn(t!("ui.messages.twitch_token_invalid").into_owned())
                 .keyed(ToastKey::new(STUCK_TWITCH_TOKEN))
                 .sticky()
-                .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::TwitchToken)),
+                .lasting_action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::TwitchToken)),
         );
     }
 }

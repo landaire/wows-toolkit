@@ -135,7 +135,7 @@ pub fn warn_wows_dir_invalid(shell: Shell) {
         landaire_ui::Notice::warn(t!("ui.messages.wows_dir_invalid").into_owned())
             .keyed(landaire_ui::ToastKey::new(STUCK_WOWS_DIR))
             .sticky()
-            .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::WowsDirectory)),
+            .lasting_action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::WowsDirectory)),
     );
 }
 
