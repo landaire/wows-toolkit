@@ -251,6 +251,33 @@ fn a_modified_double_click_selects_without_opening() {
     assert!(shown.arrivals.with_untracked(|arrivals| arrivals.contains(&landed)), "the replay was not opened");
 }
 
+/// Enter on a group header opens or closes the group, as a click on it does.
+#[test]
+fn enter_on_a_group_header_opens_and_closes_it() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(1);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let shown = listing(control, &root);
+    let expanded =
+        || shown.expanded.with_untracked(|expanded| expanded.iter().any(|key| matches!(key, NodeKey::Group(_))));
+    assert!(expanded(), "the group opens expanded");
+
+    let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
+    window.click(header).expect("the header has a box");
+    window.advance(Duration::from_millis(50));
+    assert!(!expanded(), "a click closes it");
+
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    window.advance(Duration::from_millis(50));
+    assert!(expanded(), "Enter opens it again");
+
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    window.advance(Duration::from_millis(50));
+    assert!(!expanded(), "and closes it");
+}
+
 #[test]
 fn a_badge_counts_unseen_replays_after_the_landing_ring() {
     let (mut window, control) = open();

@@ -43,6 +43,7 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
@@ -338,10 +339,17 @@ fn ListingRows(
     let shell = Shell::current();
     let model: Signal<Rc<BrowserTree>, LocalStorage> = listing.tree.into();
     let activate_events = events.clone();
-    let on_activate = UnsyncCallback::new(move |key: NodeKey| {
-        let NodeKey::Leaf(path) = key else { return };
-        listing.mark_opened(&path);
-        activate_events.send(ReplayBrowserEvent::Open(path));
+    // Enter or a double-click opens a replay, and opens or closes a group, as a click on it does.
+    let on_activate = UnsyncCallback::new(move |key: NodeKey| match key {
+        NodeKey::Leaf(path) => {
+            listing.mark_opened(&path);
+            activate_events.send(ReplayBrowserEvent::Open(path));
+        }
+        group @ NodeKey::Group(_) => listing.expanded.update(|expanded| {
+            if !expanded.remove(&group) {
+                expanded.insert(group);
+            }
+        }),
     });
     let menu_events = events.clone();
     // The selection marks the open replay, and the menu acts on its own row without moving it.
