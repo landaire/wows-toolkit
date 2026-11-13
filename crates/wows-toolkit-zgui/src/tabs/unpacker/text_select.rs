@@ -83,6 +83,13 @@ pub struct Match {
     pub columns: Range<usize>,
 }
 
+/// Whether find tells upper case from lower.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchCase {
+    Ignore,
+    Exact,
+}
+
 /// Where one case-folded character came from.
 #[derive(Clone, Copy)]
 struct Origin {
@@ -92,8 +99,13 @@ struct Origin {
     first: bool,
 }
 
-/// Appends the full Unicode case folding of `ch`, which may be more than one character.
-fn fold_into(ch: char, out: &mut Vec<char>) {
+/// Appends `ch` as it is compared: unchanged when case counts, otherwise its full Unicode case
+/// folding, which may be more than one character.
+fn fold_into(ch: char, case: MatchCase, out: &mut Vec<char>) {
+    if case == MatchCase::Exact {
+        out.push(ch);
+        return;
+    }
     if ch.is_ascii() {
         out.push(ch.to_ascii_lowercase());
         return;
@@ -120,13 +132,14 @@ fn fallback_table(needle: &[char]) -> Vec<usize> {
     table
 }
 
-/// Every occurrence of `query` in `lines`, ignoring case, without overlaps, in reading order.
+/// Every occurrence of `query` in `lines`, without overlaps, in reading order.
 ///
-/// Both sides are compared case-folded, and a match covers whole characters of the line.
-pub fn find_all(lines: &[CodeLine], query: &str) -> Vec<Match> {
+/// Unless case counts, both sides are compared case-folded. A match covers whole characters of
+/// the line.
+pub fn find_all(lines: &[CodeLine], query: &str, case: MatchCase) -> Vec<Match> {
     let mut needle = Vec::new();
     for ch in query.chars() {
-        fold_into(ch, &mut needle);
+        fold_into(ch, case, &mut needle);
     }
     if needle.is_empty() {
         return Vec::new();
@@ -143,7 +156,7 @@ pub fn find_all(lines: &[CodeLine], query: &str) -> Vec<Match> {
         let mut matched = 0;
         for (column, ch) in line_chars(tokens).enumerate() {
             folded.clear();
-            fold_into(ch, &mut folded);
+            fold_into(ch, case, &mut folded);
             for (at, folded_ch) in folded.iter().enumerate() {
                 if recent.len() == needle.len() {
                     recent.pop_front();
@@ -315,10 +328,18 @@ mod tests {
     #[test]
     fn find_ignores_case_and_does_not_overlap() {
         let lines = plain_lines("Ocean ocean\naaaa");
-        let found = find_all(&lines, "OCEAN");
+        let found = find_all(&lines, "OCEAN", MatchCase::Ignore);
         assert_eq!(found, vec![Match { line: 0, columns: 0..5 }, Match { line: 0, columns: 6..11 }]);
-        assert_eq!(find_all(&lines, "aa").len(), 2, "aaaa holds two matches, not three");
-        assert!(find_all(&lines, "").is_empty());
+        assert_eq!(find_all(&lines, "aa", MatchCase::Ignore).len(), 2, "aaaa holds two matches, not three");
+        assert!(find_all(&lines, "", MatchCase::Ignore).is_empty());
+    }
+
+    #[test]
+    fn find_matching_case_tells_upper_from_lower() {
+        let lines = plain_lines("Ocean ocean\nStra\u{df}e");
+        assert_eq!(find_all(&lines, "ocean", MatchCase::Exact), vec![Match { line: 0, columns: 6..11 }]);
+        assert!(find_all(&lines, "OCEAN", MatchCase::Exact).is_empty());
+        assert!(find_all(&lines, "strasse", MatchCase::Exact).is_empty(), "no case folding either");
     }
 
     #[test]
@@ -348,7 +369,7 @@ mod tests {
     #[test]
     fn the_current_match_is_told_apart_from_the_others() {
         let lines = plain_lines("sea and sea");
-        let found = find_all(&lines, "sea");
+        let found = find_all(&lines, "sea", MatchCase::Ignore);
         let marks = LineMarks { line: 0, selection: None, matches: &found, current: Some(1) };
         let cut = spans(&lines[0], &marks);
         let other = Marks { matched: true, ..PLAIN };
@@ -359,10 +380,13 @@ mod tests {
     #[test]
     fn find_folds_case_fully_and_matches_whole_characters() {
         let lines = plain_lines("Stra\u{df}e\n\u{df}");
-        assert_eq!(find_all(&lines, "STRASSE"), vec![Match { line: 0, columns: 0..6 }]);
-        assert_eq!(find_all(&lines, "ss"), vec![Match { line: 0, columns: 4..5 }, Match { line: 1, columns: 0..1 }]);
+        assert_eq!(find_all(&lines, "STRASSE", MatchCase::Ignore), vec![Match { line: 0, columns: 0..6 }]);
         assert_eq!(
-            find_all(&lines, "s"),
+            find_all(&lines, "ss", MatchCase::Ignore),
+            vec![Match { line: 0, columns: 4..5 }, Match { line: 1, columns: 0..1 }]
+        );
+        assert_eq!(
+            find_all(&lines, "s", MatchCase::Ignore),
             vec![Match { line: 0, columns: 0..1 }],
             "half of a folded character is not a match"
         );
@@ -371,13 +395,13 @@ mod tests {
     #[test]
     fn find_restarts_after_a_partial_match() {
         let lines = plain_lines("aabaabaaab");
-        assert_eq!(find_all(&lines, "aaab"), vec![Match { line: 0, columns: 6..10 }]);
+        assert_eq!(find_all(&lines, "aaab", MatchCase::Ignore), vec![Match { line: 0, columns: 6..10 }]);
     }
 
     #[test]
     fn a_line_marks_at_most_the_limit_around_the_current_match() {
         let lines = plain_lines(&"x".repeat(LINE_MATCH_LIMIT * 4));
-        let found = find_all(&lines, "x");
+        let found = find_all(&lines, "x", MatchCase::Ignore);
         let current = LINE_MATCH_LIMIT * 3;
         let cut = spans(&lines[0], &LineMarks { line: 0, selection: None, matches: &found, current: Some(current) });
         let marked: usize = cut.iter().filter(|span| span.marks.matched).map(|span| span.text.len()).sum();

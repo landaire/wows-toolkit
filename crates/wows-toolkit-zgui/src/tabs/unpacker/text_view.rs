@@ -1,5 +1,5 @@
 //! The viewer's text: highlighted lines in a virtualised list, with character selection by
-//! dragging, ctrl+C and ctrl+A, and a find bar on ctrl+F.
+//! dragging, copy and select-all on ctrl+C, ctrl+A and the context menu, and a find bar on ctrl+F.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -20,6 +20,7 @@ use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
@@ -47,11 +48,18 @@ use zgui::vocab::PointerButton;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::ContextMenuContentProps;
+use zgui_ui::ContextMenuProps;
+use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::InputProps;
+use zgui_ui::MenuItemProps;
+use zgui_ui::ToggleProps;
+use zgui_ui::ToggleSize;
 use zgui_ui::VirtualListProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::chevron::CHEVRON_DOWN;
 use zgui_ui_icons::set::chevron::CHEVRON_UP;
+use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
@@ -64,6 +72,7 @@ use crate::tabs::unpacker::text_layout::indents;
 use crate::tabs::unpacker::text_select::LineMarks;
 use crate::tabs::unpacker::text_select::Marks;
 use crate::tabs::unpacker::text_select::Match;
+use crate::tabs::unpacker::text_select::MatchCase;
 use crate::tabs::unpacker::text_select::Selection;
 use crate::tabs::unpacker::text_select::TextPos;
 use crate::tabs::unpacker::text_select::find_all;
@@ -94,6 +103,7 @@ const CSS: &str = css!(
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-text__find-field { width: 240px; }
+    .wt-text__area { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
     .wt-text__find-count {
         min-width: 72px;
         font-size: 12px;
@@ -190,6 +200,7 @@ impl Geometry {
 struct Find {
     open: RwSignal<bool, LocalStorage>,
     query: RwSignal<String, LocalStorage>,
+    case: RwSignal<MatchCase, LocalStorage>,
     matches: RwSignal<Rc<Vec<Match>>, LocalStorage>,
     current: RwSignal<Option<usize>, LocalStorage>,
     field: NodeRef,
@@ -214,8 +225,12 @@ impl Find {
         }
     }
 
-    /// Opens the bar, or goes back to it, with its query selected for typing over.
-    fn show(self) {
+    /// Opens the bar, or goes back to it, with its query selected for typing over. Text selected
+    /// on one line becomes the query; a query cannot span lines.
+    fn show(self, selected: Option<String>) {
+        if let Some(text) = selected.filter(|text| !text.is_empty() && !text.contains('\n')) {
+            self.query.set(text);
+        }
         self.open.set(true);
         self.focus_field();
     }
@@ -258,13 +273,15 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
     let find = Find {
         open: RwSignal::new_local(false),
         query: RwSignal::new_local(String::new()),
+        case: RwSignal::new_local(MatchCase::Ignore),
         matches: RwSignal::new_local(Rc::new(Vec::new())),
         current: RwSignal::new_local(None),
         field: NodeRef::new(),
     };
-    // A new query, or text that changed under it, starts at its first match.
+    // A new query, a change of case, or text that changed under it, starts at its first match.
     let finding = RenderEffect::new(move |_| {
-        let found = lines.with(|lines| find.query.with(|query| find_all(lines, query)));
+        let case = find.case.get();
+        let found = lines.with(|lines| find.query.with(|query| find_all(lines, query, case)));
         let first = found.first().map(|found| found.line);
         find.matches.set(Rc::new(found));
         find.current.set(first.map(|_| 0));
@@ -281,21 +298,30 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
     });
     on_cleanup_local(move || drop(focusing));
 
+    let chosen_text = move || {
+        let chosen = selection.get_untracked().filter(|chosen| !chosen.is_empty())?;
+        Some(lines.with_untracked(|lines| selected_text(lines, chosen)))
+    };
+    let copy_selection = move || {
+        if let Some(text) = chosen_text() {
+            shell.copy_text(text);
+        }
+    };
+    let select_all = move || selection.set(lines.with_untracked(|lines| Selection::all(lines)));
+
     let on_key = move |ev: &mut EventCx<'_, events::KeyDown>| {
         let named = |key: NamedKey| ev.key == Key::Named(key);
         let handled = match (&ev.key_without_modifiers, ev.modifiers.primary(), ev.modifiers.shift()) {
             (Key::Character(text), true, false) if text.eq_ignore_ascii_case("c") => {
-                if let Some(chosen) = selection.get_untracked().filter(|chosen| !chosen.is_empty()) {
-                    shell.copy_text(lines.with_untracked(|lines| selected_text(lines, chosen)));
-                }
+                copy_selection();
                 true
             }
             (Key::Character(text), true, false) if text.eq_ignore_ascii_case("a") => {
-                selection.set(lines.with_untracked(|lines| Selection::all(lines)));
+                select_all();
                 true
             }
             (Key::Character(text), true, false) if text.eq_ignore_ascii_case("f") => {
-                find.show();
+                find.show(chosen_text());
                 true
             }
             (_, false, shift) if named(NamedKey::F3) => {
@@ -345,6 +371,12 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
     };
 
     let at_pointer = move |position| lines.with_untracked(|lines| geometry.text_pos(lines, position));
+    let match_case =
+        Binding::controlled(Signal::derive_local(move || find.case.get() == MatchCase::Exact), move |on: bool| {
+            find.case.set(if on { MatchCase::Exact } else { MatchCase::Ignore });
+        });
+    let no_matches = Signal::derive_local(move || find.matches.with(|matches| matches.is_empty()));
+    let nothing_chosen = Signal::derive_local(move || selection.get().is_none_or(Selection::is_empty));
 
     view! {
         column(class = "wt-text", node_ref = root, tabindex = {Focus::Programmatic}, on:key_down = on_key) {
@@ -359,12 +391,21 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                         attr:data-testid = "unpacker-find-field",
                         on:key_down = on_field_key
                     )
+                    Toggle(
+                        pressed = match_case,
+                        size = ToggleSize::Sm,
+                        label = t!("ui.unpacker.find_match_case").into_owned(),
+                        attr:data-testid = "unpacker-find-match-case"
+                    ) {
+                        AppIcon(glyph = Glyph::CaseSensitive)
+                    }
                     text(class = format!("wt-text__find-count {TABULAR_CLASS}"), attr:data-testid = "unpacker-find-count") {{count}}
                     Button(
                         size = ButtonSize::IconSm,
                         variant = ButtonVariant::Ghost,
                         a11y:label = t!("ui.unpacker.find_previous").into_owned(),
                         attr:data-testid = "unpacker-find-previous",
+                        disabled = no_matches,
                         on:click = move |_| find.step(false, geometry)
                     ) {
                         Icon(icon = CHEVRON_UP)
@@ -374,6 +415,7 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                         variant = ButtonVariant::Ghost,
                         a11y:label = t!("ui.unpacker.find_next").into_owned(),
                         attr:data-testid = "unpacker-find-next",
+                        disabled = no_matches,
                         on:click = move |_| find.step(true, geometry)
                     ) {
                         Icon(icon = CHEVRON_DOWN)
@@ -389,53 +431,65 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     }
                 }
             }
-            VirtualList(
-                count = Signal::derive_local(move || lines.with(|lines| lines.len())),
-                row_size = LINE_HEIGHT,
-                label = title,
-                node_ref = geometry.viewport,
-                class = "wt-text__code",
-                style:font-family = code_font_family(),
-                style:tab-size = TAB_SIZE.to_string(),
-                attr:data-testid = "unpacker-viewer-text",
-                on:pointer_down = move |ev| {
-                    if ev.button != Some(PointerButton::Primary) {
-                        return;
+            ContextMenu {
+                ContextMenuTrigger(class = "wt-text__area") {
+                    VirtualList(
+                        count = Signal::derive_local(move || lines.with(|lines| lines.len())),
+                        row_size = LINE_HEIGHT,
+                        label = title,
+                        node_ref = geometry.viewport,
+                        class = "wt-text__code",
+                        style:font-family = code_font_family(),
+                        style:tab-size = TAB_SIZE.to_string(),
+                        attr:data-testid = "unpacker-viewer-text",
+                        on:pointer_down = move |ev| {
+                            if ev.button != Some(PointerButton::Primary) {
+                                return;
+                            }
+                            root.focus();
+                            let Some(at) = at_pointer(ev.position) else { return };
+                            let anchor = match selection.get_untracked() {
+                                Some(chosen) if ev.modifiers.shift() => chosen.anchor,
+                                _ => at,
+                            };
+                            selection.set(Some(Selection { anchor, head: at }));
+                            dragging.set_value(true);
+                            ev.capture_pointer();
+                        },
+                        on:pointer_move = move |ev| {
+                            if !dragging.get_value() {
+                                return;
+                            }
+                            let Some(at) = at_pointer(ev.position) else { return };
+                            // Only a move to another character redraws the lines.
+                            if let Some(chosen) = selection.get_untracked().filter(|chosen| chosen.head != at) {
+                                selection.set(Some(Selection { head: at, ..chosen }));
+                            }
+                        },
+                        on:pointer_up = move |ev| {
+                            if dragging.get_value() {
+                                dragging.set_value(false);
+                                ev.release_pointer();
+                            }
+                        },
+                        on:pointer_cancel = move |ev| {
+                            if dragging.get_value() {
+                                dragging.set_value(false);
+                                ev.release_pointer();
+                            }
+                        },
+                        row = move |ix: usize| code_line(lines, ix, selection, find, Guides { indents: line_indents, space_width })
+                    )
+                }
+                ContextMenuContent(attr:data-testid = "unpacker-viewer-menu") {
+                    MenuItem(disabled = nothing_chosen, on_select = UnsyncCallback::new(move |()| copy_selection())) {
+                        {t!("ui.buttons.copy").into_owned()}
                     }
-                    root.focus();
-                    let Some(at) = at_pointer(ev.position) else { return };
-                    let anchor = match selection.get_untracked() {
-                        Some(chosen) if ev.modifiers.shift() => chosen.anchor,
-                        _ => at,
-                    };
-                    selection.set(Some(Selection { anchor, head: at }));
-                    dragging.set_value(true);
-                    ev.capture_pointer();
-                },
-                on:pointer_move = move |ev| {
-                    if !dragging.get_value() {
-                        return;
+                    MenuItem(on_select = UnsyncCallback::new(move |()| select_all())) {
+                        {t!("ui.buttons.select_all").into_owned()}
                     }
-                    let Some(at) = at_pointer(ev.position) else { return };
-                    // Only a move to another character redraws the lines.
-                    if let Some(chosen) = selection.get_untracked().filter(|chosen| chosen.head != at) {
-                        selection.set(Some(Selection { head: at, ..chosen }));
-                    }
-                },
-                on:pointer_up = move |ev| {
-                    if dragging.get_value() {
-                        dragging.set_value(false);
-                        ev.release_pointer();
-                    }
-                },
-                on:pointer_cancel = move |ev| {
-                    if dragging.get_value() {
-                        dragging.set_value(false);
-                        ev.release_pointer();
-                    }
-                },
-                row = move |ix: usize| code_line(lines, ix, selection, find, Guides { indents: line_indents, space_width })
-            )
+                }
+            }
         }
     }
 }

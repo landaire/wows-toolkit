@@ -7,6 +7,7 @@ use std::time::Duration;
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
+use rust_i18n::t;
 use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
@@ -17,6 +18,7 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Role;
 use zgui::vocab::Toggled;
 
 use crate::interaction_tests::REVIEW_SIZE;
@@ -457,6 +459,105 @@ fn the_viewer_finds_text_and_steps_through_the_matches() {
     tab.window.press_key(NamedKey::Escape, Modifiers::NONE);
     tab.settle();
     assert!(!tab.shown("unpacker-find"), "Escape closes the find bar");
+}
+
+/// Ctrl+F in the viewer with the find bar up and its query typed.
+fn find_in(tab: &mut UnpackerWindow, query: &str) {
+    let text = tab.window.by_test_id("unpacker-viewer-text").expect("the file opens as text");
+    tab.window.click(text).expect("the text can be pressed");
+    tab.window.press_character('f', Modifiers::PRIMARY);
+    tab.settle();
+    tab.window.type_text(query);
+    tab.settle();
+}
+
+fn find_count(tab: &UnpackerWindow) -> String {
+    tab.window.texts_by_class("wt-text__find-count").concat()
+}
+
+fn disabled(tab: &mut UnpackerWindow, test_id: &str) -> bool {
+    let element = tab.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+    tab.window.a11y(element).is_some_and(|state| state.disabled)
+}
+
+/// The case toggle limits the matches to the query's own case, and the step buttons only work
+/// while there is a match to step to.
+#[test]
+fn the_find_bar_matches_case_on_request() {
+    let mut tab = open_text(options(), "case.xml", "Hull hull HULL\n");
+    find_in(&mut tab, "hull");
+    assert_eq!(find_count(&tab), "1 of 3", "case is ignored to begin with");
+    assert!(!disabled(&mut tab, "unpacker-find-next"));
+
+    tab.click("unpacker-find-match-case");
+    assert_eq!(find_count(&tab), "1 of 1", "only the lower-case match is left");
+    assert_eq!(tab.window.texts_by_class("wt-code-current"), vec!["hull".to_owned()]);
+
+    tab.click("unpacker-find-match-case");
+    assert_eq!(find_count(&tab), "1 of 3", "the toggle lets go again");
+
+    let field = tab.window.by_test_id("unpacker-find-field").expect("the find field is up");
+    tab.window.click(field).expect("the field can be pressed");
+    tab.window.type_text("zzz");
+    tab.settle();
+    assert!(disabled(&mut tab, "unpacker-find-previous"), "no match, nothing to step back to");
+    assert!(disabled(&mut tab, "unpacker-find-next"), "no match, nothing to step on to");
+}
+
+/// Text selected on one line is what ctrl+F looks for.
+#[test]
+fn find_starts_from_the_selected_text() {
+    let mut tab = open_text(options(), "pick.xml", "speed\nhull speed\n");
+    let first = tab.window.all_by_class("wt-code-line__text")[0];
+    let line = tab.window.bounds(first).expect("the line is laid out");
+    let middle = line.origin.y + DevicePx(line.size.height.0 / 2.0);
+    tab.window.click_at(Point::new(line.origin.x + DevicePx(1.0), middle));
+    tab.window.click_at_with(Point::new(line.origin.x + DevicePx(line.size.width.0 + 4.0), middle), Modifiers::SHIFT);
+    tab.settle();
+    assert_eq!(tab.window.texts_by_class("wt-code-sel").concat(), "speed");
+
+    tab.window.press_character('f', Modifiers::PRIMARY);
+    tab.settle();
+    let field = tab.window.by_test_id("unpacker-find-field").expect("the find field is up");
+    let query = tab.window.a11y(field).and_then(|state| state.value);
+    assert_eq!(query.as_deref(), Some("speed"), "the selection is the query");
+    assert_eq!(find_count(&tab), "1 of 2");
+}
+
+/// The text's context menu copies the selection, once there is one, and selects all of it.
+#[test]
+fn the_viewer_context_menu_selects_all_and_copies() {
+    let mut tab = open_ship_xml(options());
+    let text = tab.window.by_test_id("unpacker-viewer-text").expect("the XML opens as text");
+    tab.window.right_click(text).expect("the text can be right-clicked");
+    tab.settle();
+    let copy_label = t!("ui.buttons.copy").into_owned();
+    let copy = tab.window.by_role_and_label(Role::MenuItem, &copy_label).expect("the menu offers Copy");
+    assert!(tab.window.a11y(copy).is_some_and(|state| state.disabled), "nothing is selected to copy");
+
+    let select_all_label = t!("ui.buttons.select_all").into_owned();
+    let select_all =
+        tab.window.by_role_and_label(Role::MenuItem, &select_all_label).expect("the menu offers Select All");
+    tab.window.click(select_all).expect("Select All can be chosen");
+    tab.settle();
+    let selected = tab.window.texts_by_class("wt-code-sel").concat();
+    assert!(selected.starts_with("<?xml") && selected.contains("</ship>"), "every line is selected: {selected:?}");
+
+    tab.window.right_click(text).expect("the text can be right-clicked");
+    tab.settle();
+    let copy = tab.window.by_role_and_label(Role::MenuItem, &copy_label).expect("the menu offers Copy");
+    assert!(tab.window.a11y(copy).is_some_and(|state| !state.disabled), "the selection can be copied");
+}
+
+/// The words beside the decode box tick and untick it, as the box itself does.
+#[test]
+fn the_decode_prototypes_label_toggles_its_box() {
+    let mut tab = UnpackerWindow::open(options());
+    let before = tab.checked("unpacker-decode-prototypes");
+    tab.click("unpacker-decode-prototypes-label");
+    assert_ne!(tab.checked("unpacker-decode-prototypes"), before, "the label ticks the box");
+    tab.click("unpacker-decode-prototypes-label");
+    assert_eq!(tab.checked("unpacker-decode-prototypes"), before, "and unticks it");
 }
 
 /// A listing as an install looks: nested directories, files of several kinds, some queued, a
