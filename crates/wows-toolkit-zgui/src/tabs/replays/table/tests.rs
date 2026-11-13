@@ -328,6 +328,31 @@ fn the_dots_on_a_selected_row_keep_the_whole_selection() {
 }
 
 #[test]
+fn the_dots_name_their_menu_except_while_it_is_open() {
+    let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+    let past_delay = landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150);
+    let hint = t!("ui.replay.row_actions_hint").into_owned();
+
+    let name = window.by_test_id("player-name-1").expect("the first player's name is drawn");
+    window.hover(name).expect("the row takes the pointer");
+    window.advance(Duration::from_millis(100));
+    let dots = window.by_test_id("player-actions-1").expect("the row has its actions");
+    window.hover(dots).expect("the dots take the pointer");
+    window.advance(past_delay);
+    assert_eq!(window.texts_by_class("lui-tooltip"), [hint], "resting on the dots says what they do");
+
+    window.click(dots).expect("the dots take a click");
+    window.advance(Duration::from_millis(300));
+    let copy_row = t!("ui.replay.context.copy_row").into_owned();
+    assert!(window.by_role_and_label(Role::MenuItem, &copy_row).is_some(), "the dots open the row menu");
+    window.hover(name).expect("the row takes the pointer");
+    window.advance(Duration::from_millis(100));
+    window.hover(dots).expect("the dots take the pointer");
+    window.advance(past_delay);
+    assert!(window.texts_by_class("lui-tooltip").is_empty(), "the open menu is not covered by the tip");
+}
+
+#[test]
 fn without_a_detail_no_row_offers_to_open() {
     let (mut window, expanded) = open_table_over(Drawing::Recorded, Scheme::Dark, sample_model(), false);
     assert!(window.by_test_id("player-caret-2").is_none(), "no disclosure without a detail");

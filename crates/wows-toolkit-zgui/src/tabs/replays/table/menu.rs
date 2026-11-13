@@ -4,6 +4,9 @@
 use std::sync::Arc;
 
 use landaire_ui::MenuItems;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
@@ -15,8 +18,12 @@ use wows_toolkit_replay_data::columns::table_text;
 use wows_toolkit_replay_data::model::PlayerRow;
 use zgui::prelude::AnyView;
 use zgui::reactive::Callable;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 use zgui::view::EventCx;
@@ -30,6 +37,7 @@ use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::ui::ELLIPSIS;
+use zgui_ui_primitives::Binding;
 
 use crate::desktop;
 use crate::icons::AppIconProps;
@@ -205,7 +213,11 @@ fn copy_item(caption: String, cx: TableCx, produce: impl Fn() -> Option<(String,
 pub(super) fn row_actions(player: AccountId, cx: TableCx) -> AnyView {
     let anchor = NodeRef::new();
     let hint = t!("ui.replay.row_actions_hint").into_owned();
+    let label = hint.clone();
     let menus = cx.menus;
+    // The tip stays shut while the menu it names is open over it.
+    let tip_wanted = RwSignal::new_local(false);
+    let tip_open = Signal::derive_local(move || tip_wanted.get() && menus.open_row() != Some(player));
     // A press on the dots is theirs, not a press on the row, and the menu it opens has no cell.
     let open = move |ev: &mut EventCx<'_, events::Click>| {
         ev.stop_propagation();
@@ -222,15 +234,20 @@ pub(super) fn row_actions(player: AccountId, cx: TableCx) -> AnyView {
             on:pointer_down = keep_press,
             on:double_click = keep_double
         ) {
-            Button(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                node_ref = anchor,
-                on:click = open,
-                attr:data-testid = format!("player-actions-{}", player.raw()),
-                a11y:label = hint
-            ) {
-                Icon(icon = ELLIPSIS)
+            Tooltip(open = Binding::controlled(tip_open, move |on: bool| tip_wanted.set(on))) {
+                TooltipTrigger {
+                    Button(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::IconSm,
+                        node_ref = anchor,
+                        on:click = open,
+                        attr:data-testid = format!("player-actions-{}", player.raw()),
+                        a11y:label = label
+                    ) {
+                        Icon(icon = ELLIPSIS)
+                    }
+                }
+                TooltipContent {{hint.clone()}}
             }
         }
     })
