@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use zgui::component;
@@ -16,9 +17,11 @@ use zgui::view::AttrName;
 use zgui::view::BuildCx;
 use zgui::view::Children;
 use zgui::view::DomHandle;
+use zgui::view::FrameHandle;
 use zgui::view::IntoView;
 use zgui::view::NodeId;
 use zgui::view::Stylesheet;
+use zgui::view::Timers;
 use zgui::view::View;
 use zgui::view::install_stylesheet;
 use zgui_ui_tokens::ColorScheme;
@@ -81,7 +84,7 @@ pub fn ThemeRoot(
     let reduced = Signal::derive_local(move || motion.get() == MotionPreference::Reduced);
 
     (
-        RootAttribute { name: AttrName::new(REDUCED_MOTION_ATTRIBUTE), on: reduced },
+        RootAttribute::new(REDUCED_MOTION_ATTRIBUTE, reduced),
         view! {
             ThemeProvider(light = light, dark = dark, scheme = scheme) {
                 {children.into_view_once()}
@@ -98,6 +101,12 @@ pub fn ThemeRoot(
 struct RootAttribute {
     name: AttrName,
     on: Signal<bool, LocalStorage>,
+}
+
+impl RootAttribute {
+    fn new(name: &str, on: Signal<bool, LocalStorage>) -> Self {
+        Self { name: AttrName::new(name), on }
+    }
 }
 
 struct RootAttributeState {
@@ -145,6 +154,99 @@ impl Anchor for RootAttributeState {
     fn unmount(&mut self, dom: &DomHandle) {
         if let Some(root) = self.root.take() {
             write_flag(dom, root, self.name, false);
+        }
+
+        dom.detach(self.marker);
+    }
+
+    fn first_node(&self) -> Option<NodeId> {
+        Some(self.marker)
+    }
+}
+
+/// Holds a valueless attribute on every element above its mount point while `on` is true.
+///
+/// For a sheet to select a sibling of something the view sits inside, such as the scrim beside
+/// the overlay surface a view is mounted in: the attribute is written on their shared parent.
+///
+/// A subtree is mounted before it is attached to the document, so the ancestors are read at the
+/// next frame, once the whole tree is in place.
+pub struct AncestorAttribute {
+    name: AttrName,
+    on: Signal<bool, LocalStorage>,
+}
+
+impl AncestorAttribute {
+    pub fn new(name: &str, on: Signal<bool, LocalStorage>) -> Self {
+        Self { name: AttrName::new(name), on }
+    }
+}
+
+pub struct AncestorAttributeState {
+    marker: NodeId,
+    name: AttrName,
+    on: Signal<bool, LocalStorage>,
+    ancestors: Rc<RefCell<Vec<NodeId>>>,
+    timers: Option<Timers>,
+    pending: Option<FrameHandle>,
+    _following: RenderEffect<()>,
+}
+
+impl View for AncestorAttribute {
+    type State = AncestorAttributeState;
+
+    fn build(self, cx: &mut BuildCx<'_>) -> AncestorAttributeState {
+        let Self { name, on } = self;
+        let marker = cx.dom().create_marker();
+        let ancestors: Rc<RefCell<Vec<NodeId>>> = Rc::new(RefCell::new(Vec::new()));
+        let (timers, following) = cx.with_owner(|| {
+            let dom = cx.dom_handle();
+            let ancestors = Rc::clone(&ancestors);
+            let following = RenderEffect::new(move |_| {
+                let on = on.get();
+                for ancestor in ancestors.borrow().iter() {
+                    write_flag(&dom, *ancestor, name, on);
+                }
+            });
+
+            (Timers::current(), following)
+        });
+
+        AncestorAttributeState { marker, name, on, ancestors, timers, pending: None, _following: following }
+    }
+
+    // The props are signals, so a rebuild has nothing new to apply.
+    fn rebuild(self, _state: &mut AncestorAttributeState, _cx: &mut BuildCx<'_>) {}
+}
+
+impl Anchor for AncestorAttributeState {
+    fn mount(&mut self, dom: &DomHandle, parent: NodeId, before: Option<NodeId>) {
+        dom.insert(parent, self.marker, before);
+        // A mounted view that is mounted again has moved, and its old ancestors are not its own.
+        for ancestor in self.ancestors.borrow_mut().drain(..) {
+            write_flag(dom, ancestor, self.name, false);
+        }
+
+        let Some(timers) = self.timers.as_ref() else { return };
+        let dom = dom.clone();
+        let Self { marker, name, on, .. } = *self;
+        let ancestors = Rc::clone(&self.ancestors);
+        self.pending = Some(timers.request_frame(move |_| {
+            let on = on.get_untracked();
+            let mut ancestors = ancestors.borrow_mut();
+            let mut next = dom.parent(marker);
+            while let Some(ancestor) = next {
+                write_flag(&dom, ancestor, name, on);
+                ancestors.push(ancestor);
+                next = dom.parent(ancestor);
+            }
+        }));
+    }
+
+    fn unmount(&mut self, dom: &DomHandle) {
+        self.pending = None;
+        for ancestor in self.ancestors.borrow_mut().drain(..) {
+            write_flag(dom, ancestor, self.name, false);
         }
 
         dom.detach(self.marker);

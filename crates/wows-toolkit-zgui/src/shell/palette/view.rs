@@ -8,6 +8,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::AncestorAttribute;
 use landaire_ui::LoadingPlacement;
 use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
@@ -88,8 +89,14 @@ use crate::text_marks::Marks;
 
 const SHEET: &str = "wt-palette";
 
+/// Set on the palette's ancestors while it is mounted. Its overlay box also holds its scrim, so the
+/// palette's scrim alone is left unblurred.
+const PALETTE_OPEN_ATTRIBUTE: &str = "data-wt-palette-open";
+
 const CSS: &str = css!(
     ".wt-palette { width: 448px; max-width: calc(100vw - 32px); }
+    .zui-dialog.wt-palette { top: 10vh; --zui-surface-place: translate(-50%, 0px); }
+    .zui-overlay-depth[data-wt-palette-open] > .zui-overlay-scrim { --zui-scrim-blur: 0px; }
     .wt-palette .zui-command__list { max-height: 400px; }
     .wt-palette__head {
         display: flex;
@@ -214,6 +221,8 @@ pub fn CommandPalette(shell: Shell) -> impl IntoView {
                 }
             ) {
                 DialogTitle {{locale.text("ui.palette.title")}}
+                // Mounted with the surface, so the scrim stays unblurred through the exit as well.
+                {AncestorAttribute::new(PALETTE_OPEN_ATTRIBUTE, Signal::derive_local(|| true))}
                 {move || match shown.get() {
                     Some(Opening { layer: Layer::Root, .. }) => {
                         AnyView::new(view! { RootList(shell = shell, query = query) })

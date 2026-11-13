@@ -178,6 +178,8 @@ pub use crate::motion::motion_preference;
 pub use crate::palette::Appearance;
 pub use crate::palette::Palette;
 pub use crate::palette::Tier;
+pub use crate::root::AncestorAttribute;
+pub use crate::root::AncestorAttributeState;
 pub use crate::root::ThemeRoot;
 pub use crate::root::ThemeRootProps;
 pub use crate::scheme::Scheme;

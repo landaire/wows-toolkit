@@ -91,6 +91,30 @@ fn the_palette_opens_on_the_shortcut_and_closes_on_escape() {
     }
 }
 
+/// The palette sits a tenth of the window down, centred across it, and marks the overlay box that
+/// holds its scrim so that scrim is left unblurred, only while the palette is mounted.
+#[test]
+fn the_palette_sits_near_the_top_over_an_unblurred_scrim() {
+    let mut window = open_window(TestModes::default());
+    shortcut(&mut window, 'k');
+
+    let palette = window.by_test_id(PALETTE).expect("the palette is open");
+    let palette = window.bounds(palette).expect("the palette is laid out");
+    let scrim = window.by_class("zui-overlay-scrim").expect("the palette has a scrim");
+    let scrim = window.bounds(scrim).expect("the scrim is laid out");
+    let down = (palette.origin.y.0 - scrim.origin.y.0) / scrim.size.height.0;
+    assert!((down - 0.1).abs() < 0.005, "the palette's top is a tenth of the way down: {down}");
+    let palette_middle = palette.origin.x.0 + palette.size.width.0 / 2.0;
+    let scrim_middle = scrim.origin.x.0 + scrim.size.width.0 / 2.0;
+    assert!((palette_middle - scrim_middle).abs() < 1.0, "the palette is centred across the window");
+    let marked = window.all_by_attribute("data-wt-palette-open", "");
+    let depths = window.all_by_class("zui-overlay-depth");
+    assert!(marked.iter().any(|element| depths.contains(element)), "the palette's overlay box is marked");
+
+    press(&mut window, NamedKey::Escape);
+    assert!(window.by_attribute("data-wt-palette-open", "").is_none(), "the mark goes with the palette");
+}
+
 /// Every tab, the settings and the shell's own commands are on the root list; the Search tab is
 /// offered as the advanced search rather than by its name.
 #[test]
