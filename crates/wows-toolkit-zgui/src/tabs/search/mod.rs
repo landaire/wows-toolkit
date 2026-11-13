@@ -19,6 +19,7 @@ use landaire_ui::ColumnWidth;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
+use landaire_ui::GridStrings;
 use landaire_ui::LoadingProps;
 use landaire_ui::MenuItems;
 use landaire_ui::RowHeight;
@@ -174,6 +175,8 @@ const CSS: &str = css!(
 
 /// The settings row the dragged column widths are kept in, in [`ResultColumn::all`] order.
 const COLUMN_WIDTHS_KEY: &str = "search_column_widths";
+/// The pinned columns, in order. Not shared with the GPUI front end, which does not pin.
+const PINNED_COLUMNS_KEY: &str = "search_pinned_columns_zgui";
 
 /// The column the row's actions sit in, last.
 const ACTIONS_COLUMN: &str = "actions";
@@ -217,7 +220,7 @@ pub fn SearchTab() -> impl IntoView {
             .map(|column| ColumnId::new(column_id(column)))
             .chain([ColumnId::new(ACTIONS_COLUMN)]),
     ));
-    persist_widths(services, layout);
+    persist_layout(services, layout);
 
     // The saved query is read once the config database is open.
     let opening = RenderEffect::new(move |_| {
@@ -370,8 +373,9 @@ fn outcome_tone(outcome: MatchOutcome) -> Option<&'static str> {
     }
 }
 
-/// Reads the dragged widths back once, and writes them whenever a drag completes after that.
-fn persist_widths(search_services: crate::services::Services, layout: RwSignal<ColumnLayout, LocalStorage>) {
+/// Reads the dragged widths and the pins back once, and writes them whenever they change after
+/// that.
+fn persist_layout(search_services: crate::services::Services, layout: RwSignal<ColumnLayout, LocalStorage>) {
     let loaded = StoredValue::new(false);
     let loading = RenderEffect::new(move |_| {
         if loaded.get_value() {
@@ -386,16 +390,29 @@ fn persist_widths(search_services: crate::services::Services, layout: RwSignal<C
         spawn_local(async move {
             let stored = search_services
                 .on_tokio(async move {
-                    wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await
+                    let widths =
+                        wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await;
+                    let pinned =
+                        wows_toolkit_config::queries::get_setting::<Vec<ColumnId>>(&pool, PINNED_COLUMNS_KEY).await;
+                    (widths, pinned)
                 })
                 .await;
-            let Ok(Some(widths)) = stored else { return };
+            let Ok((widths, pinned)) = stored else { return };
             layout.update(|layout| {
-                for (column, width) in ResultColumn::all().into_iter().zip(widths) {
+                for (column, width) in ResultColumn::all().into_iter().zip(widths.unwrap_or_default()) {
                     // A width narrower than the grip leaves a column that cannot be grabbed again.
                     let Some(width) = width else { continue };
                     layout
                         .set_width(&ColumnId::new(column_id(column)), Some(ColumnWidth(width.max(ColumnWidth::MIN.0))));
+                }
+                // The actions column is never pinned, and an id no longer shown is passed over.
+                let pinned: Vec<ColumnId> = pinned
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|id| id.as_str() != ACTIONS_COLUMN && layout.ids().any(|known| known == id))
+                    .collect();
+                for id in &pinned {
+                    layout.pin(id);
                 }
             });
         });
@@ -412,9 +429,17 @@ fn persist_widths(search_services: crate::services::Services, layout: RwSignal<C
         }
         widths
     });
+    let saving_pins = RenderEffect::new(move |previous: Option<Vec<ColumnId>>| {
+        let pinned: Vec<ColumnId> = layout.with(|layout| layout.ids().take(layout.pinned_count()).cloned().collect());
+        if previous.as_ref().is_some_and(|previous| *previous != pinned) {
+            search_services.settings.save(PINNED_COLUMNS_KEY, &pinned);
+        }
+        pinned
+    });
     on_cleanup_local(move || {
         drop(loading);
         drop(saving);
+        drop(saving_pins);
     });
 }
 
@@ -497,7 +522,6 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
             })
             .sizing(ColumnSizing::Fixed(ColumnWidth(column.default_width())))
             .reorderable(false)
-            .pinnable(false)
             .sortable(matches!(column, ResultColumn::Sortable(_)))
         })
         .collect();
@@ -577,6 +601,11 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
             }
         }))
     };
+    let strings = GridStrings {
+        pin: t!("ui.replay.context.pin_column").into_owned(),
+        unpin: t!("ui.replay.context.unpin_column").into_owned(),
+        ..GridStrings::new()
+    };
 
     view! {
         box(class = "wt-search-body", on:pointer_leave = move |_| preview.leave(), attr:data-testid = "search-results") {
@@ -586,6 +615,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                 row_key = |row: &ResultRow| row.position,
                 mode = RowMode::fixed(ROW_HEIGHT),
                 layout = layout,
+                strings = strings,
                 sort = Signal::derive_local(move || Some(grid_sort(search.sort.get()))),
                 on_sort = UnsyncCallback::new(move |asked: Option<ColumnSort>| {
                     // The index sorts by its own rule: a press on the sorted column flips it, a
