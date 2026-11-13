@@ -28,6 +28,14 @@ wgc-auth = { workspace = true }
 wgc-catalog = { workspace = true }
 wgc-download = { workspace = true }
 wgc-install = { workspace = true }
+# The replay renderer: draw commands, the battle's clock, the collab session's shapes, the art a
+# peer sends, and an exported video handed to the clipboard as a file.
+wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+wows_replays = { workspace = true }
+wows-replay-insights = { workspace = true }
+wt-collab-client = { workspace = true }
+image = { workspace = true, features = ["png"] }
+arboard = "3.6.1"
 # The process mitigations, applied before a window exists.
 wows-toolkit-hardening = { workspace = true }
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
@@ -72,5 +80,3 @@ wows-toolkit-services = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # Game versions, for the palette's version list tests.
 wowsunpack = { workspace = true }
-# Test frames are built from RGB images.
-image = { workspace = true }
