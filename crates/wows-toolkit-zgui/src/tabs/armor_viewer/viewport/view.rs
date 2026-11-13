@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use landaire_ui::LoadingProps;
 use landaire_ui::OverlaySurfaceProps;
+use landaire_ui::PointerTipProps;
 use rust_i18n::t;
 use wows_toolkit_armor::catalog::translate_name;
 use wows_toolkit_armor::hull_picking::MeshTooltip;
@@ -19,10 +20,14 @@ use zgui::elements::Focus;
 use zgui::elements::surface;
 use zgui::geom::Css;
 use zgui::geom::CssPx;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::prelude::Fonts;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
@@ -59,6 +64,7 @@ use super::input::KeyModifiers;
 use super::input::KeyOutcome;
 use super::input::ViewKey;
 use super::model::GpuState;
+use super::model::ViewportModel;
 use super::overlay::OverlayElement;
 use super::state::ArmorViewportState;
 
@@ -151,7 +157,6 @@ const CSS: &str = css!(
         gap: 8px;
     }
     .wt-armor-viewport__tooltip {
-        position: absolute;
         padding: 4px 8px;
         pointer-events: none;
         display: flex;
@@ -221,13 +226,6 @@ const CSS: &str = css!(
     }"
 );
 
-/// How far the tooltips sit from the pointer, so they do not sit under it.
-const TOOLTIP_CURSOR_OFFSET: f32 = 16.0;
-
-/// The part of the viewport past which a tooltip opens toward the pointer rather than away from
-/// it, so it stays inside the viewport.
-const TOOLTIP_FLIP: f32 = 0.6;
-
 /// How tall a line of wheel scrolling is, in CSS pixels.
 const WHEEL_LINE: f32 = 20.0;
 
@@ -243,12 +241,20 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
     let overlay = overlay_element(state);
 
     // Where `position`, in window CSS pixels, sits in the viewport.
-    let local = move |position: zgui::geom::Point<CssPx, Css>| -> Option<Vec2> {
+    let local = move |position: Point<CssPx, Css>| -> Option<Vec2> {
         let bounds = area.window_bounds()?;
-        let scale = area.scale();
-        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-        Some(Vec2::new(position.x.0 - bounds.origin.x.0 / scale, position.y.0 - bounds.origin.y.0 / scale))
+        Some(viewport_point(position, bounds.origin, device_scale(area)))
     };
+    // Where the pointer the tooltip stands beside is in the window. None while the export panel
+    // covers the view, which keeps the pointer's moves from it.
+    let pointer = Signal::derive_local(move || {
+        let cursor = state
+            .read_overlay(|model| model.export_confirm.is_none().then(|| hovered(model)).flatten())
+            .flatten()
+            .map(|(_, cursor)| cursor)?;
+        let bounds = area.window_bounds()?;
+        Some(window_point(cursor, bounds.origin, device_scale(area)))
+    });
 
     let on_down = move |ev: &mut EventCx<'_, events::PointerDown>| {
         let Some(button) = ev.button else { return };
@@ -369,7 +375,9 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                     {overlay.class("wt-armor-viewport__overlay")}
                     {move || stand_in(state, locale)}
                     {move || readouts(state, locale)}
-                    {move || tooltips(state, locale)}
+                    PointerTip(pointer = pointer) {
+                        {move || tooltip(state, locale)}
+                    }
                     {move || export_confirm(state, locale, shell)}
                 }
             }
@@ -530,42 +538,30 @@ enum Hover {
     Mesh(MeshTooltip),
 }
 
-/// The tooltip for what the pointer rests on, anchored beside the pointer and kept inside the
-/// viewport.
-fn tooltips(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
-    locale.track();
-    let (hover, cursor, size) = state
-        .read_overlay(|model| {
-            let size = model.viewport_size();
-            if let Some((label, cursor)) = model.ring_hover() {
-                return Some((Hover::Ring(label), cursor, size));
-            }
-            if let Some((tooltip, cursor)) = model.plate_hover() {
-                // A zone is named the way the game names it, as the egui tooltip does.
-                let zone = match model.scene_source.as_ref() {
-                    Some(source) => translate_name(source.assets().metadata(), &tooltip.zone),
-                    None => tooltip.zone.clone(),
-                };
-                let material = model.material_label(tooltip.material);
-                return Some((Hover::Plate { tooltip, zone, material }, cursor, size));
-            }
-            let (tooltip, cursor) = model.mesh_hover()?;
-            Some((Hover::Mesh(tooltip), cursor, size))
-        })
-        .flatten()?;
+/// What the pointer rests on, with where it was in the viewport when that was picked. An orbit
+/// takes the tooltip from the plate behind it.
+fn hovered(model: &ViewportModel) -> Option<(Hover, Vec2)> {
+    if let Some((label, cursor)) = model.ring_hover() {
+        return Some((Hover::Ring(label), cursor));
+    }
+    if let Some((tooltip, cursor)) = model.plate_hover() {
+        // A zone is named the way the game names it, as the egui tooltip does.
+        let zone = match model.scene_source.as_ref() {
+            Some(source) => translate_name(source.assets().metadata(), &tooltip.zone),
+            None => tooltip.zone.clone(),
+        };
+        let material = model.material_label(tooltip.material);
+        return Some((Hover::Plate { tooltip, zone, material }, cursor));
+    }
+    let (tooltip, cursor) = model.mesh_hover()?;
 
-    let (width, height) = size;
-    let (horizontal, x) = if cursor.x > width * TOOLTIP_FLIP {
-        ("right", width - cursor.x + TOOLTIP_CURSOR_OFFSET)
-    } else {
-        ("left", cursor.x + TOOLTIP_CURSOR_OFFSET)
-    };
-    let (vertical, y) = if cursor.y > height * TOOLTIP_FLIP {
-        ("bottom", height - cursor.y + TOOLTIP_CURSOR_OFFSET)
-    } else {
-        ("top", cursor.y + TOOLTIP_CURSOR_OFFSET)
-    };
-    let placed = format!("{horizontal}: {x}px; {vertical}: {y}px;");
+    Some((Hover::Mesh(tooltip), cursor))
+}
+
+/// The tooltip for what the pointer rests on.
+fn tooltip(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
+    locale.track();
+    let (hover, _) = state.read_overlay(hovered).flatten()?;
 
     Some(match hover {
         Hover::Ring(label) => {
@@ -574,14 +570,14 @@ fn tooltips(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
                 .map(|line| AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-text") {{line.to_owned()}} }))
                 .collect();
             AnyView::new(view! {
-                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:style = placed, attr:data-testid = "armor-ring-tooltip") {
+                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-ring-tooltip") {
                     {lines}
                 }
             })
         }
         Hover::Plate { tooltip, zone, material } => {
             let hint = t!("ui.armor.cast_here_hint", key = ModifierKey::Shift.label()).into_owned();
-            plate_tooltip(&tooltip, &zone, &material, &hint, placed)
+            plate_tooltip(&tooltip, &zone, &material, &hint)
         }
         Hover::Mesh(tooltip) => {
             let mut lines = vec![
@@ -594,7 +590,7 @@ fn tooltips(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
                 lines.push(AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-muted") {{muted}} }));
             }
             AnyView::new(view! {
-                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:style = placed, attr:data-testid = "armor-mesh-tooltip") {
+                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-mesh-tooltip") {
                     {lines}
                 }
             })
@@ -607,19 +603,17 @@ fn swatch(color: [f32; 4], size: f32) -> AnyView {
     // Truncated to bytes as the legend's swatches are.
     let byte = |channel: f32| (channel * 255.0) as u8;
     let alpha = f32::from(byte(color[3])) / 255.0;
-    let style = format!(
-        "width: {size}px; height: {size}px; background-color: rgba({}, {}, {}, {alpha});",
-        byte(color[0]),
-        byte(color[1]),
-        byte(color[2])
-    );
-    AnyView::new(view! { box(class = "wt-armor-viewport__swatch", attr:style = style) })
+    let fill = format!("rgba({}, {}, {}, {alpha})", byte(color[0]), byte(color[1]), byte(color[2]));
+    let side = format!("{size}px");
+    AnyView::new(view! {
+        box(class = "wt-armor-viewport__swatch", style:width = side.clone(), style:height = side, style:background-color = fill)
+    })
 }
 
 /// The thickness tooltip, as the egui app's `show_armor_tooltip` lays it out: a swatch and the
 /// thickness, the zone and material, the layers of the part when there are several, and what a
 /// click there can do.
-fn plate_tooltip(tooltip: &ArmorTriangleTooltip, zone: &str, material: &str, hint: &str, placed: String) -> AnyView {
+fn plate_tooltip(tooltip: &ArmorTriangleTooltip, zone: &str, material: &str, hint: &str) -> AnyView {
     let mut lines = vec![
         AnyView::new(view! {
             box(class = "wt-armor-viewport__tooltip-head") {
@@ -647,7 +641,7 @@ fn plate_tooltip(tooltip: &ArmorTriangleTooltip, zone: &str, material: &str, hin
     lines.push(AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-muted") {{hint.to_owned()}} }));
 
     AnyView::new(view! {
-        OverlaySurface(class = "wt-armor-viewport__tooltip", attr:style = placed, attr:data-testid = "armor-plate-tooltip") {
+        OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-plate-tooltip") {
             {lines}
         }
     })
@@ -751,4 +745,39 @@ fn menu_items(state: ArmorViewportState) -> Vec<AnyView> {
         items.extend(quick);
     }
     items
+}
+
+/// How many device pixels one CSS pixel is on `area`'s surface, the window's zoom included. One
+/// where the surface reports no usable scale.
+fn device_scale(area: NodeRef) -> f32 {
+    let scale = area.scale();
+    if scale.is_finite() && scale > 0.0 { scale } else { 1.0 }
+}
+
+/// Where `position`, in window CSS pixels, sits in a viewport whose box starts at `origin` on a
+/// surface of `scale` device pixels to the CSS pixel.
+fn viewport_point(position: Point<CssPx, Css>, origin: Point<DevicePx, Device>, scale: f32) -> Vec2 {
+    Vec2::new(position.x.0 - origin.x.0 / scale, position.y.0 - origin.y.0 / scale)
+}
+
+/// Where `local`, a point in a viewport whose box starts at `origin`, sits in the window, in CSS
+/// pixels on a surface of `scale` device pixels to the CSS pixel.
+fn window_point(local: Vec2, origin: Point<DevicePx, Device>, scale: f32) -> Point<CssPx, Css> {
+    Point::new(CssPx(local.x + origin.x.0 / scale), CssPx(local.y + origin.y.0 / scale))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pointer_in_a_zoomed_window_maps_into_an_offset_viewport_and_back() {
+        // A viewport 300 by 90 CSS pixels into a window zoomed to 1.5.
+        let origin = Point::new(DevicePx(450.0), DevicePx(135.0));
+        let pointer = Point::new(CssPx(410.0), CssPx(200.0));
+
+        let local = viewport_point(pointer, origin, 1.5);
+        assert_eq!(local, Vec2::new(110.0, 110.0));
+        assert_eq!(window_point(local, origin, 1.5), pointer);
+    }
 }

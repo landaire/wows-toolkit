@@ -39,8 +39,11 @@ use wowsunpack::game_data::build_game_vfs_for_build;
 use wowsunpack::game_data::list_available_builds;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use zgui::component;
+use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::geom::Rect;
+use zgui::prelude::Zoom;
 use zgui::reactive::Signal;
 use zgui::view;
 use zgui::view::IntoView;
@@ -58,8 +61,28 @@ use crate::theme::SemanticTokensProps;
 /// The size the viewport is reviewed at.
 const VIEW: WindowSize = WindowSize { width: 1000.0, height: 640.0 };
 
+/// Where the viewport sits in its window, in CSS pixels.
+#[derive(Clone, Copy, Debug)]
+struct ViewBox {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+impl ViewBox {
+    /// The whole of a window [`VIEW`] in size.
+    const FILL: Self = Self { left: 0.0, top: 0.0, width: VIEW.width, height: VIEW.height };
+}
+
 /// How long the pipeline may take to compile and the first frame to land, in real time.
 const FIRST_FRAME_WAIT: Duration = Duration::from_secs(60);
+
+/// The zoom the tooltip placement is checked at.
+const TIP_ZOOM: f32 = 1.5;
+
+/// One CSS pixel, the gap between the pointer and the tooltip, in device pixels.
+const GAP: f32 = TIP_ZOOM;
 
 /// A ship from a real install, loaded once for every test in the process.
 struct RealShip {
@@ -107,13 +130,14 @@ fn load_real_ship() -> Option<RealShip> {
     })
 }
 
-/// The viewport filling a themed window, handing its state out.
+/// The viewport at `place` in a themed window, handing its state out.
 #[component]
-fn Harness(scheme: Scheme, handed: Rc<Cell<Option<ArmorViewportState>>>) -> impl IntoView {
+fn Harness(scheme: Scheme, place: ViewBox, handed: Rc<Cell<Option<ArmorViewportState>>>) -> impl IntoView {
     Services::provide(None);
     let state = ArmorViewportState::new();
     handed.set(Some(state));
     let choice = Signal::stored_local(ThemeChoice::Fixed(scheme));
+    let px = |value: f32| format!("{value}px");
 
     view! {
         ThemeRoot(choice = choice) {
@@ -121,7 +145,15 @@ fn Harness(scheme: Scheme, handed: Rc<Cell<Option<ArmorViewportState>>>) -> impl
                 Scheme::Light => wows_toolkit_viewmodel::settings::ThemeChoice::Light,
                 _ => wows_toolkit_viewmodel::settings::ThemeChoice::Dark,
             }))
-            box(style:width = "1000px", style:height = "640px", style:display = "flex", style:background-color = "var(--lui-color-panel)") {
+            box(
+                style:position = "absolute",
+                style:left = px(place.left),
+                style:top = px(place.top),
+                style:width = px(place.width),
+                style:height = px(place.height),
+                style:display = "flex",
+                style:background-color = "var(--lui-color-panel)"
+            ) {
                 ArmorViewport(state = state)
             }
         }
@@ -131,16 +163,21 @@ fn Harness(scheme: Scheme, handed: Rc<Cell<Option<ArmorViewportState>>>) -> impl
 /// A window showing the viewport on the graphics device, or `None` with a note when this machine
 /// has no adapter.
 fn open(appearance: Appearance) -> Option<(HeadlessWindow, ArmorViewportState)> {
-    let scheme = match appearance {
-        Appearance::Light => Scheme::Light,
-        Appearance::Dark => Scheme::Dark,
+    open_in(HeadlessOptions { desktop: Some(appearance), ..HeadlessOptions::new(VIEW) }, ViewBox::FILL)
+}
+
+/// [`open`] with the window `options` describe and the viewport at `place` in it.
+fn open_in(options: HeadlessOptions, place: ViewBox) -> Option<(HeadlessWindow, ArmorViewportState)> {
+    let scheme = match options.desktop {
+        Some(Appearance::Light) => Scheme::Light,
+        _ => Scheme::Dark,
     };
     let handed = Rc::new(Cell::new(None));
     let given = Rc::clone(&handed);
-    let options = HeadlessOptions { drawing: Drawing::Device, desktop: Some(appearance), ..HeadlessOptions::new(VIEW) };
+    let options = HeadlessOptions { drawing: Drawing::Device, ..options };
     let opened = HeadlessWindow::open(options, move || {
         let handed = Rc::clone(&given);
-        view! { Harness(scheme = scheme, handed = handed) }
+        view! { Harness(scheme = scheme, place = place, handed = handed) }
     });
     match opened {
         Ok(window) => Some((window, handed.get().expect("the harness hands its state out"))),
@@ -304,6 +341,68 @@ fn the_plate_under_the_pointer_is_picked_and_named() {
     assert!(window.by_test_id("armor-plate-tooltip").is_some(), "the plate's tooltip is shown");
     let hovered = state.read_untracked(|model| model.plate_hover().map(|(tooltip, _)| tooltip.zone)).flatten();
     assert_eq!(hovered.as_deref(), Some(plate.zone.as_str()));
+}
+
+/// The real ship in a window 600 by 400 CSS pixels zoomed to [`TIP_ZOOM`], with the viewport at
+/// `place`. `None`, with a note, without an install or an adapter.
+fn zoomed_ship(place: ViewBox) -> Option<HeadlessWindow> {
+    let Some(ship) = real_ship() else {
+        eprintln!("skipped: WT_WOWS_DIR names no game install");
+        return None;
+    };
+    let zoom = Zoom::new(TIP_ZOOM).expect("a zoom in range");
+    let size = WindowSize { width: 600.0 * TIP_ZOOM, height: 400.0 * TIP_ZOOM };
+    let options = HeadlessOptions { zoom, desktop: Some(Appearance::Dark), ..HeadlessOptions::new(size) };
+    let (mut window, state) = open_in(options, place)?;
+    show_ship(&mut window, state, ship);
+
+    Some(window)
+}
+
+/// Moves the pointer to `x`, `y` CSS pixels in the window and returns where it is in device
+/// pixels with the plate tooltip's box.
+fn plate_tooltip_at(window: &mut HeadlessWindow, x: f32, y: f32) -> (Point<DevicePx, Device>, Rect<DevicePx, Device>) {
+    let pointer = Point::new(DevicePx(x * TIP_ZOOM), DevicePx(y * TIP_ZOOM));
+    window.hover_at(pointer);
+    window.advance(Duration::from_millis(100));
+    let tooltip = window.by_test_id("armor-plate-tooltip").expect("a plate's tooltip is shown");
+
+    (pointer, window.bounds(tooltip).expect("the tooltip has a box"))
+}
+
+/// Whether `actual` is `expected` device pixels, to the device pixel the tooltip is rounded onto.
+fn near(actual: DevicePx, expected: f32) -> bool {
+    (actual.0 - expected).abs() <= 0.5
+}
+
+/// The tooltip stands one CSS pixel right of and below the pointer and moves with it, in a zoomed
+/// window whose viewport does not start at the window's corner.
+#[test]
+fn the_plate_tooltip_follows_the_pointer_in_an_offset_zoomed_viewport() {
+    let Some(mut window) = zoomed_ship(ViewBox { left: 60.0, top: 40.0, width: 300.0, height: 200.0 }) else { return };
+
+    for (x, y) in [(210.0, 140.0), (220.0, 146.0)] {
+        let (pointer, tooltip) = plate_tooltip_at(&mut window, x, y);
+        assert!(near(tooltip.left(), pointer.x.0 + GAP), "{tooltip:?} starts just right of {pointer:?}");
+        assert!(near(tooltip.top(), pointer.y.0 + GAP), "{tooltip:?} starts just below {pointer:?}");
+    }
+}
+
+/// Where the window leaves no room right of the pointer, the tooltip stands left of it instead,
+/// and on neither axis does it cover the pointer or leave the window.
+#[test]
+fn the_plate_tooltip_crosses_the_pointer_at_the_window_edge() {
+    let Some(mut window) = zoomed_ship(ViewBox { left: 300.0, top: 200.0, width: 300.0, height: 200.0 }) else {
+        return;
+    };
+
+    let (pointer, tooltip) = plate_tooltip_at(&mut window, 450.0, 300.0);
+    assert!(tooltip.size.width.0 > 150.0 * TIP_ZOOM, "the tooltip is wider than the room right of the pointer");
+    assert!(near(tooltip.right(), pointer.x.0 - GAP), "{tooltip:?} ends just left of {pointer:?}");
+    let below = near(tooltip.top(), pointer.y.0 + GAP);
+    let above = near(tooltip.bottom(), pointer.y.0 - GAP);
+    assert!(below || above, "{tooltip:?} stands just above or below {pointer:?}");
+    assert!(tooltip.bottom().0 <= 400.0 * TIP_ZOOM, "{tooltip:?} stays inside the window");
 }
 
 /// A device of this machine's own for the model-level tests, or `None` with a note.

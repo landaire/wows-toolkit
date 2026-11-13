@@ -225,6 +225,8 @@ pub use crate::tokens::lui_sheet;
 pub use crate::tokens::tier_property;
 pub use crate::tokens::zui_theme;
 pub use crate::tone::Tones;
+pub use crate::tooltip::PointerTip;
+pub use crate::tooltip::PointerTipProps;
 pub use crate::tooltip::TOOLTIP_DELAY;
 pub use crate::tooltip::Tooltip;
 pub use crate::tooltip::TooltipContent;

@@ -2,8 +2,11 @@
 
 #![cfg(feature = "test-support")]
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::PointerTipProps;
 use landaire_ui::TOOLTIP_DELAY;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::TooltipContentProps;
@@ -14,9 +17,15 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::component;
+use zgui::geom::Css;
+use zgui::geom::CssPx;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::prelude::Zoom;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::IntoView;
 
@@ -87,6 +96,46 @@ fn Rows() -> impl IntoView {
             }
         }
     }
+}
+
+/// Where the test puts the pointer a [`PointerTip`] follows.
+type Followed = RwSignal<Option<Point<CssPx, Css>>, LocalStorage>;
+
+/// A [`PointerTip`] 80 by 20 CSS pixels following a pointer the test moves, handing that pointer
+/// out.
+#[component]
+fn Follower(handed: Rc<Cell<Option<Followed>>>) -> impl IntoView {
+    let pointer: Followed = RwSignal::new_local(None);
+    handed.set(Some(pointer));
+
+    view! {
+        ThemeRoot {
+            PointerTip(pointer = pointer) {
+                box(attr:data-testid = "tip", style = "width: 80px; height: 20px")
+            }
+        }
+    }
+}
+
+/// A window zoomed to 1.5, 213 by 200 CSS pixels, holding a [`Follower`].
+fn open_follower() -> (HeadlessWindow, Followed) {
+    let handed = Rc::new(Cell::new(None));
+    let given = Rc::clone(&handed);
+    let zoom = Zoom::new(1.5).expect("a zoom in range");
+    let options = HeadlessOptions { zoom, ..HeadlessOptions::new(SIZE) };
+    let window = HeadlessWindow::open(options, move || view! { Follower(handed = Rc::clone(&given)) })
+        .expect("the window opens");
+
+    (window, handed.get().expect("the follower hands its pointer out"))
+}
+
+/// The corner of the tip with the pointer at `x`, `y` CSS pixels, in device pixels.
+fn tip_at(window: &mut HeadlessWindow, pointer: Followed, x: f32, y: f32) -> Point<DevicePx, Device> {
+    pointer.set(Some(Point::new(CssPx(x), CssPx(y))));
+    window.advance(SETTLE);
+    let tip = element(window, "tip");
+
+    window.bounds(tip).expect("the tip has a box").origin
 }
 
 fn open() -> HeadlessWindow {
@@ -251,4 +300,22 @@ fn a_control_inside_a_row_takes_over_the_rows_tooltip_and_hands_it_back() {
     assert!(shown(&window).is_empty(), "the control's goes with the pointer");
     window.advance(TOOLTIP_DELAY);
     assert_eq!(shown(&window), ["about outer"], "the row's comes back after its delay");
+}
+
+#[test]
+fn a_pointer_tip_follows_the_pointer_one_css_pixel_past_it_when_zoomed() {
+    let (mut window, pointer) = open_follower();
+
+    assert_eq!(tip_at(&mut window, pointer, 49.0, 39.0), Point::new(DevicePx(75.0), DevicePx(60.0)));
+    assert_eq!(tip_at(&mut window, pointer, 99.0, 59.0), Point::new(DevicePx(150.0), DevicePx(90.0)));
+}
+
+#[test]
+fn a_pointer_tip_crosses_the_pointer_where_the_window_has_no_room() {
+    let (mut window, pointer) = open_follower();
+
+    // 80 CSS pixels past 200 leave the 213 wide window, so the tip ends one pixel before 199.
+    assert_eq!(tip_at(&mut window, pointer, 199.0, 39.0), Point::new(DevicePx(177.0), DevicePx(60.0)));
+    // 20 CSS pixels past 190 leave the 200 high window.
+    assert_eq!(tip_at(&mut window, pointer, 49.0, 189.0), Point::new(DevicePx(75.0), DevicePx(252.0)));
 }

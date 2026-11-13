@@ -1,4 +1,5 @@
-//! Tooltips that wait half a second, show one at a time per window and stand at the pointer.
+//! Tooltips that wait half a second, show one at a time per window and stand at the pointer, and
+//! a surface that stands beside a pointer its caller follows.
 
 use core::time::Duration;
 use std::rc::Rc;
@@ -7,8 +8,11 @@ use zgui::component;
 use zgui::css;
 use zgui::geom::Css;
 use zgui::geom::CssPx;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Size;
+use zgui::prelude::try_use_window;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -327,19 +331,8 @@ pub fn TooltipContent(
     // Hidden until its size is known, so it is drawn where it belongs the first time.
     let positioner = NodeRef::new();
     let size = positioner.observe_border_size_while(move || open.get());
-    let origin: Signal<Option<Point<CssPx, Css>>, LocalStorage> = Signal::derive_local(move || {
-        let spot = place.spot.get()?;
-        let size = size.get()?;
-        if size.width.0 <= 0.0 && size.height.0 <= 0.0 {
-            return None;
-        }
-
-        // On whole device pixels, so its edges and text are sharp.
-        let scale = positioner.scale();
-        let size = Size::new(CssPx(size.width.0 / scale), CssPx(size.height.0 / scale));
-        let corner = beside_pointer(spot.pointer, size, spot.window);
-        Some(Point::new(CssPx((corner.x.0 * scale).round() / scale), CssPx((corner.y.0 * scale).round() / scale)))
-    });
+    let origin: Signal<Option<Point<CssPx, Css>>, LocalStorage> =
+        Signal::derive_local(move || corner(place.spot.get()?, size.get()?, positioner.scale()));
     let left = move || origin.get().map(|corner| format!("{}px", corner.x.0));
     let top = move || origin.get().map(|corner| format!("{}px", corner.y.0));
     let visibility = move || origin.get().is_none().then(|| "hidden".to_owned());
@@ -382,6 +375,66 @@ pub fn TooltipContent(
             }
         }
     })
+}
+
+/// A surface that stands beside a pointer its caller follows, placed as a [`Tooltip`]'s label is,
+/// and moves with it. It shows while `pointer` holds a position and takes no pointer itself.
+#[component]
+pub fn PointerTip(
+    /// Where the pointer is, in window CSS pixels. `None` hides it.
+    #[prop(into)]
+    pointer: Signal<Option<Point<CssPx, Css>>, LocalStorage>,
+    /// What stands beside the pointer.
+    children: ChildrenFn,
+) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+    let at = SurfaceElevation::raise(OverlayLayer::Popover);
+    at.publish();
+
+    // Followed, so a resize under a still pointer places it again.
+    let window = try_use_window().map(|window| window.size());
+    // Hidden until its size is known, so it is drawn where it belongs the first time.
+    let positioner = NodeRef::new();
+    let size = positioner.observe_border_size_while(move || pointer.get().is_some());
+    let origin: Signal<Option<Point<CssPx, Css>>, LocalStorage> = Signal::derive_local(move || {
+        let spot = Spot { pointer: pointer.get()?, window: window?.get() };
+        corner(spot, size.get()?, positioner.scale())
+    });
+    let left = move || origin.get().map(|corner| format!("{}px", corner.x.0));
+    let top = move || origin.get().map(|corner| format!("{}px", corner.y.0));
+    let visibility = move || origin.get().is_none().then(|| "hidden".to_owned());
+    // Held rather than moved: the portal builds its content from a function.
+    let children = StoredValue::new_local(children);
+
+    view! {
+        Portal(layer = {at.layer()}) {
+            Elevated(at = at, class = "lui-tooltip-layer") {
+                box(
+                    class = "lui-tooltip-positioner",
+                    node_ref = positioner,
+                    style:left = left,
+                    style:top = top,
+                    style:visibility = visibility
+                ) {
+                    {children.get_value().view()}
+                }
+            }
+        }
+    }
+}
+
+/// The corner, in CSS pixels, of a surface measured at `size` device pixels beside `spot`'s
+/// pointer on a surface of `scale` device pixels to the CSS pixel. On whole device pixels, so its
+/// edges and text are sharp. `None` while it has no size yet.
+fn corner(spot: Spot, size: Size<DevicePx, Device>, scale: f32) -> Option<Point<CssPx, Css>> {
+    if size.width.0 <= 0.0 && size.height.0 <= 0.0 {
+        return None;
+    }
+
+    let size = Size::new(CssPx(size.width.0 / scale), CssPx(size.height.0 / scale));
+    let corner = beside_pointer(spot.pointer, size, spot.window);
+
+    Some(Point::new(CssPx((corner.x.0 * scale).round() / scale), CssPx((corner.y.0 * scale).round() / scale)))
 }
 
 /// The corner of a tooltip of `size` for the pointer at `pointer`: [`POINTER_GAP`] right of and
@@ -435,5 +488,19 @@ mod tests {
     fn a_tooltip_with_no_room_either_side_keeps_inside_the_window() {
         assert_eq!(beside_pointer(point(50.0, 10.0), size(90.0, 20.0), size(100.0, 300.0)), point(10.0, 11.0));
         assert_eq!(beside_pointer(point(50.0, 10.0), size(150.0, 20.0), size(100.0, 300.0)), point(0.0, 11.0));
+    }
+
+    #[test]
+    fn a_zoomed_corner_is_measured_in_css_pixels_and_lands_on_a_device_pixel() {
+        let window = size(400.0, 300.0);
+        let measured = Size::new(DevicePx(120.0), DevicePx(30.0));
+
+        // 101 CSS pixels is 151.5 device pixels, taken to 152.
+        let spot = Spot { pointer: point(100.0, 49.0), window };
+        assert_eq!(corner(spot, measured, 1.5), Some(point(152.0 / 1.5, 50.0)));
+        // 80 CSS pixels wide does not fit right of a pointer 391 CSS pixels along.
+        let edge = Spot { pointer: point(391.0, 49.0), window };
+        assert_eq!(corner(edge, measured, 1.5), Some(point(310.0, 50.0)));
+        assert_eq!(corner(spot, Size::new(DevicePx(0.0), DevicePx(0.0)), 1.5), None);
     }
 }
