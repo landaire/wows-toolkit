@@ -5,6 +5,7 @@
 
 mod chrome;
 mod color;
+mod context_menu;
 mod contrast;
 mod dock;
 mod error;
@@ -85,6 +86,7 @@ pub use crate::chrome::window_frame::WindowFrame;
 pub use crate::chrome::window_frame::WindowFrameProps;
 pub use crate::color::Opacity;
 pub use crate::color::Rgb;
+pub use crate::context_menu::MenuItems;
 pub use crate::contrast::ContrastRatio;
 pub use crate::contrast::accent_foreground;
 pub use crate::contrast::readable_on;

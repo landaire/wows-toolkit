@@ -481,6 +481,21 @@ fn a_fortification_row_opens_its_building_by_click_and_by_enter() {
 }
 
 #[test]
+fn a_fortification_row_and_its_folders_open_no_menu() {
+    let mut sidebar = Sidebar::open();
+    sidebar.state.adopt_fortifications(fixture::fortifications());
+    sidebar.browse(&["armor-fortifications", "armor-fortifications/Complex"]);
+    let fort = building_row_id(GameParamId::from(fixture::FORT_OF_THE_ISLES));
+
+    for row in [RowId::from("armor-fortifications"), RowId::from("armor-fortifications/Complex"), fort.clone()] {
+        assert_eq!(sidebar.menu_of(&row), Vec::<String>::new(), "{row} offers nothing");
+        assert!(sidebar.window.by_role(Role::Menu).is_empty(), "so {row} opens no menu");
+    }
+    assert!(!sidebar.selected().contains(&fort), "nor selects the building's row");
+    assert!(sidebar.events().is_empty(), "nor opens the building");
+}
+
+#[test]
 fn enter_in_the_search_field_opens_the_first_match_and_down_moves_into_the_list() {
     let mut sidebar = Sidebar::open();
 

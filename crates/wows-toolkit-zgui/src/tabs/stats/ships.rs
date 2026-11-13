@@ -15,6 +15,7 @@ use landaire_ui::EscapeClears;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::MenuItems;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
 use landaire_ui::SortDirection;
@@ -505,7 +506,7 @@ fn ship_grid(
     ];
     let row_menu: RowMenu<GameParamId> = Rc::new(move |ship: GameParamId| {
         let summary = rows.with_untracked(|rows| rows.iter().find(|row| row.ship_id == ship).cloned());
-        AnyView::new(summary.map(|summary| copy_items(cx, summary)))
+        summary.map(|summary| MenuItems::new(move || copy_items(cx, summary.clone())))
     });
 
     AnyView::new(view! {

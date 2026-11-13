@@ -13,6 +13,7 @@ use landaire_ui::IndentWidth;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingPlacement;
 use landaire_ui::LoadingProps;
+use landaire_ui::MenuItems;
 use landaire_ui::MenuSelection;
 use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
@@ -484,34 +485,38 @@ fn rating_style(category: PersonalRatingCategory) -> String {
     )
 }
 
-/// The menu a secondary click on `key` opens.
-fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey) -> AnyView {
+/// The menu a secondary click on `key` opens. A group with no replays under it has none.
+fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey) -> Option<MenuItems> {
     match key {
         NodeKey::Group(id) => {
-            let paths =
-                listing.tree.with_untracked(|tree| tree.group(id).map(|group| group.paths.clone()).unwrap_or_default());
+            let paths = listing.tree.with_untracked(|tree| tree.group(id).map(|group| group.paths.clone()))?;
             if paths.is_empty() {
-                return AnyView::new(());
+                return None;
             }
-            let count = paths.len();
-            let (copied, listed, reindexed) = (paths.clone(), paths.clone(), paths);
-            AnyView::new(view! {
-                MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
-                    {t!("ui.replay.context.copy_replays", count = count).into_owned()}
-                }
-                MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
-                    {t!("ui.replay.context.copy_paths", count = count).into_owned()}
-                }
-                MenuSeparator()
-                MenuItem(on_select = UnsyncCallback::new({
-                    let events = events.clone();
-                    move |()| events.force_reindex(listing, &reindexed, Confirm::Always)
-                })) {
-                    {force_reindex_label(count)}
-                }
-            })
+            Some(MenuItems::new(move || group_menu(shell, listing, events.clone(), paths.clone())))
         }
-        NodeKey::Leaf(path) => leaf_menu(shell, listing, events, path),
+        NodeKey::Leaf(path) => {
+            let path = path.to_path_buf();
+            Some(MenuItems::new(move || leaf_menu(shell, listing, events.clone(), &path)))
+        }
+    }
+}
+
+fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<PathBuf>) -> impl IntoView {
+    let count = paths.len();
+    let (copied, listed, reindexed) = (paths.clone(), paths.clone(), paths);
+
+    view! {
+        MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
+            {t!("ui.replay.context.copy_replays", count = count).into_owned()}
+        }
+        MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
+            {t!("ui.replay.context.copy_paths", count = count).into_owned()}
+        }
+        MenuSeparator()
+        MenuItem(on_select = UnsyncCallback::new(move |()| events.force_reindex(listing, &reindexed, Confirm::Always))) {
+            {force_reindex_label(count)}
+        }
     }
 }
 

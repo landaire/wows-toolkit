@@ -10,6 +10,7 @@ use landaire_ui::ExpandRailProps;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::MenuItems;
 use landaire_ui::NodeKind;
 use landaire_ui::PanelSide;
 use landaire_ui::SidePanel;
@@ -468,36 +469,43 @@ fn file_row_content(model: UnpackerModel, pane: Pane, ix: usize, entry: ListingE
 }
 
 /// A file the viewer understands opens in it; a prototype the decoder understands also reads
-/// and writes as JSON.
-fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> AnyView {
-    let Some(entry) = pane.rows.with_untracked(|rows| rows.row(key.0)) else {
-        return AnyView::new(());
-    };
+/// and writes as JSON. A folder, or a file that is neither, has no menu.
+fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> {
+    let entry = pane.rows.with_untracked(|rows| rows.row(key.0))?;
     if entry.is_dir {
-        return AnyView::new(());
+        return None;
     }
-    let viewable = is_viewable(&entry.label).then(|| {
-        let path = entry.path.clone();
-        view! {
-            MenuItem(on_select = UnsyncCallback::new(move |()| model.open_viewer(path.clone()))) {
-                {t!("ui.unpacker.view_contents").into_owned()}
-            }
-        }
-    });
-    let decodable = decodable_prototype(&entry.label).is_some().then(|| {
-        let (shown, written) = (entry.path.clone(), entry.path.clone());
-        view! {
-            MenuItem(on_select = UnsyncCallback::new(move |()| model.open_json_viewer(shown.clone()))) {
-                {t!("ui.unpacker.view_as_json").into_owned()}
-            }
-            MenuItem(on_select = UnsyncCallback::new(move |()| model.extract_as_json(written.clone()))) {
-                {t!("ui.unpacker.extract_as_json").into_owned()}
-            }
-        }
-    });
+    let viewable = is_viewable(&entry.label);
+    let decodable = decodable_prototype(&entry.label).is_some();
+    if !viewable && !decodable {
+        return None;
+    }
 
-    AnyView::new(view! {
-        {viewable.map(IntoView::into_view)}
-        {decodable.map(IntoView::into_view)}
-    })
+    let path = entry.path;
+    Some(MenuItems::new(move || {
+        let viewed = path.clone();
+        let viewable = viewable.then(|| {
+            view! {
+                MenuItem(on_select = UnsyncCallback::new(move |()| model.open_viewer(viewed.clone()))) {
+                    {t!("ui.unpacker.view_contents").into_owned()}
+                }
+            }
+        });
+        let (shown, written) = (path.clone(), path.clone());
+        let decodable = decodable.then(|| {
+            view! {
+                MenuItem(on_select = UnsyncCallback::new(move |()| model.open_json_viewer(shown.clone()))) {
+                    {t!("ui.unpacker.view_as_json").into_owned()}
+                }
+                MenuItem(on_select = UnsyncCallback::new(move |()| model.extract_as_json(written.clone()))) {
+                    {t!("ui.unpacker.extract_as_json").into_owned()}
+                }
+            }
+        });
+
+        view! {
+            {viewable.map(IntoView::into_view)}
+            {decodable.map(IntoView::into_view)}
+        }
+    }))
 }

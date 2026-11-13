@@ -434,7 +434,7 @@ pub fn PlayerTable(
             unpin: t!("ui.replay.context.unpin_column").into_owned(),
             ..GridStrings::new()
         };
-        let row_menu: RowMenu<AccountId> = Rc::new(move |player: AccountId| AnyView::new(menu::row_menu(player, cx)));
+        let row_menu: RowMenu<AccountId> = Rc::new(move |player: AccountId| menu::row_menu(player, cx));
         let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
         let label = t!("ui.tabs.replay_parser").into_owned();
 

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use landaire_ui::MenuItems;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
@@ -37,11 +38,17 @@ use crate::tabs::replays::table::cells::clan_ink;
 use crate::tabs::replays::table::cells::class_mark;
 use crate::tabs::replays::table::cells::player_color;
 
-/// The items of `player`'s menu. Nothing when the player is no longer in the table.
-pub(super) fn row_menu(player: AccountId, cx: TableCx) -> Option<AnyView> {
+/// What builds `player`'s menu. Nothing when the player is no longer in the table.
+pub(super) fn row_menu(player: AccountId, cx: TableCx) -> Option<MenuItems> {
     let row = cx
         .rows
         .with_untracked(|rows| rows.iter().find(|row| row.row.db_id == player).map(|row| Arc::clone(&row.row)))?;
+
+    Some(MenuItems::new(move || row_menu_items(Arc::clone(&row), player, cx)))
+}
+
+/// The items of `player`'s menu, read from `row`.
+fn row_menu_items(row: Arc<PlayerRow>, player: AccountId, cx: TableCx) -> AnyView {
     let debug = cx.debug.get_untracked();
     let mut items: Vec<AnyView> = vec![heading(&row, cx), AnyView::new(view! { MenuSeparator() })];
 
@@ -129,7 +136,7 @@ pub(super) fn row_menu(player: AccountId, cx: TableCx) -> Option<AnyView> {
         }));
     }
 
-    Some(AnyView::new(view! { {items} }))
+    AnyView::new(view! { {items} })
 }
 
 fn copied() -> String {

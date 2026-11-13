@@ -305,7 +305,7 @@ where
         RenderEffect::new(move |_| {
             let gone = positions.with(|positions| {
                 menu_target.with_untracked(
-                    |target| matches!(target, Some(MenuTarget::Row(key)) if !positions.contains_key(key)),
+                    |target| matches!(target, Some(MenuTarget::Row(key, _)) if !positions.contains_key(key)),
                 )
             });
             if gone && menu_open.get_untracked() {
@@ -318,11 +318,14 @@ where
         let opener = {
             let cx = Rc::clone(&cx);
             move |key: K, anchor: NodeRef| {
-                if cx.row_menu.is_none() || !cx.positions.with_untracked(|positions| positions.contains_key(&key)) {
+                if !cx.positions.with_untracked(|positions| positions.contains_key(&key)) {
                     return;
                 }
+                let Some(items) = cx.row_menu_items(&key) else {
+                    return;
+                };
                 cx.target_row(&key);
-                header::open_menu_at(anchor, MenuTarget::Row(key), &cx);
+                header::open_menu_at(anchor, MenuTarget::Row(key, items), &cx);
             }
         };
         handle.attach(Rc::new(opener));
@@ -330,7 +333,7 @@ where
         let telling = RenderEffect::new(move |_| {
             let open = menu_open.get();
             let row = menu_target.with(|target| match target {
-                Some(MenuTarget::Row(key)) if open => Some(key.clone()),
+                Some(MenuTarget::Row(key, _)) if open => Some(key.clone()),
                 _ => None,
             });
             handle.set_open_row(row);
@@ -377,7 +380,7 @@ where
         let cx = Rc::clone(&cx);
         move || match cx.menu_target.get() {
             Some(MenuTarget::Header(id)) => Some(header::header_menu(Rc::clone(&cx), id)),
-            Some(MenuTarget::Row(key)) => cx.row_menu.as_ref().map(|menu| menu(key)),
+            Some(MenuTarget::Row(_, items)) => Some(items.build()),
             None => None,
         }
     };

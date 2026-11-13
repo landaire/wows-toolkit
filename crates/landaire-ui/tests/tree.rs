@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::MenuItems;
 use landaire_ui::MenuSelection;
 use landaire_ui::TOOLTIP_DELAY;
 use landaire_ui::ThemeRootProps;
@@ -143,8 +144,11 @@ fn open_with_menu(nodes: Nodes, expanded: &[u32], menu_selection: MenuSelection)
                     selection = probe.selection,
                     handle = probe.handle,
                     on_activate = UnsyncCallback::new(move |key: u32| activated.update(|keys| keys.push(key))),
-                    context_menu = TreeMenu::new(|key: &u32| view! {
-                        MenuItem(attr:data-testid = format!("menu-{key}")) {"Open"}
+                    context_menu = TreeMenu::new(|key: &u32| {
+                        let key = *key;
+                        (key != 20).then(|| MenuItems::new(move || view! {
+                            MenuItem(attr:data-testid = format!("menu-{key}")) {"Open"}
+                        }))
                     }).with_selection(menu_selection),
                     tooltip = TreeTooltip::new(|key: &u32| (*key != 3).then(|| view! { text {{format!("tip {key}")}} })),
                     attr:data-testid = "tree",
@@ -292,6 +296,25 @@ fn double_click_activates_and_secondary_click_opens_the_rows_menu() {
     window.click(row(&window, 2)).expect("the row has a box");
     press(&mut window, NamedKey::ContextMenu, Modifiers::NONE);
     assert!(window.by_test_id("menu-2").is_some(), "the menu key opens the cursor row's menu");
+}
+
+#[test]
+fn a_row_whose_key_builds_no_menu_opens_none_and_keeps_the_selection() {
+    let (mut window, probe) = open(Nodes::small(), &[2]);
+    window.click(row(&window, 3)).expect("the row has a box");
+
+    window.right_click(row(&window, 20)).expect("the row has a box");
+    window.advance(SETTLE);
+    assert!(window.by_role(Role::Menu).is_empty(), "a row whose key builds no menu opens none");
+    assert_eq!(selected(probe), HashSet::from([3]), "and the selection stays where it was");
+
+    window.click(row(&window, 20)).expect("the row has a box");
+    press(&mut window, NamedKey::ContextMenu, Modifiers::NONE);
+    assert!(window.by_role(Role::Menu).is_empty(), "nor does the menu key");
+
+    window.right_click(row(&window, 2)).expect("the row has a box");
+    window.advance(SETTLE);
+    assert!(window.by_test_id("menu-2").is_some(), "a row beside it still has its menu");
 }
 
 #[test]

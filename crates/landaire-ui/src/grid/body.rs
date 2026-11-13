@@ -40,6 +40,7 @@ use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
 use zgui_ui::virtualize::MeasuredVirtualize;
 
+use crate::context_menu::MenuItems;
 use crate::grid::column::ColumnId;
 use crate::grid::header;
 use crate::grid::mode::RowDetail;
@@ -196,11 +197,12 @@ where
         move |ev: &mut EventCx<'_, events::PointerDown>| match ev.button {
             Some(PointerButton::Primary) => cx.press_row(&key, ev.modifiers),
             Some(PointerButton::Secondary) => {
+                let Some(items) = cx.row_menu_items(&key) else {
+                    return;
+                };
                 cx.target_row(&key);
-                if cx.row_menu.is_some() {
-                    cx.menu_target.set(Some(MenuTarget::Row(key.clone())));
-                    cx.menu_claimed.set(true);
-                }
+                cx.menu_target.set(Some(MenuTarget::Row(key.clone(), items)));
+                cx.menu_claimed.set(true);
             }
             _ => {}
         }
@@ -209,8 +211,8 @@ where
         let cx = Rc::clone(&cx);
         let key = key.clone();
         move |_: &mut EventCx<'_, events::ContextMenu>| {
-            if cx.row_menu.is_some() {
-                cx.menu_target.set(Some(MenuTarget::Row(key.clone())));
+            if let Some(items) = cx.row_menu_items(&key) {
+                cx.menu_target.set(Some(MenuTarget::Row(key.clone(), items)));
                 cx.menu_claimed.set(true);
             }
         }
@@ -720,8 +722,8 @@ where
     let modifiers = ev.modifiers;
     let cursor = cx.cursor.get_untracked();
     if header::opens_menu(&ev.key, modifiers) {
-        if let (Some(key), Some(_)) = (cursor, cx.row_menu.as_ref()) {
-            open_row_menu(cx, key);
+        if let Some((key, items)) = cursor.and_then(|key| cx.row_menu_items(&key).map(|items| (key, items))) {
+            open_row_menu(cx, key, items);
         }
         ev.prevent_default();
         return;
@@ -769,8 +771,8 @@ where
     ev.stop_propagation();
 }
 
-/// Opens the row menu for `key` under its row, at the leading edge of the view.
-fn open_row_menu<T, K>(cx: &GridCx<T, K>, key: K)
+/// Opens the row menu of `key`, built by `items`, under its row, at the leading edge of the view.
+fn open_row_menu<T, K>(cx: &GridCx<T, K>, key: K, items: MenuItems)
 where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
@@ -782,5 +784,5 @@ where
     };
 
     let corner = Point::new(view.origin.x, DevicePx(row.origin.y.0 + row.size.height.0));
-    header::open_menu(corner, MenuTarget::Row(key), cx);
+    header::open_menu(corner, MenuTarget::Row(key, items), cx);
 }

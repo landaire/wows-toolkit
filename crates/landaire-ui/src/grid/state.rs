@@ -23,7 +23,6 @@ use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::runtime::clipboard::Clipboards;
-use zgui::view::AnyView;
 use zgui::view::FrameHandle;
 use zgui::view::NodeRef;
 use zgui::view::ScrollBehavior;
@@ -36,6 +35,7 @@ use zgui_ui::ContextMenuPlace;
 use zgui_ui::virtualize::MeasuredVirtualize;
 use zgui_ui::virtualize::VirtualWindow;
 
+use crate::context_menu::MenuItems;
 use crate::grid::column::ColumnId;
 use crate::grid::column::ColumnSizing;
 use crate::grid::column::ColumnWidth;
@@ -54,8 +54,11 @@ use crate::motion::MotionPreference;
 use crate::motion::Movement;
 use crate::surface::RowHeight;
 
-/// Builds the items of the menu a row opens, for that row's key.
-pub type RowMenu<K> = Rc<dyn Fn(K) -> AnyView>;
+/// Decides from a row's key whether the row has a menu, and gives what builds its items when it
+/// does. A key that gives `None` has no menu: asking for one over its row opens nothing and
+/// leaves the selection alone. The key is asked once per request, before the selection follows
+/// the row, and the items are built when the menu shows them.
+pub type RowMenu<K> = Rc<dyn Fn(K) -> Option<MenuItems>>;
 
 type RowMenuOpener<K> = Rc<dyn Fn(K, NodeRef)>;
 
@@ -153,10 +156,10 @@ impl Default for GridStrings {
 }
 
 /// What a context menu was asked for over.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub(crate) enum MenuTarget<K> {
     Header(ColumnId),
-    Row(K),
+    Row(K, MenuItems),
 }
 
 /// A header pressed and possibly being carried to a new place.
@@ -296,6 +299,11 @@ where
 {
     pub(crate) fn column(&self, id: &ColumnId) -> Option<&GridColumn<T>> {
         self.columns.iter().find(|column| column.id() == id)
+    }
+
+    /// What builds the items of `key`'s row menu, or `None` when the row has no menu.
+    pub(crate) fn row_menu_items(&self, key: &K) -> Option<MenuItems> {
+        self.row_menu.as_ref()?(key.clone())
     }
 
     /// The surface's device pixels per CSS pixel.

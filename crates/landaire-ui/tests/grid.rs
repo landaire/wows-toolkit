@@ -16,6 +16,7 @@ use landaire_ui::ColumnWidth;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
+use landaire_ui::MenuItems;
 use landaire_ui::MotionPreference;
 use landaire_ui::RowGroups;
 use landaire_ui::RowHeight;
@@ -23,6 +24,7 @@ use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMenuHandle;
 use landaire_ui::RowMode;
+use landaire_ui::Selection;
 use landaire_ui::SortDirection;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::Element;
@@ -226,7 +228,8 @@ fn a_header_dragged_past_its_neighbour_moves_its_column_there_and_its_cells_with
 #[test]
 fn the_menu_key_opens_the_row_menu_at_the_start_of_the_row() {
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), || {
-        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        let row_menu: RowMenu<u32> =
+            Rc::new(|key: u32| Some(MenuItems::new(move || view! { MenuItem {{format!("Open {key}")}} })));
         view! {
             ThemeRoot {
                 box(style = "display: flex; width: 420px; height: 300px") {
@@ -260,12 +263,58 @@ fn the_menu_key_opens_the_row_menu_at_the_start_of_the_row() {
 }
 
 #[test]
+fn a_row_whose_key_builds_no_menu_opens_none_and_keeps_the_selection() {
+    let selection = Rc::new(Cell::new(None));
+    let given = Rc::clone(&selection);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let row_menu: RowMenu<u32> = Rc::new(|key: u32| {
+            (key != 2).then(|| MenuItems::new(move || view! { MenuItem {{format!("Open {key}")}} }))
+        });
+        let selected = RwSignal::new_local(Selection::new());
+        given.set(Some(selected));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(4)),
+                        columns = columns(),
+                        row_key = |item: &Item| item.id,
+                        row_menu = row_menu,
+                        selection = selected,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let selection = selection.take().expect("the view was built");
+
+    window.click(cell(&window, "name-0")).expect("the cell has a box");
+    window.right_click(cell(&window, "name-2")).expect("the cell has a box");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role(Role::Menu).is_empty(), "a row whose key builds no menu opens none");
+    let selected: Vec<u32> = selection.get_untracked().keys().copied().collect();
+    assert_eq!(selected, [0], "and the selection stays where it was");
+
+    window.click(cell(&window, "name-2")).expect("the cell has a box");
+    window.press_key(NamedKey::F10, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role(Role::Menu).is_empty(), "nor does the menu key");
+
+    window.right_click(cell(&window, "name-1")).expect("the cell has a box");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role_and_label(Role::MenuItem, "Open 1").is_some(), "a row beside it still has its menu");
+}
+
+#[test]
 fn a_row_menu_handle_opens_a_row_menu_from_code_and_tells_it_is_open() {
     type Given = Option<(RowMenuHandle<u32>, NodeRef)>;
     let handles: Rc<Cell<Given>> = Rc::new(Cell::new(None));
     let given = Rc::clone(&handles);
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
-        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        let row_menu: RowMenu<u32> =
+            Rc::new(|key: u32| Some(MenuItems::new(move || view! { MenuItem {{format!("Open {key}")}} })));
         let handle = RowMenuHandle::new();
         let anchor = NodeRef::new();
         given.set(Some((handle, anchor)));
@@ -309,7 +358,8 @@ fn a_row_menu_handle_ignores_a_missing_row_and_closes_when_its_row_goes() {
     let handles: Rc<Cell<Given>> = Rc::new(Cell::new(None));
     let given = Rc::clone(&handles);
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
-        let row_menu: RowMenu<u32> = Rc::new(|key: u32| AnyView::new(view! { MenuItem {{format!("Open {key}")}} }));
+        let row_menu: RowMenu<u32> =
+            Rc::new(|key: u32| Some(MenuItems::new(move || view! { MenuItem {{format!("Open {key}")}} })));
         let handle = RowMenuHandle::new();
         let anchor = NodeRef::new();
         let rows = RwSignal::new_local(items(4));

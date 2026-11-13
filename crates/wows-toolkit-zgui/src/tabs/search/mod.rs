@@ -20,6 +20,7 @@ use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::GridSelectionMode;
 use landaire_ui::LoadingProps;
+use landaire_ui::MenuItems;
 use landaire_ui::RowHeight;
 use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
@@ -550,8 +551,9 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
     );
 
     let menu: RowMenu<usize> = Rc::new(move |position: usize| {
-        let Some(row) = row_at(position) else { return AnyView::new(()) };
-        AnyView::new(row_menu_items(shell, row.hit.replay_path.clone(), row.exists, move || open(position)))
+        let row = row_at(position)?;
+        let path = row.hit.replay_path.clone();
+        Some(MenuItems::new(move || row_menu_items(shell, path.clone(), row.exists, move || open(position))))
     });
     let facts = move || {
         let path = preview.watched()?;

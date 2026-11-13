@@ -4,18 +4,21 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use landaire_ui::MarkedTextProps;
+use landaire_ui::MenuItems;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::TreeRow;
 use rust_i18n::t;
 use wows_toolkit_armor::model_refs::HardpointTarget;
+use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_armor::model_tree::SkinUse;
 use wows_toolkit_armor::sidebar_tree::RowId;
 use wows_toolkit_armor::sidebar_tree::RowKind;
 use wows_toolkit_armor::sidebar_tree::RowNote;
 use wows_toolkit_armor::sidebar_tree::row_tooltip;
+use wowsunpack::export::model_catalog::ModelPath;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -227,42 +230,49 @@ fn hardpoint_checkbox(sources: RowSources, id: &RowId, target: HardpointTarget) 
 }
 
 /// The menu for row `id`: a ship row offers a comparison pane, a new tab and an export; a model or
-/// part row offers to open it, export it and copy its path.
-pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> AnyView {
-    let Some(kind) = state.tree.with_untracked(|tree| tree.kind(id).cloned()) else {
-        return AnyView::new(());
-    };
+/// part row offers to open it, export it and copy its path. Folders, headings and buildings have
+/// none.
+pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> Option<MenuItems> {
+    let kind = state.tree.with_untracked(|tree| tree.kind(id).cloned())?;
 
     if let RowKind::Ship { param_index, display_name } = &kind {
         let ship =
             ShipChoice { param_index: VehicleParamIndex::new(param_index.clone()), display_name: display_name.clone() };
-        let compared = ship.clone();
-        let tabbed = ship.clone();
-        return AnyView::new(view! {
-            MenuItem(
-                attr:data-testid = "armor-sidebar-menu-compare",
-                on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::CompareSplit(Some(compared.clone()))))
-            ) {
-                {t!("ui.armor.compare_split").into_owned()}
-            }
-            MenuItem(
-                attr:data-testid = "armor-sidebar-menu-new-tab",
-                on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::OpenInNewTab(tabbed.clone())))
-            ) {
-                {t!("ui.armor.open_in_new_tab").into_owned()}
-            }
-            MenuItem(
-                attr:data-testid = "armor-sidebar-menu-export-ship",
-                on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::ExportShip(ship.clone())))
-            ) {
-                {t!("ui.armor.export_model").into_owned()}
-            }
-        });
+        return Some(MenuItems::new(move || ship_menu(state, ship.clone())));
     }
 
-    let Some((model, from_ship)) = kind.model_selection() else {
-        return AnyView::new(());
-    };
+    let (model, from_ship) = kind.model_selection()?;
+
+    Some(MenuItems::new(move || model_menu(state, shell, model.clone(), from_ship.clone())))
+}
+
+fn ship_menu(state: SidebarState, ship: ShipChoice) -> impl IntoView {
+    let compared = ship.clone();
+    let tabbed = ship.clone();
+
+    view! {
+        MenuItem(
+            attr:data-testid = "armor-sidebar-menu-compare",
+            on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::CompareSplit(Some(compared.clone()))))
+        ) {
+            {t!("ui.armor.compare_split").into_owned()}
+        }
+        MenuItem(
+            attr:data-testid = "armor-sidebar-menu-new-tab",
+            on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::OpenInNewTab(tabbed.clone())))
+        ) {
+            {t!("ui.armor.open_in_new_tab").into_owned()}
+        }
+        MenuItem(
+            attr:data-testid = "armor-sidebar-menu-export-ship",
+            on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::ExportShip(ship.clone())))
+        ) {
+            {t!("ui.armor.export_model").into_owned()}
+        }
+    }
+}
+
+fn model_menu(state: SidebarState, shell: Shell, model: ModelPath, from_ship: Option<ShipPartRef>) -> impl IntoView {
     let (opened, opened_from) = (model.clone(), from_ship.clone());
     let path = model.as_str().to_string();
     let copy = move |()| {
@@ -270,7 +280,7 @@ pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> AnyView {
         shell.toasts().ok(t!("ui.models.path_copied", path = path).into_owned());
     };
 
-    AnyView::new(view! {
+    view! {
         MenuItem(
             attr:data-testid = "armor-sidebar-menu-open",
             on_select = UnsyncCallback::new(move |()| {
@@ -290,5 +300,5 @@ pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> AnyView {
         MenuItem(attr:data-testid = "armor-sidebar-menu-copy-path", on_select = UnsyncCallback::new(copy)) {
             {t!("ui.models.copy_path").into_owned()}
         }
-    })
+    }
 }
