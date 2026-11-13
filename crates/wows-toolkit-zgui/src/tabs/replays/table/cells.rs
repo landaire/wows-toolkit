@@ -380,6 +380,8 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         cx.toggle_expanded(db_id);
         ev.stop_propagation();
     };
+    // A press on the disclosure opens or closes the row and leaves the selection as it was.
+    let keep_press = |ev: &mut EventCx<'_, events::PointerDown>| ev.stop_propagation();
     // A double click on the disclosure is two presses of it, not also an activation of the row.
     let keep_double = |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation();
     let caret = cx.expandable.then(|| {
@@ -388,6 +390,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
                 class = "wt-pt-caret",
                 attr:data-open = open,
                 attr:data-testid = format!("player-caret-{}", db_id.raw()),
+                on:pointer_down = keep_press,
                 on:click = toggle,
                 on:double_click = keep_double
             ) {

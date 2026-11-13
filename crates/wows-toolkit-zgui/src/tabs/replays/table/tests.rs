@@ -204,6 +204,22 @@ fn a_double_click_on_the_players_name_leaves_the_row_closed() {
 }
 
 #[test]
+fn the_disclosure_opens_and_closes_a_row_without_selecting_it() {
+    let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
+
+    for _ in 0..2 {
+        let caret = window.by_test_id("player-caret-2").expect("the row has a disclosure");
+        window.click(caret).expect("the disclosure takes a click");
+        window.advance(Duration::from_millis(600));
+    }
+
+    assert!(expanded.with_untracked(HashSet::is_empty), "the second press closed the row");
+    let rows = window.by_role(Role::Row);
+    let selected = rows.into_iter().filter(|row| window.a11y(*row).and_then(|state| state.selected) == Some(true));
+    assert_eq!(selected.count(), 0, "no row is selected");
+}
+
+#[test]
 fn pinning_a_column_from_its_header_is_saved_under_the_gpui_key() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
     let kills = ReplayColumn::Kills.label();
