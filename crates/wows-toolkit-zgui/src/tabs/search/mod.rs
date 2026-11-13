@@ -646,8 +646,9 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                 row_menu = menu,
                 label = t!("ui.tabs.search").into_owned()
             )
-            // The rows fill the tab's width, so the card goes under its row rather than over it.
-            HoverPreviewCard(preview = preview, placement = Placement::new(Side::Bottom, Align::End)) {
+            // The anchor is the row's filler past the last column. The card goes under or over
+            // the row, starting where the columns end, and slides left to stay in the window.
+            HoverPreviewCard(preview = preview, placement = Placement::new(Side::Bottom, Align::Start)) {
                 {facts}
             }
         }

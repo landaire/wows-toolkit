@@ -6,11 +6,16 @@ use std::time::Duration;
 
 use landaire_ui::Appearance;
 use landaire_ui::MARK_CLASS;
+use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
+use landaire_ui::test_support::WindowSize;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Rect;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
@@ -23,6 +28,8 @@ use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::search::model::Search;
+
+type DeviceRect = Rect<DevicePx, Device>;
 
 thread_local! {
     /// The last Search tab built on this thread, for the tests to drive.
@@ -359,6 +366,81 @@ fn moving_from_a_row_to_the_header_ends_the_preview() {
     window.hover(header).expect("the header can be hovered");
     settle(&mut window);
     assert!(window.by_test_id("hover-preview").is_none(), "the card went with the row");
+}
+
+/// A window of `width` by `height` showing `count` results, every one a loss.
+fn open_with_losses(width: f32, height: f32, count: usize) -> HeadlessWindow {
+    let hits = (0..count).map(|at| hit(&format!("/replays/{at}.wowsreplay"), MatchOutcome::Loss, "Ocean")).collect();
+    let (window, _search) = open_with_hits(HeadlessOptions::new(WindowSize { width, height }), hits);
+
+    window
+}
+
+/// Hovers `cell` and returns the card's box, the cell's box and the box of the cell's row past
+/// its last column.
+fn hover_for_card(window: &mut HeadlessWindow, cell: Element) -> (DeviceRect, DeviceRect, DeviceRect) {
+    window.hover(cell).expect("the row can be hovered");
+    settle(window);
+    let card = window.by_test_id("hover-preview").expect("the card is up");
+    let card = window.bounds(card).expect("the card has a box");
+    let row = window.bounds(cell).expect("the cell has a box");
+    let centre = row.origin.y.0 + row.size.height.0 / 2.0;
+    let tail = window
+        .all_by_class("lui-grid__filler")
+        .into_iter()
+        .filter_map(|filler| window.bounds(filler))
+        .find(|filler| filler.origin.y.0 <= centre && centre <= filler.origin.y.0 + filler.size.height.0)
+        .expect("the row has a box past its last column");
+
+    (card, row, tail)
+}
+
+/// With room past the last column, the card starts there, under the row.
+#[test]
+fn the_card_starts_past_the_last_column_when_there_is_room() {
+    let mut window = open_with_losses(1700.0, 900.0, 3);
+    let cell = window.by_attribute("data-outcome", "loss").expect("a row is drawn");
+
+    let (card, row, tail) = hover_for_card(&mut window, cell);
+
+    assert!((card.origin.x.0 - tail.origin.x.0).abs() < 1.0, "card {card:?} starts at the columns' end {tail:?}");
+    assert!(card.origin.y.0 >= row.origin.y.0 + row.size.height.0, "card {card:?} is under the row {row:?}");
+}
+
+/// Without that room, the card stays in the window against its right edge, still under the row.
+#[test]
+fn the_card_keeps_inside_the_window_when_the_columns_leave_no_room() {
+    let width = 1000.0;
+    let mut window = open_with_losses(width, 900.0, 3);
+    let cell = window.by_attribute("data-outcome", "loss").expect("a row is drawn");
+
+    let (card, row, tail) = hover_for_card(&mut window, cell);
+
+    let right = card.origin.x.0 + card.size.width.0;
+    assert!(card.origin.x.0 < tail.origin.x.0, "card {card:?} moved left of the columns' end {tail:?}");
+    assert!(right <= width && right >= width - 12.0, "card {card:?} hugs the window's right edge");
+    assert!(card.origin.y.0 >= row.origin.y.0 + row.size.height.0, "card {card:?} is under the row {row:?}");
+}
+
+/// A row at the foot of the results has its card above it.
+#[test]
+fn the_card_goes_above_a_row_at_the_foot_of_the_window() {
+    let mut window = open_with_losses(1700.0, 1000.0, 60);
+    let body = window.by_test_id("search-results").expect("the results are drawn");
+    let body = window.bounds(body).expect("the results have a box");
+    let foot = body.origin.y.0 + body.size.height.0;
+    let cell = window
+        .all_by_attribute("data-outcome", "loss")
+        .into_iter()
+        .filter_map(|cell| window.bounds(cell).map(|bounds| (cell, bounds)))
+        .filter(|(_, bounds)| bounds.origin.y.0 + bounds.size.height.0 <= foot)
+        .max_by(|(_, a), (_, b)| a.origin.y.0.total_cmp(&b.origin.y.0))
+        .map(|(cell, _)| cell)
+        .expect("a row sits at the foot of the results");
+
+    let (card, row, _) = hover_for_card(&mut window, cell);
+
+    assert!(card.origin.y.0 + card.size.height.0 <= row.origin.y.0, "card {card:?} is over the row {row:?}");
 }
 
 #[test]
