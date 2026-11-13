@@ -69,8 +69,10 @@ landaire-ui = { workspace = true, features = ["test-support"] }
 wows-toolkit-config = { workspace = true, features = ["test-support"] }
 # File dialogs are recorded and answered as dismissed instead of opened.
 wows-toolkit-services = { workspace = true, features = ["test-support"] }
+# The launcher's state is set by its events rather than by the network, the keyring or a scan.
+wows-toolkit-launcher = { workspace = true, features = ["test-support"] }
 tempfile = "3"
-# Game versions, for the palette's version list tests.
+# Game versions, for the palette's version list tests and the launcher's install fixtures.
 wowsunpack = { workspace = true }
 # Test frames are built from RGB images.
 image = { workspace = true }

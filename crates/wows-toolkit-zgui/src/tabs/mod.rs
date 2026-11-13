@@ -1,8 +1,8 @@
 //! The tabs' content. [`TabBody`] mounts the component for a [`TabKey`]; the shell mounts it the
 //! first time the tab is shown, inside the tab's [`TabChrome`](crate::shell::tabs::TabChrome).
 //!
-//! Not yet ported, each an empty content area: `replays`, `launcher`, `stats`, `player_tracker`,
-//! `search`, `armor_viewer`, `unpacker`, `directory_stats`.
+//! Not yet ported, each an empty content area: `replays`, `stats`, `player_tracker`, `search`,
+//! `armor_viewer`, `unpacker`, `directory_stats`.
 
 mod armor_viewer;
 mod directory_stats;
