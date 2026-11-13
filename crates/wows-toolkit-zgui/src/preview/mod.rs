@@ -344,8 +344,8 @@ impl HoverPreview {
 pub enum MapArea {
     /// No map is coming, as without game data.
     Absent,
-    /// The map's space, held while the pointer settles and the bake starts.
-    Holding { baking: bool },
+    /// The map's space, held under a spinner while the pointer settles and the bake starts.
+    Holding,
     /// Frames are up. `waiting` while a still map stands in for a track still being drawn.
     Frames { waiting: bool },
     /// Why there is no preview, which is ordinarily a replay from a build that is not installed.
@@ -372,7 +372,7 @@ impl Watched {
             return MapArea::Frames { waiting: self.baking && shown == Shown::Map };
         }
         if self.expecting {
-            return MapArea::Holding { baking: self.baking };
+            return MapArea::Holding;
         }
 
         self.failed.clone().map_or(MapArea::Absent, MapArea::Failed)

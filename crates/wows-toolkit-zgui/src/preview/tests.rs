@@ -187,12 +187,13 @@ fn the_bake_waits_for_the_pointer_to_settle() {
     handles.enter("a.wowsreplay", handles.first);
     window.advance(DWELL - ms(50));
     assert!(baker.paths().is_empty(), "the pointer has not settled yet");
-    assert_eq!(handles.preview.map_area(), MapArea::Holding { baking: false });
+    assert_eq!(handles.preview.map_area(), MapArea::Holding);
     assert!(window.by_test_id("hover-preview-water").is_some(), "the map's space is held while the pointer settles");
+    assert!(window.by_class("zui-spinner").is_some(), "under a spinner from the start");
 
     window.advance(ms(60));
     assert_eq!(baker.paths(), [PathBuf::from("a.wowsreplay")]);
-    assert_eq!(handles.preview.map_area(), MapArea::Holding { baking: true });
+    assert_eq!(handles.preview.map_area(), MapArea::Holding);
 
     let card = window.by_test_id("hover-preview").expect("the card is up");
     let row = window.by_test_id("row-a").expect("the row is drawn");
@@ -232,7 +233,7 @@ fn moving_to_another_row_cancels_the_bake() {
     assert!(baker.bakes.borrow()[0].cancel.load(Ordering::Relaxed), "the first row's bake is told to stop");
     assert!(!baker.send_frame(0, solid(20)), "and nothing is listening for its frames");
     assert_eq!(handles.preview.watched_untracked(), Some(PathBuf::from("b.wowsreplay")));
-    assert_eq!(handles.preview.map_area(), MapArea::Holding { baking: false }, "the second row waits out its dwell");
+    assert_eq!(handles.preview.map_area(), MapArea::Holding, "the second row waits out its dwell");
     assert_eq!(handles.sink().frame_size(), None, "the first row's map comes down");
 
     window.advance(DWELL + ms(20));

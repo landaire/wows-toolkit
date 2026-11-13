@@ -70,10 +70,12 @@ const CSS: &str = css!(
         border-width: 3px;
     }
     .wt-preview-map__failure {
+        flex: 1 1 0;
+        min-width: 0;
         padding: 8px;
         font-size: 12px;
-        text-align: center;
-        color: rgba(255, 255, 255, 0.7);
+        overflow-wrap: anywhere;
+        color: var(--wt-color-text-dim);
     }"
 );
 
@@ -155,7 +157,7 @@ impl AreaKind {
     fn of(area: &MapArea) -> Self {
         match area {
             MapArea::Absent => Self::Absent,
-            MapArea::Holding { .. } => Self::Holding,
+            MapArea::Holding => Self::Holding,
             MapArea::Frames { .. } => Self::Frames,
             MapArea::Failed(_) => Self::Failed,
         }
@@ -167,7 +169,7 @@ impl AreaKind {
 fn PreviewMap(preview: HoverPreview) -> impl IntoView {
     let area = Memo::new(move |_| preview.map_area());
     let kind = Memo::new(move |_| area.with(AreaKind::of));
-    let spinning = move || matches!(area.get(), MapArea::Holding { baking: true } | MapArea::Frames { waiting: true });
+    let spinning = move || matches!(area.get(), MapArea::Frames { waiting: true });
     let failure = move || match area.get() {
         MapArea::Failed(reason) => reason,
         _ => String::new(),
@@ -180,9 +182,7 @@ fn PreviewMap(preview: HoverPreview) -> impl IntoView {
             AreaKind::Absent => None,
             AreaKind::Holding => Some(AnyView::new(view! {
                 box(class = "wt-preview-map", attr:data-testid = "hover-preview-water") {
-                    Show(when = spinning) {
-                        Spinner(label = loading.clone())
-                    }
+                    Spinner(label = loading.clone())
                 }
             })),
             AreaKind::Frames => {
