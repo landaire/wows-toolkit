@@ -90,6 +90,10 @@ pub fn HoverPreviewCard(
     /// the pointer would leave the row for the card and take the card down.
     #[prop(default = Placement::new(Side::Right, Align::Start))]
     placement: Placement,
+    /// For a card placed right of its row, the element whose right edge the card clears, so the
+    /// card does not cover that element's scrollbar.
+    #[prop(optional)]
+    beyond: Option<NodeRef>,
     children: ChildrenFn,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -98,14 +102,31 @@ pub fn HoverPreviewCard(
 
     move || {
         shown.get().map(|(anchor, replaced)| {
+            let offset = offset_past(anchor, beyond);
             view! {
-                PreviewCard(preview = preview, anchor = anchor, replaced = replaced, placement = placement) {
+                PreviewCard(preview = preview, anchor = anchor, replaced = replaced, placement = placement, offset = offset) {
                     {facts.get_value().view()}
                 }
             }
             .into_view()
         })
     }
+}
+
+/// How far from its anchor the card goes: the surface's usual gap, or a wider one past the right
+/// edge of `beyond`.
+fn offset_past(anchor: NodeRef, beyond: Option<NodeRef>) -> f32 {
+    const GAP: f32 = 4.0;
+    const CLEAR_GAP: f32 = 8.0;
+
+    let clearance = beyond.and_then(|beyond| {
+        let row = anchor.window_bounds()?;
+        let area = beyond.window_bounds()?;
+        let past = area.origin.x.0 + area.size.width.0 - (row.origin.x.0 + row.size.width.0);
+        Some(past.max(0.0) / anchor.scale())
+    });
+
+    clearance.map_or(GAP, |clearance| clearance + CLEAR_GAP)
 }
 
 /// One row's card. Built again for each row, since a popper is placed against one anchor.
@@ -115,6 +136,7 @@ fn PreviewCard(
     anchor: NodeRef,
     replaced: bool,
     placement: Placement,
+    offset: f32,
     children: ChildrenFn,
 ) -> impl IntoView {
     let state = OverlayState::uncontrolled(
@@ -134,6 +156,7 @@ fn PreviewCard(
         AnchoredSurface(
             state = state,
             placement = placement,
+            offset = offset,
             dismiss_on_outside_press = false,
             class = class,
             attr:data-testid = "hover-preview"

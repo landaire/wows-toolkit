@@ -9,12 +9,14 @@ use std::rc::Rc;
 
 use landaire_ui::BranchClick;
 use landaire_ui::Fraction;
+use landaire_ui::IndentWidth;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingPlacement;
-use landaire_ui::MenuSelection;
 use landaire_ui::LoadingProps;
+use landaire_ui::MenuSelection;
 use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TreeDepth;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
@@ -48,6 +50,7 @@ use zgui::view::AnyView;
 use zgui::view::EventCx;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::events;
 use zgui::view::install_stylesheet;
@@ -88,6 +91,9 @@ const SHEET: &str = "wt-replay-listing";
 // The row is the theme's font size (12.5px) times 2.8, as the other front end draws it: the
 // identity line, the smaller stats line under it, and a little space around both. The
 // thumbnail's ground is Ocean's water, so a thumbnail on its way does not flash.
+//
+// A replay row starts at the list's edge so its outcome edge runs down that edge; its content is
+// indented inside the row instead. Only a group row, which has a disclosure, keeps the tree's lead.
 const CSS: &str = css!(
     ".wt-listing {
         position: relative;
@@ -97,6 +103,8 @@ const CSS: &str = css!(
         min-height: 0;
     }
     .wt-listing .lui-tree-area, .wt-listing .lui-tree { flex: 1; min-height: 0; }
+    .wt-listing .lui-tree__row { gap: 0; padding-left: 0; }
+    .wt-listing .lui-tree__row[data-expanded] { gap: 4px; padding-left: 8px; }
     .wt-listing__state {
         display: flex;
         flex-direction: column;
@@ -106,7 +114,6 @@ const CSS: &str = css!(
     }
     .wt-listing__state-hint { font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-row {
-        position: relative;
         display: flex;
         flex: 1;
         align-items: center;
@@ -164,6 +171,7 @@ const CSS: &str = css!(
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-size: 14px;
     }
     .wt-row__division { color: var(--wt-color-division); }
     .wt-row__new {
@@ -177,12 +185,13 @@ const CSS: &str = css!(
     .wt-row__spacer { flex: 1; }
     .wt-row__pr {
         flex: none;
-        padding: 0 4px;
+        padding: 0 3px;
         border-radius: 2px;
         font-size: 12px;
         font-weight: 700;
     }
-    .wt-row__part { white-space: pre; }
+    .wt-row__stats .wt-row__glyph { width: 1em; height: 1em; margin-right: 3px; }
+    .wt-row__stats .wt-row__glyph--later { margin-left: 8px; }
     .wt-row__stats {
         display: flex;
         align-items: center;
@@ -191,7 +200,7 @@ const CSS: &str = css!(
         white-space: nowrap;
         overflow: hidden;
     }
-    .wt-hover-facts { display: flex; flex-direction: column; max-width: 384px; }
+    .wt-hover-facts { display: flex; flex-direction: column; max-width: 384px; padding: 2px 4px; }
     .wt-hover-fact { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
     .wt-hover-fact__label { flex: none; width: 58px; color: var(--wt-color-text-dim); }
     .wt-hover-fact__value { flex: 1; min-width: 0; }"
@@ -258,10 +267,12 @@ pub fn ListingView(listing: Listing, events: BrowserEvents) -> impl IntoView {
         })
     };
 
+    let area = NodeRef::new();
+
     view! {
-        column(class = "wt-listing", attr:data-testid = "replay-listing", on:pointer_leave = move |_| preview.leave()) {
+        column(class = "wt-listing", node_ref = area, attr:data-testid = "replay-listing", on:pointer_leave = move |_| preview.leave()) {
             {body}
-            HoverPreviewCard(preview = preview) {
+            HoverPreviewCard(preview = preview, beyond = area) {
                 {facts}
             }
         }
@@ -344,6 +355,8 @@ fn ListingRows(
             branch_click = BranchClick::SelectAndToggle,
             stripes = TreeStripes::Leaves,
             leaf_lead = LeafLead::Nothing,
+            indent = IndentWidth(0.0),
+            guides = false,
             on_activate = on_activate,
             context_menu = menu,
             label = t!("ui.replay.listing_caption").into_owned(),
@@ -359,17 +372,17 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
                 move || listing.tree.with(|tree| tree.group(&id).map(|group| group.label.clone()).unwrap_or_default());
             AnyView::new(view! {
                 row(class = "wt-row") {
-                    box(class = "wt-row__edge")
                     text(class = "wt-row__group-label") {{label}}
                 }
             })
         }
         NodeKey::Leaf(path) => {
             let anchor = row.anchor;
+            let depth = row.depth;
             let leaf_path = path.clone();
             let content = move || {
                 let leaf = listing.tree.with(|tree| tree.leaf(&leaf_path).cloned())?;
-                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf))
+                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, depth))
             };
             let enter = move |_: &mut EventCx<'_, events::PointerEnter>| {
                 let map_name = listing.tree.with_untracked(|tree| tree.leaf(&path).map(|leaf| leaf.map_name.clone()));
@@ -385,8 +398,11 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
 }
 
 /// What a replay row draws: the outcome edge, the map, the identity line with its tags and the
-/// stats line.
-fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: LeafRow) -> AnyView {
+/// stats line. The map is set in by `depth`, since the tree indents nothing.
+fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: LeafRow, depth: TreeDepth) -> AnyView {
+    // Under a group the map starts 24px in from the edge, as the other front end's does.
+    const LEVEL_INSET: f32 = 17.0;
+
     let edge = match leaf.outcome {
         MatchOutcome::Win => "wt-row__edge wt-row__edge--win",
         MatchOutcome::Loss => "wt-row__edge wt-row__edge--loss",
@@ -415,16 +431,22 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
     let stats: Vec<AnyView> = leaf
         .stats
         .into_iter()
-        .map(|part| match part {
-            LinePart::Text(text) => AnyView::new(view! { text(class = "wt-row__part") {{text}} }),
-            LinePart::Glyph(glyph) => AnyView::new(view! { AppIcon(glyph = line_glyph(glyph)) }),
+        .enumerate()
+        .map(|(at, part)| match part {
+            // The figures are spaced by their glyphs' margins, not by the spaces around them.
+            LinePart::Text(text) => AnyView::new(view! { text(class = "wt-row__part") {{text.trim().to_owned()}} }),
+            LinePart::Glyph(glyph) => {
+                let class = if at == 0 { "wt-row__glyph" } else { "wt-row__glyph wt-row__glyph--later" };
+                AnyView::new(view! { AppIcon(glyph = line_glyph(glyph), class = class) })
+            }
         })
         .collect();
+    let inset = format!("{}px", depth.0 as f32 * LEVEL_INSET);
 
     AnyView::new(view! {
         row(class = "wt-row", class:wt-row-arrived = arrived, attr:data-testid = format!("replay-row-{}", path.display())) {
             box(class = edge)
-            box(class = "wt-row__thumb-slot") {{thumb}}
+            box(class = "wt-row__thumb-slot", style:margin-left = inset) {{thumb}}
             column(class = "wt-row__lines") {
                 row(class = "wt-row__identity") {
                     text(class = "wt-row__label") {{leaf.label}}

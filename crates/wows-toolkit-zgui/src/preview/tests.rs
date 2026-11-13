@@ -205,6 +205,48 @@ fn the_bake_waits_for_the_pointer_to_settle() {
     );
 }
 
+/// A row narrower than the list it is in, as a row beside the list's scrollbar is.
+#[component]
+fn NarrowRow(handles: Rc<Cell<Option<Handles>>>) -> impl IntoView {
+    let preview = HoverPreview::with_baker(Rc::new(ScriptedBaker::default()));
+    let first = NodeRef::new();
+    let list = NodeRef::new();
+    handles.set(Some(Handles { preview, first, second: first }));
+
+    view! {
+        column(node_ref = list, attr:data-testid = "list", style:width = "240px") {
+            box(node_ref = first, attr:data-testid = "row-a", style:width = "220px", style:height = "24px") {"a.wowsreplay"}
+            HoverPreviewCard(preview = preview, beyond = list) {
+                text {"facts"}
+            }
+        }
+    }
+}
+
+#[test]
+fn a_card_placed_beyond_its_list_clears_the_lists_edge() {
+    let handles = Rc::new(Cell::new(None));
+    let mounted = Rc::clone(&handles);
+    let mut window =
+        HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 900.0, height: 600.0 }), move || {
+            view! { NarrowRow(handles = Rc::clone(&mounted)) }
+        })
+        .expect("the row opens headlessly");
+    let handles = handles.get().expect("the row was built");
+
+    handles.enter("a.wowsreplay", handles.first);
+    window.advance(ms(16));
+
+    let card = window.by_test_id("hover-preview").expect("the card is up");
+    let list = window.by_test_id("list").expect("the list is drawn");
+    let (card, list) =
+        (window.bounds(card).expect("the card has a box"), window.bounds(list).expect("the list has a box"));
+    assert!(
+        card.origin.x.0 >= list.origin.x.0 + list.size.width.0,
+        "the card starts past the list's edge: {card:?} against {list:?}"
+    );
+}
+
 #[test]
 fn a_battle_walked_recently_bakes_without_the_dwell() {
     let (mut window, baker, handles) = open_rows();

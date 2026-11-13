@@ -70,7 +70,7 @@ const CSS: &str = css!(
         flex: none;
         align-items: center;
         gap: 4px;
-        padding: 4px 8px;
+        padding: 1px 8px;
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-listing-header__caption {
@@ -215,7 +215,7 @@ fn HeaderAction(
             TooltipTrigger {
                 Button(
                     variant = ButtonVariant::Ghost,
-                    size = ButtonSize::IconSm,
+                    size = ButtonSize::IconXs,
                     disabled = disabled,
                     attr:data-testid = test_id,
                     a11y:label = move || tip.get(),
@@ -321,7 +321,7 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                 Popover(open = open) {
                     PopoverTrigger(
                         variant = ButtonVariant::Ghost,
-                        size = ButtonSize::IconSm,
+                        size = ButtonSize::IconXs,
                         attr:data-testid = "replay-listing-options",
                         a11y:label = tip
                     ) {
@@ -464,7 +464,7 @@ fn OpenMenu(control: BrowserControl) -> impl IntoView {
                 TooltipTrigger {
                     DropdownMenuTrigger(
                         variant = ButtonVariant::Ghost,
-                        size = ButtonSize::IconSm,
+                        size = ButtonSize::IconXs,
                         attr:data-testid = "replay-listing-open",
                         a11y:label = tip
                     ) {
