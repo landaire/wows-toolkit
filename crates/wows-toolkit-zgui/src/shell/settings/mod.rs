@@ -452,16 +452,22 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
                 InputGroupAddon {
                     AppIcon(glyph = Glyph::Search)
                 }
-                InputGroupInput(
-                    value = typed,
-                    placeholder = t!("ui.settings.panel.search_placeholder").into_owned(),
-                    node_ref = search,
-                    a11y:label = t!("ui.settings.panel.search_placeholder").into_owned(),
-                    attr:data-testid = "settings-search",
-                    on:key_down = move |ev| {
-                        escape.key_down(ev);
+                // Made again in the new language: a placeholder is read as the input is made.
+                {move || {
+                    locale.track();
+                    view! {
+                        InputGroupInput(
+                            value = typed,
+                            placeholder = t!("ui.settings.panel.search_placeholder").into_owned(),
+                            node_ref = search,
+                            a11y:label = t!("ui.settings.panel.search_placeholder").into_owned(),
+                            attr:data-testid = "settings-search",
+                            on:key_down = move |ev| {
+                                escape.key_down(ev);
+                            }
+                        )
                     }
-                )
+                }}
                 if move || !typed.get().is_empty() {
                     InputGroupAddon(align = InputGroupAddonAlign::InlineEnd) {
                         InputGroupButton(
@@ -744,7 +750,15 @@ fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalSt
                         }
                     }}
                 }
-                SettingControl(shell = shell, setting = setting)
+                // Made again in the new language: the controls' words are read as they are made.
+                // The language list names each language in its own words, and is the control the
+                // change comes from, so it is kept.
+                {move || {
+                    if setting != Setting::Language {
+                        locale.track();
+                    }
+                    view! { SettingControl(shell = shell, setting = setting) }
+                }}
             }
             SettingNote(shell = shell, setting = setting)
         }

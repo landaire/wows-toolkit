@@ -456,6 +456,28 @@ fn the_drawer_label_follows_the_language() {
     assert_eq!(shown, Some(german));
 }
 
+/// The controls' words follow a change of language made with the drawer open, as their rows'
+/// names do.
+#[test]
+fn the_controls_follow_the_language() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    let english = window.texts_by_class("wt-settings__card").concat();
+
+    let locale = shell().services().locale;
+    locale.choose(LanguageCode::new("de"));
+    settle(&mut window);
+    let german = t!("ui.settings.wows.cache.open_folder").into_owned();
+    let shown = window.texts_by_class("wt-settings__card").concat();
+    let searched = label(&mut window, "settings-search");
+    let asked = t!("ui.settings.panel.search_placeholder").into_owned();
+    locale.choose(LanguageCode::new("en"));
+
+    assert!(!english.contains(&german), "German words the button differently");
+    assert!(shown.contains(&german), "the button says {german}");
+    assert_eq!(searched, Some(asked), "the search asks in German");
+}
+
 /// An auto-export directory that is not there is marked once it has been looked for.
 #[test]
 fn a_missing_auto_export_directory_is_marked() {
