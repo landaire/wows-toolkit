@@ -186,6 +186,8 @@ const CSS: &str = css!(
         min-width: 0;
         min-height: 0;
     }
+    /* A band of its own under the status bar, so it reads as a notice about the build rather
+       than as part of the status. */
     .wt-debug-notice {
         display: flex;
         flex-direction: row;
@@ -194,8 +196,10 @@ const CSS: &str = css!(
         justify-content: center;
         gap: 4px;
         padding: 4px 8px;
+        border-top: 1px solid var(--lui-color-border);
+        background-color: var(--lui-color-panel);
         color: var(--wt-color-warn);
-        font-weight: 700;
+        font-size: 12px;
     }"
 );
 

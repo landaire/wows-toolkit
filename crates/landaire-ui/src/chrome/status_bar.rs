@@ -85,6 +85,12 @@ const CSS: &str = css!(
         background-color: var(--lui-color-selection);
         color: var(--lui-color-text-bright);
     }
+    .lui-status-bar .zui-button[data-size] { height: 20px; }
+    .lui-status-bar .zui-button[data-size=\"icon-xs\"],
+    .lui-status-bar .zui-button[data-size=\"icon-sm\"],
+    .lui-status-bar .zui-button[data-size=\"icon\"] {
+        width: 20px;
+    }
     .lui-running-bar {
         position: relative;
         flex: none;

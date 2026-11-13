@@ -43,7 +43,11 @@ use crate::shell::tabs::panel_glyph;
 const SHEET: &str = "wt-status-bar";
 
 const CSS: &str = css!(
-    ".wt-status-mode, .wt-status-work, .wt-status-work__line {
+    ".lui-status-bar .wt-icon {
+        width: 12px;
+        height: 12px;
+    }
+    .wt-status-mode, .wt-status-work, .wt-status-work__line {
         display: flex;
         flex-direction: row;
         align-items: center;
