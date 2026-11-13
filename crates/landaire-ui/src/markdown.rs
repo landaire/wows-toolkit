@@ -93,6 +93,9 @@ const CSS: &str = css!(
         color: var(--lui-color-accent);
         text-decoration: underline;
         cursor: pointer;
+        /* An inline element has no box of its own to be pressed, so a press would land on the
+           paragraph around it. */
+        display: inline-block;
     }
     .lui-markdown__link:focus-visible {
         outline: 1px solid var(--lui-color-accent);

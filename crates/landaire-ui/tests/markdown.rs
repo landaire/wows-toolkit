@@ -62,3 +62,11 @@ fn inert_links_take_no_focus() {
     let (mut window, _) = open(false);
     assert!(window.by_role(Role::Link).is_empty(), "a link nothing follows is not announced as one");
 }
+
+#[test]
+fn a_pressed_link_is_followed() {
+    let (mut window, followed) = open(true);
+    let links = window.by_role(Role::Link);
+    window.click(links[1]).expect("the link can be pressed");
+    assert_eq!(*followed.borrow(), ["https://example.com/issue"]);
+}
