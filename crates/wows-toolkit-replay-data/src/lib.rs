@@ -36,6 +36,8 @@ pub mod replay_render;
 pub mod sample;
 pub mod shareable;
 #[cfg(any(test, feature = "test-support"))]
+pub mod simulated_panic;
+#[cfg(any(test, feature = "test-support"))]
 pub mod simulated_watch;
 pub mod sort;
 pub mod tactics;

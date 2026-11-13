@@ -419,6 +419,28 @@ fn a_split_keeps_an_open_replays_view() {
     assert_eq!(workspace.read_failure_for_test(&path), Some(read), "and the file was not read again");
 }
 
+/// A parse that panics fails that replay's tab as any failed read does, and the app goes on
+/// reading other replays.
+#[test]
+fn a_parse_that_panics_fails_its_tab_and_the_app_goes_on() {
+    let (mut window, workspace) = open();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let faulting = dir.path().join("faulting.wowsreplay");
+    wows_toolkit_replay_data::simulated_panic::panic_on_parse(&faulting);
+    workspace.open(faulting.clone(), OpenTarget::ShowingTab);
+    settle_in_real_time(&mut window);
+
+    let failure = workspace.read_failure_for_test(&faulting).expect("the panicked read fails the tab");
+    assert!(failure.contains("a simulated decoder fault"), "the tab names the fault: {failure}");
+    assert!(laid_out(&window, "replay-panel-failed"), "the tab shows the failure");
+
+    let next = dir.path().join("next.wowsreplay");
+    std::fs::write(&next, b"not a replay").expect("the replay is written");
+    workspace.open(next.clone(), OpenTarget::NewTab);
+    settle_in_real_time(&mut window);
+    assert!(workspace.read_failure_for_test(&next).is_some(), "a later replay is still read");
+}
+
 /// The status bar carries the listing's toggle on the replays tab.
 #[test]
 fn the_status_bar_holds_the_listing_toggle_on_the_replays_tab() {

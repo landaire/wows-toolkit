@@ -20,6 +20,9 @@ pub enum ReplayLoadError {
     /// The replay's header/metadata block itself was corrupt or malformed.
     #[error("failed to parse replay: {0}")]
     Parse(String),
+    /// The parse stopped on a fault in the reader rather than in the file.
+    #[error("failed to parse replay: the reader stopped on an internal error: {report}")]
+    Panicked { report: wows_toolkit_services::supervision::PanicReport },
     /// Another recording was offered as this battle and is not it.
     #[error("{0}")]
     AltRefused(#[from] AltRefusal),

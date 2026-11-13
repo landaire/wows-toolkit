@@ -67,6 +67,7 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wows_replays::types::ArenaId;
 use wows_replays::types::GameParamId;
+use wows_toolkit_services::supervision::PanicReport;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -1125,7 +1126,29 @@ pub fn parse_replay(
 ///
 /// `alts` that do not belong to this battle are refused before anything is read
 /// (see [`alt_belongs`]).
+///
+/// A panic in the decoders ends this parse with [`ReplayLoadError::Panicked`] rather than
+/// unwinding into the caller, whose worker would otherwise take the session down with it.
 pub fn parse_replay_with_alts(
+    path: &Path,
+    alts: &[PathBuf],
+    game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
+) -> Result<ParsedReplay, ReplayLoadError> {
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(any(test, feature = "test-support"))]
+        crate::simulated_panic::panic_if_asked(path);
+        read_replay_with_alts(path, alts, game_data, personal_rating)
+    }));
+
+    read.unwrap_or_else(|payload| {
+        let report = PanicReport::caught(payload.as_ref());
+        tracing::error!(path = %path.display(), %report, "the replay parse panicked");
+        Err(ReplayLoadError::Panicked { report })
+    })
+}
+
+fn read_replay_with_alts(
     path: &Path,
     alts: &[PathBuf],
     game_data: &GameDataCache,
@@ -1690,6 +1713,23 @@ dumped_at = "2026-01-01T00:00:00Z"
         assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
         assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
         assert!(cache.loaded.lock().unwrap().is_empty(), "a failed build's slot should not linger in the cache");
+    }
+
+    /// A decoder fault ends the parse with an error naming it, on the caller's thread, rather
+    /// than unwinding into the caller.
+    #[test]
+    fn a_panicking_parse_is_a_load_error() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("faulting.wowsreplay");
+        crate::simulated_panic::panic_on_parse(&path);
+        let game_data = GameDataCache::new(dir.path().to_path_buf());
+
+        let read = parse_replay(&path, &game_data, None);
+
+        let Err(ReplayLoadError::Panicked { report }) = read else {
+            panic!("the parse is a panicked load error: {:?}", read.map(|_| ()));
+        };
+        assert!(report.to_string().starts_with("a simulated decoder fault in"), "the report names the panic: {report}");
     }
 
     #[test]

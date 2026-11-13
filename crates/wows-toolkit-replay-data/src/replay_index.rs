@@ -194,7 +194,8 @@ impl IndexOneError {
     ///
     /// Missing or broken game data and a database that would not take the
     /// rows are this machine's state, not the file's: recording them would
-    /// have later passes skip a good replay.
+    /// have later passes skip a good replay. A reader fault is this build's,
+    /// and a later build may read the file.
     pub fn is_unreadable_file(&self) -> bool {
         use crate::error::ReplayLoadError;
 
@@ -203,6 +204,7 @@ impl IndexOneError {
             Self::Parse(
                 ReplayLoadError::UnsupportedVersion { .. }
                 | ReplayLoadError::GameData(_)
+                | ReplayLoadError::Panicked { .. }
                 | ReplayLoadError::AltRefused(_),
             )
             | Self::Store(_)
