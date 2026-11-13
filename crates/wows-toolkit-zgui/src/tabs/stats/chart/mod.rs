@@ -551,7 +551,7 @@ fn SettingsMenu(
         Tooltip {
             TooltipTrigger {
                 Popover {
-                    PopoverTrigger(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.settings").into_owned(), attr:data-testid = "chart-settings") {
+                    PopoverTrigger(size = ButtonSize::IconSm, variant = ButtonVariant::Outline, a11y:label = t!("ui.stats.settings").into_owned(), attr:data-testid = "chart-settings") {
                         AppIcon(glyph = Glyph::Settings)
                     }
                     PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-settings-menu") {
