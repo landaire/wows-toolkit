@@ -19,9 +19,10 @@ pub enum ZoomStep {
 
 impl ZoomStep {
     /// The shortcut `key` with `modifiers` held is, if it is one: Ctrl, or Cmd on macOS, with `=`,
-    /// `+`, `-` or `0`, the keypad's included, since they arrive as the same characters.
+    /// `+`, `-` or `0`, the keypad's included, since they arrive as the same characters. A held
+    /// key's repeats count, so holding it keeps stepping.
     pub fn of(key: &KeyEvent, modifiers: Modifiers) -> Option<Self> {
-        if !modifiers.primary() || modifiers.alt() || key.repeat {
+        if !modifiers.primary() || modifiers.alt() {
             return None;
         }
 

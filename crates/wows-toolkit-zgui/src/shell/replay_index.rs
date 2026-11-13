@@ -17,6 +17,7 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
@@ -39,15 +40,26 @@ pub struct ReplayIndexJobs {
     outcome: RwSignal<Option<String>, LocalStorage>,
     /// The Stop flag the running build checks.
     cancel: StoredValue<Option<Arc<AtomicBool>>>,
+    /// Whether a pass the replays tab started is reading replays.
+    folder_pass: RwSignal<bool, LocalStorage>,
 }
 
 impl ReplayIndexJobs {
     pub fn new() -> Self {
-        Self { progress: RwSignal::new_local(None), outcome: RwSignal::new_local(None), cancel: StoredValue::new(None) }
+        Self {
+            progress: RwSignal::new_local(None),
+            outcome: RwSignal::new_local(None),
+            cancel: StoredValue::new(None),
+            folder_pass: RwSignal::new_local(false),
+        }
     }
 
     pub fn is_running(self) -> bool {
         self.progress.with(Option::is_some)
+    }
+
+    pub fn is_running_untracked(self) -> bool {
+        self.progress.with_untracked(Option::is_some)
     }
 
     pub fn progress(self) -> Option<IndexProgress> {
@@ -63,6 +75,19 @@ impl ReplayIndexJobs {
         if let Some(cancel) = self.cancel.get_value() {
             cancel.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// Tells the shell whether a pass the replays tab started is reading replays, so its own
+    /// build waits for it.
+    pub fn set_folder_pass(self, running: bool) {
+        if self.folder_pass.get_untracked() != running {
+            self.folder_pass.set(running);
+        }
+    }
+
+    /// Forgets the replays tab's pass, as the tab goes. `try_`, since the shell may be going too.
+    pub fn clear_folder_pass(self) {
+        let _ = self.folder_pass.try_set(false);
     }
 }
 
@@ -80,7 +105,8 @@ impl Shell {
     /// game directory, since the replays are under it, and while another build runs.
     pub fn build_replay_index(self, mode: IndexMode) {
         let index = self.replay_index;
-        if index.progress.with_untracked(Option::is_some) {
+        // Two passes at once would each load and save the unreadable-file ledger over the other's.
+        if index.progress.with_untracked(Option::is_some) || index.folder_pass.get_untracked() {
             self.toasts().warn(t!("ui.reindex.busy_index").into_owned());
             return;
         }
@@ -160,7 +186,7 @@ impl Shell {
                 }
                 Err(err) => {
                     let said = err.to_string();
-                    self.toasts().failed(said.clone());
+                    self.say_failure(said.clone());
                     said
                 }
             };

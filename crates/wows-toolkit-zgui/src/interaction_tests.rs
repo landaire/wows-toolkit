@@ -14,9 +14,25 @@ use wows_toolkit_viewmodel::settings::keys;
 use zgui::view;
 
 use crate::shell::AppRootProps;
+use crate::shell::Shell;
 
 /// The size the GPUI shell is reviewed at.
 pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
+
+thread_local! {
+    /// The shell of the window a test on this thread opened last.
+    static SHELL: std::cell::Cell<Option<Shell>> = const { std::cell::Cell::new(None) };
+}
+
+/// Notes the shell a window built, for the test that opened it.
+pub(crate) fn capture_shell(shell: Shell) {
+    SHELL.set(Some(shell));
+}
+
+/// The shell of the window this test opened.
+pub(crate) fn shell() -> Shell {
+    SHELL.get().expect("this test opened a window with the shell in it")
+}
 
 /// Points `storage_dir` at a temporary directory for the whole process, with every first-run
 /// question answered and the update check off, so the shell opens as a returning reader sees it.
@@ -55,6 +71,19 @@ pub(crate) fn open_shell(options: HeadlessOptions) -> HeadlessWindow {
 
     // The settings are read on the tokio runtime, in real time rather than the window's clock.
     settle_in_real_time(&mut window);
+
+    window
+}
+
+/// Opens the shell headlessly with no tokio runtime, so no settings are read and nothing reaches
+/// the network: what the shell does is driven by the test alone.
+pub(crate) fn open_bare_shell() -> HeadlessWindow {
+    let seeding = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    returning_reader(&seeding);
+
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(REVIEW_SIZE), || view! { AppRoot(runtime = None) })
+        .expect("the shell opens headlessly");
+    window.advance(Duration::from_millis(50));
 
     window
 }

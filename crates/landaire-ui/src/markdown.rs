@@ -348,11 +348,8 @@ impl RunReader {
         let before = at.checked_sub(1).and_then(|i| chars.get(i)).copied();
         let after = chars.get(at + width).copied();
         let on = *flag(&mut self.style);
-        let fits = if on {
-            before.is_some_and(|c| !c.is_whitespace())
-        } else {
-            after.is_some_and(|c| !c.is_whitespace())
-        };
+        let fits =
+            if on { before.is_some_and(|c| !c.is_whitespace()) } else { after.is_some_and(|c| !c.is_whitespace()) };
         if !fits {
             return false;
         }
@@ -390,9 +387,8 @@ impl RunReader {
                 continue;
             }
             // An underscore inside a word, as in a file name, is not emphasis.
-            let inside_word = c == '_'
-                && before.is_some_and(char::is_alphanumeric)
-                && next.is_some_and(char::is_alphanumeric);
+            let inside_word =
+                c == '_' && before.is_some_and(char::is_alphanumeric) && next.is_some_and(char::is_alphanumeric);
             if (c == '*' || c == '_') && !inside_word && self.toggle(chars, at, 1, |style| &mut style.emphasis) {
                 at += 1;
                 continue;

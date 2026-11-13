@@ -368,7 +368,7 @@ impl BrowserControl {
             next_check: StoredValue::new_local(0),
             checks: StoredValue::new_local(HashMap::new()),
             owner: StoredValue::new_local(Owner::current().expect("the control is made inside a component")),
-            work: BrowserWork::new(),
+            work: BrowserWork::new(shell.replay_index),
             shell,
         };
         control.follow_settings();

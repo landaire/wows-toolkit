@@ -37,6 +37,21 @@ const CSS: &str = css!(
     }"
 );
 
+/// How long a failure may be before it is worth the error window rather than a message.
+const TOO_LONG_TO_TOAST: usize = 160;
+
+impl Shell {
+    /// Says why a finished job failed: a sentence as a message, and anything longer, such as a
+    /// chain of causes, in the error window, where it can be read in full and copied.
+    pub fn say_failure(self, said: String) {
+        if said.len() > TOO_LONG_TO_TOAST || said.lines().count() > 1 {
+            show_error(self, said);
+        } else {
+            self.toasts().failed(said);
+        }
+    }
+}
+
 /// Shows an error worth reading in full, with a way to copy it.
 ///
 /// A message is right for a sentence and wrong for a chain of causes: it goes by itself and cannot

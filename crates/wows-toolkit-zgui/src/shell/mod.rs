@@ -105,7 +105,9 @@ use crate::tabs::TabBodyProps;
 use crate::tabs::armor_viewer::library::ArmorLibrary;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
+use crate::window_shell::DecoratedWindowProps;
 use crate::window_shell::RememberGeometryProps;
+use crate::window_shell::main_window_title;
 use crate::windows::tactics::TacticsHost;
 use crate::zoom::ZoomStep;
 
@@ -115,11 +117,15 @@ pub use crate::shell::dialogs::HostedDialogProps;
 
 const SHEET: &str = "wt-shell";
 
+/// The message a zoom step says, which the next step's replaces.
+const ZOOM_TOAST: &str = "zoom";
+
 const CSS: &str = css!(
     ".wt-shell {
         position: relative;
         display: flex;
         flex-direction: column;
+        flex: 1 1 auto;
         width: 100%;
         height: 100%;
         min-width: 0;
@@ -199,13 +205,15 @@ pub enum ReplayRequest {
     RenderReplay(PathBuf),
     /// Renders the battle to a video in the background and puts the file on the clipboard.
     RenderToClipboard(PathBuf),
+    /// Reads the open replays again, through a result mapping that has since been written.
+    ReparseOpen,
 }
 
 impl ReplayRequest {
-    /// Whether the replays tab comes forward for it. A clipboard render reports through messages,
-    /// so the reader stays where they asked for it.
+    /// Whether the replays tab comes forward for it. A clipboard render reports through messages
+    /// and a reparse changes only what is already open, so the reader stays where they are.
     const fn shows_replays(&self) -> bool {
-        !matches!(self, Self::RenderToClipboard(_))
+        !matches!(self, Self::RenderToClipboard(_) | Self::ReparseOpen)
     }
 }
 
@@ -566,7 +574,9 @@ pub fn AppRoot(
         ThemeRoot(choice = choice, motion = motion, zoom = zoom) {
             SemanticTokens(choice = shown)
             ToastHost {
-                ShellFrame(appearance = appearance)
+                DecoratedWindow(title = main_window_title()) {
+                    ShellFrame(appearance = appearance)
+                }
             }
         }
     }
@@ -611,6 +621,8 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     let toasts = Toasts::current().expect("ShellFrame is placed inside ToastHost, which publishes its messages");
     let shell = Shell::new(services, appearance, toasts, try_use_clipboard());
     provide_local_context(shell);
+    #[cfg(test)]
+    crate::interaction_tests::capture_shell(shell);
 
     startup::begin(services, shell);
     shell.tactics.begin(services);
@@ -639,9 +651,6 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
             node_ref = root,
             on:key_down = move |ev| {
                 shell.held.set(ev.modifiers);
-                if ev.repeat {
-                    return;
-                }
                 let modifiers = ev.modifiers;
                 if shell_shortcut(shell, ev, modifiers) {
                     ev.prevent_default();
@@ -771,18 +780,23 @@ fn hear_unfocused_keys(root: NodeRef) {
     });
 }
 
-/// Runs the window-wide shortcut `key` with `modifiers` is, and says whether it was one.
+/// Runs the window-wide shortcut `key` with `modifiers` is, and says whether it was one. Only a
+/// zoom step repeats while its key is held.
 fn shell_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifiers) -> bool {
     if let Some(step) = ZoomStep::of(key, modifiers) {
         // The zoom waits for the settings, which hold the zoom it steps from.
         let services = shell.services;
         if services.settings.read_untracked(|_| ()).is_some() {
-            shell.set_zoom(step.applied_to(shell.appearance.zoom.get_untracked()));
+            let zoom = step.applied_to(shell.appearance.zoom.get_untracked());
+            shell.set_zoom(zoom);
+            // Said, since the tab with the zoom slider may not be the one open.
+            let said = rust_i18n::t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
+            shell.toasts().show(landaire_ui::Notice::info(said).keyed(landaire_ui::ToastKey::new(ZOOM_TOAST)));
         }
         return true;
     }
 
-    if !modifiers.primary() || modifiers.alt() {
+    if key.repeat || !modifiers.primary() || modifiers.alt() {
         return false;
     }
 

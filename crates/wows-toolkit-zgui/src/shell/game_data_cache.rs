@@ -200,7 +200,7 @@ impl Shell {
                     toasts.ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned());
                 } else {
                     let said = t!("ui.messages.game_data_download_failed").into_owned();
-                    toasts.failed(said.clone());
+                    self.say_failure(said.clone());
                     self.cache.state.update(|state| state.failure = Some(said));
                 }
             }
@@ -208,7 +208,7 @@ impl Shell {
             // plan itself.
             CacheOutcome::Planned { .. } => {}
             CacheOutcome::Failed(reason) => {
-                toasts.failed(reason);
+                self.say_failure(reason);
             }
         }
     }

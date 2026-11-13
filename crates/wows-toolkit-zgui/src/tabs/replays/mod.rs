@@ -264,6 +264,7 @@ fn carry_out(workspace: ReplayWorkspace, control: BrowserControl, request: Repla
         ReplayRequest::OpenRecentFolder(root) => control.open_recent_folder(root),
         ReplayRequest::RenderReplay(path) => workspace.render(RenderRequest { path, alts: Vec::new() }),
         ReplayRequest::RenderToClipboard(path) => batch::render_many(workspace, vec![path], BatchTarget::Clipboard),
+        ReplayRequest::ReparseOpen => workspace.reparse_all(ReparseCause::GameDataArrived),
     }
 }
 

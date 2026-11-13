@@ -103,6 +103,7 @@ use crate::shell::palette::RootCommand;
 use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
 use crate::shell::palette::modes;
+use crate::shell::replay_index::ReplayIndexJobs;
 use crate::shell::replay_index::owner_rating;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
@@ -196,11 +197,13 @@ pub struct BrowserWork {
     /// Where the browser's events go, once the panel is up.
     events: StoredValue<Option<BrowserEvents>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
+    /// The shell's own build over the install's directory, which no pass here runs beside.
+    shell_index: ReplayIndexJobs,
 }
 
 impl BrowserWork {
     /// Called from the replays tab's body, with the control.
-    pub fn new() -> Self {
+    pub fn new(shell_index: ReplayIndexJobs) -> Self {
         Self {
             sources: RwSignal::new_local(HashMap::new()),
             passes: RwSignal::new_local(HashMap::new()),
@@ -209,6 +212,7 @@ impl BrowserWork {
             contributing: RwSignal::new_local(false),
             events: StoredValue::new_local(None),
             owner: StoredValue::new_local(Owner::current().expect("the browser's work is made inside a component")),
+            shell_index,
         }
     }
 
@@ -219,9 +223,24 @@ impl BrowserWork {
         owner.with(|| spawn_local(future))
     }
 
-    /// Whether a pass is reading replays: a forced re-index or a directory's own.
+    /// Whether a pass is reading replays: a forced re-index, a directory's own, or the shell's
+    /// build. Two at once would each load and save the unreadable-file ledger over the other's.
     fn is_busy(self) -> bool {
+        self.is_own_pass_running() || self.shell_index.is_running_untracked()
+    }
+
+    fn is_own_pass_running(self) -> bool {
         self.reindexing.get_untracked() || self.running.with_value(Option::is_some)
+    }
+
+    /// Tells the shell whether a pass here is reading replays. Called whenever one starts or ends.
+    fn publish_busy(self) {
+        self.shell_index.set_folder_pass(self.is_own_pass_running());
+    }
+
+    fn set_reindexing(self, running: bool) {
+        self.reindexing.set(running);
+        self.publish_busy();
     }
 
     /// The source state of tab `id`, subscribing to it.
@@ -232,12 +251,6 @@ impl BrowserWork {
     /// Whether tab `id`'s replays are still being added to its source, subscribing to it.
     pub fn is_indexing(self, id: FolderId) -> bool {
         self.passes.with(|passes| passes.contains_key(&id))
-    }
-}
-
-impl Default for BrowserWork {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -284,11 +297,29 @@ pub fn offer(control: BrowserControl) {
             work.spawn(async move { index_listed_folders(control) });
         }
     });
+    // When the shell's build ends, the rows read what the index held before it, and a directory
+    // pass queued behind it can start.
+    let shell_index = work.shell_index;
+    let after_shell_pass = RenderEffect::new(move |was_running: Option<bool>| {
+        let running = shell_index.is_running();
+        if was_running == Some(true) && !running {
+            work.spawn(async move {
+                for listing in control.all_listings() {
+                    listing.load_summaries();
+                }
+                run_next_pass(control);
+            });
+        }
+        running
+    });
     on_cleanup_local(move || {
         drop(following);
+        drop(after_shell_pass);
         if let Some(pass) = work.running.try_update_value(Option::take).flatten() {
             pass.stop();
         }
+        // The tab is gone, so nothing here holds the shell's build back.
+        shell_index.clear_folder_pass();
     });
 }
 
@@ -350,7 +381,7 @@ pub fn search_offer(control: BrowserControl) -> Offer {
 /// Whether the selected tab's list can be indexed now, subscribing to what decides it.
 pub fn index_offer(control: BrowserControl) -> Offer {
     let work = control.work;
-    if work.reindexing.get() {
+    if work.reindexing.get() || work.shell_index.is_running() {
         return Offer::Disabled(t!("ui.reindex.busy_index").into_owned());
     }
     match control.shell().services().game_data.state() {
@@ -661,7 +692,7 @@ fn run(control: BrowserControl, summary: ReindexSummary, purpose: IndexPurpose, 
         control.shell().toasts().warn(t!("ui.reindex.busy_index").into_owned());
         return;
     }
-    work.reindexing.set(true);
+    work.set_reindexing(true);
 
     let requested: BTreeSet<Release> = summary.downloads.iter().map(|need| need.release).collect();
     let base = if requested.is_empty() { None } else { cache_base(services) };
@@ -778,13 +809,13 @@ async fn read_again(
     let shell = control.shell();
     let services = shell.services();
     let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else {
-        work.reindexing.set(false);
+        work.set_reindexing(false);
         shell.toasts().failed(t!("ui.reindex.no_index").into_owned());
         return;
     };
     // Checked as the run was prepared; the setting can be cleared while a download runs.
     let Some(live_root) = install_replays_root(services) else {
-        work.reindexing.set(false);
+        work.set_reindexing(false);
         shell.toasts().failed(t!("ui.reindex.no_game_data").into_owned());
         return;
     };
@@ -808,14 +839,14 @@ async fn read_again(
     })
     .await;
     drop(job);
-    work.reindexing.set(false);
+    work.set_reindexing(false);
 
     match ran {
         Ok(progress) => {
             shell.toasts().show(pass_notice(&purpose, progress, skipped));
         }
         Err(err) => {
-            shell.toasts().failed(err.to_string());
+            shell.say_failure(err.to_string());
         }
     }
     // The rows read what the index held before the pass.
@@ -1011,6 +1042,7 @@ fn run_next_pass(control: BrowserControl) {
         passes.insert(id, PassState::Running);
     });
     work.running.set_value(Some(FolderPass { cancel, _task: task }));
+    work.publish_busy();
 }
 
 fn pass_finished(control: BrowserControl, id: FolderId, built: Result<IndexProgress, IndexError>) {
@@ -1032,6 +1064,7 @@ fn pass_finished(control: BrowserControl, id: FolderId, built: Result<IndexProgr
     }
     // Its task is the one finishing, so it is dropped rather than stopped.
     drop(work.running.try_update_value(Option::take).flatten());
+    work.publish_busy();
 
     // The rows read what the source held before the pass.
     if let Some(listing) = control.listing(id) {

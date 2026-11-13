@@ -1,11 +1,17 @@
 //! What happens once the window is open: the settings read, and everything that waits on it.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_replay_data::heap_profile;
+use wows_toolkit_replay_data::replay_index::IndexMode;
+use wows_toolkit_services::constants::Checked;
 use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
+use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
+use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Set;
@@ -17,6 +23,7 @@ use crate::i18n::LanguageCode;
 use crate::services::GameDataRequest;
 use crate::services::GameDataState;
 use crate::services::Services;
+use crate::shell::ReplayRequest;
 use crate::shell::Shell;
 use crate::shell::crash;
 use crate::shell::first_run;
@@ -31,6 +38,8 @@ pub const STUCK_WOWS_DIR: &str = "wows-dir";
 pub fn begin(services: Services, shell: Shell) {
     announce_game_data(services, shell);
     maintain_game_data_cache(services);
+    check_published_constants(services, shell);
+    rebuild_stale_index(services, shell);
 
     let loaded = services.on_tokio(async move {
         let pool = wows_toolkit_config::open_db().await?;
@@ -170,4 +179,80 @@ fn maintain_game_data_cache(services: Services) {
         true
     });
     on_cleanup_local(move || drop(maintaining));
+}
+
+/// Once a session, as soon as the game data and the settings are in: asks whether the published
+/// result mappings have moved since they were last written, and writes the newest over the
+/// installed build's. A mapping a year old reads this year's results wrongly.
+fn check_published_constants(services: Services, shell: Shell) {
+    let checking = RenderEffect::new(move |started: Option<bool>| {
+        if started == Some(true) {
+            return true;
+        }
+        let GameDataState::Ready(loaded) = services.game_data.state() else { return false };
+        let Some(known) = services.settings.read(|settings| settings.constants_commit.clone()) else { return false };
+
+        let checked = services.on_tokio(wows_toolkit_services::constants::check_latest(loaded.build(), known));
+        spawn_local(async move {
+            let outcome = checked.await.unwrap_or_else(|err| Checked::Failed(err.to_string()));
+            constants_checked(services, shell, outcome);
+        });
+        true
+    });
+    on_cleanup_local(move || drop(checking));
+}
+
+fn constants_checked(services: Services, shell: Shell, outcome: Checked) {
+    match outcome {
+        Checked::Written { build, commit } => {
+            record_constants_fetch(ConstantsFetchStatus::Succeeded);
+            tracing::info!(build, "constants: the newest result mapping was written");
+            // Stored as a nullable string, which is what the other front ends read.
+            services.settings.edit(keys::CONSTANTS_FILE_COMMIT, |settings| {
+                settings.constants_commit = Some(commit.clone());
+                Some(commit)
+            });
+            shell.toasts().info(t!("ui.replay.constants_latest_written").into_owned());
+            shell.request_replay(ReplayRequest::ReparseOpen);
+        }
+        Checked::UpToDate => record_constants_fetch(ConstantsFetchStatus::Succeeded),
+        Checked::Failed(reason) => {
+            record_constants_fetch(ConstantsFetchStatus::Failed(reason.clone()));
+            // A notice rather than a failure: the cached mappings still read.
+            tracing::warn!(%reason, "constants: the published mappings could not be checked");
+            shell.toasts().warn(t!("ui.replay.constants_check_failed", reason = reason).into_owned());
+        }
+    }
+}
+
+/// Once a session, as soon as the game data is in: indexes the install's replays again when rows
+/// an older parse wrote are out of date, so an update's fixes reach rows already indexed.
+fn rebuild_stale_index(services: Services, shell: Shell) {
+    let checking = RenderEffect::new(move |started: Option<bool>| {
+        if started == Some(true) {
+            return true;
+        }
+        if services.game_data.cache().is_none() {
+            return false;
+        }
+        let Some(wows_dir) = services.settings.read(|settings| settings.wows_dir.clone()) else { return false };
+        let Some(pool) = services.settings.pool() else { return false };
+        if wows_dir.is_empty() {
+            return true;
+        }
+
+        let root = Path::new(&wows_dir).join("replays");
+        let stale = services
+            .on_tokio(async move { wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root).await });
+        spawn_local(async move {
+            match stale.await {
+                Ok(Ok(true)) => shell.build_replay_index(IndexMode::FillGaps),
+                Ok(Ok(false)) => {}
+                Ok(Err(err)) => tracing::warn!(%err, "replay index revision could not be checked"),
+                Err(err) => tracing::warn!(%err, "replay index revision check did not complete"),
+            }
+        });
+        true
+    });
+    on_cleanup_local(move || drop(checking));
 }
