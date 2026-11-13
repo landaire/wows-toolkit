@@ -155,7 +155,7 @@ expression: specs()
     required:
       - ship
 - name: ap_shell_traits
-  description: "Which ships have AP shells that differ from what is normal for their class, for questions such as \"which ships have improved penetration angles\" or \"which ships have short-fuse AP\". trait: improved_ricochet (\"improved penetration angles\": the shell ricochets less, starting to ricochet and always ricocheting at steeper angles than the class standard, e.g. 60 / 67.5 deg instead of 45 / 60), short_fuse (\"short fuse\" as players mean it: fuse at most half the class standard, e.g. 0.005 s against 0.033 s; detonates much sooner after penetrating, so far fewer overpenetrations on thin armor), slightly_short_fuse (below the standard but more than half of it, e.g. 0.025 s against 0.033 s), long_fuse (travels farther before detonating), low_fuse_threshold (arms on thinner plates than usual for its caliber, so fewer hits pass through thin plating without exploding) or high_fuse_threshold. Filter by class, tier and nation; battery defaults to main (secondary on request). Returns each class's standard (ricochet angles and fuse time most AP shells of the class have, from every released ship), the usual arming threshold (caliber / 6), counts of ships considered and qualifying per class with shares, and the qualifying ships, each with its shells and their values beside the standard. Every listed shell is AP by game data even when its name reads SAP-42 or P.Spr.Gr.: call it AP, never SAP. One call answers the question; no per-ship lookups are needed."
+  description: "Which ships have AP shells that differ from what is normal for their class, for questions such as \"which ships have improved penetration angles\" or \"which ships have short-fuse AP\". trait: improved_ricochet (\"improved penetration angles\": the shell ricochets less, starting to ricochet and always ricocheting at steeper angles than the class standard, e.g. 60 / 67.5 deg instead of 45 / 60), short_fuse (\"short fuse\" as players mean it: fuse below 0.015 s in every class, e.g. 0.01 s or 0.005 s; detonates much sooner after penetrating, so far fewer overpenetrations on thin armor), slightly_short_fuse (below the class standard but 0.015 s or more, e.g. 0.025 s against 0.033 s), long_fuse (travels farther before detonating), low_fuse_threshold (arms on thinner plates than usual for its caliber, so fewer hits pass through thin plating without exploding) or high_fuse_threshold. Filter by class, tier and nation; battery defaults to main (secondary on request). Returns each class's standard (ricochet angles and fuse time most AP shells of the class have, from every released ship), the usual arming threshold (caliber / 6), counts of ships considered and qualifying per class with shares, and the qualifying ships, each with its shells and their values beside the standard. Every listed shell is AP by game data even when its name reads SAP-42 or P.Spr.Gr.: call it AP, never SAP. One call answers the question; no per-ship lookups are needed."
   input_schema:
     type: object
     additionalProperties: false
@@ -167,10 +167,10 @@ expression: specs()
             description: "Ricochets start at a steeper angle, always-ricochet at a steeper\nangle, or both, and neither is shallower: \"improved penetration\nangles\", the shell ricochets less."
           - type: string
             const: short_fuse
-            description: "Fuse time at most half the class standard: detonates much sooner\nafter penetrating, so far fewer overpenetrations on thin armor."
+            description: "Fuse time below 0.015 s: detonates much sooner after penetrating, so\nfar fewer overpenetrations on thin armor."
           - type: string
             const: slightly_short_fuse
-            description: "Fuse time below the class standard but more than half of it, such as\n0.025 s against 0.033 s."
+            description: "Fuse time below the class standard but not short, such as 0.025 s\nagainst 0.033 s."
           - type: string
             const: long_fuse
             description: "Fuse time longer than the class standard: travels farther inside the\nship before detonating, so more overpenetrations on thin armor."

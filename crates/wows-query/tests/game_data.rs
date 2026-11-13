@@ -736,7 +736,8 @@ fn comparison_head_to_head_gives_a_verdict() {
 }
 
 /// Des Moines' 203 mm AP ricochets from 60 deg instead of the cruiser
-/// standard 45; Minotaur's 152 mm AP has a 0.005 s fuse against 0.033 s.
+/// standard 45; Minotaur's 152 mm AP has a 0.005 s fuse, below the 0.015 s
+/// short fuse bound, while Conqueror's 0.015 s fuse is at it.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn ap_shell_traits_find_improved_angles_and_short_fuses() {
@@ -754,7 +755,18 @@ fn ap_shell_traits_find_improved_angles_and_short_fuses() {
         .expect("ships list");
     let short_rows = shell_trait_rows(&short);
     assert!(short_rows.iter().any(|row| row.starts_with("T10 Minotaur ")), "{short_rows:#?}");
-    // A 0.025 s cruiser fuse is slightly short, not short.
+    // 0.01 s is short even where it is the destroyer standard.
+    let destroyers = game()
+        .call_tool("ap_shell_traits", json!({ "trait": "short_fuse", "class": "destroyer", "min_tier": 8, "max_tier": 10 }))
+        .expect("destroyers list");
+    let destroyer_rows = shell_trait_rows(&destroyers);
+    assert!(destroyer_rows.iter().any(|row| row.contains("fuse 0.01 s")), "{destroyer_rows:#?}");
+    // 0.015 s battleship and 0.025 s cruiser fuses are slightly short, not short.
+    let battleships = game()
+        .call_tool("ap_shell_traits", json!({ "trait": "short_fuse", "class": "battleship", "min_tier": 8, "max_tier": 10 }))
+        .expect("battleships list");
+    let battleship_rows = shell_trait_rows(&battleships);
+    assert!(battleship_rows.iter().all(|row| !row.starts_with("T10 Conqueror ")), "{battleship_rows:#?}");
     assert!(short_rows.iter().all(|row| !row.contains("fuse 0.025 s")), "{short_rows:#?}");
 
     let slightly_short = game()
