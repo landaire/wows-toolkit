@@ -15,6 +15,7 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -57,7 +58,9 @@ use crate::game_art::GameArt;
 use crate::icons::AppIconProps;
 use crate::services::GameDataState;
 use crate::services::Services;
+use crate::tabs::stats::rating;
 use crate::tabs::stats::rating::RatingChipProps;
+use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-stats-overview";
 
@@ -196,6 +199,8 @@ struct Computed {
 struct OverviewShip {
     name: String,
     info: PerformanceInfo,
+    /// Absent without an expected-values table, or when the table does not know the ship.
+    rating: Option<PersonalRatingResult>,
 }
 
 impl Computed {
@@ -206,7 +211,10 @@ impl Computed {
             summary: SessionSummary::from_games(&games),
             ships: per_ship_performance_by_id(&games)
                 .into_iter()
-                .map(|(name, info)| OverviewShip { name, info })
+                .map(|(name, info)| {
+                    let rating = table.and_then(|table| info.personal_rating(table));
+                    OverviewShip { name, info, rating }
+                })
                 .collect(),
             achievements: aggregate_achievements(&games),
             rating: session_personal_rating(&games, table),
@@ -453,11 +461,14 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
         })
         .text(|ship| ship.info.total_games().to_string())
         .sizing(number_width),
-        GridColumn::new("win_rate", t!("ui.stats.column_win_rate").into_owned(), |ship: &OverviewShip| {
-            optional_percent(ship.info.win_rate())
-        })
-        .text(|ship| optional_percent(ship.info.win_rate()))
-        .sizing(number_width),
+        GridColumn::new("win_rate", t!("ui.stats.column_win_rate").into_owned(), win_rate_cell)
+            .text(|ship| optional_percent(ship.info.win_rate()))
+            .sizing(number_width),
+        GridColumn::new("pr", t!("ui.replay.column.personal_rating").into_owned(), rating_cell)
+            .text(|ship| {
+                ship.rating.as_ref().map(|rating| format!("{:.0}", rating.pr)).unwrap_or_else(|| "-".to_owned())
+            })
+            .sizing(number_width),
         GridColumn::new("avg_damage", t!("ui.stats.column_avg_damage").into_owned(), move |ship: &OverviewShip| {
             optional_number(ship.info.avg_damage(), &damage_locale)
         })
@@ -481,6 +492,38 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
             class = TABULAR_CLASS,
             attr:data-testid = "stats-overview-ships"
         )
+    })
+}
+
+/// A win rate in the colour of the band the rate falls in, as the Player Tracker draws one.
+fn win_rate_cell(ship: &OverviewShip) -> AnyView {
+    let rate = ship.info.win_rate();
+    let band = rate.map(PersonalRatingCategory::from_win_rate);
+
+    AnyView::new(view! {
+        text(
+            attr:data-testid = ship.info.ship_id().map(|id| format!("stats-overview-win-rate-{id}")),
+            attr:data-band = band.map(|band| rating_band_name(band).to_owned()),
+            style:color = band.map(rating::text_color)
+        ) {{optional_percent(rate)}}
+    })
+}
+
+/// A ship's rating on its band's chip, or a dash when nothing rates it.
+fn rating_cell(ship: &OverviewShip) -> AnyView {
+    let test_id = ship.info.ship_id().map(|id| format!("stats-overview-pr-{id}"));
+    let Some(rating) = ship.rating.as_ref() else {
+        return AnyView::new(view! {
+            text(attr:data-testid = test_id) {"-"}
+        });
+    };
+    let category = rating.category;
+    let text = format!("{:.0}", rating.pr);
+
+    AnyView::new(view! {
+        row(attr:data-testid = test_id, attr:data-band = rating_band_name(category).to_owned()) {
+            RatingChip(text = text, category = category)
+        }
     })
 }
 

@@ -18,9 +18,11 @@ use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
 use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::stats::PerGameStat;
+use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Param;
@@ -46,6 +48,7 @@ use crate::tabs::stats::overview::StatsOverviewProps;
 use crate::tabs::stats::rating;
 use crate::tabs::stats::ships::StatsShipsProps;
 use crate::theme::SemanticTokensProps;
+use crate::theme::rating_band_name;
 
 const YAMATO: u64 = FIXTURE_PR_SHIP_ID;
 const SHIMAKAZE: u64 = 4_181_604_048;
@@ -416,6 +419,35 @@ fn the_overview_rates_the_session_only_with_a_table() {
     handles.games.set(Arc::from(Vec::new()));
     settle(&mut window);
     assert!(window.by_test_id("stats-overview-summary").is_none(), "no games, no summary");
+}
+
+/// The band a cell carries, read off the element `test_id` names.
+fn band_of(window: &HeadlessWindow, test_id: &str) -> Option<&'static str> {
+    let cell = window.by_test_id(test_id).expect("the cell is drawn");
+    PersonalRatingCategory::ALL
+        .into_iter()
+        .map(rating_band_name)
+        .find(|band| window.all_by_attribute("data-band", band).contains(&cell))
+}
+
+#[test]
+fn the_overview_colours_each_win_rate_and_rating_by_its_band() {
+    let Opened { mut window, handles, .. } = open(Panel::Overview, Drawing::Recorded, Appearance::Dark, None);
+
+    // Two of three Yamato games won, one of two Shimakaze games, no Halland game.
+    assert_eq!(band_of(&window, &format!("stats-overview-win-rate-{YAMATO}")), Some("super-unicum"));
+    assert_eq!(band_of(&window, &format!("stats-overview-win-rate-{SHIMAKAZE}")), Some("average"));
+    assert_eq!(band_of(&window, &format!("stats-overview-win-rate-{HALLAND}")), Some("bad"));
+    assert_eq!(band_of(&window, &format!("stats-overview-pr-{YAMATO}")), None, "nothing rates without a table");
+
+    let table = Arc::new(fixture_personal_rating_data());
+    handles.rating.set(Some(Arc::clone(&table)));
+    settle(&mut window);
+    let yamato: Vec<PerGameStat> = evening().iter().filter(|game| game.ship_id.raw() == YAMATO).cloned().collect();
+    let yamato: Vec<&PerGameStat> = yamato.iter().collect();
+    let rated = PerformanceInfo::from_games(&yamato).personal_rating(&table).expect("the fixture rates the Yamato");
+    assert_eq!(band_of(&window, &format!("stats-overview-pr-{YAMATO}")), Some(rating_band_name(rated.category)));
+    assert_eq!(band_of(&window, &format!("stats-overview-pr-{HALLAND}")), None, "the fixture knows only the Yamato");
 }
 
 /// Writes `window` to `target/zgui-shots/<name>.png`.
