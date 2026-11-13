@@ -20,6 +20,7 @@ pub mod replay_index;
 pub mod settings;
 mod startup;
 mod status_bar;
+pub mod supervision;
 pub mod tabs;
 mod twitch;
 mod update;
@@ -647,6 +648,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     crate::interaction_tests::capture_shell(shell);
 
     startup::begin(services, shell);
+    supervision::begin(services);
     shell.tactics.begin(services);
     shell.collab.begin(shell);
     shell.armor.begin(services);

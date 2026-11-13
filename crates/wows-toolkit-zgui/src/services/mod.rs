@@ -9,11 +9,13 @@ mod game_data;
 mod jobs;
 pub mod progress;
 mod settings;
+mod supervision;
 
 use std::sync::Arc;
 
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
+use wows_toolkit_services::supervision::watchdog::Watchdog;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::provide_local_context;
@@ -33,6 +35,7 @@ pub use crate::services::settings::Settings;
 pub use crate::services::settings::SettingsState;
 #[cfg(test)]
 pub use crate::services::settings::saved_for_test;
+pub use crate::services::supervision::Supervision;
 
 /// The process-wide services, as one handle.
 #[derive(Clone, Copy)]
@@ -44,6 +47,7 @@ pub struct Services {
     pub game_data: GameData,
     pub jobs: Jobs,
     pub locale: Locale,
+    pub supervision: Supervision,
 }
 
 impl Services {
@@ -56,6 +60,7 @@ impl Services {
             game_data: GameData::new(),
             jobs: Jobs::new(),
             locale: Locale::new(),
+            supervision: Supervision::new(),
         };
         provide_local_context(services);
 
@@ -76,6 +81,11 @@ impl Services {
     /// future, such as a collab session.
     pub fn runtime(self) -> Option<Arc<Runtime>> {
         self.runtime.get_value()
+    }
+
+    /// The watchdog over the long-lived worker threads. `None` when it could not be started.
+    pub fn watchdog(self) -> Option<Watchdog> {
+        self.supervision.watchdog()
     }
 
     /// Runs `future` on the tokio runtime and resolves with its output wherever it is awaited.

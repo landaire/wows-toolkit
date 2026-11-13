@@ -2,9 +2,8 @@
 //! once, the team damage), the player table its owner supplies, and a side panel that slides in
 //! with the chat or, in debug mode, the raw JSON payloads.
 //!
-//! The panel reads its replay with `replay_data::load::parse_replay_with_alts` off the UI thread,
-//! with a job on the status bar, and again whenever its [`PanelControl`] asks or another recording
-//! of the battle is added.
+//! The panel reads its replay through the replay loader, which reports its work on the status
+//! bar, and again whenever its [`PanelControl`] asks or another recording of the battle is added.
 //!
 //! # The table slot
 //!
@@ -39,7 +38,7 @@ use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::ParsedReplay;
-use wows_toolkit_replay_data::load::parse_replay_with_alts;
+use wows_toolkit_replay_data::loader::LoadRequest;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
@@ -92,7 +91,6 @@ use zgui_ui::MenuSeparatorProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
-use crate::services::Job;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
@@ -670,9 +668,19 @@ pub fn ReplayPanel(
         control.alt_on_trial.set_value(None);
         underway.set_value(Some(Underway { cause, trial: trial.clone() }));
         parsing.set(true);
+        let reading = services.supervision.replay_loader().map(|loader| {
+            loader.read(LoadRequest {
+                path: primary.clone(),
+                alts: alts_now,
+                game_data: cache,
+                personal_rating: rating,
+            })
+        });
         spawn_in(owner.get_value(), async move {
-            let _job = services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
-            let result = blocking(move || parse_replay_with_alts(&primary, &alts_now, &cache, rating.as_deref())).await;
+            let result = match reading {
+                Some(reading) => reading.await,
+                None => Err(ReplayLoadError::LoaderGone { path: primary }),
+            };
             underway.set_value(None);
             parsing.set(false);
             let again =
