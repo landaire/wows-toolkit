@@ -1,0 +1,198 @@
+---
+source: crates/landaire-ui/src/markdown.rs
+expression: parse(notes)
+---
+[
+    Heading {
+        level: HeadingLevel(
+            2,
+        ),
+        runs: [
+            Run {
+                text: "What's new",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    },
+    ListItem {
+        depth: ListDepth(
+            0,
+        ),
+        marker: Bullet,
+        runs: [
+            Run {
+                text: "Replays",
+                style: RunStyle {
+                    strong: true,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+            Run {
+                text: ": the table keeps its ",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+            Run {
+                text: "column order",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: true,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    },
+    ListItem {
+        depth: ListDepth(
+            0,
+        ),
+        marker: Bullet,
+        runs: [
+            Run {
+                text: "Fixed ",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+            Run {
+                text: "wows_toolkit.exe",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: true,
+                },
+                link: None,
+            },
+            Run {
+                text: " crashing, see ",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+            Run {
+                text: "#123",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: Some(
+                    "https://github.com/x/y/issues/123",
+                ),
+            },
+            Run {
+                text: " which also",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    },
+    ListItem {
+        depth: ListDepth(
+            1,
+        ),
+        marker: Bullet,
+        runs: [
+            Run {
+                text: "nested point",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    },
+    ListItem {
+        depth: ListDepth(
+            0,
+        ),
+        marker: Number(
+            1,
+        ),
+        runs: [
+            Run {
+                text: "first",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    },
+    Quote(
+        [
+            Run {
+                text: "a quote",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    ),
+    Rule,
+    Code(
+        "let a = 1;",
+    ),
+    Paragraph(
+        [
+            Run {
+                text: "Full changelog: ",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+            Run {
+                text: "https://github.com/x/y/compare/a...b",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: Some(
+                    "https://github.com/x/y/compare/a...b",
+                ),
+            },
+            Run {
+                text: ". 2 * 3 and snake_case_name stay as written.",
+                style: RunStyle {
+                    strong: false,
+                    emphasis: false,
+                    code: false,
+                },
+                link: None,
+            },
+        ],
+    ),
+]
