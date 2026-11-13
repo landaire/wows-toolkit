@@ -59,7 +59,7 @@ const CSS: &str = css!(
     .wt-queue__heading { display: flex; flex: none; align-items: center; gap: 4px; padding: 4px 8px; }
     .wt-queue__count { flex: 1 1 auto; }
     .wt-queue__list { flex: 1 1 auto; min-height: 0; }
-    .wt-queue__empty { padding: 8px; font-size: 12px; color: var(--wt-color-text-dim); }
+    .wt-queue__empty { flex: 1 1 auto; padding: 8px; font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-queue-entry { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; }
     .wt-queue-entry:nth-child(even) { background-color: var(--lui-color-faint); }
     .wt-queue-entry__path {
@@ -80,6 +80,11 @@ const CSS: &str = css!(
     }
     .wt-queue__extract { display: flex; flex: 1 1 auto; }
     .wt-queue__extract-button { flex: 1 1 auto; }
+    .wt-queue__extract-button.wt-queue__extract-button:disabled {
+        background-color: var(--lui-color-faint);
+        color: var(--wt-color-text-faint);
+        opacity: 1;
+    }
     .wt-queue__slot { height: 16px; min-width: 0; }
     .wt-queue__bar { height: 8px; }"
 );

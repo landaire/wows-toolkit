@@ -118,13 +118,17 @@ const CSS: &str = css!(
         border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-listing-head__count { flex: 1 1 auto; font-size: 12px; color: var(--wt-color-text-dim); }
+    /* The heading and the listing both reserve the scrollbar's gutter, whether or not the listing
+       scrolls, and inset their cells alike, so each heading sits over its column. */
     .wt-columns {
         display: flex;
         flex: none;
         align-items: center;
         gap: 4px;
         height: 22px;
-        padding: 0 8px;
+        padding: 0 12px 0 8px;
+        overflow-x: hidden;
+        overflow-y: scroll;
         background-color: var(--lui-color-surface);
         border-bottom: 1px solid var(--lui-color-border);
         font-size: 12px;
@@ -132,6 +136,7 @@ const CSS: &str = css!(
     }
     .wt-files { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
     .wt-files .lui-tree-area, .wt-files .lui-tree { flex: 1; min-height: 0; }
+    .wt-files .lui-tree { overflow-y: scroll; }
     .wt-file { display: flex; flex: 1; align-items: center; gap: 4px; height: 100%; min-width: 0; padding-right: 8px; }
     .wt-file__queue { display: flex; flex: none; width: 20px; justify-content: center; }
     .wt-file__glyph { display: flex; flex: none; width: 16px; }

@@ -101,6 +101,54 @@ fn an_empty_queue_refuses_its_actions_and_offers_no_cancel() {
     assert!(tab.shown("unpacker-queue-empty"), "the empty queue says how to fill it");
 }
 
+/// The run controls sit at the foot of the queue panel, as they do with entries queued.
+#[test]
+fn the_extract_button_sits_at_the_foot_of_an_empty_queue() {
+    let tab = UnpackerWindow::open(options());
+    let panel = tab.window.by_test_id("unpacker-queue-panel").expect("the queue panel is up");
+    let extract = tab.window.by_test_id("unpacker-extract").expect("the extract button is up");
+    let panel = tab.window.bounds(panel).expect("the panel has a box");
+    let extract = tab.window.bounds(extract).expect("the button has a box");
+
+    let panel_bottom = panel.origin.y.0 + panel.size.height.0;
+    let extract_bottom = extract.origin.y.0 + extract.size.height.0;
+    let gap = panel_bottom - extract_bottom;
+    assert!((0.0..80.0).contains(&gap), "{extract:?} is inside the foot of {panel:?}");
+}
+
+/// Each column heading starts where its column's values do, whether or not the listing scrolls.
+#[test]
+fn the_column_headings_line_up_with_their_values() {
+    let root: VfsPath = MemoryFS::new().into();
+    root.join("few").unwrap().create_dir_all().unwrap();
+    write(&root, "few/a.xml", "<a/>");
+    root.join("many").unwrap().create_dir_all().unwrap();
+    for index in 0..80 {
+        write(&root, &format!("many/{index}.xml"), "<a/>");
+    }
+    let mut tab = UnpackerWindow::with_vfs(options(), root);
+
+    for dir in ["/few", "/many"] {
+        tab.model.pkg.select_dir(dir.to_string());
+        tab.settle();
+        for class in ["wt-file__name", "wt-file__size", "wt-file__type"] {
+            let cells = tab.window.all_by_class(class);
+            let [heading, value, ..] = cells.as_slice() else {
+                panic!("{dir}: {class} has a heading and a value");
+            };
+            let heading = tab.window.bounds(*heading).expect("the heading has a box");
+            let value = tab.window.bounds(*value).expect("the value has a box");
+            let (heading_x, value_x) = (heading.origin.x.0, value.origin.x.0);
+            let (heading_end, value_end) = (heading_x + heading.size.width.0, value_x + value.size.width.0);
+            assert!((heading_x - value_x).abs() < 1.0, "{dir}: {class} heading at {heading_x}, values at {value_x}");
+            assert!(
+                (heading_end - value_end).abs() < 1.0,
+                "{dir}: {class} heading ends at {heading_end}, values at {value_end}"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_queue_panel_holds_the_destination_beside_the_listing() {
     let mut tab = UnpackerWindow::open(options());
