@@ -180,6 +180,7 @@ const CSS: &str = css!(
     }
     .wt-rp-status { font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-rp-chat-toggle[data-selected] { background-color: var(--lui-color-selection); }
+    .zui-menu__label.wt-rp-menu-heading { color: var(--wt-color-text-dim); font-weight: 400; }
     .wt-rp-context {
         display: flex;
         flex-direction: row;
@@ -1075,7 +1076,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                 Tooltip {
                     TooltipTrigger {
                         Button(
-                            variant = ButtonVariant::Ghost,
+                            variant = ButtonVariant::Outline,
                             size = ButtonSize::Sm,
                             class = "wt-rp-chat-toggle",
                             disabled = Signal::derive_local(move || !has_chat()),
@@ -1324,7 +1325,7 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
         .collect();
         Some(AnyView::new(view! {
             MenuSeparator()
-            MenuLabel {{t!("ui.replay.section_debug").into_owned()}}
+            MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_debug").into_owned()}}
             {items}
         }))
     };
@@ -1335,7 +1336,7 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
                 {t!("ui.replay.actions").into_owned()}
             }
             DropdownMenuContent {
-                MenuLabel {{t!("ui.replay.section_match").into_owned()}}
+                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_match").into_owned()}}
                 {on_render.map(|on_render| AnyView::new(view! {
                     MenuItem(
                         attr:data-testid = "replay-render",
@@ -1351,7 +1352,7 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
                     ) {{t!("ui.replay.hide_my_stats").into_owned()}}
                 }
                 MenuSeparator()
-                MenuLabel {{t!("ui.replay.section_export").into_owned()}}
+                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_export").into_owned()}}
                 {exports}
                 {debug_items}
             }
