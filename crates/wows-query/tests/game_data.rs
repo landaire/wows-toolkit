@@ -59,6 +59,8 @@ use wows_query::tech_tree::LineOrder;
 use wows_query::tech_tree::ResearchPoints;
 use wows_query::tech_tree::ResetCostRank;
 use wows_query::tech_tree::TechTreeLinesArgs;
+use wows_query::torpedo_rankings::TorpedoEntry;
+use wows_query::torpedo_rankings::TorpedoRankingsArgs;
 use wows_query::turtleback::TurtlebackSearchArgs;
 use wows_query::upgrades::UniqueUpgradesArgs;
 use wowsunpack::ballistics::ShellParams;
@@ -1457,6 +1459,62 @@ fn battle_impact_lists_a_named_ship() {
 
     let carriers = game().call_tool("battle_impact", json!({ "class": "carrier", "tier": 10 }));
     assert!(carriers.is_err());
+}
+
+/// The torpedo_rankings tool answer for the worst tier 10 destroyer
+/// torpedoes.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn worst_tier_10_destroyer_torpedoes() {
+    let args = json!({ "class": "destroyer", "min_tier": 10, "max_tier": 10, "order": "worst", "limit": 8 });
+    let output = game().call_tool("torpedo_rankings", args).expect("tier 10 destroyer torpedoes rank");
+    insta::assert_yaml_snapshot!(output);
+}
+
+/// Khabarovsk's torpedoes are spotted from 0.6 km, later than most, which
+/// counts for them; F. Sherman and Hull bring only two of their four
+/// single tubes to one broadside, and those bear across a narrow arc.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn torpedo_rankings_judge_each_factor_in_its_direction() {
+    let output = game()
+        .torpedo_rankings(&TorpedoRankingsArgs {
+            class: Some(ShipClass::Destroyer),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            limit: Some(usize::MAX),
+            ..Default::default()
+        })
+        .expect("tier 10 destroyer torpedoes rank");
+    let entries = |prefix: &str| -> Vec<&TorpedoEntry> {
+        let found: Vec<&TorpedoEntry> = output.entries.iter().filter(|entry| entry.ship.starts_with(prefix)).collect();
+        assert!(!found.is_empty(), "{prefix} is ranked");
+        found
+    };
+    let detectability = |entry: &TorpedoEntry| -> f32 {
+        entry
+            .standings
+            .iter()
+            .find(|standing| standing.factor == "detectability")
+            .map(|standing| standing.standing)
+            .expect("every torpedo has a detectability")
+    };
+
+    let mut standings: Vec<f32> = output.entries.iter().map(detectability).collect();
+    standings.sort_by(f32::total_cmp);
+    let median = standings[standings.len() / 2];
+    for khabarovsk in entries("T10 Khabarovsk ") {
+        let standing = detectability(khabarovsk);
+        assert!(standing > median, "Khabarovsk detectability p{standing} against median p{median}");
+    }
+
+    for prefix in ["T10 F. Sherman ", "T10 Hull "] {
+        for entry in entries(prefix) {
+            let named = |words: &str| entry.weaknesses.iter().any(|weakness| weakness.contains(words));
+            assert!(named("only 2 torpedoes per broadside"), "{}: {:?}", entry.ship, entry.weaknesses);
+            assert!(named("launchers bear only"), "{}: {:?}", entry.ship, entry.weaknesses);
+        }
+    }
 }
 
 /// Incomparable, C. Colombo with its unique upgrade and Togasa, in testing,

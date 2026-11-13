@@ -57,6 +57,7 @@ pub mod stat_value;
 pub mod stats;
 pub mod tech_tree;
 pub mod tools;
+pub mod torpedo_rankings;
 pub mod turtleback;
 pub mod upgrades;
 

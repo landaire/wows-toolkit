@@ -46,6 +46,7 @@ use crate::stat_search::StatSearchArgs;
 use crate::stat_value::ExplainStatValueArgs;
 use crate::stats::ShipStatsArgs;
 use crate::tech_tree::TechTreeLinesArgs;
+use crate::torpedo_rankings::TorpedoRankingsArgs;
 use crate::turtleback::TurtlebackSearchArgs;
 use crate::upgrades::UniqueUpgradesArgs;
 use crate::upgrades::UpgradeArgs;
@@ -212,6 +213,12 @@ const TOOLS: &[Tool] = &[
         description: "Rank the destroyers, cruisers or battleships of one tier (or tier range) by how much each can sway a battle, for questions such as \"which tier 10 cruiser has the most impact\", \"strongest tier 8 destroyer\" or \"how much impact does Moskva have\". Use it instead of judging from one stat such as fires per minute. Each ship gets a score from 0 to 100. Class-specific components cover firepower, accuracy at 12 km, reach, survivability, mobility and spotting. Battleships also cover gun handling, close-quarters weapons, funny-button effect and access, and unique-commander talent potential. Firepower includes reload, damage, shell type, raw AP penetration at 12 km, AP fuse-arming threshold, SAP armor coverage and AP overmatch as applicable. Close quarters includes secondary damage, range, fire chance and SAP armor coverage. Consumables contribute to survivability or spotting, including mobile smoke. Every component is the share of the group the ship beats on its factors; the weights depend on the class and come back with the formula. Returns the top ships (limit, default 10) and any ships named, each with its rank, score, component scores, the factors that raise each component most and its weak points, plus the lowest scoring ships. It is a judgment from game data, not win-rate data. Carriers and submarines are not scored.",
         schema: input_schema::<BattleImpactArgs>,
         call: |game, arguments| run(arguments, |args| game.battle_impact(args)),
+    },
+    Tool {
+        name: "torpedo_rankings",
+        description: "Rank the torpedoes of destroyers, cruisers or battleships of a tier range from best to worst, for questions such as \"worst tier 10 torpedoes\", \"best destroyer torpedoes\" or \"are F. Sherman's torpedoes bad\". Use it instead of chaining stat_search rankings: it weighs every factor in the direction better for it. Each torpedo option (a ship with alternative torpedoes has one per torpedo) gets a score from 0 to 100 from its standing in the group on: damage per hit, damage at the end of its run (damage falloff, e.g. Chateaurenault), torpedoes per broadside and broadside alpha from the launchers' firing arcs, reload, damage per minute at one target, range, speed, reaction time and detectability (lower is better for both: the target sees the torpedo later), flooding, how wide the launchers' firing arc is and how close to bow and stern they fire, and the classes it can hit (deep-water torpedoes pass under destroyers). Each entry lists every factor with its value, rank and percentile, and its strengths and weaknesses in words: quote them to say why a torpedo ranks where it does. order worst lists the worst first. Without class, destroyer, cruiser and battleship torpedoes rank together; for torpedoes in general give class destroyer. Released ships only unless include_test. The score is a judgment from game data with the weights the output states, not win rates.",
+        schema: input_schema::<TorpedoRankingsArgs>,
+        call: |game, arguments| run(arguments, |args| game.torpedo_rankings(args)),
     },
     Tool {
         name: "turtleback_search",

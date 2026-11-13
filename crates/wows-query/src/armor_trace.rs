@@ -1567,7 +1567,7 @@ fn failure_verb(outcome: RayOutcome) -> &'static str {
 }
 
 /// "a", "a and b", "a, b and c".
-fn join_and<S: AsRef<str>>(items: &[S]) -> String {
+pub(crate) fn join_and<S: AsRef<str>>(items: &[S]) -> String {
     match items {
         [] => String::new(),
         [only] => only.as_ref().to_owned(),

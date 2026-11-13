@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::ops::Range;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -343,7 +344,7 @@ pub struct MatchupLine {
 
 /// Values in order, serialized as a map from key to value.
 #[derive(Debug, Clone, Default)]
-pub struct FactorValues(Vec<(&'static str, String)>);
+pub struct FactorValues(pub(crate) Vec<(&'static str, String)>);
 
 impl Serialize for FactorValues {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -429,7 +430,7 @@ pub struct GroupRank {
 
 impl GroupRank {
     /// The rank of `value` among `values`, its own included.
-    fn new(value: f32, better: Better, values: impl Iterator<Item = f32>) -> Self {
+    pub(crate) fn new(value: f32, better: Better, values: impl Iterator<Item = f32>) -> Self {
         let mut count: usize = 0;
         let mut above: usize = 0;
         let mut below: usize = 0;
@@ -1120,7 +1121,7 @@ impl Factor {
 
 /// One compared factor of a torpedo option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum TorpedoFactor {
+pub(crate) enum TorpedoFactor {
     Speed,
     Range,
     Damage,
@@ -1273,10 +1274,19 @@ fn unique_marker(name: &str) -> String {
     format!("with unique upgrade {name}")
 }
 
-struct TorpedoScores {
-    name: String,
-    modules: Vec<String>,
-    values: HashMap<TorpedoFactor, f32>,
+pub(crate) struct TorpedoScores {
+    pub(crate) name: String,
+
+    /// GameParams name of the torpedo.
+    pub(crate) param: String,
+
+    pub(crate) modules: Vec<String>,
+
+    /// Index into [`Planner::selections`] of the first module combination
+    /// carrying the torpedo.
+    pub(crate) selection: usize,
+
+    pub(crate) values: HashMap<TorpedoFactor, f32>,
     damage_by_distance: Option<String>,
     builds: Vec<String>,
 
@@ -1287,7 +1297,7 @@ struct TorpedoScores {
 
 impl TorpedoScores {
     /// The unique upgrade `factor`'s value takes, if any.
-    fn unique_for(&self, factor: TorpedoFactor) -> Option<&str> {
+    pub(crate) fn unique_for(&self, factor: TorpedoFactor) -> Option<&str> {
         self.unique_upgrade.as_deref().filter(|_| self.unique_used.contains(&factor))
     }
 }
@@ -1334,7 +1344,7 @@ struct FacedMount<'a> {
 
 /// How a battery's barrels bear on targets ahead and astern.
 #[derive(Debug, Clone, Copy)]
-struct MountArcs {
+pub(crate) struct MountArcs {
     barrels: u32,
 
     /// Most barrels that bear at one bearing within 30 deg of the bow, and
@@ -1347,11 +1357,17 @@ struct MountArcs {
     all_from_bow: Option<u16>,
     all_from_stern: Option<u16>,
 
-    /// Smallest angle off the bow at which any barrel bears.
-    any_from_bow: Option<u16>,
+    /// Smallest angles off the bow and off the stern at which any barrel
+    /// bears.
+    pub(crate) any_from_bow: Option<u16>,
+    pub(crate) any_from_stern: Option<u16>,
 
     /// Most barrels that bear at one bearing on either broadside.
-    broadside: u32,
+    pub(crate) broadside: u32,
+
+    /// Most bearings of one side, starboard 1-179 or port 181-359, at which
+    /// any barrel bears.
+    pub(crate) side_arc: usize,
 }
 
 impl MountArcs {
@@ -1378,6 +1394,7 @@ impl MountArcs {
         let from_bow = |degrees: u16| degrees.min(360 - degrees);
         let from_stern = |degrees: u16| degrees.abs_diff(180);
         let all = (0..360u16).filter(|degrees| bearing[usize::from(*degrees)] == barrels);
+        let side_arc = |degrees: Range<usize>| degrees.filter(|degrees| bearing[*degrees] > 0).count();
 
         Some(Self {
             barrels,
@@ -1386,7 +1403,9 @@ impl MountArcs {
             all_from_bow: all.clone().map(from_bow).min(),
             all_from_stern: all.map(from_stern).min(),
             any_from_bow: (0..360u16).filter(|degrees| bearing[usize::from(*degrees)] > 0).map(from_bow).min(),
+            any_from_stern: (0..360u16).filter(|degrees| bearing[usize::from(*degrees)] > 0).map(from_stern).min(),
             broadside: most(&mut (30..=150).chain(210..=330)),
+            side_arc: side_arc(1..180).max(side_arc(181..360)),
         })
     }
 
@@ -1999,7 +2018,7 @@ impl GameData {
     }
 
     /// Each torpedo of every torpedo module, on its best-fit builds.
-    fn torpedo_scores(
+    pub(crate) fn torpedo_scores(
         &self,
         planner: &Planner<'_>,
         rates: &crate::rates::Rates,
@@ -2080,7 +2099,9 @@ impl GameData {
 
             scores.push(TorpedoScores {
                 name,
+                param,
                 modules,
+                selection,
                 values,
                 damage_by_distance: points.map(|points| describe_falloff(&points)),
                 builds: build_lines,
@@ -2102,22 +2123,13 @@ impl GameData {
         component: ComponentType,
     ) -> Result<Option<MountArcs>, QueryError> {
         let mut best: Option<MountArcs> = None;
-        'selections: for selection in planner.selections() {
-            let facings = match self.hardpoint_facings(ship, selection) {
-                Ok(facings) => facings,
+        for selection in planner.selections() {
+            let arcs = match self.selection_arcs(ship, selection, component) {
+                Ok(arcs) => arcs,
                 Err(QueryError::HullFacingsUnavailable { .. }) => return Ok(None),
                 Err(error) => return Err(error),
             };
-            let mut mounts = Vec::new();
-            for (mount, barrels) in aiming_mounts(&ship.param, selection, component) {
-                // A hull model without the facing of every mount says
-                // nothing about how the battery bears.
-                let Some(&facing) = facings.get(mount.hp_name()) else {
-                    continue 'selections;
-                };
-                mounts.push(FacedMount { mount, barrels, facing });
-            }
-            if let Some(arcs) = MountArcs::of(&mounts)
+            if let Some(arcs) = arcs
                 && best.is_none_or(|best| arcs.barrels > best.barrels)
             {
                 best = Some(arcs);
@@ -2125,6 +2137,29 @@ impl GameData {
         }
 
         Ok(best)
+    }
+
+    /// How a battery bears ahead and astern on module combination
+    /// `selection`. `None` without the battery or the facing of one of its
+    /// mounts; `HullFacingsUnavailable` without the hull's facings.
+    pub(crate) fn selection_arcs(
+        &self,
+        ship: &Ship,
+        selection: &ShipUpgradeSelection,
+        component: ComponentType,
+    ) -> Result<Option<MountArcs>, QueryError> {
+        let facings = self.hardpoint_facings(ship, selection)?;
+        let mut mounts = Vec::new();
+        for (mount, barrels) in aiming_mounts(&ship.param, selection, component) {
+            // A hull model without the facing of every mount says nothing
+            // about how the battery bears.
+            let Some(&facing) = facings.get(mount.hp_name()) else {
+                return Ok(None);
+            };
+            mounts.push(FacedMount { mount, barrels, facing });
+        }
+
+        Ok(MountArcs::of(&mounts))
     }
 
     /// Thinnest plate of `zone` above the waterline; `None` without one.
@@ -3022,7 +3057,7 @@ fn signals(ship: &Ship, score: &ShipScores) -> Vec<String> {
 
 /// A factor value for the build planner.
 #[derive(Debug, Clone, Copy)]
-struct Amount(f32);
+pub(crate) struct Amount(pub(crate) f32);
 
 impl StatAmount for Amount {
     fn amount(self) -> f32 {

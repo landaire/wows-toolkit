@@ -505,6 +505,47 @@ expression: specs()
         type: integer
         description: Highest scoring ships listed. Defaults to 10; 0 lists only the ships named.
         minimum: 0
+- name: torpedo_rankings
+  description: "Rank the torpedoes of destroyers, cruisers or battleships of a tier range from best to worst, for questions such as \"worst tier 10 torpedoes\", \"best destroyer torpedoes\" or \"are F. Sherman's torpedoes bad\". Use it instead of chaining stat_search rankings: it weighs every factor in the direction better for it. Each torpedo option (a ship with alternative torpedoes has one per torpedo) gets a score from 0 to 100 from its standing in the group on: damage per hit, damage at the end of its run (damage falloff, e.g. Chateaurenault), torpedoes per broadside and broadside alpha from the launchers' firing arcs, reload, damage per minute at one target, range, speed, reaction time and detectability (lower is better for both: the target sees the torpedo later), flooding, how wide the launchers' firing arc is and how close to bow and stern they fire, and the classes it can hit (deep-water torpedoes pass under destroyers). Each entry lists every factor with its value, rank and percentile, and its strengths and weaknesses in words: quote them to say why a torpedo ranks where it does. order worst lists the worst first. Without class, destroyer, cruiser and battleship torpedoes rank together; for torpedoes in general give class destroyer. Released ships only unless include_test. The score is a judgment from game data with the weights the output states, not win rates."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: "destroyer, cruiser or battleship. Omit to rank the torpedoes of all three in one group. Cruisers and battleships carry torpedoes as close-range secondary weapons, so for questions about torpedoes in general give destroyer."
+      min_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      max_tier:
+        type: integer
+        description: "A ship tier, 1 to 11. Arguments also accept \"supership\" for tier 11."
+        minimum: 1
+        maximum: 11
+      nation:
+        type: string
+        description: "Nation as GameParams spells it, e.g. \"USA\", \"United_Kingdom\". Lists only that nation's torpedoes, still ranked among every nation's. A premium replica of another ship ranks as its original and is not listed apart."
+      order:
+        type: string
+        enum:
+          - best
+          - worst
+        description: best (the default) or worst first.
+      limit:
+        type: integer
+        description: Most torpedo options listed. Defaults to 10.
+        minimum: 0
+      include_test:
+        type: boolean
+        description: Rank ships in closed testing too. Defaults to false.
 - name: turtleback_search
   description: "Which ships have a turtleback: an armored deck sloping down behind a thicker belt to meet it near or below the waterline, read from each ship's 3D armor model. Filter by tier, class and nation. Returns considered and qualifying counts per class and per nation with shares, and the qualifying ships with deck thickness, slope and belt thickness. Ships sharing one armor model, such as collaboration copies, count once."
   input_schema:
