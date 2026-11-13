@@ -57,6 +57,7 @@ use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::material_alpha::AlphaMode;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelExportError;
+use wowsunpack::export::model_library::ModelLibrary;
 use wowsunpack::export::model_library::ModelLoadError;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
@@ -85,6 +86,7 @@ use crate::scene_load::LoadCancel;
 use crate::scene_load::LoadCancelled;
 use crate::scene_load::RestJob;
 use crate::surface_maps::SurfaceMapsByPart;
+use crate::textures::SceneTextures;
 use crate::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
@@ -304,6 +306,8 @@ pub struct LoadedShipArmor {
     /// The zones GameParams names for this ship, which is where a splash
     /// zone's plating and health come from.
     pub hit_locations: Option<HashMap<String, HitLocation>>,
+    /// The textures each hull material references, read on first ask.
+    pub texture_inventory: OnceLock<SceneTextures>,
 }
 
 impl LoadedShipArmor {
@@ -330,6 +334,13 @@ impl LoadedShipArmor {
     /// The hull's normal and metal-gloss maps, once they have landed.
     pub fn surface_maps(&self) -> Option<&SurfaceMapsByPart> {
         self.hull_surface_maps.get()
+    }
+
+    /// The textures each hull material references, read from `library` on the first call, which
+    /// reads one `.dds` header per texture. `library` must be over the build the scene was
+    /// loaded from.
+    pub fn textures(&self, library: &ModelLibrary) -> &SceneTextures {
+        self.texture_inventory.get_or_init(|| SceneTextures::build(library, &self.hull_meshes))
     }
 
     pub fn is_ship(&self) -> bool {
@@ -612,6 +623,7 @@ fn load_ship_armor(
         splash_data,
         splash_box_groups,
         hit_locations,
+        texture_inventory: OnceLock::new(),
     };
 
     Ok(FirstStage { scene, rest })

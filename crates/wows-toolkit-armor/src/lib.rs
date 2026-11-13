@@ -24,6 +24,7 @@ pub mod scene_load;
 pub mod sidebar_tree;
 pub mod splash;
 pub mod surface_maps;
+pub mod textures;
 pub mod trajectory;
 pub mod tree_filter;
 pub mod upload;

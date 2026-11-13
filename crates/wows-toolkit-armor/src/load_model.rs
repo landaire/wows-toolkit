@@ -577,6 +577,7 @@ fn model_scene(
         splash_data: None,
         splash_box_groups: Vec::new(),
         hit_locations: None,
+        texture_inventory: OnceLock::new(),
     };
 
     FirstStage { scene, rest: vec![RestJob::Pick(sources)] }
