@@ -42,6 +42,12 @@ pub fn storage_dir() -> Option<PathBuf> {
     if let Some(chosen) = storage_override::get() {
         return Some(chosen);
     }
+    // A test build that reaches the platform directory would read and write
+    // the running user's own database.
+    assert!(
+        !cfg!(feature = "test-support"),
+        "storage_dir called in a test-support build before storage_override::set"
+    );
 
     #[cfg(target_os = "windows")]
     {
@@ -147,6 +153,8 @@ mod dump_base_tests {
 
     #[test]
     fn an_empty_or_relative_override_falls_back_to_the_default() {
+        #[cfg(feature = "test-support")]
+        storage_override::set(std::env::temp_dir().join("wows-toolkit-config-tests"));
         // A relative path is refused for the same reason an empty one is: it
         // names no fixed place for a cache that outlives the session.
         assert_eq!(game_data_dump_base_with_override(""), game_data_dump_base());
