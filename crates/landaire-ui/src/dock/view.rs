@@ -28,16 +28,27 @@ use zgui::view::Children;
 use zgui::view::Classes;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::DropdownMenuContentProps;
+use zgui_ui::DropdownMenuProps;
+use zgui_ui::DropdownMenuTriggerProps;
+use zgui_ui::MenuItemProps;
+use zgui_ui::MenuSeparatorProps;
 use zgui_ui::PanelBound;
 use zgui_ui::ResizableContext;
 use zgui_ui::ResizableHandleProps;
 use zgui_ui::ResizablePanelGroupProps;
 use zgui_ui::ResizablePanelProps;
 use zgui_ui::TabsContentProps;
+use zgui_ui_icons::IconProps;
+use zgui_ui_icons::set::ui::ELLIPSIS;
 use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Orientation;
 
+use crate::chrome::tab_strip::TabStripEnd;
 use crate::chrome::tab_strip::TabStripPanels;
 use crate::chrome::tab_strip::TabStripProps;
 use crate::chrome::tab_strip::TabStripStrings;
@@ -63,6 +74,7 @@ const SHEET: &str = "landaire-ui-dock";
 
 const CSS: &str = css!(
     ".lui-dock {
+        position: relative;
         display: flex;
         flex: 1 1 auto;
         width: 100%;
@@ -72,6 +84,15 @@ const CSS: &str = css!(
         overflow: hidden;
         background-color: var(--lui-color-surface);
     }
+    .lui-dock .lui-dock__group[data-zoomed] {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 20;
+    }
+    .lui-dock .lui-dock__group[data-covered] { display: none; }
     .lui-dock__slot {
         display: flex;
         flex-direction: column;
@@ -91,15 +112,21 @@ const CSS: &str = css!(
         background-color: var(--lui-color-panel);
         color: var(--lui-color-text);
     }
-    .lui-dock .lui-dock__group .lui-tab-strip__scroller {
+    .lui-dock .lui-dock__group .lui-tab-strip__scroller,
+    .lui-dock .lui-dock__group .lui-tab-strip__bar {
         flex: none;
         border-bottom: 1px solid var(--lui-color-border);
         background-color: var(--lui-color-surface);
     }
+    .lui-dock .lui-dock__group .lui-tab-strip__bar .lui-tab-strip__scroller {
+        border-bottom: none;
+        background-color: transparent;
+    }
     .lui-dock .lui-tab-strip__list .lui-tab-strip__tab.zui-tabs__trigger[data-state=\"active\"]:first-child {
         border-left-color: transparent;
     }
-    .lui-dock .lui-dock__group-single .lui-tab-strip__scroller {
+    .lui-dock .lui-dock__group-single .lui-tab-strip__scroller,
+    .lui-dock .lui-dock__group-single .lui-tab-strip__bar {
         border-bottom: none;
         background-color: transparent;
     }
@@ -109,6 +136,10 @@ const CSS: &str = css!(
         background-color: transparent;
         color: var(--lui-color-text);
         font-weight: 400;
+    }
+    .lui-dock__menu.zui-button {
+        margin: 0 4px;
+        color: var(--lui-color-text-dim);
     }
     .lui-dock__body {
         display: flex;
@@ -154,6 +185,30 @@ const CSS: &str = css!(
     }"
 );
 
+/// The words of the menu at the end of each tab group's strip, which draws the group over the
+/// whole dock and closes the panel it shows.
+#[derive(Clone, Copy, Debug)]
+pub struct DockMenuStrings {
+    /// What the menu's button is called, for a screen reader.
+    pub menu: Signal<String, LocalStorage>,
+    pub zoom_in: Signal<String, LocalStorage>,
+    pub zoom_out: Signal<String, LocalStorage>,
+    pub close: Signal<String, LocalStorage>,
+}
+
+impl DockMenuStrings {
+    /// The words in English.
+    pub fn new() -> Self {
+        Self { menu: "More".into(), zoom_in: "Zoom In".into(), zoom_out: "Zoom Out".into(), close: "Close".into() }
+    }
+}
+
+impl Default for DockMenuStrings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// What the dock's tab strips say to a screen reader, and the words of their context menus.
 #[derive(Clone, Copy)]
 struct DockLabels {
@@ -162,12 +217,14 @@ struct DockLabels {
     /// What each group's strip of tabs is called.
     tabs: Signal<String, LocalStorage>,
     strings: TabStripStrings,
+    /// The words of each group's menu, or `None` for groups without one.
+    menu: Option<DockMenuStrings>,
 }
 
 impl DockLabels {
     /// What a dock says when it is not told otherwise.
     fn english() -> Self {
-        Self { close: "Close".into(), tabs: "Panels".into(), strings: TabStripStrings::new() }
+        Self { close: "Close".into(), tabs: "Panels".into(), strings: TabStripStrings::new(), menu: None }
     }
 
     /// The labels of the dock the calling scope is in.
@@ -439,6 +496,10 @@ pub fn Dock(
     /// The words of each tab's context menu. English when not given.
     #[prop(optional)]
     strings: Option<TabStripStrings>,
+    /// Gives each tab group a menu at the end of its strip, in these words. No menu when not
+    /// given.
+    #[prop(optional)]
+    menu: Option<DockMenuStrings>,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
 ) -> impl IntoView {
@@ -448,6 +509,7 @@ pub fn Dock(
         close: close_label.unwrap_or(english.close),
         tabs: tabs_label.unwrap_or(english.tabs),
         strings: strings.unwrap_or(english.strings),
+        menu,
     });
 
     view! {
@@ -478,9 +540,11 @@ fn DockFrame(state: DockState) -> impl IntoView {
     let (center_share, center_bound) = start(&column_start, 0);
     let (bottom_share, bottom_bound) = start(&column_start, 1);
 
-    let hidden_left = move || !showing.with(|showing| showing.left && showing.middle);
-    let hidden_right = move || !showing.with(|showing| showing.right && showing.middle);
-    let hidden_bottom = move || !showing.with(|showing| showing.center && showing.bottom);
+    // A zoomed group covers the frame, so its handles leave the focus order with the other groups.
+    let zoomed = move || state.zoomed().is_some();
+    let hidden_left = move || zoomed() || !showing.with(|showing| showing.left && showing.middle);
+    let hidden_right = move || zoomed() || !showing.with(|showing| showing.right && showing.middle);
+    let hidden_bottom = move || zoomed() || !showing.with(|showing| showing.center && showing.bottom);
 
     view! {
         ResizablePanelGroup(
@@ -636,10 +700,12 @@ fn SplitView(state: DockState, split: SplitId, axis: SplitAxis, parts: Vec<NodeS
         SplitAxis::Vertical => Orientation::Vertical,
     };
 
+    // A zoomed group covers the split, so its handles leave the focus order too.
+    let zoomed = move || state.zoomed().is_some();
     let mut children = Vec::new();
     for (index, (shape, share)) in parts.into_iter().zip(shares).enumerate() {
         if index > 0 {
-            children.push(AnyView::new(view! { ResizableHandle() }));
+            children.push(AnyView::new(view! { ResizableHandle(class:lui-dock__handle-hidden = zoomed) }));
         }
         children.push(AnyView::new(view! {
             ResizablePanel(default_size = share.percent(), min_size = 5.0) {
@@ -686,10 +752,16 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
             strings = labels.strings,
             on_close_tabs = on_close_tabs,
             class = "lui-dock__group",
-            class:lui-dock__group-single = single
+            class:lui-dock__group-single = single,
+            attr:data-zoomed = move || (state.zoomed() == Some(group)).then(String::new),
+            // Hidden rather than only drawn over, so the keyboard and a screen reader skip it too.
+            attr:data-covered = move || state.zoomed().is_some_and(|zoomed| zoomed != group).then(String::new)
         ) {
             for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
                 DockTab(state = state, entry = entry)
+            }
+            TabStripEnd(slot) {
+                {labels.menu.map(|strings| view! { GroupMenu(state = state, group = group, strings = strings) }.into_view())}
             }
             TabStripPanels(slot) {
                 box(class = "lui-dock__body") {
@@ -697,6 +769,49 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
                         DockContent(state = state, entry = entry)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// The menu at the end of a group's strip: draws the group over the whole dock or puts it back,
+/// and closes the panel it shows when that panel is closable.
+#[component]
+fn GroupMenu(state: DockState, group: GroupId, strings: DockMenuStrings) -> impl IntoView {
+    let zoomed = move || state.zoomed() == Some(group);
+    let closable = Memo::new(move |_| {
+        state.layout.with(|layout| {
+            let group = layout.group(group)?;
+            group.panels.iter().find(|entry| entry.id == group.active).map(|entry| entry.closable)
+        }) == Some(true)
+    });
+    let toggle_zoom = UnsyncCallback::new(move |()| state.set_zoomed((!zoomed()).then_some(group)));
+    let close_shown = UnsyncCallback::new(move |()| {
+        if let Some(active) = state.active_panel(group) {
+            let _ = state.close(&active);
+        }
+    });
+
+    view! {
+        DropdownMenu {
+            DropdownMenuTrigger(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::IconXs,
+                class = "lui-dock__menu",
+                a11y:label = move || strings.menu.get()
+            ) {
+                Icon(icon = ELLIPSIS)
+            }
+            DropdownMenuContent {
+                MenuItem(on_select = toggle_zoom) {
+                    {move || if zoomed() { strings.zoom_out.get() } else { strings.zoom_in.get() }}
+                }
+                if move || closable.get() {
+                    MenuSeparator()
+                    MenuItem(on_select = close_shown) {
+                        {move || strings.close.get()}
+                    }
+                } else {}
             }
         }
     }

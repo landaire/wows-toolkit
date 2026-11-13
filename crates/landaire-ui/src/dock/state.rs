@@ -6,6 +6,7 @@ use std::rc::Rc;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
@@ -117,6 +118,7 @@ pub struct DockState {
     pub(crate) layout: RwSignal<Layout, LocalStorage>,
     registry: StoredValue<PanelRegistry, LocalStorage>,
     pub(crate) generation: RwSignal<LayoutGeneration, LocalStorage>,
+    zoomed: RwSignal<Option<GroupId>, LocalStorage>,
 }
 
 impl DockState {
@@ -126,6 +128,7 @@ impl DockState {
             layout: RwSignal::new_local(Layout::new()),
             registry: StoredValue::new_local(registry),
             generation: RwSignal::new_local(LayoutGeneration(0)),
+            zoomed: RwSignal::new_local(None),
         }
     }
 
@@ -160,13 +163,24 @@ impl DockState {
 
     pub fn set_region_open(self, region: DockRegion, open: bool) {
         self.layout.update(|layout| layout.set_open(region, open));
+        if !open {
+            self.unzoom_in(region);
+        }
     }
 
     pub fn toggle_region(self, region: DockRegion) {
-        self.layout.update(|layout| {
-            let open = layout.region(region).open;
-            layout.set_open(region, !open);
-        });
+        let open = self.layout.with_untracked(|layout| layout.region(region).open);
+        self.set_region_open(region, !open);
+    }
+
+    /// Puts back a zoomed group in `region`, so the region reopens as laid out.
+    fn unzoom_in(self, region: DockRegion) {
+        let Some(zoomed) = self.zoomed.with_untracked(|zoomed| *zoomed) else {
+            return;
+        };
+        if self.layout.with_untracked(|layout| layout.region_of(zoomed)) == Some(region) {
+            self.zoomed.set(None);
+        }
     }
 
     /// Whether `region` is open. An open region with no panels in it takes no room either.
@@ -212,9 +226,29 @@ impl DockState {
         self.layout.with(|layout| layout.group(group).map(|group| group.active.clone()))
     }
 
-    /// The panels on screen: the one each group shows, in the open regions. Reactive.
+    /// The group drawn over the whole dock, or `None` while the dock is drawn as laid out. A
+    /// group that has gone, or whose region does not show, is not zoomed.
+    pub fn zoomed(self) -> Option<GroupId> {
+        let zoomed = self.zoomed.get()?;
+
+        self.layout.with(|layout| layout.shows_group(zoomed)).then_some(zoomed)
+    }
+
+    /// Draws `group` over the whole dock, or with `None` the dock as laid out. A group whose
+    /// region does not show is not zoomed. The layout itself is unchanged, so this is not saved
+    /// with it.
+    pub fn set_zoomed(self, group: Option<GroupId>) {
+        let group = group.filter(|group| self.layout.with_untracked(|layout| layout.shows_group(*group)));
+        self.zoomed.set(group);
+    }
+
+    /// The panels on screen: the one each group shows, in the open regions, or only the zoomed
+    /// group's. Reactive.
     pub fn shown_panels(self) -> Vec<PanelId> {
-        self.layout.with(Layout::shown_panels)
+        match self.zoomed() {
+            Some(group) => self.active_panel(group).into_iter().collect(),
+            None => self.layout.with(Layout::shown_panels),
+        }
     }
 
     pub fn dump(self) -> SavedLayout {
@@ -236,6 +270,7 @@ impl DockState {
         layout.limits = self.layout.try_with_untracked(|current| current.limits).ok_or(DockError::Gone)?;
 
         self.layout.set(layout);
+        self.zoomed.set(None);
         self.generation.update(|generation| generation.0 += 1);
 
         Ok(RestoreReport { skipped })

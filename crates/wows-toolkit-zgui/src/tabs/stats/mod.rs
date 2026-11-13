@@ -120,6 +120,7 @@ use crate::shell::tabs::AppTab;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
+use crate::tabs::dock_menu_strings;
 use crate::tabs::stats::chart::StatsChartProps;
 use crate::tabs::stats::overview::StatsOverviewProps;
 use crate::tabs::stats::ships::StatsShipsProps;
@@ -627,6 +628,7 @@ pub fn StatsBody(
             Dock(
                 state = dock,
                 class = "wt-stats__dock",
+                menu = dock_menu_strings(locale),
                 attr:data-testid = match scope {
                     StatsScope::Session => "stats-dock",
                     StatsScope::Directory => "directory-stats-dock",

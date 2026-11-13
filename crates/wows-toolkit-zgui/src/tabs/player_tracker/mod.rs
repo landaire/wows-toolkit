@@ -75,6 +75,7 @@ use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::TabKey;
 use crate::shell::tabs::panel_side_name;
+use crate::tabs::dock_menu_strings;
 use crate::tabs::player_tracker::live::LiveSourceConfig;
 use crate::tabs::player_tracker::model::LoadState;
 use crate::tabs::player_tracker::model::TrackerModel;
@@ -325,7 +326,8 @@ pub fn PlayerTrackerTab() -> impl IntoView {
             }}
             Dock(
                 state = dock,
-                class = "wt-tracker-dock"
+                class = "wt-tracker-dock",
+                menu = dock_menu_strings(locale)
             )
         }
     }

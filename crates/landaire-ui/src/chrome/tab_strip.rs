@@ -145,6 +145,24 @@ const CSS: &str = css!(
         flex: none;
         min-width: 0;
     }
+    .lui-tab-strip__bar {
+        display: flex;
+        flex-direction: row;
+        flex: none;
+        align-items: center;
+        min-width: 0;
+    }
+    .lui-tab-strip__bar > .lui-tab-strip__menu-area {
+        align-self: stretch;
+        flex: 1 1 auto;
+    }
+    .lui-tab-strip__end {
+        display: flex;
+        flex-direction: row;
+        flex: none;
+        align-items: center;
+        gap: 2px;
+    }
     .lui-tab-strip__tab .lui-tab-strip__close {
         opacity: 0;
         transition: opacity var(--lui-motion-fade) var(--lui-motion-ease);
@@ -282,6 +300,12 @@ pub struct TabStripPanels {
     children: Children,
 }
 
+/// Controls at the end of a [`TabStrip`]'s row, after its tabs, such as a menu button.
+#[slot]
+pub struct TabStripEnd {
+    children: Children,
+}
+
 /// The words a [`TabStrip`]'s context menu shows.
 #[derive(Clone, Copy, Debug)]
 pub struct TabStripStrings {
@@ -339,6 +363,9 @@ pub fn TabStrip(
     /// The panels under the tabs.
     #[prop(optional)]
     tab_strip_panels: Option<TabStripPanels>,
+    /// Controls after the tabs, outside the area that scrolls and the tabs' context menu.
+    #[prop(optional)]
+    tab_strip_end: Option<TabStripEnd>,
     #[prop(into, optional)] class: Classes,
     #[prop(attrs)] attrs: Attrs,
     /// The [`TabStripTab`]s.
@@ -406,34 +433,49 @@ pub fn TabStrip(
     let class = Classes::from("lui-tab-strip").merged(class);
     let panels = tab_strip_panels.map(|panels| panels.children.into_view_once());
 
-    view! {
-        Tabs(value = value, a11y:label = move || label.get(), class = class, {..attrs}) {
-            ContextMenu {
-                ContextMenuTrigger(class = "lui-tab-strip__menu-area") {
-                    box(
-                        class = "lui-tab-strip__scroller",
-                        on:pointer_down = on_menu_press,
-                        on:context_menu = on_menu_request
-                    ) {
-                        row(class = "lui-tab-strip__track", node_ref = track) {
-                            TabsList(class = "lui-tab-strip__list") {
-                                {children.into_view_once()}
-                            }
-                            box(
-                                class = "lui-tab-strip__underline",
-                                a11y:hidden = true,
-                                attr:data-gliding = move || gliding.get().then(|| "true".to_owned()),
-                                style:display = move || span.get().is_none().then(|| "none".to_owned()),
-                                style:left = move || span.get().map(|span| format!("{}px", span.left)),
-                                style:width = move || span.get().map(|span| format!("{}px", span.width))
-                            )
+    let tabs = view! {
+        ContextMenu {
+            ContextMenuTrigger(class = "lui-tab-strip__menu-area") {
+                box(
+                    class = "lui-tab-strip__scroller",
+                    on:pointer_down = on_menu_press,
+                    on:context_menu = on_menu_request
+                ) {
+                    row(class = "lui-tab-strip__track", node_ref = track) {
+                        TabsList(class = "lui-tab-strip__list") {
+                            {children.into_view_once()}
                         }
+                        box(
+                            class = "lui-tab-strip__underline",
+                            a11y:hidden = true,
+                            attr:data-gliding = move || gliding.get().then(|| "true".to_owned()),
+                            style:display = move || span.get().is_none().then(|| "none".to_owned()),
+                            style:left = move || span.get().map(|span| format!("{}px", span.left)),
+                            style:width = move || span.get().map(|span| format!("{}px", span.width))
+                        )
                     }
                 }
-                ContextMenuContent {
-                    {menu}
+            }
+            ContextMenuContent {
+                {menu}
+            }
+        }
+    };
+    let bar = match tab_strip_end {
+        Some(end) => AnyView::new(view! {
+            row(class = "lui-tab-strip__bar") {
+                {tabs}
+                row(class = "lui-tab-strip__end") {
+                    {end.children.into_view_once()}
                 }
             }
+        }),
+        None => AnyView::new(tabs),
+    };
+
+    view! {
+        Tabs(value = value, a11y:label = move || label.get(), class = class, {..attrs}) {
+            {bar}
             {panels}
         }
     }

@@ -10,13 +10,16 @@ mod search;
 mod stats;
 mod unpacker;
 
+use landaire_ui::DockMenuStrings;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::Signal;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 
+use crate::i18n::Locale;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
 use crate::tabs::armor_viewer::ArmorViewerTabProps;
@@ -51,5 +54,15 @@ pub fn TabBody(tab: TabKey) -> impl IntoView {
         TabKey::App(AppTab::ArmorViewer) => AnyView::new(view! { ArmorViewerTab() }),
         TabKey::App(AppTab::Unpacker) => AnyView::new(view! { UnpackerTab() }),
         TabKey::DirectoryStats(id) => AnyView::new(view! { DirectoryStatsTab(id = id) }),
+    }
+}
+
+/// The words of a dock's group menus in the reader's language.
+fn dock_menu_strings(locale: Locale) -> DockMenuStrings {
+    DockMenuStrings {
+        menu: Signal::derive_local(locale.text("ui.buttons.more_options")),
+        zoom_in: Signal::derive_local(locale.text("ui.tabs.zoom_in_panel")),
+        zoom_out: Signal::derive_local(locale.text("ui.tabs.zoom_out_panel")),
+        close: Signal::derive_local(locale.text("ui.tabs.close_panel")),
     }
 }

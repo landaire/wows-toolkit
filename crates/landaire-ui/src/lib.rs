@@ -61,6 +61,7 @@ pub use crate::chrome::status_bar::StatusBarStart;
 pub use crate::chrome::status_bar::StatusToggle;
 pub use crate::chrome::status_bar::StatusToggleProps;
 pub use crate::chrome::tab_strip::TabStrip;
+pub use crate::chrome::tab_strip::TabStripEnd;
 pub use crate::chrome::tab_strip::TabStripPanels;
 pub use crate::chrome::tab_strip::TabStripProps;
 pub use crate::chrome::tab_strip::TabStripStrings;
@@ -113,6 +114,7 @@ pub use crate::dock::state::DockState;
 pub use crate::dock::state::PanelFactory;
 pub use crate::dock::state::PanelRegistry;
 pub use crate::dock::view::Dock;
+pub use crate::dock::view::DockMenuStrings;
 pub use crate::dock::view::DockProps;
 pub use crate::error::DockError;
 #[cfg(feature = "test-support")]

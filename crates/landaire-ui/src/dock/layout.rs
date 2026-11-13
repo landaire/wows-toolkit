@@ -431,6 +431,15 @@ impl Layout {
         }
     }
 
+    pub(crate) fn region_of(&self, id: GroupId) -> Option<DockRegion> {
+        self.locate(|node| matches!(node, Node::Group(group) if group.id == id)).map(|path| path.region)
+    }
+
+    /// Whether group `id` is in a region that takes room.
+    pub(crate) fn shows_group(&self, id: GroupId) -> bool {
+        self.region_of(id).is_some_and(|region| self.shows(region))
+    }
+
     pub(crate) fn split_shares(&self, id: SplitId) -> Vec<Share> {
         let Some(path) = self.locate(|node| matches!(node, Node::Split(split) if split.id == id)) else {
             return Vec::new();
