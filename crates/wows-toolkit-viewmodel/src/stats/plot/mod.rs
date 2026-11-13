@@ -18,7 +18,9 @@ use super::chart::Rgb;
 /// Room left for the value ticks, the game numbers, and the axis titles.
 const LEFT_GUTTER: f32 = 64.0;
 const BOTTOM_GUTTER: f32 = 40.0;
-const TOP_GUTTER: f32 = 24.0;
+/// The value axis title sits in this gutter, clear of the top tick label that rises above the
+/// area's top edge.
+const TOP_GUTTER: f32 = 34.0;
 const RIGHT_GUTTER: f32 = 16.0;
 const LEGEND_MIN_WIDTH: f32 = 96.0;
 const LEGEND_MAX_WIDTH: f32 = 190.0;
