@@ -29,6 +29,7 @@ use zgui::view::Children;
 use zgui::view::Classes;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonSize;
@@ -54,6 +55,10 @@ use crate::chrome::tab_strip::TabStripPanels;
 use crate::chrome::tab_strip::TabStripProps;
 use crate::chrome::tab_strip::TabStripStrings;
 use crate::chrome::tab_strip::TabStripTabProps;
+use crate::dock::drag::Area;
+use crate::dock::drag::DragContext;
+use crate::dock::drag::DragLayerProps;
+use crate::dock::drag::draggable;
 use crate::dock::kept;
 use crate::dock::kept::KeptView;
 use crate::dock::layout::CssLength;
@@ -185,6 +190,35 @@ const CSS: &str = css!(
         width: 44px;
         margin-left: -22px;
         margin-top: 0;
+    }
+    .lui-dock .lui-tab-strip__tab[data-lifted] { opacity: 0.5; cursor: grabbing; }
+    .lui-dock__landing, .lui-dock__gap, .lui-dock__ghost {
+        position: absolute;
+        z-index: 40;
+        pointer-events: none;
+        box-sizing: border-box;
+    }
+    .lui-dock__landing {
+        border: 1px solid color-mix(in srgb, var(--lui-color-accent) 70%, transparent);
+        border-radius: 4px;
+        background-color: color-mix(in srgb, var(--lui-color-accent) 20%, transparent);
+    }
+    .lui-dock__gap {
+        border-radius: 1px;
+        background-color: var(--lui-color-accent);
+    }
+    .lui-dock__ghost {
+        z-index: 41;
+        max-width: 220px;
+        padding: 4px 12px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        border: 1px solid var(--lui-color-border-bright);
+        border-radius: 6px;
+        background-color: var(--lui-color-panel);
+        color: var(--lui-color-text);
+        opacity: 0.85;
     }"
 );
 
@@ -394,6 +428,32 @@ impl Placement {
     }
 }
 
+/// Where the frame places the folding `region` of `layout` in `dock`, inside its limits and beside
+/// the regions that show.
+pub(crate) fn region_area(layout: &Layout, region: FoldingRegion, dock: Area) -> Area {
+    let showing = Showing::of(layout);
+    let row = targets(layout, showing, &ROW, GroupLength(Some(dock.width)));
+    let part = |share: f64| share / 100.0;
+
+    match region {
+        FoldingRegion::Left => Area { width: dock.width * part(row[0]), ..dock },
+        FoldingRegion::Right => {
+            let width = dock.width * part(row[2]);
+            Area { left: dock.left + dock.width - width, width, ..dock }
+        }
+        FoldingRegion::Bottom => {
+            let column = targets(layout, showing, &COLUMN, GroupLength(Some(dock.height)));
+            let height = dock.height * part(column[1]);
+            Area {
+                left: dock.left + dock.width * part(row[0]),
+                top: dock.top + dock.height - height,
+                width: dock.width * part(row[1]),
+                height,
+            }
+        }
+    }
+}
+
 /// What the frame sizes a group for. A change to any of it places the group's panels again.
 #[derive(Clone, Debug, PartialEq)]
 struct Sizing {
@@ -534,12 +594,15 @@ pub fn Dock(
     // Panel views are built in this scope, so they outlast the groups that show them.
     state.kept.update_value(|kept| kept.set_scope(Owner::current()));
     on_cleanup_local(move || kept::clear(state.kept));
+    let drag = DragContext::new();
+    provide_local_context(drag);
 
     view! {
-        box(class = "lui-dock", {..attrs}, class = class) {
+        box(class = "lui-dock", node_ref = drag.dock, {..attrs}, class = class) {
             for _generation in move || vec![state.generation.get()], key = |generation: &LayoutGeneration| *generation {
                 DockFrame(state = state)
             }
+            DragLayer(drag = drag)
         }
     }
 }
@@ -770,6 +833,11 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
         }
     });
 
+    let body = NodeRef::new();
+    if let Some(drag) = use_local_context::<DragContext>() {
+        drag.register_body(group, body);
+    }
+
     view! {
         TabStrip(
             value = shown,
@@ -789,7 +857,7 @@ fn GroupView(state: DockState, group: GroupId) -> impl IntoView {
                 {labels.menu.map(|strings| view! { GroupMenu(state = state, group = group, strings = strings) }.into_view())}
             }
             TabStripPanels(slot) {
-                box(class = "lui-dock__body") {
+                box(class = "lui-dock__body", node_ref = body) {
                     for entry in move || panels.get(), key = |entry: &PanelEntry| entry.id.clone() {
                         DockContent(state = state, entry = entry)
                     }
@@ -852,9 +920,12 @@ fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
     };
     let title = factory.as_ref().map(|factory| factory.title(&entry.id));
     let value = entry.id.as_str().to_owned();
+    let drag = draggable(state, entry.id.clone(), label);
 
     if !entry.closable {
-        return AnyView::new(view! { TabStripTab(value = value, a11y:label = move || label.get()) {{title}} });
+        return AnyView::new(view! {
+            TabStripTab(value = value, a11y:label = move || label.get(), {..drag}) {{title}}
+        });
     }
 
     let close = DockLabels::current().close;
@@ -866,7 +937,13 @@ fn DockTab(state: DockState, entry: PanelEntry) -> AnyView {
     });
 
     AnyView::new(view! {
-        TabStripTab(value = value, on_close = on_close, close_label = close_label, a11y:label = move || label.get()) {{title}}
+        TabStripTab(
+            value = value,
+            on_close = on_close,
+            close_label = close_label,
+            a11y:label = move || label.get(),
+            {..drag}
+        ) {{title}}
     })
 }
 

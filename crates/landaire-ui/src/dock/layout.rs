@@ -128,6 +128,16 @@ impl FoldingRegion {
     }
 }
 
+impl From<FoldingRegion> for DockRegion {
+    fn from(region: FoldingRegion) -> Self {
+        match region {
+            FoldingRegion::Left => Self::Left,
+            FoldingRegion::Right => Self::Right,
+            FoldingRegion::Bottom => Self::Bottom,
+        }
+    }
+}
+
 /// A length in CSS pixels, finite and not below zero.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "f64", into = "f64")]
@@ -166,17 +176,19 @@ pub enum Edge {
     Bottom,
 }
 
-/// Where [`add_panel`](crate::DockState::add_panel) puts a panel.
+/// Where [`add_panel`](crate::DockState::add_panel) puts a panel, and where
+/// [`move_panel`](crate::DockState::move_panel) moves one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DockTarget {
     /// The region's first tab group, made when the region has none.
     Region(DockRegion),
+    /// The end of the group's tabs.
     Group(GroupId),
+    /// Before the tab at `index` in the group's tabs as they are before the change, or at the end
+    /// when `index` is past them.
+    Tab { group: GroupId, index: usize },
     /// A new tab group split off `group` at `edge`, halving the room `group` had.
-    Beside {
-        group: GroupId,
-        edge: Edge,
-    },
+    Beside { group: GroupId, edge: Edge },
 }
 
 /// A panel as a layout holds it.
@@ -304,10 +316,10 @@ pub(crate) enum Node {
 
 impl Node {
     /// Builds a value for the tree from its leaves up.
-    pub(crate) fn fold<T>(
-        &self,
-        mut group: impl FnMut(&TabGroup) -> T,
-        mut split: impl FnMut(&Split, Vec<T>) -> T,
+    pub(crate) fn fold<'a, T>(
+        &'a self,
+        mut group: impl FnMut(&'a TabGroup) -> T,
+        mut split: impl FnMut(&'a Split, Vec<T>) -> T,
     ) -> T {
         enum Visit<'a> {
             Enter(&'a Node),
@@ -431,6 +443,15 @@ impl Layout {
         }
     }
 
+    /// Every tab group, region by region in [`DockRegion::ALL`] order.
+    pub(crate) fn groups(&self) -> Vec<&TabGroup> {
+        DockRegion::ALL
+            .into_iter()
+            .filter_map(|region| self.region(region).root.as_ref())
+            .flat_map(|root| root.fold(|group| vec![group], |_, children| children.into_iter().flatten().collect()))
+            .collect()
+    }
+
     pub(crate) fn region_of(&self, id: GroupId) -> Option<DockRegion> {
         self.locate(|node| matches!(node, Node::Group(group) if group.id == id)).map(|path| path.region)
     }
@@ -506,18 +527,59 @@ impl Layout {
             return Err(DockError::DuplicatePanel { id: entry.id });
         }
 
-        let path = match target {
+        self.place(target, entry)
+    }
+
+    /// Takes `panel` from where it is and puts it at `target` in one change, keeping its entry,
+    /// and shows it there. A move that leaves the panel where it is, or that splits a group off
+    /// itself when the panel is the group's only one, changes nothing.
+    pub(crate) fn move_panel(&mut self, panel: &PanelId, target: DockTarget) -> Result<GroupId, DockError> {
+        let path = self.locate_panel(panel).ok_or_else(|| DockError::UnknownPanel { id: panel.clone() })?;
+        let Node::Group(source) = self.node(&path) else {
+            unreachable!("a located panel is in a group");
+        };
+        let (source_id, count) = (source.id, source.panels.len());
+        let Some(from) = source.panels.iter().position(|entry| &entry.id == panel) else {
+            unreachable!("a located panel is in its group");
+        };
+        match target {
+            DockTarget::Region(_) => {}
+            DockTarget::Group(group) | DockTarget::Tab { group, .. } | DockTarget::Beside { group, .. } => {
+                self.locate_group(group)?;
+            }
+        }
+
+        let target = match target {
+            DockTarget::Tab { group, index } if group == source_id => {
+                if index == from || index == from + 1 {
+                    return Ok(source_id);
+                }
+                // The panel leaves its place before it takes the new one.
+                DockTarget::Tab { group, index: if index > from { index - 1 } else { index } }
+            }
+            DockTarget::Beside { group, .. } if group == source_id && count == 1 => return Ok(source_id),
+            other => other,
+        };
+        let entry = self.remove(panel)?;
+
+        self.place(target, entry)
+    }
+
+    /// Puts `entry` at `target`, shows it in its group and opens the region the group is in.
+    fn place(&mut self, target: DockTarget, entry: PanelEntry) -> Result<GroupId, DockError> {
+        let (path, index) = match target {
             DockTarget::Region(region) => match self.first_group(region) {
-                Some(path) => path,
+                Some(path) => (path, None),
                 None => {
                     let id = self.next_group();
                     let root = Node::Group(TabGroup { id, panels: Vec::new(), active: entry.id.clone() });
                     self.region_mut(region).root = Some(root);
-                    NodePath { region, steps: Vec::new() }
+                    (NodePath { region, steps: Vec::new() }, None)
                 }
             },
-            DockTarget::Group(group) => self.locate_group(group)?,
-            DockTarget::Beside { group, edge } => self.split_off(group, edge, entry.id.clone())?,
+            DockTarget::Group(group) => (self.locate_group(group)?, None),
+            DockTarget::Tab { group, index } => (self.locate_group(group)?, Some(index)),
+            DockTarget::Beside { group, edge } => (self.split_off(group, edge, entry.id.clone())?, None),
         };
 
         self.region_mut(path.region).open = true;
@@ -525,7 +587,8 @@ impl Layout {
             unreachable!("a located group is a group");
         };
         group.active = entry.id.clone();
-        group.panels.push(entry);
+        let at = index.map_or(group.panels.len(), |index| index.min(group.panels.len()));
+        group.panels.insert(at, entry);
 
         Ok(group.id)
     }
@@ -748,23 +811,38 @@ impl Layout {
         node
     }
 
-    /// Replaces the group `id` with a split of it and a new empty group at `edge`, and returns the
-    /// path to the new group, which takes `first` as its active panel.
+    /// Splits a new empty group off the group `id` at `edge` and returns the path to it. The new
+    /// group takes `first` as its active panel and half the room `id` had: beside it in the split
+    /// it is in when that split runs the same way, and otherwise in a new split in its place.
     fn split_off(&mut self, id: GroupId, edge: Edge, first: PanelId) -> Result<NodePath, DockError> {
         let path = self.locate_group(id)?;
         let new_group = self.next_group();
-        let split = self.next_split();
-
         let (axis, new_first) = match edge {
             Edge::Left => (SplitAxis::Horizontal, true),
             Edge::Right => (SplitAxis::Horizontal, false),
             Edge::Top => (SplitAxis::Vertical, true),
             Edge::Bottom => (SplitAxis::Vertical, false),
         };
-        let fresh = Part {
-            share: Share(50.0),
-            node: Node::Group(TabGroup { id: new_group, panels: Vec::new(), active: first }),
-        };
+        let fresh = Node::Group(TabGroup { id: new_group, panels: Vec::new(), active: first });
+
+        if let Some((&index, parent_steps)) = path.steps.split_last() {
+            let parent = NodePath { region: path.region, steps: parent_steps.to_vec() };
+            if let Node::Split(split) = self.node_mut(&parent)
+                && split.axis == axis
+            {
+                let half = Share(split.parts[index].share.0 / 2.0);
+                split.parts[index].share = half;
+                let at = if new_first { index } else { index + 1 };
+                split.parts.insert(at, Part { share: half, node: fresh });
+
+                let mut steps = parent.steps;
+                steps.push(at);
+                return Ok(NodePath { region: path.region, steps });
+            }
+        }
+
+        let split = self.next_split();
+        let fresh = Part { share: Share(50.0), node: fresh };
         let slot = self.node_mut(&path);
         let old = Part {
             share: Share(50.0),
@@ -781,7 +859,9 @@ impl Layout {
         Ok(NodePath { region: path.region, steps })
     }
 
-    /// Takes the node at `path` out of its tree and gives its room to its siblings.
+    /// Takes the node at `path` out of its tree and gives its room to its siblings. A split left
+    /// with one part is replaced by that part, whose parts join the split around it when both
+    /// run the same way.
     fn prune(&mut self, path: NodePath) {
         let Some((&last, parent_steps)) = path.steps.split_last() else {
             self.region_mut(path.region).root = None;
@@ -797,11 +877,38 @@ impl Layout {
         if split.parts.len() == 1 {
             let only = split.parts.remove(0).node;
             *slot = only;
+            self.merge_into_parent(parent);
             return;
         }
 
         let parts = std::mem::take(&mut split.parts);
         split.parts = rescaled(parts.into_iter().map(|part| (part.share, part.node)).collect())
+    }
+
+    /// Puts the parts of the split at `path` in its place in the split around it, when both run
+    /// the same way, each taking its share of the room the inner split had.
+    fn merge_into_parent(&mut self, path: NodePath) {
+        let Some((&index, parent_steps)) = path.steps.split_last() else {
+            return;
+        };
+        let parent = NodePath { region: path.region, steps: parent_steps.to_vec() };
+        let Node::Split(outer) = self.node_mut(&parent) else {
+            unreachable!("a path steps only through splits");
+        };
+        let Node::Split(inner) = &outer.parts[index].node else {
+            return;
+        };
+        if inner.axis != outer.axis {
+            return;
+        }
+
+        let room = outer.parts[index].share.0;
+        let Node::Split(inner) = outer.parts.remove(index).node else {
+            unreachable!("the part was just seen to be a split");
+        };
+        let moved =
+            inner.parts.into_iter().map(|part| Part { share: Share(part.share.0 * room / 100.0), node: part.node });
+        outer.parts.splice(index..index, moved);
     }
 }
 
@@ -944,5 +1051,120 @@ mod tests {
         layout.activate(&PanelId::new("a")).expect("a is in the dock");
         layout.set_open(DockRegion::Bottom, false);
         assert_eq!(shown(&layout), ["a", "c"]);
+    }
+
+    fn order(layout: &Layout, group: GroupId) -> Vec<String> {
+        layout.group(group).expect("the group is in the layout").panels.iter().map(|entry| entry.id.0.clone()).collect()
+    }
+
+    fn group_of(layout: &Layout, id: &str) -> GroupId {
+        layout.group_of(&PanelId::new(id)).expect("the panel is in the layout")
+    }
+
+    #[test]
+    fn a_tab_moved_within_its_group_lands_before_the_tab_it_was_dropped_on() {
+        let mut layout = Layout::new();
+        let group = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        for id in ["b", "c"] {
+            layout.add_panel(DockTarget::Group(group), entry(id)).expect("adds");
+        }
+        let a = PanelId::new("a");
+
+        layout.move_panel(&a, DockTarget::Tab { group, index: 2 }).expect("moves");
+        assert_eq!(order(&layout, group), ["b", "a", "c"]);
+        assert_eq!(active_of(&layout, group), "a", "a moved tab is shown");
+
+        layout.move_panel(&PanelId::new("c"), DockTarget::Tab { group, index: 0 }).expect("moves");
+        assert_eq!(order(&layout, group), ["c", "b", "a"]);
+
+        layout.move_panel(&a, DockTarget::Tab { group, index: 9 }).expect("moves");
+        assert_eq!(order(&layout, group), ["c", "b", "a"], "past the end is the end");
+
+        let before = layout.clone();
+        layout.move_panel(&PanelId::new("b"), DockTarget::Tab { group, index: 1 }).expect("moves");
+        layout.move_panel(&PanelId::new("b"), DockTarget::Tab { group, index: 2 }).expect("moves");
+        assert_eq!(layout, before, "a drop on either side of the tab itself changes nothing");
+    }
+
+    #[test]
+    fn moving_a_groups_last_panel_away_takes_the_group_out_and_the_split_with_it() {
+        let mut layout = Layout::new();
+        let left = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        let right = layout.add_panel(DockTarget::Beside { group: left, edge: Edge::Right }, entry("b")).expect("adds");
+        let fixed = PanelEntry { closable: false, ..entry("fixed") };
+        layout.add_panel(DockTarget::Group(right), fixed.clone()).expect("adds");
+
+        layout.move_panel(&PanelId::new("a"), DockTarget::Tab { group: right, index: 1 }).expect("moves");
+        assert!(layout.group(left).is_none(), "the emptied group is gone");
+        assert_eq!(layout.shape(DockRegion::Center), Some(NodeShape::Group(right)), "and its split folded away");
+        assert_eq!(order(&layout, right), ["b", "a", "fixed"]);
+
+        layout.move_panel(&PanelId::new("fixed"), DockTarget::Region(DockRegion::Bottom)).expect("moves");
+        assert!(layout.shows(DockRegion::Bottom), "the region it lands in opens");
+        assert_eq!(layout.panels().last(), Some(&fixed), "a moved panel keeps its entry");
+        assert_eq!(
+            layout.move_panel(&PanelId::new("gone"), DockTarget::Group(right)),
+            Err(DockError::UnknownPanel { id: PanelId::new("gone") })
+        );
+        assert_eq!(
+            layout.move_panel(&PanelId::new("a"), DockTarget::Group(left)),
+            Err(DockError::UnknownGroup { group: left }),
+            "a move to a group that has gone leaves the panel where it was"
+        );
+        assert_eq!(group_of(&layout, "a"), right);
+    }
+
+    #[test]
+    fn a_tab_dropped_at_its_own_groups_edge_splits_off_unless_it_is_alone() {
+        let mut layout = Layout::new();
+        let group = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        layout.add_panel(DockTarget::Group(group), entry("b")).expect("adds");
+
+        let split =
+            layout.move_panel(&PanelId::new("b"), DockTarget::Beside { group, edge: Edge::Bottom }).expect("moves");
+        let Some(NodeShape::Split { axis: SplitAxis::Vertical, parts, id }) = layout.shape(DockRegion::Center) else {
+            panic!("the center is split one over the other");
+        };
+        assert_eq!(parts, [NodeShape::Group(group), NodeShape::Group(split)]);
+        assert_eq!(layout.split_shares(id), [Share(50.0), Share(50.0)]);
+
+        let before = layout.clone();
+        layout.move_panel(&PanelId::new("b"), DockTarget::Beside { group: split, edge: Edge::Left }).expect("moves");
+        assert_eq!(layout, before, "a lone tab cannot be split off its own group");
+    }
+
+    #[test]
+    fn a_split_beside_a_part_of_a_split_the_same_way_joins_that_split() {
+        let mut layout = Layout::new();
+        let a = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        let b = layout.add_panel(DockTarget::Beside { group: a, edge: Edge::Right }, entry("b")).expect("adds");
+        let c = layout.add_panel(DockTarget::Region(DockRegion::Left), entry("c")).expect("adds");
+
+        layout.move_panel(&PanelId::new("c"), DockTarget::Beside { group: b, edge: Edge::Left }).expect("moves");
+        let Some(NodeShape::Split { axis: SplitAxis::Horizontal, parts, id }) = layout.shape(DockRegion::Center) else {
+            panic!("the center is split side by side");
+        };
+        assert_eq!(parts.len(), 3, "no split inside a split the same way");
+        assert_eq!(parts[0], NodeShape::Group(a));
+        assert_eq!(parts[2], NodeShape::Group(b));
+        assert_eq!(layout.split_shares(id), [Share(50.0), Share(25.0), Share(25.0)]);
+        assert!(layout.group(c).is_none());
+        assert!(!layout.shows(DockRegion::Left), "the emptied region takes no room");
+    }
+
+    #[test]
+    fn a_split_left_with_one_part_gives_that_parts_parts_to_a_split_the_same_way_around_it() {
+        let mut layout = Layout::new();
+        let a = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        let b = layout.add_panel(DockTarget::Beside { group: a, edge: Edge::Right }, entry("b")).expect("adds");
+        layout.add_panel(DockTarget::Beside { group: b, edge: Edge::Bottom }, entry("d")).expect("adds");
+        let c = layout.add_panel(DockTarget::Beside { group: b, edge: Edge::Right }, entry("c")).expect("adds");
+
+        layout.move_panel(&PanelId::new("d"), DockTarget::Group(a)).expect("moves");
+        let Some(NodeShape::Split { axis: SplitAxis::Horizontal, parts, id }) = layout.shape(DockRegion::Center) else {
+            panic!("the center is split side by side");
+        };
+        assert_eq!(parts, [NodeShape::Group(a), NodeShape::Group(b), NodeShape::Group(c)]);
+        assert_eq!(layout.split_shares(id), [Share(50.0), Share(25.0), Share(25.0)]);
     }
 }

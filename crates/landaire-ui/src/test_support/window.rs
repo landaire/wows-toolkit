@@ -414,7 +414,33 @@ impl HeadlessWindow {
     /// `steps` moves, one output frame apart, and releases it there.
     pub fn drag(&mut self, element: Element, to: Point<DevicePx, Device>, steps: u32) -> Result<(), HeadlessError> {
         let from = self.centre(element)?;
-        let to = self.to_css(to);
+        self.drag_css(from, self.to_css(to), steps);
+
+        Ok(())
+    }
+
+    /// [`Self::drag`] from `from`, in device pixels from the window's top-left corner, for a press
+    /// somewhere other than an element's middle.
+    pub fn drag_from(&mut self, from: Point<DevicePx, Device>, to: Point<DevicePx, Device>, steps: u32) {
+        self.drag_css(self.to_css(from), self.to_css(to), steps);
+    }
+
+    /// Presses the primary button at `at`, in device pixels from the window's top-left corner,
+    /// and holds it, for a drag that is looked at part way: move with [`Self::hover_at`], and let
+    /// go with [`Self::release`].
+    pub fn press_at(&mut self, at: Point<DevicePx, Device>) {
+        let at = self.to_css(at);
+        self.move_pointer(at);
+        self.pointer_event(PointerAction::Pressed, at, Some(PointerButton::Primary));
+    }
+
+    /// Releases the primary button where the pointer is.
+    pub fn release(&mut self) {
+        let at = self.pointer.unwrap_or(Point::new(CssPx(0.0), CssPx(0.0)));
+        self.pointer_event(PointerAction::Released, at, Some(PointerButton::Primary));
+    }
+
+    fn drag_css(&mut self, from: Point<CssPx, Css>, to: Point<CssPx, Css>, steps: u32) {
         self.move_pointer(from);
         self.pointer_event(PointerAction::Pressed, from, Some(PointerButton::Primary));
 
@@ -430,8 +456,6 @@ impl HeadlessWindow {
         }
 
         self.pointer_event(PointerAction::Released, to, Some(PointerButton::Primary));
-
-        Ok(())
     }
 
     /// Types `text` wherever the keyboard is, one character at a time.

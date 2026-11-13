@@ -150,6 +150,12 @@ impl DockState {
         self.change(|layout| layout.add_panel(target, entry))
     }
 
+    /// Moves `panel` to `target` in one change, as dropping its tab there does. The panel keeps
+    /// its id, its entry and its view, and shows where it lands. A group left empty is taken out.
+    pub fn move_panel(self, panel: &PanelId, target: DockTarget) -> Result<GroupId, DockError> {
+        self.change(|layout| layout.move_panel(panel, target))
+    }
+
     /// Shows `panel` in its tab group and opens the region it is in.
     pub fn activate(self, panel: &PanelId) -> Result<(), DockError> {
         self.change(|layout| layout.activate(panel))
@@ -236,6 +242,13 @@ impl DockState {
         let zoomed = self.zoomed.get()?;
 
         self.layout.with(|layout| layout.shows_group(zoomed)).then_some(zoomed)
+    }
+
+    /// [`zoomed`](Self::zoomed) without subscribing the running effect.
+    pub(crate) fn zoomed_untracked(self) -> Option<GroupId> {
+        let zoomed = self.zoomed.with_untracked(|zoomed| *zoomed)?;
+
+        self.layout.with_untracked(|layout| layout.shows_group(zoomed)).then_some(zoomed)
     }
 
     /// Draws `group` over the whole dock, or with `None` the dock as laid out. A group whose

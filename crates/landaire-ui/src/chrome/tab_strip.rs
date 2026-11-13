@@ -507,8 +507,13 @@ pub fn TabStripTab(
             control(
                 class = "lui-tab-strip__close",
                 tabindex = {Focus::Programmatic},
-                // A press on the button is not a choice of its tab.
+                // A press on the button is not a choice of its tab, nor the start of a drag.
                 on:focus_in = |ev| ev.stop_propagation(),
+                on:pointer_down = |ev| {
+                    if ev.button == Some(PointerButton::Primary) {
+                        ev.stop_propagation();
+                    }
+                },
                 on:click = move |ev| {
                     ev.stop_propagation();
                     on_close.run(());

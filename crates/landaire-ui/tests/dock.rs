@@ -290,6 +290,180 @@ fn a_panel_keeps_its_view_while_its_region_changes_shape_until_it_is_removed() {
     assert_eq!(counts.built.get(), 7, "and builds them again");
 }
 
+/// A point on the label of the tab called `label`, clear of its close button.
+fn grip(window: &mut HeadlessWindow, label: &str) -> Point<DevicePx, Device> {
+    let tab = window.by_role_and_label(Role::Tab, label).expect("the tab is announced");
+    let bounds = window.bounds(tab).expect("the tab has a box");
+
+    Point::new(DevicePx(bounds.origin.x.0 + 6.0), DevicePx(bounds.origin.y.0 + bounds.size.height.0 / 2.0))
+}
+
+fn tab(window: &mut HeadlessWindow, label: &str) -> Element {
+    window.by_role_and_label(Role::Tab, label).expect("the tab is announced")
+}
+
+/// The box of the one element with `class`, when it takes room.
+fn shown_box(window: &HeadlessWindow, class: &str) -> Option<Rect<DevicePx, Device>> {
+    let element = window.by_class(class)?;
+
+    window.bounds(element).filter(|bounds| bounds.size.width.0 > 0.0 && bounds.size.height.0 > 0.0)
+}
+
+fn group_panels(state: DockState) -> Vec<Vec<String>> {
+    fn walk(node: &SavedNode, into: &mut Vec<Vec<String>>) {
+        match node {
+            SavedNode::Tabs { panels, .. } => {
+                into.push(panels.iter().map(|entry| entry.id.as_str().to_owned()).collect())
+            }
+            SavedNode::Split { parts, .. } => parts.iter().for_each(|part| walk(&part.node, into)),
+        }
+    }
+    let saved = state.dump();
+    let mut groups = Vec::new();
+    for region in [&saved.center, &saved.left, &saved.right, &saved.bottom] {
+        if let Some(root) = &region.root {
+            walk(root, &mut groups);
+        }
+    }
+
+    groups
+}
+
+#[test]
+fn a_tab_dropped_on_the_right_of_a_group_splits_it_and_keeps_its_view() {
+    let (mut window, state) = open(three_tabs);
+    window.advance(FRAME);
+    let content = window.by_test_id("content-a").expect("a is built");
+    let a = grip(&mut window, "a");
+
+    window.drag_from(a, Point::new(DevicePx(740.0), DevicePx(300.0)), 8);
+    window.advance(FRAME);
+
+    assert_eq!(group_panels(state), [vec!["b", "c"], vec!["a"]]);
+    assert_eq!(window.by_test_id("content-a"), Some(content), "the moved panel kept its view");
+    let width = width_of(&window, "content-a").expect("a is laid out");
+    assert!((width - 400.0).abs() < 10.0, "the new group takes half the room: {width}");
+    assert!(is_selected(&mut window, "a"));
+    assert!(shown_box(&window, "lui-dock__landing").is_none(), "nothing is drawn once it lands");
+}
+
+#[test]
+fn a_tab_dropped_on_the_strip_goes_into_the_gap_under_the_pointer() {
+    let (mut window, state) = open(three_tabs);
+    window.advance(FRAME);
+    let a = grip(&mut window, "a");
+    let c = tab(&mut window, "c");
+    let c_box = window.bounds(c).expect("the tab has a box");
+    let past_c = Point::new(
+        DevicePx(c_box.origin.x.0 + c_box.size.width.0 - 2.0),
+        DevicePx(c_box.origin.y.0 + c_box.size.height.0 / 2.0),
+    );
+
+    window.drag_from(a, past_c, 8);
+    window.advance(FRAME);
+    assert_eq!(ids(state), ["b", "c", "a"]);
+
+    let a = grip(&mut window, "a");
+    let b = tab(&mut window, "b");
+    let b_box = window.bounds(b).expect("the tab has a box");
+    let before_b = Point::new(DevicePx(b_box.origin.x.0 + 2.0), DevicePx(b_box.origin.y.0 + b_box.size.height.0 / 2.0));
+    window.drag_from(a, before_b, 8);
+    window.advance(FRAME);
+    assert_eq!(ids(state), ["a", "b", "c"]);
+}
+
+#[test]
+fn a_held_tab_shows_where_it_would_land_and_escape_puts_it_back() {
+    let (mut window, state) = open(three_tabs);
+    window.advance(FRAME);
+    let a = grip(&mut window, "a");
+
+    window.press_at(a);
+    window.hover_at(Point::new(DevicePx(400.0), DevicePx(250.0)));
+    window.hover_at(Point::new(DevicePx(740.0), DevicePx(300.0)));
+    window.advance(FRAME);
+
+    let landing = shown_box(&window, "lui-dock__landing").expect("the landing is drawn");
+    assert!((landing.origin.x.0 - 400.0).abs() < 2.0, "over the right half: {landing:?}");
+    assert!((landing.size.width.0 - 400.0).abs() < 2.0, "over the right half: {landing:?}");
+    let ghost = shown_box(&window, "lui-dock__ghost").expect("the tab follows the pointer");
+    assert!(ghost.origin.x.0 > 600.0, "the tab is under the pointer: {ghost:?}");
+    assert_eq!(window.texts_by_class("lui-dock__ghost"), ["a"]);
+    assert!(window.by_attribute("data-lifted", "").is_some(), "the held tab is marked");
+    assert_eq!(window.cursor(), Some(CursorStyle::Grabbing));
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(FRAME);
+    assert!(shown_box(&window, "lui-dock__landing").is_none());
+    assert!(shown_box(&window, "lui-dock__ghost").is_none());
+    window.release();
+    window.advance(FRAME);
+    assert_eq!(group_panels(state), [vec!["a", "b", "c"]], "the panels are where they were");
+    assert!(is_selected(&mut window, "b"), "the tab let go is not chosen");
+}
+
+#[test]
+fn a_click_on_a_tab_chooses_it_and_a_drag_that_moves_nothing_does_not() {
+    let (mut window, _state) = open(three_tabs);
+    window.advance(FRAME);
+
+    let a = grip(&mut window, "a");
+    window.drag_from(a, Point::new(DevicePx(400.0), DevicePx(320.0)), 8);
+    window.advance(FRAME);
+    assert!(is_selected(&mut window, "b"), "a drop that changes nothing leaves the choice alone");
+
+    let grip_a = grip(&mut window, "a");
+    window.click_at(grip_a);
+    window.advance(FRAME);
+    assert!(is_selected(&mut window, "a"));
+    let a = tab(&mut window, "a");
+    assert!(window.a11y(a).is_some_and(|state| state.focused), "the clicked tab takes the focus");
+}
+
+#[test]
+fn a_held_tab_whose_panel_is_closed_is_let_go() {
+    let (mut window, state) = open(three_tabs);
+    window.advance(FRAME);
+    let a = grip(&mut window, "a");
+
+    window.press_at(a);
+    window.hover_at(Point::new(DevicePx(740.0), DevicePx(300.0)));
+    window.advance(FRAME);
+    assert!(shown_box(&window, "lui-dock__ghost").is_some(), "the tab is held");
+
+    state.close(&PanelId::new("a")).expect("a is in the dock");
+    window.advance(FRAME);
+    assert!(shown_box(&window, "lui-dock__landing").is_none());
+    assert!(shown_box(&window, "lui-dock__ghost").is_none());
+    window.release();
+    window.advance(FRAME);
+    assert_eq!(group_panels(state), [vec!["b", "c"]]);
+}
+
+#[test]
+fn a_tab_dropped_at_the_docks_edge_opens_a_side_region_and_an_emptied_one_folds_away() {
+    let (mut window, state) = open(three_tabs);
+    window.advance(FRAME);
+    let c = grip(&mut window, "c");
+
+    window.drag_from(c, Point::new(DevicePx(4.0), DevicePx(300.0)), 8);
+    window.advance(FRAME);
+    assert!(state.is_region_open(DockRegion::Left));
+    assert!(!state.is_region_empty(DockRegion::Left));
+    let fixed = PanelEntry { closable: false, ..entry("c") };
+    assert_eq!(state.dump().left.root, Some(SavedNode::Tabs { panels: vec![fixed], active: PanelId::new("c") }));
+    let side = width_of(&window, "content-c").expect("c is laid out");
+    assert!(side > 100.0 && side < 300.0, "the region takes its share: {side}");
+
+    let c = grip(&mut window, "c");
+    window.drag_from(c, Point::new(DevicePx(480.0), DevicePx(300.0)), 8);
+    window.advance(FRAME);
+    assert!(state.is_region_empty(DockRegion::Left), "the side gave its only panel back");
+    assert_eq!(group_panels(state), [vec!["a", "b", "c"]]);
+    let main = width_of(&window, "content-c").expect("c is laid out");
+    assert!(main > 700.0, "the center takes the room the side left: {main}");
+}
+
 /// The dividers that take room, each with its box.
 fn shown_dividers(window: &mut HeadlessWindow) -> Vec<(Element, Rect<DevicePx, Device>)> {
     window
