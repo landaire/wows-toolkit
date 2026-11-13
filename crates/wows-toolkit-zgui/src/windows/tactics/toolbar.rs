@@ -1028,9 +1028,11 @@ fn Shortcuts() -> impl IntoView {
     let tip = heading.clone();
     let label = heading.clone();
 
+    // The popover sits inside the tip: a tooltip holds an overlay state of its own, so a popover
+    // trigger beneath it would open the tooltip rather than the popover.
     view! {
-        Popover {
-            Tip(tip = tip) {
+        Tip(tip = tip) {
+            Popover {
                 PopoverTrigger(
                     variant = ButtonVariant::Ghost,
                     size = ButtonSize::IconSm,
@@ -1039,13 +1041,13 @@ fn Shortcuts() -> impl IntoView {
                 ) {
                     AppIcon(glyph = Glyph::Info)
                 }
-            }
-            PopoverContent(class = "wt-tactics-panel wt-tactics-panel--shortcuts", attr:data-testid = "tactics-shortcuts-menu") {
-                text(class = "wt-tactics-panel__text") {{heading.clone()}}
-                text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_tools").into_owned()}}
-                {shortcut_tools()}
-                text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_actions").into_owned()}}
-                {shortcut_actions()}
+                PopoverContent(class = "wt-tactics-panel wt-tactics-panel--shortcuts", attr:data-testid = "tactics-shortcuts-menu") {
+                    text(class = "wt-tactics-panel__text") {{heading.clone()}}
+                    text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_tools").into_owned()}}
+                    {shortcut_tools()}
+                    text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_actions").into_owned()}}
+                    {shortcut_actions()}
+                }
             }
         }
     }

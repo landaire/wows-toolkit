@@ -203,6 +203,15 @@ fn a_range_circle_name_toggles_it() {
     assert_eq!(on(&board), was, "and back");
 }
 
+/// The shortcuts button opens the list of chords.
+#[test]
+fn the_shortcuts_button_opens_the_chords() {
+    let mut board = BoardWindow::open();
+    assert!(!board.has("tactics-shortcuts-menu"));
+    board.press("tactics-shortcuts");
+    assert!(board.has("tactics-shortcuts-menu"), "the press opens the list");
+}
+
 /// Escape in the ship search empties what was typed.
 #[test]
 fn escape_empties_the_ship_search() {
