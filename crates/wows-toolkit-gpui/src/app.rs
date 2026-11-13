@@ -1121,6 +1121,7 @@ impl App {
             });
         }
         jobs.extend(crate::status_bar::running(cx));
+        jobs.extend(crate::supervision::worker_jobs(cx));
 
         let inspector = (self.active_tab == AppTab::ReplayInspector).then(|| self.replay_inspector.clone());
         let toggles = match self.active_tab {

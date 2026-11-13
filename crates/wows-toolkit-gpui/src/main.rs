@@ -41,6 +41,7 @@ mod side_split;
 mod slider_field;
 mod stats;
 mod status_bar;
+mod supervision;
 mod tactics;
 mod text_filter;
 mod theme;
@@ -138,6 +139,9 @@ fn main() {
         zoom::bind_keys(cx);
         if let Err(err) = runtime::init(cx) {
             tracing::error!("failed to start the tokio runtime: {err}");
+        }
+        if let Err(err) = supervision::init(cx) {
+            tracing::error!("the watchdog did not start; worker threads are not watched: {err}");
         }
 
         // Read before the window opens: position can only be set at builder

@@ -13,14 +13,13 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::StreamExt;
 use jiff::Timestamp;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::live_match::LiveSource;
-use wows_toolkit_replay_data::live_match::LiveWatch;
-use wows_toolkit_replay_data::live_match::Observed;
-use wows_toolkit_replay_data::live_match::POLL_INTERVAL;
 use wows_toolkit_replay_data::live_match::scan_arena_retrying;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
@@ -235,26 +234,25 @@ impl LiveModel {
             self.watch.set_value(None);
             return;
         };
+        let Some(watchdog) = services.watchdog() else {
+            tracing::error!("live match: the watchdog is not running, so no battle is looked for");
+            self.watch.set_value(None);
+            return;
+        };
+        let (poll, mut changes) = match LivePoll::start(&watchdog, &config.replay_dir) {
+            Ok(started) => started,
+            Err(err) => {
+                tracing::error!(%err, "live match: the poll did not start");
+                self.watch.set_value(None);
+                return;
+            }
+        };
 
         let task = spawn_local(async move {
-            let mut watch = LiveWatch::new(&config.replay_dir);
-            let mut first = true;
-            loop {
-                // A step is a blocking `metadata`, and a read when it changed, which on a network
-                // share would stall a frame on this thread. The pause rides along with it.
-                let pause = !std::mem::replace(&mut first, false);
-                let observed;
-                (watch, observed) = blocking(move || {
-                    if pause {
-                        std::thread::sleep(POLL_INTERVAL);
-                    }
-                    let observed = watch.step();
-                    (watch, observed)
-                })
-                .await;
-                if let Observed::Changed(live) = observed {
-                    self.adopt(services, &config, live);
-                }
+            // Held by the task, so cancelling it ends the poll.
+            let _poll = poll;
+            while let Some(live) = changes.next().await {
+                self.adopt(services, &config, live);
             }
         });
         self.watch.set_value(Some(task));

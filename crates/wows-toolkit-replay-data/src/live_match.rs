@@ -8,19 +8,36 @@
 //! **Polled, not watched.** A filesystem watcher reports changes only, so a
 //! battle already under way when the app starts raises no event; the egui app
 //! covers that with a separate startup check. One poll covers both, and at
-//! [`POLL_INTERVAL`] costs a `stat` per tick. Every function here blocks.
+//! [`POLL_INTERVAL`] costs a `stat` per tick. [`LivePoll`] runs it on a thread
+//! the watchdog supervises; every function here blocks.
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 
+use futures::channel::mpsc::UnboundedReceiver;
+use futures::channel::mpsc::UnboundedSender;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
+use wows_toolkit_services::supervision::WorkerStop;
+use wows_toolkit_services::supervision::watchdog::Heartbeat;
+use wows_toolkit_services::supervision::watchdog::Registration;
+use wows_toolkit_services::supervision::watchdog::Supervised;
+use wows_toolkit_services::supervision::watchdog::Watchdog;
+use wows_toolkit_services::supervision::watchdog::WatchdogError;
+use wows_toolkit_services::supervision::watchdog::WorkerName;
+use wows_toolkit_services::supervision::watchdog::WorkerSpec;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -33,7 +50,7 @@ use crate::load::decode_constants;
 ///
 /// A battle lasts twenty minutes, so noticing one a couple of seconds late
 /// costs nothing; polling faster only spends more syscalls.
-pub const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// The file the game writes for the duration of a battle.
 pub const ARENA_INFO_FILE: &str = "tempArenaInfo.json";
@@ -88,7 +105,7 @@ pub enum LiveMatchError {
 
 /// What one [`LiveWatch::step`] found.
 #[derive(Debug)]
-pub enum Observed {
+enum Observed {
     /// Nothing to report since the last step.
     Unchanged,
     /// The battle in progress changed. `None` is no battle, or one whose arena
@@ -101,7 +118,7 @@ pub enum Observed {
 /// The caller drives it: one [`step`](Self::step) per [`POLL_INTERVAL`], on a
 /// thread that may block.
 #[derive(Debug)]
-pub struct LiveWatch {
+struct LiveWatch {
     source: LiveSource,
     current: Option<ArenaInfoStamp>,
     /// Nothing has been reported yet, so the first step reports even when it
@@ -114,12 +131,12 @@ pub struct LiveWatch {
 }
 
 impl LiveWatch {
-    pub fn new(replay_dir: &Path) -> Self {
+    fn new(replay_dir: &Path) -> Self {
         Self { source: LiveSource::in_dir(replay_dir), current: None, reported: false, attempts: 0 }
     }
 
     /// Polls once, reading the arena info when it changed.
-    pub fn step(&mut self) -> Observed {
+    fn step(&mut self) -> Observed {
         // How many times an unreadable arena info is re-read before it is taken
         // at face value as "no battle this app can read". The game flushes the
         // file in one go, so a couple of ticks covers the race; past that the
@@ -147,6 +164,85 @@ impl LiveWatch {
 
         Observed::Changed(read.and_then(Result::ok))
     }
+}
+
+/// The poll of one replays directory for the battle in progress, on a thread of its own that the
+/// watchdog starts again when it stops. Dropping it ends the thread.
+pub struct LivePoll {
+    /// `None` once dropped, which is done before the thread is told to end so its end is not
+    /// taken for a stop.
+    registration: Option<Registration>,
+    shared: Arc<PollShared>,
+}
+
+impl LivePoll {
+    /// The poll's name under the watchdog and on its thread.
+    pub const WORKER: &str = "live-match-poll";
+
+    /// Starts polling `replay_dir` under `watchdog`. Each change of battle arrives on the
+    /// returned receiver, the first poll's included: `None` is no battle, or one whose arena info
+    /// never parsed.
+    pub fn start(
+        watchdog: &Watchdog,
+        replay_dir: &Path,
+    ) -> Result<(Self, UnboundedReceiver<Option<LiveMatch>>), WatchdogError> {
+        // A poll is a `stat` every two seconds; half a minute without one is a directory that
+        // does not answer, such as a network share that has gone away.
+        const STALL_AFTER: Duration = Duration::from_secs(30);
+
+        let (changes, received) = futures::channel::mpsc::unbounded();
+        let shared = Arc::new(PollShared {
+            #[cfg(any(test, feature = "test-support"))]
+            replay_dir: replay_dir.to_path_buf(),
+            watch: Mutex::new(LiveWatch::new(replay_dir)),
+            changes,
+            closed: Mutex::new(false),
+            closing: Condvar::new(),
+        });
+        let spec = WorkerSpec { name: WorkerName::new(Self::WORKER), stall_after: Some(STALL_AFTER) };
+        let registration = watchdog.register(spec, Arc::new(PollSupervisor { shared: Arc::clone(&shared) }))?;
+
+        Ok((Self { registration: Some(registration), shared }, received))
+    }
+}
+
+impl Drop for LivePoll {
+    fn drop(&mut self) {
+        drop(self.registration.take());
+
+        *lock(&self.shared.closed) = true;
+        self.shared.closing.notify_all();
+    }
+}
+
+/// The poll as the watchdog sees it.
+struct PollSupervisor {
+    shared: Arc<PollShared>,
+}
+
+impl Supervised for PollSupervisor {
+    fn start(&self, heartbeat: Heartbeat) -> std::io::Result<JoinHandle<()>> {
+        let shared = Arc::clone(&self.shared);
+        std::thread::Builder::new().name(LivePoll::WORKER.to_owned()).spawn(move || poll_live(&shared, &heartbeat))
+    }
+
+    /// The poll holds no request to fail, and the next thread polls on from the last one's state.
+    fn stopped(&self, _stop: &WorkerStop) {}
+
+    /// Nothing waits on the poll; the watchdog's report says it has stopped.
+    fn gave_up(&self, _stop: &WorkerStop) {}
+}
+
+struct PollShared {
+    #[cfg(any(test, feature = "test-support"))]
+    replay_dir: PathBuf,
+    /// Kept here rather than on the thread, so a restarted thread does not report the battle
+    /// again.
+    watch: Mutex<LiveWatch>,
+    changes: UnboundedSender<Option<LiveMatch>>,
+    /// Set when the [`LivePoll`] is dropped.
+    closed: Mutex<bool>,
+    closing: Condvar,
 }
 
 /// The stamp of the battle in progress, or `None` when there is none.
@@ -216,8 +312,38 @@ pub fn scan_arena_retrying(
     }
 }
 
+/// Polls every [`POLL_INTERVAL`] until the [`LivePoll`] is dropped, beating `heartbeat` before
+/// each poll.
+fn poll_live(shared: &PollShared, heartbeat: &Heartbeat) {
+    let mut closed = *lock(&shared.closed);
+    while !closed {
+        heartbeat.beat();
+
+        #[cfg(any(test, feature = "test-support"))]
+        crate::simulated_panic::stop_live_poll_if_asked(&shared.replay_dir);
+        let observed = lock(&shared.watch).step();
+        if let Observed::Changed(live) = observed {
+            // The receiver goes with its owner, which closes the poll as it goes.
+            let _ = shared.changes.unbounded_send(live);
+        }
+
+        let waited = shared.closing.wait_timeout_while(lock(&shared.closed), POLL_INTERVAL, |closed| !*closed);
+        closed = *waited.unwrap_or_else(PoisonError::into_inner).0;
+    }
+}
+
+/// A lock whose holder may have panicked part way through a poll, which leaves a state the next
+/// poll reads as well as any.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod tests {
+    use futures::StreamExt;
+    use futures::executor::block_on;
+    use wows_toolkit_services::supervision::watchdog::WorkerHealth;
+
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -311,6 +437,37 @@ mod tests {
         assert!(matches!(watch.step(), Observed::Unchanged), "a second failed read is retried");
         assert!(matches!(watch.step(), Observed::Changed(None)), "the third is taken as no battle");
         assert!(matches!(watch.step(), Observed::Unchanged));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A poll whose thread panics is started again by the watchdog and reports the battle, and
+    /// dropping the poll ends its thread.
+    #[test]
+    fn a_stopped_poll_is_started_again_by_the_watchdog() {
+        let dir = temp_dir("restart");
+        std::fs::write(dir.join(ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        crate::simulated_panic::stop_live_poll_once(&dir);
+        let watchdog = Watchdog::start_with_period(Duration::from_millis(20)).expect("the watchdog starts");
+        let mut reports = watchdog.reports();
+
+        let (poll, mut changes) = LivePoll::start(&watchdog, &dir).expect("the poll starts");
+
+        loop {
+            let workers = block_on(reports.next()).expect("the watchdog reports");
+            let restarting = workers.iter().any(|worker| {
+                worker.name.as_str() == LivePoll::WORKER
+                    && matches!(&worker.health, WorkerHealth::Restarting { stop: WorkerStop::Panicked(_), .. })
+            });
+            if restarting {
+                break;
+            }
+        }
+        let live = block_on(changes.next()).expect("the restarted poll reports");
+        assert_eq!(live.map(|live| live.players.len()), Some(2), "the battle is reported");
+
+        drop(poll);
+        assert!(block_on(changes.next()).is_none(), "the thread ends with its poll");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

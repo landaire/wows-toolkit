@@ -1,4 +1,5 @@
-//! Replay reads a test makes panic, standing in for faults in the decoders and in the loader.
+//! Replay reads a test makes panic, standing in for faults in the decoders, in the loader and in
+//! the live match poll.
 //!
 //! Keyed by path and held process-wide: the read runs on a worker thread, and other tests read
 //! other files at the same time.
@@ -15,6 +16,8 @@ enum Fault {
     Parse,
     /// In the loader around the parse, which stops the loader's thread.
     Loader,
+    /// In the live match poll of a replays directory, which stops the poll's thread.
+    LivePoll,
 }
 
 static FAULTS: Mutex<Vec<(PathBuf, Fault)>> = Mutex::new(Vec::new());
@@ -27,6 +30,11 @@ pub fn panic_on_parse(path: &Path) {
 /// Makes the replay loader's thread panic, outside the parse, whenever it reads `path`.
 pub fn stop_loader_on(path: &Path) {
     ask(path, Fault::Loader);
+}
+
+/// Makes the next live match poll of the replays directory `dir` stop its thread.
+pub fn stop_live_poll_once(dir: &Path) {
+    ask(dir, Fault::LivePoll);
 }
 
 fn ask(path: &Path, fault: Fault) {
@@ -48,5 +56,18 @@ pub(crate) fn panic_if_asked(path: &Path) {
 pub(crate) fn stop_loader_if_asked(path: &Path) {
     if asked(path, Fault::Loader) {
         panic!("a simulated loader fault in {}", path.display());
+    }
+}
+
+/// Panics, once, when a test asked the live match poll of `dir` to stop.
+pub(crate) fn stop_live_poll_if_asked(dir: &Path) {
+    let asked = {
+        let mut faults = FAULTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = faults.len();
+        faults.retain(|asked| !(asked.0 == dir && asked.1 == Fault::LivePoll));
+        faults.len() != before
+    };
+    if asked {
+        panic!("a simulated live match poll fault in {}", dir.display());
     }
 }

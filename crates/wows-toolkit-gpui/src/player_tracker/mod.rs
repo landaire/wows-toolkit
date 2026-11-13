@@ -1050,9 +1050,17 @@ impl PlayerTrackerView {
         // Weak: the task is owned by this view, and a strong handle here
         // would be a cycle that keeps the whole tab alive for the process.
         let entity = cx.entity().downgrade();
-        self._live_watch = Some(live::watch(replay_dir, cx, move |live, cx| {
-            entity.update(cx, |this, cx| this.adopt_live_match(live, cx)).is_ok()
-        }));
+        self._live_watch = match crate::supervision::watchdog(cx) {
+            Some(watchdog) => live::watch(&watchdog, &replay_dir, cx, move |live, cx| {
+                entity.update(cx, |this, cx| this.adopt_live_match(live, cx)).is_ok()
+            })
+            .inspect_err(|err| tracing::error!(%err, "player tracker: the battle watch did not start"))
+            .ok(),
+            None => {
+                tracing::error!("player tracker: the watchdog is not running, so no battle is looked for");
+                None
+            }
+        };
         cx.notify();
     }
 
@@ -2976,12 +2984,20 @@ mod tests {
         dir
     }
 
+    /// Starts the watchdog the live poll runs under. The poll and the watchdog are real threads,
+    /// so a test that drives them waits in real time.
+    fn start_watchdog(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| crate::supervision::init(cx).expect("the watchdog starts"));
+    }
+
     /// The two halves a scan produces must actually reach the cells: the
     /// identities give a row its account, and only an account can look a
     /// player's statistics up.
     #[gpui_kit::test]
     async fn a_scanned_identity_joins_its_player_to_the_looked_up_statistics(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        start_watchdog(cx);
         let dir = temp_dir("stats-join");
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
@@ -3052,6 +3068,7 @@ mod tests {
     #[gpui_kit::test]
     async fn a_chat_login_that_names_a_player_puts_a_chip_on_their_row(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        start_watchdog(cx);
         let dir = temp_dir("twitch-chip");
         let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
 
@@ -3405,6 +3422,7 @@ mod tests {
     #[gpui_kit::test]
     async fn the_view_modes_change_which_scopes_the_roster_shows(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        start_watchdog(cx);
         let dir = temp_dir("view-modes");
         let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
 
@@ -3460,6 +3478,7 @@ mod tests {
     #[gpui_kit::test]
     async fn a_battle_appearing_in_the_replays_directory_fills_the_roster(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        start_watchdog(cx);
         let dir = temp_dir("live");
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
@@ -3492,6 +3511,34 @@ mod tests {
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
             window.try_find("tracker-roster-ally-0").is_none()
+        })
+        .await;
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A poll whose thread stops is started again by the watchdog, and the battle it then finds
+    /// fills the roster.
+    #[gpui_kit::test]
+    async fn a_battle_is_found_after_the_poll_thread_stopped(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        start_watchdog(cx);
+        let dir = temp_dir("live-restart");
+        std::fs::write(dir.join(wows_toolkit_replay_data::live_match::ARENA_INFO_FILE), ARENA_INFO)
+            .expect("the arena info is writable");
+        wows_toolkit_replay_data::simulated_panic::stop_live_poll_once(&dir);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        window
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, window, cx);
+                tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
+            })
+            .expect("the window is open");
+
+        cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
+            window.render_frame(cx);
+            window.try_find("tracker-roster-ally-0").is_some()
         })
         .await;
 

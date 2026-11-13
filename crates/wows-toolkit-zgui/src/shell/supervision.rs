@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use rust_i18n::t;
+use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::loader::ReplayLoader;
 use wows_toolkit_services::supervision::queue::Activity;
 use wows_toolkit_services::supervision::watchdog::WorkerHealth;
@@ -57,6 +58,7 @@ pub fn begin(services: Services) {
 pub fn worker_title(name: &WorkerName) -> String {
     match name.as_str() {
         ReplayLoader::WORKER => t!("ui.app.worker_replay_loader").into_owned(),
+        LivePoll::WORKER => t!("ui.app.worker_live_match").into_owned(),
         other => other.to_owned(),
     }
 }
