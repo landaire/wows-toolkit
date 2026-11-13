@@ -163,16 +163,6 @@ const CSS: &str = css!(
         align-items: center;
         gap: 2px;
     }
-    .lui-tab-strip__tab .lui-tab-strip__close {
-        opacity: 0;
-        transition: opacity var(--lui-motion-fade) var(--lui-motion-ease);
-    }
-    .lui-tab-strip__tab[data-state=\"active\"] .lui-tab-strip__close,
-    .lui-tab-strip__tab:hover .lui-tab-strip__close,
-    .lui-tab-strip__tab:focus-visible .lui-tab-strip__close,
-    .lui-tab-strip__tab:focus-within .lui-tab-strip__close {
-        opacity: 1;
-    }
     .lui-tab-strip__underline {
         position: absolute;
         bottom: 0;
@@ -341,9 +331,9 @@ impl Default for TabStripStrings {
 /// <kbd>Home</kbd> and <kbd>End</kbd> go to the ends, and <kbd>Delete</kbd> closes a tab that can
 /// be closed.
 ///
-/// A tab that can be closed shows its close button while it is selected, hovered or focused, and
-/// closes on a middle click. Its context menu, from the secondary button or the menu key, closes
-/// it, every other tab, or the tabs after it, skipping the tabs that cannot be closed.
+/// A tab that can be closed always shows its close button, and closes on a middle click. Its
+/// context menu, from the secondary button or the menu key, closes it, every other tab, or the
+/// tabs after it, skipping the tabs that cannot be closed.
 #[allow(clippy::too_many_arguments, reason = "each prop is a named field of the props builder")]
 #[component(slot_aware)]
 pub fn TabStrip(
