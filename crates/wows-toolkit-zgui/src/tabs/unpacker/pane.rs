@@ -26,10 +26,13 @@ use wowsunpack::vfs::VfsPath;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 
@@ -261,6 +264,8 @@ pub struct Pane {
     pub path_filter: RwSignal<String, LocalStorage>,
     pub sidebar_open: RwSignal<bool, LocalStorage>,
     pub sidebar_width: RwSignal<PanelWidth, LocalStorage>,
+    /// The file a reveal asked for, selected once the listing holds it.
+    revealed: StoredValue<Option<String>, LocalStorage>,
 }
 
 impl Pane {
@@ -282,6 +287,7 @@ impl Pane {
             path_filter: RwSignal::new_local(String::new()),
             sidebar_open: RwSignal::new_local(true),
             sidebar_width: RwSignal::new_local(SIDEBAR_WIDTH),
+            revealed: StoredValue::new_local(None),
         };
         pane.follow();
         pane
@@ -305,6 +311,7 @@ impl Pane {
             self.listing_selection.set(HashSet::new());
             self.listing.set(Rc::new(ListingModel::new(rows.len())));
             self.rows.set(rows);
+            self.select_revealed();
         });
         // A directory picked in the tree is the one the listing shows.
         let picked = RenderEffect::new(move |_| {
@@ -373,14 +380,33 @@ impl Pane {
         }
     }
 
-    /// Shows `path`'s own directory with the file among the rows, clearing any filter that would
-    /// hide it.
+    /// Shows `path`'s own directory with the file among the rows selected, clearing any filter
+    /// that would hide it.
     pub fn reveal(self, path: &VfsPath) {
+        self.revealed.set_value(Some(path.as_str().to_string()));
+        let dir = containing_dir(path);
+        let unchanged = self.filter.get_untracked().is_empty() && self.selected_dir.get_untracked() == dir;
         if !self.filter.get_untracked().is_empty() {
             self.filter.set(String::new());
         }
-        self.select_dir(containing_dir(path));
+        self.select_dir(dir);
+        // Rows already listing the directory are not rebuilt, so the file is selected among them.
+        if unchanged {
+            self.select_revealed();
+        }
         self.sidebar_open.set(true);
+    }
+
+    /// Selects the revealed file once the listing holds it.
+    fn select_revealed(self) {
+        let Some(file) = self.revealed.get_value() else { return };
+        let at = self.rows.with_untracked(|rows| match rows {
+            Rows::Directory(entries) => entries.iter().position(|entry| entry.path.as_str() == file),
+            Rows::Filtered { .. } => None,
+        });
+        let Some(at) = at else { return };
+        self.revealed.set_value(None);
+        self.listing_selection.set(HashSet::from([RowKey(at)]));
     }
 
     pub fn files(self) -> Option<Arc<FileList>> {

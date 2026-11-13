@@ -259,6 +259,8 @@ pub enum TabRequest {
     ViewArmor { param_index: ShipParamIndex, display_name: String },
     /// Shows generated games in the Stats tab, or the recorded ones again.
     ShowStats(StatsSource),
+    /// Shows a file of the packages in the Resource Unpacker, by its VFS path.
+    RevealInUnpacker { path: String },
 }
 
 /// Which games the Stats tab shows.
@@ -275,6 +277,7 @@ impl TabRequest {
             Self::Search(_) => AppTab::Search,
             Self::ViewArmor { .. } => AppTab::ArmorViewer,
             Self::ShowStats(_) => AppTab::Stats,
+            Self::RevealInUnpacker { .. } => AppTab::Unpacker,
         }
     }
 }

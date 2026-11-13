@@ -1,5 +1,6 @@
 //! The Unpacker tab driven in the headless shell, with its game data handed to its model.
 
+use std::collections::HashSet;
 use std::io::Write as _;
 use std::time::Duration;
 
@@ -23,9 +24,11 @@ use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::shell::palette::TabRequest;
 use crate::tabs::unpacker::built_model;
 use crate::tabs::unpacker::model::UnpackerModel;
 use crate::tabs::unpacker::pane::BrowserSource;
+use crate::tabs::unpacker::pane::RowKey;
 
 /// The shell, open on the Unpacker tab.
 struct UnpackerWindow {
@@ -513,4 +516,33 @@ fn review_unpacker_dark() {
 #[ignore = "draws on the graphics device; run by hand to review the tab"]
 fn review_unpacker_light() {
     review(Appearance::Light, "unpacker-light");
+}
+
+#[test]
+fn revealing_a_file_selects_its_row() {
+    let vfs = fixture();
+    let mut tab = UnpackerWindow::with_vfs(options(), vfs.clone());
+
+    tab.model.pkg.reveal(&vfs.join("content/gameplay/b.xml").unwrap());
+    tab.settle();
+    assert_eq!(tab.model.pkg.listing_selection.get_untracked(), HashSet::from([RowKey(0)]));
+
+    // Directories sort first, so a.xml is the second row of its directory.
+    tab.model.pkg.select_dir("/content".to_string());
+    tab.settle();
+    tab.model.pkg.reveal(&vfs.join("content/a.xml").unwrap());
+    tab.settle();
+    assert_eq!(tab.model.pkg.listing_selection.get_untracked(), HashSet::from([RowKey(1)]));
+}
+
+#[test]
+fn another_tab_can_ask_for_a_package_file_to_be_shown() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let shell = tab.model.shell;
+
+    shell.palette.send(shell, TabRequest::RevealInUnpacker { path: "content/gameplay/b.xml".to_string() });
+    tab.settle();
+
+    assert_eq!(tab.model.pkg.selected_dir.get_untracked(), "/content/gameplay");
+    assert_eq!(tab.model.pkg.listing_selection.get_untracked(), HashSet::from([RowKey(0)]));
 }

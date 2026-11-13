@@ -70,6 +70,8 @@ use zgui_ui::prelude::Binding;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::palette::TabRequest;
+use crate::shell::tabs::AppTab;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
@@ -82,6 +84,7 @@ use crate::tabs::unpacker::model::SEARCH_KIND;
 use crate::tabs::unpacker::model::UnpackerModel;
 use crate::tabs::unpacker::model::VIEWER_KIND;
 use crate::tabs::unpacker::pane::BrowserSource;
+use crate::tabs::unpacker::pane::PaneState;
 use crate::tabs::unpacker::queue::QueuePanelProps;
 use crate::tabs::unpacker::search::SearchPanelProps;
 use crate::tabs::unpacker::viewer::ViewerPanelProps;
@@ -153,6 +156,28 @@ pub fn UnpackerTab() -> impl IntoView {
     keep(RenderEffect::new(move |_| {
         let _ = dock.panels();
         model.forget_closed_panels();
+    }));
+    // A file another tab asked for is shown once the build's packages have loaded.
+    let pending = RwSignal::new_local(None::<String>);
+    keep(RenderEffect::new(move |_| {
+        for request in shell.palette.take_requests(AppTab::Unpacker) {
+            if let TabRequest::RevealInUnpacker { path } = request {
+                pending.set(Some(path));
+            }
+        }
+    }));
+    keep(RenderEffect::new(move |_| {
+        let Some(path) = pending.get() else { return };
+        let vfs = model.pkg.state.with(|state| match state {
+            PaneState::Ready(loaded) => Some(loaded.vfs.clone()),
+            PaneState::Empty | PaneState::Loading | PaneState::Failed(_) => None,
+        });
+        let Some(vfs) = vfs else { return };
+        pending.set(None);
+        match vfs.join(&path) {
+            Ok(file) => model.reveal(BrowserSource::Pkg, file),
+            Err(err) => tracing::warn!("unpacker: {path} is not a package path: {err}"),
+        }
     }));
 
     let locale = services.locale;
