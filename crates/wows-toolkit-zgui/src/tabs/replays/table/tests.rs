@@ -19,6 +19,9 @@ use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::Signal;
 use zgui::reactive::provide_local_context;
 use zgui::vocab::Role;
@@ -237,6 +240,43 @@ fn pinning_a_column_from_its_header_is_saved_under_the_gpui_key() {
         saved.iter().rev().find(|(key, _)| *key == COLUMN_ARRANGEMENT_KEY).expect("the arrangement is saved");
     let stored: StoredArrangement = serde_json::from_str(json).expect("the saved arrangement reads back");
     assert_eq!(stored.pinned, vec!["name", "ship_name", "kills"]);
+}
+
+#[test]
+fn a_column_dragged_narrow_fits_an_open_detail_and_saves_only_the_drag() {
+    let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+    let kills = ReplayColumn::Kills.label();
+    let header_width = |window: &mut HeadlessWindow| {
+        let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");
+        window.bounds(header).expect("the header has a box").size.width.0
+    };
+    let saved_widths = || {
+        let saved = saved_for_test();
+        saved.into_iter().filter(|(key, _)| *key == COLUMN_WIDTHS_KEY).map(|(_, json)| json).collect::<Vec<_>>()
+    };
+
+    let grip = window.by_role_and_label(Role::Splitter, &format!("Resize {kills}")).expect("the grip is drawn");
+    let from = window.bounds(grip).expect("the grip has a box");
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 - 40.0), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(300));
+    let set = header_width(&mut window);
+    let dragged = saved_widths();
+    assert!(!dragged.is_empty(), "the drag saved the widths");
+
+    let cell = kills_cell(&window, 2);
+    window.double_click(cell).expect("the row takes a double click");
+    window.advance(Duration::from_millis(400));
+    let detail = window.by_test_id("detail-2-kills").expect("the Kills detail is open");
+    let needs = window.bounds(detail).expect("the detail has a box").size.width.0;
+    assert!(set < needs, "the fixture needs the detail ({needs}) wider than the drag ({set})");
+    assert_eq!(header_width(&mut window), needs, "the column widens to the detail");
+
+    let cell = kills_cell(&window, 2);
+    window.double_click(cell).expect("the row takes a double click");
+    window.advance(Duration::from_millis(600));
+    assert_eq!(header_width(&mut window), set, "closed, the column returns to the width dragged to");
+    assert_eq!(saved_widths(), dragged, "and the detail saved no width of its own");
 }
 
 #[test]
