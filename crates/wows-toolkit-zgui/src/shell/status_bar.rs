@@ -65,14 +65,20 @@ const CSS: &str = css!(
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .wt-status-work .zui-spinner {
+    .wt-status-work .zui-spinner, .wt-status-work__item .zui-spinner {
         width: 12px;
         height: 12px;
+        flex: none;
     }
     .wt-status-work__list {
         display: flex;
         flex-direction: column;
         gap: 4px;
+    }
+    .wt-status-work__item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }"
 );
 
@@ -192,8 +198,11 @@ fn Work(jobs: Signal<Vec<Job>, LocalStorage>) -> impl IntoView {
                         TooltipContent {
                             column(class = "wt-status-work__list") {
                                 // Two jobs can say the same thing, so a row is keyed by its place.
-                                for row in move || jobs.get().iter().map(said).enumerate().collect::<Vec<_>>(), key = |row: &(usize, String)| row.0 {
-                                    text {{row.1}}
+                                for item in move || jobs.get().iter().map(said).enumerate().collect::<Vec<_>>(), key = |item: &(usize, String)| item.0 {
+                                    row(class = "wt-status-work__item") {
+                                        Spinner(label = item.1.clone())
+                                        text {{item.1}}
+                                    }
                                 }
                             }
                         }
