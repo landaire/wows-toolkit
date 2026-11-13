@@ -61,6 +61,7 @@ use crate::tabs::replays::table::damage_mix;
 use crate::tabs::replays::table::menu;
 use crate::theme::Semantic;
 use crate::theme::rating_band_name;
+use crate::theme::with_clan_league_ink;
 
 /// One column's cell of one row.
 pub(super) fn cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
@@ -125,11 +126,7 @@ pub(super) fn clan_ink(row: &PlayerRow, cx: TableCx) -> Attrs {
             .custom_property(CustomPropertyName::new("wt-clan-dark"), move || Some(color.to_owned()));
     };
 
-    let theme = cx.theme;
-    let readable = move |desktop: Appearance| Some(theme.get().palette(desktop).readable_on_rows(league).to_string());
-    attrs
-        .custom_property(CustomPropertyName::new("wt-clan-light"), move || readable(Appearance::Light))
-        .custom_property(CustomPropertyName::new("wt-clan-dark"), move || readable(Appearance::Dark))
+    with_clan_league_ink(attrs, cx.theme, league)
 }
 
 /// The ship's class: the game's icon tinted for the player, or the species' name until the icon
