@@ -84,8 +84,8 @@ pub struct HoverPreview {
 impl HoverPreview {
     /// Bakes against the process's game data. Called from a component's body inside `AppRoot`.
     pub fn new() -> Self {
-        let game_data = Services::current().game_data;
-        Self::with_baker(Rc::new(GameDataBaker { game_data }))
+        let services = Services::current();
+        Self::with_baker(Rc::new(GameDataBaker { game_data: services.game_data, settings: services.settings }))
     }
 
     fn with_baker(baker: Rc<dyn PreviewBaker>) -> Self {

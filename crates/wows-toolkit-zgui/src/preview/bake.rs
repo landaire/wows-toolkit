@@ -17,11 +17,12 @@ use wows_toolkit_replay_data::minimap_preview::PreviewFrames;
 use zgui::task::blocking;
 
 use crate::services::GameData;
+use crate::services::Settings;
 
 /// Starts bakes. The game data in the app; a script under test.
 pub(crate) trait PreviewBaker {
-    /// Whether anything can be baked at all. Without game data there is no preview, and nothing
-    /// is waited for.
+    /// Whether anything can be baked at all. Without game data, or with previews turned off in the
+    /// settings, there is no preview, and nothing is waited for.
     fn is_available(&self) -> bool;
 
     /// Whether `path`'s battle was walked recently, so baking it costs too little to wait for the
@@ -59,11 +60,15 @@ pub(crate) struct BakeStreams {
 /// Bakes against the game data the process shares.
 pub(crate) struct GameDataBaker {
     pub game_data: GameData,
+    pub settings: Settings,
 }
 
 impl PreviewBaker for GameDataBaker {
     fn is_available(&self) -> bool {
-        self.game_data.cache_untracked().is_some()
+        // Settings still loading leave previews on, the setting's default.
+        let enabled = self.settings.read_untracked(|settings| settings.replay.enable_replay_previews) != Some(false);
+
+        enabled && self.game_data.cache_untracked().is_some()
     }
 
     fn is_walked(&self, path: &Path) -> bool {
@@ -71,6 +76,10 @@ impl PreviewBaker for GameDataBaker {
     }
 
     fn start(&self, request: BakeRequest) -> Option<BakeStreams> {
+        // Asked again: previews may have been turned off while the pointer dwelled.
+        if !self.is_available() {
+            return None;
+        }
         let cache = self.game_data.cache_untracked()?;
         let BakeRequest { path, map_name, edge, cancel } = request;
         let (map_sender, own_map) = oneshot::channel();

@@ -22,10 +22,12 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::frame::BgraFrame;
 use wows_toolkit_replay_data::minimap_preview::FRAME_INTERVAL;
 use wows_toolkit_replay_data::minimap_preview::PreviewError;
 use wows_toolkit_replay_data::minimap_preview::PreviewFrames;
+use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use zgui::component;
 use zgui::reactive::Signal;
@@ -41,8 +43,13 @@ use crate::preview::MapArea;
 use crate::preview::PreviewTarget;
 use crate::preview::bake::BakeRequest;
 use crate::preview::bake::BakeStreams;
+use crate::preview::bake::GameDataBaker;
 use crate::preview::bake::PreviewBaker;
 use crate::preview::card::HoverPreviewCardProps;
+use crate::services::GameDataRequest;
+use crate::services::Services;
+use crate::shell::ShellHarnessProps;
+use crate::shell::settings::tests::test_settings;
 
 /// A baker whose bakes the test drives by hand.
 #[derive(Default)]
@@ -358,6 +365,41 @@ fn without_game_data_the_card_holds_no_map() {
     assert_eq!(handles.preview.map_area(), MapArea::Absent);
     assert!(window.by_test_id("hover-preview").is_some(), "the row's facts still go up");
     assert!(window.by_test_id("hover-preview-water").is_none(), "with no space held for a map");
+}
+
+#[component]
+fn CatchServices(caught: Rc<Cell<Option<Services>>>) -> impl IntoView {
+    caught.set(Some(Services::current()));
+    view! { box() }
+}
+
+/// The settings switch turns the game data's bakes off, as the reader asks on slow storage.
+#[test]
+fn previews_turned_off_in_the_settings_bake_nothing() {
+    let caught = Rc::new(Cell::new(None));
+    let inner = Rc::clone(&caught);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 }), move || {
+        let caught = Rc::clone(&inner);
+        view! { ShellHarness(theme = wows_toolkit_viewmodel::settings::ThemeChoice::Dark) { CatchServices(caught = caught) } }
+    })
+    .expect("the harness opens headlessly");
+    window.advance(ms(16));
+    let services = caught.get().expect("the services are caught");
+    services.game_data.adopt(GameDataRequest {
+        wows_dir: None,
+        cache_dir: String::new(),
+        locale: None,
+        auto_dump: false,
+    });
+    let baker = GameDataBaker { game_data: services.game_data, settings: services.settings };
+    let previews = |enabled: bool| {
+        let replay = ReplaySettings { enable_replay_previews: enabled, ..ReplaySettings::default() };
+        services.settings.adopt_unsaved(StartupSettings { replay, ..test_settings() });
+        baker.is_available()
+    };
+
+    assert!(previews(true), "game data and previews on");
+    assert!(!previews(false), "previews off");
 }
 
 /// A frame of `width` by `height` drawn by `paint`.
