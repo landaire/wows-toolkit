@@ -46,6 +46,7 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
+use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::EventCx;
@@ -95,6 +96,7 @@ const SHEET: &str = "wt-replay-listing";
 //
 // A replay row starts at the list's edge so its outcome edge runs down that edge; its content is
 // indented inside the row instead. Only a group row, which has a disclosure, keeps the tree's lead.
+// A replay row's content spans the whole row, so the pointer leaving it has left the row.
 const CSS: &str = css!(
     ".wt-listing {
         position: relative;
@@ -104,7 +106,7 @@ const CSS: &str = css!(
         min-height: 0;
     }
     .wt-listing .lui-tree-area, .wt-listing .lui-tree { flex: 1; min-height: 0; }
-    .wt-listing .lui-tree__row { gap: 0; padding-left: 0; }
+    .wt-listing .lui-tree__row { gap: 0; padding-left: 0; padding-right: 0; }
     .wt-listing .lui-tree__row[data-expanded] { gap: 4px; padding-left: 8px; }
     .wt-listing__state {
         display: flex;
@@ -121,7 +123,7 @@ const CSS: &str = css!(
         gap: 4px;
         height: 100%;
         min-width: 0;
-        padding-right: 4px;
+        padding-right: 8px;
     }
     .wt-row-arrived { animation: wt-row-arrival 1200ms cubic-bezier(0.5, 1, 0.89, 1); }
     [reduced-motion] .wt-row-arrived { animation: none; }
@@ -381,6 +383,7 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
             let anchor = row.anchor;
             let depth = row.depth;
             let leaf_path = path.clone();
+            let left_path = path.clone();
             let content = move || {
                 let leaf = listing.tree.with(|tree| tree.leaf(&leaf_path).cloned())?;
                 Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, depth))
@@ -389,8 +392,19 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
                 let map_name = listing.tree.with_untracked(|tree| tree.leaf(&path).map(|leaf| leaf.map_name.clone()));
                 preview.enter(PreviewTarget { path: path.clone(), map_name, anchor });
             };
+            // A group header has no preview, so leaving a replay row for anything but another
+            // ends it. Moving onto the next row enters it in the same pointer move, so the leave
+            // waits for the move and ends only a preview still on this row.
+            let leave = move |_: &mut EventCx<'_, events::PointerLeave>| {
+                let path = left_path.clone();
+                spawn_local(async move {
+                    if preview.watched_untracked().as_deref() == Some(path.as_path()) {
+                        preview.leave();
+                    }
+                });
+            };
             AnyView::new(view! {
-                box(class = "wt-row-host", style:display = "contents", on:pointer_enter = enter) {
+                box(class = "wt-row-host", style:display = "contents", on:pointer_enter = enter, on:pointer_leave = leave) {
                     {content}
                 }
             })

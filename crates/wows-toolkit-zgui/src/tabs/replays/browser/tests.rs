@@ -485,6 +485,45 @@ fn a_rows_menu_leaves_the_selection_on_the_selected_replay() {
     assert_eq!(shown.selected_paths(), [paths[0].clone()], "closing the menu leaves the selection");
 }
 
+#[test]
+fn a_group_header_shows_no_replay_preview() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(3);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let paths = listed(listing(control, &root));
+
+    window.hover(row(&window, &paths[0])).expect("the row has a box");
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("hover-preview").is_some(), "the card is up for the replay row");
+
+    // The preview ends as the pointer leaves the row's content, so that content has to be the
+    // whole row.
+    let content = window.bounds(row(&window, &paths[0])).expect("the row has a box");
+    let middle = content.origin.y.0 + content.size.height.0 / 2.0;
+    let items = window.by_role(Role::TreeItem);
+    let tree_row = items
+        .into_iter()
+        .filter_map(|item| window.bounds(item))
+        .find(|bounds| bounds.origin.y.0 <= middle && middle < bounds.origin.y.0 + bounds.size.height.0)
+        .expect("the replay sits in a tree row");
+    assert_eq!(
+        (content.origin.x.0, content.size.width.0),
+        (tree_row.origin.x.0, tree_row.size.width.0),
+        "a replay row's content spans the row"
+    );
+
+    let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
+    window.hover(header).expect("the header has a box");
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("hover-preview").is_none(), "a group header has no preview");
+
+    window.hover(row(&window, &paths[1])).expect("the row has a box");
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("hover-preview").is_some(), "the next replay row has its card");
+}
+
 fn summary(outcome: MatchOutcome, self_pr: Option<f64>) -> RowSummary {
     RowSummary {
         outcome,

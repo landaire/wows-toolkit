@@ -166,7 +166,7 @@ impl HoverPreview {
         });
     }
 
-    /// The pointer left the rows, so whatever was dwelling or baking is abandoned.
+    /// The pointer is on no replay row, so whatever was dwelling or baking is abandoned.
     pub fn leave(self) {
         let watching = self.status.with_untracked(Option::is_some);
         if !watching {
