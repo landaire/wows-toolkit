@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "(skill.expect(\"one typo\"), upgrade.expect(\"one typo\"))"
+---
+- - Concealment Expert
+- - Main Battery Modification 2

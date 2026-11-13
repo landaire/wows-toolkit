@@ -1,0 +1,10 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 2
+payload:
+  EntityControl:
+    entity_id: 433435
+    is_controlled: false

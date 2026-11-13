@@ -1,0 +1,10 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: verdicts
+---
+- - "G. Kurfürst main battery 420 mm HE has 105 mm penetration, so it penetrates this 27 mm plate."
+  - ~
+  - "G. Kurfürst main battery 420 mm AP overmatches plates up to 29 mm, so it overmatches this 27 mm plate."
+- - "Des Moines main battery 203 mm HE has 34 mm penetration, so it penetrates this 27 mm plate."
+  - ~
+  - "Des Moines main battery 203 mm AP overmatches plates up to 14 mm, so it does not overmatch this 27 mm plate."

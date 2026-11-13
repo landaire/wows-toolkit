@@ -1,0 +1,47 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({\n    \"ranked\": ranking[\"ranked\"], \"omitted\": ranking[\"omitted\"], \"lacking\":\n    ranking[\"lacking\"], \"note\": ranking[\"note\"],\n})"
+---
+ranked: 185
+omitted: 182
+lacking:
+  total: 31
+  by_tier:
+    "2": 11
+    "3": 11
+    "4": 9
+  by_class:
+    destroyer: 31
+  ships:
+    - "T4 Bourrasque (destroyer, France)"
+    - "T4 Isokaze (destroyer, Japan)"
+    - "T4 Izyaslav (destroyer, Russia)"
+    - "T4 Klas Horn (destroyer, Europe)"
+    - "T4 Serrano (destroyer, Pan_America)"
+    - "T4 Shenyang (destroyer, Pan_Asia)"
+    - "T4 Turbine (destroyer, Italy)"
+    - "T4 V-170 (destroyer, Germany)"
+    - "T4 Wakeful (destroyer, United_Kingdom)"
+    - "T3 Almte. Villar (destroyer, Pan_America)"
+    - "T3 Campbeltown (destroyer, United_Kingdom, premium)"
+    - "T3 Derzki (destroyer, Russia)"
+    - "T3 Fusilier (destroyer, France)"
+    - "T3 G-101 (destroyer, Germany)"
+    - "T3 N. Sauro (destroyer, Italy)"
+    - "T3 Phra Ruang (destroyer, Pan_Asia)"
+    - "T3 Romulus (destroyer, Europe)"
+    - "T3 Valkyrie (destroyer, United_Kingdom)"
+    - "T3 Vampire (destroyer, Commonwealth, premium)"
+    - "T3 Wakatake (destroyer, Japan)"
+    - "T2 Curtatone (destroyer, Italy)"
+    - "T2 En. Gabolde (destroyer, France)"
+    - "T2 Longjiang (destroyer, Pan_Asia)"
+    - "T2 Medea (destroyer, United_Kingdom)"
+    - "T2 Sampson (destroyer, USA)"
+    - "T2 Smith (destroyer, USA, premium)"
+    - "T2 Storozhevoi (destroyer, Russia)"
+    - "T2 Tachibana (destroyer, Japan, premium) [replicas: Tachibana L]"
+    - "T2 Tátra (destroyer, Europe)"
+    - "T2 Umikaze (destroyer, Japan)"
+    - "T2 V-25 (destroyer, Germany)"
+note: "Released submarines are of tiers 6, 8, 10. Of the searched ships, those with anti-submarine weapons start at tier 3. Most battleships and cruisers of tiers V to X received anti-submarine weapons when submarines entered Random Battles in update 0.10.9 (https://blog.worldofwarships.com/blog/225); few ships below tier V have them."
