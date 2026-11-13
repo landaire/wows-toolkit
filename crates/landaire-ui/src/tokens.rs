@@ -149,6 +149,8 @@ pub fn lui_declarations(palette: &Palette) -> Declarations {
     declarations.push("--lui-color-text-faint", &tones.text_faint.to_string());
     // The dimming behind a drawer, the same black on either appearance.
     declarations.push("--lui-color-scrim", &Rgb::BLACK.with_opacity(Opacity(0.25)).to_string());
+    // zgui paints the text selection band in this color.
+    declarations.push("--zgui-selection", &palette.text_selection().to_string());
 
     declarations.push("--lui-radius", RADIUS);
     declarations.push("--lui-radius-lg", RADIUS_LARGE);
@@ -355,6 +357,20 @@ mod tests {
         assert_eq!(value_of(&light, "--lui-shadow-card"), Some("none"));
         assert_eq!(value_of(&dark, "--lui-shadow-overlay"), Some("0 2px 4px 0 rgb(0 0 0 / 0.32)"));
         assert_eq!(value_of(&light, "--lui-shadow-overlay"), Some("0 2px 4px 0 rgb(0 0 0 / 0.12)"));
+    }
+
+    #[test]
+    fn every_scheme_writes_its_text_selection() {
+        for scheme in Scheme::ALL {
+            let palette = scheme.palette();
+            let declarations = lui_declarations(palette);
+
+            assert_eq!(
+                value_of(&declarations, "--zgui-selection"),
+                Some(palette.text_selection().to_string().as_str()),
+                "{scheme:?}"
+            );
+        }
     }
 
     #[test]
