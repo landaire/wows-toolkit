@@ -27,6 +27,10 @@ pub enum ToolkitError {
     )]
     ReplayBuildUnavailable { build: u32, version: String, replay_path: Option<PathBuf> },
 
+    /// The load stopped on a fault in the reader rather than in the file.
+    #[error("failed to load replay: the reader stopped on an internal error: {report}")]
+    ReplayLoadPanicked { report: wows_toolkit_services::supervision::PanicReport },
+
     #[error("Background task completed")]
     BackgroundTaskCompleted,
 

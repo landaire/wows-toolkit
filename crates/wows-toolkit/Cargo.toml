@@ -106,6 +106,8 @@ wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-hardening = { workspace = true }
+# `PanicReport`, which a panicked replay load is reported with.
+wows-toolkit-services = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 web-time = { workspace = true }
 rand = "0.10"

@@ -15,6 +15,7 @@ use tracing::instrument;
 use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
+use wows_toolkit_services::supervision::PanicReport;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
@@ -26,6 +27,7 @@ use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::ReplaySource;
+use crate::task::TaskCompletion;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
@@ -970,63 +972,60 @@ impl ReplayLoader {
         let input = self.input;
 
         let _join_handle = crate::util::thread::spawn_logged("load-replay", move || {
-            // For a path input, read the file and construct the replay here so
-            // the retry loop that waits out a game still flushing it, and the
-            // build resolution that may lazily load a whole build, stay off the
-            // UI thread.
-            let replay = match input {
-                ReplayInput::Built(replay) => replay,
-                ReplayInput::Path(path) => match Self::build_replay_from_path(&deps, path) {
-                    Ok(snapshot) => snapshot.replay,
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        return;
-                    }
-                },
+            let replay_path = match &input {
+                ReplayInput::Built(replay) => replay.read().source_path.clone(),
+                ReplayInput::Path(path) => Some(path.clone()),
             };
-
-            // Determine the replay's build and get version-matched data
-            let raw_version = replay.read().replay_file.meta.clientVersionFromExe.clone();
-            let Some(replay_version) = Version::try_from_client_exe(&raw_version) else {
-                let _ =
-                    tx.send(Err(rootcause::report!("replay reports an unreadable client version {:?}", raw_version)));
-                return;
-            };
-
-            let Some(wows_data_for_build) = deps.build_cache.resolve(&replay_version) else {
-                error!("Failed to load game data for version {}", replay_version.to_path());
-                let replay_path = replay.read().source_path.clone();
-                let _ = tx.send(Err(missing_build_report(&replay_version, replay_path)));
-                return;
-            };
-
-            let game_version = {
-                let data = wows_data_for_build.read();
-                // Update the replay's resource loader and game constants to match
-                // the version-matched data, in case it was originally constructed
-                // with a different version's metadata (e.g. at startup).
-                if let Some(game_metadata) = &data.game_metadata {
-                    let mut replay_guard = replay.write();
-                    replay_guard.resource_loader = Arc::clone(game_metadata);
-                    replay_guard.game_constants = Some(Arc::clone(&data.game_constants));
-                }
-                data.patch_version
-            };
-
-            let res = { replay.read().parse(game_version.to_string().as_str()) };
-            let res = res.map(|parsed| {
-                {
-                    let mut replay_guard = replay.write();
-                    replay_guard.store_parse(parsed);
-                    replay_guard.build_ui_report(&deps);
-                }
-                BackgroundTaskCompletion::ReplayLoaded { replay, source }
-            });
-
-            let _ = tx.send(res);
+            let completion = contain_load_panic(replay_path.as_deref(), || Self::load_on_worker(&deps, input, source));
+            let _ = tx.send(completion);
         });
 
         Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
+    }
+
+    fn load_on_worker(deps: &ReplayDependencies, input: ReplayInput, source: ReplaySource) -> TaskCompletion {
+        // For a path input, read the file and construct the replay here so
+        // the retry loop that waits out a game still flushing it, and the
+        // build resolution that may lazily load a whole build, stay off the
+        // UI thread.
+        let replay = match input {
+            ReplayInput::Built(replay) => replay,
+            ReplayInput::Path(path) => Self::build_replay_from_path(deps, path)?.replay,
+        };
+
+        // Determine the replay's build and get version-matched data
+        let raw_version = replay.read().replay_file.meta.clientVersionFromExe.clone();
+        let Some(replay_version) = Version::try_from_client_exe(&raw_version) else {
+            return Err(rootcause::report!("replay reports an unreadable client version {:?}", raw_version));
+        };
+
+        let Some(wows_data_for_build) = deps.build_cache.resolve(&replay_version) else {
+            error!("Failed to load game data for version {}", replay_version.to_path());
+            let replay_path = replay.read().source_path.clone();
+            return Err(missing_build_report(&replay_version, replay_path));
+        };
+
+        let game_version = {
+            let data = wows_data_for_build.read();
+            // Update the replay's resource loader and game constants to match
+            // the version-matched data, in case it was originally constructed
+            // with a different version's metadata (e.g. at startup).
+            if let Some(game_metadata) = &data.game_metadata {
+                let mut replay_guard = replay.write();
+                replay_guard.resource_loader = Arc::clone(game_metadata);
+                replay_guard.game_constants = Some(Arc::clone(&data.game_constants));
+            }
+            data.patch_version
+        };
+
+        let parsed = replay.read().parse(game_version.to_string().as_str())?;
+        {
+            let mut replay_guard = replay.write();
+            replay_guard.store_parse(parsed);
+            replay_guard.build_ui_report(deps);
+        }
+
+        Ok(BackgroundTaskCompletion::ReplayLoaded { replay, source })
     }
 
     /// Read a replay file and construct a [`Replay`] wired to the version-matched
@@ -1106,6 +1105,22 @@ pub(crate) fn missing_build_report(version: &Version, replay_path: Option<PathBu
     report.attach("try installing the matching game client version")
 }
 
+/// Runs one replay load, ending a panic in it as that replay's error so the UI
+/// reports the replay as failed instead of the worker stopping with no result.
+fn contain_load_panic(replay_path: Option<&Path>, load: impl FnOnce() -> TaskCompletion) -> TaskCompletion {
+    let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(load));
+
+    loaded.unwrap_or_else(|payload| {
+        let report = PanicReport::caught(payload.as_ref());
+        tracing::error!(path = ?replay_path, %report, "the replay load panicked");
+        let error: rootcause::Report = ToolkitError::ReplayLoadPanicked { report }.into();
+        match replay_path {
+            Some(path) => Err(error.attach(format!("path: {}", path.display()))),
+            None => Err(error),
+        }
+    })
+}
+
 /// Read and parse a replay, retrying while the game finishes flushing it.
 ///
 /// The filesystem watcher fires as soon as the game creates or renames the
@@ -1173,6 +1188,43 @@ mod tests {
             }
             _ => panic!("a resolvable build must produce ReplayBuildUnavailable: {report:?}"),
         }
+    }
+
+    /// A load that panics ends as that replay's error, naming the panic and
+    /// the file, rather than the worker stopping with no result.
+    #[test]
+    fn a_load_that_panics_is_that_replays_error() {
+        let path = Path::new("faulting.wowsreplay");
+
+        let completion = crate::test_utils::with_silenced_panic_hook(|| {
+            contain_load_panic(Some(path), || panic!("a simulated decoder fault"))
+        });
+
+        let Err(error) = completion else {
+            panic!("a panicked load must be an error");
+        };
+        let Some(ToolkitError::ReplayLoadPanicked { report }) = error.downcast_current_context::<ToolkitError>() else {
+            panic!("the error must name the panic: {error:?}");
+        };
+        assert_eq!(report.to_string(), "a simulated decoder fault");
+        assert!(format!("{error:?}").contains("faulting.wowsreplay"), "the error must name the replay: {error:?}");
+    }
+
+    /// A load that fails without panicking keeps its own error, which the
+    /// download prompt downcasts to learn which build to offer.
+    #[test]
+    fn a_load_that_fails_without_panicking_keeps_its_own_error() {
+        let version = Version::from_client_exe("15,4,0,11965230");
+
+        let completion = contain_load_panic(None, || Err(missing_build_report(&version, None)));
+
+        let Err(error) = completion else {
+            panic!("the load's own error must be kept");
+        };
+        assert!(matches!(
+            error.downcast_current_context::<ToolkitError>(),
+            Some(ToolkitError::ReplayBuildUnavailable { build: 11_965_230, .. })
+        ));
     }
 
     /// A directory scan decides a build is missing with `has_data_for` and
