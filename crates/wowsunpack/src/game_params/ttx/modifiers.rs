@@ -2,10 +2,12 @@
 //! per-name bundle resolved for one `Species`.
 //!
 //! Combine rule (faithful to the client). The client folds a list of same-name
-//! modifier values inside the native `Modifiers.ModifierDef.mix`
+//! modifier values inside `Modifiers.ModifierDef.mixImplementation`
 //! (`Components/ModifiersComponent.py:109`, `CrewModifiers.py:95`,
-//! `ma6320f36/ttx/TTXFactory.py:61`), which is a compiled module with no Python
-//! source, so the fold operator cannot be read directly. Each modifier name has
+//! `ma6320f36/ttx/TTXFactory.py:61`), starting from each name's default and
+//! folding by its `ModifierValueType` group: MULTIPLICATIVE names multiply,
+//! ADDITIVE names add, and ABSOLUTE names keep the larger (`isPositive`) or the
+//! smaller value. Each modifier name has
 //! a `baseValue` in the client `MODIFIER_SETTINGS` table
 //! (`mbf4783af/ModifierSettings.py:359`), and that base value is the identity
 //! the fold preserves: coefficient names have `baseValue == 1.0` and are folded
@@ -18,7 +20,8 @@
 //! (line 499) and `buffsShiftMaxLevel` (base 0.0) as `+ modifier.buffsShiftMaxLevel`
 //! (line 529). We reuse `crate::game_params::modifier_settings_data::modifier_setting`,
 //! which already transcribes `base_value`, as the classifier rather than guessing
-//! from name suffixes.
+//! from name suffixes. ABSOLUTE caps are absent from that table and are listed in
+//! `KNOWN_CAPS`.
 
 use std::collections::HashMap;
 
@@ -37,8 +40,17 @@ use crate::game_params::types::Species;
 /// (0.0/0.006/../0.06). Without this allowlist `classify` would reject these names as unknown.
 const KNOWN_ADDITIVE: &[&str] = &["yawSpeedBonus", "buffsStartPool", "healthRegenPercent"];
 
-/// A modifier name that is neither in `MODIFIER_SETTINGS` nor either allowlist, so
-/// its fold operator (multiply vs add) cannot be classified.
+/// Main battery range cap in meters (`ModifierValueType.py:163`, ABSOLUTE group,
+/// `isPositive=False`).
+pub const MAIN_BATTERY_RANGE_CAP: &str = "GMMaxDistAbsoluteCap";
+
+/// ABSOLUTE-group names with `isPositive=False`, which the client folds by keeping
+/// the smallest value, each with its client default as the fold identity
+/// (`m65e88a3f.py:1989`).
+const KNOWN_CAPS: &[(&str, f32)] = &[(MAIN_BATTERY_RANGE_CAP, 9_999_999.0)];
+
+/// A modifier name that is neither in `MODIFIER_SETTINGS` nor any allowlist, so
+/// its fold operator cannot be classified.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnknownModifier {
     pub name: String,
@@ -46,11 +58,7 @@ pub struct UnknownModifier {
 
 impl std::fmt::Display for UnknownModifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "unrecognized modifier {}: not in MODIFIER_SETTINGS or the additive/multiplicative allowlists",
-            self.name
-        )
+        write!(f, "unrecognized modifier {}: not in MODIFIER_SETTINGS or the known-name allowlists", self.name)
     }
 }
 
@@ -69,7 +77,7 @@ impl std::fmt::Display for ModifierError {
         match self {
             ModifierError::Unknown(names) => write!(
                 f,
-                "unrecognized modifiers (not in MODIFIER_SETTINGS or the additive/multiplicative allowlists): {}",
+                "unrecognized modifiers (not in MODIFIER_SETTINGS or the known-name allowlists): {}",
                 names.join(", ")
             ),
         }
@@ -103,13 +111,15 @@ const KNOWN_MULTIPLICATIVE: &[&str] = &[
 ];
 
 /// How same-name modifier values fold, keyed off the modifier's `MODIFIER_SETTINGS`
-/// `base_value` (1.0 -> coefficient, 0.0 -> bonus).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `base_value` (1.0 -> coefficient, 0.0 -> bonus) or its `KNOWN_CAPS` entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Combine {
     /// Coefficient: values multiply, identity 1.0.
     Multiply,
     /// Bonus: values add, identity 0.0.
     Add,
+    /// Cap: the smallest value holds, identity the client default.
+    Min { identity: f32 },
 }
 
 impl Combine {
@@ -125,6 +135,9 @@ impl Combine {
         if KNOWN_MULTIPLICATIVE.contains(&name) {
             return Ok(Combine::Multiply);
         }
+        if let Some(&(_, identity)) = KNOWN_CAPS.iter().find(|(cap, _)| *cap == name) {
+            return Ok(Combine::Min { identity });
+        }
         match modifier_setting(version, name) {
             Some(s) if s.base_value == 0.0 => Ok(Combine::Add),
             Some(_) => Ok(Combine::Multiply),
@@ -136,6 +149,7 @@ impl Combine {
         match self {
             Combine::Multiply => 1.0,
             Combine::Add => 0.0,
+            Combine::Min { identity } => identity,
         }
     }
 
@@ -144,6 +158,7 @@ impl Combine {
         match self {
             Combine::Multiply => base * amount,
             Combine::Add => base + amount,
+            Combine::Min { .. } => base.min(amount),
         }
     }
 
@@ -151,18 +166,20 @@ impl Combine {
         match self {
             Combine::Multiply => acc * value,
             Combine::Add => acc + value,
+            Combine::Min { .. } => acc.min(value),
         }
     }
 }
 
 /// The fold identity for `name` at `version`: 1.0 for multiplicative names, 0.0 for
-/// additive ones. Errors when the name cannot be classified (same rule as `from_modifiers`).
+/// additive ones, the client default for caps. Errors when the name cannot be
+/// classified (same rule as `from_modifiers`).
 pub(crate) fn modifier_identity(version: Version, name: &str) -> Result<f32, ModifierError> {
     Combine::classify(version, name).map(Combine::identity).map_err(|e| ModifierError::Unknown(vec![e.name]))
 }
 
 /// Folds the values several sources give one modifier, as the client mixes
-/// them: coefficients multiply and bonuses add.
+/// them: coefficients multiply, bonuses add and caps keep the smallest.
 pub fn fold_modifier_values(
     version: Version,
     name: &str,
@@ -288,6 +305,19 @@ impl ModifierBundle {
             }
             None => 0.0,
         }
+    }
+
+    /// The folded cap for `name`, the smallest value any source gave it. A present
+    /// name must have folded as a cap (`debug_assert`ed). `None` when no source
+    /// carries it, so the capped stat is left as computed.
+    pub fn cap(&self, name: &str) -> Option<f32> {
+        let value = self.values.get(name).copied()?;
+        debug_assert!(
+            matches!(self.rules.get(name), Some(Combine::Min { .. })),
+            "cap({name:?}) reads a modifier that is not a cap"
+        );
+
+        Some(value)
     }
 
     /// Apply a single named modifier to a base value, choosing multiply vs add by
@@ -576,6 +606,22 @@ mod tests {
         let err = ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION)
             .expect_err("an unknown modifier must error, not silently multiply");
         assert_eq!(err, ModifierError::Unknown(vec!["totallyNotARealModifier".to_string()]), "got {err:?}");
+    }
+
+    /// `GMMaxDistAbsoluteCap` is an ABSOLUTE `isPositive=False` value: sources keep
+    /// the smallest, from the client default 9999999. Kurama's alternative fire mode
+    /// carries 12000 and Triunfante's 14500.
+    #[test]
+    fn range_cap_keeps_the_smallest() {
+        assert_eq!(fold_modifier_values(VERSION, MAIN_BATTERY_RANGE_CAP, []), Ok(9_999_999.0));
+        assert_eq!(fold_modifier_values(VERSION, MAIN_BATTERY_RANGE_CAP, [14_500.0, 12_000.0]), Ok(12_000.0));
+
+        let mods = [modifier(MAIN_BATTERY_RANGE_CAP, 14_500.0), modifier(MAIN_BATTERY_RANGE_CAP, 12_000.0)];
+        let bundle =
+            ModifierBundle::from_modifiers(&mods, Species::Battleship, VERSION).expect("the range cap is known");
+        assert_eq!(bundle.cap(MAIN_BATTERY_RANGE_CAP), Some(12_000.0));
+        assert_eq!(bundle.apply(13_000.0, MAIN_BATTERY_RANGE_CAP), 12_000.0);
+        assert_eq!(ModifierBundle::empty(Species::Battleship).cap(MAIN_BATTERY_RANGE_CAP), None);
     }
 
     /// `classify` at the unset version (0.0.0) fails open to the default table and

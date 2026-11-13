@@ -3,10 +3,12 @@
 //! A consumable with an `artilleryDistCoeff`, such as Spotting Aircraft,
 //! multiplies the main battery range after every modifier
 //! (`artillery_range_km`, FactoryArtillery.py:42), so it is listed as an
-//! alternative on top of the best-fit build.
+//! alternative on top of the best-fit build. A `GMMaxDistAbsoluteCap` still
+//! bounds the scaled range.
 
 use serde::Serialize;
 use wows_core::units::Km;
+use wowsunpack::game_params::ttx::factories::cap_artillery_range_km;
 
 use crate::builds::Better;
 use crate::builds::BuildAlternative;
@@ -54,7 +56,10 @@ impl GameData {
         };
 
         for (name, coefficient) in self.range_consumables(planner.ship()) {
-            let extract = |outcome: &Outcome| range(outcome).map(|range| Km::new(round(range * coefficient.0)));
+            let extract = |outcome: &Outcome| {
+                range(outcome)
+                    .map(|range| Km::new(round(cap_artillery_range_km(range * coefficient.0, &outcome.bundle))))
+            };
             let active = StatPlan::new(format!("main battery range with {name} active"), Better::Higher, &extract);
             let Some(with_consumable) = planner.plan(&active)? else {
                 continue;

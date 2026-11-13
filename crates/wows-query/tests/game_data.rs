@@ -1517,6 +1517,47 @@ fn torpedo_rankings_judge_each_factor_in_its_direction() {
     }
 }
 
+/// Kurama's alternative fire mode holds the main battery to its 12000 m
+/// `GMMaxDistAbsoluteCap`, Spotting Aircraft included, and leaves the standard
+/// 16.79 km alone. Tier 11 ships and every-tier destroyer torpedo rankings
+/// build their stats.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn range_cap_of_tier_11_alternative_fire_modes_builds() {
+    let range = |special_ability_active: bool| -> serde_json::Value {
+        let stats = game()
+            .call_tool("ship_stats", json!({ "ship": "Kurama", "special_ability_active": special_ability_active }))
+            .expect("Kurama exists");
+        stats["build_stats"]["main_battery_range"]["builds"].clone()
+    };
+    let standard = range(false);
+    assert_eq!(standard["base"], 16.79);
+    let modified = range(true);
+    assert_eq!(modified["base"], 12.0);
+    assert_eq!(modified["best"]["value"], 12.0);
+    assert_eq!(modified["alternatives"][0]["label"], "with Spotting Aircraft active");
+    assert_eq!(modified["alternatives"][0]["value"], 12.0);
+
+    let comparison = game()
+        .ship_comparison(&ShipComparisonArgs { ships: Some(vec!["Kurama".to_owned()]), ..Default::default() })
+        .expect("Kurama compares");
+    assert_eq!(comparison.group, "tier 11 cruisers");
+
+    let battleships = game()
+        .ship_comparison(&ShipComparisonArgs {
+            class: Some(ShipClass::Battleship),
+            tier: Some(Tier(11)),
+            ..Default::default()
+        })
+        .expect("tier 11 battleships compare");
+    assert!(battleships.ranked > 0);
+
+    let torpedoes = game()
+        .torpedo_rankings(&TorpedoRankingsArgs { class: Some(ShipClass::Destroyer), ..Default::default() })
+        .expect("destroyer torpedoes of every tier rank");
+    assert!(!torpedoes.entries.is_empty());
+}
+
 /// Incomparable, C. Colombo with its unique upgrade and Togasa, in testing,
 /// ranked among every tier 10 battleship.
 #[test]
