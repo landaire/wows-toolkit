@@ -17,6 +17,7 @@ use zgui::view::Children;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui_ui::Toast;
+use zgui_ui::ToastAction;
 use zgui_ui::ToastCorner;
 use zgui_ui::ToastId;
 use zgui_ui::ToastKind;
@@ -142,7 +143,15 @@ impl Notice {
 
     /// The same message with a button that runs `run` and then takes the message down.
     pub fn action(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
-        Self { action: Some(NoticeAction { label: label.into(), run: std::rc::Rc::new(run) }), ..self }
+        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keeps_message: false };
+        Self { action: Some(action), ..self }
+    }
+
+    /// The same message with a button that runs `run` and leaves the message up, for a message
+    /// that is withdrawn once what it is about is put right.
+    pub fn lasting_action(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
+        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keeps_message: true };
+        Self { action: Some(action), ..self }
     }
 
     fn into_toast(self) -> Toast {
@@ -152,10 +161,13 @@ impl Notice {
             ToastStay::UntilWithdrawn => toast.persistent(),
         };
 
-        match self.action {
-            Some(action) => toast.action(action.label, move || (action.run)()),
-            None => toast,
-        }
+        let Some(action) = self.action else {
+            return toast;
+        };
+        let button = ToastAction::new(action.label, move || (action.run)());
+        let button = if action.keeps_message { button.keep_open() } else { button };
+
+        toast.action_with(button)
     }
 }
 
@@ -220,6 +232,7 @@ impl Toasts {
 struct NoticeAction {
     label: String,
     run: std::rc::Rc<dyn Fn()>,
+    keeps_message: bool,
 }
 
 impl std::fmt::Debug for NoticeAction {
