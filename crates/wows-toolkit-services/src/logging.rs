@@ -20,6 +20,8 @@ fn targets(front_end: &'static str) -> tracing_subscriber::filter::Targets {
         .with_target("wows_replay_insights", tracing::Level::DEBUG)
         .with_target("wows_replays", tracing::Level::INFO)
         .with_target(wows_data_mgr::LOG_TARGET, tracing::Level::INFO)
+        // zgui's renderer names the adapter it opens and each one it passes over.
+        .with_target("zgui_render_wgpu", tracing::Level::INFO)
 }
 
 /// Where the rotated log files live: beside the executable, as the egui app

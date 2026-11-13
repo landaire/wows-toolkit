@@ -182,7 +182,13 @@ fn main() {
     let app = geometry.apply(app);
 
     heap_profile::mark("app.run");
+    // The view is built once the window has its graphics device, so the check runs after the
+    // renderer has made its choice and never delays it.
+    let mut adapter_check = asked.gpu_adapter.is_some().then_some(asked);
     let ran = app.run(move || {
+        if let Some(asked) = adapter_check.take() {
+            cli::check_unmatched_adapter(asked);
+        }
         let runtime = runtime.clone();
         view! { AppRoot(runtime = runtime) }
     });

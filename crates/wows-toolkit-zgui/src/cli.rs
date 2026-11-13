@@ -134,20 +134,56 @@ pub fn parse() -> Invocation {
 /// The `--list-gpus` report: every adapter the renderer chooses from, in the order it tries them
 /// under `asked`'s preference.
 pub fn adapter_report(asked: &Cli) -> String {
-    let adapters = zgui::app::adapters(&asked.adapter_preference());
+    format_adapters(&adapters(asked))
+}
+
+/// Warns, on a thread of its own, when `--gpu-adapter` names no adapter, since the renderer then
+/// falls back to its usual order without saying so. The adapter it opens is logged by the
+/// renderer.
+///
+/// Listing the adapters loads every driver, so it is called only when `--gpu-adapter` was given,
+/// and once the window is up.
+pub fn check_unmatched_adapter(asked: Cli) {
+    let spawned = std::thread::Builder::new().name("gpu-adapter-check".to_owned()).spawn(move || {
+        let Some(named) = &asked.gpu_adapter else { return };
+
+        let adapters = adapters(&asked);
+        let wanted = named.to_lowercase();
+        if adapters.iter().any(|adapter| adapter.name.to_lowercase().contains(&wanted)) {
+            return;
+        }
+
+        tracing::warn!("--gpu-adapter {named:?} matched no adapter; the adapters are:\n{}", format_adapters(&adapters));
+    });
+    if let Err(err) = spawned {
+        tracing::warn!("could not start the --gpu-adapter check: {err}");
+    }
+}
+
+struct AdapterLine {
+    name: String,
+    line: String,
+}
+
+fn adapters(asked: &Cli) -> Vec<AdapterLine> {
+    zgui::app::adapters(&asked.adapter_preference())
+        .into_iter()
+        .map(|info| AdapterLine {
+            line: format!(
+                "{} ({:?}, {:?}, driver {} {})\n",
+                info.name, info.device_type, info.backend, info.driver, info.driver_info
+            ),
+            name: info.name,
+        })
+        .collect()
+}
+
+fn format_adapters(adapters: &[AdapterLine]) -> String {
     if adapters.is_empty() {
         return "No display adapter this build can draw on.\n".to_owned();
     }
 
-    adapters
-        .iter()
-        .map(|info| {
-            format!(
-                "{} ({:?}, {:?}, driver {} {})\n",
-                info.name, info.device_type, info.backend, info.driver, info.driver_info
-            )
-        })
-        .collect()
+    adapters.iter().map(|adapter| adapter.line.as_str()).collect()
 }
 
 /// A writer onto the console that launched this process, if there was one.
