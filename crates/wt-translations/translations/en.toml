@@ -30,6 +30,9 @@ close_directory_stats = "Close directory stats"
 search = "Search"
 search_these_replays = "Search these replays"
 search_these_replays_unavailable = "These replays have not been indexed yet"
+zoom_in_panel = "Zoom In"
+zoom_out_panel = "Zoom Out"
+close_panel = "Close"
 
 # -- Common buttons --
 
