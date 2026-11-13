@@ -116,7 +116,7 @@ const CSS: &str = css!(
         font-weight: 700;
     }
     .wt-armor-row__flag { flex: none; width: 23px; height: 16px; }
-    .wt-armor-row__class { flex: none; width: 16px; height: 16px; }
+    .wt-armor-row__class { flex: none; width: 16px; height: 16px; transform: rotate(90deg); }
     .wt-armor-row__label { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
     .wt-armor-row__label--missing { color: var(--wt-color-text-dim); }
     .wt-armor-row__name, .wt-armor-row__note, .wt-armor-row__status {

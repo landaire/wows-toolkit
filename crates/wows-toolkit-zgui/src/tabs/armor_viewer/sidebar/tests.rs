@@ -3,11 +3,14 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::io::Write;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use landaire_ui::HeadlessError;
 use landaire_ui::MARK_CLASS;
+use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
@@ -76,7 +79,10 @@ struct Sidebar {
 
 /// Ship assets over an empty store: the sidebar reads the catalog, and art it does not find.
 fn catalog() -> Arc<SidebarCatalog> {
-    let vfs: VfsPath = MemoryFS::new().into();
+    catalog_over(MemoryFS::new().into())
+}
+
+fn catalog_over(vfs: VfsPath) -> Arc<SidebarCatalog> {
     let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
     let assets = ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new()));
 
@@ -108,6 +114,15 @@ impl Sidebar {
     }
 
     fn mount(options: HeadlessOptions, theme: ThemeChoice, loaded: Arc<SidebarCatalog>, models: ModelsSource) -> Self {
+        Self::try_mount(options, theme, loaded, models).expect("the sidebar opens headlessly")
+    }
+
+    fn try_mount(
+        options: HeadlessOptions,
+        theme: ThemeChoice,
+        loaded: Arc<SidebarCatalog>,
+        models: ModelsSource,
+    ) -> Result<Self, HeadlessError> {
         let events = Rc::new(RefCell::new(Vec::new()));
         let caught: Rc<Cell<Option<Inputs>>> = Rc::new(Cell::new(None));
         let (recorder, inner) = (Rc::clone(&events), Rc::clone(&caught));
@@ -131,13 +146,12 @@ impl Sidebar {
                     )
                 }
             }
-        })
-        .expect("the sidebar opens headlessly");
+        })?;
         window.advance(Duration::from_millis(100));
         let state = built_state().expect("the sidebar was built");
         let inputs = caught.get().expect("the inputs were made");
 
-        Self { window, state, inputs, events }
+        Ok(Self { window, state, inputs, events })
     }
 
     fn settle(&mut self) {
@@ -552,6 +566,47 @@ fn a_ship_row_loads_the_ship_and_a_part_row_opens_the_part_model() {
     assert_eq!(sidebar.events()[1..], [SidebarEvent::OpenModel { model: turret(), from_ship }]);
 }
 
+/// The game draws a class icon pointing up; the sidebar shows it pointing right, as the other
+/// tabs do.
+#[test]
+fn a_class_icon_points_right() {
+    // Drawn only in the top half of its box, so it points up as the game's icons do.
+    const UP: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"20\" viewBox=\"0 0 10 20\">\
+        <rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"white\"/></svg>";
+
+    rust_i18n::set_locale("en");
+    let vfs: VfsPath = MemoryFS::new().into();
+    vfs.join("gui/fla/minimap/ship_icons").unwrap().create_dir_all().unwrap();
+    let mut file = vfs.join("gui/fla/minimap/ship_icons/minimap_battleship.svg").unwrap().create_file().unwrap();
+    file.write_all(UP.as_bytes()).unwrap();
+    drop(file);
+
+    let options = HeadlessOptions {
+        drawing: Drawing::Device,
+        ..HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 })
+    };
+    let mut sidebar = match Sidebar::try_mount(options, ThemeChoice::Dark, catalog_over(vfs), ModelsSource::Loading) {
+        Ok(sidebar) => sidebar,
+        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+            eprintln!("skipped: no graphics adapter to draw the sidebar on");
+            return;
+        }
+        Err(err) => panic!("the sidebar opens: {err}"),
+    };
+    sidebar.browse(&["armor-nation-USA"]);
+    crate::interaction_tests::settle_in_real_time(&mut sidebar.window);
+
+    let icon = sidebar.window.by_class("wt-armor-row__class").expect("the class row shows its icon");
+    let bounds = sidebar.window.bounds(icon).expect("the icon has a box");
+    let pixels = sidebar.window.pixels().expect("the window is drawn on the device");
+    let middle_y = (bounds.origin.y.0 + bounds.size.height.0 / 2.0) as i32;
+    let at = |fraction: f32| (bounds.origin.x.0 + bounds.size.width.0 * fraction) as i32;
+    let brightness = |x: i32| pixels.rgba(x, middle_y)[..3].iter().map(|&channel| u32::from(channel)).sum::<u32>();
+
+    assert!(brightness(at(0.8)) > 600, "the icon's point is drawn on the right: {:?}", pixels.rgba(at(0.8), middle_y));
+    assert!(brightness(at(0.2)) < 300, "and its base on the left: {:?}", pixels.rgba(at(0.2), middle_y));
+}
+
 /// The catalogue and model library of the install named by `WT_WOWS_DIR`.
 fn real_catalog() -> (Arc<SidebarCatalog>, ModelsSource) {
     let Some(dir) = std::env::var_os("WT_WOWS_DIR").map(std::path::PathBuf::from) else {
@@ -595,7 +650,6 @@ fn settle_until_listed(sidebar: &mut Sidebar) {
 #[ignore = "draws on the graphics device and reads a game install; run by hand to review the sidebar"]
 fn the_sidebar_renders_the_real_catalogue_in_dark_and_light() {
     use landaire_ui::Appearance;
-    use landaire_ui::test_support::Drawing;
 
     rust_i18n::set_locale("en");
     let (loaded, models) = real_catalog();
