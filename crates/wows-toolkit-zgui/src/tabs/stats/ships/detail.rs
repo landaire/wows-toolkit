@@ -3,6 +3,9 @@
 use std::sync::Arc;
 
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::stats::table::COLUMNS;
 use wows_toolkit_viewmodel::stats::table::Cell;
@@ -14,9 +17,6 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::tabs::stats::rating::RatingChipProps;
 

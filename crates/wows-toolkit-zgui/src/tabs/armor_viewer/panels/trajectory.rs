@@ -6,6 +6,9 @@
 
 use landaire_ui::SliderFieldProps;
 use landaire_ui::SliderRange;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_icons::Glyph;
@@ -44,9 +47,6 @@ use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;

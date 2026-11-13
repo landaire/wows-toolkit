@@ -28,6 +28,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use landaire_ui::FadeInProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_config::ReplayExportFormat;
@@ -85,9 +88,6 @@ use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
 use zgui_ui::SpinnerProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;

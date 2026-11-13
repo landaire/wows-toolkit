@@ -2,6 +2,9 @@
 //! and the scan above; the capture point and drawing tools below.
 
 use landaire_ui::MarkedTextProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::tactics::BoardTool;
@@ -58,9 +61,6 @@ use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
 use zgui_ui::SeparatorProps;
 use zgui_ui::SpinnerProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;

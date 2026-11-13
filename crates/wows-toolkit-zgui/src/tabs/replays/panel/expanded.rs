@@ -10,6 +10,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
@@ -49,9 +52,6 @@ use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SeparatorProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;

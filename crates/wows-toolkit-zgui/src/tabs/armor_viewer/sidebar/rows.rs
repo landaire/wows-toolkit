@@ -4,6 +4,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use landaire_ui::MarkedTextProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use landaire_ui::TreeRow;
 use rust_i18n::t;
 use wows_toolkit_armor::model_refs::HardpointTarget;
@@ -29,9 +32,6 @@ use zgui::vocab::PropValue;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::MenuItemProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui::prelude::Binding;
 
 use crate::services::Services;
@@ -89,7 +89,6 @@ fn row_content(sources: RowSources, tree: &SidebarTree, id: &RowId) -> AnyView {
     let state = sources.state;
     let missing = tree.missing(id);
     let note = tree.note(id).cloned();
-    let opens = kind.opens_on_its_own();
 
     let icon = row_icon(sources, &kind);
     let name = row_name(sources, &kind, label);
@@ -110,7 +109,6 @@ fn row_content(sources: RowSources, tree: &SidebarTree, id: &RowId) -> AnyView {
             {note}
         }
     });
-    let label = if opens { with_tooltip(state, &kind, missing, label) } else { label };
     let checkbox = kind.hardpoint_target().map(|target| hardpoint_checkbox(sources, id, target));
 
     let opened = id.clone();
@@ -174,32 +172,25 @@ fn row_name(sources: RowSources, kind: &RowKind, label: String) -> AnyView {
     }
 }
 
-/// `label` with the row's whole name, and what it opens, shown on hover.
-fn with_tooltip(
-    state: SidebarState,
-    kind: &RowKind,
-    missing: Option<wowsunpack::export::model_catalog::GeometryAvailability>,
-    label: AnyView,
-) -> AnyView {
-    let skin_uses: Vec<SkinUse> = match kind {
+/// The tooltip of row `id`: its whole name and what it opens. `None` for a row that opens
+/// nothing.
+pub fn row_tip(state: SidebarState, id: &RowId) -> Option<AnyView> {
+    let (kind, missing) = state.tree.with_untracked(|tree| Some((tree.kind(id)?.clone(), tree.missing(id))))?;
+    if !kind.opens_on_its_own() {
+        return None;
+    }
+
+    let skin_uses: Vec<SkinUse> = match &kind {
         RowKind::Model(model) => state.models.with_untracked(|models| match models {
             ModelsState::Ready(index) => index.skins.get(model).map(|uses| uses.to_vec()).unwrap_or_default(),
             ModelsState::Loading | ModelsState::Unavailable => Vec::new(),
         }),
         _ => Vec::new(),
     };
-    let lines: Rc<[String]> =
-        row_tooltip(kind, &skin_uses, missing).unwrap_or_default().lines().map(str::to_string).collect();
-    let lines = move || lines.iter().map(|line| view! { text {{line.clone()}} }).collect::<Vec<_>>();
+    let text = row_tooltip(&kind, &skin_uses, missing)?;
+    let lines = text.lines().map(|line| view! { text {{line.to_owned()}} }).collect::<Vec<_>>();
 
-    AnyView::new(view! {
-        Tooltip {
-            TooltipTrigger(class = "wt-armor-row__tip") {{label}}
-            TooltipContent {
-                column(class = "wt-armor-row__tip-lines") {{lines.clone()}}
-            }
-        }
-    })
+    Some(AnyView::new(view! { column(class = "wt-armor-row__tip-lines") {{lines}} }))
 }
 
 /// The checkbox showing a model's hardpoints in the pane. A press on it neither opens nor

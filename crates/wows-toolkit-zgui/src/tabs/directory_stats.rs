@@ -14,6 +14,9 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::directory_stats::DirectoryStatsUpdate;
@@ -54,9 +57,6 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::ProgressProps;
 use zgui_ui::SpinnerProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::http::USER_AGENT;
 use crate::icons::AppIconProps;

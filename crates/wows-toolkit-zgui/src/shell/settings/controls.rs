@@ -5,6 +5,9 @@
 //! three. There is no apply step to forget.
 
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
@@ -62,9 +65,6 @@ use zgui_ui::SliderProps;
 use zgui_ui::SpinnerProps;
 use zgui_ui::SwitchProps;
 use zgui_ui::SwitchSize;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui::prelude::Binding;
 
 use crate::desktop;

@@ -1,5 +1,8 @@
 //! The renderer's view: the map, what is drawn over it, and the transport under it.
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
@@ -47,9 +50,6 @@ use zgui_ui::SelectTriggerProps;
 use zgui_ui::SelectValueProps;
 use zgui_ui::SliderProps;
 use zgui_ui::SpinnerProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::frames::FrameViewProps;
 use crate::icons::AppIconProps;

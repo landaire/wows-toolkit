@@ -2,6 +2,9 @@
 //! whatever those jobs found.
 
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use zgui::component;
 use zgui::reactive::Signal;
@@ -18,9 +21,6 @@ use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::SpinnerProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::desktop;
 use crate::shell::Shell;

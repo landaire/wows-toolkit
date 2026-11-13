@@ -1,6 +1,9 @@
 //! The gear on the transport: what the viewport draws, what an export is encoded with, and saving both as the defaults.
 
 use landaire_ui::Toasts;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_minimap_renderer::VideoCodec;
 use wows_toolkit_icons::Glyph;
@@ -37,9 +40,6 @@ use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Placement;

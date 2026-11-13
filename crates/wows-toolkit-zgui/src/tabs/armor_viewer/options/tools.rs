@@ -3,6 +3,9 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use zgui::css;
@@ -19,9 +22,6 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuSeparatorProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;

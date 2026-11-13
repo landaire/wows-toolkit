@@ -3,6 +3,9 @@
 
 use std::path::PathBuf;
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
@@ -43,9 +46,6 @@ use zgui_ui::ToggleGroupItemProps;
 use zgui_ui::ToggleGroupProps;
 use zgui_ui::ToggleSize;
 use zgui_ui::ToggleVariant;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Placement;

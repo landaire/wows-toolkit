@@ -1,5 +1,8 @@
 //! What a pointer resting on the frame reads: a roster's consumable icon, or the advantage label.
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use wows_toolkit_replay_data::replay_render::hover::advantage_hover;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::view::ElementPoint;
@@ -12,9 +15,6 @@ use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui_ui::SeparatorProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 
 use crate::windows::renderer::session::HoveredConsumable;
 use crate::windows::renderer::session::RendererSession;
@@ -23,7 +23,7 @@ const SHEET: &str = "wt-renderer-hover";
 
 const CSS: &str = css!(
     ".wt-renderer-hover__strip { position: absolute; }
-    .wt-renderer-hover__strip .zui-tooltip__trigger, .wt-renderer-hover__fill { width: 100%; height: 100%; }
+    .wt-renderer-hover__strip .lui-tooltip-trigger, .wt-renderer-hover__fill { width: 100%; height: 100%; }
     .wt-renderer-hover__lines { display: flex; flex-direction: column; font-size: 11px; }
     .wt-renderer-hover__reading {
         position: absolute;

@@ -29,6 +29,7 @@ use landaire_ui::RowHeight;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
+use landaire_ui::TreeTooltip;
 use rust_i18n::t;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_armor::model_refs::HardpointTarget;
@@ -73,6 +74,7 @@ use crate::tabs::armor_viewer::sidebar::art::SidebarArt;
 use crate::tabs::armor_viewer::sidebar::header::SidebarHeaderProps;
 use crate::tabs::armor_viewer::sidebar::rows::RowSources;
 use crate::tabs::armor_viewer::sidebar::rows::row_menu;
+use crate::tabs::armor_viewer::sidebar::rows::row_tip;
 use crate::tabs::armor_viewer::sidebar::rows::sidebar_row;
 use crate::tabs::armor_viewer::sidebar::state::SidebarState;
 use crate::tabs::armor_viewer::sidebar::tree_model::SidebarTree;
@@ -121,7 +123,6 @@ const CSS: &str = css!(
     }
     .wt-armor-row__flag { flex: none; width: 23px; height: 16px; }
     .wt-armor-row__class { flex: none; width: 16px; height: 16px; }
-    .wt-armor-row__tip { display: flex; flex: 1 1 auto; min-width: 0; }
     .wt-armor-row__label { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
     .wt-armor-row__label--missing { color: var(--wt-color-text-dim); }
     .wt-armor-row__name, .wt-armor-row__note, .wt-armor-row__status {
@@ -313,6 +314,7 @@ pub fn ArmorSidebar(
                 leaf_lead = LeafLead::Space,
                 on_activate = UnsyncCallback::new(move |id: RowId| state.open_row(&id)),
                 context_menu = TreeMenu::new(move |id: &RowId| row_menu(state, shell, id)),
+                tooltip = TreeTooltip::new(move |id: &RowId| row_tip(state, id)),
                 handle = state.handle,
                 label = t!("ui.armor.ships").into_owned(),
                 attr:data-testid = "armor-sidebar-tree"

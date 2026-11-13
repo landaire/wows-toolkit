@@ -14,6 +14,9 @@ use std::sync::Arc;
 
 use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use thiserror::Error;
 use wows_replays::types::GameParamId;
@@ -78,9 +81,6 @@ use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_primitives::Binding;
 
 use crate::i18n::Locale;

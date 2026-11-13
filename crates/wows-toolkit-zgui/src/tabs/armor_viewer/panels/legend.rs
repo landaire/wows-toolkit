@@ -6,6 +6,9 @@
 
 use std::rc::Rc;
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_icons::Glyph;
 use wowsunpack::export::gltf_export::ArmorLegendEntry;
@@ -29,9 +32,6 @@ use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::chevron::CHEVRON_DOWN;
 use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;

@@ -2,6 +2,9 @@
 //! destination, the queue's contents, and the button that writes them.
 
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::unpacker::extract::PrototypeOutput;
@@ -25,9 +28,6 @@ use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
 use zgui_ui::ProgressProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui::VirtualListProps;
 use zgui_ui::prelude::Binding;
 
