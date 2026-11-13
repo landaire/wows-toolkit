@@ -26,6 +26,7 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 
 use crate::armor::PlateNames;
 use crate::armor_trace::GridRay;
+use crate::armor_trace::GunChoice;
 use crate::armor_trace::GunRequest;
 use crate::armor_trace::RayPlate;
 use crate::armor_trace::TargetHull;
@@ -425,8 +426,12 @@ impl GameData {
         let weapon = match (&args.shooter, args.range_km) {
             (Some(shooter), Some(range_km)) => {
                 let shooter = self.resolve_ship(shooter, &mut interpretations)?;
-                let request =
-                    GunRequest { battery: Battery::Main, ammo: Ammo::Ap, range_km: Some(range_km), ifhe: false };
+                let request = GunRequest {
+                    guns: GunChoice::Largest(Battery::Main),
+                    ammo: Ammo::Ap,
+                    range_km: Some(range_km),
+                    ifhe: false,
+                };
                 Some(self.gun_weapon(shooter, &request)?)
             }
             (None, None) => None,

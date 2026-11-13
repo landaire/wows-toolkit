@@ -366,6 +366,54 @@ expression: specs()
         description: "Distance between neighbouring rays in m, 0.25 to 10. Defaults to 0.5."
     required:
       - ship
+- name: gun_module_matchups
+  description: "Compare one ship's main battery gun modules as the attacker, for questions such as \"GK with the 406 mm or the 420 mm guns\", \"how do their pens compare\" or \"how many tier 10 battleships does the larger gun penetrate or citadel\". Per gun module (default: every one the ship can mount, stock first): shell, caliber, raw AP penetration at range_km (default 12), overmatch and fuse threshold, and how many target ships (default: the shooter's class and tier, test ships included; broadside unless target_angle_deg is given) it penetrates the armor over the citadel of (armor stops at most 10% of the rays there that do not ricochet), citadels (at least 5% of the rays over the citadel detonate inside it) and citadels often (at least 25%). differences names the ships each module gains or loses against the first module, with both shares. For one target ship use armor_trace."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      ship:
+        type: string
+        description: "Firing ship, e.g. \"G. Kurfurst\"."
+      modules:
+        type: array
+        items:
+          type: string
+        description: "Main battery gun modules to compare, e.g. [\"420 mm/48 SK C/40 on a Drh LC/34 mount\"]. Defaults to every gun module the ship can mount, stock first."
+      ammo:
+        type: string
+        enum:
+          - AP
+          - HE
+          - SAP
+        description: Shell type. Defaults to AP.
+      range_km:
+        type: number
+        description: "Gun range in km, 0 or more. Defaults to 12."
+      target_angle_deg:
+        type: number
+        description: "Target heading away from broadside in degrees: 0 is broadside, 30 angled, 90 bow-on. Defaults to 0."
+      target_class:
+        type: string
+        enum:
+          - destroyer
+          - cruiser
+          - battleship
+          - aircraft_carrier
+          - submarine
+        description: "Class of the target ships. Defaults to the firing ship's class."
+      target_min_tier:
+        type: integer
+        description: "Lowest target tier. Defaults to target_max_tier when given, else the firing ship's tier."
+        minimum: 1
+        maximum: 11
+      target_max_tier:
+        type: integer
+        description: "Highest target tier. Defaults to target_min_tier when given, else the firing ship's tier."
+        minimum: 1
+        maximum: 11
+    required:
+      - ship
 - name: armor_assessment
   description: "How well one ship's armor protects it, for questions such as \"is X's armor good\" or \"is X tanky\". Traces the ship's 3D armor model against shooter groups chosen from its matchmaking tiers (the most common destroyer, light cruiser, heavy cruiser and battleship AP calibers, cruiser HE and SAP) at broadside, 30 and 45 deg angled, in close (5-10 km), moderate (12-15 km) and long (15 km and beyond) range bands; shooters that cannot reach a band are listed as excluded. Per band, group and aspect: citadel, penetration, overpenetration, ricochet, shatter and fuse-armed rates with ray counts, ranked among released ships of its class within one tier. Properties: citadel roof and floor against the waterline, share of the citadel side above water, turtleback, the citadel face above water, and plates that arm the fuse of AP that would otherwise overpenetrate. Ends with a verdict built from those numbers. Destroyers and submarines have no citadel: citadel_metrics says citadel rates do not apply to them, and a missing citadel is no weakness."
   input_schema:
