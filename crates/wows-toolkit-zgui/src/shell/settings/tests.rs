@@ -345,6 +345,27 @@ fn the_shortcut_toggles_the_drawer_and_escape_shuts_it() {
     assert!(window.by_test_id("settings-search").is_none(), "the shortcut shuts it as well");
 }
 
+/// A press on a theme tile, which restyles the whole window, leaves Escape closing the drawer.
+#[test]
+fn escape_shuts_the_drawer_after_a_theme_tile_is_pressed() {
+    let mut window = open_unsaved();
+    shell().settings_drawer.open_at(Setting::Theme);
+    settle(&mut window);
+    settle(&mut window);
+
+    // The pointer rests on the tile across the press, as a reader's does.
+    let tile = find(&window, "theme-choice-Light");
+    window.hover(tile).expect("the tile can be pointed at");
+    window.advance(Duration::from_secs(2));
+    click(&mut window, "theme-choice-Light");
+    window.advance(Duration::from_secs(2));
+    assert_eq!(shell().appearance.theme.get_untracked(), ThemeChoice::Light);
+    assert!(window.by_test_id("settings-search").is_some(), "the press leaves the drawer open");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(window.by_test_id("settings-search").is_none(), "escape shuts the drawer");
+}
+
 /// A message about a setting opens the drawer with that setting at the top.
 #[test]
 fn opening_at_a_setting_brings_it_to_the_top() {
