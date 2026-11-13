@@ -66,6 +66,7 @@ use crate::shell::Shell;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
+use crate::tabs::dock_menu_strings;
 use crate::tabs::replays::arrivals::Arrivals;
 use crate::tabs::replays::batch::BatchTarget;
 use crate::tabs::replays::browser::BrowserControl;
@@ -230,6 +231,7 @@ pub fn ReplaysTab() -> impl IntoView {
                         close_label = t!("ui.replay_folders.close").into_owned(),
                         tabs_label = t!("ui.replay.listing_caption").into_owned(),
                         class = "wt-replays__dock",
+                        menu = dock_menu_strings(locale),
                         attr:data-testid = "replays-dock"
                     )
                     Show(when = move || workspace.is_empty()) {

@@ -16,6 +16,8 @@ use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::Set;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 use super::BUILT;
@@ -129,6 +131,37 @@ fn a_plain_open_replaces_only_the_replay_showing() {
         sorted(workspace.open_replays()),
         [PathBuf::from("behind.wowsreplay"), PathBuf::from("next.wowsreplay")]
     );
+}
+
+/// The replay strip ends in the dock's menu, which closes the replay on screen.
+#[test]
+fn the_replay_strip_menu_closes_the_replay_on_screen() {
+    let (mut window, workspace) = open();
+    workspace.open(PathBuf::from("behind.wowsreplay"), OpenTarget::ShowingTab);
+    workspace.open(PathBuf::from("front.wowsreplay"), OpenTarget::NewTab);
+    window.advance(Duration::from_millis(32));
+
+    let dock = bounds_of(&window, "replays-dock");
+    let mut menus = Vec::new();
+    for button in window.by_role(Role::Button) {
+        if window.a11y(button).and_then(|state| state.label).as_deref() == Some("More Options") {
+            menus.push(button);
+        }
+    }
+    let menu = menus
+        .into_iter()
+        .find(|button| window.bounds(*button).is_some_and(|bounds| dock.contains(bounds.origin)))
+        .expect("the replay strip has a menu");
+    window.click(menu).expect("the menu button has a box");
+    window.advance(Duration::from_millis(400));
+    assert!(window.by_role_and_label(Role::MenuItem, "Close").is_some(), "the menu offers Close");
+
+    // The missing files raise toasts over the menu's items, so the keyboard chooses.
+    window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    window.advance(Duration::from_millis(400));
+
+    assert_eq!(workspace.open_replays(), [PathBuf::from("behind.wowsreplay")], "the replay on screen is closed");
 }
 
 /// The dock shows a drop target until something opens, and the tab's title is the file's name
