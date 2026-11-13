@@ -132,13 +132,23 @@ pub enum BranchClick {
     SelectAndToggle,
 }
 
+/// What opening a [`Tree`]'s context menu over a row does to the selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MenuSelection {
+    /// A row outside the selection becomes the selection and the cursor, so a menu that acts on
+    /// the selection acts on what was clicked.
+    #[default]
+    Follow,
+    /// The selection and the cursor stay where they are. The menu acts on the row it was opened
+    /// over, for a selection that marks something the menu does not change.
+    Keep,
+}
+
 /// The items of the menu a secondary click on a row of a [`Tree`] opens, built for the row's
 /// key.
-///
-/// A secondary click on a row outside the selection selects that row first, so a menu that acts
-/// on the selection acts on what was clicked.
 pub struct TreeMenu<K> {
     build: Rc<dyn Fn(&K) -> AnyView>,
+    selection: MenuSelection,
 }
 
 impl<K> TreeMenu<K> {
@@ -146,13 +156,18 @@ impl<K> TreeMenu<K> {
     where
         V: IntoView + 'static,
     {
-        Self { build: Rc::new(move |key: &K| AnyView::new(build(key))) }
+        Self { build: Rc::new(move |key: &K| AnyView::new(build(key))), selection: MenuSelection::Follow }
+    }
+
+    /// The menu, with `selection` deciding what opening it does to the selection.
+    pub fn with_selection(self, selection: MenuSelection) -> Self {
+        Self { selection, ..self }
     }
 }
 
 impl<K> Clone for TreeMenu<K> {
     fn clone(&self) -> Self {
-        Self { build: Rc::clone(&self.build) }
+        Self { build: Rc::clone(&self.build), selection: self.selection }
     }
 }
 
@@ -318,6 +333,7 @@ where
         branch_click,
         on_activate,
         menu_request: context_menu.is_some().then(|| RwSignal::new_local(None)),
+        menu_selection: context_menu.as_ref().map_or(MenuSelection::Follow, |menu| menu.selection),
         tooltip,
         cursor_row: RwSignal::new_local(None),
     });
@@ -360,6 +376,7 @@ struct RowParts<M: TreeModel, F> {
     /// The row a secondary press landed on, taken by the scroll container as the press passes
     /// it. `None` when the tree has no context menu.
     menu_request: Option<RwSignal<Option<M::Key>, LocalStorage>>,
+    menu_selection: MenuSelection,
     /// The element of the row the cursor is on, while it is built.
     cursor_row: RwSignal<Option<NodeRef>, LocalStorage>,
     tooltip: Option<TreeTooltip<M::Key>>,
@@ -407,6 +424,7 @@ where
             on_activate: parts.on_activate,
             place: ContextMenuPlace::current(),
             menu_target,
+            menu_selection: parts.menu_selection,
             cursor_row,
             typed: Typeahead::new(),
         };
@@ -520,6 +538,7 @@ struct Keyboard<M: TreeModel> {
     on_activate: Option<UnsyncCallback<M::Key>>,
     place: Option<ContextMenuPlace>,
     menu_target: RwSignal<Option<M::Key>, LocalStorage>,
+    menu_selection: MenuSelection,
     cursor_row: RwSignal<Option<NodeRef>, LocalStorage>,
     typed: Typeahead,
 }
@@ -607,7 +626,7 @@ impl<M: TreeModel> Keyboard<M> {
             return false;
         };
 
-        if !state.selection.contains_untracked(&key) {
+        if self.menu_selection == MenuSelection::Follow && !state.selection.contains_untracked(&key) {
             state.select_only(key.clone());
         }
         self.menu_target.set(Some(key));
@@ -716,18 +735,19 @@ where
 
     let asked = key.clone();
     let menu_request = parts.menu_request;
+    let menu_selection = parts.menu_selection;
     let on_pointer_down = move |ev: &mut EventCx<'_, events::PointerDown>| {
         if ev.button == Some(PointerButton::Secondary)
             && let Some(request) = menu_request
         {
-            ask_menu(state, request, &asked);
+            ask_menu(state, request, menu_selection, &asked);
         }
     };
     // A long press asks with this event alone, with no secondary press before it.
     let long_pressed = key.clone();
     let on_context_menu = move |_: &mut EventCx<'_, events::ContextMenu>| {
         if let Some(request) = menu_request {
-            ask_menu(state, request, &long_pressed);
+            ask_menu(state, request, menu_selection, &long_pressed);
         }
     };
 
@@ -792,13 +812,19 @@ where
     })
 }
 
-/// Records `key` as the row a menu was asked for over, after making it the cursor and, unless
-/// it is already among them, the selection.
-fn ask_menu<M: TreeModel>(state: TreeState<M>, request: RwSignal<Option<M::Key>, LocalStorage>, key: &M::Key) {
-    if state.selection.contains_untracked(key) {
-        state.cursor.set(Some(key.clone()));
-    } else {
-        state.select_only(key.clone());
+/// Records `key` as the row a menu was asked for over. Under [`MenuSelection::Follow`] the row
+/// becomes the cursor and, unless it is already among them, the selection.
+fn ask_menu<M: TreeModel>(
+    state: TreeState<M>,
+    request: RwSignal<Option<M::Key>, LocalStorage>,
+    selection: MenuSelection,
+    key: &M::Key,
+) {
+    match selection {
+        MenuSelection::Follow if state.selection.contains_untracked(key) => state.cursor.set(Some(key.clone())),
+        MenuSelection::Follow => state.select_only(key.clone()),
+        // The menu acts on `key` alone, which `request` carries.
+        MenuSelection::Keep => {}
     }
     request.set(Some(key.clone()));
 }

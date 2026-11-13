@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::MenuSelection;
 use landaire_ui::TOOLTIP_DELAY;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::TreeHandle;
@@ -110,6 +111,10 @@ struct Probe {
 }
 
 fn open(nodes: Nodes, expanded: &[u32]) -> (HeadlessWindow, Probe) {
+    open_with_menu(nodes, expanded, MenuSelection::Follow)
+}
+
+fn open_with_menu(nodes: Nodes, expanded: &[u32], menu_selection: MenuSelection) -> (HeadlessWindow, Probe) {
     let model = Rc::new(nodes);
     let opened: HashSet<u32> = expanded.iter().copied().collect();
     let probe: Rc<Cell<Option<Probe>>> = Rc::new(Cell::new(None));
@@ -140,7 +145,7 @@ fn open(nodes: Nodes, expanded: &[u32]) -> (HeadlessWindow, Probe) {
                     on_activate = UnsyncCallback::new(move |key: u32| activated.update(|keys| keys.push(key))),
                     context_menu = TreeMenu::new(|key: &u32| view! {
                         MenuItem(attr:data-testid = format!("menu-{key}")) {"Open"}
-                    }),
+                    }).with_selection(menu_selection),
                     tooltip = TreeTooltip::new(|key: &u32| (*key != 3).then(|| view! { text {{format!("tip {key}")}} })),
                     attr:data-testid = "tree",
                     style:height = "220px"
@@ -287,6 +292,30 @@ fn double_click_activates_and_secondary_click_opens_the_rows_menu() {
     window.click(row(&window, 2)).expect("the row has a box");
     press(&mut window, NamedKey::ContextMenu, Modifiers::NONE);
     assert!(window.by_test_id("menu-2").is_some(), "the menu key opens the cursor row's menu");
+}
+
+#[test]
+fn a_menu_that_keeps_the_selection_leaves_it_on_its_row() {
+    let (mut window, probe) = open_with_menu(Nodes::small(), &[2], MenuSelection::Keep);
+    window.click(row(&window, 20)).expect("the row has a box");
+
+    window.right_click(row(&window, 3)).expect("the row has a box");
+    window.advance(SETTLE);
+    assert!(window.by_test_id("menu-3").is_some(), "the menu is built for the clicked row");
+    assert_eq!(selected(probe), HashSet::from([20]), "the selection stays where it was");
+
+    press(&mut window, NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(500));
+    assert_eq!(selected(probe), HashSet::from([20]), "closing the menu leaves the selection");
+    let cursor = window.all_by_attribute("data-cursor", "true");
+    assert_eq!(cursor.len(), 1, "one row holds the cursor");
+    let cursor = window.bounds(cursor[0]).expect("the cursor row has a box");
+    let kept = window.bounds(row(&window, 20)).expect("the row has a box");
+    let middle = kept.origin.y.0 + kept.size.height.0 / 2.0;
+    assert!(
+        cursor.origin.y.0 <= middle && middle < cursor.origin.y.0 + cursor.size.height.0,
+        "the cursor stays on the selected row"
+    );
 }
 
 #[test]

@@ -11,6 +11,7 @@ use landaire_ui::BranchClick;
 use landaire_ui::Fraction;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingPlacement;
+use landaire_ui::MenuSelection;
 use landaire_ui::LoadingProps;
 use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
@@ -329,7 +330,9 @@ fn ListingRows(
         activate_events.send(ReplayBrowserEvent::Open(path));
     });
     let menu_events = events.clone();
-    let menu = TreeMenu::new(move |key: &NodeKey| row_menu(shell, listing, menu_events.clone(), key));
+    // The selection marks the open replay, and the menu acts on its own row without moving it.
+    let menu = TreeMenu::new(move |key: &NodeKey| row_menu(shell, listing, menu_events.clone(), key))
+        .with_selection(MenuSelection::Keep);
 
     view! {
         Tree(

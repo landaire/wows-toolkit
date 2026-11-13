@@ -231,6 +231,7 @@ pub use crate::tooltip::TooltipTrigger;
 pub use crate::tooltip::TooltipTriggerProps;
 pub use crate::tree::BranchClick;
 pub use crate::tree::LeafLead;
+pub use crate::tree::MenuSelection;
 pub use crate::tree::NodeKind;
 pub use crate::tree::SelectionMode;
 pub use crate::tree::Tree;

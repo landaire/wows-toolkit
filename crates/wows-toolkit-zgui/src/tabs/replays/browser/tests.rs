@@ -8,6 +8,7 @@ use landaire_ui::TreeModel;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -23,6 +24,8 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
+use zgui::vocab::Role;
 
 use super::folders::BrowserControl;
 use super::folders::FolderId;
@@ -458,6 +461,28 @@ fn ctrl_click_builds_a_selection_and_a_plain_click_replaces_it() {
     window.click(row(&window, &paths[2])).expect("the row has a box");
     window.advance(Duration::from_millis(50));
     assert_eq!(shown.selected_paths(), [paths[2].clone()], "a plain click replaces the set");
+}
+
+#[test]
+fn a_rows_menu_leaves_the_selection_on_the_selected_replay() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(2);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let shown = listing(control, &root);
+    let paths = listed(shown);
+
+    window.click(row(&window, &paths[0])).expect("the row has a box");
+    window.right_click(row(&window, &paths[1])).expect("the row has a box");
+    window.advance(Duration::from_millis(300));
+    let open = t!("ui.replay.context.open_in_new_tab").into_owned();
+    assert!(window.by_role_and_label(Role::MenuItem, &open).is_some(), "the row's menu is open");
+    assert_eq!(shown.selected_paths(), [paths[0].clone()], "the menu leaves the selection");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(500));
+    assert_eq!(shown.selected_paths(), [paths[0].clone()], "closing the menu leaves the selection");
 }
 
 fn summary(outcome: MatchOutcome, self_pr: Option<f64>) -> RowSummary {
