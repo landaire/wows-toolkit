@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use wows_toolkit_services::paths::without_verbatim_prefix;
+
 /// The tab's name: the directory's own name, or the whole path for a root.
 pub fn folder_name(root: &Path) -> String {
     match root.file_name() {
@@ -36,20 +38,11 @@ pub fn shortened_path(root: &Path) -> String {
             _ => result.push(component.as_os_str()),
         }
     }
-    without_verbatim_prefix(&result.display().to_string())
+    without_verbatim_prefix(&result).display().to_string()
 }
 
 /// The path as the reader knows it, without the verbatim prefix Windows puts
 /// on a canonical one.
 pub fn shown_path(root: &Path) -> String {
-    without_verbatim_prefix(&root.display().to_string())
-}
-
-/// `\\?\C:\x` as `C:\x`, and `\\?\UNC\server\share` as `\\server\share`.
-fn without_verbatim_prefix(path: &str) -> String {
-    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{share}");
-    }
-
-    path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+    without_verbatim_prefix(root).display().to_string()
 }

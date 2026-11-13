@@ -12,6 +12,7 @@ pub mod game_data_cache;
 pub mod http;
 pub mod logging;
 pub mod match_stats;
+pub mod paths;
 pub mod personal_rating;
 pub mod runtime;
 pub mod settings;

@@ -22,7 +22,7 @@ pub fn reveal_in_file_manager(path: &std::path::Path) {
         use std::os::windows::process::CommandExt as _;
 
         let mut command = std::process::Command::new("explorer");
-        command.raw_arg(format!("/select,\"{}\"", without_verbatim_prefix(path).display()));
+        command.raw_arg(format!("/select,\"{}\"", crate::paths::without_verbatim_prefix(path).display()));
         command
     };
     #[cfg(target_os = "macos")]
@@ -40,54 +40,5 @@ pub fn reveal_in_file_manager(path: &std::path::Path) {
 
     if let Err(err) = prepare(&mut command).spawn() {
         tracing::warn!("{} could not be shown in the file manager: {err}", path.display());
-    }
-}
-
-/// `path` without the `\\?\` prefix `std::fs::canonicalize` gives it, for programs that only read
-/// the plain form. Other paths are returned as they are.
-#[cfg(target_os = "windows")]
-fn without_verbatim_prefix(path: &std::path::Path) -> std::path::PathBuf {
-    use std::path::Component;
-    use std::path::PathBuf;
-    use std::path::Prefix;
-
-    let mut components = path.components();
-    let Some(Component::Prefix(prefix)) = components.next() else {
-        return path.to_path_buf();
-    };
-    let mut plain = match prefix.kind() {
-        Prefix::VerbatimDisk(letter) => PathBuf::from(format!("{}:\\", char::from(letter))),
-        Prefix::VerbatimUNC(server, share) => {
-            let mut root = std::ffi::OsString::from(r"\\");
-            root.push(server);
-            root.push(r"\");
-            root.push(share);
-            root.push(r"\");
-            PathBuf::from(root)
-        }
-        _ => return path.to_path_buf(),
-    };
-    plain.extend(components.filter(|component| !matches!(component, Component::RootDir)));
-
-    plain
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[test]
-    fn verbatim_paths_lose_their_prefix() {
-        assert_eq!(
-            without_verbatim_prefix(Path::new(r"\\?\C:\Games\World of Warships\replays\a,b.wowsreplay")),
-            Path::new(r"C:\Games\World of Warships\replays\a,b.wowsreplay")
-        );
-        assert_eq!(
-            without_verbatim_prefix(Path::new(r"\\?\UNC\host\share\replays\x.wowsreplay")),
-            Path::new(r"\\host\share\replays\x.wowsreplay")
-        );
-        assert_eq!(without_verbatim_prefix(Path::new(r"D:\replays\x.wowsreplay")), Path::new(r"D:\replays\x.wowsreplay"));
     }
 }
