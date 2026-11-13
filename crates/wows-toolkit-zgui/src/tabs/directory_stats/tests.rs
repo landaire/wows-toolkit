@@ -9,6 +9,7 @@ use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_toolkit_replay_data::directory_stats::ReadState;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -17,12 +18,15 @@ use wows_toolkit_viewmodel::stats::replay_set::ReplaySetSkips;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::view;
+use zgui::vocab::Role;
 
 use super::DirectoryHeaderProps;
 use super::DirectoryRead;
 use super::DirectoryStatsProps;
+use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
+use crate::interaction_tests::shell;
 use crate::services::Services;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
@@ -45,7 +49,7 @@ fn open_view(root: &Path) -> HeadlessWindow {
         let root = root.clone();
         view! {
             ThemeRoot {
-                DirectoryStats(root = root, game_data = GameDataCache::without_install())
+                DirectoryStats(root = root, game_data = Signal::stored_local(Some(GameDataCache::without_install())))
             }
         }
     })
@@ -94,6 +98,27 @@ fn an_empty_directory_shows_no_skipped_count() {
 
     assert!(window.by_test_id("directory-stats-reload").is_some());
     assert!(window.by_test_id("directory-stats-skipped").is_none());
+}
+
+fn dock_tab_selected(window: &mut HeadlessWindow, label: &str) -> Option<bool> {
+    let tab = window.by_role_and_label(Role::Tab, label)?;
+    window.a11y(tab).and_then(|state| state.selected)
+}
+
+/// Choosing a dock tab of a directory opened from the replay browser shows that panel.
+#[test]
+fn a_dock_tab_chosen_in_a_directory_tab_is_shown() {
+    let dir = broken_directory();
+    let mut window = open_shell(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    shell().open_directory_stats(dir.path().to_path_buf());
+    settle(&mut window);
+    assert!(window.by_test_id("directory-stats-reload").is_some(), "the read has finished");
+
+    let ships = t!("ui.stats.ships").into_owned();
+    let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
+    window.click(tab).expect("the Ships tab is clicked");
+    settle(&mut window);
+    assert_eq!(dock_tab_selected(&mut window, &ships), Some(true));
 }
 
 fn shoot_header(appearance: Appearance, read: DirectoryRead, name: &str) -> PathBuf {

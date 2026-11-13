@@ -33,10 +33,12 @@ use zgui::css;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
@@ -175,14 +177,13 @@ impl DirectoryRead {
 pub fn DirectoryStatsTab(id: DirectoryStatsId) -> impl IntoView {
     let services = Services::current();
     let shell = Shell::current();
-    let root = shell.directory_stats(id).map(|tab| tab.root);
-
-    let body = move || {
-        let root = root.clone()?;
-        // Nothing can be read before the settings say where the install is.
-        let game_data = services.game_data.cache()?;
-        Some(AnyView::new(view! { DirectoryStats(root = root, game_data = game_data) }))
-    };
+    let game_data = Signal::derive_local(move || services.game_data.cache());
+    // Built once rather than from a closure: a closure builds the view again whenever anything
+    // read while building it changes, and the dock is read there, so choosing a dock tab would
+    // reset it.
+    let body = shell
+        .directory_stats(id)
+        .map(|tab| AnyView::new(view! { DirectoryStats(root = tab.root, game_data = game_data) }));
 
     view! {
         box(class = "wt-directory-stats", attr:data-testid = format!("directory-stats-tab-{}", id.0)) {
@@ -191,9 +192,13 @@ pub fn DirectoryStatsTab(id: DirectoryStatsId) -> impl IntoView {
     }
 }
 
-/// The header and the stats body over the replays in `root`, read against `game_data`.
+/// The header and the stats body over the replays in `root`, read against `game_data` once the
+/// settings say where the install is, and again whenever another cache is adopted.
 #[component]
-fn DirectoryStats(root: PathBuf, game_data: GameDataCache) -> impl IntoView {
+fn DirectoryStats(
+    root: PathBuf,
+    #[prop(into)] game_data: Signal<Option<GameDataCache>, LocalStorage>,
+) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
     let games: RwSignal<Arc<[PerGameStat]>> = RwSignal::new(Arc::from([]));
@@ -208,21 +213,29 @@ fn DirectoryStats(root: PathBuf, game_data: GameDataCache) -> impl IntoView {
     let reader = StoredValue::new_local(None::<Task>);
     let start = {
         let root = root.clone();
-        move || {
+        UnsyncCallback::new(move |game_data: GameDataCache| {
             reader.with_value(|task| task.as_ref().map(Task::cancel));
-            let read_in = || start_read(services, root.clone(), game_data.clone(), games, read);
+            let read_in = || start_read(services, root.clone(), game_data, games, read);
             let task = match &owner {
                 Some(owner) => owner.with(read_in),
                 None => read_in(),
             };
             reader.set_value(Some(task));
-        }
+        })
     };
-    start();
+    // A cache adopted for another install reads the directory again through it.
+    let following = RenderEffect::new(move |_| {
+        if let Some(game_data) = game_data.get() {
+            start.run(game_data);
+        }
+    });
+    on_cleanup_local(move || drop(following));
     let reload = UnsyncCallback::new(move |()| {
         // A read still running would be cut off and its games thrown away.
-        if read.get_untracked().state == ReadState::Finished {
-            start();
+        if read.get_untracked().state == ReadState::Finished
+            && let Some(game_data) = game_data.get_untracked()
+        {
+            start.run(game_data);
         }
     });
 
