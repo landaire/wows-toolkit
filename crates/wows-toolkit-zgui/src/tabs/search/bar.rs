@@ -3,6 +3,9 @@
 
 use landaire_ui::LoadingLineProps;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
@@ -414,13 +417,18 @@ fn segment_view(
         }
         let path = path.clone();
         return AnyView::new(view! {
-            Button(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::Xs,
-                on:click = move |_| search.begin_value_edit(path.clone()),
-                attr:data-testid = "search-pill-value"
-            ) {
-                {label}
+            Tooltip {
+                TooltipTrigger {
+                    Button(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::Xs,
+                        on:click = move |_| search.begin_value_edit(path.clone()),
+                        attr:data-testid = "search-pill-value"
+                    ) {
+                        {label}
+                    }
+                }
+                TooltipContent {{t!("ui.search.edit_value").into_owned()}}
             }
         });
     }

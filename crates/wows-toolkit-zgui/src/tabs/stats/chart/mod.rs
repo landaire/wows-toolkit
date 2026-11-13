@@ -547,77 +547,82 @@ fn SettingsMenu(
     };
 
     view! {
-        Popover {
-            PopoverTrigger(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.settings").into_owned(), attr:data-testid = "chart-settings") {
-                AppIcon(glyph = Glyph::Settings)
-            }
-            PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-settings-menu") {
-                text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.statistic"))}}
-                row(class = "wt-chart__wrap") {
-                    for stat in move || settings.with(|settings| selectable_stats(settings.mode, settings.running, settings.combined, rated.get())), key = |stat: &ChartableStat| stat.translation_key() {
-                        {stat_toggle(stat)}
+        Tooltip {
+            TooltipTrigger {
+                Popover {
+                    PopoverTrigger(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.settings").into_owned(), attr:data-testid = "chart-settings") {
+                        AppIcon(glyph = Glyph::Settings)
                     }
-                }
-                text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.chart"))}}
-                row(class = "wt-chart__wrap") {
-                    {mode_toggle(ChartMode::Line)}
-                    {mode_toggle(ChartMode::Bar)}
-                }
-                text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.options"))}}
-                CheckRow(
-                    checked = combined,
-                    label = Signal::derive_local(move || { locale.track(); t!("ui.stats.combine_ships").into_owned() }),
-                    change = UnsyncCallback::new(move |on: bool| {
-                        let rated = rated.get_untracked();
-                        settings.update(|settings| model::set_combined(settings, on, rated));
-                    }),
-                    test_id = "chart-combined"
-                )
-                // Combining the ships is already a running line.
-                box(class = "wt-chart__slot", class:wt-chart__gone = move || !line.get()) {
-                    CheckRow(
-                        checked = Signal::derive_local(move || running.get() || combined.get()),
-                        disabled = combined,
-                        label = Signal::derive_local(move || { locale.track(); t!("ui.stats.running_average").into_owned() }),
-                        change = UnsyncCallback::new(move |on: bool| {
-                            let rated = rated.get_untracked();
-                            settings.update(|settings| model::set_running(settings, on, rated));
-                        }),
-                        test_id = "chart-running"
-                    )
-                }
-                CheckRow(
-                    checked = flag(|settings| settings.show_values),
-                    label = Signal::derive_local(move || { locale.track(); t!("ui.stats.value_labels").into_owned() }),
-                    change = UnsyncCallback::new(move |on: bool| settings.update(|settings| settings.show_values = on)),
-                    test_id = "chart-values"
-                )
-                // The chart's own narrowing, when it has been taken off the tab's bar. The tab's
-                // filters stay the default, so a reader who never opens this sees one set.
-                text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.filters"))}}
-                Tooltip {
-                    TooltipTrigger {
+                    PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-settings-menu") {
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.statistic"))}}
+                        row(class = "wt-chart__wrap") {
+                            for stat in move || settings.with(|settings| selectable_stats(settings.mode, settings.running, settings.combined, rated.get())), key = |stat: &ChartableStat| stat.translation_key() {
+                                {stat_toggle(stat)}
+                            }
+                        }
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.chart"))}}
+                        row(class = "wt-chart__wrap") {
+                            {mode_toggle(ChartMode::Line)}
+                            {mode_toggle(ChartMode::Bar)}
+                        }
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.options"))}}
                         CheckRow(
-                            checked = own,
-                            label = Signal::derive_local(move || { locale.track(); t!("ui.stats.own_filters").into_owned() }),
+                            checked = combined,
+                            label = Signal::derive_local(move || { locale.track(); t!("ui.stats.combine_ships").into_owned() }),
                             change = UnsyncCallback::new(move |on: bool| {
-                                let tab = filters.get_untracked();
-                                settings.update(|settings| model::set_own_filters(settings, on, &tab));
+                                let rated = rated.get_untracked();
+                                settings.update(|settings| model::set_combined(settings, on, rated));
                             }),
-                            test_id = "chart-own-filters"
+                            test_id = "chart-combined"
                         )
+                        // Combining the ships is already a running line.
+                        box(class = "wt-chart__slot", class:wt-chart__gone = move || !line.get()) {
+                            CheckRow(
+                                checked = Signal::derive_local(move || running.get() || combined.get()),
+                                disabled = combined,
+                                label = Signal::derive_local(move || { locale.track(); t!("ui.stats.running_average").into_owned() }),
+                                change = UnsyncCallback::new(move |on: bool| {
+                                    let rated = rated.get_untracked();
+                                    settings.update(|settings| model::set_running(settings, on, rated));
+                                }),
+                                test_id = "chart-running"
+                            )
+                        }
+                        CheckRow(
+                            checked = flag(|settings| settings.show_values),
+                            label = Signal::derive_local(move || { locale.track(); t!("ui.stats.value_labels").into_owned() }),
+                            change = UnsyncCallback::new(move |on: bool| settings.update(|settings| settings.show_values = on)),
+                            test_id = "chart-values"
+                        )
+                        // The chart's own narrowing, when it has been taken off the tab's bar. The tab's
+                        // filters stay the default, so a reader who never opens this sees one set.
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.filters"))}}
+                        Tooltip {
+                            TooltipTrigger {
+                                CheckRow(
+                                    checked = own,
+                                    label = Signal::derive_local(move || { locale.track(); t!("ui.stats.own_filters").into_owned() }),
+                                    change = UnsyncCallback::new(move |on: bool| {
+                                        let tab = filters.get_untracked();
+                                        settings.update(|settings| model::set_own_filters(settings, on, &tab));
+                                    }),
+                                    test_id = "chart-own-filters"
+                                )
+                            }
+                            TooltipContent {{t!("ui.stats.own_filters_tooltip").into_owned()}}
+                        }
+                        column(class = "wt-chart__slot", class:wt-chart__gone = move || !own.get()) {
+                            row(class = "wt-chart__wrap") {
+                                {division_toggle(DivisionFilter::All)}
+                                {division_toggle(DivisionFilter::SoloOnly)}
+                                {division_toggle(DivisionFilter::DivOnly)}
+                            }
+                            {mode_filters()}
+                        }
                     }
-                    TooltipContent {{t!("ui.stats.own_filters_tooltip").into_owned()}}
-                }
-                column(class = "wt-chart__slot", class:wt-chart__gone = move || !own.get()) {
-                    row(class = "wt-chart__wrap") {
-                        {division_toggle(DivisionFilter::All)}
-                        {division_toggle(DivisionFilter::SoloOnly)}
-                        {division_toggle(DivisionFilter::DivOnly)}
-                    }
-                    {mode_filters()}
                 }
             }
+            TooltipContent {{tr(locale, || t!("ui.stats.settings"))}}
         }
     }
 }
@@ -683,51 +688,71 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
     };
 
     view! {
-        Popover {
-            PopoverTrigger(
-                size = ButtonSize::Sm,
-                variant = ButtonVariant::Outline,
-                class = "wt-chart__ships",
-                attr:data-narrowed = move || { let (selected, total) = counts(); Some((selected < total).to_string()) },
-                a11y:label = move || format!("{}: {}", t!("ui.stats.filter_ships"), count_label()),
-                attr:data-testid = "chart-ship-filter"
-            ) {
-                AppIcon(glyph = Glyph::Funnel)
-                text {{tr(locale, || t!("ui.stats.ships"))}}
-                text(class = "wt-chart__dim") {{count_label}}
-            }
-            PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-ship-filter-menu") {
-                row(class = "wt-chart__heading-row") {
-                    text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.ships"))}}
-                    text(class = "wt-chart__dim") {{count_label}}
-                }
-                row(class = "wt-chart__row") {
-                    box(class = "wt-chart__search") {
-                        Input(value = query, placeholder = t!("ui.stats.search_ships").into_owned(), attr:data-testid = "chart-ship-search")
+        Tooltip {
+            TooltipTrigger {
+                Popover {
+                    PopoverTrigger(
+                        size = ButtonSize::Sm,
+                        variant = ButtonVariant::Outline,
+                        class = "wt-chart__ships",
+                        attr:data-narrowed = move || { let (selected, total) = counts(); Some((selected < total).to_string()) },
+                        a11y:label = move || format!("{}: {}", t!("ui.stats.filter_ships"), count_label()),
+                        attr:data-testid = "chart-ship-filter"
+                    ) {
+                        AppIcon(glyph = Glyph::Funnel)
+                        text {{tr(locale, || t!("ui.stats.ships"))}}
+                        text(class = "wt-chart__dim") {{count_label}}
                     }
-                    box(class:wt-chart__gone = move || query.with(String::is_empty)) {
-                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.clear").into_owned(), attr:data-testid = "chart-ship-search-clear", on:click = move |_| query.set(String::new())) {
-                            AppIcon(glyph = Glyph::X)
+                    PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-ship-filter-menu") {
+                        row(class = "wt-chart__heading-row") {
+                            text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.ships"))}}
+                            text(class = "wt-chart__dim") {{count_label}}
+                        }
+                        row(class = "wt-chart__row") {
+                            box(class = "wt-chart__search") {
+                                Input(value = query, placeholder = t!("ui.stats.search_ships").into_owned(), attr:data-testid = "chart-ship-search")
+                            }
+                            box(class:wt-chart__gone = move || query.with(String::is_empty)) {
+                                Tooltip {
+                                    TooltipTrigger {
+                                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.clear").into_owned(), attr:data-testid = "chart-ship-search-clear", on:click = move |_| query.set(String::new())) {
+                                            AppIcon(glyph = Glyph::X)
+                                        }
+                                    }
+                                    TooltipContent {{tr(locale, || t!("ui.stats.clear"))}}
+                                }
+                            }
+                        }
+                        row(class = "wt-chart__row") {
+                            Tooltip {
+                                TooltipTrigger {
+                                    Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-all", on:click = move |_| pick_visible(true)) {
+                                        {tr(locale, || t!("ui.stats.all_ships"))}
+                                    }
+                                }
+                                TooltipContent {{tr(locale, || t!("ui.stats.all_ships_tooltip"))}}
+                            }
+                            Tooltip {
+                                TooltipTrigger {
+                                    Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-none", on:click = move |_| pick_visible(false)) {
+                                        {tr(locale, || t!("ui.stats.no_ships"))}
+                                    }
+                                }
+                                TooltipContent {{tr(locale, || t!("ui.stats.no_ships_tooltip"))}}
+                            }
+                        }
+                        text(
+                            class = "wt-chart__dim",
+                            class:wt-chart__gone = move || !(none_visible.get() && query.with(|query| !query.trim().is_empty())),
+                            attr:data-testid = "chart-no-ship-matches"
+                        ) {{tr(locale, || t!("ui.stats.no_ship_matches"))}}
+                        for ship in move || visible.get(), key = |ship: &(GameParamId, String)| ship.0 {
+                            {ship_row(ship)}
                         }
                     }
                 }
-                row(class = "wt-chart__row") {
-                    Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-all", on:click = move |_| pick_visible(true)) {
-                        {tr(locale, || t!("ui.stats.all_ships"))}
-                    }
-                    Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-none", on:click = move |_| pick_visible(false)) {
-                        {tr(locale, || t!("ui.stats.no_ships"))}
-                    }
-                }
-                text(
-                    class = "wt-chart__dim",
-                    class:wt-chart__gone = move || !(none_visible.get() && query.with(|query| !query.trim().is_empty())),
-                    attr:data-testid = "chart-no-ship-matches"
-                ) {{tr(locale, || t!("ui.stats.no_ship_matches"))}}
-                for ship in move || visible.get(), key = |ship: &(GameParamId, String)| ship.0 {
-                    {ship_row(ship)}
-                }
             }
+            TooltipContent {{tr(locale, || t!("ui.stats.filter_ships"))}}
         }
     }
 }

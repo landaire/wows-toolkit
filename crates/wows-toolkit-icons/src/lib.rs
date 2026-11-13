@@ -39,6 +39,7 @@ macro_rules! glyph_list {
             Folder => "folder",
             FolderOpen => "folder-open",
             Funnel => "funnel",
+            HardDrive => "hard-drive",
             Image => "image",
             Info => "info",
             LayoutDashboard => "layout-dashboard",

@@ -415,7 +415,7 @@ fn AchievementTile(earned: ShownAchievement, art: GameArt) -> impl IntoView {
         }
         Some(Art::Vector(_)) | None => AnyView::new(view! {
             box(class = "wt-stats-achievement__glyph") {
-                AppIcon(glyph = Glyph::Trophy)
+                AppIcon(glyph = Glyph::Star)
             }
         }),
     };

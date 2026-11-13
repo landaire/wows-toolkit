@@ -577,13 +577,16 @@ fn row_menu(side: &'static str, index: usize, row: &LiveRosterRow, shell: Shell)
                 }
                 DropdownMenuContent {
                     MenuItem(on_select = UnsyncCallback::new(move |()| desktop::open_url(&numbers.get_value()))) {
-                        {t!("ui.player_tracker.open_wows_numbers").into_owned()}
+                        AppIcon(glyph = Glyph::SquareArrowOutUpRight)
+                        text {{t!("ui.player_tracker.open_wows_numbers").into_owned()}}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| desktop::open_url(&builds.get_value()))) {
-                        {t!("ui.player_tracker.open_shipbuilds").into_owned()}
+                        AppIcon(glyph = Glyph::SquareArrowOutUpRight)
+                        text {{t!("ui.player_tracker.open_shipbuilds").into_owned()}}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| TrackerModel::find_player_matches(shell, account))) {
-                        {t!("ui.player_tracker.find_matches").into_owned()}
+                        AppIcon(glyph = Glyph::Search)
+                        text {{t!("ui.player_tracker.find_matches").into_owned()}}
                     }
                 }
             }

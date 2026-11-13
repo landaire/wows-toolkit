@@ -354,7 +354,7 @@ fn Listing(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     attr:data-testid = format!("unpacker-{fragment}-extract-listed"),
                     on:click = move |_| model.queue_listed(&pane.rows.with_untracked(|rows| rows.all()))
                 ) {
-                    AppIcon(glyph = Glyph::Download)
+                    AppIcon(glyph = Glyph::HardDrive)
                     text {{t!("ui.unpacker.queue_all_files").into_owned()}}
                 }
             }

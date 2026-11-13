@@ -598,18 +598,23 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
     let ship = row.ship_id;
     let summary = Arc::clone(row);
     let copy = view! {
-        DropdownMenu {
-            DropdownMenuTrigger(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                a11y:label = t!("ui.stats.copy_table").into_owned(),
-                attr:data-testid = format!("ship-copy-{ship}")
-            ) {
-                AppIcon(glyph = Glyph::Copy)
+        Tooltip {
+            TooltipTrigger {
+                DropdownMenu {
+                    DropdownMenuTrigger(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::IconSm,
+                        a11y:label = t!("ui.stats.copy_table").into_owned(),
+                        attr:data-testid = format!("ship-copy-{ship}")
+                    ) {
+                        AppIcon(glyph = Glyph::Copy)
+                    }
+                    DropdownMenuContent {
+                        {copy_items(cx, Arc::clone(&summary))}
+                    }
+                }
             }
-            DropdownMenuContent {
-                {copy_items(cx, Arc::clone(&summary))}
-            }
+            TooltipContent {{t!("ui.stats.copy_table").into_owned()}}
         }
     };
     let clear = clearable.then(|| {
