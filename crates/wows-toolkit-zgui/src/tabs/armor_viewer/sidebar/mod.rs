@@ -162,7 +162,7 @@ pub struct CommonPaneSettings {
     pub comparing: bool,
     pub mirror_cameras: bool,
     pub sync_options: bool,
-    /// Whether the panes are stacked rather than side by side.
+    /// Whether a comparison split opens below the active pane rather than beside it.
     pub stack_panes: bool,
     /// What a newly opened model shows first. Not a comparison setting.
     pub opening_layer: OpeningLayer,
@@ -189,9 +189,11 @@ pub enum SidebarEvent {
     },
     /// A building, under Fortifications or under its hull model.
     OpenBuilding(GameParamId),
-    /// A new comparison pane: with `Some`, showing that ship; with `None`, a copy of the pane
-    /// already showing.
+    /// A new comparison pane in a split beside the active one: with `Some`, showing that ship;
+    /// with `None`, a copy of the pane already showing.
     CompareSplit(Option<ShipChoice>),
+    /// A new pane showing the ship, as another tab of the active pane's group.
+    OpenInNewTab(ShipChoice),
     /// The ship at stock hull and default LOD, whatever any pane shows.
     ExportShip(ShipChoice),
     ExportModel {

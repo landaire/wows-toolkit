@@ -254,16 +254,20 @@ fn a_catalogue_model_row_offers_to_open_export_and_copy_the_model() {
 }
 
 #[test]
-fn a_ship_row_offers_a_comparison_pane_and_an_export() {
+fn a_ship_row_offers_a_comparison_pane_a_new_tab_and_an_export() {
     let mut sidebar = Sidebar::open();
     sidebar.search("iowa");
     let iowa = ship_row_id(fixture::IOWA_INDEX);
 
-    let offered = sidebar.menu_of(&iowa);
-    assert_eq!(offered.len(), 2, "{offered:?}");
+    assert_eq!(sidebar.menu_of(&iowa), ["Compare in new split", "Export Ship Model", "Open in new tab"]);
     sidebar.click("armor-sidebar-menu-compare");
+    sidebar.menu_of(&iowa);
+    sidebar.click("armor-sidebar-menu-new-tab");
 
-    assert_eq!(sidebar.events(), [SidebarEvent::CompareSplit(Some(iowa_choice()))]);
+    assert_eq!(
+        sidebar.events(),
+        [SidebarEvent::CompareSplit(Some(iowa_choice())), SidebarEvent::OpenInNewTab(iowa_choice())]
+    );
 }
 
 #[test]

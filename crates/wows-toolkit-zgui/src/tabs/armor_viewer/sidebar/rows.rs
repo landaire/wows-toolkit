@@ -226,8 +226,8 @@ fn hardpoint_checkbox(sources: RowSources, id: &RowId, target: HardpointTarget) 
     })
 }
 
-/// The menu for row `id`: a ship row offers a comparison pane and an export; a model or part
-/// row offers to open it, export it and copy its path.
+/// The menu for row `id`: a ship row offers a comparison pane, a new tab and an export; a model or
+/// part row offers to open it, export it and copy its path.
 pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> AnyView {
     let Some(kind) = state.tree.with_untracked(|tree| tree.kind(id).cloned()) else {
         return AnyView::new(());
@@ -237,12 +237,19 @@ pub fn row_menu(state: SidebarState, shell: Shell, id: &RowId) -> AnyView {
         let ship =
             ShipChoice { param_index: VehicleParamIndex::new(param_index.clone()), display_name: display_name.clone() };
         let compared = ship.clone();
+        let tabbed = ship.clone();
         return AnyView::new(view! {
             MenuItem(
                 attr:data-testid = "armor-sidebar-menu-compare",
                 on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::CompareSplit(Some(compared.clone()))))
             ) {
                 {t!("ui.armor.compare_split").into_owned()}
+            }
+            MenuItem(
+                attr:data-testid = "armor-sidebar-menu-new-tab",
+                on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::OpenInNewTab(tabbed.clone())))
+            ) {
+                {t!("ui.armor.open_in_new_tab").into_owned()}
             }
             MenuItem(
                 attr:data-testid = "armor-sidebar-menu-export-ship",

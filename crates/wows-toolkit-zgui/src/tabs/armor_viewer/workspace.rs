@@ -1,17 +1,28 @@
-//! The Armor Viewer tab's state: its panes and which is active, what the panes share, the options
-//! rail, and the loads that fill a pane.
+//! The Armor Viewer tab's state: its panes and which is active, the dock they are laid out in,
+//! what the panes share, the options rail, and the loads that fill a pane.
 //!
 //! A selection always loads into the active pane, captured as the load starts, so a pane switch
 //! while it runs cannot redirect it. Each pane's viewport lives under an owner of its own, which
-//! is disposed as the pane closes: that cancels the pane's load and releases its meshes.
+//! is disposed as the pane's tab closes: that cancels the pane's load and releases its meshes.
 //!
 //! Loads run off the UI thread with a job on the status bar. The first stage is shown as it lands
 //! and the viewport runs the rest of the scene in the background.
 
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::DockRegion;
+use landaire_ui::DockState;
+use landaire_ui::DockTarget;
+use landaire_ui::Edge;
+use landaire_ui::GroupId;
+use landaire_ui::PanelEntry;
+use landaire_ui::PanelId;
+use landaire_ui::PanelKind;
+use landaire_ui::PanelRegistry;
 use rust_i18n::t;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
@@ -72,7 +83,21 @@ use crate::tabs::armor_viewer::viewport::ViewportChange;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PaneId(u64);
 
-/// Which way the comparison panes are laid out.
+impl PaneId {
+    const PANEL_PREFIX: &str = "armor-pane-";
+
+    /// The dock panel the pane is shown in.
+    pub fn panel_id(self) -> PanelId {
+        PanelId::new(format!("{}{}", Self::PANEL_PREFIX, self.0))
+    }
+
+    /// The pane shown in `panel`, if it is a pane's panel.
+    pub fn from_panel(panel: &PanelId) -> Option<Self> {
+        panel.as_str().strip_prefix(Self::PANEL_PREFIX)?.parse().ok().map(Self)
+    }
+}
+
+/// Which side of the active pane a comparison split opens on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PaneSplit {
     /// Side by side, which compares two ships' beams.
@@ -80,6 +105,24 @@ pub enum PaneSplit {
     SideBySide,
     /// One above the other, which compares their lengths.
     Stacked,
+}
+
+impl PaneSplit {
+    fn edge(self) -> Edge {
+        match self {
+            Self::SideBySide => Edge::Right,
+            Self::Stacked => Edge::Bottom,
+        }
+    }
+}
+
+/// Where a new pane opens, from the active pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanePlace {
+    /// In a split of its own beside the active pane's group, on the side [`PaneSplit`] names.
+    Split,
+    /// As another tab of the active pane's group.
+    Tab,
 }
 
 /// Where the active pane sits among the panes, as the reader counts them.
@@ -96,6 +139,32 @@ pub struct Pane {
     pub id: PaneId,
     pub viewport: ArmorViewportState,
     owner: Owner,
+}
+
+/// Which group each docked pane is in, and the pane each group shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DockShown {
+    groups: HashMap<PaneId, GroupId>,
+    shown: BTreeMap<GroupId, PaneId>,
+}
+
+impl DockShown {
+    /// Tracked.
+    fn of(dock: DockState) -> Self {
+        let mut groups = HashMap::new();
+        let mut shown = BTreeMap::new();
+        for entry in dock.panels() {
+            let (Some(pane), Some(group)) = (PaneId::from_panel(&entry.id), dock.group_of(&entry.id)) else {
+                continue;
+            };
+            groups.insert(pane, group);
+            if let Some(showing) = dock.active_panel(group).as_ref().and_then(PaneId::from_panel) {
+                shown.insert(group, showing);
+            }
+        }
+
+        Self { groups, shown }
+    }
 }
 
 /// A ship load started into one pane.
@@ -151,12 +220,16 @@ pub struct CastKey {
 pub struct ArmorWorkspace {
     pub services: Services,
     pub library: ArmorLibrary,
+    /// Where the panes are laid out, each a tab.
+    pub dock: DockState,
+    /// Every open pane, in the order they were opened.
     panes: RwSignal<Vec<Pane>, LocalStorage>,
     /// The tab's owner. Panes are its children whatever owner a compare or close runs under, so
     /// they are disposed with the tab and not with the control that asked for them.
     owner: StoredValue<Owner>,
     active: RwSignal<PaneId, LocalStorage>,
     next_pane: StoredValue<u64>,
+    /// Which side of the active pane a comparison split opens on.
     pub split: RwSignal<PaneSplit, LocalStorage>,
     mirror_cameras: RwSignal<bool, LocalStorage>,
     sync_options: RwSignal<bool, LocalStorage>,
@@ -202,6 +275,7 @@ impl ArmorWorkspace {
         let workspace = Self {
             services,
             library,
+            dock: DockState::new(PanelRegistry::new()),
             panes: RwSignal::new_local(Vec::new()),
             owner: StoredValue::new(Owner::current().expect("a component body runs under an owner")),
             active: RwSignal::new_local(PaneId(0)),
@@ -230,14 +304,15 @@ impl ArmorWorkspace {
             zone_filter: RwSignal::new_local(String::new()),
             part_filter: RwSignal::new_local(String::new()),
         };
+        super::dock::register(workspace);
         let first = workspace.fresh_pane();
         workspace.active.set(first.id);
-        workspace.panes.set(vec![first]);
+        workspace.place_pane(first, DockTarget::Region(DockRegion::Center));
 
         workspace
     }
 
-    /// Every pane, in display order. Tracked.
+    /// Every pane, in the order they were opened. Tracked.
     pub fn panes(self) -> Vec<Pane> {
         self.panes.get()
     }
@@ -257,17 +332,23 @@ impl ArmorWorkspace {
         self.panes.with_untracked(|panes| pane_of(panes, active))
     }
 
-    /// Where the active pane sits. Tracked.
+    /// Where the active pane sits among the dock's tabs. Tracked.
     pub fn active_position(self) -> PanePosition {
-        let active = self.active.get();
-        self.panes.with(|panes| PanePosition {
-            number: panes.iter().position(|pane| pane.id == active).map_or(1, |ix| ix + 1),
-            count: panes.len(),
-        })
+        let active = self.active.get().panel_id();
+        let panels = self.dock.panels();
+
+        PanePosition {
+            number: panels.iter().position(|entry| entry.id == active).map_or(1, |ix| ix + 1),
+            count: panels.len(),
+        }
     }
 
     fn viewports_untracked(self) -> Vec<ArmorViewportState> {
         self.panes.with_untracked(|panes| panes.iter().map(|pane| pane.viewport).collect())
+    }
+
+    pub(super) fn find_pane(self, id: PaneId) -> Option<Pane> {
+        self.panes.with_untracked(|panes| panes.iter().find(|pane| pane.id == id).cloned())
     }
 
     /// Makes `id` the active pane: interacting with a pane is what makes it the target.
@@ -300,45 +381,96 @@ impl ArmorWorkspace {
         owner.with(|| spawn_local(work));
     }
 
-    /// Closes pane `id`. The last pane is emptied rather than removed, since a viewer with no
+    /// Holds `pane` and docks it at `target`, showing it in its group. Held first, since the dock
+    /// builds the pane's view from what the workspace holds.
+    fn place_pane(self, pane: Pane, target: DockTarget) {
+        let id = pane.id;
+        self.panes.update(|panes| panes.push(pane));
+        self.dock_pane(id, target);
+    }
+
+    fn dock_pane(self, id: PaneId, target: DockTarget) {
+        let panel = PanelEntry::new(id.panel_id(), PanelKind::new(super::dock::PANE_KIND));
+        if let Err(err) = self.dock.add_panel(target, panel) {
+            tracing::error!("armor viewer: the pane was not docked: {err}");
+        }
+    }
+
+    /// Follows a change to the dock from `before`, what it was when last followed: a pane whose
+    /// tab was chosen becomes the active one, and closed panes are let go. Tracked, and returns
+    /// what to follow the next change from.
+    pub fn follow_dock(self, before: Option<&DockShown>) -> DockShown {
+        let now = DockShown::of(self.dock);
+        if let Some(chosen) = before.and_then(|before| chosen_pane(before, &now, self.active.get_untracked())) {
+            self.activate(chosen);
+        }
+        self.release_closed();
+
+        now
+    }
+
+    /// Lets go of the panes whose tabs have left the dock, which stops their loads and releases
+    /// their meshes. With none left an empty pane takes their place, since a viewer with no
     /// viewport would draw nothing.
-    pub fn close_pane(self, id: PaneId) {
-        let Some(ix) = self.panes.with_untracked(|panes| panes.iter().position(|pane| pane.id == id)) else { return };
-        let len = self.panes.with_untracked(Vec::len);
-        let closed = if len > 1 {
-            let mut closed = None;
-            self.panes.update(|panes| closed = Some(panes.remove(ix)));
-            if self.active.get_untracked() == id {
-                let next = self.panes.with_untracked(|panes| panes[ix.min(panes.len() - 1)].id);
-                self.active.set(next);
-            }
-            closed
-        } else {
-            let fresh = self.fresh_pane();
-            let mut closed = None;
-            self.active.set(fresh.id);
-            self.panes.update(|panes| closed = Some(std::mem::replace(&mut panes[0], fresh)));
-            self.ship_loaded.set(false);
-            closed
-        };
-        if let Some(closed) = closed {
-            closed.owner.cleanup();
+    fn release_closed(self) {
+        let docked: Vec<PaneId> =
+            self.dock.panels_untracked().iter().filter_map(|entry| PaneId::from_panel(&entry.id)).collect();
+        if self.panes.with_untracked(|panes| panes.iter().all(|pane| docked.contains(&pane.id))) {
+            return;
         }
-        // A replay followed in the closed pane has nowhere left to show its moves.
-        if self.following.get_value().is_some_and(|following| following.pane == id) {
-            self.following.set_value(None);
-        }
-        self.pending_hits.update_value(|pending| {
-            if pending.as_ref().is_some_and(|held| held.load.pane == id) {
-                *pending = None;
-            }
+
+        // Made before the closed panes go, so the workspace never holds none.
+        let fresh = docked.is_empty().then(|| self.fresh_pane());
+        let mut closed = Vec::new();
+        self.panes.update(|panes| {
+            let (kept, gone) = std::mem::take(panes).into_iter().partition(|pane| docked.contains(&pane.id));
+            *panes = kept;
+            panes.extend(fresh.clone());
+            closed = gone;
         });
+        for pane in closed {
+            pane.owner.cleanup();
+            // A replay followed in the closed pane has nowhere left to show its moves.
+            if self.following.get_value().is_some_and(|following| following.pane == pane.id) {
+                self.following.set_value(None);
+            }
+            self.pending_hits.update_value(|pending| {
+                if pending.as_ref().is_some_and(|held| held.load.pane == pane.id) {
+                    *pending = None;
+                }
+            });
+        }
+
+        match fresh {
+            Some(fresh) => {
+                self.active.set(fresh.id);
+                self.ship_loaded.set(false);
+                self.dock_pane(fresh.id, DockTarget::Region(DockRegion::Center));
+            }
+            None => {
+                if !docked.contains(&self.active.get_untracked())
+                    && let Some(first) = docked.first()
+                {
+                    self.active.set(*first);
+                }
+            }
+        }
         self.push_cast_ship();
     }
 
-    /// Adds a comparison pane copying the active one, or opening `ship` when the compare was asked
-    /// from a ship's own row. The new pane becomes the active one.
+    /// Adds a comparison pane in a split beside the active one, copying it, or opening `ship` when
+    /// the compare was asked from a ship's own row. The new pane becomes the active one.
     pub fn compare(self, ship: Option<(String, String)>) {
+        self.add_pane(PanePlace::Split, ship);
+    }
+
+    /// Adds a pane as another tab of the active pane's group, opening `ship` in it. The new pane
+    /// becomes the active one.
+    pub fn open_in_new_tab(self, param_index: String, display_name: String) {
+        self.add_pane(PanePlace::Tab, Some((param_index, display_name)));
+    }
+
+    fn add_pane(self, place: PanePlace, ship: Option<(String, String)>) {
         let source = self.active_untracked();
         let fresh = self.fresh_pane();
         if let Some(armor) = source.shown() {
@@ -356,8 +488,15 @@ impl ArmorWorkspace {
                 viewport.apply_synced(&synced);
             }
         }
+        let target = match self.dock.group_of(&self.active.get_untracked().panel_id()) {
+            Some(group) => match place {
+                PanePlace::Split => DockTarget::Beside { group, edge: self.split.get_untracked().edge() },
+                PanePlace::Tab => DockTarget::Group(group),
+            },
+            None => DockTarget::Region(DockRegion::Center),
+        };
         let id = fresh.id;
-        self.panes.update(|panes| panes.push(fresh));
+        self.place_pane(fresh, target);
         self.active.set(id);
 
         if let Some((param_index, display_name)) = ship {
@@ -870,7 +1009,7 @@ impl ArmorWorkspace {
         viewport.follow_hits(hits);
     }
 
-    fn pane_untracked(self, id: PaneId) -> Option<ArmorViewportState> {
+    pub(super) fn pane_untracked(self, id: PaneId) -> Option<ArmorViewportState> {
         self.panes.with_untracked(|panes| panes.iter().find(|pane| pane.id == id).map(|pane| pane.viewport))
     }
 
@@ -903,6 +1042,25 @@ impl ArmorWorkspace {
         let outcome = outcome.map_err(|_| ProblemReason::ShipUnreadable).and_then(drawable_scene);
         self.land_ship(started, target, bundle, "PASB028".to_owned(), "Iowa".to_owned(), outcome);
     }
+}
+
+/// The pane a change to the dock from `before` to `now` makes active: one whose tab was chosen in
+/// its group, or that was moved into a group, new or not, and shown there. A pane shown because the
+/// tab before it closed only takes over from the active pane. A new group showing a new pane is
+/// ignored, since the workspace activates the panes it places.
+fn chosen_pane(before: &DockShown, now: &DockShown, active: PaneId) -> Option<PaneId> {
+    now.shown.iter().find_map(|(group, &showing)| {
+        let Some(&was) = before.shown.get(group) else {
+            return before.groups.contains_key(&showing).then_some(showing);
+        };
+        if was == showing {
+            return None;
+        }
+        let switched = now.groups.get(&was) == Some(group);
+        let replaced_active = was == active && !now.groups.contains_key(&was);
+
+        (switched || replaced_active).then_some(showing)
+    })
 }
 
 fn pane_of(panes: &[Pane], id: PaneId) -> ArmorViewportState {
@@ -938,11 +1096,94 @@ fn take_pending_hits(pending: &mut Option<PendingHits>, param_index: &str, load:
 
 #[cfg(test)]
 mod tests {
+    use landaire_ui::DockRegion;
+    use landaire_ui::DockState;
+    use landaire_ui::DockTarget;
+    use landaire_ui::Edge;
+    use landaire_ui::GroupId;
+    use landaire_ui::PanelEntry;
+    use landaire_ui::PanelFactory;
+    use landaire_ui::PanelKind;
+    use landaire_ui::PanelRegistry;
+    use zgui::reactive::Owner;
+    use zgui::view::AnyView;
+
+    use super::DockShown;
     use super::LoadGeneration;
     use super::PaneId;
     use super::PendingHits;
     use super::StartedLoad;
+    use super::chosen_pane;
     use super::take_pending_hits;
+
+    const KIND: &str = "pane";
+
+    fn dock() -> DockState {
+        let mut registry = PanelRegistry::new();
+        registry.register(PanelKind::new(KIND), PanelFactory::new(|_| String::new(), |_| AnyView::new(())));
+
+        DockState::new(registry)
+    }
+
+    fn add(dock: DockState, target: DockTarget, pane: u64) -> GroupId {
+        dock.add_panel(target, PanelEntry::new(PaneId(pane).panel_id(), PanelKind::new(KIND))).expect("a pane docks")
+    }
+
+    #[test]
+    fn a_pane_names_its_panel() {
+        assert_eq!(PaneId::from_panel(&PaneId(12).panel_id()), Some(PaneId(12)));
+        assert_eq!(PaneId::from_panel(&landaire_ui::PanelId::new("armor-pane-x")), None);
+        assert_eq!(PaneId::from_panel(&landaire_ui::PanelId::new("chart-3")), None);
+    }
+
+    #[test]
+    fn a_tab_chosen_in_its_group_becomes_active() {
+        Owner::new().with(|| {
+            let dock = dock();
+            let left = add(dock, DockTarget::Region(DockRegion::Center), 0);
+            add(dock, DockTarget::Group(left), 1);
+            add(dock, DockTarget::Beside { group: left, edge: Edge::Right }, 2);
+            let before = DockShown::of(dock);
+
+            dock.activate(&PaneId(0).panel_id()).expect("the tab is chosen");
+
+            assert_eq!(chosen_pane(&before, &DockShown::of(dock), PaneId(2)), Some(PaneId(0)));
+        });
+    }
+
+    #[test]
+    fn a_closed_tab_hands_over_only_when_it_was_active() {
+        Owner::new().with(|| {
+            let dock = dock();
+            let left = add(dock, DockTarget::Region(DockRegion::Center), 0);
+            add(dock, DockTarget::Group(left), 1);
+            add(dock, DockTarget::Beside { group: left, edge: Edge::Right }, 2);
+            let before = DockShown::of(dock);
+
+            dock.close(&PaneId(1).panel_id()).expect("the tab closes");
+            let now = DockShown::of(dock);
+
+            assert_eq!(chosen_pane(&before, &now, PaneId(2)), None, "the active pane is elsewhere");
+            assert_eq!(chosen_pane(&before, &now, PaneId(1)), Some(PaneId(0)), "its neighbour takes over");
+        });
+    }
+
+    #[test]
+    fn a_moved_tab_is_active_where_it_lands() {
+        Owner::new().with(|| {
+            let dock = dock();
+            let left = add(dock, DockTarget::Region(DockRegion::Center), 0);
+            add(dock, DockTarget::Group(left), 1);
+            let right = add(dock, DockTarget::Beside { group: left, edge: Edge::Right }, 2);
+            let before = DockShown::of(dock);
+
+            dock.remove(&PaneId(1).panel_id()).expect("the tab leaves its group");
+            add(dock, DockTarget::Group(right), 1);
+
+            assert_eq!(chosen_pane(&before, &DockShown::of(dock), PaneId(1)), Some(PaneId(1)));
+            assert_eq!(chosen_pane(&before, &DockShown::of(dock), PaneId(2)), Some(PaneId(1)));
+        });
+    }
 
     #[test]
     fn held_hits_go_only_to_the_load_they_were_held_for() {

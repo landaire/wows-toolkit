@@ -1,10 +1,10 @@
 //! The Armor Viewer tab: the ships list beside the viewport dock, with the options rail on the
 //! right and the thickness legend floating over the viewports.
 //!
-//! [`workspace::ArmorWorkspace`] holds the panes and the loads that fill them. The ship data comes
-//! from [`library::ArmorLibrary`], which the shell holds so the palette lists the ships from any
-//! tab. A ship opened from the palette or from a replay viewport is opened in the active pane once
-//! the ship data has loaded.
+//! [`workspace::ArmorWorkspace`] holds the panes, each a tab of the dock, and the loads that fill
+//! them. The ship data comes from [`library::ArmorLibrary`], which the shell holds so the palette
+//! lists the ships from any tab. A ship opened from the palette or from a replay viewport is opened
+//! in the active pane once the ship data has loaded.
 
 mod dock;
 pub mod library;
@@ -100,6 +100,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
     adopt_defaults(workspace);
     take_requests(shell, workspace);
     follow_panes(workspace);
+    follow_dock(workspace);
     publish_chrome(shell, workspace);
     follow_xray_key(shell, workspace);
 
@@ -256,6 +257,12 @@ fn follow_panes(workspace: ArmorWorkspace) {
     });
 }
 
+/// Makes a pane whose tab is chosen the active one, and lets go of panes whose tabs close.
+fn follow_dock(workspace: ArmorWorkspace) {
+    let following = RenderEffect::new(move |before| workspace.follow_dock(before.as_ref()));
+    on_cleanup_local(move || drop(following));
+}
+
 /// Puts the ships list and options rail toggles on the status bar, and names what a held key
 /// changes: Ctrl makes a zone's checkbox show that zone alone, and Shift makes a click on the hull
 /// cast a shell. Neither does anything before a ship is shown.
@@ -312,6 +319,9 @@ fn on_sidebar_event(shell: Shell, workspace: ArmorWorkspace, event: SidebarEvent
         SidebarEvent::OpenBuilding(building) => workspace.open_building(building),
         SidebarEvent::CompareSplit(ship) => {
             workspace.compare(ship.map(|ship| (ship.param_index.as_str().to_owned(), ship.display_name)));
+        }
+        SidebarEvent::OpenInNewTab(ship) => {
+            workspace.open_in_new_tab(ship.param_index.as_str().to_owned(), ship.display_name);
         }
         SidebarEvent::ExportShip(ship) => {
             let Some(bundle) = workspace.library.ready_untracked() else {

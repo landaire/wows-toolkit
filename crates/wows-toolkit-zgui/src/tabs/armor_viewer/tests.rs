@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
+use landaire_ui::DockTarget;
+use landaire_ui::Edge;
 use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
@@ -53,6 +55,7 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Role;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::open_shell;
@@ -66,6 +69,7 @@ use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::armor_viewer::options::OptionSectionsOpen;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
+use crate::tabs::armor_viewer::workspace::PaneId;
 
 /// The shell, open on the Armor Viewer tab.
 struct ArmorWindow {
@@ -120,6 +124,55 @@ impl ArmorWindow {
         self.window.texts_by_class(MARK_CLASS)
     }
 
+    /// Where pane `id` is drawn, as its left and top edges. `None` while it is not on screen.
+    fn drawn_at(&self, id: PaneId) -> Option<(f32, f32)> {
+        let element = self.window.by_attribute("data-panel", id.panel_id().as_str())?;
+        let bounds = self.window.bounds(element)?;
+
+        (bounds.size.width.0 > 0.0 && bounds.size.height.0 > 0.0).then_some((bounds.origin.x.0, bounds.origin.y.0))
+    }
+
+    /// Presses the close button of the tab named `name` that sits furthest right.
+    fn close_rightmost(&mut self, name: &str) {
+        let label = format!("Close {name}");
+        let closes: Vec<_> = self
+            .window
+            .by_role(Role::Button)
+            .into_iter()
+            .filter(|button| self.window.a11y(*button).and_then(|state| state.label).as_deref() == Some(label.as_str()))
+            .collect();
+        let rightmost = closes
+            .into_iter()
+            .filter_map(|button| Some((button, self.window.bounds(button)?.origin.x.0)))
+            .max_by(|(_, left), (_, right)| left.total_cmp(right))
+            .map(|(button, _)| button)
+            .unwrap_or_else(|| panic!("a tab named {name} has a close button"));
+        self.window.click(rightmost).expect("the close button can be pressed");
+        self.settle();
+    }
+
+    /// The tab named `name`.
+    fn tab(&mut self, name: &str) -> landaire_ui::test_support::Element {
+        self.window.by_role_and_label(Role::Tab, name).unwrap_or_else(|| panic!("a tab is named {name}"))
+    }
+
+    /// Lets loads run until `done`.
+    fn settle_until(&mut self, done: impl Fn() -> bool) {
+        for _ in 0..100 {
+            if done() {
+                return;
+            }
+            settle_in_real_time(&mut self.window);
+        }
+        assert!(done(), "the loads settle");
+    }
+
+    /// Closes pane `id`'s tab, as its close button does.
+    fn close_tab(&mut self, id: PaneId) {
+        self.workspace.dock.close(&id.panel_id()).expect("the pane's tab closes");
+        self.settle();
+    }
+
     /// Hands the active pane `scene`, as a finished load does, and leaves only `sections` open.
     fn install(&mut self, scene: LoadedShipArmor, sections: &[OptionSection]) {
         let workspace = self.workspace;
@@ -138,6 +191,10 @@ impl ArmorWindow {
         }
         self.settle();
     }
+}
+
+fn group_of(workspace: ArmorWorkspace, id: PaneId) -> Option<landaire_ui::GroupId> {
+    workspace.dock.group_of(&id.panel_id())
 }
 
 fn turret() -> ModelPath {
@@ -250,10 +307,10 @@ fn the_status_bar_toggles_the_ships_list_and_the_options_rail() {
     assert!(armor.workspace.sidebar_open.get_untracked());
 }
 
-/// A comparison pane copies the active one and becomes active; closing it leaves the first, and
-/// closing the last pane empties it rather than removing it.
+/// Compare opens a copy of the active pane in a split of its own beside it, which becomes the
+/// active pane; with the panes stacked the split opens below. A press in a pane makes it active.
 #[test]
-fn a_compare_pane_comes_and_goes_and_the_last_is_emptied() {
+fn compare_opens_a_split_beside_the_active_pane() {
     let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
     let workspace = armor.workspace;
     let first = workspace.active_id();
@@ -261,19 +318,123 @@ fn a_compare_pane_comes_and_goes_and_the_last_is_emptied() {
         .active_untracked()
         .show_armor(Arc::new(fixtures::model_scene(turret(), Vec::new())), workspace.opening_layer.get_untracked());
 
-    workspace.compare(None);
-    armor.settle();
-    assert_eq!(workspace.panes().len(), 2);
-    assert_ne!(workspace.active_id(), first, "the new pane is the active one");
+    armor.click("armor-sidebar-compare");
+    let compared = workspace.active_id();
+    assert_ne!(compared, first, "the new pane is the active one");
     assert!(workspace.active_untracked().shown().is_some(), "and shows what the first one did");
+    assert_ne!(group_of(workspace, compared), group_of(workspace, first), "in a group of its own");
+    let (left, right) = (armor.drawn_at(first).expect("drawn"), armor.drawn_at(compared).expect("drawn"));
+    assert!(left.1 == right.1 && left.0 < right.0, "side by side: {left:?} {right:?}");
     assert!(armor.shown("armor-options-target"), "the rail names the pane it acts on");
 
-    armor.click("armor-viewport-pane-close");
-    assert_eq!(workspace.panes().len(), 1);
+    let mut common = workspace.common();
+    common.stack_panes = true;
+    workspace.set_common(common);
+    armor.click("armor-sidebar-compare");
+    let stacked = workspace.active_id();
+    let below = armor.drawn_at(stacked).expect("drawn");
+    let above = armor.drawn_at(compared).expect("drawn");
+    assert!(below.0 == above.0 && below.1 > above.1, "below the active pane: {above:?} {below:?}");
 
-    armor.click("armor-viewport-pane-close");
-    assert_eq!(workspace.panes().len(), 1, "the last pane is kept");
-    assert!(workspace.active_untracked().shown().is_none(), "and emptied");
+    let pane = armor.window.by_attribute("data-panel", first.panel_id().as_str()).expect("the first pane is shown");
+    armor.window.click(pane).expect("the pane can be pressed");
+    armor.settle();
+    assert_eq!(workspace.active_id(), first, "a press in a pane makes it active");
+}
+
+/// Each pane's tab closes it, by its close button or a middle click, which lets its viewport go;
+/// closing the last leaves an empty pane in its place.
+#[test]
+fn a_pane_tab_closes_by_its_button_or_a_middle_click() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    let first = workspace.active_id();
+    let first_viewport = workspace.active_untracked();
+    let scene = fixtures::model_scene(turret(), Vec::new());
+    let name = scene.display_name.clone();
+    first_viewport.show_armor(Arc::new(scene), workspace.opening_layer.get_untracked());
+    workspace.compare(None);
+    armor.settle();
+    let compared_viewport = workspace.active_untracked();
+    assert_eq!(workspace.panes().len(), 2);
+
+    armor.close_rightmost(&name);
+    assert_eq!(workspace.panes().len(), 1);
+    assert_eq!(workspace.active_id(), first, "the pane left is the active one");
+    assert!(compared_viewport.read_untracked(|_| ()).is_none(), "the closed pane's viewport is let go");
+
+    let tab = armor.tab(&name);
+    armor.window.middle_click(tab).expect("the tab takes a middle click");
+    armor.settle();
+    assert_eq!(workspace.panes().len(), 1, "an empty pane takes the last one's place");
+    assert_ne!(workspace.active_id(), first);
+    assert!(workspace.active_untracked().shown().is_none());
+    assert!(first_viewport.read_untracked(|_| ()).is_none(), "the last pane's viewport is let go too");
+    armor.tab(&rust_i18n::t!("ui.armor.empty"));
+}
+
+/// A ship opened in a new tab joins the active pane's group and becomes the active pane. Choosing
+/// the other tab makes its pane the active one, which is where the next ship opens.
+#[test]
+fn a_new_tab_joins_the_active_group_and_a_chosen_tab_takes_the_next_ship() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    workspace.library.adopt_for_test(Arc::new(bundle()), None);
+    let first = workspace.active_id();
+    let first_viewport = workspace.active_untracked();
+    let scene = fixtures::model_scene(turret(), Vec::new());
+    let name = scene.display_name.clone();
+    first_viewport.show_armor(Arc::new(scene), workspace.opening_layer.get_untracked());
+
+    workspace.open_in_new_tab("PASB028".to_owned(), "Iowa".to_owned());
+    armor.settle();
+    let tabbed = workspace.active_id();
+    let tabbed_viewport = workspace.active_untracked();
+    assert_ne!(tabbed, first, "the new pane is the active one");
+    assert_eq!(group_of(workspace, tabbed), group_of(workspace, first), "in the active pane's group");
+    assert!(armor.drawn_at(tabbed).is_some() && armor.drawn_at(first).is_none(), "drawn in place of the first");
+    // The store holds no ships, so the load fails in the new pane.
+    armor.settle_until(|| tabbed_viewport.scene_problem().is_some());
+
+    let tab = armor.tab(&name);
+    armor.window.click(tab).expect("the tab can be chosen");
+    armor.settle();
+    assert_eq!(workspace.active_id(), first, "choosing its tab makes the pane active");
+    assert!(armor.drawn_at(first).is_some());
+
+    workspace.open_ship("PJSB018".to_owned(), "Yamato".to_owned());
+    armor.settle_until(|| first_viewport.scene_problem().is_some());
+    let subject = |viewport: crate::tabs::armor_viewer::viewport::ArmorViewportState| {
+        viewport.scene_problem().map(|problem| problem.subject)
+    };
+    assert_eq!(subject(first_viewport), Some("Yamato".into()), "the ship opens in the chosen pane");
+    assert_eq!(subject(tabbed_viewport), Some("Iowa".into()), "and not in the other");
+}
+
+/// A pane whose tab is dragged into a split of its own is shown there and becomes the active pane,
+/// keeping its viewport.
+#[test]
+fn a_pane_dragged_into_a_new_split_becomes_active() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    workspace.library.adopt_for_test(Arc::new(bundle()), None);
+    let first = workspace.active_id();
+    let first_viewport = workspace.active_untracked();
+    first_viewport
+        .show_armor(Arc::new(fixtures::model_scene(turret(), Vec::new())), workspace.opening_layer.get_untracked());
+    workspace.open_in_new_tab("PASB028".to_owned(), "Iowa".to_owned());
+    armor.settle();
+    let tabbed = workspace.active_id();
+    let group = group_of(workspace, first).expect("the first pane is docked");
+
+    let target = DockTarget::Beside { group, edge: Edge::Right };
+    workspace.dock.move_panel(&first.panel_id(), target).expect("the pane moves");
+    armor.settle();
+
+    assert_eq!(workspace.active_id(), first, "the moved pane is the active one");
+    assert_ne!(group_of(workspace, first), group_of(workspace, tabbed), "in a group of its own");
+    assert!(armor.drawn_at(first).is_some() && armor.drawn_at(tabbed).is_some(), "both are drawn");
+    assert!(first_viewport.read_untracked(|_| ()).is_some(), "the moved pane keeps its viewport");
 }
 
 /// A ship that cannot be read says so in its pane, and the model shown before is not passed off as
@@ -411,7 +572,7 @@ fn playback_moving_during_a_load_is_shown_when_the_ship_lands() {
 /// none once that pane is closed.
 #[test]
 fn playback_moves_the_hits_of_the_pane_the_replay_was_shown_in() {
-    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
     let workspace = armor.workspace;
     let source = workspace.library.new_source();
     let shown_in = workspace.active_untracked();
@@ -431,7 +592,7 @@ fn playback_moves_the_hits_of_the_pane_the_replay_was_shown_in() {
     assert_eq!(shown_in.hits_drawn(), 2, "the pane the replay was shown in follows it");
     assert_eq!(compared.hits_drawn(), 0, "the active pane is left alone");
 
-    workspace.close_pane(first);
+    armor.close_tab(first);
     workspace.follow_hits(source, followed(&[1.0, 2.0, 3.0], 70.0));
     assert_eq!(compared.hits_drawn(), 0, "with its pane closed, the replay moves nothing");
 }
@@ -520,8 +681,7 @@ fn closing_a_pane_cancels_its_load() {
     let closing = workspace.active_id();
     let opening = workspace.active_untracked().begin_load("Iowa".to_string());
 
-    workspace.close_pane(closing);
-    armor.settle();
+    armor.close_tab(closing);
 
     assert!(opening.cancel.is_cancelled());
 }
@@ -853,8 +1013,9 @@ fn the_rail_tools_fill_two_even_columns() {
     assert!((add_ship.size.width.0 - group.size.width.0).abs() < 1.0, "{add_ship:?} spans {group:?}");
 }
 
-/// The tab with two real ships compared side by side, drawn in both appearances: the ships list,
-/// both panes, the options rail and the legend. Needs a game install named by `WT_WOWS_DIR`.
+/// The tab with two real ships compared side by side, then a third opened as a tab beside the
+/// second, drawn in both appearances: the ships list, the panes, the options rail and the legend.
+/// Needs a game install named by `WT_WOWS_DIR`.
 #[test]
 #[ignore = "needs a game install in WT_WOWS_DIR and draws on the graphics device"]
 fn the_tab_renders_a_real_ship_in_dark_and_light() {
@@ -893,6 +1054,13 @@ fn the_tab_renders_a_real_ship_in_dark_and_light() {
         settle_in_real_time(&mut armor.window);
         assert!(armor.shown("armor-sidebar-tree"), "the ships list is loaded");
         let path = save_shot(&mut armor.window, name);
+        println!("{}", path.display());
+
+        let (param_index, display_name) = ship_named("Iowa");
+        workspace.open_in_new_tab(param_index, display_name);
+        wait_until_shown(&mut armor, "Iowa");
+        settle_in_real_time(&mut armor.window);
+        let path = save_shot(&mut armor.window, &format!("{name}-tabs"));
         println!("{}", path.display());
     }
 }
