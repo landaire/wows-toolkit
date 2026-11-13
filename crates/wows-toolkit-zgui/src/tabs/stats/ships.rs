@@ -130,6 +130,7 @@ const CSS: &str = css!(
         gap: 4px;
         min-width: 0;
         padding: 2px 0;
+        cursor: pointer;
     }
     .wt-stats-ship__flag {
         flex: none;
@@ -562,8 +563,15 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
     let losses = format!("{}L", performance.losses());
     let header = row.header.clone();
 
+    // The whole header opens and closes the ship, as one press. A double click is two presses,
+    // so it is kept from the grid, which would toggle the row a third time.
     AnyView::new(view! {
-        row(class = "wt-stats-ship") {
+        row(
+            class = "wt-stats-ship",
+            attr:data-testid = format!("ship-header-{ship}"),
+            on:click = move |_| cx.toggle(ship),
+            on:double_click = move |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation()
+        ) {
             Button(
                 variant = ButtonVariant::Ghost,
                 size = ButtonSize::IconXs,
@@ -573,8 +581,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
                 on:click = move |ev: &mut EventCx<'_, events::Click>| {
                     ev.stop_propagation();
                     cx.toggle(ship);
-                },
-                on:double_click = move |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation()
+                }
             ) {
                 box(class = "wt-stats-chevron", attr:data-open = open) {
                     Icon(icon = CHEVRON_RIGHT, size = IconSize::Sm)

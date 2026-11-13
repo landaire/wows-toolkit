@@ -267,6 +267,28 @@ fn clicking_a_toggle_opens_only_that_ship() {
     assert_eq!(expanded(&mut window, SHIMAKAZE), Some(false), "clicking again closes it");
 }
 
+/// A press anywhere on a ship's header opens or closes it, as the chevron does; a double click
+/// is two presses and leaves it as it was.
+#[test]
+fn the_whole_ship_header_opens_the_ship() {
+    let Opened { mut window, .. } = open_ships(true);
+
+    let header = window.by_test_id(&format!("ship-header-{SHIMAKAZE}")).expect("the ship is listed");
+    window.click(header).expect("the header is drawn");
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(true), "a press on the header opens the ship");
+
+    let header = window.by_test_id(&format!("ship-header-{SHIMAKAZE}")).expect("the ship is listed");
+    window.double_click(header).expect("the header is drawn");
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(true), "a double click leaves it open");
+
+    let header = window.by_test_id(&format!("ship-header-{SHIMAKAZE}")).expect("the ship is listed");
+    window.click(header).expect("the header is drawn");
+    settle(&mut window);
+    assert_eq!(expanded(&mut window, SHIMAKAZE), Some(false), "another press closes it");
+}
+
 #[test]
 fn a_ship_is_cleared_on_the_second_press_or_the_first_with_ctrl() {
     let Opened { mut window, cleared, .. } = open_ships(true);
