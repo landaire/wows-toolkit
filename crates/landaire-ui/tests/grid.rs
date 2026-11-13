@@ -671,6 +671,189 @@ fn a_fitted_column_widens_to_an_open_part_and_narrows_after_it_closes() {
     assert_eq!(width(&window, size), narrow, "the column narrowed back");
 }
 
+/// A part in the size column for each row, 200px wide for row 0 and 300px for row 1.
+fn size_parts() -> RowMode<Item> {
+    RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+        let width = 200 + 100 * item.id;
+        (column.as_str() == "size").then(|| {
+            view! { box(attr:data-testid = format!("part-{}", item.id), style = format!("height: 20px; width: {width}px")) {} }
+        })
+    })
+}
+
+/// Opens or closes row `id` and lets the reveal finish.
+fn toggle(window: &mut HeadlessWindow, id: u32) {
+    let opened = cell(window, &format!("name-{id}"));
+    window.double_click(opened).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+}
+
+fn size_width(window: &mut HeadlessWindow) -> f32 {
+    let size = header(window, "Size");
+    width(window, size)
+}
+
+/// Drags the size column's grip `by` and gives the width the drag stored.
+fn drag_size_grip(window: &mut HeadlessWindow, handles: &Handles, by: f32) -> f32 {
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Size").expect("the grip is announced");
+    let from = window.bounds(grip).expect("the grip has a box");
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 + by), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+
+    let layout = handles.layout.get().expect("the layout").get_untracked();
+    layout.width(&ColumnId::from("size")).expect("the drag stored a width").0
+}
+
+#[test]
+fn a_set_column_fits_its_widest_open_part_until_the_last_closes() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open(items(3), size_parts, Rc::clone(&handles));
+    assert_eq!(size_width(&mut window), 80.0);
+
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), 200.0, "the column widened to the open part");
+    toggle(&mut window, 1);
+    assert_eq!(size_width(&mut window), 300.0, "both open, it fits the wider");
+    assert_eq!(width(&window, cell(&window, "part-1")), 300.0, "the wider part shows whole");
+
+    let wider = cell(&window, "name-1");
+    window.double_click(wider).expect("the cell has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(size_width(&mut window), 300.0, "a closing part keeps its width until it has closed");
+    window.advance(Duration::from_millis(400));
+    assert_eq!(size_width(&mut window), 200.0, "then the column fits the part still open");
+
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), 80.0, "with none open, the column returns to its width");
+    let layout = handles.layout.get().expect("the layout").get_untracked();
+    assert_eq!(layout.width(&ColumnId::from("size")), None, "which the parts never stored");
+}
+
+#[test]
+fn a_column_resized_narrower_than_its_cells_widens_only_to_its_part() {
+    let handles = Rc::new(Handles::default());
+    let mode = || {
+        RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+            (column.as_str() == "name").then(|| {
+                view! { box(attr:data-testid = format!("part-{}", item.id), style = "height: 20px; width: 60px") {} }
+            })
+        })
+    };
+    let mut window = open_with(items(3), mode, Rc::clone(&handles), MotionPreference::Full, |mut layout| {
+        layout.set_width(&ColumnId::from("name"), Some(ColumnWidth(40.0)));
+        layout
+    });
+    let name = header(&mut window, "Name");
+    assert_eq!(width(&window, name), 40.0);
+
+    toggle(&mut window, 0);
+    let name = header(&mut window, "Name");
+    assert_eq!(width(&window, name), 60.0, "the part, not the wider names, sets the width");
+}
+
+#[test]
+fn a_resize_over_a_widened_column_holds_until_its_parts_close() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open(items(3), size_parts, Rc::clone(&handles));
+    toggle(&mut window, 1);
+    assert_eq!(size_width(&mut window), 300.0);
+
+    let set = drag_size_grip(&mut window, &handles, -100.0);
+    assert!((set - 200.0).abs() <= 4.0, "the drag moved from the width drawn, to {set}");
+    assert_eq!(size_width(&mut window), set, "and the column shows the width dragged to");
+    assert_eq!(width(&window, cell(&window, "part-1")), 300.0, "the part keeps its width and is cut off");
+
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), set, "another part opening does not undo the drag");
+
+    toggle(&mut window, 0);
+    toggle(&mut window, 1);
+    assert_eq!(size_width(&mut window), set, "closed, the column keeps the width dragged to");
+
+    toggle(&mut window, 1);
+    assert_eq!(size_width(&mut window), 300.0, "a part opened later widens it again");
+}
+
+#[test]
+fn a_resize_with_no_part_open_still_lets_a_part_widen_the_column() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open(items(3), size_parts, Rc::clone(&handles));
+    let set = drag_size_grip(&mut window, &handles, 20.0);
+    assert_eq!(size_width(&mut window), set);
+
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), 200.0);
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), set);
+}
+
+#[test]
+fn resetting_a_held_column_fits_it_to_its_parts_again() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open(items(3), size_parts, Rc::clone(&handles));
+    toggle(&mut window, 1);
+    let set = drag_size_grip(&mut window, &handles, -100.0);
+    assert_eq!(size_width(&mut window), set);
+
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Size").expect("the grip is announced");
+    window.double_click(grip).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(size_width(&mut window), 300.0);
+}
+
+#[test]
+fn a_pinned_column_widens_to_its_part_no_further_than_the_pinned_share_of_the_view() {
+    let handles = Rc::new(Handles::default());
+    let mut window = open_with(items(3), size_parts, Rc::clone(&handles), MotionPreference::Full, |mut layout| {
+        layout.pin(&ColumnId::from("size"));
+        layout
+    });
+    toggle(&mut window, 0);
+    assert_eq!(size_width(&mut window), 200.0, "a part that fits widens the column to it");
+
+    toggle(&mut window, 1);
+    // The pinned columns may take 60% of the 420px view, 252px.
+    let capped = size_width(&mut window);
+    assert!(capped > 240.0 && capped < 252.5, "the pinned column is {capped} wide");
+    assert_eq!(width(&window, cell(&window, "part-1")), 300.0, "and its wider part is cut off");
+}
+
+#[test]
+fn two_pinned_columns_widen_to_their_parts_within_the_pinned_share_together() {
+    let handles = Rc::new(Handles::default());
+    let mode = || {
+        RowMode::with_column_detail(|_: &Item, column: &ColumnId| {
+            matches!(column.as_str(), "name" | "size").then(|| view! { box(style = "height: 20px; width: 200px") {} })
+        })
+    };
+    let mut window = open_with(items(3), mode, Rc::clone(&handles), MotionPreference::Full, |mut layout| {
+        layout.pin(&ColumnId::from("name"));
+        layout.pin(&ColumnId::from("size"));
+        layout
+    });
+    toggle(&mut window, 0);
+
+    // The pinned columns may take 60% of the 420px view, 252px. The first gives way first.
+    let name = header(&mut window, "Name");
+    let name = width(&window, name);
+    let size = size_width(&mut window);
+    assert_eq!(name, 100.0, "the first pinned column keeps its width");
+    assert!(size > 140.0 && name + size < 252.5, "the pinned columns are {name} and {size} wide");
+
+    // Narrowing the first while the parts show leaves the other the room it gives up.
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Name").expect("the grip is announced");
+    let from = window.bounds(grip).expect("the grip has a box");
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 - 40.0), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+    let name = header(&mut window, "Name");
+    let name = width(&window, name);
+    let size = size_width(&mut window);
+    assert!(name < 100.0, "the first pinned column is {name} wide");
+    assert!(size > 190.0 && name + size < 252.5, "the pinned columns are {name} and {size} wide");
+}
+
 #[test]
 fn a_row_mark_runs_down_the_leading_column_and_its_detail() {
     let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
@@ -918,6 +1101,55 @@ fn a_measured_row_counts_its_open_detail_as_part_of_its_height() {
     window.advance(Duration::from_millis(100));
     assert!(window.by_test_id("detail-0").is_some(), "the detail is open");
     assert_eq!(top(&window, cell(&window, "name-5")), held, "a row growing above the view moves nothing in it");
+}
+
+/// A measured grid whose rows open a part in the size column, as `size_parts` draws them.
+fn measured_size_parts() -> RowMode<Item> {
+    RowMode::Measured {
+        estimate: RowHeight(24.0),
+        overscan: 4,
+        detail: Some(landaire_ui::RowDetail::Columns(Rc::new(|item: &Item, column: &ColumnId| {
+            let width = 200 + 100 * item.id;
+            (column.as_str() == "size")
+                .then(|| AnyView::new(view! { box(style = format!("height: 20px; width: {width}px")) {} }))
+        }))),
+    }
+}
+
+#[test]
+fn under_reduced_motion_a_column_narrows_as_its_part_closes() {
+    let (mut window, measured) = open_measured(3, columns, measured_size_parts);
+    window.advance(Duration::from_millis(100));
+    measured.expanded.set(HashSet::from([0]));
+    window.advance(Duration::from_millis(100));
+    assert_eq!(size_width(&mut window), 200.0);
+
+    measured.expanded.set(HashSet::new());
+    window.advance(Duration::from_millis(20));
+    assert_eq!(size_width(&mut window), 80.0);
+}
+
+#[test]
+fn a_resize_over_an_open_part_holds_through_a_reorder() {
+    let (mut window, measured) = open_measured(3, columns, measured_size_parts);
+    window.advance(Duration::from_millis(100));
+    measured.expanded.set(HashSet::from([1]));
+    window.advance(Duration::from_millis(100));
+    assert_eq!(size_width(&mut window), 300.0);
+
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Size").expect("the grip is announced");
+    let from = window.bounds(grip).expect("the grip has a box");
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 - 100.0), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+    let set = size_width(&mut window);
+    assert!(set < 300.0);
+
+    let mut reversed = measured.rows.get_untracked();
+    reversed.reverse();
+    measured.rows.set(reversed);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(size_width(&mut window), set);
 }
 
 #[test]

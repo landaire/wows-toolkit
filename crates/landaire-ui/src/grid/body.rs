@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -50,6 +51,7 @@ use crate::grid::state::GridCx;
 use crate::grid::state::MenuTarget;
 use crate::grid::state::RowHover;
 use crate::grid::state::Step;
+use crate::motion::MotionPreference;
 use crate::motion::Movement;
 use crate::surface::RowIndex;
 
@@ -355,6 +357,7 @@ where
     let carried = id.clone();
     Attrs::new()
         .class_toggle(zgui::view::ClassName::new(class), true)
+        .attribute(AttrName::new("data-held"), cx.held(id))
         .attribute(AttrName::new("data-pinned"), move || {
             pins.with(|pins| pins.left_of(&pinned).is_some()).then(String::new)
         })
@@ -467,9 +470,11 @@ where
     let built = RwSignal::new_local(open.get_untracked());
     let closing: Rc<RefCell<Option<TimeoutHandle>>> = Rc::new(RefCell::new(None));
     let timers = cx.timers.clone();
+    let motion = cx.motion;
     let following = {
         let closing = Rc::clone(&closing);
         RenderEffect::new(move |_| {
+            let full = motion.get() == MotionPreference::Full;
             if open.get() {
                 closing.replace(None);
                 built.set(true);
@@ -479,12 +484,19 @@ where
                 return;
             }
 
-            match timers.as_ref() {
+            // Under reduced motion the close is not drawn, and the columns it widened narrow with
+            // it, a close already under way included.
+            match timers.as_ref().filter(|_| full) {
+                // The close under way runs on.
+                Some(_) if closing.borrow().is_some() => {}
                 Some(timers) => {
                     let handle = timers.set_timeout(CLOSE_AFTER, move || built.set(false));
                     closing.replace(Some(handle));
                 }
-                None => built.set(false),
+                None => {
+                    closing.replace(None);
+                    built.set(false);
+                }
             }
         })
     };
@@ -544,7 +556,7 @@ where
     let ids = cx.drawn_ids;
     view! {
         for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
-            {column_part(&cx, id, value, Rc::clone(&detail), parts, line)}
+            {column_part(Rc::clone(&cx), id, value, Rc::clone(&detail), parts, line)}
         }
         box(
             class = "lui-grid__detail-cell",
@@ -571,7 +583,7 @@ struct DetailLine {
 /// `id`'s part of an open row. Its content is laid out at its own width, so a part wider than its
 /// column is marked cut off.
 fn column_part<T, K>(
-    cx: &GridCx<T, K>,
+    cx: Rc<GridCx<T, K>>,
     id: ColumnId,
     value: RwSignal<Option<T>, LocalStorage>,
     detail: ColumnDetail<T>,
@@ -602,11 +614,30 @@ where
             }
         })
     };
+    // Whether the part has content, counted in its column while it does.
+    let shown = Rc::new(Cell::new(false));
+    let build = {
+        let cx = Rc::clone(&cx);
+        let id = id.clone();
+        let shown = Rc::clone(&shown);
+        move || {
+            let part = value.with(|row| row.as_ref().and_then(|row| detail(row, &id)));
+            if part.is_some() != shown.get() {
+                shown.set(part.is_some());
+                cx.note_part(&id, part.is_some());
+            }
+            part
+        }
+    };
     {
+        let cx = Rc::clone(&cx);
         let id = id.clone();
         on_cleanup_local(move || {
             drop(noting);
             parts.try_update(|parts| parts.remove(&id));
+            if shown.get() {
+                cx.note_part(&id, false);
+            }
         });
     }
 
@@ -616,10 +647,15 @@ where
         let room = room.get()?;
         (content.width.0 > room.width.0 + 0.5 * scale()).then(String::new)
     };
-    let own = placed(cx, &id, "lui-grid__detail-cell");
-    let shift = shift(cx, id.clone());
-    let mark = row_mark(cx, id.clone(), value);
+    let own = placed(&cx, &id, "lui-grid__detail-cell");
+    let shift = shift(&cx, id.clone());
+    let mark = row_mark(&cx, id.clone(), value);
     let open = line.open;
+    let rooms = cx.rooms;
+    let limit = {
+        let id = id.clone();
+        move || rooms.with(|rooms| rooms.get(&id).map(|room| format!("{room}px")))
+    };
 
     AnyView::new(view! {
         box(
@@ -628,12 +664,13 @@ where
             attr:data-state = move || line.state.get(),
             attr:data-cut = cut,
             var:--lui-grid-detail-height = move || line.height.get(),
+            var:--lui-grid-room = limit,
             a11y:hidden = move || !open.get(),
             {..own}
         ) {
             {mark}
             box(class = "lui-grid__detail-part", node_ref = inner) {
-                {move || value.with(|row| row.as_ref().and_then(|row| detail(row, &id)))}
+                {build}
             }
             if move || cut().is_some() {
                 box(class = "lui-grid__detail-fade", a11y:hidden = true) {}

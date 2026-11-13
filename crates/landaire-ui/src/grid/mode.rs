@@ -13,8 +13,11 @@ type ColumnDetail<T> = Rc<dyn Fn(&T, &ColumnId) -> Option<AnyView>>;
 pub enum RowDetail<T> {
     /// One region under the row, as wide as the view.
     Spanning(Rc<dyn Fn(&T) -> AnyView>),
-    /// A part under each column's own cell, laid out in that column's track, so a fitted column
-    /// widens to its part. `None` leaves the column's part empty.
+    /// A part under each column's own cell, laid out in that column's track. A column widens to its
+    /// widest part while any shows, closing ones included, and returns to its width after. A column
+    /// resized while a part shows holds the width set until none does, and a pinned column widens no
+    /// further than the pinned share of the view. A part wider than its column is cut off with a
+    /// fade. `None` leaves the column's part empty.
     Columns(ColumnDetail<T>),
 }
 

@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use zgui::platform::ClipboardKind;
 use zgui::reactive::Callable;
@@ -28,6 +29,7 @@ use zgui::view::NodeRef;
 use zgui::view::ScrollBehavior;
 use zgui::view::ScrollPosition;
 use zgui::view::ScrollTarget;
+use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 use zgui::vocab::Modifiers;
 use zgui::vocab::Timestamp;
@@ -53,6 +55,10 @@ use crate::motion::CubicBezier;
 use crate::motion::MotionPreference;
 use crate::motion::Movement;
 use crate::surface::RowHeight;
+
+/// The share of the view the pinned columns may take. The rest is left to the scrolling columns
+/// and their scrollbar.
+pub(crate) const PINNED_SHARE: f32 = 0.6;
 
 /// Decides from a row's key whether the row has a menu, and gives what builds its items when it
 /// does. A key that gives `None` has no menu: asking for one over its row opens nothing and
@@ -241,6 +247,17 @@ where
     pub(crate) widths: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
     /// The widest each fitted column has been laid out at since the rows last changed.
     pub(crate) fitted: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
+    /// How many built detail parts with content each column holds, closing ones included.
+    pub(crate) parts: Rc<RefCell<HashMap<ColumnId, usize>>>,
+    /// Each column's width as last laid out with no part showing in it.
+    pub(crate) bases: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
+    /// Columns resized while a part showed in them. They are drawn at the width set rather than
+    /// widened to their parts until no part shows in them.
+    pub(crate) waived: RwSignal<HashSet<ColumnId>, LocalStorage>,
+    /// Releases the waivers of columns left with no part.
+    pub(crate) release: RefCell<Option<TimeoutHandle>>,
+    /// How wide each pinned column's parts may widen it, in CSS pixels.
+    pub(crate) rooms: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
 
     /// How far each column is drawn from its place while the columns slide to new places.
     pub(crate) shifts: RwSignal<HashMap<ColumnId, f32>, LocalStorage>,
@@ -347,6 +364,7 @@ where
     pub(crate) fn tracks(&self) -> String {
         let resize = self.resize.get();
         let fitted = self.fitted.get();
+        let waived = self.waived.get();
         let mut tracks: Vec<String> = self.drawn.with(|drawn| {
             drawn
                 .columns()
@@ -355,15 +373,19 @@ where
                     let column = self.column(state.id())?;
                     let dragged =
                         resize.as_ref().filter(|resize| resize.column == *state.id()).map(|resize| resize.width);
-                    let track = match dragged.or_else(|| state.width().map(|width| column.clamp(width.0))) {
-                        Some(width) => width.css(),
-                        None => match column.sizing_value() {
-                            ColumnSizing::Fixed(width) => column.clamp(width.0).css(),
-                            ColumnSizing::Fit => {
-                                let least = fitted.get(state.id()).copied().unwrap_or(0.0);
-                                format!("minmax({}, max-content)", column.clamp(least).css())
-                            }
-                        },
+                    if let Some(width) = dragged {
+                        return Some(width.css());
+                    }
+
+                    let track = match set_width(column, state.width()) {
+                        Some(width) if waived.contains(state.id()) => width.css(),
+                        // A set column's cells are held out of its measure, so only its open
+                        // parts widen it past the width set.
+                        Some(width) => format!("minmax({}, max-content)", width.css()),
+                        None => {
+                            let least = fitted.get(state.id()).copied().unwrap_or(0.0);
+                            format!("minmax({}, max-content)", column.clamp(least).css())
+                        }
                     };
                     Some(track)
                 })
@@ -374,6 +396,104 @@ where
         tracks.join(" ")
     }
 
+    /// The width `id` is set to as drawn: dragged, resized or sized. `None` for a fitted column.
+    pub(crate) fn set_width_of(&self, id: &ColumnId) -> Option<ColumnWidth> {
+        let column = self.column(id)?;
+        let dragged =
+            self.resize.with(|resize| resize.as_ref().filter(|resize| resize.column == *id).map(|resize| resize.width));
+
+        dragged.or_else(|| self.drawn.with(|drawn| set_width(column, drawn.width(id))))
+    }
+
+    /// The `data-held` attribute of `id`'s header and cells: present while its width is set rather
+    /// than fitted, which holds them out of the column's measure.
+    pub(crate) fn held(&self, id: &ColumnId) -> impl Fn() -> Option<String> + 'static {
+        let resize = self.resize;
+        let drawn = self.drawn;
+        let sized = self.column(id).is_some_and(|column| column.sizing_value() != ColumnSizing::Fit);
+        let id = id.clone();
+
+        move || {
+            let dragged = resize.with(|resize| resize.as_ref().is_some_and(|resize| resize.column == id));
+            let set = sized || dragged || drawn.with(|drawn| drawn.width(&id).is_some());
+            set.then(String::new)
+        }
+    }
+
+    /// Notes that a built part in `id` has content, or no longer has.
+    pub(crate) fn note_part(&self, id: &ColumnId, shows: bool) {
+        let emptied = {
+            let mut parts = self.parts.borrow_mut();
+            if shows {
+                *parts.entry(id.clone()).or_default() += 1;
+                return;
+            }
+            let Some(count) = parts.get_mut(id) else { return };
+            *count -= 1;
+            let emptied = *count == 0;
+            if emptied {
+                parts.remove(id);
+            }
+            emptied
+        };
+        if !emptied {
+            return;
+        }
+
+        // A row rebuilt under a new key takes its part down before it builds it again, so the
+        // waivers are released once that has settled. A column that kept its width as its last
+        // part closed is not measured again, so the bases are taken from the widths here.
+        let parts = Rc::clone(&self.parts);
+        let waived = self.waived;
+        let widths = self.widths;
+        let bases = self.bases;
+        let release = move || {
+            let shown = |id: &ColumnId| parts.borrow().contains_key(id);
+            // The signals may already be gone while the grid is taken down.
+            if waived.try_with_untracked(|waived| waived.iter().any(|id| !shown(id))) == Some(true) {
+                waived.try_update(|waived| waived.retain(|id| shown(id)));
+            }
+            let Some(bare) = widths.try_with_untracked(|widths| {
+                widths.iter().filter(|(id, _)| !shown(id)).map(|(id, width)| (id.clone(), *width)).collect::<Vec<_>>()
+            }) else {
+                return;
+            };
+            let stale = bases.try_with_untracked(|bases| bare.iter().any(|(id, width)| bases.get(id) != Some(width)));
+            if stale == Some(true) {
+                bases.try_update(|bases| bases.extend(bare));
+            }
+        };
+        match self.timers.as_ref() {
+            Some(timers) => {
+                let handle = timers.set_timeout(Duration::ZERO, release);
+                self.release.replace(Some(handle));
+            }
+            None => release(),
+        }
+    }
+
+    /// Holds `id` at the width just set while a part shows in it, since the reader set that width
+    /// with the part in view.
+    pub(crate) fn waive(&self, id: &ColumnId) {
+        let shows = self.parts.borrow().contains_key(id);
+        if shows && self.waived.with_untracked(|waived| !waived.contains(id)) {
+            self.waived.update(|waived| {
+                waived.insert(id.clone());
+            });
+        }
+    }
+
+    /// Gives `id` back the width it is fitted or sized to.
+    pub(crate) fn reset_width(&self, id: &ColumnId) {
+        self.resize.set(None);
+        self.layout.update(|layout| layout.set_width(id, None));
+        if self.waived.with_untracked(|waived| waived.contains(id)) {
+            self.waived.update(|waived| {
+                waived.remove(id);
+            });
+        }
+    }
+
     /// Notes the width `id`'s header was laid out at.
     pub(crate) fn measured(&self, id: &ColumnId, width: f32) {
         if self.widths.with_untracked(|widths| widths.get(id) != Some(&width)) {
@@ -381,8 +501,16 @@ where
                 widths.insert(id.clone(), width);
             });
         }
+        let bare = !self.parts.borrow().contains_key(id);
+        if bare && self.bases.with_untracked(|bases| bases.get(id) != Some(&width)) {
+            self.bases.update(|bases| {
+                bases.insert(id.clone(), width);
+            });
+        }
 
-        let fits = self.column(id).is_some_and(|column| column.sizing_value() == ColumnSizing::Fit);
+        let fits = self.column(id).is_some_and(|column| column.sizing_value() == ColumnSizing::Fit)
+            && !self.resize.with_untracked(|resize| resize.as_ref().is_some_and(|resize| resize.column == *id))
+            && self.layout.with_untracked(|layout| layout.width(id).is_none());
         let wider = self.fitted.with_untracked(|fitted| fitted.get(id).is_none_or(|known| width > *known));
         if fits && wider {
             self.fitted.update(|fitted| {
@@ -410,9 +538,6 @@ where
     /// columns may take once the other pinned columns have theirs. `None` before the view is laid
     /// out.
     pub(crate) fn pinned_room(&self, id: &ColumnId) -> Option<f32> {
-        // The rest of the view is left to the scrolling columns and their scrollbar.
-        const PINNED_SHARE: f32 = 0.6;
-
         let view = self.port.bounds()?.size.width.0 / self.scale();
         let others: f32 = self.layout.with_untracked(|layout| {
             layout
@@ -743,7 +868,75 @@ pub(crate) enum Step {
     Last,
 }
 
+/// The width `column` is set to: `resized`, what a reader resized it to, or else the width it is
+/// sized to. `None` for a column fitted to its content.
+fn set_width<T>(column: &GridColumn<T>, resized: Option<ColumnWidth>) -> Option<ColumnWidth> {
+    match (resized, column.sizing_value()) {
+        (Some(width), _) | (None, ColumnSizing::Fixed(width)) => Some(column.clamp(width.0)),
+        (None, ColumnSizing::Fit) => None,
+    }
+}
+
+/// How wide each of `pinned` may be widened by its parts for the pinned columns to stay within
+/// `cap`. The first pinned column gives way first, then the others from the right: a column's room
+/// is what `cap` leaves once the columns that give way after it have their `widths` and those that
+/// give way before it have their `bases`. No room is less than its column's base.
+pub(crate) fn pinned_rooms(
+    pinned: &[ColumnId],
+    widths: &HashMap<ColumnId, f32>,
+    bases: &HashMap<ColumnId, f32>,
+    cap: f32,
+) -> HashMap<ColumnId, f32> {
+    let Some((first, rest)) = pinned.split_first() else {
+        return HashMap::new();
+    };
+    // A column not laid out yet takes no room.
+    let width = |id: &ColumnId| widths.get(id).copied().unwrap_or(0.0);
+    let base = |id: &ColumnId| bases.get(id).copied().unwrap_or_else(|| width(id));
+
+    // The column that gives way last comes first.
+    let kept: Vec<&ColumnId> = rest.iter().chain(std::iter::once(first)).collect();
+    kept.iter()
+        .enumerate()
+        .map(|(rank, id)| {
+            let before: f32 = kept[..rank].iter().map(|other| width(other)).sum();
+            let after: f32 = kept[rank + 1..].iter().map(|other| base(other)).sum();
+            ((*id).clone(), (cap - before - after).max(base(id)))
+        })
+        .collect()
+}
+
 /// The ids of `columns` in their order, for a layout.
 pub(crate) fn known_ids<T>(columns: &[GridColumn<T>]) -> Arc<[ColumnId]> {
     columns.iter().map(|column| column.id().clone()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sizes(entries: &[(&str, f32)]) -> HashMap<ColumnId, f32> {
+        entries.iter().map(|(id, width)| (ColumnId::from(*id), *width)).collect()
+    }
+
+    #[test]
+    fn the_first_pinned_column_gives_way_first_then_the_rest_from_the_right() {
+        let pinned = [ColumnId::from("name"), ColumnId::from("ship"), ColumnId::from("class")];
+        let bases = sizes(&[("name", 100.0), ("ship", 80.0), ("class", 40.0)]);
+        let widths = sizes(&[("name", 100.0), ("ship", 150.0), ("class", 90.0)]);
+
+        let rooms = pinned_rooms(&pinned, &widths, &bases, 300.0);
+
+        assert_eq!(rooms, sizes(&[("ship", 160.0), ("class", 50.0), ("name", 100.0)]));
+    }
+
+    #[test]
+    fn a_pinned_column_keeps_at_least_its_base() {
+        let pinned = [ColumnId::from("name"), ColumnId::from("ship")];
+        let bases = sizes(&[("name", 200.0), ("ship", 200.0)]);
+
+        let rooms = pinned_rooms(&pinned, &bases, &bases, 300.0);
+
+        assert_eq!(rooms, sizes(&[("name", 200.0), ("ship", 200.0)]));
+    }
 }

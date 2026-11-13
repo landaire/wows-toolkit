@@ -130,6 +130,7 @@ where
         let carried = id.clone();
         Attrs::new()
             .class_toggle(zgui::view::ClassName::new("lui-grid__head"), true)
+            .attribute(AttrName::new("data-held"), cx.held(&id))
             .attribute(AttrName::new("data-align"), Some(column.align_value().attribute().to_owned()))
             .attribute(AttrName::new("data-sortable"), column.is_sortable().then(String::new))
             .attribute(AttrName::new("data-pinned"), move || {
@@ -371,6 +372,7 @@ where
             };
             cx.resize.set(None);
             cx.layout.update(|layout| layout.set_width(&resize.column, Some(resize.width)));
+            cx.waive(&resize.column);
         }
     };
     let on_pointer_up = {
@@ -390,8 +392,7 @@ where
         let id = id.clone();
         move |ev: &mut EventCx<'_, events::DoubleClick>| {
             ev.stop_propagation();
-            cx.resize.set(None);
-            cx.layout.update(|layout| layout.set_width(&id, None));
+            cx.reset_width(&id);
         }
     };
     let on_click = move |ev: &mut EventCx<'_, events::Click>| ev.stop_propagation();
@@ -410,6 +411,7 @@ where
             };
 
             cx.layout.update(|layout| layout.set_width(&id, Some(width)));
+            cx.waive(&id);
         }
     };
 
@@ -537,7 +539,7 @@ where
             cx.rearrange(next);
         })
     };
-    let on_reset = UnsyncCallback::new(move |()| cx.layout.update(|layout| layout.set_width(&id, None)));
+    let on_reset = UnsyncCallback::new(move |()| cx.reset_width(&id));
 
     AnyView::new(view! {
         MenuItem(disabled = refused, on_select = on_pin) {{pin_label}}

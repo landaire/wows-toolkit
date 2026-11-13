@@ -41,6 +41,7 @@ use zgui_ui::virtualize::MeasuredVirtualize;
 use zgui_ui::virtualize::Virtualize;
 
 use crate::grid::body;
+use crate::grid::column::ColumnId;
 use crate::grid::column::GridColumn;
 use crate::grid::header;
 use crate::grid::layout::ColumnLayout;
@@ -231,6 +232,11 @@ where
         resize: RwSignal::new_local(None),
         widths,
         fitted: RwSignal::new_local(HashMap::new()),
+        parts: Rc::new(RefCell::new(HashMap::new())),
+        bases: RwSignal::new_local(HashMap::new()),
+        waived: RwSignal::new_local(HashSet::new()),
+        release: RefCell::new(None),
+        rooms: RwSignal::new_local(HashMap::new()),
         shifts: RwSignal::new_local(HashMap::new()),
         instant: RwSignal::new_local(false),
         slide: Rc::new(RefCell::new(None)),
@@ -292,9 +298,31 @@ where
             }
         })
     };
+    let rooming = {
+        let cx = Rc::clone(&cx);
+        RenderEffect::new(move |_| {
+            let Some(view) = port_size.get().map(|size| size.width.0 / cx.scale()) else { return };
+            let pinned: Vec<ColumnId> = drawn.with(|drawn| {
+                drawn.columns().iter().filter(|state| state.is_pinned()).map(|state| state.id().clone()).collect()
+            });
+            let cap = view * state::PINNED_SHARE;
+            // A set column's base is the width set; a fitted one's is its last bare measure.
+            let mut bases = cx.bases.get();
+            for id in &pinned {
+                if let Some(width) = cx.set_width_of(id) {
+                    bases.insert(id.clone(), width.0);
+                }
+            }
+            let rooms = cx.widths.with(|widths| state::pinned_rooms(&pinned, widths, &bases, cap));
+            if cx.rooms.with_untracked(|known| *known != rooms) {
+                cx.rooms.set(rooms);
+            }
+        })
+    };
     on_cleanup_local(move || {
         drop(indexing);
         drop(reconciling);
+        drop(rooming);
     });
 
     let menu_open = RwSignal::new_local(false);

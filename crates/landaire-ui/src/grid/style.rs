@@ -49,6 +49,8 @@ pub(crate) const CSS: &str = css!(
         background-color: var(--lui-color-panel);
         transition: translate var(--lui-motion-rearrange) var(--lui-motion-ease);
     }
+    .lui-grid__head[data-held], .lui-grid__cell[data-held] { width: 0; min-width: 100%; }
+    .lui-grid__detail-cell[data-pinned] { max-width: var(--lui-grid-room, none); }
     .lui-grid[data-instant] .lui-grid__head, .lui-grid[data-instant] .lui-grid__cell,
     .lui-grid[data-instant] .lui-grid__detail-cell {
         transition: none;
