@@ -84,6 +84,7 @@ const CSS: &str = css!(
         gap: 4px;
         padding: 4px;
         font-size: 12px;
+        line-height: 15px;
         border: 1px solid var(--lui-color-border-bright);
         background-color: rgba(0, 0, 0, 0.05);
         box-shadow: inset 0 1px 0 0 rgba(0, 0, 0, 0.14), inset 0 2px 0 0 rgba(0, 0, 0, 0.07),
@@ -105,11 +106,11 @@ const CSS: &str = css!(
     .wt-xr-col {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 3px;
         min-width: 0;
         font-size: 12px;
     }
-    .wt-xr-col--name { gap: 3px; padding-left: 8px; }
+    .wt-xr-col--name { gap: 2px; padding-left: 8px; }
     .wt-xr-heading {
         font-size: 12px;
         font-weight: 600;
@@ -175,11 +176,11 @@ const CSS: &str = css!(
         height: 32px;
         color: var(--wt-color-text-faint);
     }
-    .wt-xr-skills { display: flex; flex-direction: column; gap: 4px; }
+    .wt-xr-skills { display: flex; flex-direction: column; gap: 3px; }
     .wt-xr-skills__tier { display: flex; flex-direction: row; align-items: center; gap: 4px; }
     .wt-xr-skills__cost { flex: none; width: 14px; color: var(--wt-color-text-dim); }
     .wt-xr-skill--unlearned { color: var(--wt-color-text-faint); }
-    .wt-xr-table { display: flex; flex-direction: column; gap: 4px; }
+    .wt-xr-table { display: flex; flex-direction: column; gap: 2px; }
     .wt-xr-table__row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
     .wt-xr-table__name { display: flex; flex-direction: row; align-items: center; gap: 4px; flex: none; width: 170px; }
     .wt-xr-table__count { flex: none; width: 64px; }
