@@ -11,6 +11,7 @@ use landaire_ui::PanelKind;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_replays::types::AccountId;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
@@ -260,6 +261,26 @@ fn the_listing_header_carries_the_listing_controls() {
     window.click(toggle).expect("the toggle has a box");
     window.advance(SLIDE);
     assert!(laid_out(&window, "replay-listing-options"), "and back with it");
+}
+
+/// The header's open menu opens the replay file picked.
+#[test]
+fn the_open_menu_opens_a_picked_replay() {
+    let (mut window, workspace) = open();
+
+    let trigger = window.by_test_id("replay-listing-open").expect("the header has an open button");
+    window.click(trigger).expect("the open button has a box");
+    window.advance(Duration::from_millis(300));
+    let file = t!("ui.replay.open_file").into_owned();
+    let item = window.by_role_and_label(Role::MenuItem, &file).expect("the menu offers a replay file");
+
+    wows_toolkit_services::dialog::take_asked();
+    wows_toolkit_services::dialog::pick_next(PathBuf::from("picked.wowsreplay"));
+    window.click(item).expect("the item has a box");
+    settle_in_real_time(&mut window);
+
+    assert_eq!(wows_toolkit_services::dialog::take_asked(), [wows_toolkit_services::dialog::Asked::File]);
+    assert_eq!(workspace.open_replays(), [PathBuf::from("picked.wowsreplay")], "the picked replay opens");
 }
 
 /// The header comes first, the folder tabs directly under it, then the listing.

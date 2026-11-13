@@ -136,6 +136,32 @@ fn opening_a_folder_adds_or_selects_one_tab_and_the_install_stays_first() {
     assert_eq!(control.pinned_folders(), PinnedFolders::default(), "and it is not pinned");
 }
 
+/// The header's open button drops a menu, and its directory item lists the directory picked.
+#[test]
+fn the_open_menu_lists_a_picked_directory() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let (_dir, root) = replay_dir(2);
+
+    let trigger = window.by_test_id("replay-listing-open").expect("the header has an open button");
+    window.click(trigger).expect("the open button has a box");
+    window.advance(Duration::from_millis(300));
+    let file = t!("ui.replay.open_file").into_owned();
+    assert!(window.by_role_and_label(Role::MenuItem, &file).is_some(), "the menu offers a replay file");
+    let directory = t!("ui.replay.open_directory").into_owned();
+    let item = window.by_role_and_label(Role::MenuItem, &directory).expect("the menu offers a directory");
+
+    wows_toolkit_services::dialog::take_asked();
+    wows_toolkit_services::dialog::pick_next(root.clone());
+    window.click(item).expect("the item has a box");
+    settle_in_real_time(&mut window);
+
+    assert_eq!(wows_toolkit_services::dialog::take_asked(), [wows_toolkit_services::dialog::Asked::Folder]);
+    assert_eq!(control.selected.get_untracked(), folder_id(control, &root), "the picked directory is selected");
+    assert_eq!(listed(listing(control, &root)).len(), 2, "its replays are listed");
+}
+
 #[test]
 fn a_pinned_folder_is_watched_and_saved_in_tab_order() {
     let (mut window, control) = open();

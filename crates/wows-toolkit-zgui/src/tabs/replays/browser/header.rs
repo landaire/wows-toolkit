@@ -452,6 +452,9 @@ fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
 }
 
 /// The open actions: one replay file, or a directory of replays opened as a tab of its own.
+///
+/// The menu sits inside the tooltip: the tooltip provides an overlay state of its own, and a
+/// trigger inside it would toggle the tooltip rather than the menu.
 #[component]
 fn OpenMenu(control: BrowserControl) -> impl IntoView {
     let shell = control.shell();
@@ -459,9 +462,9 @@ fn OpenMenu(control: BrowserControl) -> impl IntoView {
     let tip = locale.text("ui.replay.open");
 
     view! {
-        DropdownMenu {
-            Tooltip {
-                TooltipTrigger {
+        Tooltip {
+            TooltipTrigger {
+                DropdownMenu {
                     DropdownMenuTrigger(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconXs,
@@ -470,17 +473,17 @@ fn OpenMenu(control: BrowserControl) -> impl IntoView {
                     ) {
                         AppIcon(glyph = Glyph::FolderOpen)
                     }
+                    DropdownMenuContent(placement = Placement::new(Side::Bottom, Align::End)) {
+                        MenuItem(on_select = UnsyncCallback::new(move |()| open_replay_file(shell))) {
+                            {t!("ui.replay.open_file").into_owned()}
+                        }
+                        MenuItem(on_select = UnsyncCallback::new(move |()| control.browse_folder())) {
+                            {t!("ui.replay.open_directory").into_owned()}
+                        }
+                    }
                 }
-                TooltipContent {{tip}}
             }
-            DropdownMenuContent(placement = Placement::new(Side::Bottom, Align::End)) {
-                MenuItem(on_select = UnsyncCallback::new(move |()| open_replay_file(shell))) {
-                    {t!("ui.replay.open_file").into_owned()}
-                }
-                MenuItem(on_select = UnsyncCallback::new(move |()| control.browse_folder())) {
-                    {t!("ui.replay.open_directory").into_owned()}
-                }
-            }
+            TooltipContent {{tip}}
         }
     }
 }
