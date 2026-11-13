@@ -272,14 +272,62 @@ fn double_clicking_a_file_opens_it_in_a_viewer() {
     assert!(tab.shown("unpacker-viewer-text"), "the XML opens as text");
 }
 
-/// The shell with `SHIP_XML` open in a viewer.
-fn open_ship_xml(options: HeadlessOptions) -> UnpackerWindow {
+/// The shell with a file named `name` holding `body` open in a viewer.
+fn open_text(options: HeadlessOptions, name: &str, body: &str) -> UnpackerWindow {
     let root: VfsPath = MemoryFS::new().into();
-    write(&root, "ship.xml", SHIP_XML);
+    write(&root, name, body);
     let mut tab = UnpackerWindow::with_vfs(options, root.clone());
-    tab.model.open_viewer(root.join("ship.xml").expect("the path is valid"));
+    tab.model.open_viewer(root.join(name).expect("the path is valid"));
     settle_in_real_time(&mut tab.window);
     tab
+}
+
+/// The shell with `SHIP_XML` open in a viewer.
+fn open_ship_xml(options: HeadlessOptions) -> UnpackerWindow {
+    open_text(options, "ship.xml", SHIP_XML)
+}
+
+/// A tab is two columns wide, and a press lands on the character drawn under it after tabs and
+/// wide characters.
+#[test]
+fn the_viewer_places_presses_after_tabs_and_wide_characters() {
+    let mut tab = open_text(options(), "indent.xml", "\t\tvalue = 1\n    value = 2\n\u{4e2d}\u{6587}value = 3");
+    let lines: Vec<_> = tab
+        .window
+        .all_by_class("wt-code-line__text")
+        .into_iter()
+        .map(|line| tab.window.bounds(line).expect("the line is laid out"))
+        .collect();
+    assert_eq!(lines.len(), 3);
+    assert!(
+        (lines[0].size.width.0 - lines[1].size.width.0).abs() < 0.5,
+        "two tabs are as wide as four spaces: {lines:?}"
+    );
+
+    // Every line ends in nine one-column characters, and the second line is thirteen of them.
+    let column = lines[1].size.width.0 / 13.0;
+    for (at, line) in lines.iter().enumerate() {
+        let middle = line.origin.y + DevicePx(line.size.height.0 / 2.0);
+        let right = line.origin.x.0 + line.size.width.0;
+        tab.window.click_at(Point::new(DevicePx(right - 8.7 * column), middle));
+        tab.window.click_at_with(Point::new(DevicePx(right + 2.0 * column), middle), Modifiers::SHIFT);
+        tab.settle();
+        let selected = tab.window.texts_by_class("wt-code-sel").concat();
+        assert_eq!(selected, format!("value = {}", at + 1), "the press lands where the text is drawn");
+    }
+}
+
+/// Each indent level has a guide, and a blank line keeps the guides of the line above it.
+#[test]
+fn the_viewer_draws_indent_guides() {
+    let tab = open_text(options(), "guides.xml", "a\n    b\n\n\tc");
+    let guides = tab.window.all_by_class("wt-code-line__guide");
+    let xs: Vec<f32> =
+        guides.into_iter().map(|guide| tab.window.bounds(guide).expect("the guide is laid out").origin.x.0).collect();
+    assert_eq!(xs.len(), 5, "two guides on the indented line and the blank one, one on the tab: {xs:?}");
+    assert!(xs[1] > xs[0], "the second level's guide is right of the first: {xs:?}");
+    assert_eq!(xs[2..4], xs[0..2], "the blank line repeats the guides above it");
+    assert_eq!(xs[4], xs[0], "a tab is one indent level");
 }
 
 /// The viewer with a selection across lines and the find bar marking its matches.

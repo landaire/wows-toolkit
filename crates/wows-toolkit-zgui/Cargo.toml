@@ -47,6 +47,8 @@ image = { workspace = true, features = ["png"] }
 wows-data-mgr = { workspace = true, features = ["download"] }
 # The Unpacker viewer's syntax highlighting.
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
+# The Unpacker viewer's find, which compares case-folded text.
+unicase = "2.9"
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }

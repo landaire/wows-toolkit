@@ -1,5 +1,6 @@
 //! Character selection and find over the viewer's lines. Columns count characters, not bytes.
 
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use crate::tabs::unpacker::viewer::CodeLine;
@@ -54,8 +55,8 @@ pub fn line_len(line: &CodeLine) -> usize {
     line.iter().map(|token| token.text.chars().count()).sum()
 }
 
-fn line_text(line: &CodeLine) -> String {
-    line.iter().map(|token| token.text.as_str()).collect()
+fn line_chars(line: &CodeLine) -> impl Iterator<Item = char> + '_ {
+    line.iter().flat_map(|token| token.text.chars())
 }
 
 /// The selected characters, with a newline between lines.
@@ -64,14 +65,14 @@ pub fn selected_text(lines: &[CodeLine], selection: Selection) -> String {
     let mut out = String::new();
     let taken = end.line.saturating_sub(start.line) + 1;
     for (at, line) in lines.iter().enumerate().skip(start.line).take(taken) {
-        let text = line_text(line);
         let from = if at == start.line { start.column } else { 0 };
         let to = if at == end.line { end.column } else { usize::MAX };
-        out.extend(text.chars().skip(from).take(to.saturating_sub(from)));
+        out.extend(line_chars(line).skip(from).take(to.saturating_sub(from)));
         if at < end.line {
             out.push('\n');
         }
     }
+
     out
 }
 
@@ -82,26 +83,95 @@ pub struct Match {
     pub columns: Range<usize>,
 }
 
+/// Where one case-folded character came from.
+#[derive(Clone, Copy)]
+struct Origin {
+    /// The column of the character it was folded from.
+    column: usize,
+    /// Whether it is the first character that character folded to.
+    first: bool,
+}
+
+/// Appends the full Unicode case folding of `ch`, which may be more than one character.
+fn fold_into(ch: char, out: &mut Vec<char>) {
+    if ch.is_ascii() {
+        out.push(ch.to_ascii_lowercase());
+        return;
+    }
+
+    let mut buffer = [0; 4];
+    out.extend(unicase::UniCase::new(&*ch.encode_utf8(&mut buffer)).to_folded_case().chars());
+}
+
+/// For each prefix of `needle`, the length of its longest proper prefix that is also its suffix.
+fn fallback_table(needle: &[char]) -> Vec<usize> {
+    let mut table = vec![0; needle.len()];
+    let mut matched = 0;
+    for at in 1..needle.len() {
+        while matched > 0 && needle[at] != needle[matched] {
+            matched = table[matched - 1];
+        }
+        if needle[at] == needle[matched] {
+            matched += 1;
+        }
+        table[at] = matched;
+    }
+
+    table
+}
+
 /// Every occurrence of `query` in `lines`, ignoring case, without overlaps, in reading order.
+///
+/// Both sides are compared case-folded, and a match covers whole characters of the line.
 pub fn find_all(lines: &[CodeLine], query: &str) -> Vec<Match> {
-    let needle: Vec<char> = query.chars().collect();
+    let mut needle = Vec::new();
+    for ch in query.chars() {
+        fold_into(ch, &mut needle);
+    }
     if needle.is_empty() {
         return Vec::new();
     }
-    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    let fallback = fallback_table(&needle);
+
     let mut found = Vec::new();
+    let mut folded = Vec::new();
+    // Only the origins of the last `needle.len()` folded characters are kept, which is all a match
+    // ending at the newest one reads, so a long line costs no memory in proportion to its length.
+    let mut recent: VecDeque<Origin> = VecDeque::with_capacity(needle.len());
     for (line, tokens) in lines.iter().enumerate() {
-        let hay: Vec<char> = tokens.iter().flat_map(|token| token.text.chars()).collect();
-        let mut at = 0;
-        while at + needle.len() <= hay.len() {
-            if hay[at..at + needle.len()].iter().zip(&needle).all(|(a, b)| same(*a, *b)) {
-                found.push(Match { line, columns: at..at + needle.len() });
-                at += needle.len();
-            } else {
-                at += 1;
+        recent.clear();
+        let mut matched = 0;
+        for (column, ch) in line_chars(tokens).enumerate() {
+            folded.clear();
+            fold_into(ch, &mut folded);
+            for (at, folded_ch) in folded.iter().enumerate() {
+                if recent.len() == needle.len() {
+                    recent.pop_front();
+                }
+                recent.push_back(Origin { column, first: at == 0 });
+
+                while matched > 0 && needle[matched] != *folded_ch {
+                    matched = fallback[matched - 1];
+                }
+                if needle[matched] == *folded_ch {
+                    matched += 1;
+                }
+                if matched < needle.len() {
+                    continue;
+                }
+
+                let start = recent[0];
+                let whole = start.first && at + 1 == folded.len();
+                if whole {
+                    found.push(Match { line, columns: start.column..column + 1 });
+                    matched = 0;
+                } else {
+                    matched = fallback[matched - 1];
+                }
             }
         }
     }
+
     found
 }
 
@@ -121,12 +191,30 @@ pub struct Span {
     pub marks: Marks,
 }
 
-/// What is marked on one line: the selection, the matches on it and the current match.
+/// What is marked on one line: the selection, every match in reading order, and the index of the
+/// current one.
 pub struct LineMarks<'a> {
     pub line: usize,
     pub selection: Option<Selection>,
     pub matches: &'a [Match],
-    pub current: Option<&'a Match>,
+    pub current: Option<usize>,
+}
+
+/// The most matches marked on one line. A minified file can hold millions on one line, and each
+/// mark is a separate element, so only those nearest the current match are marked.
+pub const LINE_MATCH_LIMIT: usize = 256;
+
+/// The first `chars` characters of `text`: their length in bytes and how many there were.
+fn advance(text: &str, chars: usize) -> (usize, usize) {
+    let mut taken = 0;
+    for (at, _) in text.char_indices() {
+        if taken == chars {
+            return (at, taken);
+        }
+        taken += 1;
+    }
+
+    (text.len(), taken)
 }
 
 /// `tokens` cut where a mark starts or ends. A selection that runs past the line's end adds a
@@ -134,15 +222,19 @@ pub struct LineMarks<'a> {
 pub fn spans(tokens: &CodeLine, marks: &LineMarks<'_>) -> Vec<Span> {
     let len = line_len(tokens);
     let selected = marks.selection.and_then(|selection| selection.on_line(marks.line, len));
-    let on_line = |found: &&Match| found.line == marks.line;
-    let current = marks.current.filter(on_line).map(|found| found.columns.clone());
-    let matched: Vec<Range<usize>> = marks.matches.iter().filter(on_line).map(|found| found.columns.clone()).collect();
 
-    let mut cuts: Vec<usize> = Vec::new();
+    let first = marks.matches.partition_point(|found| found.line < marks.line);
+    let end = first + marks.matches[first..].partition_point(|found| found.line == marks.line);
+    let current_here = marks.current.filter(|at| (first..end).contains(at));
+    let shown_start = match current_here {
+        Some(at) => at.saturating_sub(LINE_MATCH_LIMIT / 2).min(end.saturating_sub(LINE_MATCH_LIMIT)).max(first),
+        None => first,
+    };
+    let shown = &marks.matches[shown_start..end.min(shown_start + LINE_MATCH_LIMIT)];
+    let current = current_here.map(|at| marks.matches[at].columns.clone());
+
+    let mut cuts: Vec<usize> = shown.iter().flat_map(|found| [found.columns.start, found.columns.end]).collect();
     if let Some((range, _)) = &selected {
-        cuts.extend([range.start, range.end]);
-    }
-    for range in matched.iter().chain(current.iter()) {
         cuts.extend([range.start, range.end]);
     }
     cuts.sort_unstable();
@@ -150,27 +242,32 @@ pub fn spans(tokens: &CodeLine, marks: &LineMarks<'_>) -> Vec<Span> {
 
     let marks_at = |column: usize| Marks {
         selected: selected.as_ref().is_some_and(|(range, _)| range.contains(&column)),
-        matched: matched.iter().any(|range| range.contains(&column)),
+        matched: shown
+            .get(shown.partition_point(|found| found.columns.end <= column))
+            .is_some_and(|found| found.columns.contains(&column)),
         current: current.as_ref().is_some_and(|range| range.contains(&column)),
     };
 
     let mut out = Vec::new();
     let mut column = 0;
+    let mut next_cut = 0;
     for token in tokens {
         let mut rest = token.text.as_str();
         while !rest.is_empty() {
-            let count = rest.chars().count();
-            let next_cut = cuts.iter().copied().find(|cut| *cut > column).unwrap_or(usize::MAX);
-            let take = (next_cut - column).min(count);
-            let bytes = rest.char_indices().nth(take).map_or(rest.len(), |(at, _)| at);
+            while cuts.get(next_cut).is_some_and(|cut| *cut <= column) {
+                next_cut += 1;
+            }
+            let wanted = cuts.get(next_cut).map_or(usize::MAX, |cut| cut - column);
+            let (bytes, taken) = advance(rest, wanted);
             out.push(Span { class: token.class, text: rest[..bytes].to_owned(), marks: marks_at(column) });
             rest = &rest[bytes..];
-            column += take;
+            column += taken;
         }
     }
     if selected.is_some_and(|(_, past_end)| past_end) {
         out.push(Span { class: None, text: " ".to_owned(), marks: Marks { selected: true, ..Marks::default() } });
     }
+
     out
 }
 
@@ -252,10 +349,41 @@ mod tests {
     fn the_current_match_is_told_apart_from_the_others() {
         let lines = plain_lines("sea and sea");
         let found = find_all(&lines, "sea");
-        let marks = LineMarks { line: 0, selection: None, matches: &found, current: found.get(1) };
+        let marks = LineMarks { line: 0, selection: None, matches: &found, current: Some(1) };
         let cut = spans(&lines[0], &marks);
         let other = Marks { matched: true, ..PLAIN };
         let current = Marks { matched: true, current: true, ..PLAIN };
         assert_eq!(texts(&cut), vec![("sea", other), (" and ", PLAIN), ("sea", current)]);
+    }
+
+    #[test]
+    fn find_folds_case_fully_and_matches_whole_characters() {
+        let lines = plain_lines("Stra\u{df}e\n\u{df}");
+        assert_eq!(find_all(&lines, "STRASSE"), vec![Match { line: 0, columns: 0..6 }]);
+        assert_eq!(find_all(&lines, "ss"), vec![Match { line: 0, columns: 4..5 }, Match { line: 1, columns: 0..1 }]);
+        assert_eq!(
+            find_all(&lines, "s"),
+            vec![Match { line: 0, columns: 0..1 }],
+            "half of a folded character is not a match"
+        );
+    }
+
+    #[test]
+    fn find_restarts_after_a_partial_match() {
+        let lines = plain_lines("aabaabaaab");
+        assert_eq!(find_all(&lines, "aaab"), vec![Match { line: 0, columns: 6..10 }]);
+    }
+
+    #[test]
+    fn a_line_marks_at_most_the_limit_around_the_current_match() {
+        let lines = plain_lines(&"x".repeat(LINE_MATCH_LIMIT * 4));
+        let found = find_all(&lines, "x");
+        let current = LINE_MATCH_LIMIT * 3;
+        let cut = spans(&lines[0], &LineMarks { line: 0, selection: None, matches: &found, current: Some(current) });
+        let marked: usize = cut.iter().filter(|span| span.marks.matched).map(|span| span.text.len()).sum();
+        assert_eq!(marked, LINE_MATCH_LIMIT);
+        let current_at = cut.iter().position(|span| span.marks.current).expect("the current match is marked");
+        let before: usize = cut[..current_at].iter().map(|span| span.text.len()).sum();
+        assert_eq!(before, current, "the current match is drawn at its column");
     }
 }

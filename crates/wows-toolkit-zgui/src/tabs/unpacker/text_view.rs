@@ -1,6 +1,7 @@
 //! The viewer's text: highlighted lines in a virtualised list, with character selection by
 //! dragging, ctrl+C and ctrl+A, and a find bar on ctrl+F.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use landaire_ui::TABULAR_CLASS;
@@ -13,6 +14,7 @@ use zgui::geom::Css;
 use zgui::geom::CssPx;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::prelude::Fonts;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -24,8 +26,11 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
+use zgui::reactive::use_context;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::EventCx;
@@ -50,13 +55,18 @@ use zgui_ui_icons::set::chevron::CHEVRON_UP;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
+use crate::tabs::unpacker::text_layout::LineShaper;
+use crate::tabs::unpacker::text_layout::TAB_SIZE;
+use crate::tabs::unpacker::text_layout::code_font_family;
+use crate::tabs::unpacker::text_layout::column_at;
+use crate::tabs::unpacker::text_layout::guide_columns;
+use crate::tabs::unpacker::text_layout::indents;
 use crate::tabs::unpacker::text_select::LineMarks;
 use crate::tabs::unpacker::text_select::Marks;
 use crate::tabs::unpacker::text_select::Match;
 use crate::tabs::unpacker::text_select::Selection;
 use crate::tabs::unpacker::text_select::TextPos;
 use crate::tabs::unpacker::text_select::find_all;
-use crate::tabs::unpacker::text_select::line_len;
 use crate::tabs::unpacker::text_select::selected_text;
 use crate::tabs::unpacker::text_select::spans;
 use crate::tabs::unpacker::viewer::CodeLine;
@@ -71,17 +81,9 @@ const CSS: &str = css!(
         flex: 1 1 auto;
         min-height: 0;
         overflow-x: auto;
-        font-family: ui-monospace, monospace;
         font-size: 12px;
         cursor: text;
         user-select: none;
-    }
-    .wt-text__measure {
-        position: absolute;
-        visibility: hidden;
-        white-space: pre;
-        font-family: ui-monospace, monospace;
-        font-size: 12px;
     }
     .wt-text__find {
         flex: none;
@@ -98,8 +100,17 @@ const CSS: &str = css!(
         color: var(--wt-color-text-dim);
     }
     .wt-code-line { display: flex; height: 18px; align-items: center; min-width: max-content; }
+    .wt-code-line__body { position: relative; flex: none; display: flex; align-items: center; height: 18px; }
+    .wt-code-line__guide {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background-color: color-mix(in srgb, var(--lui-color-border) 85%, transparent);
+    }
     .wt-code-line__number {
         flex: none;
+        box-sizing: border-box;
         width: 48px;
         padding-right: 12px;
         text-align: right;
@@ -114,20 +125,18 @@ const CSS: &str = css!(
 /// One line of code, and the height every line is drawn at.
 pub const LINE_HEIGHT: f32 = 18.0;
 
-/// Where the text starts: the line-number column's width and its padding.
-const NUMBER_WIDTH: f32 = 60.0;
-
-/// How many characters the hidden measure holds, so one character's width is read to a fraction of
-/// a pixel.
-const MEASURE_CHARS: usize = 64;
+/// Where the text starts: the line-number column's border-box width.
+const NUMBER_WIDTH: f32 = 48.0;
 
 pub type Lines = RwSignal<Rc<Vec<CodeLine>>, LocalStorage>;
 
-/// Where the viewer's lines are and how wide a character is.
+/// Where the viewer's lines are and where their characters sit.
 #[derive(Clone, Copy)]
 struct Geometry {
     viewport: NodeRef,
-    measure: NodeRef,
+    shaper: StoredValue<LineShaper, LocalStorage>,
+    /// Each shaped line's character boundaries, by line, until the text changes.
+    stops: StoredValue<HashMap<usize, Rc<[f32]>>, LocalStorage>,
 }
 
 impl Geometry {
@@ -139,13 +148,25 @@ impl Geometry {
         let scroll = self.viewport.scroll_offset();
         let x = (position.x.0 * scale - rect.origin.x.0 + scroll.x.0) / scale - NUMBER_WIDTH;
         let y = (position.y.0 * scale - rect.origin.y.0 + scroll.y.0) / scale;
-        let char_width = self.measure.window_bounds()?.size.width.0 / scale / MEASURE_CHARS as f32;
-        if char_width <= 0.0 {
-            return None;
-        }
         let line = ((y / LINE_HEIGHT).floor().max(0.0) as usize).min(last);
-        let column = ((x / char_width).round().max(0.0) as usize).min(line_len(&lines[line]));
-        Some(TextPos { line, column })
+        let stops = self.line_stops(lines, line)?;
+
+        Some(TextPos { line, column: column_at(&stops, x) })
+    }
+
+    /// `line`'s character boundaries, shaped the first time they are asked for. `None` once the
+    /// view is disposed.
+    fn line_stops(self, lines: &[CodeLine], line: usize) -> Option<Rc<[f32]>> {
+        if let Some(stops) = self.stops.with_value(|stops| stops.get(&line).cloned()) {
+            return Some(stops);
+        }
+
+        let stops: Rc<[f32]> = self.shaper.try_update_value(|shaper| shaper.stops(&lines[line]))?.into();
+        self.stops.update_value(|cache| {
+            cache.insert(line, Rc::clone(&stops));
+        });
+
+        Some(stops)
     }
 
     /// Scrolls `line` to the middle of the port, unless it is already in view.
@@ -215,9 +236,24 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let shell = Shell::current();
     let root = NodeRef::new();
-    let geometry = Geometry { viewport: NodeRef::new(), measure: NodeRef::new() };
+    let fonts = use_context::<Fonts>().expect("every window provides its fonts");
+    let mut shaper = LineShaper::new(fonts.shaper());
+    let space_width = shaper.space_width();
+    let geometry = Geometry {
+        viewport: NodeRef::new(),
+        shaper: StoredValue::new_local(shaper),
+        stops: StoredValue::new_local(HashMap::new()),
+    };
     let selection = RwSignal::new_local(None::<Selection>);
     let dragging = StoredValue::new_local(false);
+
+    // New text is shaped again when it is clicked, and its indent recounted.
+    let line_indents = RwSignal::new_local(Rc::new(Vec::new()));
+    let relaying = RenderEffect::new(move |_| {
+        geometry.stops.update_value(HashMap::clear);
+        line_indents.set(Rc::new(lines.with(|lines| indents(lines))));
+    });
+    on_cleanup_local(move || drop(relaying));
 
     let find = Find {
         open: RwSignal::new_local(false),
@@ -353,13 +389,14 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     }
                 }
             }
-            text(class = "wt-text__measure", node_ref = geometry.measure, a11y:hidden = true) {{"0".repeat(MEASURE_CHARS)}}
             VirtualList(
                 count = Signal::derive_local(move || lines.with(|lines| lines.len())),
                 row_size = LINE_HEIGHT,
                 label = title,
                 node_ref = geometry.viewport,
                 class = "wt-text__code",
+                style:font-family = code_font_family(),
+                style:tab-size = TAB_SIZE.to_string(),
                 attr:data-testid = "unpacker-viewer-text",
                 on:pointer_down = move |ev| {
                     if ev.button != Some(PointerButton::Primary) {
@@ -397,10 +434,17 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                         ev.release_pointer();
                     }
                 },
-                row = move |ix: usize| code_line(lines, ix, selection, find)
+                row = move |ix: usize| code_line(lines, ix, selection, find, Guides { indents: line_indents, space_width })
             )
         }
     }
+}
+
+/// Where a line's indent guides go: each line's indent in columns, and one column's width.
+#[derive(Clone, Copy)]
+struct Guides {
+    indents: RwSignal<Rc<Vec<usize>>, LocalStorage>,
+    space_width: f32,
 }
 
 fn code_line(
@@ -408,6 +452,7 @@ fn code_line(
     ix: usize,
     selection: RwSignal<Option<Selection>, LocalStorage>,
     find: Find,
+    guides: Guides,
 ) -> impl IntoView {
     // Read through the signals, so a line drawn plain is redrawn once the highlighting lands, and
     // a line is redrawn as the selection or the matches over it change.
@@ -416,12 +461,7 @@ fn code_line(
         let current_at = find.current.get();
         find.matches
             .with(|matches| {
-                let marks = LineMarks {
-                    line: ix,
-                    selection: chosen,
-                    matches: matches.as_slice(),
-                    current: current_at.and_then(|at| matches.get(at)),
-                };
+                let marks = LineMarks { line: ix, selection: chosen, matches: matches.as_slice(), current: current_at };
                 lines.with(|lines| lines.get(ix).map(|line| spans(line, &marks)).unwrap_or_default())
             })
             .into_iter()
@@ -440,10 +480,23 @@ fn code_line(
             .collect::<Vec<AnyView>>()
     };
 
+    let guide_views = move || {
+        let indent = guides.indents.with(|indents| indents.get(ix).copied().unwrap_or(0));
+        guide_columns(indent)
+            .map(|column| {
+                let left = format!("{}px", column as f32 * guides.space_width);
+                AnyView::new(view! { box(class = "wt-code-line__guide", style:left = left) })
+            })
+            .collect::<Vec<AnyView>>()
+    };
+
     view! {
         row(class = "wt-code-line") {
             text(class = format!("wt-code-line__number {TABULAR_CLASS}")) {{(ix + 1).to_string()}}
-            text(class = "wt-code-line__text") {{pieces}}
+            row(class = "wt-code-line__body") {
+                {guide_views}
+                text(class = "wt-code-line__text") {{pieces}}
+            }
         }
     }
 }

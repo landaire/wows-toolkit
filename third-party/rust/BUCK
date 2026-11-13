@@ -48740,6 +48740,12 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "unicase",
+    actual = ":unicase-2",
+    visibility = ["PUBLIC"],
+)
+
 http_archive(
     name = "unicase-2.9.0.crate",
     sha256 = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142",

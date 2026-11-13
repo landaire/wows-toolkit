@@ -10,6 +10,7 @@ mod queue;
 mod search;
 #[cfg(test)]
 mod tests;
+mod text_layout;
 mod text_select;
 mod text_view;
 mod viewer;

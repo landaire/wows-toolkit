@@ -49,6 +49,7 @@ ZGUI_DEPS = [
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
+    "//third-party/rust:unicase",
     "//third-party/rust:zgui",
     "//third-party/rust:zgui-css",
     "//third-party/rust:zgui-image",
