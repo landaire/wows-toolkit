@@ -1,8 +1,13 @@
-//! Remembering where a window was, in the row every front end shares
+//! What every window of the app shares: the frame drawn where the desktop draws none, and
+//! remembering where the window was, in the row every front end shares
 //! (`wows_toolkit_config::WindowKind`).
 
 use std::time::Duration;
 
+use landaire_ui::TitleBarProps;
+use landaire_ui::TitleBarStrings;
+use landaire_ui::WindowFrameProps;
+use rust_i18n::t;
 use wows_toolkit_config::WindowKind;
 use wows_toolkit_config::WindowSettings;
 use zgui::App;
@@ -15,6 +20,8 @@ use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::SetValue;
+use zgui::view;
+use zgui::view::Children;
 use zgui::view::IntoView;
 use zgui::view::Timers;
 
@@ -23,6 +30,34 @@ use crate::services::Services;
 /// Where the main window opens when nothing was remembered.
 const DEFAULT_ORIGIN: (f32, f32) = (200.0, 120.0);
 const DEFAULT_SIZE: (f32, f32) = (1200.0, 800.0);
+
+/// The main window's title.
+pub fn main_window_title() -> String {
+    format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION"))
+}
+
+/// A window's content, under the title bar and inside the frame the app draws when the desktop
+/// draws neither, as a Wayland compositor without server-side decorations does. Elsewhere the
+/// desktop's own frame stays and the content fills the window.
+#[component]
+pub fn DecoratedWindow(#[prop(into)] title: String, children: Children) -> impl IntoView {
+    let title = StoredValue::new_local(title);
+    let strings = TitleBarStrings {
+        minimize: t!("ui.windows.minimize").into_owned(),
+        maximize: t!("ui.windows.maximize").into_owned(),
+        restore: t!("ui.windows.restore").into_owned(),
+        close: t!("ui.windows.close").into_owned(),
+    };
+
+    view! {
+        WindowFrame(attr:data-testid = "window-frame") {
+            TitleBar(strings = strings, attr:data-testid = "window-title-bar") {
+                text {{title.get_value()}}
+            }
+            {children.into_view_once()}
+        }
+    }
+}
 
 /// How the main window should open, as the shared row remembers it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,5 +198,47 @@ mod tests {
         let geometry = WindowSettings { inner_size_points: Some([640.0, 480.0]), ..WindowSettings::default() };
         assert!(!store(services, WindowKind::ReplayRenderer, geometry), "nothing is left to store into");
         store_before_exit(services, WindowKind::ReplayRenderer, geometry);
+    }
+
+    /// The title bar and frame appear only while the desktop leaves the frame to the app, and go
+    /// again when it takes the frame back.
+    #[test]
+    fn the_app_draws_a_frame_only_where_the_desktop_draws_none() {
+        use landaire_ui::ThemeRootProps;
+        use landaire_ui::test_support::HeadlessOptions;
+        use landaire_ui::test_support::HeadlessWindow;
+        use landaire_ui::test_support::WindowSize;
+        use zgui::platform::DecorationSource;
+        use zgui::view;
+
+        use super::DecoratedWindowProps;
+
+        let options = HeadlessOptions::new(WindowSize { width: 640.0, height: 400.0 });
+        let mut window = HeadlessWindow::open(options, || {
+            view! {
+                ThemeRoot {
+                    DecoratedWindow(title = "Tactics Board") {
+                        text(attr:data-testid = "window-body") {"body"}
+                    }
+                }
+            }
+        })
+        .expect("the window opens headlessly");
+        window.advance(std::time::Duration::from_millis(100));
+        assert!(window.by_test_id("window-body").is_some());
+        assert!(window.by_test_id("window-title-bar").is_none(), "the desktop's own title bar is the only one");
+
+        window.set_decoration_source(DecorationSource::Application).expect("the window is open");
+        window.advance(std::time::Duration::from_millis(100));
+        let bar = window.by_test_id("window-title-bar").expect("the app draws a title bar");
+        let frame = window.by_test_id("window-frame").expect("the frame is there");
+        assert!(window.bounds(bar).is_some_and(|bounds| bounds.size.height.0 > 0.0));
+        assert!(window.by_attribute("data-framed", "true").is_some_and(|framed| framed == frame));
+        assert!(window.by_label("Close").is_some(), "the window can be closed from the app's bar");
+
+        window.set_decoration_source(DecorationSource::Platform).expect("the window is open");
+        window.advance(std::time::Duration::from_millis(100));
+        assert!(window.by_test_id("window-title-bar").is_none());
+        assert!(window.by_attribute("data-framed", "true").is_none());
     }
 }

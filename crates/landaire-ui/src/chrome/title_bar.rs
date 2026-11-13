@@ -255,6 +255,7 @@ pub fn TitleBar(
 
     let window = or_current(window);
     let source = window.decoration_source();
+    let fullscreen = window.fullscreen();
     let window = StoredValue::new_local(window);
     let strings = StoredValue::new_local(strings.unwrap_or_default());
     let leading = StoredValue::new_local(title_bar_leading.map(|slot| slot.children));
@@ -277,7 +278,8 @@ pub fn TitleBar(
     };
 
     view! {
-        if move || source.get() == DecorationSource::Application {
+        // A fullscreen window gives its whole surface to the content, as the frame does.
+        if move || source.get() == DecorationSource::Application && fullscreen.get().is_none() {
             row(
                 attr:data-buttons = buttons.name(),
                 on:pointer_down = move_or_double_click(window.get_value()),

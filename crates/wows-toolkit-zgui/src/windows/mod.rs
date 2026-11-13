@@ -28,6 +28,7 @@ use crate::services::Services;
 use crate::shell::Appearance;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
+use crate::window_shell::DecoratedWindowProps;
 
 const SHEET: &str = "wt-window";
 
@@ -36,6 +37,7 @@ const CSS: &str = css!(
     ".wt-window {
         display: flex;
         flex-direction: column;
+        flex: 1 1 auto;
         width: 100%;
         height: 100%;
         min-width: 0;
@@ -61,15 +63,18 @@ where
     let services = Services::current();
     let appearance =
         use_local_context::<Appearance>().expect("a secondary window is opened from inside the main window");
+    let title = options.attributes().title.to_string();
     use_windows().open(options, move || {
         let content = AnyView::new(content());
-        view! { WindowRoot(services = services, appearance = appearance, content = content) }
+        let title = title.clone();
+        view! { WindowRoot(services = services, appearance = appearance, title = title, content = content) }
     })
 }
 
-/// A secondary window's theme and message host, with the process's services published to it.
+/// A secondary window's theme, frame and message host, with the process's services published to
+/// it.
 #[component]
-fn WindowRoot(services: Services, appearance: Appearance, content: AnyView) -> impl IntoView {
+fn WindowRoot(services: Services, appearance: Appearance, title: String, content: AnyView) -> impl IntoView {
     provide_local_context(services);
     provide_local_context(appearance);
     let choice = Signal::derive_local(move || palette_choice(appearance.shown_theme()));
@@ -81,8 +86,10 @@ fn WindowRoot(services: Services, appearance: Appearance, content: AnyView) -> i
         ThemeRoot(choice = choice, motion = motion, zoom = zoom) {
             SemanticTokens(choice = shown)
             ToastHost {
-                WindowSurface {
-                    {content}
+                DecoratedWindow(title = title) {
+                    WindowSurface {
+                        {content}
+                    }
                 }
             }
         }

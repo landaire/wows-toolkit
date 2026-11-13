@@ -170,7 +170,7 @@ fn main() {
 
     // Read before the window opens: a position can only be asked for when it is made.
     let geometry = window_shell::MainWindowGeometry::remembered();
-    let title = format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION"));
+    let title = window_shell::main_window_title();
     let app = zgui::app()
         .with_title(title.clone())
         .with_application_id(APPLICATION_ID)
