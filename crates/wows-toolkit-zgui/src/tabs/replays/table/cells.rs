@@ -396,12 +396,26 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         })
     });
 
+    // A double click on the player's text leaves the row as it is, as GPUI's does.
     let species = class_mark(&player, cx);
-    let division =
-        player.division_label.clone().map(|division| AnyView::new(view! { text(class = "wt-pt-text") {{division}} }));
+    let species_name = player.ship_species_text.clone();
+    let species = if species_name.is_empty() {
+        species
+    } else {
+        AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger { box(on:double_click = keep_double) {{species}} }
+                TooltipContent {{species_name.clone()}}
+            }
+        })
+    };
+    let division = player
+        .division_label
+        .clone()
+        .map(|division| AnyView::new(view! { text(class = "wt-pt-text", on:double_click = keep_double) {{division}} }));
     let clan = player.clan_tag.clone().map(|clan| {
         let ink = clan_ink(&player, cx);
-        AnyView::new(view! { text(class = "wt-pt-text", {..ink}) {{clan}} })
+        AnyView::new(view! { text(class = "wt-pt-text", on:double_click = keep_double, {..ink}) {{clan}} })
     });
     let name_color = player.is_abuser.then(|| player_color(PlayerColorKind::Abuser).to_owned());
     let name = player.display_name.clone();
@@ -431,7 +445,12 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
                 {species}
                 {division}
                 {clan}
-                text(class = "wt-pt-text", style:color = name_color) {{name}}
+                text(
+                    class = "wt-pt-text",
+                    style:color = name_color,
+                    attr:data-testid = format!("player-name-text-{}", db_id.raw()),
+                    on:double_click = keep_double
+                ) {{name}}
                 box(class = "wt-pt-fill") {}
                 {hidden}
                 {twitch}

@@ -9,6 +9,7 @@ use landaire_ui::Scheme;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use landaire_ui::test_support::Drawing;
+use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
@@ -158,12 +159,30 @@ fn a_press_on_a_header_sorts_by_it_descending_first_then_ascending() {
     assert_eq!(row_order(&window), expected_order(SortOrder::Asc(SortColumn::Kills)));
 }
 
+/// The Kills cell on player `id`'s line: the Name cell's text keeps a double click to itself, so
+/// tests open a row from here.
+pub(crate) fn kills_cell(window: &HeadlessWindow, id: i64) -> Element {
+    let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
+    let line = window.bounds(name).expect("the name has a box");
+    let middle = line.origin.y.0 + line.size.height.0 / 2.0;
+    let on_line = |cell: &Element| {
+        window
+            .bounds(*cell)
+            .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
+    };
+    window
+        .all_by_attribute("data-column", ReplayColumn::Kills.storage_key())
+        .into_iter()
+        .find(on_line)
+        .expect("the player's line has a Kills cell")
+}
+
 #[test]
 fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
     let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
-    let name = window.by_test_id("player-name-2").expect("the second player's name is drawn");
+    let cell = kills_cell(&window, 2);
 
-    window.double_click(name).expect("the row takes a double click");
+    window.double_click(cell).expect("the row takes a double click");
     window.advance(Duration::from_millis(400));
     assert!(window.by_test_id("detail-2-name").is_some(), "the row's detail is open");
 
@@ -172,6 +191,16 @@ fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
     window.advance(Duration::from_millis(600));
     assert!(expanded.with_untracked(HashSet::is_empty), "the disclosure closed the row");
     assert!(window.by_test_id("detail-2-name").is_none(), "the detail is gone once it has closed");
+}
+
+#[test]
+fn a_double_click_on_the_players_name_leaves_the_row_closed() {
+    let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
+    let name = window.by_test_id("player-name-text-2").expect("the second player's name is drawn");
+
+    window.double_click(name).expect("the name takes a double click");
+    window.advance(Duration::from_millis(400));
+    assert!(expanded.with_untracked(HashSet::is_empty), "no row opens");
 }
 
 #[test]
@@ -247,8 +276,8 @@ fn without_a_detail_no_row_offers_to_open() {
     let (mut window, expanded) = open_table_over(Drawing::Recorded, Scheme::Dark, sample_model(), false);
     assert!(window.by_test_id("player-caret-2").is_none(), "no disclosure without a detail");
 
-    let name = window.by_test_id("player-name-2").expect("the second player's name is drawn");
-    window.double_click(name).expect("the row takes a double click");
+    let cell = kills_cell(&window, 2);
+    window.double_click(cell).expect("the row takes a double click");
     window.advance(Duration::from_millis(400));
     assert!(expanded.with_untracked(HashSet::is_empty), "no row opens");
 }
@@ -256,8 +285,8 @@ fn without_a_detail_no_row_offers_to_open() {
 #[test]
 fn an_open_detail_follows_a_column_pinned_after_it_opened() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
-    let name = window.by_test_id("player-name-2").expect("the second player's name is drawn");
-    window.double_click(name).expect("the row takes a double click");
+    let cell = kills_cell(&window, 2);
+    window.double_click(cell).expect("the row takes a double click");
     window.advance(Duration::from_millis(400));
     let kills_key = ReplayColumn::Kills.storage_key();
     let part = format!("detail-2-{kills_key}");

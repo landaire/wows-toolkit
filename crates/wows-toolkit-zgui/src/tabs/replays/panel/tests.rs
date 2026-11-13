@@ -229,11 +229,10 @@ fn the_player_table_slot_draws_the_table_and_opens_a_rows_detail() {
     let Opened { mut window } =
         open(Opening { seed: Some(loaded(model, true)), table: Some(player_table_slot()), ..Opening::default() });
     assert!(window.by_test_id("fake-table").is_none());
-    let name =
-        window.by_test_id(&format!("player-name-{}", with_detail.db_id.raw())).expect("the table draws the player");
+    let cell = crate::tabs::replays::table::tests::kills_cell(&window, with_detail.db_id.raw());
     assert!(window.by_class("wt-xr-frame").is_none(), "no row starts open");
 
-    window.double_click(name).expect("the row takes a double click");
+    window.double_click(cell).expect("the row takes a double click");
     window.advance(Duration::from_millis(600));
     assert!(window.by_class("wt-xr-frame").is_some(), "the row's detail opens");
 }
