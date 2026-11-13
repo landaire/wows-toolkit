@@ -19,6 +19,7 @@ pub mod chat;
 pub mod expanded;
 mod figures;
 mod raw_json;
+mod skeleton;
 #[cfg(test)]
 mod tests;
 
@@ -104,6 +105,7 @@ use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
 use crate::tabs::replays::panel::raw_json::RawJsonPanelProps;
+use crate::tabs::replays::panel::skeleton::TableSkeletonProps;
 use crate::tabs::replays::table::PlayerDetail;
 use crate::tabs::replays::table::PlayerDetailCx;
 
@@ -119,14 +121,13 @@ const CSS: &str = css!(
         min-height: 0;
     }
     .wt-rp-loaded { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-    .wt-rp-loading, .wt-rp-failed {
+    .wt-rp-failed {
         display: flex;
         flex-direction: column;
         gap: 4px;
         padding: 8px;
         font-size: 14px;
     }
-    .wt-rp-loading { flex-direction: row; align-items: center; gap: 8px; color: var(--wt-color-text-dim); }
     .wt-rp-failed__title { font-weight: 700; }
     .wt-rp-dim { color: var(--wt-color-text-dim); }
     .wt-rp-win { color: var(--wt-color-win); }
@@ -754,12 +755,7 @@ pub fn ReplayPanel(
     });
 
     let body = move || match kind.get() {
-        StateKind::Loading => AnyView::new(view! {
-            row(class = "wt-rp-loading", attr:data-testid = "replay-panel-loading") {
-                Spinner(label = t!("ui.replay.loading").into_owned())
-                text {{t!("ui.replay.loading").into_owned()}}
-            }
-        }),
+        StateKind::Loading => AnyView::new(view! { TableSkeleton(label = t!("ui.replay.loading").into_owned()) }),
         StateKind::Failed => {
             let reason = move || {
                 state.with(|state| match state {

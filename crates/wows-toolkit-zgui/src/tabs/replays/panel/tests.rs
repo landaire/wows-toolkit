@@ -184,12 +184,17 @@ fn open(opening: Opening) -> Opened {
     Opened { window }
 }
 
-/// Until the replay is read the panel says it is loading.
+/// Until the replay is read the panel draws the table's outline, pulsing, under a card that says
+/// it is loading.
 #[test]
 fn a_replay_being_read_shows_that_it_is_loading() {
-    let Opened { window } = open(Opening::default());
-    assert!(window.by_test_id("replay-panel-loading").is_some());
+    let Opened { mut window } = open(Opening::default());
+    let loading = window.by_test_id("replay-panel-loading").expect("the outline is drawn");
     assert!(window.by_test_id("replay-table-slot").is_none());
+    assert_eq!(window.a11y(loading).and_then(|state| state.label).as_deref(), Some("Loading..."));
+    assert_eq!(window.texts_by_class("wt-skeleton__label"), ["Loading..."]);
+    let outline = window.by_class("wt-skeleton__outline").expect("the outline is drawn");
+    assert!(window.running_animations(outline) > 0, "the outline pulses");
 }
 
 /// The header names the match and says when the results are missing.
