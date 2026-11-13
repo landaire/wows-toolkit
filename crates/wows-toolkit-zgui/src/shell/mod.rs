@@ -40,6 +40,7 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::WorkspaceInsetProps;
 use tokio::runtime::Runtime;
+use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
@@ -710,7 +711,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                                                 }
                                             }
                                             TooltipContent {{move || {
-                                                shell.directory_stats(id).map(|tab| tab.root.display().to_string()).unwrap_or_default()
+                                                shell.directory_stats(id).map(|tab| shown_path(&tab.root)).unwrap_or_default()
                                             }}}
                                         }
                                     }

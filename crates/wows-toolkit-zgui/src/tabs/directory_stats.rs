@@ -23,6 +23,7 @@ use wows_toolkit_replay_data::directory_stats::DirectoryStatsUpdate;
 use wows_toolkit_replay_data::directory_stats::ReadState;
 use wows_toolkit_replay_data::directory_stats::read_directory;
 use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetGames;
@@ -361,7 +362,7 @@ fn DirectoryHeader(
                 row(class = "wt-directory-stats__root") {
                     AppIcon(glyph = Glyph::FolderOpen)
                     text(class = "wt-directory-stats__path", attr:data-testid = "directory-stats-path") {
-                        {root.display().to_string()}
+                        {shown_path(&root)}
                     }
                 }
                 box(class = "wt-directory-stats__rule")

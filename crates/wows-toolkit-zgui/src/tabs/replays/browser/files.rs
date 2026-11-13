@@ -6,12 +6,17 @@ use std::path::PathBuf;
 
 use landaire_ui::Toasts;
 use rust_i18n::t;
+use wows_toolkit_services::paths::without_verbatim_prefix;
 
 use crate::shell::Shell;
 
 /// Puts the paths on the clipboard as text, one per line.
 pub fn copy_paths(shell: Shell, paths: &[PathBuf]) {
-    let text = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    let text = paths
+        .iter()
+        .map(|path| without_verbatim_prefix(path).to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
     shell.copy_text(text);
 }
 

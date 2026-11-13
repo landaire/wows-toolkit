@@ -36,6 +36,7 @@ use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::child_process::reveal_in_file_manager;
+use wows_toolkit_services::paths::without_verbatim_prefix;
 use wows_toolkit_viewmodel::listing_row::hover_facts_for_match;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::search::game_mode_gap_applies;
@@ -626,7 +627,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
 /// What a result row offers, shared by its dots and its right-click menu. A replay that is no
 /// longer on disk keeps its path to copy; the rest is greyed out under a line that says why.
 fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: impl Fn() + 'static) -> impl IntoView {
-    let copied = path.display().to_string();
+    let copied = without_verbatim_prefix(&path).display().to_string();
     let file = path.clone();
     let (rendered, clipped) = (path.clone(), path.clone());
     view! {
