@@ -37,6 +37,7 @@ use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_armor::sidebar_tree::RowId;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelLibrary;
 use wowsunpack::export::ship::ShipAssets;
@@ -135,7 +136,9 @@ const CSS: &str = css!(
     .wt-armor-row__tip-lines { display: flex; flex-direction: column; }
     .wt-armor-common { display: flex; flex-direction: column; gap: 8px; width: 220px; padding: 8px; }
     .wt-armor-common__check { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; }
-    .wt-armor-common__tiers { font-size: 13px; }"
+    .wt-armor-common__tiers { font-size: 13px; }
+    .wt-armor-common__xray { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    .wt-armor-common__xray-choices { display: flex; flex-direction: column; gap: 6px; padding-left: 4px; }"
 );
 
 /// The loaded ship catalog the sidebar lists, with the assets its models and icons are read
@@ -166,6 +169,9 @@ pub struct CommonPaneSettings {
     pub stack_panes: bool,
     /// What a newly opened model shows first. Not a comparison setting.
     pub opening_layer: OpeningLayer,
+    /// When a part hovered in the view shows its highlight through what is in front of it. Not
+    /// a comparison setting.
+    pub xray_highlight: XrayHighlight,
 }
 
 /// A ship the reader picked from the listing.

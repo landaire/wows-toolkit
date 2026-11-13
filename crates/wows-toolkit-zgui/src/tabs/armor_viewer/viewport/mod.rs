@@ -41,4 +41,5 @@ pub use types::OpeningLayer;
 pub use types::SceneFeatures;
 pub use types::SceneSource;
 pub use types::ViewportChange;
+pub use types::XRAY_KEY;
 pub use view::ArmorViewportProps;

@@ -8,6 +8,7 @@ use rust_i18n::t;
 use wows_toolkit_armor::catalog::TierRange;
 use wows_toolkit_armor::catalog::tier_roman;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -15,6 +16,7 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
+use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -24,6 +26,8 @@ use zgui_ui::Checked;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
+use zgui_ui::RadioGroupItemProps;
+use zgui_ui::RadioGroupProps;
 use zgui_ui::SeparatorProps;
 use zgui_ui::TooltipContentProps;
 use zgui_ui::TooltipProps;
@@ -39,6 +43,7 @@ use crate::tabs::armor_viewer::sidebar::CommonPaneSettings;
 use crate::tabs::armor_viewer::sidebar::SidebarEvent;
 use crate::tabs::armor_viewer::sidebar::state::SidebarState;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
+use crate::tabs::armor_viewer::viewport::XRAY_KEY;
 
 /// The title row.
 #[component]
@@ -88,6 +93,17 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
     };
 
     let show_armor = Signal::derive_local(move || Checked::from(common.get().opening_layer.shows_armor()));
+    let xray = Signal::derive_local(move || xray_value(common.get().xray_highlight).to_owned());
+    let choose_xray = move |value: String| {
+        let Some(mode) = XrayHighlight::ALL.into_iter().find(|mode| xray_value(*mode) == value) else { return };
+        let mut next = common.get_untracked();
+        next.xray_highlight = mode;
+        state.send(SidebarEvent::Common(next));
+    };
+    let xray_heading = move || {
+        locale.track();
+        t!("ui.armor.xray_highlight").into_owned()
+    };
     let mirror = Signal::derive_local(move || Checked::from(common.get().mirror_cameras));
     let stack = Signal::derive_local(move || Checked::from(common.get().stack_panes));
     let sync = Signal::derive_local(move || Checked::from(common.get().sync_options));
@@ -136,6 +152,17 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                             Signal::stored_local(false),
                             change(|common, on| common.opening_layer = OpeningLayer::from_show_armor(on)),
                         )}
+                        box(class = "wt-armor-common__xray") {
+                            text {{xray_heading}}
+                            RadioGroup(
+                                value = Binding::controlled(xray, choose_xray),
+                                label = t!("ui.armor.xray_highlight").into_owned(),
+                                class = "wt-armor-common__xray-choices",
+                                attr:data-testid = "armor-pane-xray-highlight"
+                            ) {
+                                {XrayHighlight::ALL.into_iter().map(xray_choice).collect::<Vec<_>>()}
+                            }
+                        }
                         {check(
                             "armor-pane-mirror-cameras",
                             "ui.armor.mirror_cameras",
@@ -214,6 +241,43 @@ fn check(
             }
             TooltipContent {{locale.text(hint)}}
         }
+    }
+}
+
+/// One x-ray mode in the common settings menu.
+fn xray_choice(mode: XrayHighlight) -> AnyView {
+    let locale = Services::current().locale;
+    let label = move || {
+        locale.track();
+        xray_label(mode)
+    };
+
+    AnyView::new(view! {
+        row(class = "wt-armor-common__check") {
+            RadioGroupItem(
+                value = xray_value(mode),
+                label = xray_label(mode),
+                attr:data-testid = format!("armor-pane-xray-highlight-{}", xray_value(mode))
+            )
+            text {{label}}
+        }
+    })
+}
+
+/// How an x-ray choice is named to the radio group.
+fn xray_value(mode: XrayHighlight) -> &'static str {
+    match mode {
+        XrayHighlight::Always => "always",
+        XrayHighlight::WhileHeld => "while_held",
+        XrayHighlight::Off => "off",
+    }
+}
+
+fn xray_label(mode: XrayHighlight) -> String {
+    match mode {
+        XrayHighlight::Always => t!("ui.armor.xray_always").into_owned(),
+        XrayHighlight::WhileHeld => t!("ui.armor.xray_while_held", key = XRAY_KEY.label()).into_owned(),
+        XrayHighlight::Off => t!("ui.armor.xray_off").into_owned(),
     }
 }
 

@@ -62,6 +62,7 @@ use crate::tabs::armor_viewer::sidebar::ArmorSidebarProps;
 use crate::tabs::armor_viewer::sidebar::ModelsSource;
 use crate::tabs::armor_viewer::sidebar::SidebarCatalog;
 use crate::tabs::armor_viewer::sidebar::SidebarEvent;
+use crate::tabs::armor_viewer::viewport::XRAY_KEY;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 
 const SHEET: &str = "wt-armor-viewer";
@@ -100,6 +101,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
     take_requests(shell, workspace);
     follow_panes(workspace);
     publish_chrome(shell, workspace);
+    follow_xray_key(shell, workspace);
 
     let catalog: Signal<Option<Arc<SidebarCatalog>>, LocalStorage> = {
         let built = Memo::new(move |_| library.ready().map(|bundle| Arc::as_ptr(&bundle) as usize));
@@ -184,13 +186,13 @@ fn adopt_defaults(workspace: ArmorWorkspace) {
         if adopted.get_value() {
             return;
         }
-        let Some((defaults, show_armor)) =
-            settings.read(|settings| (settings.armor_defaults.clone(), settings.model_show_armor))
-        else {
+        let Some((defaults, show_armor, xray_highlight)) = settings.read(|settings| {
+            (settings.armor_defaults.clone(), settings.model_show_armor, settings.model_xray_highlight)
+        }) else {
             return;
         };
         adopted.set_value(true);
-        workspace.apply_defaults(defaults.as_ref(), show_armor);
+        workspace.apply_defaults(defaults.as_ref(), show_armor, xray_highlight);
     });
     on_cleanup_local(move || drop(adopting));
 }
@@ -292,6 +294,15 @@ fn publish_chrome(shell: Shell, workspace: ArmorWorkspace) {
         drop(mode);
         chrome.set_mode(None);
     });
+}
+
+/// Keeps every pane's hover highlight with the x-ray mode and its key, so pressing or letting go
+/// of the key takes effect without a pointer move.
+fn follow_xray_key(shell: Shell, workspace: ArmorWorkspace) {
+    let depth = RenderEffect::new(move |_| {
+        workspace.set_highlight_depth(XRAY_KEY.is_down(shell.held_modifiers()));
+    });
+    on_cleanup_local(move || drop(depth));
 }
 
 fn on_sidebar_event(shell: Shell, workspace: ArmorWorkspace, event: SidebarEvent) {
