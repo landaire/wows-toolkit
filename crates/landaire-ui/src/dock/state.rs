@@ -27,6 +27,7 @@ use crate::dock::layout::PanelId;
 use crate::dock::layout::PanelKind;
 use crate::dock::layout::RegionExtent;
 use crate::dock::layout::RegionLimits;
+use crate::dock::layout::SplitAxis;
 use crate::dock::saved::RestoreReport;
 use crate::dock::saved::SavedLayout;
 use crate::error::DockError;
@@ -154,6 +155,12 @@ impl DockState {
     /// its id, its entry and its view, and shows where it lands. A group left empty is taken out.
     pub fn move_panel(self, panel: &PanelId, target: DockTarget) -> Result<GroupId, DockError> {
         self.change(|layout| layout.move_panel(panel, target))
+    }
+
+    /// Puts every tab group in `region` in one split along `axis`, in the order they are laid
+    /// out, each keeping the room it had. Groups and panels keep their ids and views.
+    pub fn line_up(self, region: DockRegion, axis: SplitAxis) {
+        self.layout.update(|layout| layout.line_up(region, axis));
     }
 
     /// Shows `panel` in its tab group and opens the region it is in.

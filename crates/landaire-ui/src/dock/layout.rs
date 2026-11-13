@@ -910,6 +910,30 @@ impl Layout {
             inner.parts.into_iter().map(|part| Part { share: Share(part.share.0 * room / 100.0), node: part.node });
         outer.parts.splice(index..index, moved);
     }
+
+    /// Puts every group in `region` in one split along `axis`, in the order they are laid out,
+    /// sharing the room evenly. Shares carried over from nested splits could fall below a part's
+    /// least size, which would not keep the room they had anyway.
+    pub(crate) fn line_up(&mut self, region: DockRegion, axis: SplitAxis) {
+        let slot = &mut self.region_mut(region).root;
+        let Some(Node::Split(root)) = slot else {
+            return;
+        };
+
+        // A stack, so the first part is taken first and a split's parts take its place in order.
+        let mut pending: Vec<Node> = std::mem::take(&mut root.parts).into_iter().rev().map(|part| part.node).collect();
+        let mut groups = Vec::new();
+        while let Some(node) = pending.pop() {
+            match node {
+                Node::Group(group) => groups.push(Node::Group(group)),
+                Node::Split(split) => pending.extend(split.parts.into_iter().rev().map(|part| part.node)),
+            }
+        }
+
+        let share = Share(100.0 / groups.len() as f64);
+        root.axis = axis;
+        root.parts = groups.into_iter().map(|node| Part { share, node }).collect();
+    }
 }
 
 /// A panel a restore left out, and why.
@@ -1166,5 +1190,32 @@ mod tests {
         };
         assert_eq!(parts, [NodeShape::Group(a), NodeShape::Group(b), NodeShape::Group(c)]);
         assert_eq!(layout.split_shares(id), [Share(50.0), Share(25.0), Share(25.0)]);
+    }
+
+    #[test]
+    fn lining_up_a_region_puts_every_group_in_one_split_sharing_the_room() {
+        let mut layout = Layout::new();
+        let a = layout.add_panel(DockTarget::Region(DockRegion::Center), entry("a")).expect("adds");
+        let b = layout.add_panel(DockTarget::Beside { group: a, edge: Edge::Right }, entry("b")).expect("adds");
+        let d = layout.add_panel(DockTarget::Beside { group: b, edge: Edge::Bottom }, entry("d")).expect("adds");
+        let Some(NodeShape::Split { id, .. }) = layout.shape(DockRegion::Center) else {
+            panic!("the center is split");
+        };
+
+        layout.line_up(DockRegion::Center, SplitAxis::Vertical);
+        let Some(NodeShape::Split { axis: SplitAxis::Vertical, parts, id: lined }) = layout.shape(DockRegion::Center)
+        else {
+            panic!("the center is split one above another");
+        };
+        assert_eq!(lined, id, "the split around them is kept");
+        assert_eq!(parts, [NodeShape::Group(a), NodeShape::Group(b), NodeShape::Group(d)]);
+        let third = Share(100.0 / 3.0);
+        assert_eq!(layout.split_shares(id), [third, third, third]);
+
+        layout.line_up(DockRegion::Center, SplitAxis::Horizontal);
+        let Some(NodeShape::Split { axis: SplitAxis::Horizontal, parts, .. }) = layout.shape(DockRegion::Center) else {
+            panic!("the center is split side by side");
+        };
+        assert_eq!(parts, [NodeShape::Group(a), NodeShape::Group(b), NodeShape::Group(d)]);
     }
 }
