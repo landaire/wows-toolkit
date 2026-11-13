@@ -680,9 +680,9 @@ impl BrowserControl {
     /// A chosen tab on the install's replays directory gives way to the install's own tab, and
     /// the directory leaves the recent list, since the install's tab always shows it.
     fn fold_install_into_tabs(self, install: &Path) {
-        let folded: Vec<FolderTab> = self.folders.with_untracked(|folders| {
-            folders.iter().filter(|tab| tab.root() == Some(install)).cloned().collect()
-        });
+        let folded: Vec<FolderTab> = self
+            .folders
+            .with_untracked(|folders| folders.iter().filter(|tab| tab.root() == Some(install)).cloned().collect());
         for tab in folded {
             if self.selected.get_untracked() == tab.id {
                 self.select_folder(FolderId::INSTALL);
@@ -868,7 +868,9 @@ impl BrowserControl {
             return;
         }
         let noted = self.unseen.with_untracked(|unseen| unseen.get(&id).is_some_and(|paths| paths.contains(&path)))
-            || self.pending_landings.with_value(|pending| pending.get(&id).is_some_and(|landing| landing.paths.contains(&path)));
+            || self
+                .pending_landings
+                .with_value(|pending| pending.get(&id).is_some_and(|landing| landing.paths.contains(&path)));
         if noted {
             return;
         }
@@ -940,6 +942,7 @@ impl BrowserControl {
             }
             ListingEvent::WatchWithdrawn => self.shell.toasts().withdraw(&watch_toast_key(id)),
             ListingEvent::BuildsMissing(missing) => events.send(ReplayBrowserEvent::BuildsMissing(missing)),
+            ListingEvent::BuildsListed(builds) => events.send(ReplayBrowserEvent::BuildsListed(builds)),
         }
     }
 

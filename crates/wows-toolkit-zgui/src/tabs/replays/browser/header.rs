@@ -317,9 +317,9 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
     };
 
     view! {
-        Popover(open = open) {
-            Tooltip {
-                TooltipTrigger {
+        Tooltip {
+            TooltipTrigger {
+                Popover(open = open) {
                     PopoverTrigger(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconSm,
@@ -328,68 +328,68 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                     ) {
                         AppIcon(glyph = Glyph::Settings)
                     }
-                }
-                TooltipContent {{tip}}
-            }
-            PopoverContent(
-                placement = Placement::new(Side::Bottom, Align::End),
-                class = "wt-listing-options",
-                attr:data-testid = "replay-listing-options-menu"
-            ) {
-                {path_line}
-                column(class = "wt-listing-options__item") {
-                    Button(
-                        variant = ButtonVariant::Ghost,
-                        size = ButtonSize::Sm,
-                        class = "wt-listing-options__action",
-                        attr:data-testid = "directory-game-data",
-                        on:click = check_game_data
+                    PopoverContent(
+                        placement = Placement::new(Side::Bottom, Align::End),
+                        class = "wt-listing-options",
+                        attr:data-testid = "replay-listing-options-menu"
                     ) {
-                        AppIcon(glyph = Glyph::Download)
-                        text {{locale.text("ui.replay.check_game_data")}}
-                    }
-                    text(class = "wt-listing-options__hint") {{locale.text("ui.replay.check_game_data_tooltip")}}
-                }
-                {stats}
-                Separator()
-                Tooltip {
-                    TooltipTrigger {
-                        row(class = "wt-listing-options__check") {
-                            Checkbox(
-                                checked = Binding::controlled(auto_load, set_auto_load),
-                                attr:data-testid = "replay-listing-auto-load-latest",
-                                a11y:label = t!("ui.replay.autoload_latest").into_owned()
-                            )
-                            text {{locale.text("ui.replay.autoload_latest")}}
+                        {path_line}
+                        column(class = "wt-listing-options__item") {
+                            Button(
+                                variant = ButtonVariant::Ghost,
+                                size = ButtonSize::Sm,
+                                class = "wt-listing-options__action",
+                                attr:data-testid = "directory-game-data",
+                                on:click = check_game_data
+                            ) {
+                                AppIcon(glyph = Glyph::Download)
+                                text {{locale.text("ui.replay.check_game_data")}}
+                            }
+                            text(class = "wt-listing-options__hint") {{locale.text("ui.replay.check_game_data_tooltip")}}
                         }
+                        {stats}
+                        Separator()
+                        Tooltip {
+                            TooltipTrigger {
+                                row(class = "wt-listing-options__check") {
+                                    Checkbox(
+                                        checked = Binding::controlled(auto_load, set_auto_load),
+                                        attr:data-testid = "replay-listing-auto-load-latest",
+                                        a11y:label = t!("ui.replay.autoload_latest").into_owned()
+                                    )
+                                    text {{locale.text("ui.replay.autoload_latest")}}
+                                }
+                            }
+                            TooltipContent {{locale.text("ui.replay.autoload_latest_tooltip")}}
+                        }
+                        Separator()
+                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.group_label")}}
+                        ToggleGroup(
+                            value = Binding::controlled(grouping, set_grouping),
+                            variant = ToggleVariant::Outline,
+                            size = ToggleSize::Sm,
+                            label = t!("ui.replay.group_label").into_owned(),
+                            attr:data-testid = "replay-listing-grouping"
+                        ) {
+                            ToggleGroupItem(value = grouping_value(ReplayGrouping::Date), attr:data-testid = "replay-listing-grouping-date") {
+                                {locale.text("ui.replay.group.date")}
+                            }
+                            ToggleGroupItem(value = grouping_value(ReplayGrouping::Ship), attr:data-testid = "replay-listing-grouping-ship") {
+                                {locale.text("ui.replay.group.ship")}
+                            }
+                            ToggleGroupItem(value = grouping_value(ReplayGrouping::None), attr:data-testid = "replay-listing-grouping-none") {
+                                {locale.text("ui.replay.group.none")}
+                            }
+                        }
+                        Separator()
+                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.column_filters")}}
+                        ColumnFilterCheck(filter = ColumnFilter::RawXp)
+                        ColumnFilterCheck(filter = ColumnFilter::ObservedDamage)
+                        ColumnFilterCheck(filter = ColumnFilter::Heals)
                     }
-                    TooltipContent {{locale.text("ui.replay.autoload_latest_tooltip")}}
                 }
-                Separator()
-                text(class = "wt-listing-options__title") {{locale.text("ui.replay.group_label")}}
-                ToggleGroup(
-                    value = Binding::controlled(grouping, set_grouping),
-                    variant = ToggleVariant::Outline,
-                    size = ToggleSize::Sm,
-                    label = t!("ui.replay.group_label").into_owned(),
-                    attr:data-testid = "replay-listing-grouping"
-                ) {
-                    ToggleGroupItem(value = grouping_value(ReplayGrouping::Date), attr:data-testid = "replay-listing-grouping-date") {
-                        {locale.text("ui.replay.group.date")}
-                    }
-                    ToggleGroupItem(value = grouping_value(ReplayGrouping::Ship), attr:data-testid = "replay-listing-grouping-ship") {
-                        {locale.text("ui.replay.group.ship")}
-                    }
-                    ToggleGroupItem(value = grouping_value(ReplayGrouping::None), attr:data-testid = "replay-listing-grouping-none") {
-                        {locale.text("ui.replay.group.none")}
-                    }
-                }
-                Separator()
-                text(class = "wt-listing-options__title") {{locale.text("ui.replay.column_filters")}}
-                ColumnFilterCheck(filter = ColumnFilter::RawXp)
-                ColumnFilterCheck(filter = ColumnFilter::ObservedDamage)
-                ColumnFilterCheck(filter = ColumnFilter::Heals)
             }
+            TooltipContent {{tip}}
         }
     }
 }
