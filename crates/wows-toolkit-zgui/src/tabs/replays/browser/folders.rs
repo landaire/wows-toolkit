@@ -764,7 +764,7 @@ impl BrowserControl {
     pub fn browse_folder(self) {
         let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.replay.open_directory"));
         self.spawn(async move {
-            if let Ok(Some(directory)) = asked.await {
+            if let Some(directory) = self.shell.chosen_path(asked).await {
                 self.open_folder(directory);
             }
         });
