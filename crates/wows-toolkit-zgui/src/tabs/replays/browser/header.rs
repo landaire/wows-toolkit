@@ -452,9 +452,6 @@ fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
 }
 
 /// The open actions: one replay file, or a directory of replays opened as a tab of its own.
-///
-/// The menu sits inside the tooltip: the tooltip provides an overlay state of its own, and a
-/// trigger inside it would toggle the tooltip rather than the menu.
 #[component]
 fn OpenMenu(control: BrowserControl) -> impl IntoView {
     let shell = control.shell();

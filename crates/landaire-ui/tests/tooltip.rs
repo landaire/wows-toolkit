@@ -28,6 +28,11 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::IntoView;
+use zgui::vocab::Role;
+use zgui_ui::DropdownMenuContentProps;
+use zgui_ui::DropdownMenuProps;
+use zgui_ui::DropdownMenuTriggerProps;
+use zgui_ui::MenuItemProps;
 
 const SIZE: WindowSize = WindowSize { width: 320.0, height: 300.0 };
 
@@ -318,4 +323,36 @@ fn a_pointer_tip_crosses_the_pointer_where_the_window_has_no_room() {
     assert_eq!(tip_at(&mut window, pointer, 199.0, 39.0), Point::new(DevicePx(177.0), DevicePx(60.0)));
     // 20 CSS pixels past 190 leave the 200 high window.
     assert_eq!(tip_at(&mut window, pointer, 49.0, 189.0), Point::new(DevicePx(75.0), DevicePx(252.0)));
+}
+
+/// A menu whose trigger is inside a tooltip's trigger, inside the menu.
+#[component]
+fn TippedMenu() -> impl IntoView {
+    view! {
+        ThemeRoot {
+            DropdownMenu {
+                Tooltip {
+                    TooltipTrigger {
+                        DropdownMenuTrigger(attr:data-testid = "menu-trigger") {"Open"}
+                    }
+                    TooltipContent {"about the menu"}
+                }
+                DropdownMenuContent {
+                    MenuItem {"Item"}
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_menu_trigger_inside_a_tooltip_opens_its_menu() {
+    let mut window =
+        HeadlessWindow::open(HeadlessOptions::new(SIZE), || view! { TippedMenu() }).expect("the window opens");
+    let trigger = element(&window, "menu-trigger");
+
+    window.click(trigger).expect("the trigger has a box");
+    window.advance(SETTLE);
+
+    assert!(window.by_role_and_label(Role::MenuItem, "Item").is_some(), "the click opens the menu");
 }

@@ -196,8 +196,10 @@ pub fn Tooltip(
 
     let outer = TooltipLink::current().map(Rc::new);
     let place = TooltipPlace::new();
-    let state = OverlayState::new(open, false, on_open_change).anchored_to(place.area).provide();
-    let intent = HoverIntent::new(state, open_after, close_after).in_handoff(Handoff::current()).provide();
+    // Reached through the link only. Published as context, they would be what a menu or popover
+    // trigger inside the trigger binds to, and its click would open this rather than its menu.
+    let state = OverlayState::new(open, false, on_open_change).anchored_to(place.area);
+    let intent = HoverIntent::new(state, open_after, close_after).in_handoff(Handoff::current());
     provide_local_context(TooltipLink { intent, place, outer });
 
     // Placed as it opens, whoever opened it, and before the surface is laid out.

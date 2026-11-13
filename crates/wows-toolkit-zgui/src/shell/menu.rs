@@ -36,8 +36,6 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
     let locale = services.locale;
     let item = move |run: fn(Services, Shell)| UnsyncCallback::new(move |()| run(services, shell));
 
-    // The menu sits inside the tooltip's trigger: a tooltip holds an overlay state of its own, so a
-    // menu trigger beneath it would open the tooltip rather than the menu.
     view! {
         Tooltip {
             TooltipTrigger {

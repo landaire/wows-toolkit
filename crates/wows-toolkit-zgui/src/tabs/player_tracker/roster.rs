@@ -519,8 +519,6 @@ fn twitch_chip(side: &'static str, index: usize, candidates: Option<Vec<SniperCa
     }
 
     let logins = StoredValue::new(candidates.iter().map(|candidate| candidate.login.clone()).collect::<Vec<String>>());
-    // The menu sits inside the hover's trigger: a trigger answers to the nearest overlay around it,
-    // so the other way round the chip would open the hover rather than the menu.
     AnyView::new(view! {
         Tooltip {
             TooltipTrigger(class = "wt-tracker-roster-col--chip") {

@@ -1028,8 +1028,6 @@ fn Shortcuts() -> impl IntoView {
     let tip = heading.clone();
     let label = heading.clone();
 
-    // The popover sits inside the tip: a tooltip holds an overlay state of its own, so a popover
-    // trigger beneath it would open the tooltip rather than the popover.
     view! {
         Tip(tip = tip) {
             Popover {
