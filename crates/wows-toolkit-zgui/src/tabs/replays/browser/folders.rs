@@ -79,6 +79,7 @@ use crate::shell::palette::modes;
 use crate::tabs::replays::browser::BrowserEvents;
 use crate::tabs::replays::browser::ReplayBrowserEvent;
 use crate::tabs::replays::browser::actions;
+use crate::tabs::replays::browser::actions::BrowserWork;
 use crate::tabs::replays::browser::header::ListingHeaderProps;
 use crate::tabs::replays::browser::listing::Listing;
 use crate::tabs::replays::browser::listing::ListingEvent;
@@ -312,6 +313,8 @@ pub struct BrowserControl {
     /// The waits after which landed replays count, each dropped as it fires.
     counting: StoredValue<Vec<zgui::view::TimeoutHandle>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
+    /// The index passes, forced re-indexing and contributing.
+    pub(super) work: BrowserWork,
     shell: Shell,
 }
 
@@ -340,6 +343,7 @@ impl BrowserControl {
             timers: StoredValue::new_local(Timers::current()),
             counting: StoredValue::new_local(Vec::new()),
             owner: StoredValue::new_local(Owner::current().expect("the control is made inside a component")),
+            work: BrowserWork::new(),
             shell,
         };
         control.follow_settings();
@@ -352,6 +356,10 @@ impl BrowserControl {
 
     fn services(self) -> Services {
         self.shell.services()
+    }
+
+    pub(super) fn shell(self) -> Shell {
+        self.shell
     }
 
     fn spawn(self, future: impl Future<Output = ()> + 'static) {
@@ -553,6 +561,7 @@ impl BrowserControl {
                 self.select_folder(into);
             }
             self.remove_tab(id);
+            actions::folder_closed(self, id);
             if let Some(old) = old {
                 self.rename_recent(&old, &key);
             }
@@ -586,6 +595,8 @@ impl BrowserControl {
         }
         if present {
             actions::index_folder(self, id);
+        } else {
+            actions::folder_closed(self, id);
         }
     }
 
@@ -898,11 +909,12 @@ pub(super) fn FolderPanels(control: BrowserControl, events: BrowserEvents) -> im
     install_stylesheet(SHEET, CSS);
     let motion = motion_preference();
     let notice = move || folder_notice(control);
-    let pane_events = StoredValue::new_local(events);
+    actions::adopt_events(control, events.clone());
+    let pane_events = StoredValue::new_local(events.clone());
 
     view! {
         column(class = "wt-browser", attr:data-testid = "replay-browser") {
-            ListingHeader(control = control)
+            ListingHeader(control = control, events = events)
             FolderStrip(control = control, motion = motion)
             column(class = "wt-folder-notice-host") {{notice}}
             for tab in move || control.folders.get(), key = |tab: &FolderTab| tab.id {

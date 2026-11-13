@@ -24,6 +24,8 @@ wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
 wows-toolkit-services = { workspace = true }
+# The game data a forced re-index downloads first.
+wows-data-mgr = { workspace = true, features = ["download"] }
 # The Launcher tab's state and background work, and the launcher crates whose types it shows.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
@@ -50,6 +52,8 @@ rustls = { version = "0.23.43", default-features = false, features = ["ring", "s
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 humansize = "2.1.3"
