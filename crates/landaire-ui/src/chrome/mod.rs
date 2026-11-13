@@ -4,6 +4,7 @@
 pub(crate) mod count_up;
 pub(crate) mod drawer;
 pub(crate) mod frame_window;
+pub(crate) mod loading;
 pub(crate) mod reveal;
 pub(crate) mod side_split;
 pub(crate) mod slide;
