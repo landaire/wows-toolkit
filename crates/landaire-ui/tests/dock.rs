@@ -28,8 +28,11 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::geom::Rect;
+use zgui::platform::CursorStyle;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
@@ -211,6 +214,39 @@ fn a_folded_region_comes_back_at_the_width_it_had() {
     window.advance(FRAME);
     let back = width(&window, "content-side").expect("the side panel is laid out again");
     assert!((back - side).abs() < 1.0, "came back at {back}, was {side}");
+}
+
+/// The dividers that take room, each with its box.
+fn shown_dividers(window: &mut HeadlessWindow) -> Vec<(Element, Rect<DevicePx, Device>)> {
+    window
+        .by_role(Role::Splitter)
+        .into_iter()
+        .filter_map(|handle| Some((handle, window.bounds(handle)?)))
+        .filter(|(_, bounds)| bounds.size.width.0 > 0.0 && bounds.size.height.0 > 0.0)
+        .collect()
+}
+
+#[test]
+fn a_divider_shows_the_resize_cursor_of_its_axis() {
+    let (mut window, _state) = open(|state| {
+        state.add_panel(DockTarget::Region(DockRegion::Center), entry("main")).expect("adds");
+        state.add_panel(DockTarget::Region(DockRegion::Right), entry("side")).expect("adds");
+        state.add_panel(DockTarget::Region(DockRegion::Bottom), entry("log")).expect("adds");
+    });
+    window.advance(FRAME);
+    let dividers = shown_dividers(&mut window);
+    let upright = dividers.iter().find(|(_, bounds)| bounds.size.height.0 > bounds.size.width.0).expect("a side edge");
+    let level = dividers.iter().find(|(_, bounds)| bounds.size.width.0 > bounds.size.height.0).expect("a bottom edge");
+    assert!(upright.1.size.width.0 >= 9.0, "the side edge catches the pointer {} wide", upright.1.size.width.0);
+    let (upright, level) = (upright.0, level.0);
+
+    window.hover(upright).expect("the divider has a box");
+    window.advance(FRAME);
+    assert_eq!(window.cursor(), Some(CursorStyle::ResizeColumn));
+
+    window.hover(level).expect("the divider has a box");
+    window.advance(FRAME);
+    assert_eq!(window.cursor(), Some(CursorStyle::ResizeRow));
 }
 
 fn width_of(window: &HeadlessWindow, id: &str) -> Option<f32> {

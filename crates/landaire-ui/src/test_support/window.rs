@@ -18,6 +18,7 @@ use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::geom::Size;
+use zgui::platform::CursorStyle;
 use zgui::platform::DecorationSource;
 use zgui::platform::PlatformCx;
 use zgui::platform::Surface;
@@ -490,6 +491,28 @@ impl HeadlessWindow {
 
         surface.set_decoration_source(source);
         self.deliver(SurfaceEvent::DecorationSourceChanged(source));
+
+        Ok(())
+    }
+
+    /// The cursor the window last asked the platform to show, or `None` before it asked for one.
+    pub fn cursor(&self) -> Option<CursorStyle> {
+        self.surface().and_then(|surface| surface.last_cursor())
+    }
+
+    /// Resizes the window to `size`, as a window manager would, and runs the frames that asks for.
+    pub fn resize(&mut self, size: WindowSize) -> Result<(), HeadlessError> {
+        let Some(surface) = self.surface() else {
+            return Err(HeadlessError::NoWindow);
+        };
+
+        let device = Size::new(
+            DevicePx((f64::from(size.width) * self.scale.0) as f32),
+            DevicePx((f64::from(size.height) * self.scale.0) as f32),
+        );
+        surface.resize(device);
+        self.deliver(SurfaceEvent::Resized(device));
+        self.advance(FRAME);
 
         Ok(())
     }

@@ -11,7 +11,6 @@ use landaire_ui::TitleButtonSide;
 use landaire_ui::WindowFrameProps;
 use landaire_ui::test_support::WindowSize;
 use zgui::css;
-use zgui::platform::CursorStyle;
 use zgui::platform::DecorationSource;
 use zgui::platform::FullscreenMode;
 use zgui::platform::ResizeEdge;
@@ -81,10 +80,6 @@ impl FrameWindow for Undecorated {
 
     fn begin_resize_drag(&self, edge: ResizeEdge) {
         self.window.begin_resize_drag(edge);
-    }
-
-    fn set_cursor(&self, cursor: CursorStyle) {
-        self.window.set_cursor(cursor);
     }
 }
 

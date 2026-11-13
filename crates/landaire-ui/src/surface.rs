@@ -97,7 +97,9 @@ pub const CSS: &str = css!(
     }
     .lui-tabular {
         font-variant-numeric: tabular-nums;
-    }"
+    }
+    .zui-resizable__handle[data-direction=\"horizontal\"] { cursor: col-resize; }
+    .zui-resizable__handle[data-direction=\"vertical\"] { cursor: row-resize; }"
 );
 
 /// A row's position in its list or table, from 0.

@@ -1,15 +1,12 @@
 //! The border and resize grips of a window whose platform draws no frame.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use zgui::component;
 use zgui::css;
-use zgui::platform::CursorStyle;
 use zgui::platform::ResizeEdge;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
-use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::view;
 use zgui::view::AnyView;
@@ -82,7 +79,15 @@ const CSS: &str = css!(
     .lui-window-frame__grip[data-edge=\"sw\"] { left: 0; }
     .lui-window-frame__grip[data-edge=\"e\"],
     .lui-window-frame__grip[data-edge=\"ne\"],
-    .lui-window-frame__grip[data-edge=\"se\"] { right: 0; }"
+    .lui-window-frame__grip[data-edge=\"se\"] { right: 0; }
+    .lui-window-frame__grip[data-edge=\"n\"],
+    .lui-window-frame__grip[data-edge=\"s\"] { cursor: ns-resize; }
+    .lui-window-frame__grip[data-edge=\"w\"],
+    .lui-window-frame__grip[data-edge=\"e\"] { cursor: ew-resize; }
+    .lui-window-frame__grip[data-edge=\"nw\"],
+    .lui-window-frame__grip[data-edge=\"se\"] { cursor: nwse-resize; }
+    .lui-window-frame__grip[data-edge=\"ne\"],
+    .lui-window-frame__grip[data-edge=\"sw\"] { cursor: nesw-resize; }"
 );
 
 /// One edge or corner a [`WindowFrame`] resizes from.
@@ -91,18 +96,17 @@ struct Side {
     edge: ResizeEdge,
     /// What its grip is styled by.
     name: &'static str,
-    cursor: CursorStyle,
 }
 
 const SIDES: [Side; 8] = [
-    Side { edge: ResizeEdge::North, name: "n", cursor: CursorStyle::ResizeNorthSouth },
-    Side { edge: ResizeEdge::South, name: "s", cursor: CursorStyle::ResizeNorthSouth },
-    Side { edge: ResizeEdge::West, name: "w", cursor: CursorStyle::ResizeEastWest },
-    Side { edge: ResizeEdge::East, name: "e", cursor: CursorStyle::ResizeEastWest },
-    Side { edge: ResizeEdge::NorthWest, name: "nw", cursor: CursorStyle::ResizeNorthWestSouthEast },
-    Side { edge: ResizeEdge::NorthEast, name: "ne", cursor: CursorStyle::ResizeNorthEastSouthWest },
-    Side { edge: ResizeEdge::SouthWest, name: "sw", cursor: CursorStyle::ResizeNorthEastSouthWest },
-    Side { edge: ResizeEdge::SouthEast, name: "se", cursor: CursorStyle::ResizeNorthWestSouthEast },
+    Side { edge: ResizeEdge::North, name: "n" },
+    Side { edge: ResizeEdge::South, name: "s" },
+    Side { edge: ResizeEdge::West, name: "w" },
+    Side { edge: ResizeEdge::East, name: "e" },
+    Side { edge: ResizeEdge::NorthWest, name: "nw" },
+    Side { edge: ResizeEdge::NorthEast, name: "ne" },
+    Side { edge: ResizeEdge::SouthWest, name: "sw" },
+    Side { edge: ResizeEdge::SouthEast, name: "se" },
 ];
 
 /// A window's whole content, framed when the platform draws no frame for it.
@@ -143,51 +147,22 @@ pub fn WindowFrame(
 
 /// The strip along `side` that resizes the window from it.
 fn grip(window: Rc<dyn FrameWindow>, side: Side) -> AnyView {
-    let Side { edge, name, cursor } = side;
-    let on_press = {
-        let window = Rc::clone(&window);
-        move |ev: &mut EventCx<'_, events::PointerDown>| {
-            if ev.button != Some(PointerButton::Primary) || !ev.primary {
-                return;
-            }
+    let Side { edge, name } = side;
+    let on_press = move |ev: &mut EventCx<'_, events::PointerDown>| {
+        if ev.button != Some(PointerButton::Primary) || !ev.primary {
+            return;
+        }
 
-            ev.stop_propagation();
-            window.begin_resize_drag(edge);
-        }
+        ev.stop_propagation();
+        window.begin_resize_drag(edge);
     };
-    let hovered = Rc::new(Cell::new(false));
-    let on_enter = {
-        let window = Rc::clone(&window);
-        let hovered = Rc::clone(&hovered);
-        move |_: &mut EventCx<'_, events::PointerEnter>| {
-            hovered.set(true);
-            window.set_cursor(cursor);
-        }
-    };
-    let on_leave = {
-        let window = Rc::clone(&window);
-        let hovered = Rc::clone(&hovered);
-        move |_: &mut EventCx<'_, events::PointerLeave>| {
-            hovered.set(false);
-            window.set_cursor(CursorStyle::Default);
-        }
-    };
-    // A grip taken away under the pointer gets no leave to put the cursor back.
-    on_cleanup_local(move || {
-        if hovered.get() {
-            window.set_cursor(CursorStyle::Default);
-        }
-    });
 
     AnyView::new(view! {
         box(
             class = "lui-window-frame__grip",
             attr:data-edge = name,
             a11y:hidden = true,
-            on:pointer_down = on_press,
-            // Set on entry rather than from the sheet: the platform cursor is not a style.
-            on:pointer_enter = on_enter,
-            on:pointer_leave = on_leave
+            on:pointer_down = on_press
         ) {}
     })
 }

@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use zgui::platform::CursorStyle;
 use zgui::platform::DecorationSource;
 use zgui::platform::FullscreenMode;
 use zgui::platform::ResizeEdge;
@@ -38,8 +37,6 @@ pub trait FrameWindow {
 
     /// Hands the pointer to the desktop to resize the window from `edge`.
     fn begin_resize_drag(&self, edge: ResizeEdge);
-
-    fn set_cursor(&self, cursor: CursorStyle);
 }
 
 impl FrameWindow for WindowHandle {
@@ -77,10 +74,6 @@ impl FrameWindow for WindowHandle {
 
     fn begin_resize_drag(&self, edge: ResizeEdge) {
         WindowHandle::begin_resize_drag(self, edge);
-    }
-
-    fn set_cursor(&self, cursor: CursorStyle) {
-        WindowHandle::set_cursor(self, cursor);
     }
 }
 

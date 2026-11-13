@@ -2,7 +2,6 @@
 
 #![cfg(feature = "test-support")]
 
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -49,14 +48,12 @@ enum Request {
     ResizeDrag(ResizeEdge),
 }
 
-/// A window that records each request and the cursor it was last told to show, and maximises on
-/// the two requests that ask for it.
+/// A window that records each request, and maximises on the two requests that ask for it.
 #[derive(Clone)]
 struct Recorded {
     source: RwSignal<DecorationSource>,
     maximized: RwSignal<bool>,
     requests: Rc<RefCell<Vec<Request>>>,
-    cursor: Rc<Cell<CursorStyle>>,
 }
 
 impl Recorded {
@@ -106,10 +103,6 @@ impl FrameWindow for Recorded {
 
     fn begin_resize_drag(&self, edge: ResizeEdge) {
         self.record(Request::ResizeDrag(edge));
-    }
-
-    fn set_cursor(&self, cursor: CursorStyle) {
-        self.cursor.set(cursor);
     }
 }
 
@@ -166,7 +159,6 @@ fn open_with(build: fn(Recorded) -> AnyView) -> (HeadlessWindow, Recorded) {
             source: RwSignal::new(DecorationSource::Application),
             maximized: RwSignal::new(false),
             requests: Rc::new(RefCell::new(Vec::new())),
-            cursor: Rc::new(Cell::new(CursorStyle::Default)),
         };
         *sent.borrow_mut() = Some(recorded.clone());
         build(recorded)
@@ -300,14 +292,17 @@ fn the_frame_resizes_from_its_edges_only_while_it_is_framed() {
     let bounds = window.bounds(north).expect("the grip has a box");
     assert_eq!(bounds.size.height.0, 8.0);
 
+    window.hover(north).expect("the grip has a box");
+    window.advance(SETTLE);
+    assert_eq!(window.cursor(), Some(CursorStyle::ResizeNorthSouth));
+
     window.click(north).expect("the grip has a box");
     assert_eq!(recorded.taken(), [Request::ResizeDrag(ResizeEdge::North)]);
-    assert_eq!(recorded.cursor.get(), CursorStyle::ResizeNorthSouth);
 
     recorded.maximized.set(true);
     window.advance(SETTLE);
     assert!(window.by_class("lui-window-frame__grip").is_none(), "a maximized window has no grips");
-    assert_eq!(recorded.cursor.get(), CursorStyle::Default, "the grip under the pointer put the cursor back");
+    assert_ne!(window.cursor(), Some(CursorStyle::ResizeNorthSouth), "the grip under the pointer took its cursor");
 
     recorded.maximized.set(false);
     recorded.source.set(DecorationSource::Platform);
