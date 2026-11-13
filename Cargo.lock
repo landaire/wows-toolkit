@@ -16837,6 +16837,7 @@ dependencies = [
  "zgui",
  "zgui-css",
  "zgui-image",
+ "zgui-render-wgpu",
  "zgui-ui",
  "zgui-ui-icons",
  "zgui-ui-primitives",

@@ -16,6 +16,8 @@ zgui-ui-tokens = { workspace = true }
 zgui-image = { workspace = true }
 # The placement a hover card is asked for.
 zgui-ui-primitives = { workspace = true }
+# Keeps the software Vulkan driver out of the process when a hardware one is installed.
+zgui-render-wgpu = { workspace = true }
 # Palettes, the theme root and the window chrome shared with other zgui front ends.
 landaire-ui = { workspace = true }
 # The icon set, shared with the other desktop front end.

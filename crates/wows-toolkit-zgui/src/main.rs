@@ -115,10 +115,6 @@ const APPLICATION_ID: &str = "io.github.landaire.WoWsToolkit";
 const MIN_WINDOW_SIZE: (f32, f32) = (640.0, 480.0);
 
 fn main() {
-    // First, so the totals cover the whole process. Inert without `dhat-heap`.
-    heap_profile::start();
-    heap_profile::mark("main.begin");
-
     // Before anything is opened: an argument this build does not take is reported and the process
     // exits. The update's cleanup step runs first: the binary it replaced is only deletable once
     // the process that spawned this one has exited, and it has.
@@ -134,6 +130,16 @@ fn main() {
         }
         cli::Invocation::Run(asked) => *asked,
     };
+
+    // Before any thread starts, the heap profiler's among them: the Vulkan loader keeps lavapipe
+    // and its LLVM out only while the process has one thread. The CPU renderer may want lavapipe.
+    if !asked.cpu_renderer {
+        zgui_render_wgpu::gpu::loader::prefer_hardware_vulkan();
+    }
+
+    // As early as the line above allows. Inert without `dhat-heap`.
+    heap_profile::start();
+    heap_profile::mark("main.begin");
 
     // `ring` and `aws_lc_rs` are both enabled in the dependency graph, so rustls cannot pick a
     // provider by crate features and `ClientConfig::builder()` panics unless one is installed.
