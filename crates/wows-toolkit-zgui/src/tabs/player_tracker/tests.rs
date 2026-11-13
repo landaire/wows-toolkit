@@ -205,6 +205,24 @@ fn the_filter_narrows_the_rows_to_matching_names() {
     assert!(!tracker.has("tracker-player-7"), "the other goes");
 }
 
+/// A kept row marks what the filter matched in its name or its tag, and leaves the other plain.
+#[test]
+fn the_filter_marks_names_and_tags() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    tracker.seed_two_players();
+
+    tracker.model.set_filter("abe".to_owned());
+    tracker.settle();
+    let marked = tracker.window.texts_by_class(landaire_ui::MARK_CLASS);
+    assert!(marked.contains(&"Abe".to_owned()), "{marked:?}");
+
+    tracker.model.set_filter("wtk".to_owned());
+    tracker.settle();
+    let marked = tracker.window.texts_by_class(landaire_ui::MARK_CLASS);
+    assert_eq!(marked.iter().filter(|piece| *piece == "WTK").count(), 2, "kept by the tag: {marked:?}");
+    assert!(!marked.contains(&"Abe".to_owned()), "the names are plain");
+}
+
 #[test]
 fn a_historical_row_opens_on_its_aliases_and_account_id() {
     let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));

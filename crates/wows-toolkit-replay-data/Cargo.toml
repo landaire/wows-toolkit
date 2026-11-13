@@ -67,8 +67,6 @@ wt-translations = { workspace = true }
 # The tactics board's shapes and capture points as a collab session holds them, the annotation tools,
 # and the frames a playback broadcasts to a session.
 wt-collab-client = { workspace = true }
-# A ship search folds accents, as the armor viewer's does.
-unidecode = "0.3"
 
 [dev-dependencies]
 # Setting an mtime explicitly, so a test can order two files written in the
