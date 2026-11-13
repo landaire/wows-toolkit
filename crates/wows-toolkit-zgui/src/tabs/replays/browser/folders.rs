@@ -1278,7 +1278,7 @@ fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
 }
 
 /// What hovering a tab says: its directory, whether it is followed, and what it holds unseen.
-fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
+pub(super) fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
     let Some(tab) = control.folders.with(|folders| folders.iter().find(|tab| tab.id == id).cloned()) else {
         return String::new();
     };
@@ -1286,14 +1286,16 @@ fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
         Some(root) => Some(root.to_path_buf()),
         None => control.listings.with(|listings| listings.get(&id).and_then(|listing| listing.directory.get())),
     };
-    let dir = directory.as_deref().map(shown_path).unwrap_or_default();
+    let shown = directory.as_deref().map(shown_path);
+    // Only an opened directory is looked for or found gone, and it always has a path.
+    let dir = || shown.clone().unwrap_or_default();
     match tab.state {
-        FolderState::Checking => return t!("ui.replay_folders.checking", dir = dir).into_owned(),
-        FolderState::Missing => return t!("ui.replay_folders.missing", dir = dir).into_owned(),
+        FolderState::Checking => return t!("ui.replay_folders.checking", dir = dir()).into_owned(),
+        FolderState::Missing => return t!("ui.replay_folders.missing", dir = dir()).into_owned(),
         FolderState::Listed => {}
     }
 
-    let mut lines = vec![dir];
+    let mut lines: Vec<String> = shown.into_iter().collect();
     match tab.watch() {
         ListingWatch::Watched => {
             let state = control.listings.with(|listings| listings.get(&id).map(|listing| listing.watch_state.get()));

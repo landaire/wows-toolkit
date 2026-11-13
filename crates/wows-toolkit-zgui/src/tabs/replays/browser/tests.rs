@@ -162,6 +162,17 @@ fn the_open_menu_lists_a_picked_directory() {
     assert_eq!(listed(listing(control, &root)).len(), 2, "its replays are listed");
 }
 
+/// The install's tab names its directory first, and says nothing in its place before there is one.
+#[test]
+fn a_tab_without_a_directory_has_no_blank_tooltip_line() {
+    let (mut window, control) = open();
+    settle_in_real_time(&mut window);
+    assert_eq!(control.listing(FolderId::INSTALL).and_then(|listing| listing.directory.get_untracked()), None);
+
+    let tooltip = super::folders::folder_tooltip(control, FolderId::INSTALL);
+    assert!(!tooltip.starts_with('\n'), "the tooltip starts with what it says, got {tooltip:?}");
+}
+
 #[test]
 fn a_pinned_folder_is_watched_and_saved_in_tab_order() {
     let (mut window, control) = open();
