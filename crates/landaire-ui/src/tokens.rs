@@ -25,7 +25,14 @@ use crate::tone::Tones;
 /// Body text size.
 pub const BASE_FONT_SIZE: &str = "12.5px";
 
+/// The platform's interface face. Linux has no one face for that, so it is the first installed of
+/// the desktop faces GPUI tries for its own interface font, which on GNOME is Adwaita Sans.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const SANS_FAMILY: &str =
+    "\"IBM Plex Sans\", Ubuntu, \"Adwaita Sans\", Cantarell, \"Noto Sans\", \"DejaVu Sans\", system-ui, sans-serif";
+
 /// The platform's interface face.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub const SANS_FAMILY: &str = "system-ui, sans-serif";
 
 pub const MONO_FAMILY: &str = "ui-monospace, monospace";
