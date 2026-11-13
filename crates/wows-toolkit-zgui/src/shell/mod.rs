@@ -83,6 +83,7 @@ use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
 use zgui::vocab::Modifiers;
+use zgui_ui::prelude::Binding;
 
 use crate::i18n::LanguageCode;
 use crate::icons::AppIconProps;
@@ -655,6 +656,10 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
 
     let locale = services.locale;
     let on_close_tab = move |id: DirectoryStatsId| UnsyncCallback::new(move |()| shell.close_directory_stats(id));
+    let chosen_tab = Binding::controlled(shell.selected, move |value: String| {
+        let Some(tab) = TabKey::parse(&value) else { return };
+        shell.select(tab);
+    });
 
     view! {
         column(
@@ -674,7 +679,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
         ) {
             row(class = "wt-shell__strip") {
                 box(class = "wt-shell__tabs") {
-                    TabStrip(value = shell.selected, label = "Tabs", attr:data-testid = "app-tabs") {
+                    TabStrip(value = chosen_tab, label = "Tabs", attr:data-testid = "app-tabs") {
                         for tab in move || shell.tab_order(), key = |tab: &TabKey| *tab {
                             {match tab {
                                 TabKey::App(app_tab) => AnyView::new(view! {

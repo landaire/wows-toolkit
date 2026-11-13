@@ -393,6 +393,23 @@ fn escape_shuts_the_drawer_after_a_theme_tile_is_pressed() {
     assert!(window.by_test_id("settings-search").is_none(), "escape shuts the drawer");
 }
 
+/// Choosing a tab on the strip shuts the drawer, as choosing one from the palette does.
+#[test]
+fn choosing_a_tab_shuts_the_drawer() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    let other = shell()
+        .tab_order()
+        .into_iter()
+        .find(|tab| Some(*tab) != shell().selected_untracked())
+        .expect("there is another tab");
+
+    click(&mut window, &other.value());
+
+    assert_eq!(shell().selected_untracked(), Some(other), "the tab is chosen");
+    assert!(window.by_test_id("settings-search").is_none(), "and the drawer is shut");
+}
+
 /// A message about a setting opens the drawer with that setting at the top.
 #[test]
 fn opening_at_a_setting_brings_it_to_the_top() {
