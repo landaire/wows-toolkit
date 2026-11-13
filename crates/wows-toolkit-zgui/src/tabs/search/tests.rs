@@ -194,6 +194,27 @@ fn a_completion_is_taken_with_the_keyboard() {
     assert!(!search.completions_open.get_untracked(), "Escape closes the dropdown");
 }
 
+/// Escape closes open completions first and keeps the text; with them closed it empties the text.
+#[test]
+fn escape_closes_the_completions_then_empties_the_text() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    click(&mut window, "search-query");
+    window.type_text("ma");
+    settle(&mut window);
+    assert!(search.completions_open.get_untracked(), "typing opens the completions");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(!search.completions_open.get_untracked(), "Escape closes the dropdown");
+    assert_eq!(search.pending.get_untracked(), "ma", "and keeps the text");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(search.pending.get_untracked(), "", "a second Escape empties the text");
+    assert!(!search.completions_open.get_untracked(), "and the dropdown stays closed");
+}
+
 /// Each completion row marks the letters of its label the typed fragment matched.
 #[test]
 fn a_completion_marks_what_was_typed() {

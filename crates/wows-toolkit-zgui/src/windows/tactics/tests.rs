@@ -203,6 +203,23 @@ fn a_range_circle_name_toggles_it() {
     assert_eq!(on(&board), was, "and back");
 }
 
+/// Escape in the ship search empties what was typed.
+#[test]
+fn escape_empties_the_ship_search() {
+    let mut board = BoardWindow::open();
+    board.set_map();
+    let search = board.window.by_test_id("tactics-ship-search").expect("the ship search is shown");
+    let typed = |window: &mut HeadlessWindow| window.a11y(search).and_then(|state| state.value).unwrap_or_default();
+    board.press("tactics-ship-search");
+    board.window.type_text("yam");
+    board.settle();
+    assert_eq!(typed(&mut board.window), "yam");
+
+    board.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    board.settle();
+    assert_eq!(typed(&mut board.window), "", "Escape empties the search");
+}
+
 /// The board's window from a real install, set on a map with a capture point added and a line
 /// drawn, in both palettes. Reads the install named by `WT_WOWS_DIR`.
 #[test]

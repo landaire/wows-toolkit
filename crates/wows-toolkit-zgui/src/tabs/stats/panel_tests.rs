@@ -29,6 +29,7 @@ use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 
 use crate::services::Services;
 use crate::tabs::stats::overview::StatsOverviewProps;
@@ -271,6 +272,15 @@ fn the_search_keeps_the_ships_whose_name_holds_it() {
     window.click(clear).expect("the button is drawn");
     settle(&mut window);
     assert!(window.by_test_id(&format!("ship-toggle-{YAMATO}")).is_some(), "every ship is back");
+
+    let search = window.by_test_id("stats-ships-search").expect("the search is shown");
+    window.click(search).expect("the search is drawn");
+    window.type_text("moines");
+    settle(&mut window);
+    assert!(window.by_test_id(&format!("ship-toggle-{YAMATO}")).is_none());
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(window.by_test_id(&format!("ship-toggle-{YAMATO}")).is_some(), "Escape empties the search");
 }
 
 #[test]

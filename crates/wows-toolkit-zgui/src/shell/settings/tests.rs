@@ -317,17 +317,26 @@ fn a_category_button_scrolls_its_section_to_the_top() {
     assert_eq!(window.a11y(button).and_then(|state| state.selected), Some(true), "and its button is marked");
 }
 
-/// Ctrl+, opens and shuts the drawer, and Escape shuts it from the search.
+/// Ctrl+, opens and shuts the drawer. Escape in the search empties typed text first, then shuts
+/// the drawer.
 #[test]
 fn the_shortcut_toggles_the_drawer_and_escape_shuts_it() {
     let mut window = open_unsaved();
 
     window.press_character(',', Modifiers::PRIMARY);
     settle(&mut window);
-    assert!(window.by_test_id("settings-search").is_some(), "the shortcut opens it");
+    let search = window.by_test_id("settings-search").expect("the shortcut opens it");
+    let typed = |window: &mut HeadlessWindow| window.a11y(search).and_then(|state| state.value).unwrap_or_default();
+    window.type_text("zoom");
+    settle(&mut window);
+    assert_eq!(typed(&mut window), "zoom", "the search takes focus as the drawer opens");
     window.press_key(NamedKey::Escape, Modifiers::NONE);
     settle(&mut window);
-    assert!(window.by_test_id("settings-search").is_none(), "escape shuts it, from the search");
+    assert_eq!(typed(&mut window), "", "escape empties the typed search");
+    assert!(window.by_test_id("settings-search").is_some(), "and leaves the drawer open");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(window.by_test_id("settings-search").is_none(), "escape in the empty search shuts it");
 
     window.press_character(',', Modifiers::PRIMARY);
     settle(&mut window);

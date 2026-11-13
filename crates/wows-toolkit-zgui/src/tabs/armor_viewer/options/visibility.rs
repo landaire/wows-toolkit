@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::EscapeClears;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -34,14 +35,11 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
-use zgui::vocab::Key;
-use zgui::vocab::NamedKey;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -201,12 +199,7 @@ pub(super) fn tree_field(
             text(class = "wt-armor-tree__dim", attr:data-testid = format!("{id}-count"), a11y:label = label) {{said}}
         })
     };
-    let on_key = move |ev: &mut zgui::view::EventCx<'_, zgui::view::events::KeyDown>| {
-        if ev.key == Key::Named(NamedKey::Escape) && !value.get_untracked().is_empty() {
-            value.set(String::new());
-            ev.stop_propagation();
-        }
-    };
+    let escape = EscapeClears::new(value);
     let clear_label = t!("ui.stats.clear").into_owned();
 
     AnyView::new(view! {
@@ -219,7 +212,9 @@ pub(super) fn tree_field(
                     label = placeholder,
                     class = "wt-armor-tree__input",
                     attr:data-testid = id,
-                    on:key_down:capture = on_key
+                    on:key_down:capture = move |ev| {
+                        escape.key_down(ev);
+                    }
                 )
                 if move || !value.get().is_empty() {
                     Button(

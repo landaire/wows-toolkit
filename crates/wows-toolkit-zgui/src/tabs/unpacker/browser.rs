@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use landaire_ui::BranchClick;
 use landaire_ui::CollapseButtonProps;
+use landaire_ui::EscapeClears;
 use landaire_ui::ExpandRailProps;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingProps;
@@ -220,8 +221,11 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
         let path_filter = pane.path_filter.get_untracked().trim().to_string();
         model.open_search(pane.source, query, path_filter, files);
     };
-    let on_search_key = move |ev: &mut EventCx<'_, events::KeyDown>| {
-        if ev.key == Key::Named(NamedKey::Enter) {
+    let filter_escape = EscapeClears::new(pane.filter);
+    let search_escape = EscapeClears::new(pane.search_query);
+    let path_escape = EscapeClears::new(pane.path_filter);
+    let on_search_key = move |escape: EscapeClears, ev: &mut EventCx<'_, events::KeyDown>| {
+        if !escape.key_down(ev) && ev.key == Key::Named(NamedKey::Enter) {
             start_search();
         }
     };
@@ -241,7 +245,10 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     placeholder = t!("ui.unpacker.filter_files").into_owned(),
                     label = t!("ui.unpacker.filter_files").into_owned(),
                     class = "wt-pane__field",
-                    attr:data-testid = format!("unpacker-{fragment}-filter")
+                    attr:data-testid = format!("unpacker-{fragment}-filter"),
+                    on:key_down = move |ev| {
+                        filter_escape.key_down(ev);
+                    }
                 )
             }
             box(class = "wt-pane__tree") {
@@ -265,7 +272,7 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                         label = t!("ui.unpacker.search_hint").into_owned(),
                         class = "wt-pane__field",
                         attr:data-testid = format!("unpacker-{fragment}-search"),
-                        on:key_down = on_search_key
+                        on:key_down = move |ev| on_search_key(search_escape, ev)
                     )
                 }
                 Input(
@@ -273,7 +280,7 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     placeholder = t!("ui.unpacker.path_filter_hint").into_owned(),
                     label = t!("ui.unpacker.path_filter_hint").into_owned(),
                     attr:data-testid = format!("unpacker-{fragment}-path-filter"),
-                    on:key_down = on_search_key
+                    on:key_down = move |ev| on_search_key(path_escape, ev)
                 )
                 Button(
                     size = ButtonSize::Sm,

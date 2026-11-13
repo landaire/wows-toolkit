@@ -507,6 +507,11 @@ fn typing_a_search_filters_ships_and_models() {
     assert!(!sidebar.listed(&ship_row_id("PJSB018")), "a ship not matching is not");
     let yamato = fixture::path("content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model");
     assert!(!sidebar.listed(&model_row_id(&yamato)), "nor a model not matching");
+
+    sidebar.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    sidebar.settle();
+    assert_eq!(sidebar.state.search_text.get_untracked(), "", "Escape empties the search");
+    assert!(!sidebar.state.query.get_untracked().is_active(), "and the listing is no longer searched");
 }
 
 #[test]

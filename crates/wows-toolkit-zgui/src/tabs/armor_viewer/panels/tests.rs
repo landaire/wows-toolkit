@@ -60,6 +60,8 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShipModelDistance;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 const SIZE: WindowSize = WindowSize { width: 900.0, height: 800.0 };
@@ -275,6 +277,25 @@ fn the_trajectory_section_asks_for_a_ship_until_one_is_compared() {
     assert!(!shown(&window, "armor-trajectory-add-ship"));
     assert!(shown(&window, "armor-trajectory-ship"));
     assert!(shown(&window, "armor-trajectory-shell"));
+}
+
+/// Escape in the ship search empties what was typed and keeps the caret there.
+#[test]
+fn escape_empties_the_ship_search() {
+    let (mut window, _mounted) = open();
+    let search = window.by_test_id("armor-pen-search").expect("the search is on screen");
+    let typed = |window: &mut HeadlessWindow| window.a11y(search).and_then(|state| state.value).unwrap_or_default();
+    click(&mut window, "armor-pen-search");
+    window.type_text("mont");
+    window.advance(Duration::from_millis(100));
+    assert_eq!(typed(&mut window), "mont");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(typed(&mut window), "", "Escape empties the search");
+    window.type_text("y");
+    window.advance(Duration::from_millis(100));
+    assert_eq!(typed(&mut window), "y", "the search keeps focus");
 }
 
 /// A shell through two plates, cast with no ship chosen.

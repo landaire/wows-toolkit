@@ -144,6 +144,26 @@ fn the_folder_tree_collapses_to_a_rail_and_expands_again() {
     assert!(!tab.shown("unpacker-pkg-tree-rail"), "and goes away with it");
 }
 
+/// Escape in the file filter, the content search and the path filter empties what was typed.
+#[test]
+fn escape_empties_the_filter_and_search_fields() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let pane = tab.model.pkg;
+    for (id, value) in [
+        ("unpacker-pkg-filter", pane.filter),
+        ("unpacker-pkg-search", pane.search_query),
+        ("unpacker-pkg-path-filter", pane.path_filter),
+    ] {
+        tab.click(id);
+        tab.window.type_text("xml");
+        tab.settle();
+        assert_eq!(value.get_untracked(), "xml", "{id} takes typing");
+        tab.window.press_key(NamedKey::Escape, Modifiers::NONE);
+        tab.settle();
+        assert_eq!(value.get_untracked(), "", "Escape empties {id}");
+    }
+}
+
 #[test]
 fn the_status_bar_closes_the_queue_dock_and_opens_it_again() {
     let mut tab = UnpackerWindow::open(options());

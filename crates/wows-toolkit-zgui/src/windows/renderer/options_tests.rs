@@ -253,6 +253,14 @@ fn the_timeline_filter_decides_what_the_list_shows() {
     assert!(!shown(&window, "replay-renderer-timeline-row-1"), "the search keeps one row");
     let marked = window.texts_by_class(landaire_ui::MARK_CLASS);
     assert!(!marked.is_empty() && marked.iter().all(|piece| piece == "at 30"), "{marked:?}");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(session.events.with_untracked(|events| events.filter().search.clone()), "", "Escape empties the search");
+    assert!(shown(&window, "replay-renderer-timeline"), "and leaves the timeline open");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(!shown(&window, "replay-renderer-timeline"), "Escape in the empty search closes it");
 }
 
 /// Clicking a row moves playback to when it happened, on the battle's own clock.

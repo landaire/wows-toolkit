@@ -1,6 +1,7 @@
 //! The query bar: the committed query drawn as pills, the box the next term is typed in, and the
 //! completions or calendar hanging under it.
 
+use landaire_ui::EscapeClears;
 use landaire_ui::LoadingLineProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::TooltipContentProps;
@@ -197,11 +198,18 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
     });
     on_cleanup_local(move || drop(typing));
 
+    // With the completions open, Escape closes them; with them closed, it empties the text.
+    let escape =
+        EscapeClears::with(Signal::derive_local(move || search.pending.with(|text| !text.is_empty())), move || {
+            search.clear_typed()
+        });
     let on_key = move |ev: &mut EventCx<'_, events::KeyDown>| {
         if handle_key(search, input, &ev.key, ev.modifiers) {
             ev.prevent_default();
             ev.stop_propagation();
+            return;
         }
+        escape.key_down(ev);
     };
     let strip = move || {
         let expr = search.reading.get()?;

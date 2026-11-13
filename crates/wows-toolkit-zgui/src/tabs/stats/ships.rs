@@ -11,6 +11,7 @@ use landaire_ui::ColumnAlign;
 use landaire_ui::ColumnSizing;
 use landaire_ui::ColumnSort;
 use landaire_ui::ColumnWidth;
+use landaire_ui::EscapeClears;
 use landaire_ui::GridColumn;
 use landaire_ui::GridProps;
 use landaire_ui::MarkedTextProps;
@@ -397,6 +398,7 @@ pub fn StatsShips(
         locale.track();
         t!("ui.stats.search_ships").into_owned()
     };
+    let escape = EscapeClears::new(query);
 
     view! {
         column(class = "wt-stats-ships", attr:data-testid = "stats-ships") {
@@ -410,7 +412,10 @@ pub fn StatsShips(
                         value = query,
                         placeholder = placeholder(),
                         label = placeholder(),
-                        attr:data-testid = "stats-ships-search"
+                        attr:data-testid = "stats-ships-search",
+                        on:key_down = move |ev| {
+                            escape.key_down(ev);
+                        }
                     )
                     if move || query.with(|query| !query.is_empty()) {
                         Tooltip {

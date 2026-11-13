@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
@@ -78,6 +79,9 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
     let refused = Signal::derive_local(move || !session.collab.with(CollabLink::is_active));
     // Kept with the transport, so the catalogue is read once rather than each time the popover opens.
     let catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage> = StoredValue::new_local(None);
+    // The ship chooser's search, held here so Escape in it empties it before it closes the popover.
+    let query = RwSignal::new_local(String::new());
+    let escape = EscapeClears::new(query);
     let named = t!("ui.renderer.annotations.title").into_owned();
     let label = named.clone();
 
@@ -95,8 +99,8 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
                     ) {
                         AppIcon(glyph = Glyph::NotebookPen)
                     }
-                    PopoverContent(attr:data-testid = "replay-renderer-tools") {
-                        ToolsPanel(session = session, catalog = catalog)
+                    PopoverContent(dismiss_on_escape = escape.dismiss_on_escape(), attr:data-testid = "replay-renderer-tools") {
+                        ToolsPanel(session = session, catalog = catalog, query = query, escape = escape)
                     }
                 }
             }
@@ -107,7 +111,12 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
 
 /// What the popover holds.
 #[component]
-fn ToolsPanel(session: RendererSession, catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage>) -> impl IntoView {
+fn ToolsPanel(
+    session: RendererSession,
+    catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage>,
+    query: RwSignal<String, LocalStorage>,
+    escape: EscapeClears,
+) -> impl IntoView {
     let undo_refused = Signal::derive_local(move || !session.annotator.with(Annotator::can_undo));
     // A peer's change can rename or remove the picked ship, so it is read again as the session
     // redraws; the memo keeps the chooser, and what is typed in it, until the answer changes.
@@ -117,7 +126,9 @@ fn ToolsPanel(session: RendererSession, catalog: StoredValue<Option<Rc<ShipCatal
     });
     let chooser = move || {
         let named = picked_ship.get()?;
-        Some(AnyView::new(view! { ShipChooser(session = session, named = named, catalog = catalog) }))
+        Some(AnyView::new(
+            view! { ShipChooser(session = session, named = named, catalog = catalog, query = query, escape = escape) },
+        ))
     };
     let tools: Vec<AnyView> =
         TOOLS.iter().map(|button| AnyView::new(view! { ToolToggle(session = session, button = button) })).collect();
@@ -310,8 +321,11 @@ fn ShipChooser(
     session: RendererSession,
     named: Option<String>,
     catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage>,
+    query: RwSignal<String, LocalStorage>,
+    escape: EscapeClears,
 ) -> impl IntoView {
-    let query = RwSignal::new_local(String::new());
+    // Each chooser starts empty, as the ship it names may have changed.
+    query.set(String::new());
     // Built the first time something is typed, and again after that only while no build is loaded.
     let ships = move || -> Option<Rc<ShipCatalog>> {
         if let Some(built) = catalog.with_value(Option::clone) {
@@ -365,7 +379,11 @@ fn ShipChooser(
                 value = query,
                 placeholder = t!("ui.renderer.annotations.ship_hint").into_owned(),
                 label = t!("ui.renderer.annotations.ship_hint").into_owned(),
-                attr:data-testid = "replay-renderer-ship-search"
+                node_ref = escape.node_ref(),
+                attr:data-testid = "replay-renderer-ship-search",
+                on:key_down = move |ev| {
+                    escape.key_down(ev);
+                }
             )
             column {
                 {matches}

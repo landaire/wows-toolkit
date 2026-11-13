@@ -1,5 +1,6 @@
 //! The transport's event timeline: what happened, filtered, and clickable.
 
+use landaire_ui::EscapeClears;
 use landaire_ui::LoadingLineProps;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
@@ -76,6 +77,11 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
     let label = t!("ui.renderer.settings.event_timeline").into_owned();
     let named = label.clone();
     let title = label.clone();
+    // Escape in the search empties it before it closes the popover.
+    let escape = EscapeClears::with(
+        Signal::derive_local(move || session.events.with(|events| !events.filter().search.is_empty())),
+        move || session.events.update(|events| events.set_filter(|filter| filter.search = String::new())),
+    );
 
     view! {
         Popover {
@@ -93,6 +99,7 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
                 }
             }
             PopoverContent(
+                dismiss_on_escape = escape.dismiss_on_escape(),
                 placement = Placement::new(Side::Top, Align::End),
                 class = "wt-renderer-timeline",
                 attr:data-testid = "replay-renderer-timeline"
@@ -101,7 +108,7 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
                     text(class = "wt-renderer-timeline__title") {{title.clone()}}
                     CopyButton(session = session)
                 }
-                FilterBar(session = session)
+                FilterBar(session = session, escape = escape)
                 Separator()
                 TimelineRows(session = session)
             }
@@ -147,7 +154,7 @@ fn CopyButton(session: RendererSession) -> impl IntoView {
 
 /// The kind switches and the search box.
 #[component]
-fn FilterBar(session: RendererSession) -> impl IntoView {
+fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
     let search = Signal::derive_local(move || session.events.with(|events| events.filter().search.clone()));
     let set_every_kind =
         move |on: bool| session.events.update(|events| events.set_filter(|filter| filter.kinds = [on; KIND_COUNT]));
@@ -177,7 +184,11 @@ fn FilterBar(session: RendererSession) -> impl IntoView {
                             session.events.update(|events| events.set_filter(|filter| filter.search = text));
                         }),
                         placeholder = t!("ui.replay.timeline_search_hint").into_owned(),
-                        attr:data-testid = "replay-renderer-timeline-search"
+                        attr:data-testid = "replay-renderer-timeline-search",
+                        node_ref = escape.node_ref(),
+                        on:key_down = move |ev| {
+                            escape.key_down(ev);
+                        }
                     )
                 }
             }

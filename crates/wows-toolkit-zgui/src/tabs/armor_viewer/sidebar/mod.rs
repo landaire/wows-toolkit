@@ -24,6 +24,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use landaire_ui::BranchClick;
+use landaire_ui::EscapeClears;
 use landaire_ui::LeafLead;
 use landaire_ui::LoadingPlacement;
 use landaire_ui::LoadingProps;
@@ -55,6 +56,7 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::With;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
@@ -274,16 +276,26 @@ pub fn ArmorSidebar(
     });
 
     let sources = RowSources { state, art, hardpoints, services };
-    let on_search_key = move |ev: &mut EventCx<'_, events::KeyDown>| match ev.key {
-        Key::Named(NamedKey::Enter) => {
-            state.open_from_search();
-            ev.prevent_default();
+    let escape =
+        EscapeClears::with(Signal::derive_local(move || state.search_text.with(|text| !text.is_empty())), move || {
+            state.search_text.set(String::new());
+            state.search_changed("");
+        });
+    let on_search_key = move |ev: &mut EventCx<'_, events::KeyDown>| {
+        if escape.key_down(ev) {
+            return;
         }
-        Key::Named(NamedKey::ArrowDown) if ev.modifiers.is_empty() && state.enter_listing() => {
-            ev.prevent_default();
-            ev.stop_propagation();
+        match ev.key {
+            Key::Named(NamedKey::Enter) => {
+                state.open_from_search();
+                ev.prevent_default();
+            }
+            Key::Named(NamedKey::ArrowDown) if ev.modifiers.is_empty() && state.enter_listing() => {
+                ev.prevent_default();
+                ev.stop_propagation();
+            }
+            _ => {}
         }
-        _ => {}
     };
     let search_label = t!("ui.models.search").into_owned();
     let tree_model: Signal<Rc<SidebarTree>, LocalStorage> = state.tree.into();

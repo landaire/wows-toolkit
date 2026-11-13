@@ -17,6 +17,7 @@ mod visibility;
 
 use std::sync::Arc;
 
+use landaire_ui::EscapeClears;
 use rust_i18n::t;
 use zgui::component;
 use zgui::css;
@@ -31,8 +32,6 @@ use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
-use zgui::vocab::Key;
-use zgui::vocab::NamedKey;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -314,13 +313,7 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
             ) {{said}}
         })
     };
-    // Escape clears what was typed, rather than only leaving the field.
-    let on_filter_key = move |ev: &mut zgui::view::EventCx<'_, zgui::view::events::KeyDown>| {
-        if ev.key == Key::Named(NamedKey::Escape) && !filter_text.get().is_empty() {
-            filter_text.set(String::new());
-            ev.stop_propagation();
-        }
-    };
+    let escape = EscapeClears::new(filter_text);
 
     view! {
         column(class = "wt-armor-options", attr:data-testid = "armor-options-panel") {
@@ -335,7 +328,9 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                         label = t!("ui.armor.filter_options").into_owned(),
                         class = "wt-armor-options__field",
                         attr:data-testid = "armor-options-filter",
-                        on:key_down:capture = on_filter_key
+                        on:key_down:capture = move |ev| {
+                            escape.key_down(ev);
+                        }
                     )
                     if move || !filter_text.get().is_empty() {
                         Button(

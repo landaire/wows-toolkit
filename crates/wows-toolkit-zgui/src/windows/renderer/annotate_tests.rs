@@ -380,6 +380,20 @@ fn a_picked_ship_gets_a_handle_and_a_chooser() {
     assert!(window.by_test_id("replay-renderer-ship-chooser").is_some(), "the chooser is up");
     assert!(window.by_label(&t!("ui.renderer.annotations.no_ship")).is_some(), "saying no ship is chosen yet");
     assert!(window.by_label(&t!("ui.renderer.annotations.ship_hint")).is_some(), "with a search to find one by");
+
+    let search = window.by_test_id("replay-renderer-ship-search").expect("the search is drawn");
+    let typed = |window: &mut HeadlessWindow| window.a11y(search).and_then(|state| state.value).unwrap_or_default();
+    click(&mut window, "replay-renderer-ship-search");
+    window.type_text("yam");
+    settle(&mut window);
+    assert_eq!(typed(&mut window), "yam");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(typed(&mut window), "", "Escape empties the search");
+    assert!(window.by_test_id("replay-renderer-tools").is_some(), "and leaves the tools open");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(window.by_test_id("replay-renderer-tools").is_none(), "Escape in the empty search closes them");
 }
 
 /// A click with the primary modifier held adds to what is picked, as the shortcut sheet says; a

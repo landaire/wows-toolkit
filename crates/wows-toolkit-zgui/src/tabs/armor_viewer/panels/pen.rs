@@ -8,6 +8,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
@@ -335,6 +336,7 @@ fn ShipSearch(
     assets: Signal<Option<Arc<ShipAssets>>, LocalStorage>,
 ) -> impl IntoView {
     let query = RwSignal::new_local(String::new());
+    let escape = EscapeClears::new(query);
     // Flattened once per catalog: thousands of names are folded for the search.
     let flattened: StoredValue<Option<FlattenedCatalog>, LocalStorage> = StoredValue::new_local(None);
     let entries = move || -> Option<Rc<Vec<CatalogEntry>>> {
@@ -391,7 +393,10 @@ fn ShipSearch(
                 value = query,
                 placeholder = t!("ui.armor.pen.search_hint").into_owned(),
                 label = t!("ui.armor.pen.search_hint").into_owned(),
-                attr:data-testid = "armor-pen-search"
+                attr:data-testid = "armor-pen-search",
+                on:key_down = move |ev| {
+                    escape.key_down(ev);
+                }
             )
             column(class = "wt-armor-pen__results", attr:data-testid = "armor-pen-results") {
                 {results}

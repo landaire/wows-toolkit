@@ -9,6 +9,7 @@ mod tests;
 mod zoom_anchor;
 
 use landaire_ui::DrawerProps;
+use landaire_ui::EscapeClears;
 use landaire_ui::LoadingPlacement;
 use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
@@ -398,7 +399,8 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
 
     let typed = RwSignal::new_local(String::new());
     let query = Signal::derive_local(move || FilterQuery::new(&typed.get()));
-    let search = NodeRef::new();
+    let escape = EscapeClears::new(typed);
+    let search = escape.node_ref();
 
     // The search is ready for typing as the drawer opens.
     let focusing = RenderEffect::new(move |focused: Option<bool>| {
@@ -447,7 +449,10 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
                     placeholder = t!("ui.settings.panel.search_placeholder").into_owned(),
                     node_ref = search,
                     a11y:label = t!("ui.settings.panel.search_placeholder").into_owned(),
-                    attr:data-testid = "settings-search"
+                    attr:data-testid = "settings-search",
+                    on:key_down = move |ev| {
+                        escape.key_down(ev);
+                    }
                 )
                 if move || !typed.get().is_empty() {
                     InputGroupAddon(align = InputGroupAddonAlign::InlineEnd) {

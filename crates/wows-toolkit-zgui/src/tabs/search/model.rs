@@ -666,6 +666,12 @@ impl Search {
         }
     }
 
+    /// Empties the box as an edit would, so the query runs again, but with the completions closed.
+    pub fn clear_typed(self) {
+        self.typed("", false);
+        self.pending.set(String::new());
+    }
+
     /// Puts an older (positive `delta`) or newer query in the bar. Walking past the newest
     /// restores the text the walk started from.
     pub fn walk_history(self, delta: isize) {

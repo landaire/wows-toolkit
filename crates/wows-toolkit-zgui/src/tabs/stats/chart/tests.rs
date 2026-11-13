@@ -17,6 +17,8 @@ use wows_toolkit_viewmodel::stats::GameLimit;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 
 use super::*;
 use crate::theme::SemanticTokensProps;
@@ -177,9 +179,10 @@ fn unticking_a_ship_remembers_the_pick() {
     assert!(shown(&window, "chart-empty"), "no ship, nothing to plot");
 }
 
-/// The ship search marks the letters of each kept name it matched.
+/// The ship search marks the letters of each kept name it matched. Escape empties it before it
+/// closes the menu.
 #[test]
-fn the_ship_search_marks_the_matched_letters() {
+fn the_ship_search_marks_the_matched_letters_and_escape_empties_it() {
     let (mut window, _settings) =
         open(ChartSettings::default(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
 
@@ -192,6 +195,15 @@ fn the_ship_search_marks_the_matched_letters() {
     let marked = window.texts_by_class(landaire_ui::MARK_CLASS);
     assert!(!marked.is_empty() && marked.chunks(2).all(|pair| pair == ["D", "M"]), "{marked:?}");
     assert!(window.by_test_id("chart-ship-3763255248").is_none(), "Yamato does not match");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(50));
+    assert!(shown(&window, "chart-ship-filter-menu"), "Escape in the typed search leaves the menu open");
+    assert!(window.by_test_id("chart-ship-3763255248").is_some(), "and empties the search");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("chart-ship-filter-menu").is_none(), "Escape in the empty search closes the menu");
 }
 
 #[test]

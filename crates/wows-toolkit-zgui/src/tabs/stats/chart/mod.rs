@@ -12,6 +12,7 @@ mod tests;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
 use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
@@ -686,6 +687,7 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
             )
         }
     };
+    let escape = EscapeClears::new(query);
 
     view! {
         Tooltip {
@@ -703,14 +705,22 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
                         text {{tr(locale, || t!("ui.stats.ships"))}}
                         text(class = "wt-chart__dim") {{count_label}}
                     }
-                    PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-ship-filter-menu") {
+                    PopoverContent(class = "wt-chart__menu", dismiss_on_escape = escape.dismiss_on_escape(), attr:data-testid = "chart-ship-filter-menu") {
                         row(class = "wt-chart__heading-row") {
                             text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.ships"))}}
                             text(class = "wt-chart__dim") {{count_label}}
                         }
                         row(class = "wt-chart__row") {
                             box(class = "wt-chart__search") {
-                                Input(value = query, placeholder = t!("ui.stats.search_ships").into_owned(), attr:data-testid = "chart-ship-search")
+                                Input(
+                                    value = query,
+                                    placeholder = t!("ui.stats.search_ships").into_owned(),
+                                    node_ref = escape.node_ref(),
+                                    attr:data-testid = "chart-ship-search",
+                                    on:key_down = move |ev| {
+                                        escape.key_down(ev);
+                                    }
+                                )
                             }
                             box(class:wt-chart__gone = move || query.with(String::is_empty)) {
                                 Tooltip {
