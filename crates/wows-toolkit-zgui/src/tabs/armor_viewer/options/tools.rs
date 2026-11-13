@@ -45,7 +45,8 @@ const CSS: &str = css!(
         gap: 4px;
     }
     .wt-armor-tool { display: flex; min-width: 0; border-radius: 2px; }
-    .wt-armor-tool__button { width: 100%; min-width: 0; justify-content: flex-start; }
+    .wt-armor-tool__trigger { display: flex; flex: 1 1 auto; min-width: 0; }
+    .wt-armor-tool__button { width: 100%; min-width: 0; justify-content: center; }
     .wt-armor-tool__button[data-selected] {
         background-color: var(--lui-color-selection);
         border-color: var(--lui-color-accent);
@@ -228,7 +229,7 @@ fn tool_button(tool: Tool) -> AnyView {
             a11y:selected = move || selected.get()
         ) {
             Tooltip {
-                TooltipTrigger(class = "wt-armor-tool") {
+                TooltipTrigger(class = "wt-armor-tool__trigger") {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,

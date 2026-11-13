@@ -821,6 +821,38 @@ fn the_cast_hint_and_tool_labels_stay_inside_the_rail() {
     }
 }
 
+/// The tool buttons fill an even two-column grid, and the firing ship button spans the rail.
+#[test]
+fn the_rail_tools_fill_two_even_columns() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let bounds = |id: &str| {
+        let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        armor.window.bounds(element).expect("it is laid out")
+    };
+    let grid = bounds("armor-options-tools");
+    let [hidden, gaps, splash, boxes, export] = [
+        "armor-show-hidden-button",
+        "armor-show-gaps-button",
+        "armor-splash-button",
+        "armor-splash-boxes-button",
+        "armor-export-trigger",
+    ]
+    .map(bounds);
+
+    for button in [hidden, gaps, splash, boxes, export] {
+        assert!((button.size.width.0 - hidden.size.width.0).abs() < 1.0, "{button:?} is as wide as {hidden:?}");
+        assert!(button.size.width.0 > grid.size.width.0 * 0.45, "{button:?} fills half of {grid:?}");
+    }
+    for (left, right) in [(hidden, gaps), (splash, boxes)] {
+        assert!((left.origin.x.0 - grid.origin.x.0).abs() < 1.0, "{left:?} starts the row");
+        assert!((right.right().0 - grid.right().0).abs() < 1.0, "{right:?} ends the row");
+    }
+
+    let group = bounds("armor-trajectory");
+    let add_ship = bounds("armor-trajectory-add-ship");
+    assert!((add_ship.size.width.0 - group.size.width.0).abs() < 1.0, "{add_ship:?} spans {group:?}");
+}
+
 /// The tab with two real ships compared side by side, drawn in both appearances: the ships list,
 /// both panes, the options rail and the legend. Needs a game install named by `WT_WOWS_DIR`.
 #[test]

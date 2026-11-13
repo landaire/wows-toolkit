@@ -44,7 +44,8 @@ const CSS: &str = css!(
     }
     .wt-armor-pane[data-single] { border-width: 0; }
     .wt-armor-pane[data-active] { border-color: var(--lui-color-accent); }
-    .wt-armor-pane__close { position: absolute; top: 4px; right: 4px; }"
+    /* Small and in the corner, clear of the axis gizmo below it. */
+    .wt-armor-pane__close { position: absolute; top: 2px; right: 2px; }"
 );
 
 /// Every pane of `workspace`, split as it says.
@@ -123,7 +124,7 @@ fn DockPane(workspace: ArmorWorkspace, pane: Pane) -> impl IntoView {
                     TooltipTrigger {
                         Button(
                             variant = ButtonVariant::Ghost,
-                            size = ButtonSize::IconSm,
+                            size = ButtonSize::IconXs,
                             attr:data-testid = "armor-viewport-pane-close",
                             a11y:label = t!("ui.armor.close_pane").into_owned(),
                             on:click = move |_| workspace.close_pane(id)

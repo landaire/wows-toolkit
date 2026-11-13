@@ -73,6 +73,8 @@ const CSS: &str = css!(
     .wt-armor-trajectory__row { display: flex; align-items: center; gap: 4px; }
     .wt-armor-trajectory__markers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
     .wt-armor-trajectory__spacer { flex: 1; }
+    .wt-armor-trajectory__wide { display: flex; }
+    .wt-armor-trajectory__wide-button { flex: 1 1 auto; }
     .wt-armor-trajectory__marker { flex: none; display: flex; align-items: center; justify-content: center;
         width: 22px; height: 22px; border-radius: 11px; border: 2px solid #00000099; font-size: 12px;
         font-weight: 700; color: #000000; cursor: pointer; }
@@ -176,10 +178,11 @@ fn FiringControls(
             let tip = t!("ui.armor.trajectory_add_ship_tooltip").into_owned();
             return AnyView::new(view! {
                 Tooltip {
-                    TooltipTrigger {
+                    TooltipTrigger(class = "wt-armor-trajectory__wide") {
                         Button(
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Sm,
+                            class = "wt-armor-trajectory__wide-button",
                             attr:data-testid = "armor-trajectory-add-ship",
                             on:click = move |_| {
                                 if let Some(open) = open_pen_check.get_value() {
