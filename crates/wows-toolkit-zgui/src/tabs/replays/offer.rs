@@ -46,6 +46,7 @@ use zgui_ui::prelude::Binding;
 use crate::services::Job;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
+use crate::shell::settings::Setting;
 use crate::tabs::replays::browser::cache_base;
 use crate::tabs::replays::browser::proxy_url;
 
@@ -124,7 +125,11 @@ impl GameDataOffer {
         }
         let services = shell.services();
         let Some(base) = cache_base(services) else {
-            shell.toasts().warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned());
+            let open = shell.settings_drawer;
+            shell.toasts().show(
+                landaire_ui::Notice::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned())
+                    .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::CacheDirectory)),
+            );
             return;
         };
         let Some(runtime) = services.runtime() else { return };
