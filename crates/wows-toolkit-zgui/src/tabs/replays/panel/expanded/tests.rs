@@ -5,6 +5,7 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_replay_insights::battle_report::AchievementResult;
+use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replays::types::AccountId;
@@ -15,6 +16,7 @@ use wows_toolkit_replay_data::test_support::base_row;
 use wows_toolkit_replay_data::test_support::fire_chance_result;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wowsunpack::game_types::ChargeCount;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
@@ -280,6 +282,32 @@ fn an_enemy_build_shows_only_in_debug_mode() {
     drop(window);
     let (window, _) = open_detail(row, vec![ReplayColumn::Skills], true);
     assert!(window.by_test_id("replay-build").is_some());
+}
+
+/// A consumable's long name wraps inside its own column rather than running under the counts.
+#[test]
+fn a_long_consumable_name_stays_clear_of_the_counts() {
+    let mut row = base_row(1, Relation::new(0), true);
+    row.consumables = vec![ConsumableResult {
+        // One word wider than the column: a word that cannot fit is broken rather than overflowing.
+        display_name: "AuxiliaryAndTorpedoWeaponryCoordination".to_string(),
+        description: String::new(),
+        icon_key: "PCY045_CallFightersPremium".to_string(),
+        charges_used: 1,
+        total_charges: ChargeCount::Finite(3),
+    }];
+
+    let (window, _) = open_detail(row, vec![ReplayColumn::Skills], false);
+
+    let label = window.by_class("wt-xr-table__label").expect("the consumable is named");
+    let label = window.bounds(label).expect("the name has a box");
+    let count = window.by_class("wt-xr-table__count").expect("the counts have a column");
+    let count = window.bounds(count).expect("the count has a box");
+    assert!(
+        label.origin.x.0 + label.size.width.0 <= count.origin.x.0,
+        "the name {label:?} ends before the counts {count:?}"
+    );
+    assert!(label.size.height.0 > count.size.height.0, "the name takes a second line");
 }
 
 /// A row whose figures are under NDA shows the NDA line under its damage, not the breakdown.

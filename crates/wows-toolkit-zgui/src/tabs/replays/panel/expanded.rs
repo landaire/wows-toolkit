@@ -183,6 +183,7 @@ const CSS: &str = css!(
     .wt-xr-table { display: flex; flex-direction: column; gap: 2px; }
     .wt-xr-table__row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
     .wt-xr-table__name { display: flex; flex-direction: row; align-items: center; gap: 4px; flex: none; width: 170px; }
+    .wt-xr-table__label { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
     .wt-xr-table__count { flex: none; width: 64px; }
     .wt-xr-table__head { font-weight: 600; }
     .wt-xr-fire__headline { display: flex; flex-direction: row; align-items: center; gap: 8px; }
@@ -198,7 +199,7 @@ const CSS: &str = css!(
     .wt-xr-tally__row { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; }
     .wt-xr-tally__count { flex: none; width: 44px; text-align: right; }
     .wt-xr-ship { display: flex; flex-direction: row; align-items: center; gap: 8px; }
-    .wt-xr-ship__name { flex: none; width: 160px; }
+    .wt-xr-ship__name { flex: none; width: 160px; white-space: normal; overflow-wrap: anywhere; }
     .wt-xr-tip { display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: 300px; }
     .wt-xr-tip__name { font-weight: 600; }
     .wt-xr-tip__text { text-align: center; white-space: pre-wrap; }"
@@ -905,7 +906,7 @@ fn consumable_row(consumable: &ConsumableResult, art: GameArt) -> AnyView {
         row(class = "wt-xr-table__row", attr:data-testid = "replay-consumable") {
             row(class = "wt-xr-table__name") {
                 {move || shown.view(art, false)}
-                text {{name}}
+                text(class = "wt-xr-table__label") {{name}}
             }
             text(class = "wt-xr-table__count") {{remaining}}
             text(class = "wt-xr-table__count") {{total}}
