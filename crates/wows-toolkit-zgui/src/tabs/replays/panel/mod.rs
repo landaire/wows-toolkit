@@ -1370,7 +1370,7 @@ fn SideContent(
     player_metadata: RwSignal<Option<Rc<str>>, LocalStorage>,
 ) -> impl IntoView {
     let title = move || kind.get().title_key().map(|key| t!(key).into_owned()).unwrap_or_default();
-    let close_label = t!("ui.replay.close_side_panel").into_owned();
+    let close_label = StoredValue::new(t!("ui.replay.close_side_panel").into_owned());
     let content = move || {
         let loaded = loaded.get()?;
         match kind.get() {
@@ -1391,14 +1391,19 @@ fn SideContent(
             row(class = "wt-rp-side__head") {
                 text(class = "wt-rp-side__title") {{title}}
                 Show(when = move || kind.get() == SidePanel::RawPlayerMetadata) {
-                    Button(
-                        variant = ButtonVariant::Ghost,
-                        size = ButtonSize::IconSm,
-                        attr:data-testid = "replay-side-panel-close",
-                        a11y:label = close_label.clone(),
-                        on:click = move |_| side.set(SidePanel::None)
-                    ) {
-                        AppIcon(glyph = wows_toolkit_icons::Glyph::X)
+                    Tooltip {
+                        TooltipTrigger {
+                            Button(
+                                variant = ButtonVariant::Ghost,
+                                size = ButtonSize::IconSm,
+                                attr:data-testid = "replay-side-panel-close",
+                                a11y:label = close_label.get_value(),
+                                on:click = move |_| side.set(SidePanel::None)
+                            ) {
+                                AppIcon(glyph = wows_toolkit_icons::Glyph::PanelRightClose)
+                            }
+                        }
+                        TooltipContent {{close_label.get_value()}}
                     }
                 }
             }

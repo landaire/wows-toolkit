@@ -8,6 +8,7 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
@@ -340,6 +341,11 @@ fn a_rows_raw_metadata_opens_in_the_side_panel_and_closes() {
     assert!(window.by_test_id("replay-raw-json").is_some());
 
     let close = window.by_test_id("replay-side-panel-close").expect("the panel has a close");
+    assert!(window.by_attribute("data-icon", "panel-right-close").is_some(), "the close shows the panel going right");
+    window.hover(close).expect("the close takes the pointer");
+    window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.close_side_panel").into_owned()]);
+
     window.click(close).expect("clickable");
     window.advance(Duration::from_millis(600));
     assert!(window.by_test_id("replay-side-panel-close").is_none(), "the panel is shut");

@@ -55,6 +55,7 @@ macro_rules! glyph_list {
             PanelBottom => "panel-bottom",
             PanelLeft => "panel-left",
             PanelRight => "panel-right",
+            PanelRightClose => "panel-right-close",
             Pause => "pause",
             Pin => "pin",
             Play => "play",
