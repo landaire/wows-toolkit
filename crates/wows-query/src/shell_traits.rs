@@ -33,10 +33,10 @@ const DEFAULT_LIMIT: usize = 50;
 /// shells land a millimeter off.
 const THRESHOLD_TOLERANCE_MM: f32 = 1.0;
 
-/// A fuse at most this share of the class standard is short, as players mean
-/// it: British light cruiser AP at 0.005 s against 0.033 s. Fuses between
-/// this and the standard, such as 0.025 s, are slightly short.
-const SHORT_FUSE_SHARE: f32 = 0.5;
+/// A fuse below this, in microseconds, is short as players mean it, in every
+/// class: 0.01 s destroyer and cruiser AP and 0.005 s British light cruiser
+/// AP are short, 0.015 s British battleship AP is not.
+const SHORT_FUSE_BELOW_US: u32 = 15_000;
 
 /// Arguments for `ap_shell_traits`.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -69,12 +69,12 @@ pub enum ApShellTrait {
     /// angles", the shell ricochets less.
     ImprovedRicochet,
 
-    /// Fuse time at most half the class standard: detonates much sooner
-    /// after penetrating, so far fewer overpenetrations on thin armor.
+    /// Fuse time below 0.015 s: detonates much sooner after penetrating, so
+    /// far fewer overpenetrations on thin armor.
     ShortFuse,
 
-    /// Fuse time below the class standard but more than half of it, such as
-    /// 0.025 s against 0.033 s.
+    /// Fuse time below the class standard but not short, such as 0.025 s
+    /// against 0.033 s.
     SlightlyShortFuse,
 
     /// Fuse time longer than the class standard: travels farther inside the
@@ -197,17 +197,19 @@ impl Standards {
             ApShellTrait::ShortFuse | ApShellTrait::SlightlyShortFuse | ApShellTrait::LongFuse => {
                 let fuse = shell.fuse_time_s?.value();
                 let base = standard.fuse_time_s.value();
-                // In whole microseconds, so 0.005 s is exactly half of 0.01 s.
+                // In whole microseconds, so the comparisons are exact.
                 let micros = |seconds: f32| (seconds * 1e6).round() as u32;
                 let fuse_us = micros(fuse);
                 let base_us = micros(base);
-                let half_us = micros(base * SHORT_FUSE_SHARE);
                 let departs = match shell_trait {
-                    ApShellTrait::ShortFuse => fuse_us <= half_us,
-                    ApShellTrait::SlightlyShortFuse => fuse_us > half_us && fuse_us < base_us,
+                    ApShellTrait::ShortFuse => fuse_us < SHORT_FUSE_BELOW_US,
+                    ApShellTrait::SlightlyShortFuse => fuse_us >= SHORT_FUSE_BELOW_US && fuse_us < base_us,
                     _ => fuse_us > base_us,
                 };
-                departs.then(|| format!("fuse {fuse} s; {class_name} standard {base} s"))
+                departs.then(|| {
+                    let short = if shell_trait == ApShellTrait::ShortFuse { " (short: below 0.015 s)" } else { "" };
+                    format!("fuse {fuse} s{short}; {class_name} standard {base} s")
+                })
             }
             ApShellTrait::LowFuseThreshold | ApShellTrait::HighFuseThreshold => {
                 let threshold = shell.fuse_threshold_mm?.value();
@@ -320,7 +322,7 @@ impl GameData {
             qualifying: qualifying_counts,
             ships,
             omitted,
-            rule: "Each class's standard ricochet angles and fuse time are the values most of the distinct AP shells of that battery on the class's released ships have, across every tier and nation; ties go to the lower value. The standard fuse threshold is the caliber divided by the ratio most AP shells have, within 1 mm. improved_ricochet: neither ricochet angle is below the standard and one is above it. short_fuse: fuse time at most half the class standard; slightly_short_fuse: below the standard but more than half of it; long_fuse: above the standard. low_fuse_threshold and high_fuse_threshold: arming threshold more than 1 mm below or above the standard for the caliber. Every gun module's shells are read. Every listed shell is AP by game data; names such as SAP-42 or P.Spr.Gr. are AP designations, not SAP.",
+            rule: "Each class's standard ricochet angles and fuse time are the values most of the distinct AP shells of that battery on the class's released ships have, across every tier and nation; ties go to the lower value. The standard fuse threshold is the caliber divided by the ratio most AP shells have, within 1 mm. improved_ricochet: neither ricochet angle is below the standard and one is above it. short_fuse: fuse time below 0.015 s in every class, even where that is the class standard; slightly_short_fuse: below the class standard but 0.015 s or more; long_fuse: above the class standard. low_fuse_threshold and high_fuse_threshold: arming threshold more than 1 mm below or above the standard for the caliber. Every gun module's shells are read. Every listed shell is AP by game data; names such as SAP-42 or P.Spr.Gr. are AP designations, not SAP.",
         })
     }
 
