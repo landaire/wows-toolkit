@@ -408,6 +408,16 @@ impl HeadlessWindow {
         !self.harness.app().windows().is_empty()
     }
 
+    /// Closes the window as a user does from its title bar, and runs what that asks for.
+    pub fn close(&mut self) {
+        self.deliver(SurfaceEvent::CloseRequested);
+    }
+
+    /// Whether the application has asked to exit.
+    pub fn is_exiting(&self) -> bool {
+        self.harness.platform().is_exiting()
+    }
+
     fn window(&self) -> &zgui::runtime::Window {
         &self.harness.app().windows()[0]
     }

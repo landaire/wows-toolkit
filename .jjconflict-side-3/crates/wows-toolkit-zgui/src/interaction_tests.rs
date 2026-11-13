@@ -12,6 +12,7 @@ use landaire_ui::test_support::WindowSize;
 use tokio::runtime::Runtime;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::view;
+use zgui::vocab::Role;
 
 use crate::shell::AppRootProps;
 
@@ -24,6 +25,10 @@ pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 8
 pub(crate) fn returning_reader(runtime: &Runtime) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
+        if let Some(real) = std::env::var_os("WTZ_VERIFY_STORAGE") {
+            wows_toolkit_config::storage_override::set(std::path::PathBuf::from(real));
+            return;
+        }
         let dir = tempfile::tempdir().expect("a temporary directory can be made");
         wows_toolkit_config::storage_override::set(dir.path().to_path_buf());
         std::mem::forget(dir);
@@ -95,4 +100,31 @@ fn the_shell_renders_in_dark_and_light() {
         let path = shoot(appearance, name);
         println!("{}", path.display());
     }
+}
+
+#[test]
+fn closing_the_window_tears_the_shell_down() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+
+    window.close();
+
+    assert!(!window.is_open());
+}
+
+/// Quitting asks the event loop to stop, and the loop ending drops the runtime with the shell
+/// still open, as a compositor going away does.
+#[test]
+fn quitting_from_the_menu_tears_the_shell_down() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    let menu = window.by_test_id("app-menu").expect("the strip carries the menu");
+    window.click(menu).expect("the menu takes a click");
+    window.advance(Duration::from_millis(300));
+    let quit = rust_i18n::t!("ui.menu.quit").into_owned();
+    let item = window.by_role_and_label(Role::MenuItem, &quit).expect("the menu offers to quit");
+
+    window.click(item).expect("the item takes a click");
+    window.advance(Duration::from_millis(300));
+
+    assert!(window.is_exiting());
+    drop(window);
 }
