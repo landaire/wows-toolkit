@@ -1179,3 +1179,52 @@ fn a_copy_holds_the_selected_rows_in_row_order() {
 
     assert_eq!(copied.borrow().as_deref(), Some("item 1\t10\nitem 3\t30"));
 }
+
+/// The header menu pins a pinnable column and offers no pin for one that cannot be pinned.
+#[test]
+fn the_header_menu_pins_only_a_pinnable_column() {
+    let handles = Rc::new(Handles::default());
+    let handed = Rc::clone(&handles);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let columns: Vec<GridColumn<Item>> = columns()
+            .into_iter()
+            .map(|column| if column.id() == &ColumnId::from("size") { column.pinnable(false) } else { column })
+            .collect();
+        let layout = RwSignal::new_local(ColumnLayout::new(columns.iter().map(|column| column.id().clone())));
+        handed.layout.set(Some(layout));
+        let rows = RwSignal::new_local(items(3));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = rows,
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        mode = RowMode::natural(),
+                        layout = layout,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+
+    let size = header(&mut window, "Size");
+    window.right_click(size).expect("the header has a box");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role_and_label(Role::MenuItem, "Reset width").is_some(), "the menu is open");
+    assert!(window.by_role_and_label(Role::MenuItem, "Pin column").is_none(), "an unpinnable column has no pin");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+
+    let name = header(&mut window, "Name");
+    window.right_click(name).expect("the header has a box");
+    window.advance(Duration::from_millis(300));
+    let pin = window.by_role_and_label(Role::MenuItem, "Pin column").expect("a pinnable column offers a pin");
+    window.click(pin).expect("the item has a box");
+    window.advance(Duration::from_millis(300));
+
+    let layout = handles.layout.get().expect("the layout").get_untracked();
+    assert!(layout.is_pinned(&ColumnId::from("name")), "the item pins the column");
+}

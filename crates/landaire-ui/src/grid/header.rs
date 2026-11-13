@@ -38,6 +38,7 @@ use zgui_ui_icons::set::arrow::ARROW_DOWN;
 use zgui_ui_icons::set::arrow::ARROW_UP;
 
 use crate::grid::column::ColumnId;
+use crate::grid::column::GridColumn;
 use crate::grid::layout;
 use crate::grid::layout::Placement;
 use crate::grid::layout::Section;
@@ -521,6 +522,8 @@ where
     K: Clone + Eq + Hash + 'static,
 {
     let pinned = cx.layout.with_untracked(|layout| layout.is_pinned(&id));
+    // A column that can never be pinned has no pin item rather than one that is always refused.
+    let offers_pin = pinned || cx.column(&id).is_some_and(GridColumn::is_pinnable);
     let refused = !pinned && !cx.may_pin(&id);
     let resized = cx.layout.with_untracked(|layout| layout.width(&id).is_some());
     let pin_label = if pinned { cx.strings.unpin.clone() } else { cx.strings.pin.clone() };
@@ -540,10 +543,14 @@ where
         })
     };
     let on_reset = UnsyncCallback::new(move |()| cx.reset_width(&id));
+    let reset = view! { MenuItem(disabled = !resized, on_select = on_reset) {{reset_label}} };
 
+    if !offers_pin {
+        return AnyView::new(reset);
+    }
     AnyView::new(view! {
         MenuItem(disabled = refused, on_select = on_pin) {{pin_label}}
-        MenuItem(disabled = !resized, on_select = on_reset) {{reset_label}}
+        {reset}
     })
 }
 
