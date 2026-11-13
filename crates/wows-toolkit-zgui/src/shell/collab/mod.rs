@@ -81,6 +81,7 @@ use zgui_ui_primitives::Binding;
 use zgui_ui_primitives::Placement;
 use zgui_ui_primitives::Side;
 
+use crate::desktop;
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
 use crate::shell::tabs::AppTab;
@@ -108,6 +109,7 @@ const CSS: &str = css!(
     .wt-collab__grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wt-collab__token { flex: 1; min-width: 0; font-family: monospace; font-size: 12px; overflow: hidden; }
     .wt-collab__check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .wt-collab__more-info { align-self: flex-start; }
     .wt-collab__wide { width: 100%; }
     .wt-session-toggle-active { color: var(--lui-color-danger); }"
 );
@@ -408,6 +410,17 @@ fn before_revealing_address(shell: Shell, go: impl Fn() + Copy + 'static) {
                         AlertDialogTitle {{notice.title()}}
                         AlertDialogDescription {{notice.message()}}
                     }
+                    {notice.more_info_url().map(|url| AnyView::new(view! {
+                        Button(
+                            variant = ButtonVariant::Ghost,
+                            size = ButtonSize::Sm,
+                            class = "wt-collab__more-info",
+                            attr:data-testid = "notice-more-info",
+                            on:click = move |_| desktop::open_url(url)
+                        ) {
+                            {t!("ui.labels.more_info").into_owned()}
+                        }
+                    }))}
                     row(class = "wt-collab__check") {
                         Checkbox(
                             checked = Binding::controlled(ticked, suppress),
