@@ -144,7 +144,18 @@ pub struct RunStyle {
 pub struct Run {
     pub text: String,
     pub style: RunStyle,
-    pub link: Option<String>,
+    pub link: Option<RunLink>,
+}
+
+/// Which link of its block a run is part of. Two links side by side to one target are two links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkIndex(u32);
+
+/// The link a run is part of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunLink {
+    pub target: String,
+    pub index: LinkIndex,
 }
 
 /// One block of a document.
@@ -254,11 +265,13 @@ impl Held {
         Self { text: text.to_owned(), spaced_break: line.ends_with("  ") }
     }
 
-    /// Joins a wrapped line onto the block it continues. A line ending in two spaces or a
-    /// backslash is a hard break; at the end of a block neither is, so the backslash stays.
+    /// Joins a wrapped line onto the block it continues. A line ending in two spaces or an
+    /// unescaped backslash is a hard break; at the end of a block neither is, so the backslash
+    /// stays.
     fn join(&mut self, text: &str, line: &str) {
-        if let Some(kept) = self.text.strip_suffix('\\') {
-            self.text.truncate(kept.len());
+        let backslashes = self.text.bytes().rev().take_while(|byte| *byte == b'\\').count();
+        if backslashes % 2 == 1 {
+            self.text.pop();
             self.text.push('\n');
         } else if self.spaced_break {
             self.text.push('\n');
@@ -324,7 +337,8 @@ fn depth_of(line: &str) -> ListDepth {
 /// The runs of one block's text.
 pub fn runs(text: &str) -> Vec<Run> {
     let chars: Vec<char> = text.chars().collect();
-    let mut reader = RunReader { out: Vec::new(), held: String::new(), style: RunStyle::default(), link: None };
+    let mut reader =
+        RunReader { out: Vec::new(), held: String::new(), style: RunStyle::default(), link: None, links: 0 };
     reader.read(&chars);
     reader.flush();
 
@@ -335,10 +349,19 @@ struct RunReader {
     out: Vec<Run>,
     held: String,
     style: RunStyle,
-    link: Option<String>,
+    link: Option<RunLink>,
+    /// How many links have been read.
+    links: u32,
 }
 
 impl RunReader {
+    fn next_link(&mut self, target: String) -> RunLink {
+        let index = LinkIndex(self.links);
+        self.links += 1;
+
+        RunLink { target, index }
+    }
+
     fn flush(&mut self) {
         if !self.held.is_empty() {
             self.out.push(Run { text: std::mem::take(&mut self.held), style: self.style, link: self.link.clone() });
@@ -440,7 +463,7 @@ impl RunReader {
         let target = target.split_whitespace().next().unwrap_or_default().to_owned();
 
         self.flush();
-        self.link = Some(target);
+        self.link = Some(self.next_link(target));
         self.read(&chars[at + 1..close]);
         self.flush();
         self.link = None;
@@ -450,7 +473,8 @@ impl RunReader {
 
     fn push_link(&mut self, text: String, target: String) {
         self.flush();
-        self.out.push(Run { text, style: self.style, link: Some(target) });
+        let link = self.next_link(target);
+        self.out.push(Run { text, style: self.style, link: Some(link) });
     }
 }
 
@@ -524,49 +548,76 @@ fn block_view(block: Block, on_link: Option<UnsyncCallback<String>>) -> AnyView 
     }
 }
 
+/// The runs of a block, with each link's consecutive runs gathered into one link, so a link that
+/// mixes styles is still one stop for Tab and one link to a screen reader.
 fn runs_view(runs: Vec<Run>, on_link: Option<UnsyncCallback<String>>) -> Vec<AnyView> {
-    runs.into_iter()
-        .map(|run| {
-            let mut class = String::from("lui-markdown__run");
-            for (on, name) in [
-                (run.style.strong, " lui-markdown__strong"),
-                (run.style.emphasis, " lui-markdown__emphasis"),
-                (run.style.code, " lui-markdown__code"),
-                (run.link.is_some(), " lui-markdown__link"),
-            ] {
-                if on {
-                    class.push_str(name);
-                }
-            }
-            match (run.link, on_link) {
-                (Some(target), Some(on_link)) => {
-                    let pressed = target.clone();
-                    AnyView::new(view! {
-                        text(
-                            class = class,
-                            attr:data-href = target.clone(),
-                            tabindex = {Focus::Sequential},
-                            a11y:role = {Role::Link},
-                            on:click = move |_| on_link.run(pressed.clone()),
-                            on:key_down = move |ev| {
-                                if ev.key != Key::Named(NamedKey::Enter) || ev.modifiers != Modifiers::NONE {
-                                    return;
-                                }
+    let mut out = Vec::new();
+    let mut runs = runs.into_iter().peekable();
+    while let Some(first) = runs.next() {
+        let Some(link) = first.link.clone() else {
+            out.push(run_view(first));
+            continue;
+        };
 
-                                on_link.run(target.clone());
-                                ev.prevent_default();
-                                ev.stop_propagation();
-                            }
-                        ) {{run.text}}
-                    })
+        let mut label = first.text.clone();
+        let mut pieces = vec![run_view(first)];
+        while let Some(next) = runs.next_if(|next| next.link.as_ref().is_some_and(|next| next.index == link.index)) {
+            label.push_str(&next.text);
+            pieces.push(run_view(next));
+        }
+        out.push(link_view(Link { target: link.target, label }, pieces, on_link));
+    }
+
+    out
+}
+
+fn run_view(run: Run) -> AnyView {
+    let mut class = String::from("lui-markdown__run");
+    for (on, name) in [
+        (run.style.strong, " lui-markdown__strong"),
+        (run.style.emphasis, " lui-markdown__emphasis"),
+        (run.style.code, " lui-markdown__code"),
+    ] {
+        if on {
+            class.push_str(name);
+        }
+    }
+
+    AnyView::new(view! { text(class = class) {{run.text}} })
+}
+
+/// Where a link goes, and its whole text, which names it to a screen reader.
+struct Link {
+    target: String,
+    label: String,
+}
+
+fn link_view(link: Link, pieces: Vec<AnyView>, on_link: Option<UnsyncCallback<String>>) -> AnyView {
+    let Link { target, label } = link;
+    let Some(on_link) = on_link else {
+        return AnyView::new(view! { text(class = "lui-markdown__link", attr:data-href = target) {{pieces}} });
+    };
+
+    let pressed = target.clone();
+    AnyView::new(view! {
+        text(
+            class = "lui-markdown__link",
+            attr:data-href = target.clone(),
+            tabindex = {Focus::Sequential},
+            a11y:role = {Role::Link},
+            a11y:label = label,
+            on:click = move |_| on_link.run(pressed.clone()),
+            on:key_down = move |ev| {
+                if ev.key != Key::Named(NamedKey::Enter) || ev.modifiers != Modifiers::NONE {
+                    return;
                 }
-                (Some(target), None) => {
-                    AnyView::new(view! { text(class = class, attr:data-href = target) {{run.text}} })
-                }
-                (None, _) => AnyView::new(view! { text(class = class) {{run.text}} }),
+
+                on_link.run(target.clone());
+                ev.prevent_default();
+                ev.stop_propagation();
             }
-        })
-        .collect()
+        ) {{pieces}}
+    })
 }
 
 #[cfg(test)]
@@ -615,5 +666,10 @@ mod tests {
             [Block::ListItem { depth: ListDepth(0), marker: ListMarker::Bullet, runs: runs("one\ntwo") }]
         );
         assert_eq!(parse("last\\"), [Block::Paragraph(runs("last\\"))], "a backslash ending the block stays");
+        assert_eq!(
+            parse("one\\\\\ntwo"),
+            [Block::Paragraph(runs("one\\\\ two"))],
+            "an escaped backslash is text, not a break"
+        );
     }
 }

@@ -18,10 +18,11 @@ use zgui::vocab::Role;
 
 const SIZE: WindowSize = WindowSize { width: 600.0, height: 300.0 };
 
-const SOURCE: &str = "See [the notes](https://example.com/notes) and [the issue](https://example.com/issue).";
+/// The second link mixes styles, and is still one link.
+const SOURCE: &str = "See [the notes](https://example.com/notes) and [the **issue**](https://example.com/issue).";
 
-/// A document whose links record what they were followed to.
-fn open(on_link: bool) -> (HeadlessWindow, Rc<RefCell<Vec<String>>>) {
+/// A document of `source` whose links record what they were followed to.
+fn open(source: &'static str, on_link: bool) -> (HeadlessWindow, Rc<RefCell<Vec<String>>>) {
     let followed = Rc::new(RefCell::new(Vec::new()));
     let recorded = Rc::clone(&followed);
     let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
@@ -29,7 +30,7 @@ fn open(on_link: bool) -> (HeadlessWindow, Rc<RefCell<Vec<String>>>) {
         let callback = on_link.then(|| UnsyncCallback::new(move |target: String| recorded.borrow_mut().push(target)));
         view! {
             ThemeRoot {
-                Markdown(source = SOURCE, on_link = callback)
+                Markdown(source = source, on_link = callback)
             }
         }
     })
@@ -40,11 +41,13 @@ fn open(on_link: bool) -> (HeadlessWindow, Rc<RefCell<Vec<String>>>) {
 
 #[test]
 fn links_are_announced_reached_by_tab_and_followed_by_enter() {
-    let (mut window, followed) = open(true);
+    let (mut window, followed) = open(SOURCE, true);
     let links = window.by_role(Role::Link);
     assert_eq!(links.len(), 2, "each link is announced as a link");
     let label = window.a11y(links[0]).and_then(|state| state.label);
     assert_eq!(label.as_deref(), Some("the notes"), "a link is named by its text");
+    let label = window.a11y(links[1]).and_then(|state| state.label);
+    assert_eq!(label.as_deref(), Some("the issue"), "a link that mixes styles is named by all of its text");
 
     window.press_key(NamedKey::Tab, Modifiers::NONE);
     assert!(window.a11y(links[0]).is_some_and(|state| state.focused), "Tab reaches the first link");
@@ -59,14 +62,23 @@ fn links_are_announced_reached_by_tab_and_followed_by_enter() {
 
 #[test]
 fn inert_links_take_no_focus() {
-    let (mut window, _) = open(false);
+    let (mut window, _) = open(SOURCE, false);
     assert!(window.by_role(Role::Link).is_empty(), "a link nothing follows is not announced as one");
 }
 
 #[test]
 fn a_pressed_link_is_followed() {
-    let (mut window, followed) = open(true);
+    let (mut window, followed) = open(SOURCE, true);
     let links = window.by_role(Role::Link);
     window.click(links[1]).expect("the link can be pressed");
     assert_eq!(*followed.borrow(), ["https://example.com/issue"]);
+}
+
+#[test]
+fn two_links_side_by_side_to_one_target_are_two_links() {
+    let (mut window, _) = open("[one](https://example.com)[two](https://example.com)", true);
+    let links = window.by_role(Role::Link);
+    let labels: Vec<Option<String>> =
+        links.iter().map(|link| window.a11y(*link).and_then(|state| state.label)).collect();
+    assert_eq!(labels, [Some("one".to_owned()), Some("two".to_owned())]);
 }

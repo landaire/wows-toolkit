@@ -95,7 +95,12 @@ expression: parse(notes)
                     code: false,
                 },
                 link: Some(
-                    "https://github.com/x/y/issues/123",
+                    RunLink {
+                        target: "https://github.com/x/y/issues/123",
+                        index: LinkIndex(
+                            0,
+                        ),
+                    },
                 ),
             },
             Run {
@@ -181,7 +186,12 @@ expression: parse(notes)
                     code: false,
                 },
                 link: Some(
-                    "https://github.com/x/y/compare/a...b",
+                    RunLink {
+                        target: "https://github.com/x/y/compare/a...b",
+                        index: LinkIndex(
+                            0,
+                        ),
+                    },
                 ),
             },
             Run {
