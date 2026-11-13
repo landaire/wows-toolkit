@@ -26,6 +26,8 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 
+use crate::shell::tabs::ModifierKey;
+
 /// How the camera orbits are drawn.
 ///
 /// `mode` is `None` until a ship names one, and is corrected whenever the loaded ship changes: a
@@ -153,6 +155,12 @@ pub struct AllVisible {
     pub hull: bool,
     pub armor: bool,
 }
+
+/// The key [`XrayHighlight::WhileHeld`] waits for. Shift casts shells, and window managers often
+/// take Alt.
+///
+/// [`XrayHighlight::WhileHeld`]: wows_toolkit_viewmodel::settings::XrayHighlight::WhileHeld
+pub const XRAY_KEY: ModifierKey = ModifierKey::Primary;
 
 /// Which layer of a model is in view when it opens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

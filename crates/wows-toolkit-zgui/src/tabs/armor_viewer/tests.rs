@@ -30,7 +30,9 @@ use wows_toolkit_armor::load_ship::ShipSubject;
 use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
@@ -444,11 +446,68 @@ fn a_picked_opening_layer_outlasts_the_saved_one_read_after() {
     common.opening_layer = OpeningLayer::Mesh;
     workspace.set_common(common);
 
-    workspace.apply_defaults(None, true);
+    workspace.apply_defaults(None, true, XrayHighlight::Always);
 
     assert_eq!(workspace.opening_layer.get_untracked(), OpeningLayer::Mesh);
     let saved = workspace.services.settings.read_untracked(|settings| settings.model_show_armor);
     assert_eq!(saved, Some(false), "the pick is what is saved");
+}
+
+/// The saved x-ray mode is adopted, a mode picked while it was being read outlasts it, and the
+/// pick is saved in its place.
+#[test]
+fn the_xray_mode_is_restored_and_a_pick_outlasts_the_saved_one() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    workspace.apply_defaults(None, true, XrayHighlight::Off);
+    assert_eq!(workspace.xray_highlight.get_untracked(), XrayHighlight::Off, "restored from the settings");
+
+    let mut common = workspace.common();
+    common.xray_highlight = XrayHighlight::WhileHeld;
+    workspace.set_common(common);
+    workspace.apply_defaults(None, true, XrayHighlight::Always);
+
+    assert_eq!(workspace.xray_highlight.get_untracked(), XrayHighlight::WhileHeld);
+    let saved = workspace.services.settings.read_untracked(|settings| settings.model_xray_highlight);
+    assert_eq!(saved, Some(XrayHighlight::WhileHeld), "the pick is what is saved");
+}
+
+/// Choosing a mode in the common settings menu saves it.
+#[test]
+fn choosing_an_xray_mode_in_the_menu_saves_it() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    armor.click("armor-sidebar-common");
+    armor.click("armor-pane-xray-highlight-off");
+
+    assert_eq!(armor.workspace.xray_highlight.get_untracked(), XrayHighlight::Off);
+    let saved = armor.workspace.services.settings.read_untracked(|settings| settings.model_xray_highlight);
+    assert_eq!(saved, Some(XrayHighlight::Off));
+}
+
+/// Each mode chooses whether a hover in the view shows through what is in front of it, and in
+/// the while-held mode pressing and letting go of the key flips it with no pointer move between.
+#[test]
+fn the_xray_mode_and_the_held_key_choose_the_highlight_depth() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    let cases = [
+        (XrayHighlight::Always, HighlightDepth::XRay, HighlightDepth::XRay),
+        (XrayHighlight::WhileHeld, HighlightDepth::Tested, HighlightDepth::XRay),
+        (XrayHighlight::Off, HighlightDepth::Tested, HighlightDepth::Tested),
+    ];
+    for (mode, released, held) in cases {
+        let mut common = workspace.common();
+        common.xray_highlight = mode;
+        workspace.set_common(common);
+        for (key_held, expected) in [(false, released), (true, held), (false, released)] {
+            let modifiers = if key_held { Modifiers::PRIMARY } else { Modifiers::NONE };
+            armor.window.press_key(NamedKey::Control, modifiers);
+            armor.settle();
+
+            let depth = workspace.active_untracked().highlight_depth();
+            assert_eq!(depth, expected, "{mode:?}, key held: {key_held}");
+        }
+    }
 }
 
 /// Closing a pane stops the load running into it.

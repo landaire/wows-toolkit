@@ -23,9 +23,11 @@ use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
 use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::game_types::GameParamId;
@@ -162,6 +164,11 @@ pub struct ArmorWorkspace {
     pub opening_layer: RwSignal<OpeningLayer, LocalStorage>,
     /// Set once the reader picks the opening layer, which the saved setting read after must not undo.
     opening_layer_picked: StoredValue<bool>,
+    /// When a part hovered in the view shows its highlight through what is in front of it.
+    /// Persisted under `MODEL_VIEWER_XRAY_HIGHLIGHT`.
+    pub xray_highlight: RwSignal<XrayHighlight, LocalStorage>,
+    /// Set once the reader picks the x-ray mode, which the saved setting read after must not undo.
+    xray_highlight_picked: StoredValue<bool>,
     /// Whose hardpoints are marked, as the sidebar's checkboxes left them.
     pub hardpoints: RwSignal<Rc<HashSet<HardpointTarget>>, LocalStorage>,
     /// Set once a ship has been shown, which the legend and the held-key modes wait for.
@@ -204,6 +211,8 @@ impl ArmorWorkspace {
             sync_options: RwSignal::new_local(false),
             opening_layer: RwSignal::new_local(OpeningLayer::default()),
             opening_layer_picked: StoredValue::new(false),
+            xray_highlight: RwSignal::new_local(XrayHighlight::default()),
+            xray_highlight_picked: StoredValue::new(false),
             hardpoints: RwSignal::new_local(Rc::new(HashSet::new())),
             ship_loaded: RwSignal::new_local(false),
             pending_hits: StoredValue::new_local(None),
@@ -366,6 +375,7 @@ impl ArmorWorkspace {
             sync_options: self.sync_options.get(),
             stack_panes: self.split.get() == PaneSplit::Stacked,
             opening_layer: self.opening_layer.get(),
+            xray_highlight: self.xray_highlight.get(),
         }
     }
 
@@ -377,6 +387,11 @@ impl ArmorWorkspace {
             self.opening_layer.set(common.opening_layer);
             self.opening_layer_picked.set_value(true);
             self.save_opening_layer();
+        }
+        if common.xray_highlight != self.xray_highlight.get_untracked() {
+            self.xray_highlight.set(common.xray_highlight);
+            self.xray_highlight_picked.set_value(true);
+            self.save_xray_highlight();
         }
         let split = if common.stack_panes { PaneSplit::Stacked } else { PaneSplit::SideBySide };
         if self.split.get_untracked() != split {
@@ -438,9 +453,14 @@ impl ArmorWorkspace {
     }
 
     /// Seeds the legend and every pane's display settings from the saved defaults row, and what a
-    /// model opens showing from its setting. A layer the reader picked while the settings were read
-    /// is kept, and saved in place of the one read.
-    pub fn apply_defaults(self, defaults: Option<&ArmorViewerDefaultsRow>, show_armor: bool) {
+    /// model opens showing and the x-ray mode from their settings. A layer or mode the reader
+    /// picked while the settings were read is kept, and saved in place of the one read.
+    pub fn apply_defaults(
+        self,
+        defaults: Option<&ArmorViewerDefaultsRow>,
+        show_armor: bool,
+        xray_highlight: XrayHighlight,
+    ) {
         if let Some(defaults) = defaults {
             self.unported.set_value(UnportedDefaults {
                 show_splash_boxes: defaults.show_splash_boxes,
@@ -456,6 +476,29 @@ impl ArmorWorkspace {
             self.save_opening_layer();
         } else {
             self.opening_layer.set(OpeningLayer::from_show_armor(show_armor));
+        }
+        if self.xray_highlight_picked.get_value() {
+            self.save_xray_highlight();
+        } else {
+            self.xray_highlight.set(xray_highlight);
+        }
+    }
+
+    fn save_xray_highlight(self) {
+        let mode = self.xray_highlight.get_untracked();
+        self.services.settings.edit(keys::MODEL_VIEWER_XRAY_HIGHLIGHT, |settings| {
+            settings.model_xray_highlight = mode;
+            settings.model_xray_highlight
+        });
+    }
+
+    /// Shows every pane's hover highlight through what is in front of it as the x-ray mode and
+    /// whether its key is held say.
+    pub fn set_highlight_depth(self, key_held: bool) {
+        let shows_through = self.xray_highlight.get().shows_through(key_held);
+        let depth = if shows_through { HighlightDepth::XRay } else { HighlightDepth::Tested };
+        for viewport in self.panes.with(|panes| panes.iter().map(|pane| pane.viewport).collect::<Vec<_>>()) {
+            viewport.set_highlight_depth(depth);
         }
     }
 

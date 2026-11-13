@@ -24,6 +24,7 @@ use wows_toolkit_armor::scene_load::SharedLoad;
 use wows_toolkit_armor::splash;
 use wows_toolkit_armor::upload;
 use wows_toolkit_armor::viewport::camera::ArcballCamera;
+use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_armor::viewport::renderer::LAYER_OVERLAY;
 use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
@@ -422,6 +423,15 @@ impl ViewportModel {
         }
         self.hardpoint_targets = targets;
         self.upload_hardpoints();
+        cx.notify();
+    }
+
+    /// Adopts whether a hover in the view shows through what is in front of it.
+    pub(super) fn set_highlight_depth(&mut self, depth: HighlightDepth, cx: &mut ViewCx) {
+        if self.viewport.highlight_depth() == depth {
+            return;
+        }
+        self.viewport.set_highlight_depth(depth);
         cx.notify();
     }
 
@@ -891,6 +901,15 @@ impl ArmorViewportState {
 
     pub fn set_hardpoint_targets(self, targets: HashSet<HardpointTarget>) {
         self.update(|this, cx| this.set_hardpoint_targets(targets, cx));
+    }
+
+    pub fn set_highlight_depth(self, depth: HighlightDepth) {
+        self.update(|this, cx| this.set_highlight_depth(depth, cx));
+    }
+
+    #[cfg(test)]
+    pub fn highlight_depth(self) -> HighlightDepth {
+        self.read(|this| this.viewport.highlight_depth()).unwrap_or_default()
     }
 
     #[cfg(test)]
