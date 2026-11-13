@@ -29,9 +29,13 @@ use zgui::reactive::prelude::Update;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
 use zgui::vocab::NamedKey;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
 use zgui_ui::InputProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
@@ -333,6 +337,17 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                         attr:data-testid = "armor-options-filter",
                         on:key_down:capture = on_filter_key
                     )
+                    if move || !filter_text.get().is_empty() {
+                        Button(
+                            variant = ButtonVariant::Ghost,
+                            size = ButtonSize::IconXs,
+                            attr:data-testid = "armor-options-filter-clear",
+                            a11y:label = t!("ui.stats.clear").into_owned(),
+                            on:click = move |_| filter_text.set(String::new())
+                        ) {
+                            AppIcon(glyph = wows_toolkit_icons::Glyph::X)
+                        }
+                    }
                 }
             }
             box(class = "wt-armor-options__body", attr:data-testid = "armor-options-body") {

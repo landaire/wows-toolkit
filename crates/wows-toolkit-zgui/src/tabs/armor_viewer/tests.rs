@@ -732,6 +732,19 @@ fn a_rail_filter_matching_nothing_says_so() {
     assert!(armor.shown("armor-options-no-match"));
 }
 
+/// The clear button beside the rail's filter shows only while something is typed, and empties it.
+#[test]
+fn the_rail_filter_clear_button_empties_the_filter() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    assert!(!armor.shown("armor-options-filter-clear"), "nothing to clear");
+    armor.type_into("armor-options-filter", "qqqqzzzz");
+    armor.click("armor-options-filter-clear");
+
+    assert!(armor.workspace.options_filter.get_untracked().is_empty());
+    assert!(!armor.shown("armor-options-no-match"), "the rail is back");
+    assert!(!armor.shown("armor-options-filter-clear"));
+}
+
 /// A row under a switch that is off is no match for the rail's filter, so the group holding it is
 /// dropped; turning the switch on while the filter stands finds it.
 #[test]

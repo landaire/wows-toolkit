@@ -2,6 +2,9 @@
 //! comparison pane is added, the panes share it along the split and the active pane gets an accent
 //! border. Every pane carries a close button; closing the last one empties it.
 
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use zgui::component;
 use zgui::css;
@@ -10,6 +13,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
+use zgui::vocab::PointerButton;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -93,7 +97,8 @@ fn pane_views(workspace: ArmorWorkspace, panes: Vec<Pane>) -> Vec<AnyView> {
         .collect()
 }
 
-/// One pane: its viewport and close button. Any press inside it makes it the active pane.
+/// One pane: its viewport and close button. A primary or secondary press inside it makes it the
+/// active pane; a middle press only pans.
 #[component]
 fn DockPane(workspace: ArmorWorkspace, pane: Pane) -> impl IntoView {
     let id = pane.id;
@@ -106,18 +111,28 @@ fn DockPane(workspace: ArmorWorkspace, pane: Pane) -> impl IntoView {
             attr:data-testid = "armor-viewport-pane",
             attr:data-single = move || single().then(String::new),
             attr:data-active = move || active().then(String::new),
-            on:pointer_down:capture = move |_| workspace.activate(id)
+            on:pointer_down:capture = move |ev| {
+                if matches!(ev.button, Some(PointerButton::Primary | PointerButton::Secondary)) {
+                    workspace.activate(id);
+                }
+            }
         ) {
             ArmorViewport(state = pane.viewport)
-            Button(
-                variant = ButtonVariant::Ghost,
-                size = ButtonSize::IconSm,
-                class = "wt-armor-pane__close",
-                attr:data-testid = "armor-viewport-pane-close",
-                a11y:label = t!("ui.armor.close_pane").into_owned(),
-                on:click = move |_| workspace.close_pane(id)
-            ) {
-                AppIcon(glyph = wows_toolkit_icons::Glyph::X)
+            box(class = "wt-armor-pane__close") {
+                Tooltip {
+                    TooltipTrigger {
+                        Button(
+                            variant = ButtonVariant::Ghost,
+                            size = ButtonSize::IconSm,
+                            attr:data-testid = "armor-viewport-pane-close",
+                            a11y:label = t!("ui.armor.close_pane").into_owned(),
+                            on:click = move |_| workspace.close_pane(id)
+                        ) {
+                            AppIcon(glyph = wows_toolkit_icons::Glyph::X)
+                        }
+                    }
+                    TooltipContent {{t!("ui.armor.close_pane").into_owned()}}
+                }
             }
         }
     }

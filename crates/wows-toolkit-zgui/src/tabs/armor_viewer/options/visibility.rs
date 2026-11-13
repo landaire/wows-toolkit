@@ -96,7 +96,9 @@ const CSS: &str = css!(
     .wt-armor-tree__dim { font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-armor-tree__none { font-size: 13px; color: var(--wt-color-text-dim); padding: 8px; }
     .wt-armor-tree__thickness { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .wt-armor-tree__thickness-label { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--wt-color-text-dim); }"
+    .wt-armor-tree__thickness-label { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--wt-color-text-dim); }
+    .wt-armor-tri.wt-armor-tri:indeterminate { background-color: transparent; border-color: var(--zui-color-input); }
+    .wt-armor-tri.wt-armor-tri:indeterminate > .zui-checkbox__dash { color: var(--wt-color-warn); }"
 );
 
 /// The armor section's body: `None` when the rail's filter keeps nothing in it.
@@ -236,9 +238,10 @@ pub(super) fn tree_field(
     })
 }
 
-/// A checkbox that can show "some of these": a box whose rows are partly shown reads as mixed.
-/// `on_change` is told whether the box was ticked.
+/// A checkbox that can show "some of these": a box whose rows are partly shown reads as mixed,
+/// an empty box with a dash in the warning colour. `on_change` is told whether the box was ticked.
 pub(super) fn tri_checkbox(test_id: String, state: TriState, on_change: impl Fn(bool) + 'static) -> AnyView {
+    install_stylesheet(SHEET, CSS);
     let checked = match state {
         TriState::On => Checked::Yes,
         TriState::Partial => Checked::Mixed,
@@ -248,6 +251,7 @@ pub(super) fn tri_checkbox(test_id: String, state: TriState, on_change: impl Fn(
     AnyView::new(view! {
         Checkbox(
             checked = Binding::controlled(Signal::stored_local(checked), move |next: Checked| on_change(next.is_checked())),
+            class = "wt-armor-tri",
             attr:data-testid = test_id
         )
     })

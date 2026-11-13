@@ -78,7 +78,7 @@ const SIDEBAR_RANGE: WidthRange = WidthRange { min: PanelWidth(180.0), max: Pane
 
 /// The rail is fixed: its sections are their own widths, so a drag could only overflow or pad them.
 const OPTIONS_WIDTH: PanelWidth = PanelWidth(300.0);
-const OPTIONS_RANGE: WidthRange = WidthRange { min: OPTIONS_WIDTH, max: OPTIONS_WIDTH };
+const OPTIONS_RANGE: WidthRange = WidthRange::fixed(OPTIONS_WIDTH);
 
 #[cfg(test)]
 thread_local! {
