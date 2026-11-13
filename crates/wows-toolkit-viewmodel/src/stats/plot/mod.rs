@@ -333,7 +333,7 @@ fn tick_values(min: f64, max: f64) -> Vec<f64> {
     let first = (min / step).floor() * step;
     let mut ticks = Vec::new();
     let mut value = first;
-    while value <= max + step * 0.5 && ticks.len() < TICKS * 3 {
+    while value < max + step && ticks.len() < TICKS * 3 {
         ticks.push(value);
         value += step;
     }
@@ -614,6 +614,13 @@ mod tests {
         assert!(ticks.last().copied().unwrap() >= 47_000.0, "the range is covered");
         let step = ticks[1] - ticks[0];
         assert!(ticks.windows(2).all(|pair| (pair[1] - pair[0] - step).abs() < step * 1e-6), "one even step");
+    }
+
+    #[test]
+    fn the_top_tick_is_at_or_above_the_largest_value() {
+        let ticks = tick_values(0.0, 337_082.0);
+        assert_eq!(ticks.last().copied(), Some(400_000.0), "a line is not cut off above the top tick");
+        assert_eq!(tick_values(0.0, 300_000.0).last().copied(), Some(300_000.0));
     }
 
     #[test]
