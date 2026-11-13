@@ -236,3 +236,33 @@ fn a_kept_panel_keeps_its_state_while_shut() {
     let label = window.a11y(count).and_then(|state| state.label);
     assert_eq!(label.as_deref(), Some("count 2"), "what the panel held survived the toggle");
 }
+
+#[component]
+fn FixedSplit() -> impl IntoView {
+    let open = RwSignal::new_local(true);
+    let width = RwSignal::new_local(PanelWidth(200.0));
+
+    view! {
+        ThemeRoot {
+            column(style = "height: 300px") {
+                SideSplit(open = open, width = width, range = WidthRange::fixed(PanelWidth(200.0)), resize_label = "Resize panel") {
+                    SidePanel(slot) {
+                        box(attr:data-testid = "panel", style = "flex: 1 1 auto")
+                    }
+                    column(attr:data-testid = "main", style = "flex: 1 1 auto")
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_panel_of_one_width_has_no_edge_to_drag() {
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), || view! { FixedSplit() }).expect("opens");
+    window.advance(SETTLE);
+
+    assert!(window.by_test_id("panel").is_some(), "the panel is open");
+    assert!(window.by_role_and_label(Role::Splitter, "Resize panel").is_none(), "nothing offers a resize");
+    let main = window.by_test_id("main").expect("the main area is built");
+    assert_eq!(width_of(&window, main), 400.0, "the panel keeps its width");
+}

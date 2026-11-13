@@ -130,7 +130,7 @@ pub struct SidePanel {
     children: ChildrenFn,
 }
 
-/// The widths a side panel may be dragged between.
+/// The widths a side panel may be dragged between. A range of one width has no edge to drag.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WidthRange {
     pub min: PanelWidth,
@@ -138,6 +138,15 @@ pub struct WidthRange {
 }
 
 impl WidthRange {
+    /// A panel that is always `width` wide.
+    pub const fn fixed(width: PanelWidth) -> Self {
+        Self { min: width, max: width }
+    }
+
+    fn is_fixed(self) -> bool {
+        self.min == self.max
+    }
+
     /// The widest a panel may be in a split `split` pixels wide, leaving the main area
     /// `main_min`. Never narrower than the range allows.
     fn widest(self, split: Option<f32>, main_min: PanelWidth) -> f32 {
@@ -155,7 +164,7 @@ struct DragStart {
 }
 
 /// A main area with a panel at one edge that slides open and shut and is resized by dragging its
-/// inner edge.
+/// inner edge, unless its range is one width.
 ///
 /// The panel slides over the main area and moves whole. The main area gives up the panel's width
 /// only once the panel has come to rest open, and takes it back as a close starts, so it is laid
@@ -246,7 +255,7 @@ pub fn SideSplit(
                     {panel.get_value().view()}
                 }
             } else {}
-            if move || open.get() && slide.settled.get() {
+            if move || !range.is_fixed() && open.get() && slide.settled.get() {
                 control(
                     class = "lui-side-split__edge",
                     tabindex = {Focus::Sequential},
