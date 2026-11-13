@@ -738,8 +738,11 @@ where
 
     let activated = key.clone();
     let on_activate = parts.on_activate;
-    let on_double_click = move |_: &mut EventCx<'_, events::DoubleClick>| {
-        if let Some(activate) = on_activate {
+    // With a modifier held, each click of a double-click is a selection gesture.
+    let on_double_click = move |ev: &mut EventCx<'_, events::DoubleClick>| {
+        if let Some(activate) = on_activate
+            && ev.modifiers.is_empty()
+        {
             activate.run(activated.clone());
         }
     };

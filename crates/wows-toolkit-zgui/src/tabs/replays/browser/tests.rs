@@ -231,6 +231,26 @@ fn a_new_arrival_is_tagged_until_opened_or_left() {
     );
 }
 
+/// A double-click with a modifier held marks rows rather than opening one.
+#[test]
+fn a_modified_double_click_selects_without_opening() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(1);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    control.pin_folder(folder_id(control, &root), true);
+    settle_in_real_time(&mut window);
+    let landed = land(&root, FIXTURES[1], &mut window);
+    let shown = listing(control, &root);
+
+    window.click_with(row(&window, &landed), Modifiers::SHIFT).expect("the row has a box");
+    window.click_with(row(&window, &landed), Modifiers::SHIFT).expect("the row has a box");
+    window.advance(Duration::from_millis(50));
+
+    assert!(shown.arrivals.with_untracked(|arrivals| arrivals.contains(&landed)), "the replay was not opened");
+}
+
 #[test]
 fn a_badge_counts_unseen_replays_after_the_landing_ring() {
     let (mut window, control) = open();
