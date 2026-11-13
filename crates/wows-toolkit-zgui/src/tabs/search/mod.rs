@@ -24,12 +24,16 @@ use landaire_ui::RowHeight;
 use landaire_ui::RowHover;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMode;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::child_process::reveal_in_file_manager;
 use wows_toolkit_viewmodel::listing_row::hover_facts_for_match;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
@@ -78,6 +82,7 @@ use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Placement;
 use zgui_ui_primitives::Side;
 
+use crate::icons::AppIconProps;
 use crate::preview::HoverPreview;
 use crate::preview::PreviewTarget;
 use crate::preview::card::HoverPreviewCardProps;
@@ -498,21 +503,42 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
         GridColumn::new(ACTIONS_COLUMN, "", move |row: &ResultRow| {
             let position = row.position;
             let path = row.hit.replay_path.clone();
+            let clipped = path.clone();
             let exists = row.exists;
             view! {
                 row(class = "wt-search-actions") {
-                    DropdownMenu {
-                        DropdownMenuTrigger(
-                            variant = ButtonVariant::Ghost,
-                            size = ButtonSize::IconXs,
-                            a11y:label = t!("ui.search.row_actions_hint").into_owned(),
-                            attr:data-testid = format!("search-row-actions-{position}")
-                        ) {
-                            Icon(icon = ELLIPSIS)
+                    Tooltip {
+                        TooltipTrigger {
+                            Button(
+                                variant = ButtonVariant::Ghost,
+                                size = ButtonSize::IconXs,
+                                disabled = !exists,
+                                a11y:label = t!("ui.replay.context.render_to_clipboard").into_owned(),
+                                attr:data-testid = format!("search-row-render-clipboard-{position}"),
+                                on:click = move |_| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone()))
+                            ) {
+                                AppIcon(glyph = Glyph::Copy)
+                            }
                         }
-                        DropdownMenuContent {
-                            {row_menu_items(shell, path.clone(), exists, move || open(position))}
+                        TooltipContent {{t!("ui.replay.context.render_to_clipboard").into_owned()}}
+                    }
+                    Tooltip {
+                        TooltipTrigger {
+                            DropdownMenu {
+                                DropdownMenuTrigger(
+                                    variant = ButtonVariant::Ghost,
+                                    size = ButtonSize::IconXs,
+                                    a11y:label = t!("ui.search.row_actions_hint").into_owned(),
+                                    attr:data-testid = format!("search-row-actions-{position}")
+                                ) {
+                                    Icon(icon = ELLIPSIS)
+                                }
+                                DropdownMenuContent {
+                                    {row_menu_items(shell, path.clone(), exists, move || open(position))}
+                                }
+                            }
                         }
+                        TooltipContent {{t!("ui.search.row_actions_hint").into_owned()}}
                     }
                 }
             }
