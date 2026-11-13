@@ -3,7 +3,6 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::Write;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +34,7 @@ use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
@@ -60,6 +60,7 @@ use super::SidebarEvent;
 use super::built_state;
 use super::rows::row_test_id;
 use super::state::SidebarState;
+use crate::game_art;
 use crate::services::saved_for_test;
 use crate::shell::ShellHarnessProps;
 
@@ -589,24 +590,15 @@ fn a_ship_row_loads_the_ship_and_a_part_row_opens_the_part_model() {
 /// tabs do.
 #[test]
 fn a_class_icon_points_right() {
-    // Drawn only in the top half of its box, so it points up as the game's icons do.
-    const UP: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"20\" viewBox=\"0 0 10 20\">\
-        <rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"white\"/></svg>";
-
     rust_i18n::set_locale("en");
-    let vfs: VfsPath = MemoryFS::new().into();
-    vfs.join("gui/fla/minimap/ship_icons").unwrap().create_dir_all().unwrap();
-    let mut file = vfs.join("gui/fla/minimap/ship_icons/minimap_battleship.svg").unwrap().create_file().unwrap();
-    file.write_all(UP.as_bytes()).unwrap();
-    drop(file);
-
+    let vfs = game_art::testing::upright_class_icon(Species::Battleship);
     let options = HeadlessOptions {
         drawing: Drawing::Device,
         ..HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 })
     };
     let mut sidebar = match Sidebar::try_mount(options, ThemeChoice::Dark, catalog_over(vfs), ModelsSource::Loading) {
         Ok(sidebar) => sidebar,
-        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+        Err(err) if game_art::testing::no_device(&err) => {
             eprintln!("skipped: no graphics adapter to draw the sidebar on");
             return;
         }
@@ -615,15 +607,7 @@ fn a_class_icon_points_right() {
     sidebar.browse(&["armor-nation-USA"]);
     crate::interaction_tests::settle_in_real_time(&mut sidebar.window);
 
-    let icon = sidebar.window.by_class("wt-armor-row__class").expect("the class row shows its icon");
-    let bounds = sidebar.window.bounds(icon).expect("the icon has a box");
-    let pixels = sidebar.window.pixels().expect("the window is drawn on the device");
-    let middle_y = (bounds.origin.y.0 + bounds.size.height.0 / 2.0) as i32;
-    let at = |fraction: f32| (bounds.origin.x.0 + bounds.size.width.0 * fraction) as i32;
-    let brightness = |x: i32| pixels.rgba(x, middle_y)[..3].iter().map(|&channel| u32::from(channel)).sum::<u32>();
-
-    assert!(brightness(at(0.8)) > 600, "the icon's point is drawn on the right: {:?}", pixels.rgba(at(0.8), middle_y));
-    assert!(brightness(at(0.2)) < 300, "and its base on the left: {:?}", pixels.rgba(at(0.2), middle_y));
+    game_art::testing::assert_points_right(&mut sidebar.window, "wt-armor-row__class");
 }
 
 /// The catalogue and model library of the install named by `WT_WOWS_DIR`.

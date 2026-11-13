@@ -10,8 +10,8 @@ use zgui_image::ImageBytes;
 
 use crate::game_art;
 
-/// Flags by GameParams nation key and white class icons by species. What the build lacks is
-/// left out, and its row shows no icon.
+/// Flags by GameParams nation key and white class icons, turned to point right, by species. What
+/// the build lacks is left out, and its row shows no icon.
 #[derive(Default)]
 pub struct SidebarArt {
     flags: HashMap<String, ImageBytes>,
@@ -32,8 +32,7 @@ impl SidebarArt {
                 if classes.contains_key(&class.species) {
                     continue;
                 }
-                let svg = game_art::class_icon_svg(vfs, class.species).and_then(|bytes| String::from_utf8(bytes).ok());
-                if let Some(svg) = svg {
+                if let Ok(svg) = game_art::class_icon_svg(vfs, class.species) {
                     classes.insert(class.species, Arc::from(svg));
                 }
             }

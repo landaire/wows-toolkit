@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
+use landaire_ui::HeadlessError;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use landaire_ui::test_support::Drawing;
@@ -14,12 +15,19 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_replays::types::GameParamId;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
 use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ParamData;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::game_params::types::Vehicle;
+use wowsunpack::recognized::Recognized;
 use zgui::component;
 use zgui::reactive::RwSignal;
 use zgui::reactive::UnsyncCallback;
@@ -31,6 +39,8 @@ use zgui::view::install_stylesheet;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 
+use crate::game_art;
+use crate::interaction_tests::settle_in_real_time;
 use crate::services::Services;
 use crate::tabs::stats::overview::StatsOverviewProps;
 use crate::tabs::stats::rating;
@@ -113,10 +123,14 @@ fn PanelRoot(
     appearance: Appearance,
     games: Arc<[PerGameStat]>,
     rating: Option<Arc<PersonalRatingData>>,
+    game_data: Option<Arc<LoadedGameData>>,
     handles: Rc<RefCell<Option<Handles>>>,
     cleared: Rc<RefCell<Vec<GameParamId>>>,
 ) -> impl IntoView {
-    Services::provide(None);
+    let services = Services::provide(None);
+    if let Some(data) = game_data {
+        services.game_data.set_ready_for_test(data);
+    }
     let dark = appearance == Appearance::Dark;
     install_stylesheet("wt-test-rating", &format!(":root {{ {} }}", rating::test_properties(dark)));
     let games = RwSignal::new(games);
@@ -148,6 +162,16 @@ struct Opened {
 }
 
 fn open(panel: Panel, drawing: Drawing, appearance: Appearance, rating: Option<Arc<PersonalRatingData>>) -> Opened {
+    try_open(panel, drawing, appearance, rating, None).expect("the panel opens headlessly")
+}
+
+fn try_open(
+    panel: Panel,
+    drawing: Drawing,
+    appearance: Appearance,
+    rating: Option<Arc<PersonalRatingData>>,
+    game_data: Option<Arc<LoadedGameData>>,
+) -> Result<Opened, HeadlessError> {
     let handles = Rc::new(RefCell::new(None));
     let cleared = Rc::new(RefCell::new(Vec::new()));
     let options = HeadlessOptions {
@@ -162,15 +186,53 @@ fn open(panel: Panel, drawing: Drawing, appearance: Appearance, rating: Option<A
             let handles = Rc::clone(&handles);
             let cleared = Rc::clone(&cleared);
             let rating = rating.clone();
+            let game_data = game_data.clone();
             view! {
-                PanelRoot(panel = panel, appearance = appearance, games = evening(), rating = rating, handles = handles, cleared = cleared)
+                PanelRoot(
+                    panel = panel,
+                    appearance = appearance,
+                    games = evening(),
+                    rating = rating,
+                    game_data = game_data,
+                    handles = handles,
+                    cleared = cleared
+                )
             }
-        })
-        .expect("the panel opens headlessly")
+        })?
     };
     let handles = handles.borrow_mut().take().expect("the panel publishes its handles");
 
-    Opened { window, handles, cleared }
+    Ok(Opened { window, handles, cleared })
+}
+
+/// A build whose only ship is the Yamato, a battleship, and whose only file is the battleship
+/// class icon, pointing up.
+fn yamato_build() -> Arc<LoadedGameData> {
+    let vehicle = Vehicle::builder()
+        .level(10)
+        .group("battleship".to_owned())
+        .maybe_abilities(None)
+        .upgrades(Vec::new())
+        .maybe_config_data(None)
+        .maybe_model_path(None)
+        .maybe_armor(None)
+        .maybe_hit_locations(None)
+        .permoflages(Vec::new())
+        .camera_trajectories(Vec::new())
+        .maybe_ttx_components(None)
+        .innate_skills(Vec::new())
+        .build();
+    let param = Param::builder()
+        .id(GameParamId::from(YAMATO))
+        .index("PJSB018".to_owned())
+        .name("PJSB018_Yamato_1944".to_owned())
+        .species(Recognized::Known(Species::Battleship))
+        .nation("Japan".to_owned())
+        .data(ParamData::Vehicle(vehicle))
+        .build();
+    let provider = GameMetadataProvider::from_params_no_specs(vec![param]).expect("a one-ship provider builds");
+
+    Arc::new(LoadedGameData::for_test(provider, game_art::testing::upright_class_icon(Species::Battleship), 1))
 }
 
 fn open_ships(clearable: bool) -> Opened {
@@ -298,6 +360,23 @@ fn a_rating_table_arriving_late_still_rates_the_ships() {
         window.by_test_id(&format!("ship-row-{YAMATO}-PersonalRating")).is_some(),
         "the late table reaches the rows"
     );
+}
+
+/// The game draws a class icon pointing up; a ship's row shows it pointing right.
+#[test]
+fn a_ships_class_icon_points_right() {
+    let ships = Panel::Ships { clearable: false };
+    let mut window = match try_open(ships, Drawing::Device, Appearance::Dark, None, Some(yamato_build())) {
+        Ok(Opened { window, .. }) => window,
+        Err(err) if game_art::testing::no_device(&err) => {
+            eprintln!("skipped: no graphics adapter to draw the panel on");
+            return;
+        }
+        Err(err) => panic!("the panel opens: {err}"),
+    };
+    settle_in_real_time(&mut window);
+
+    game_art::testing::assert_points_right(&mut window, "wt-stats-ship__class");
 }
 
 #[test]

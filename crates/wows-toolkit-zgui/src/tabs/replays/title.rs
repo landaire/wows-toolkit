@@ -1,5 +1,5 @@
 //! A replay tab's title, as the GPUI tab draws it: a spinner while the battle is read, then the
-//! recording player's flag and ship class beside "{ship} - {map}".
+//! recording player's flag and ship class, pointing right, beside "{ship} - {map}".
 
 use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
@@ -9,6 +9,7 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
@@ -26,7 +27,6 @@ use zgui_ui::SpinnerProps;
 use crate::game_art;
 use crate::services::GameDataState;
 use crate::services::Services;
-use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelTitle;
 use crate::tabs::replays::panel::TitleShip;
 
@@ -43,15 +43,15 @@ const CSS: &str = css!(
 struct ShipArt {
     ship: TitleShip,
     flag: Option<ImageBytes>,
-    /// The white class icon, as SVG markup.
+    /// The white class icon, pointing right, as SVG markup.
     class: Option<String>,
 }
 
 #[component]
-pub fn ReplayTabTitle(control: PanelControl) -> impl IntoView {
+pub fn ReplayTabTitle(#[prop(into)] title: Signal<PanelTitle, LocalStorage>) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
-    let title = Memo::new(move |_| control.title());
+    let title = Memo::new(move |_| title.get());
     let art: RwSignal<Option<ShipArt>, LocalStorage> = RwSignal::new_local(None);
 
     // Read again for another ship or another build. A read the next run overtakes ends with it.
@@ -114,7 +114,75 @@ fn class_view(art: &ShipArt) -> Option<AnyView> {
 /// `ship`'s flag and white class icon in `vfs`. What the build lacks is left out.
 fn read_art(vfs: &VfsPath, ship: TitleShip) -> ShipArt {
     let flag = ship.nation.as_deref().and_then(|nation| game_art::nation_flag_png(vfs, nation)).map(ImageBytes::new);
-    let class = game_art::class_icon_svg(vfs, ship.class).and_then(|bytes| String::from_utf8(bytes).ok());
+    let class = game_art::class_icon_svg(vfs, ship.class).ok();
 
     ShipArt { ship, flag, class }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use landaire_ui::Appearance;
+    use landaire_ui::ThemeRootProps;
+    use landaire_ui::test_support::Drawing;
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::HeadlessWindow;
+    use landaire_ui::test_support::WindowSize;
+    use wows_toolkit_replay_data::load::LoadedGameData;
+    use wows_toolkit_viewmodel::settings::ThemeChoice;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::game_params::types::Species;
+    use zgui::component;
+    use zgui::reactive::Signal;
+    use zgui::view;
+    use zgui::view::IntoView;
+
+    use super::ReplayTabTitleProps;
+    use crate::game_art;
+    use crate::interaction_tests::settle_in_real_time;
+    use crate::services::Services;
+    use crate::tabs::replays::panel::PanelTitle;
+    use crate::tabs::replays::panel::TitleShip;
+    use crate::theme::SemanticTokensProps;
+
+    /// The title of a battle in a battleship, over a build whose only file is the battleship
+    /// class icon, pointing up.
+    #[component]
+    fn TitleRoot() -> impl IntoView {
+        let services = Services::provide(None);
+        let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+        let vfs = game_art::testing::upright_class_icon(Species::Battleship);
+        services.game_data.set_ready_for_test(Arc::new(LoadedGameData::for_test(provider, vfs, 1)));
+        let ship = TitleShip { nation: None, class: Species::Battleship };
+        let title = PanelTitle::Read { title: "Yamato - Ocean".to_owned(), ship: Some(ship) };
+
+        view! {
+            ThemeRoot {
+                SemanticTokens(choice = ThemeChoice::Dark)
+                ReplayTabTitle(title = Signal::stored_local(title))
+            }
+        }
+    }
+
+    /// The game draws a class icon pointing up; a replay tab's title shows it pointing right.
+    #[test]
+    fn the_class_icon_points_right() {
+        let options = HeadlessOptions {
+            drawing: Drawing::Device,
+            desktop: Some(Appearance::Dark),
+            ..HeadlessOptions::new(WindowSize { width: 300.0, height: 60.0 })
+        };
+        let mut window = match HeadlessWindow::open(options, || view! { TitleRoot() }) {
+            Ok(window) => window,
+            Err(err) if game_art::testing::no_device(&err) => {
+                eprintln!("skipped: no graphics adapter to draw the title on");
+                return;
+            }
+            Err(err) => panic!("the title opens: {err}"),
+        };
+        settle_in_real_time(&mut window);
+
+        game_art::testing::assert_points_right(&mut window, "wt-replay-title__class");
+    }
 }

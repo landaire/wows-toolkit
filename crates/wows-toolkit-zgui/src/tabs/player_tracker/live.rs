@@ -196,7 +196,7 @@ impl LiveModel {
             let drawn: Vec<(ClassIconKey, Vec<u8>)> = blocking(move || {
                 fresh
                     .into_iter()
-                    .filter_map(|key| match game_art::turned_class_icon_png(data.vfs(), key) {
+                    .filter_map(|key| match game_art::class_icon_png(data.vfs(), key) {
                         Ok(png) => Some((key, png)),
                         Err(err) => {
                             tracing::warn!("live match: {err}");

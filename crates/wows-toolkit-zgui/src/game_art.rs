@@ -2,8 +2,10 @@
 //! (achievements, ribbons, modules, signals, captain skills, consumables), and the tone a class
 //! icon is drawn in.
 //!
-//! The game's class icons are white. A row's icon is its SVG with every paint multiplied by the
-//! row's tone, as the game tints them, either as markup or drawn to a PNG turned to point right.
+//! The game's class icons are white and point up. Every view shows one turned to point right,
+//! as GPUI does, so [`class_icon_svg`] is the only reader of them and turns them as it reads. A
+//! row's icon is that SVG with every paint multiplied by the row's tone, as the game tints them,
+//! either as markup or drawn to a PNG.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,6 +20,7 @@ use resvg::tiny_skia::Pixmap;
 use resvg::tiny_skia::Transform;
 use resvg::usvg::Options;
 use resvg::usvg::Tree;
+use resvg::usvg::WriteOptions;
 use wows_toolkit_replay_data::columns::PlayerColorKind;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
@@ -91,9 +94,26 @@ impl From<PlayerTint> for ClassTone {
     }
 }
 
-/// `species`' white class icon in `vfs`, as SVG bytes.
-pub fn class_icon_svg(vfs: &VfsPath, species: Species) -> Option<Vec<u8>> {
-    GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.read(vfs, None)
+/// `species`' white class icon in `vfs`, turned to point right, as SVG markup.
+pub fn class_icon_svg(vfs: &VfsPath, species: Species) -> Result<String, ClassIconError> {
+    let upright = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }
+        .read(vfs, None)
+        .ok_or(ClassIconError::Missing(species))?;
+    turned_svg(&upright, species)
+}
+
+/// `svg`, which points up, turned a quarter turn clockwise.
+fn turned_svg(svg: &[u8], species: Species) -> Result<String, ClassIconError> {
+    let tree = Tree::from_data(svg, &Options::default()).map_err(|source| ClassIconError::Parse { species, source })?;
+    let (width, height) = (tree.size().width(), tree.size().height());
+    // Written back by the parser, the icon has an explicit size, which the nested `svg` needs.
+    let upright = tree.to_string(&WriteOptions::default());
+
+    // (x, y) goes to (height - y, x).
+    Ok(format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{height}\" height=\"{width}\" \
+         viewBox=\"0 0 {height} {width}\"><g transform=\"matrix(0 1 -1 0 {height} 0)\">{upright}</g></svg>"
+    ))
 }
 
 /// `nation`'s flag in `vfs`, as PNG bytes. `nation` is the nation's name in the game params.
@@ -176,14 +196,14 @@ pub enum ClassIconError {
 }
 
 /// `key`'s icon from `vfs`, drawn in its tone and turned to point right, as PNG bytes.
-pub fn turned_class_icon_png(vfs: &VfsPath, key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> {
-    let svg = class_icon_svg(vfs, key.species).ok_or(ClassIconError::Missing(key.species))?;
-    turned_png(&svg, key)
+pub fn class_icon_png(vfs: &VfsPath, key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> {
+    let svg = class_icon_svg(vfs, key.species)?;
+    tinted_png(&svg, key)
 }
 
-fn turned_png(svg: &[u8], key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> {
+fn tinted_png(svg: &str, key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> {
     let species = key.species;
-    let tree = Tree::from_data(svg, &Options::default()).map_err(|source| ClassIconError::Parse { species, source })?;
+    let tree = Tree::from_str(svg, &Options::default()).map_err(|source| ClassIconError::Parse { species, source })?;
     let size = tree.size().to_int_size();
     let mut pixmap = Pixmap::new(size.width(), size.height()).ok_or(ClassIconError::Empty { species })?;
     resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
@@ -194,10 +214,9 @@ fn turned_png(svg: &[u8], key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> 
         let tinted = multiply(Rgb::from_channels(color.red(), color.green(), color.blue()), key.tone);
         out.0 = [tinted.red(), tinted.green(), tinted.blue(), color.alpha()];
     }
-    let turned = image::imageops::rotate90(&drawn);
 
     let mut png = Vec::new();
-    turned
+    drawn
         .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
         .map_err(|source| ClassIconError::Encode { species, source })?;
     Ok(png)
@@ -221,7 +240,7 @@ pub enum ArtKey {
     CrewSkill(CrewSkillName),
     /// By the nation's name in the game params.
     NationFlag(String),
-    /// White, for a caller to tint with [`tinted_svg`].
+    /// White and pointing right, for a caller to tint with [`tinted_svg`].
     ShipClass(Species),
 }
 
@@ -237,10 +256,7 @@ impl ArtKey {
             Self::SignalFlag(name) => raster(GuiAsset::SignalFlag(name)),
             Self::CrewSkill(name) => raster(GuiAsset::CrewSkill { name }),
             Self::NationFlag(nation) => raster(GuiAsset::NationFlag(nation)),
-            Self::ShipClass(species) => {
-                let svg = String::from_utf8(class_icon_svg(vfs, *species)?).ok()?;
-                Some(Art::Vector(Arc::from(svg)))
-            }
+            Self::ShipClass(species) => class_icon_svg(vfs, *species).ok().map(|svg| Art::Vector(Arc::from(svg))),
         }
     }
 }
@@ -406,16 +422,78 @@ impl Default for GameArt {
     }
 }
 
+/// A build holding a class icon drawn pointing up, as the game draws them, and the check that a
+/// view shows it pointing right.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::io::Write;
+
+    use landaire_ui::HeadlessError;
+    use landaire_ui::test_support::HeadlessWindow;
+    use wowsunpack::game_assets::GuiAsset;
+    use wowsunpack::game_assets::ShipIconState;
+    use wowsunpack::game_params::types::Species;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
+
+    /// White in the top half of its box only, so it points up. Sized by its view box alone.
+    pub(crate) const UPRIGHT: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 20\">\
+        <rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"white\"/></svg>";
+
+    /// A build whose only file is `species`' class icon, [`UPRIGHT`].
+    pub(crate) fn upright_class_icon(species: Species) -> VfsPath {
+        let vfs: VfsPath = MemoryFS::new().into();
+        let path = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.candidate_paths(None).remove(0);
+        let file = vfs.join(&path).expect("the icon's path is valid");
+        file.parent().create_dir_all().expect("the icon's directory is made");
+        file.create_file().expect("the icon is made").write_all(UPRIGHT.as_bytes()).expect("the icon is written");
+        vfs
+    }
+
+    /// Whether `err` says the machine has no graphics device to draw on.
+    pub(crate) fn no_device(err: &HeadlessError) -> bool {
+        matches!(
+            err,
+            HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }
+        )
+    }
+
+    /// Panics unless the element with `class` shows [`UPRIGHT`] pointing right: lit towards its
+    /// right edge and dark towards its left, along its middle.
+    pub(crate) fn assert_points_right(window: &mut HeadlessWindow, class: &str) {
+        let icon = window.by_class(class).unwrap_or_else(|| panic!("{class} is drawn"));
+        let bounds = window.bounds(icon).unwrap_or_else(|| panic!("{class} has a box"));
+        let pixels = window.pixels().expect("the window is drawn on the device");
+        let middle_y = (bounds.origin.y.0 + bounds.size.height.0 / 2.0) as i32;
+        let at = |fraction: f32| (bounds.origin.x.0 + bounds.size.width.0 * fraction) as i32;
+        let brightness = |x: i32| pixels.rgba(x, middle_y)[..3].iter().map(|&channel| u32::from(channel)).sum::<u32>();
+        let (point, base) = (at(0.8), at(0.2));
+
+        assert!(brightness(point) > 300, "{class} has its point on the right: {:?}", pixels.rgba(point, middle_y));
+        assert!(
+            brightness(base) < brightness(point) / 3,
+            "and its base on the left: {:?}",
+            pixels.rgba(base, middle_y)
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use image::ImageFormat;
     use landaire_ui::Rgb;
+    use resvg::tiny_skia::Pixmap;
+    use resvg::tiny_skia::Transform;
+    use resvg::usvg::Options;
+    use resvg::usvg::Tree;
     use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
     use wowsunpack::game_params::types::Species;
 
     use super::ClassIconKey;
+    use super::class_icon_png;
+    use super::class_icon_svg;
+    use super::testing::upright_class_icon;
     use super::tinted_svg;
-    use super::turned_png;
     use crate::theme::Semantic;
 
     #[test]
@@ -428,17 +506,40 @@ mod tests {
         );
     }
 
+    /// The tinted markup of `species`' icon drawn at its own size, with straight alpha.
+    fn drawn_markup(species: Species, tone: Rgb) -> image::RgbaImage {
+        let svg = class_icon_svg(&upright_class_icon(species), species).expect("the icon is read");
+        let tree = Tree::from_str(&tinted_svg(&svg, tone), &Options::default()).expect("the markup parses");
+        let size = tree.size().to_int_size();
+        let mut pixmap = Pixmap::new(size.width(), size.height()).expect("the icon has an area");
+        resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+        let mut drawn = image::RgbaImage::new(size.width(), size.height());
+        for (out, pixel) in drawn.pixels_mut().zip(pixmap.pixels()) {
+            let color = pixel.demultiply();
+            out.0 = [color.red(), color.green(), color.blue(), color.alpha()];
+        }
+        drawn
+    }
+
     #[test]
-    fn a_turned_icon_points_right_and_takes_the_rows_tone() {
-        // A white bar along the top of a 4x2 icon: turned clockwise it runs down the right edge.
-        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="1" fill="#ffffff"/></svg>"##;
-        let key = ClassIconKey::new(Species::Destroyer, PlayerTint::Ally);
-        let png = turned_png(svg, key).expect("the icon draws");
+    fn a_class_icon_read_as_markup_points_right_and_takes_a_tone() {
+        let tone = Semantic::DARK.loss;
+        let drawn = drawn_markup(Species::Battleship, tone);
+
+        assert_eq!(drawn.dimensions(), (20, 10), "the upright 10x20 icon lies on its side");
+        assert_eq!(drawn.get_pixel(15, 5).0, [tone.red(), tone.green(), tone.blue(), 255], "the point is on the right");
+        assert_eq!(drawn.get_pixel(4, 5).0[3], 0, "the left half is empty");
+    }
+
+    #[test]
+    fn a_class_icon_drawn_as_a_png_points_right_and_takes_the_rows_tone() {
+        let key = ClassIconKey::new(Species::Battleship, PlayerTint::Ally);
+        let png = class_icon_png(&upright_class_icon(Species::Battleship), key).expect("the icon draws");
         let decoded = image::load_from_memory_with_format(&png, ImageFormat::Png).expect("the PNG decodes").to_rgba8();
 
-        assert_eq!(decoded.dimensions(), (2, 4));
+        assert_eq!(decoded.dimensions(), (20, 10));
         let tone = Semantic::DARK.win;
-        assert_eq!(decoded.get_pixel(1, 0).0, [tone.red(), tone.green(), tone.blue(), 255]);
-        assert_eq!(decoded.get_pixel(0, 0).0[3], 0);
+        assert_eq!(decoded.get_pixel(15, 5).0, [tone.red(), tone.green(), tone.blue(), 255]);
+        assert_eq!(decoded.get_pixel(4, 5).0[3], 0);
     }
 }

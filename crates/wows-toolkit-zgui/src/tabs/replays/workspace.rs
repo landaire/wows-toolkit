@@ -195,7 +195,9 @@ impl ReplayWorkspace {
                 },
             )
             .with_title(move |id| match Docked::of(id).and_then(|docked| self.control_of(&docked)) {
-                Some(control) => AnyView::new(view! { ReplayTabTitle(control = control) }),
+                Some(control) => {
+                    AnyView::new(view! { ReplayTabTitle(title = Signal::derive_local(move || control.title())) })
+                }
                 None => AnyView::new(()),
             }),
         );

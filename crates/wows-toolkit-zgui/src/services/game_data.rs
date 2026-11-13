@@ -78,6 +78,12 @@ impl GameData {
         self.state.get_untracked()
     }
 
+    /// Holds `data` as the loaded build.
+    #[cfg(test)]
+    pub fn set_ready_for_test(self, data: Arc<LoadedGameData>) {
+        self.state.set(GameDataState::Ready(data));
+    }
+
     /// The cache replays are read through. `None` before the settings are read.
     pub fn cache(self) -> Option<GameDataCache> {
         self.cache.get()
