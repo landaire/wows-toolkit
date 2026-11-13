@@ -43,7 +43,7 @@ impl AppTab {
             Self::Stats => "ui.tabs.stats",
             Self::PlayerTracker => "ui.tabs.player_tracker",
             Self::Search => "ui.tabs.search",
-            Self::ArmorViewer => "ui.tabs.armor_viewer",
+            Self::ArmorViewer => "ui.tabs.model_viewer",
             Self::Unpacker => "ui.tabs.unpacker",
             Self::Launcher => "ui.tabs.launcher",
         }
@@ -60,7 +60,7 @@ impl AppTab {
             Self::Stats => Glyph::ChartColumn,
             Self::PlayerTracker => Glyph::VenetianMask,
             Self::Search => Glyph::Search,
-            Self::ArmorViewer => Glyph::Shield,
+            Self::ArmorViewer => Glyph::Box,
             Self::Unpacker => Glyph::Archive,
             Self::Launcher => Glyph::Rocket,
         }
