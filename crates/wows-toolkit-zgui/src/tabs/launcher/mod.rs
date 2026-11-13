@@ -64,13 +64,13 @@ const CSS: &str = css!(
     .wt-launcher__page {
         display: flex;
         flex-direction: column;
-        gap: 24px;
-        padding: 16px;
+        gap: 16px;
+        padding: 12px 16px;
     }
     .wt-launcher__section {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
     }
     .wt-launcher__heading {
         font-size: var(--zui-type-size-sm);
@@ -80,8 +80,8 @@ const CSS: &str = css!(
     .wt-launcher__card {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding: 12px;
+        gap: 6px;
+        padding: 8px 12px;
         border: 1px solid var(--lui-color-border);
         border-radius: 6px;
         background-color: var(--lui-color-surface);
@@ -92,7 +92,7 @@ const CSS: &str = css!(
         gap: 4px;
         min-width: 0;
     }
-    .wt-launcher__column--wide { gap: 8px; }
+    .wt-launcher__column--wide { gap: 6px; }
     .wt-launcher__row {
         display: flex;
         flex-direction: row;
@@ -131,7 +131,7 @@ const CSS: &str = css!(
         width: 240px;
         flex: none;
     }
-    .wt-launcher__textarea { min-height: 52px; }
+    .wt-launcher__textarea.wt-launcher__textarea { min-height: 48px; }
     .wt-launcher__path-label { width: 60px; flex: none; }
     .wt-launcher__meter {
         display: flex;

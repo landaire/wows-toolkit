@@ -28,6 +28,8 @@ use wows_toolkit_launcher::test_support;
 use wows_toolkit_services::dialog::Asked;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::view;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::returning_reader;
@@ -431,6 +433,46 @@ fn extra_args_are_saved_when_the_field_is_left() {
 
     let saved = saved_launcher_row().expect("leaving the field saved the launcher row");
     assert_eq!(saved["extra_args"], serde_json::json!(["-console"]));
+}
+
+/// An option field holds two lines when short and grows to show every line it is given.
+#[test]
+fn an_option_field_grows_with_its_lines() {
+    let mut launcher = LauncherWindow::open();
+    launcher.adopt(configured());
+    let height = |launcher: &LauncherWindow| {
+        let field = launcher.window.by_test_id("launcher-env-vars").expect("the field is shown");
+        launcher.window.bounds(field).expect("it is laid out").size.height.0
+    };
+    let short = height(&launcher);
+
+    launcher.press("launcher-env-vars");
+    for line in ["A=1", "B=2", "C=3", "D=4"] {
+        launcher.window.type_text(line);
+        launcher.window.press_key(NamedKey::Enter, Modifiers::NONE);
+    }
+    launcher.settle();
+
+    let tall = height(&launcher);
+    assert!(tall > short + 30.0, "four lines take more room than two: {short} then {tall}");
+}
+
+/// Each Proton Browse button sits after the path it sets, not across the page from it.
+#[test]
+fn the_proton_browse_buttons_follow_their_paths() {
+    let mut launcher = LauncherWindow::open();
+    launcher.adopt(configured());
+    let bounds = |id: &str| {
+        let element = launcher.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        launcher.window.bounds(element).expect("it is laid out")
+    };
+
+    let column = bounds("launcher-extra-args");
+    for browse in ["launcher-proton-binary", "launcher-proton-prefix"] {
+        let button = bounds(browse);
+        let offset = button.origin.x.0 - column.origin.x.0;
+        assert!(offset < 400.0, "{browse} sits {offset}px into a column {}px wide", column.size.width.0);
+    }
 }
 
 #[test]

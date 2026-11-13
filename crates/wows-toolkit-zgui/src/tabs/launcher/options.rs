@@ -160,7 +160,6 @@ fn ProtonPathRow(model: LauncherModel, shell: Shell, which: ProtonPath) -> impl 
                 }
                 .into_view(),
             }}
-            box(class = "wt-launcher__spacer")
             Button(
                 variant = ButtonVariant::Outline,
                 size = ButtonSize::Sm,
