@@ -30,11 +30,13 @@ use crate::motion::REDUCED_MOTION_ATTRIBUTE;
 use crate::scheme::ThemeChoice;
 use crate::surface;
 use crate::tokens;
+use crate::tooltip;
 
 /// What the `--lui-*` properties are installed under.
 const SHEET: &str = "landaire-ui-theme";
 
-/// Applies a theme choice, a motion preference and a zoom to the window it is in.
+/// Applies a theme choice, a motion preference, a zoom and the tooltip timing to the window it is
+/// in.
 ///
 /// One per window, around everything else: it declares its tokens on `:root`, so surfaces
 /// portalled onto overlay bands are themed too.
@@ -52,6 +54,7 @@ pub fn ThemeRoot(
 ) -> impl IntoView {
     install_stylesheet(surface::SHEET, surface::CSS);
     motion::provide_motion_preference(motion);
+    tooltip::install_tooltips();
 
     let sheet = Stylesheet::install(SHEET, &tokens::lui_sheet(choice.get_untracked()));
     let installed = RenderEffect::new(move |previous: Option<()>| {

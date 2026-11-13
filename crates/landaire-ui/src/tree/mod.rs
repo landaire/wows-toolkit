@@ -71,6 +71,9 @@ use crate::surface::RowHeight;
 use crate::surface::RowIndex;
 use crate::surface::STRIPE_CLASS;
 use crate::surface::TreeDepth;
+use crate::tooltip::TooltipContentProps;
+use crate::tooltip::TooltipProps;
+use crate::tooltip::TooltipTriggerProps;
 use crate::tree::flat::FlatRow;
 use crate::tree::flat::FlatRows;
 use crate::tree::keys::Command;
@@ -148,6 +151,30 @@ impl<K> TreeMenu<K> {
 }
 
 impl<K> Clone for TreeMenu<K> {
+    fn clone(&self) -> Self {
+        Self { build: Rc::clone(&self.build) }
+    }
+}
+
+/// Builds a row's tooltip for its key, or `None` when the row has none.
+type BuildTooltip<K> = Rc<dyn Fn(&K) -> Option<AnyView>>;
+
+/// The tooltip a row of a [`Tree`] shows, built for the row's key. It covers the whole row,
+/// indent and chevron included. A key that builds `None` has no tooltip.
+pub struct TreeTooltip<K> {
+    build: BuildTooltip<K>,
+}
+
+impl<K> TreeTooltip<K> {
+    pub fn new<V>(build: impl Fn(&K) -> Option<V> + 'static) -> Self
+    where
+        V: IntoView + 'static,
+    {
+        Self { build: Rc::new(move |key: &K| build(key).map(AnyView::new)) }
+    }
+}
+
+impl<K> Clone for TreeTooltip<K> {
     fn clone(&self) -> Self {
         Self { build: Rc::clone(&self.build) }
     }
@@ -253,6 +280,7 @@ pub fn Tree<M, V, F>(
     #[prop(optional)]
     on_activate: Option<UnsyncCallback<M::Key>>,
     #[prop(optional)] context_menu: Option<TreeMenu<M::Key>>,
+    #[prop(optional)] tooltip: Option<TreeTooltip<M::Key>>,
     #[prop(optional)] handle: Option<TreeHandle<M::Key>>,
     /// What the tree is called, for a screen reader.
     #[prop(into, optional)]
@@ -290,6 +318,7 @@ where
         branch_click,
         on_activate,
         menu_request: context_menu.is_some().then(|| RwSignal::new_local(None)),
+        tooltip,
         cursor_row: RwSignal::new_local(None),
     });
     let body = Body { parts, port, row_height, menu_target, label, class, attrs };
@@ -333,6 +362,7 @@ struct RowParts<M: TreeModel, F> {
     menu_request: Option<RwSignal<Option<M::Key>, LocalStorage>>,
     /// The element of the row the cursor is on, while it is built.
     cursor_row: RwSignal<Option<NodeRef>, LocalStorage>,
+    tooltip: Option<TreeTooltip<M::Key>>,
 }
 
 /// One visible row as the keyed list of built rows knows it.
@@ -730,9 +760,13 @@ where
         (NodeKind::Leaf, LeafLead::Nothing) => AnyView::new(()),
     };
 
+    let tip = parts.tooltip.clone().filter(|tip| (tip.build)(&key).is_some()).map(|tip| {
+        let key = key.clone();
+        move || (tip.build)(&key)
+    });
     let content = (parts.slot)(TreeRow { key, index, depth, kind, expanded, selected, focused, anchor });
 
-    AnyView::new(view! {
+    let row = view! {
         box(
             node_ref = anchor,
             on:click = on_click,
@@ -744,6 +778,16 @@ where
             {indent}
             {lead}
             box(class = "lui-tree__content") {{content}}
+        }
+    };
+    let Some(tip) = tip else {
+        return AnyView::new(row);
+    };
+
+    AnyView::new(view! {
+        Tooltip {
+            TooltipTrigger(class = "lui-tree__tip") {{row}}
+            TooltipContent {{tip.clone()}}
         }
     })
 }

@@ -8,12 +8,14 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::TOOLTIP_DELAY;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::TreeHandle;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeModel;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
+use landaire_ui::TreeTooltip;
 use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
@@ -139,6 +141,7 @@ fn open(nodes: Nodes, expanded: &[u32]) -> (HeadlessWindow, Probe) {
                     context_menu = TreeMenu::new(|key: &u32| view! {
                         MenuItem(attr:data-testid = format!("menu-{key}")) {"Open"}
                     }),
+                    tooltip = TreeTooltip::new(|key: &u32| (*key != 3).then(|| view! { text {{format!("tip {key}")}} })),
                     attr:data-testid = "tree",
                     style:height = "220px"
                 )
@@ -162,6 +165,25 @@ fn press(window: &mut HeadlessWindow, key: NamedKey, modifiers: Modifiers) {
 
 fn selected(probe: Probe) -> HashSet<u32> {
     probe.selection.get_untracked()
+}
+
+#[test]
+fn a_rows_tooltip_covers_its_chevron_and_shows_one_at_a_time() {
+    let (mut window, _) = open(Nodes::small(), &[]);
+    let wait = TOOLTIP_DELAY + SETTLE;
+
+    let chevron = window.by_class("lui-tree__chevron").expect("the first root has a chevron");
+    window.hover(chevron).expect("hovers");
+    window.advance(wait);
+    assert_eq!(window.texts_by_class("lui-tooltip"), ["tip 1"]);
+
+    window.hover(row(&window, 2)).expect("hovers");
+    window.advance(wait);
+    assert_eq!(window.texts_by_class("lui-tooltip"), ["tip 2"]);
+
+    window.hover(row(&window, 3)).expect("hovers");
+    window.advance(wait);
+    assert!(window.texts_by_class("lui-tooltip").is_empty(), "a row whose key builds none has no tooltip");
 }
 
 #[test]

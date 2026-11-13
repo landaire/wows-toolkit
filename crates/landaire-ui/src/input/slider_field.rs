@@ -16,9 +16,6 @@ use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SliderProps;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_icons::IconData;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
@@ -30,6 +27,9 @@ use crate::input::number::NumberInputProps;
 use crate::input::number::NumberRange;
 use crate::input::number::StepButtons;
 use crate::input::number::decimals_of;
+use crate::tooltip::TooltipContentProps;
+use crate::tooltip::TooltipProps;
+use crate::tooltip::TooltipTriggerProps;
 
 /// What the field rules are installed under.
 const SHEET: &str = "landaire-ui-slider-field";

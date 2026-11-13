@@ -30,15 +30,15 @@ use zgui::view::install_stylesheet;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
 use zgui::vocab::Timestamp;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_icons::IconData;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 
 use crate::chrome::frame_window::FrameWindow;
 use crate::chrome::frame_window::or_current;
+use crate::tooltip::TooltipContentProps;
+use crate::tooltip::TooltipProps;
+use crate::tooltip::TooltipTriggerProps;
 
 /// What the title bar rules are installed under.
 const SHEET: &str = "landaire-ui-title-bar";

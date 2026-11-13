@@ -26,15 +26,15 @@ use zgui::view::install_stylesheet;
 use zgui::vocab::Role;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_icons::IconData;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 
 use crate::motion::MotionPreference;
 use crate::motion::motion_preference;
+use crate::tooltip::TooltipContentProps;
+use crate::tooltip::TooltipProps;
+use crate::tooltip::TooltipTriggerProps;
 
 const SHEET: &str = "landaire-ui-status-bar";
 

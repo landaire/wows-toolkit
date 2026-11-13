@@ -25,6 +25,12 @@ pub(crate) const CSS: &str = css!(
         display: flex;
         flex-direction: column;
     }
+    .lui-tooltip-trigger.lui-tree__tip {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        flex: none;
+    }
     .lui-tree__row {
         display: flex;
         flex-direction: row;

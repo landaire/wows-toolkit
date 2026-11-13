@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
@@ -41,9 +42,14 @@ use zgui::vocab::PhysicalKey;
 use zgui::vocab::PointerAction;
 use zgui::vocab::PointerButton;
 use zgui::vocab::PointerEvent;
+use zgui::vocab::PointerId;
+use zgui::vocab::PointerKind;
 use zgui::vocab::Role;
+use zgui::vocab::ScrollDelta;
+use zgui::vocab::ScrollPhase;
 use zgui::vocab::Timestamp;
 use zgui::vocab::Toggled;
+use zgui::vocab::WheelEvent;
 use zgui_platform_headless::Harness;
 use zgui_platform_headless::Headless;
 use zgui_platform_headless::OffscreenSurface;
@@ -220,10 +226,15 @@ impl HeadlessWindow {
         let dom = self.window().dom();
         let class = ClassName::new(class);
 
+        // An overlay band's root may also lie below the page root, so a node is read once.
+        let mut seen = HashSet::new();
         let mut texts = Vec::new();
         let mut pending = self.roots();
         pending.reverse();
         while let Some(node) = pending.pop() {
+            if !seen.insert(node) {
+                continue;
+            }
             if dom.classes(node).contains(&class) {
                 texts.push(dom.text_content(node));
             }
@@ -290,6 +301,29 @@ impl HeadlessWindow {
     pub fn hover(&mut self, element: Element) -> Result<(), HeadlessError> {
         let at = self.centre(element)?;
         self.move_pointer(at);
+
+        Ok(())
+    }
+
+    /// Moves the pointer to `at`, in device pixels from the window's top-left corner.
+    pub fn hover_at(&mut self, at: Point<DevicePx, Device>) {
+        let at = self.to_css(at);
+        self.move_pointer(at);
+    }
+
+    /// Turns the wheel over the middle of `element`, asking to scroll `down` CSS pixels.
+    pub fn wheel(&mut self, element: Element, down: f32) -> Result<(), HeadlessError> {
+        let at = self.centre(element)?;
+        self.move_pointer(at);
+
+        let event = WheelEvent {
+            id: PointerId::MOUSE,
+            kind: PointerKind::Mouse,
+            position: at,
+            delta: ScrollDelta::Pixels(Size::new(CssPx(0.0), CssPx(down))),
+            phase: ScrollPhase::Discrete,
+        };
+        self.deliver(SurfaceEvent::Wheel { event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
 
         Ok(())
     }

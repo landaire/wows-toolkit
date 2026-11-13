@@ -281,13 +281,9 @@ fn rows_mark_the_letters_the_query_matched() {
     assert_eq!(marked(&window), ["Sm\u{e5}l"], "a folded letter is marked as written");
 }
 
-/// The marked pieces the rows show. The list builds each row twice, the second time in the
-/// catalogue it walks, so the pieces come in two equal halves.
+/// The marked pieces the rows show.
 fn marked(window: &HeadlessWindow) -> Vec<String> {
-    let mut pieces = window.texts_by_class(MARK_CLASS);
-    let copy = pieces.split_off(pieces.len() / 2);
-    assert_eq!(pieces, copy, "the catalogue holds the same rows");
-    pieces
+    window.texts_by_class(MARK_CLASS)
 }
 
 /// With no game data the ship list is still where ctrl+p on the Armor Viewer goes, and says why

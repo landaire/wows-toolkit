@@ -13,12 +13,13 @@ use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
-use zgui_ui::TooltipContentProps;
-use zgui_ui::TooltipProps;
-use zgui_ui::TooltipTriggerProps;
 use zgui_ui_icons::IconData;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
+
+use crate::tooltip::TooltipContentProps;
+use crate::tooltip::TooltipProps;
+use crate::tooltip::TooltipTriggerProps;
 
 /// What the surface rules are installed under.
 pub const SHEET: &str = "landaire-ui-surfaces";
