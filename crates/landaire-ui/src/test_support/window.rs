@@ -341,10 +341,15 @@ impl HeadlessWindow {
     /// Presses and releases the primary button at `at`, in device pixels from the window's
     /// top-left corner, for a point other than an element's middle.
     pub fn click_at(&mut self, at: Point<DevicePx, Device>) {
+        self.click_at_with(at, Modifiers::NONE);
+    }
+
+    /// Presses and releases the primary button at `at` with `modifiers` held.
+    pub fn click_at_with(&mut self, at: Point<DevicePx, Device>, modifiers: Modifiers) {
         let at = self.to_css(at);
         self.move_pointer(at);
-        self.pointer_event(PointerAction::Pressed, at, Some(PointerButton::Primary));
-        self.pointer_event(PointerAction::Released, at, Some(PointerButton::Primary));
+        self.pointer_event_with(PointerAction::Pressed, at, Some(PointerButton::Primary), modifiers);
+        self.pointer_event_with(PointerAction::Released, at, Some(PointerButton::Primary), modifiers);
     }
 
     /// Clicks the primary button twice over the middle of `element`, close enough together to
