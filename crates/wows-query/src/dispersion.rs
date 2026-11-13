@@ -712,14 +712,42 @@ impl GameData {
         } else {
             skill_data.skill_trigger_sentence(skill)
         };
-        let mut skill_row = row(skill_name, row_kind, &skill_profiles, Some(&base), range);
-        skill_row.condition = condition;
+        let mut skill_row = row(skill_name.clone(), row_kind, &skill_profiles, Some(&base), range);
+        skill_row.condition = condition.clone();
+        let mut rows = vec![row("base".to_owned(), RowKind::Base, &base, None, range), skill_row];
+
+        // The skill on top of each range or accuracy build of this game build,
+        // so "range mod and <skill>" has its own row.
+        let planner = Planner::new(self, ship);
+        let mut lasting = self.dispersion_candidates(&battery, &planner, stock, &base)?.lasting;
+        // Today's copy of the selected skill would apply it twice.
+        lasting.retain(|candidate| {
+            !matches!(candidate.source, Source::Item(Item::Skill { index, .. })
+                if planner.skill(index).internal_name() == skill.internal_name())
+        });
+        let singles = lasting.iter().map(|candidate| vec![candidate]);
+        for chosen in singles.chain(combined_builds(&battery, &lasting)) {
+            let recipe = Recipe::of(&battery, &chosen);
+            let mut loadout = planner.loadout_of(&recipe.items, None);
+            loadout.skills.push(skill.clone());
+            loadout.triggers = Triggers::Skills(vec![skill.internal_name().clone()]);
+            let effects = self.effective_modifiers_at_version(ship, &loadout, skill_data.version())?;
+            let Some(profiles) =
+                battery.profiles(effects.build.modifiers.bundle(), &recipe.selection, recipe.coefficient)
+            else {
+                continue;
+            };
+            let Some(combined_kind) = change_kind(&base[0], &profiles[0]) else {
+                continue;
+            };
+            let mut combined =
+                row(format!("{} + {skill_name}", build_label(&chosen)), combined_kind, &profiles, Some(&base), range);
+            combined.condition = condition.clone();
+            rows.push(combined);
+        }
+
         let guns = base.iter().map(|mount| gun_curve(&mount.mount, &mount.profile.curve)).collect();
-        let computed = ShipRows {
-            rows: vec![row("base".to_owned(), RowKind::Base, &base, None, range), skill_row],
-            sources: Vec::new(),
-            guns,
-        };
+        let computed = ShipRows { rows, sources: Vec::new(), guns };
         let headline = 1;
         let group = match &args.compare {
             Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, Some(headline))?),
@@ -732,6 +760,9 @@ impl GameData {
             if !condition.ends_with(['.', '!', '?']) {
                 conclusion.push('.');
             }
+        }
+        for combined in &computed.rows[headline + 1..] {
+            conclusion.push_str(&combined_sentence(combined));
         }
         if let Some(group) = &group {
             conclusion.push_str(&group_sentence(ship, range, group));
@@ -1092,15 +1123,23 @@ fn combined_rows(
     base: &[MountProfile],
     range: Km,
 ) -> Result<Vec<DispersionRow>, QueryError> {
+    combined_builds(battery, candidates)
+        .iter()
+        .map(|chosen| combined_row(battery, planner, chosen, base, range))
+        .collect()
+}
+
+/// The candidate sets of [`combined_rows`].
+fn combined_builds<'c>(battery: &Battery<'_>, candidates: &'c [Candidate]) -> Vec<Vec<&'c Candidate>> {
     let ranged: Vec<&Candidate> = candidates.iter().filter(|candidate| candidate.kind != RowKind::Accuracy).collect();
     let accurate: Vec<&Candidate> = candidates.iter().filter(|candidate| candidate.kind != RowKind::Range).collect();
 
     let longest = pick(battery, &ranged, |candidate| -candidate.profiles[0].profile.max_range.value());
     let tightest = pick(battery, &accurate, |candidate| candidate.profiles[0].profile.ideal_radius_coef);
 
-    let mut rows = Vec::new();
+    let mut builds = Vec::new();
     if longest.len() > 1 {
-        rows.push(combined_row(battery, planner, &longest, base, range)?);
+        builds.push(longest.clone());
     }
 
     let mut both = longest.clone();
@@ -1112,10 +1151,10 @@ fn combined_rows(
         }
     }
     if !longest.is_empty() && both.len() > longest.len() {
-        rows.push(combined_row(battery, planner, &both, base, range)?);
+        builds.push(both);
     }
 
-    Ok(rows)
+    builds
 }
 
 /// One candidate per upgrade slot, per fire control slot and per consumable
@@ -1163,6 +1202,35 @@ fn upgrade_slot(game: &GameData, source: &Source) -> Option<u8> {
     }
 }
 
+/// The items, modules and consumable range multiplier of the build `chosen`.
+struct Recipe {
+    items: Vec<Item>,
+    selection: ShipUpgradeSelection,
+    coefficient: RangeCoefficient,
+}
+
+impl Recipe {
+    fn of(battery: &Battery<'_>, chosen: &[&Candidate]) -> Self {
+        let mut recipe =
+            Self { items: Vec::new(), selection: battery.selection.clone(), coefficient: RangeCoefficient::NONE };
+        for candidate in chosen {
+            match &candidate.source {
+                Source::Item(item) => recipe.items.push(*item),
+                Source::FireControl(param) => ModuleKind::FireControl.set(&mut recipe.selection, param.clone()),
+                Source::RangeConsumable(range) => {
+                    recipe.coefficient = RangeCoefficient(recipe.coefficient.0 * range.0);
+                }
+                Source::SpecialAbility => unreachable!("conditional candidates are left out of builds"),
+            }
+        }
+        recipe
+    }
+}
+
+fn build_label(chosen: &[&Candidate]) -> String {
+    chosen.iter().map(|candidate| candidate.label.as_str()).collect::<Vec<_>>().join(" + ")
+}
+
 fn combined_row(
     battery: &Battery<'_>,
     planner: &Planner<'_>,
@@ -1170,27 +1238,15 @@ fn combined_row(
     base: &[MountProfile],
     range: Km,
 ) -> Result<DispersionRow, QueryError> {
-    let mut items = Vec::new();
-    let mut selection = battery.selection.clone();
-    let mut coefficient = RangeCoefficient::NONE;
-    for candidate in chosen {
-        match &candidate.source {
-            Source::Item(item) => items.push(*item),
-            Source::FireControl(param) => ModuleKind::FireControl.set(&mut selection, param.clone()),
-            Source::RangeConsumable(range) => coefficient = RangeCoefficient(coefficient.0 * range.0),
-            Source::SpecialAbility => unreachable!("conditional candidates are left out of builds"),
-        }
-    }
-
-    let bundle = planner.modifiers_with(&items)?;
+    let recipe = Recipe::of(battery, chosen);
+    let bundle = planner.modifiers_with(&recipe.items)?;
     let profiles = battery
-        .profiles(&bundle, &selection, coefficient)
+        .profiles(&bundle, &recipe.selection, recipe.coefficient)
         .expect("the battery has profiles on every selection its candidates came from");
     let kind = change_kind(&base[0], &profiles[0])
         .expect("a build of candidates that each lengthen range or tighten accuracy changes one of them");
-    let label = chosen.iter().map(|candidate| candidate.label.as_str()).collect::<Vec<_>>().join(" + ");
 
-    Ok(row(label, kind, &profiles, Some(base), range))
+    Ok(row(build_label(chosen), kind, &profiles, Some(base), range))
 }
 
 fn row(
@@ -1295,6 +1351,20 @@ fn gun_curve(mount: &str, curve: &DispersionCurve) -> GunCurve {
         radius_on_delim: curve.radius_on_delim,
         radius_on_max: curve.radius_on_max,
         delim: curve.delim,
+    }
+}
+
+/// " With <build> (<range> km range): <h> m horizontal and <v> m vertical."
+fn combined_sentence(combined: &DispersionRow) -> String {
+    let max = format_km(combined.max_range_km.value());
+    match first_ellipse(combined) {
+        Some(ellipse) => format!(
+            " With {} ({max} km range): {} m horizontal and {} m vertical.",
+            combined.build,
+            format_m(ellipse.horizontal_m),
+            format_m(ellipse.vertical_m)
+        ),
+        None => format!(" With {} ({max} km range): out of range.", combined.build),
     }
 }
 

@@ -121,9 +121,34 @@ fn selected_skill_uses_the_normal_effects_pipeline() {
     );
     assert_eq!(selected.headline.as_deref(), Some(skill));
     assert!(selected.mechanics_version.is_some());
+    // Today's copy of the skill is not combined with the selected one.
+    assert!(selected.builds.iter().all(|row| row.build.matches(skill).count() <= 1), "{:#?}", selected.builds);
     assert!(
         selected.conclusion.contains("Condition: at the priority target within secondary range, after sustained fire")
     );
+}
+
+/// A removed skill on today's ship also gets a row on top of each range and
+/// accuracy build: Thor's longer range with Gun Fire Control System
+/// Modification 2 lowers vertical dispersion at 18 km, with Dead Eye as
+/// without it.
+#[test]
+#[cfg_attr(not(all(has_build_13533378, has_build_3747819)), ignore)]
+fn removed_skill_combines_with_range_builds() {
+    let root = PathBuf::from(std::env::var_os("WOWS_GAME_DATA").expect("WOWS_GAME_DATA names the dump root"));
+    let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml")).expect("readable builds.toml");
+    let entry = index.find_by_build(3747819).expect("dump root lists build 3747819");
+    let dead_eye_build =
+        GameData::load_dump(&root.join(&entry.dir), Some(&std::env::temp_dir().join("wows-query-test-cache")))
+            .expect("dump loads");
+    let request = DispersionAtRangeArgs {
+        build: Some("Dead Eye".to_owned()),
+        ..args("Thor", 18.0, DispersionBattery::MainBattery)
+    };
+
+    let output = GAME.dispersion_at_range_with_skill(&request, &dead_eye_build).expect("Dead Eye dispersion resolves");
+
+    insta::assert_snapshot!(output.conclusion, @"At 18 km, Thor's main battery dispersion without Dead Eye is 240 m horizontal and 135.8 m vertical; with Dead Eye it is 216 m horizontal and 122.2 m vertical (-10% horizontal, -10% vertical). Condition: Increases the firing accuracy of the main battery if there are no visible enemy ships within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires onboard, and other combat events are not taken into account. With Gun Fire Control System Modification 2 + Dead Eye (25.17 km range): 216 m horizontal and 117.3 m vertical. With Aiming Systems Modification 1 + Dead Eye (21.7 km range): 200.9 m horizontal and 113.7 m vertical. With Gun Fire Control System Modification 2 + Aiming Systems Modification 1 + Dead Eye (25.17 km range): 200.9 m horizontal and 109.1 m vertical.");
 }
 
 /// Montana against Yamato at 12 km differs in sigma as well as ellipse size.
