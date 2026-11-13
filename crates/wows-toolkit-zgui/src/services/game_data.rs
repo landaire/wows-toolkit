@@ -8,6 +8,7 @@ use wows_toolkit_replay_data::heap_profile;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::load::load_current_build;
+use wows_toolkit_replay_data::minimap_preview;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -88,6 +89,8 @@ impl GameData {
 
     /// Replaces the cache with one over `request`'s install and loads its newest build.
     pub fn adopt(self, request: GameDataRequest) {
+        // Kept preview tracks and renderers were read through the cache this replaces.
+        minimap_preview::forget_kept_previews();
         self.generation.update_value(|generation| generation.0 += 1);
         let generation = self.generation.get_value();
         let locale = request.locale.as_ref().map_or("en", LanguageCode::as_str);
@@ -164,7 +167,13 @@ impl GameData {
     pub fn set_locale(self, code: LanguageCode) {
         let Some(cache) = self.cache.get_untracked() else { return };
         spawn_detached(async move {
-            blocking(move || cache.set_locale(code.as_str())).await;
+            blocking(move || {
+                cache.set_locale(code.as_str());
+                // Kept preview tracks carry ship names in the previous language. Forgotten once
+                // the names are rewritten, so a walk begun in between is not kept either.
+                minimap_preview::forget_kept_previews();
+            })
+            .await;
         });
     }
 }

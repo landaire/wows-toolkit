@@ -102,6 +102,7 @@ fn renderer_for(
     layout: SidePanelLayout,
 ) -> Result<SharedPreviewRenderer, PreviewError> {
     let key = RendererKey { build, map: map_name.to_owned(), layout };
+    let built_in = track_generation();
     {
         let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(at) = cache.iter().position(|held| held.key == key) {
@@ -120,14 +121,23 @@ fn renderer_for(
     // which costs one extra read rather than a stall.
     let renderer: SharedPreviewRenderer =
         Arc::new(Mutex::new(PreviewRenderer::with_layout(vfs, version, map_name, layout)?));
+    keep_renderer(key, &renderer, built_in);
+    Ok(renderer)
+}
 
+/// Keeps `renderer`, unless the kept previews were forgotten after it was begun `built_in`: it
+/// may have read the install they were forgotten for.
+fn keep_renderer(key: RendererKey, renderer: &SharedPreviewRenderer, built_in: TrackGeneration) {
+    // Held through the generation check, as `forget_kept_previews` holds it through the bump.
     let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if track_generation() != built_in {
+        return;
+    }
     cache.retain(|held| held.key != key);
-    cache.push(CachedRenderer { key, renderer: Arc::clone(&renderer) });
+    cache.push(CachedRenderer { key, renderer: Arc::clone(renderer) });
     while cache.len() > RENDERER_CACHE_SIZE {
         cache.remove(0);
     }
-    Ok(renderer)
 }
 
 /// The renderer `path`'s battle is drawn through on `layout`'s canvas.
@@ -172,7 +182,8 @@ pub fn layout_for(options: &RenderOptions) -> SidePanelLayout {
 /// have the memory back than the next preview's speed, or whose install or
 /// language has changed under them.
 pub fn forget_kept_previews() {
-    RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    let mut renderers = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    renderers.clear();
     let mut kept = TRACKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     kept.tracks.clear();
     kept.generation = TrackGeneration(kept.generation.0 + 1);
@@ -215,11 +226,11 @@ struct CachedTrack {
     track: Arc<WalkedTrack>,
 }
 
-/// How many times the kept tracks have been forgotten.
+/// How many times the kept previews have been forgotten.
 ///
-/// A walk notes it before it starts, so one that was running when the tracks
-/// were forgotten, and may carry names in the language they were forgotten
-/// for, is not kept.
+/// A walk or a renderer build notes it before it starts, so one that was
+/// running when the previews were forgotten, and may carry names in the
+/// language or art from the install they were forgotten for, is not kept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TrackGeneration(u64);
 
@@ -634,6 +645,7 @@ pub fn render_map_art(
 /// The renderer kept for `held_as`, built over `art` if there is not one yet.
 fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> SharedPreviewRenderer {
     let key = RendererKey { build: None, map: held_as.to_owned(), layout: SidePanelLayout::None };
+    let built_in = track_generation();
     {
         let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(at) = cache.iter().position(|held| held.key == key) {
@@ -649,13 +661,7 @@ fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> Shar
     // every other preview if the cache were held through it.
     let renderer: SharedPreviewRenderer =
         Arc::new(Mutex::new(PreviewRenderer::with_art(art.clone(), vfs, None, SidePanelLayout::None)));
-
-    let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    cache.retain(|held| held.key != key);
-    cache.push(CachedRenderer { key, renderer: Arc::clone(&renderer) });
-    while cache.len() > RENDERER_CACHE_SIZE {
-        cache.remove(0);
-    }
+    keep_renderer(key, &renderer, built_in);
     renderer
 }
 
