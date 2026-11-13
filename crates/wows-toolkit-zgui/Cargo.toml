@@ -47,6 +47,10 @@ humansize = "2.1.3"
 rootcause = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# The theme colours a custom element reads from its computed style.
+zgui-css = { workspace = true }
+# A copied chart is an image, which zgui's clipboard does not carry.
+arboard = "3.6.1"
 
 # A release build has no console, so `--help`, `--version` and a refused argument are written to
 # the parent's console or shown in a message box.
