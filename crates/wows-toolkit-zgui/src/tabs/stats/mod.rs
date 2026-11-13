@@ -4,7 +4,6 @@
 //! and Ships panels and any number of chart panels. The session's filters, charts and dock layout
 //! are saved; a directory's are not.
 
-mod art;
 mod chart;
 mod overview;
 #[cfg(test)]

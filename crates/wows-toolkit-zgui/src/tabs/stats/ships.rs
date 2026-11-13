@@ -75,11 +75,11 @@ use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 
+use crate::game_art::Art;
+use crate::game_art::ArtKey;
+use crate::game_art::GameArt;
 use crate::icons::AppIconProps;
 use crate::services::Services;
-use crate::tabs::stats::art::Art;
-use crate::tabs::stats::art::ArtKey;
-use crate::tabs::stats::art::GameArt;
 use crate::tabs::stats::overview::loaded_build;
 use crate::tabs::stats::overview::optional_decimal;
 use crate::tabs::stats::overview::optional_number;
@@ -381,7 +381,7 @@ pub fn StatsShips(
             }),
             None => Vec::new(),
         };
-        cx.art.want(data, keys);
+        cx.art.want(data.as_deref(), keys);
     });
     on_cleanup_local(move || {
         drop(disarming);

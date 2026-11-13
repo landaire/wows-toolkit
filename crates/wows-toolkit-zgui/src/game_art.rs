@@ -1,10 +1,15 @@
-//! Ship-class icons and nation flags read from a build's game files, and the tone a class icon is
-//! drawn in.
+//! Game art read from a build's game files: ship-class icons, nation flags and the keyed icons
+//! (achievements, ribbons, modules, signals, captain skills, consumables), and the tone a class
+//! icon is drawn in.
 //!
 //! The game's class icons are white. A row's icon is its SVG with every paint multiplied by the
 //! row's tone, as the game tints them, either as markup or drawn to a PNG turned to point right.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use image::ImageFormat;
 use image::RgbaImage;
@@ -14,11 +19,25 @@ use resvg::tiny_skia::Transform;
 use resvg::usvg::Options;
 use resvg::usvg::Tree;
 use wows_toolkit_replay_data::columns::PlayerColorKind;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wowsunpack::game_assets::GuiAsset;
 use wowsunpack::game_assets::ShipIconState;
+use wowsunpack::game_params::types::CrewSkillName;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::StoredValue;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::prelude::WithValue;
+use zgui::task::Task;
+use zgui::task::blocking;
+use zgui::task::spawn_local;
+use zgui_image::ImageBytes;
 
 use crate::theme::Semantic;
 
@@ -182,6 +201,209 @@ fn turned_png(svg: &[u8], key: ClassIconKey) -> Result<Vec<u8>, ClassIconError> 
         .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
         .map_err(|source| ClassIconError::Encode { species, source })?;
     Ok(png)
+}
+
+/// One picture a build holds.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtKey {
+    /// By the achievement's icon key.
+    Achievement(String),
+    /// By the ribbon's icon key.
+    Ribbon(String),
+    /// By the icon key of the ribbon it belongs to.
+    SubRibbon(String),
+    /// By the consumable's icon key.
+    Consumable(String),
+    /// By the module's game params name.
+    Modernization(String),
+    /// By the signal's game params name.
+    SignalFlag(String),
+    CrewSkill(CrewSkillName),
+    /// By the nation's name in the game params.
+    NationFlag(String),
+    /// White, for a caller to tint with [`tinted_svg`].
+    ShipClass(Species),
+}
+
+impl ArtKey {
+    fn read(&self, vfs: &VfsPath) -> Option<Art> {
+        let raster = |asset: GuiAsset<'_>| asset.read(vfs, None).map(|bytes| Art::Raster(ImageBytes::new(bytes)));
+        match self {
+            Self::Achievement(key) => raster(GuiAsset::Achievement(key)),
+            Self::Ribbon(key) => raster(GuiAsset::Ribbon(key)),
+            Self::SubRibbon(key) => raster(GuiAsset::SubRibbon(&format!("sub{key}"))),
+            Self::Consumable(key) => raster(GuiAsset::Consumable(key)),
+            Self::Modernization(name) => raster(GuiAsset::Modernization(name)),
+            Self::SignalFlag(name) => raster(GuiAsset::SignalFlag(name)),
+            Self::CrewSkill(name) => raster(GuiAsset::CrewSkill { name }),
+            Self::NationFlag(nation) => raster(GuiAsset::NationFlag(nation)),
+            Self::ShipClass(species) => {
+                let svg = String::from_utf8(class_icon_svg(vfs, *species)?).ok()?;
+                Some(Art::Vector(Arc::from(svg)))
+            }
+        }
+    }
+}
+
+/// A picture as the window draws it.
+#[derive(Clone, Debug)]
+pub enum Art {
+    /// PNG bytes, for an image element.
+    Raster(ImageBytes),
+    /// SVG markup, for a vector element.
+    Vector(Arc<str>),
+}
+
+impl Art {
+    /// The `src` of a raster picture.
+    pub fn url(&self) -> Option<String> {
+        match self {
+            Self::Raster(bytes) => Some(bytes.url()),
+            Self::Vector(_) => None,
+        }
+    }
+}
+
+/// The build a picture was read from. A newer build replaces it all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourceBuild(u32);
+
+/// What every view has read from the current build, the pictures it lacks included, so a picture
+/// is read once per build however many views draw it.
+#[derive(Default)]
+struct ReadArt {
+    source: Option<SourceBuild>,
+    pictures: HashMap<ArtKey, Option<Art>>,
+}
+
+thread_local! {
+    static READ: RefCell<ReadArt> = RefCell::new(ReadArt::default());
+}
+
+/// What `source` holds for `key`, when it has been read.
+fn already_read(source: SourceBuild, key: &ArtKey) -> Option<Option<Art>> {
+    READ.with_borrow(|read| if read.source == Some(source) { read.pictures.get(key).cloned() } else { None })
+}
+
+fn note_read(source: SourceBuild, pictures: &[(ArtKey, Option<Art>)]) {
+    READ.with_borrow_mut(|read| {
+        if read.source != Some(source) {
+            *read = ReadArt { source: Some(source), pictures: HashMap::new() };
+        }
+        read.pictures.extend(pictures.iter().cloned());
+    });
+}
+
+/// The pictures one view draws, as a `Copy` handle. Reads end with the view.
+#[derive(Clone, Copy)]
+pub struct GameArt {
+    loaded: RwSignal<HashMap<ArtKey, Art>, LocalStorage>,
+    work: StoredValue<ArtWork, LocalStorage>,
+}
+
+#[derive(Default)]
+struct ArtWork {
+    source: Option<SourceBuild>,
+    asked: HashSet<ArtKey>,
+    reads: Vec<Task>,
+}
+
+impl GameArt {
+    pub fn new() -> Self {
+        Self { loaded: RwSignal::new_local(HashMap::new()), work: StoredValue::new_local(ArtWork::default()) }
+    }
+
+    /// The picture under `key`, `None` until it is read or when the build has none. Reactive.
+    pub fn get(self, key: &ArtKey) -> Option<Art> {
+        self.loaded.with(|loaded| loaded.get(key).cloned())
+    }
+
+    /// Reads the pictures in `keys` not asked for yet from `data`. Without a build, drops them all.
+    pub fn want(self, data: Option<&LoadedGameData>, keys: impl IntoIterator<Item = ArtKey>) {
+        let Some(data) = data else {
+            self.release();
+            return;
+        };
+
+        let source = SourceBuild(data.build());
+        if self.work.with_value(|work| work.source) != Some(source) {
+            self.release();
+            self.work.update_value(|work| work.source = Some(source));
+        }
+
+        let fresh: Vec<ArtKey> = self.work.with_value(|work| {
+            let mut seen = HashSet::new();
+            keys.into_iter().filter(|key| !work.asked.contains(key) && seen.insert(key.clone())).collect()
+        });
+        if fresh.is_empty() {
+            return;
+        }
+        self.work.update_value(|work| work.asked.extend(fresh.iter().cloned()));
+
+        let mut known = Vec::new();
+        let mut unread = Vec::new();
+        for key in fresh {
+            match already_read(source, &key) {
+                Some(Some(art)) => known.push((key, art)),
+                Some(None) => {}
+                None => unread.push(key),
+            }
+        }
+        if !known.is_empty() {
+            self.loaded.update(|loaded| loaded.extend(known));
+        }
+        if unread.is_empty() {
+            return;
+        }
+
+        let vfs = data.vfs().clone();
+        let read = spawn_local(async move {
+            let read: Vec<(ArtKey, Option<Art>)> = blocking(move || {
+                unread
+                    .into_iter()
+                    .map(|key| {
+                        let art = key.read(&vfs);
+                        (key, art)
+                    })
+                    .collect()
+            })
+            .await;
+            note_read(source, &read);
+            if self.work.try_with_value(|work| work.source) != Some(Some(source)) {
+                return;
+            }
+            self.loaded.update(|loaded| loaded.extend(read.into_iter().filter_map(|(key, art)| Some((key, art?)))));
+        });
+        self.work.update_value(|work| {
+            work.reads.retain(|read| !read.is_finished());
+            work.reads.push(read);
+        });
+    }
+
+    /// Holds `art` under `key` as though the build gave it.
+    #[cfg(test)]
+    pub fn insert_for_test(self, key: ArtKey, art: Art) {
+        self.loaded.update(|loaded| {
+            loaded.insert(key, art);
+        });
+    }
+
+    fn release(self) {
+        // A read of the build left behind must not refill the shared cache with it.
+        let work = self.work.try_update_value(std::mem::take);
+        for read in work.into_iter().flat_map(|work| work.reads) {
+            read.cancel();
+        }
+        if self.loaded.with_untracked(|loaded| !loaded.is_empty()) {
+            self.loaded.update(HashMap::clear);
+        }
+    }
+}
+
+impl Default for GameArt {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

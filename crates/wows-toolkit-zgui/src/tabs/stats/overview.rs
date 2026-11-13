@@ -51,12 +51,12 @@ use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 
+use crate::game_art::Art;
+use crate::game_art::ArtKey;
+use crate::game_art::GameArt;
 use crate::icons::AppIconProps;
 use crate::services::GameDataState;
 use crate::services::Services;
-use crate::tabs::stats::art::Art;
-use crate::tabs::stats::art::ArtKey;
-use crate::tabs::stats::art::GameArt;
 use crate::tabs::stats::rating::RatingChipProps;
 
 const SHEET: &str = "wt-stats-overview";
@@ -241,7 +241,7 @@ pub fn StatsOverview(
         let keys: Vec<ArtKey> = computed.with(|computed| {
             computed.achievements.iter().map(|earned| ArtKey::Achievement(earned.icon_key.clone())).collect()
         });
-        art.want(loaded_build(services), keys);
+        art.want(loaded_build(services).as_deref(), keys);
     });
     on_cleanup_local(move || drop(wanting));
 
