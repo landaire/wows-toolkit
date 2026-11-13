@@ -21,6 +21,7 @@ use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 use crate::tabs::armor_viewer::workspace::Pane;
 use crate::tabs::armor_viewer::workspace::PaneId;
 use crate::tabs::dock_menu_strings;
+use crate::tabs::tab_menu_strings;
 
 const SHEET: &str = "wt-armor-dock";
 
@@ -57,6 +58,7 @@ pub fn ArmorDock(workspace: ArmorWorkspace) -> impl IntoView {
             close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
             tabs_label = Signal::derive_local(locale.text("ui.armor.viewports")),
             menu = dock_menu_strings(locale),
+            strings = tab_menu_strings(locale),
             class = "wt-armor-dock",
             attr:data-testid = "armor-viewport-dock"
         )

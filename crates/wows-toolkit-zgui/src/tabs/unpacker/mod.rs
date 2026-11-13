@@ -76,6 +76,7 @@ use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
 use crate::tabs::dock_menu_strings;
+use crate::tabs::tab_menu_strings;
 use crate::tabs::unpacker::browser::BrowserPaneProps;
 use crate::tabs::unpacker::model::BROWSER_KIND;
 use crate::tabs::unpacker::model::QUEUE_KIND;
@@ -192,6 +193,7 @@ pub fn UnpackerTab() -> impl IntoView {
                 state = dock,
                 class = "wt-unpacker-dock",
                 menu = dock_menu_strings(locale),
+                strings = tab_menu_strings(locale),
                 close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
                 tabs_label = Signal::derive_local(locale.text("ui.tabs.unpacker")),
                 attr:data-testid = "unpacker-dock"

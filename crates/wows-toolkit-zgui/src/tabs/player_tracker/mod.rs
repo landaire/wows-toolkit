@@ -85,6 +85,7 @@ use crate::tabs::player_tracker::roster::CurrentMatchSectionProps;
 use crate::tabs::player_tracker::tables::ClansSectionProps;
 use crate::tabs::player_tracker::tables::IconButtonProps;
 use crate::tabs::player_tracker::tables::PlayersSectionProps;
+use crate::tabs::tab_menu_strings;
 
 const SHEET: &str = "wt-player-tracker";
 
@@ -330,6 +331,7 @@ pub fn PlayerTrackerTab() -> impl IntoView {
                 state = dock,
                 class = "wt-tracker-dock",
                 menu = dock_menu_strings(locale),
+                strings = tab_menu_strings(locale),
                 close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
                 tabs_label = Signal::derive_local(locale.text("ui.tabs.player_tracker"))
             )

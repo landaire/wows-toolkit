@@ -11,6 +11,7 @@ mod stats;
 mod unpacker;
 
 use landaire_ui::DockMenuStrings;
+use landaire_ui::TabStripStrings;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Signal;
@@ -64,5 +65,14 @@ fn dock_menu_strings(locale: Locale) -> DockMenuStrings {
         zoom_in: Signal::derive_local(locale.text("ui.tabs.zoom_in_panel")),
         zoom_out: Signal::derive_local(locale.text("ui.tabs.zoom_out_panel")),
         close: Signal::derive_local(locale.text("ui.tabs.close_panel")),
+    }
+}
+
+/// The words of a tab's right-click menu in the reader's language.
+pub(crate) fn tab_menu_strings(locale: Locale) -> TabStripStrings {
+    TabStripStrings {
+        close: Signal::derive_local(locale.text("ui.tabs.close_tab")),
+        close_others: Signal::derive_local(locale.text("ui.tabs.close_other_tabs")),
+        close_to_the_right: Signal::derive_local(locale.text("ui.tabs.close_tabs_to_the_right")),
     }
 }

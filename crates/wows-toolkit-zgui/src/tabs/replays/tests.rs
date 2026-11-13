@@ -165,6 +165,29 @@ fn the_replay_strip_menu_closes_the_replay_on_screen() {
     assert_eq!(workspace.open_replays(), [PathBuf::from("behind.wowsreplay")], "the replay on screen is closed");
 }
 
+/// A replay tab's right-click menu speaks the reader's language.
+#[test]
+fn the_replay_tab_menu_is_translated() {
+    let (mut window, workspace) = open();
+    workspace.open(PathBuf::from("behind.wowsreplay"), OpenTarget::ShowingTab);
+    workspace.open(PathBuf::from("front.wowsreplay"), OpenTarget::NewTab);
+    window.advance(Duration::from_millis(32));
+
+    let dock = bounds_of(&window, "replays-dock");
+    let tab = window
+        .by_role(Role::Tab)
+        .into_iter()
+        .find(|tab| window.bounds(*tab).is_some_and(|bounds| dock.contains(bounds.origin)))
+        .expect("the dock shows a replay tab");
+    window.right_click(tab).expect("the tab has a box");
+    window.advance(Duration::from_millis(400));
+
+    for key in ["ui.tabs.close_tab", "ui.tabs.close_other_tabs", "ui.tabs.close_tabs_to_the_right"] {
+        let label = t!(key).into_owned();
+        assert!(window.by_role_and_label(Role::MenuItem, &label).is_some(), "the menu offers {label}");
+    }
+}
+
 /// The dock shows a drop target until something opens, and the tab's title is the file's name
 /// until the battle is read.
 #[test]

@@ -125,6 +125,7 @@ use crate::tabs::dock_menu_strings;
 use crate::tabs::stats::chart::StatsChartProps;
 use crate::tabs::stats::overview::StatsOverviewProps;
 use crate::tabs::stats::ships::StatsShipsProps;
+use crate::tabs::tab_menu_strings;
 
 /// Games shown when the limit is switched on without a saved count. The egui drag value opens at
 /// this and clamps to 1..=999.
@@ -633,6 +634,7 @@ pub fn StatsBody(
                 state = dock,
                 class = "wt-stats__dock",
                 menu = dock_menu_strings(locale),
+                strings = tab_menu_strings(locale),
                 close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
                 tabs_label = Signal::derive_local(locale.text("ui.tabs.stats")),
                 attr:data-testid = match scope {

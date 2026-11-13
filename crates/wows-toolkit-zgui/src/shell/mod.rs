@@ -31,7 +31,6 @@ use std::sync::Arc;
 
 use landaire_ui::MotionPreference;
 use landaire_ui::TabStripProps;
-use landaire_ui::TabStripStrings;
 use landaire_ui::TabStripTabProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
@@ -112,6 +111,7 @@ use crate::shell::twitch::TwitchLink;
 use crate::shell::update::UpdateFlow;
 use crate::tabs::TabBodyProps;
 use crate::tabs::armor_viewer::library::ArmorLibrary;
+use crate::tabs::tab_menu_strings;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
 use crate::window_shell::DecoratedWindowProps;
@@ -661,11 +661,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
         let Some(tab) = TabKey::parse(&value) else { return };
         shell.select(tab);
     });
-    let strip_strings = TabStripStrings {
-        close: Signal::derive_local(locale.text("ui.tabs.close_tab")),
-        close_others: Signal::derive_local(locale.text("ui.tabs.close_other_tabs")),
-        close_to_the_right: Signal::derive_local(locale.text("ui.tabs.close_tabs_to_the_right")),
-    };
+    let strip_strings = tab_menu_strings(locale);
 
     view! {
         column(
