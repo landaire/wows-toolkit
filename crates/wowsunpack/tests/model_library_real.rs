@@ -123,7 +123,7 @@ fn a_turret_loads_with_textures_hardpoints_and_armor() {
     );
     let image = albedo.image.as_ref().expect("decoded albedo");
     assert!(image.width <= 256 && image.height <= 256, "decoded at the requested texture LOD");
-    assert!(image.pixels.chunks_exact(4).all(|p| p[3] == u8::MAX), "albedo is opaque");
+    assert!(image.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == u8::MAX), "albedo is opaque");
     let normal = material.normal.as_ref().expect("normal map");
     assert_eq!(normal.source.path(), Some("content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_n.dds"));
     assert!(normal.image.is_some());

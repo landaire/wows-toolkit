@@ -66,7 +66,7 @@ impl Surface {
     }
 
     fn triangles(&self) -> impl Iterator<Item = [usize; 3]> + '_ {
-        self.indices.chunks_exact(3).map(|t| [t[0] as usize, t[1] as usize, t[2] as usize])
+        self.indices.as_chunks::<3>().0.iter().map(|t| [t[0] as usize, t[1] as usize, t[2] as usize])
     }
 
     /// The summed vertex normals of `triangle`, which point out of the surface.

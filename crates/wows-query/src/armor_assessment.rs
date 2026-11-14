@@ -1950,14 +1950,6 @@ pub(crate) fn class_plural(class: ShipClass) -> &'static str {
     }
 }
 
-fn capitalize_first(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => String::new(),
-    }
-}
-
 fn percent(value: f32) -> Percent {
     Percent::new(round1(value))
 }

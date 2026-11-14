@@ -183,9 +183,9 @@ fn a_propeller_disc_keeps_its_alpha_in_the_load_and_the_glb() {
     let hull_pixels = hull.albedo.and_then(|albedo| albedo.image).expect("the hull albedo decodes").pixels;
 
     assert_eq!(disc.alpha, AlphaMode::Blend);
-    assert!(disc_pixels.chunks_exact(4).any(|px| px[3] < u8::MAX), "the disc is see-through somewhere");
+    assert!(disc_pixels.as_chunks::<4>().0.iter().any(|px| px[3] < u8::MAX), "the disc is see-through somewhere");
     assert_eq!(hull.alpha, AlphaMode::Opaque);
-    assert!(hull_pixels.chunks_exact(4).all(|px| px[3] == u8::MAX), "the hull is opaque");
+    assert!(hull_pixels.as_chunks::<4>().0.iter().all(|px| px[3] == u8::MAX), "the hull is opaque");
 
     let options = ModelExportOptions {
         lod: 0,

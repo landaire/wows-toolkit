@@ -55,7 +55,7 @@ impl AlphaMode {
     pub fn apply(self, pixels: &mut [u8]) {
         match self {
             Self::Opaque => {
-                for pixel in pixels.chunks_exact_mut(4) {
+                for pixel in pixels.as_chunks_mut::<4>().0 {
                     pixel[3] = u8::MAX;
                 }
             }

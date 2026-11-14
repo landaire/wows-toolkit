@@ -49,10 +49,10 @@ fn iowa(assets: &ShipAssets, options: &ShipExportOptions) -> wowsunpack::export:
 
 /// Mean of one channel over an RGBA8 buffer.
 fn channel_mean(pixels: &[u8], channel: usize) -> f64 {
-    let texels = pixels.chunks_exact(4);
+    let (texels, _) = pixels.as_chunks::<4>();
     let count = texels.len().max(1) as f64;
 
-    texels.map(|texel| f64::from(texel[channel])).sum::<f64>() / count
+    texels.iter().map(|texel| f64::from(texel[channel])).sum::<f64>() / count
 }
 
 /// The decoded RGBA8 pixels of a texture embedded in a GLB.
@@ -87,7 +87,7 @@ fn assert_gltf_surface_maps(gltf: &gltf::Gltf) {
 
     let metal_roughness =
         embedded_pixels(gltf, material.pbr_metallic_roughness().metallic_roughness_texture().expect("mr").texture());
-    assert!(metal_roughness.chunks_exact(4).all(|texel| texel[0] == u8::MAX && texel[3] == u8::MAX));
+    assert!(metal_roughness.as_chunks::<4>().0.iter().all(|texel| texel[0] == u8::MAX && texel[3] == u8::MAX));
     eprintln!(
         "mean roughness {:.1}, metalness {:.1}",
         channel_mean(&metal_roughness, 1),
