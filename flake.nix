@@ -42,11 +42,16 @@
 
       # minimal (rustc + cargo + rust-std) keeps CI lean — the default profile
       # pulls rust-docs (~140 MiB) on every fresh runner. The `components` list
-      # from rust-toolchain.toml (rustfmt, clippy) is added as extensions.
-      rustToolchain = pkgs.rust-bin.stable.${resolvedChannel}.minimal.override {
-        extensions = components;
-        inherit targets;
-      };
+      # from rust-toolchain.toml is added as extensions. rust-analyzer and the
+      # rust-src it reads std from serve the editor alone, so only the devShell
+      # carries them.
+      editorComponents = ["rust-analyzer" "rust-src"];
+      mkRustToolchain = extensions:
+        pkgs.rust-bin.stable.${resolvedChannel}.minimal.override {
+          inherit extensions targets;
+        };
+      rustToolchain = mkRustToolchain (pkgs.lib.subtractLists editorComponents components);
+      devRustToolchain = mkRustToolchain components;
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
@@ -223,8 +228,8 @@
         devShells.default = mkShell rec {
           buildInputs =
             [
-              # Rust
-              rustToolchain
+              # Rust, with rust-analyzer from the same release
+              devRustToolchain
 
               # misc. libraries
               openssl

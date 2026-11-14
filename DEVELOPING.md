@@ -28,7 +28,7 @@ missing, so run it first and again after installing.
 
 [Nix](https://nixos.org/download/) is the recommended way to set up a development environment on Linux and macOS. Running `nix develop` gives you everything you need in a single command:
 
-- The exact Rust toolchain version from `rust-toolchain` (with all required components)
+- The exact Rust toolchain version from `rust-toolchain.toml` (with all required components), including a matching rust-analyzer
 - [DepotDownloader](https://github.com/SteamRE/DepotDownloader) for downloading game data (no separate .NET install needed)
 - `openssl` and `pkg-config`
 - All Linux GUI libraries (X11, Wayland, Vulkan, fontconfig) — these are often the most painful to set up manually
