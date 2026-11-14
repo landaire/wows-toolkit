@@ -26,6 +26,7 @@ use crate::comparison::round2;
 use crate::comparison::tier_label;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::names::Interpretations;
 use crate::ship_variants::listing_order;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
@@ -38,6 +39,9 @@ use crate::ships::TierRange;
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoRankingsArgs {
+    /// A ship whose torpedoes to judge: lists only its options, ranked among its class and tier unless class or tiers are given.
+    pub ship: Option<String>,
+
     /// destroyer, cruiser or battleship. Omit to rank the torpedoes of all three in one group. Cruisers and battleships carry torpedoes as close-range secondary weapons, so for questions about torpedoes in general give destroyer.
     pub class: Option<ShipClass>,
 
@@ -68,6 +72,10 @@ pub enum TorpedoOrder {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TorpedoRankingsOutput {
+    /// Names read as something they do not spell exactly, or as one of several ships sharing a name.
+    #[serde(skip_serializing_if = "Interpretations::is_empty")]
+    pub interpretations: Interpretations,
+
     /// e.g. "tier 10 destroyers".
     pub group: String,
 
@@ -86,6 +94,12 @@ pub struct TorpedoRankingsOutput {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nation: Option<String>,
+
+    /// With `ship`: per option, its rank in the group in words, e.g. "F.
+    /// Sherman's Mk17 ranks 33 of the 39 torpedo options of tier 10
+    /// destroyers (score 36.4): better than 13% of the others."
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub verdicts: Vec<String>,
 
     pub entries: Vec<TorpedoEntry>,
 
@@ -440,7 +454,12 @@ impl GameData {
         // Launchers aimed by bearing: submarine tubes aim by firing sectors.
         const RANKED_CLASSES: [ShipClass; 3] = [ShipClass::Destroyer, ShipClass::Cruiser, ShipClass::Battleship];
 
-        let classes: Vec<ShipClass> = match args.class {
+        let mut interpretations = Interpretations::default();
+        let focus = match &args.ship {
+            Some(query) => Some(self.resolve_ship(query, &mut interpretations)?),
+            None => None,
+        };
+        let classes: Vec<ShipClass> = match args.class.or(focus.map(|ship| ship.class)) {
             None => RANKED_CLASSES.to_vec(),
             Some(class) if RANKED_CLASSES.contains(&class) => vec![class],
             Some(_) => {
@@ -449,7 +468,10 @@ impl GameData {
                 });
             }
         };
-        let tiers = TierRange::from_bounds(args.min_tier, args.max_tier);
+        let tiers = match (focus, args.min_tier, args.max_tier) {
+            (Some(ship), None, None) => TierRange::from_bounds(Some(ship.tier), Some(ship.tier)),
+            (_, min, max) => TierRange::from_bounds(min, max),
+        };
         if tiers.is_some_and(|tiers| tiers.min > tiers.max) {
             return Err(QueryError::InvalidArguments { reason: "min_tier must not exceed max_tier" });
         }
@@ -495,33 +517,45 @@ impl GameData {
         });
         let scores: Vec<f32> = judged.iter().map(|(judgment, _)| judgment.score.value()).collect();
         let listing = ShipFilter { nation: args.nation.clone(), ..filter };
+        let focused = |ship: &Ship| focus.is_none_or(|focus| focus.param.index() == ship.param.index());
         let mut listed: Vec<TorpedoEntry> = judged
             .into_iter()
-            .filter(|(_, option)| listing.matches(option.ship))
+            .filter(|(_, option)| listing.matches(option.ship) && focused(option.ship))
             .map(|(judgment, option)| {
                 let rank = 1 + scores.iter().filter(|other| **other > judgment.score.value()).count();
                 judgment.into_entry(rank, option)
             })
             .collect();
+        if focus.is_some() && listed.is_empty() {
+            return Err(QueryError::InvalidArguments {
+                reason: "the ship carries no torpedoes in the group ranked; give its class and tier or omit them",
+            });
+        }
         if order == TorpedoOrder::Worst {
             listed.reverse();
         }
+        let tier_text = tiers.map_or_else(|| "every tier".to_owned(), tier_label);
+        let class_names: Vec<&str> = classes.iter().copied().map(class_plural).collect();
+        let classes_text = join_and(&class_names);
+        let group_text = format!("{tier_text} {classes_text}");
+        let verdicts = match focus {
+            Some(ship) => listed.iter().map(|entry| verdict(&ship.name, entry, &scores, &group_text)).collect(),
+            None => Vec::new(),
+        };
         let limit = args.limit.unwrap_or(DEFAULT_LIMIT);
         let omitted = (listed.len() > limit).then(|| listed.len() - limit);
         let entries = listed.into_iter().take(limit).collect();
 
-        let tier_text = tiers.map_or_else(|| "every tier".to_owned(), tier_label);
-        let class_names: Vec<&str> = classes.iter().copied().map(class_plural).collect();
-        let classes_text = join_and(&class_names);
-
         Ok(TorpedoRankingsOutput {
-            group: format!("{tier_text} {classes_text}"),
+            interpretations,
+            group: group_text,
             classes,
             tiers,
             ships: armed,
             options: options.len(),
             order,
             nation: args.nation.clone(),
+            verdicts,
             entries,
             omitted,
             weights: Factor::ALL
@@ -782,6 +816,22 @@ fn judge(option: &TorpedoValues<'_>, options: &[TorpedoValues<'_>]) -> Judgment 
         factors: FactorValues(factors),
         standings,
     }
+}
+
+/// "F. Sherman's Mk17 ranks 33 of the 39 torpedo options of tier 10
+/// destroyers (score 36.4): better than 13% of the others."
+fn verdict(ship: &str, entry: &TorpedoEntry, scores: &[f32], group: &str) -> String {
+    let score = entry.score.value();
+    let others = scores.len().saturating_sub(1).max(1);
+    let beaten = scores.iter().filter(|other| **other < score).count();
+    let share = (beaten as f32 * 100.0 / others as f32).round();
+
+    format!(
+        "{ship}'s {} ranks {} of the {} torpedo options of {group} (score {score}): better than {share}% of the others.",
+        entry.torpedo,
+        entry.rank,
+        scores.len()
+    )
 }
 
 fn rule(classes: &str) -> String {
