@@ -7,7 +7,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
-use wows_replay_insights::battle_impact::BattleImpactResult;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_replay_data::model::PlayerRow;
@@ -25,7 +25,7 @@ use crate::theme::rating_band_name;
 /// The PR tile's test id.
 pub const PR_TILE_ID: &str = "replay-personal-rating-badge";
 
-/// The BI tile's test id.
+/// The MC tile's test id.
 pub const BI_TILE_ID: &str = "replay-battle-impact-badge";
 
 /// The PR tile's spoken text, verbatim the egui `pr_chip` call's format string.
@@ -33,9 +33,9 @@ pub fn personal_rating_label(rating: &PersonalRatingResult) -> String {
     format!("PR: {:.0} ({})", rating.pr, rating.category.name())
 }
 
-/// The BI tile's spoken text, in the PR tile's form.
-pub fn battle_impact_label(rating: &BattleImpactResult) -> String {
-    format!("BI: {:.0} ({})", rating.bi, rating.category.name())
+/// The MC tile's spoken text, in the PR tile's form.
+pub fn match_contribution_label(rating: &MatchContributionResult) -> String {
+    format!("MC: {:.0} ({})", rating.mc, rating.category.name())
 }
 
 /// The recording player's own figures, read once from the parsed model.
@@ -86,14 +86,14 @@ fn tier_color(category: PersonalRatingCategory) -> String {
     format!("var(--wt-pr-{}-text)", rating_band_name(category))
 }
 
-/// The recording player's figures, Personal Rating and Battle Impact as tiles, counted up from
+/// The recording player's figures, Personal Rating and Match Contribution as tiles, counted up from
 /// nothing when `counting`. A figure the replay does not carry has no tile; an unrated battle's
 /// rating tile says so.
 #[component]
 pub fn StatTiles(
     own: Option<OwnFigures>,
     rating: Option<BattleRating>,
-    battle_impact: Option<BattleImpactResult>,
+    match_contribution: Option<MatchContributionResult>,
     counting: bool,
 ) -> impl IntoView {
     let from = counting.then_some(0.0);
@@ -149,13 +149,13 @@ pub fn StatTiles(
             said: personal_rating_label(&rating),
             figure: rating.breakdown.is_some().then(|| RatedFigure::Personal(rating.clone())),
         }),
-        battle_impact.map(|rating| RatingTile {
+        match_contribution.map(|rating| RatingTile {
             id: BI_TILE_ID,
-            name: t!("ui.replay.column.battle_impact").into_owned(),
-            value: rating.bi,
+            name: t!("ui.replay.column.match_contribution").into_owned(),
+            value: rating.mc,
             category: rating.category,
-            said: battle_impact_label(&rating),
-            figure: Some(RatedFigure::BattleImpact(Box::new(rating))),
+            said: match_contribution_label(&rating),
+            figure: Some(RatedFigure::MatchContribution(Box::new(rating))),
         }),
     ];
     for tile in ratings.into_iter().flatten() {

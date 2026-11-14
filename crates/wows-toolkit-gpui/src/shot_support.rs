@@ -106,7 +106,7 @@ mod tests {
     /// `WT_SHOT_BUILD` from the game data dumps under `WT_SHOT_GAME_DATA`.
     #[test]
     #[ignore = "reads game data from the machine and draws on the graphics device"]
-    fn the_stats_tab_shows_battle_impact() {
+    fn the_stats_tab_shows_match_contribution() {
         let variable = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is set"));
         let mut table = PersonalRatingData::new();
         let bytes = std::fs::read(variable("WT_SHOT_EXPECTED_VALUES")).expect("the expected values read");

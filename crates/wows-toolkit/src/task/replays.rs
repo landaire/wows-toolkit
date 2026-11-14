@@ -20,7 +20,7 @@ use tracing::error;
 use tracing::instrument;
 use tracing::warn;
 use wows_replays::ReplayFile;
-use wows_toolkit_viewmodel::index_rows::rateable_battle_impact;
+use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
@@ -787,8 +787,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
             let indexed_paths: HashSet<String> =
                 match (data.db_pool.as_ref(), data.tokio_runtime.as_ref(), data.index_source_id) {
                     (Some(pool), Some(rt), Some(src)) => {
-                        let rateable_bi = rateable_battle_impact(Some(&*data.personal_rating_data.read()));
-                        rt.block_on(crate::db::index::query::record_paths_in_source(pool, src, rateable_bi))
+                        let rateable_mc = rateable_match_contribution(Some(&*data.personal_rating_data.read()));
+                        rt.block_on(crate::db::index::query::record_paths_in_source(pool, src, rateable_mc))
                             .unwrap_or_default()
                     }
                     _ => HashSet::new(),
@@ -1467,10 +1467,10 @@ fn run_reconcile_index(
         .block_on(crate::db::index::query::ensure_default_source(&deps.db_pool, &replays_dir, now))
         .map_err(|e| report!("failed to resolve replay index source: {e}"))?;
 
-    let rateable_bi = rateable_battle_impact(Some(&*deps.personal_rating_data.read()));
+    let rateable_mc = rateable_match_contribution(Some(&*deps.personal_rating_data.read()));
     let indexed_paths: HashSet<String> = deps
         .tokio_runtime
-        .block_on(crate::db::index::query::record_paths_in_source(&deps.db_pool, source_id, rateable_bi))
+        .block_on(crate::db::index::query::record_paths_in_source(&deps.db_pool, source_id, rateable_mc))
         .unwrap_or_default();
     let mut unindexable = deps.tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&deps.db_pool));
 
@@ -2055,9 +2055,9 @@ fn run_read_directory(
 
     // The paths this source already has index rows for. Re-opening a directory
     // then costs a read per replay instead of a re-parse of the whole tree.
-    let rateable_bi = rateable_battle_impact(Some(&*deps.personal_rating_data.read()));
+    let rateable_mc = rateable_match_contribution(Some(&*deps.personal_rating_data.read()));
     let indexed_paths: HashSet<String> = tokio_runtime
-        .block_on(crate::db::index::query::record_paths_in_source(&pool, source, rateable_bi))
+        .block_on(crate::db::index::query::record_paths_in_source(&pool, source, rateable_mc))
         .unwrap_or_default();
 
     // The replays a previous run found to be un-parseable. Their parse panics

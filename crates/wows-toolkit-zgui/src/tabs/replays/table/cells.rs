@@ -71,7 +71,7 @@ pub(super) fn cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
         ReplayColumn::Name => name_cell(row, cx),
         ReplayColumn::Skills => skills_cell(row, cx),
         ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(col, row, cx),
-        ReplayColumn::PersonalRating | ReplayColumn::BattleImpact => rating_cell(col, row, cx),
+        ReplayColumn::PersonalRating | ReplayColumn::MatchContribution => rating_cell(col, row, cx),
         _ => number_cell(col, row, cx),
     }
 }
@@ -312,15 +312,15 @@ fn damage_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
     })
 }
 
-/// A PR or BI figure over its team-share bar, with the rating's parts drawn on hover. The plain
+/// A PR or MC figure over its team-share bar, with the rating's parts drawn on hover. The plain
 /// figure and its band's name when the rating kept no parts or the row's stats are hidden, and
-/// a BI dash says why when the recording ended before the battle did.
+/// an MC dash says why when the recording ended before the battle did.
 fn rating_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
     // The parts carry the damage and spotting figures a hidden row keeps back.
     let hidden = row.row.should_hide_stats() && !row.debug;
     let figure = match col {
-        ReplayColumn::BattleImpact => {
-            row.row.battle_impact.clone().map(|rating| RatedFigure::BattleImpact(Box::new(rating)))
+        ReplayColumn::MatchContribution => {
+            row.row.match_contribution.clone().map(|rating| RatedFigure::MatchContribution(Box::new(rating)))
         }
         _ => row.row.personal_rating.clone().filter(|rating| rating.breakdown.is_some()).map(RatedFigure::Personal),
     };
@@ -328,7 +328,10 @@ fn rating_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
 
     match figure.filter(|_| !hidden) {
         Some(figure) => with_rating_hover(figure_cell(col, row, cx, &cell, None), figure, "wt-pt-trigger"),
-        None if col == ReplayColumn::BattleImpact && row.row.battle_impact.is_none() && row.battle_impact_withheld => {
+        None if col == ReplayColumn::MatchContribution
+            && row.row.match_contribution.is_none()
+            && row.match_contribution_withheld =>
+        {
             let hover = t!("ui.rating.unrated_early_exit").into_owned();
             with_hover(figure_cell(col, row, cx, &cell, None), Some(hover))
         }

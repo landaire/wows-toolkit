@@ -504,8 +504,8 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         }
         None => {}
     }
-    if let Some(value) = leaf.battle_impact {
-        chips.push(rating_chip("bi", &t!("ui.replay.column.battle_impact"), value));
+    if let Some(value) = leaf.match_contribution {
+        chips.push(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value));
     }
     let rating = (!chips.is_empty()).then(|| view! { box(class = "wt-row__spacer") {} {chips} });
     let stats: Vec<AnyView> = leaf

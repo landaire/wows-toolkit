@@ -67,8 +67,8 @@ pub struct LeafRow {
     /// The reader's rating in the battle, once the index has scored it, or
     /// that the battle is unrated.
     pub personal_rating: Option<BattleRating>,
-    /// The reader's battle impact, once the index has scored a battle the recording saw to its end.
-    pub battle_impact: Option<f64>,
+    /// The reader's match contribution, once the index has scored a battle the recording saw to its end.
+    pub match_contribution: Option<f64>,
 }
 
 /// What a row for a replay that could not be read draws.
@@ -152,7 +152,7 @@ impl BrowserTree {
                     let summary = inputs.summaries.get(&path);
                     let personal_rating =
                         summary.and_then(|summary| BattleRating::from_stored(summary.rating_scope, summary.self_pr));
-                    let battle_impact = summary.and_then(|summary| summary.self_bi);
+                    let match_contribution = summary.and_then(|summary| summary.self_mc);
                     let leaf = LeafRow {
                         label,
                         battle,
@@ -162,7 +162,7 @@ impl BrowserTree {
                         in_division,
                         hover: hover.remove(&path).unwrap_or_default(),
                         personal_rating,
-                        battle_impact,
+                        match_contribution,
                     };
                     tree.order.push(path.clone());
                     tree.leaves.insert(path.clone(), leaf);

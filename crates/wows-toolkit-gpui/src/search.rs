@@ -2158,7 +2158,7 @@ impl Render for SearchView {
                     let tint = match column {
                         ResultColumn::Sortable(SortColumn::Outcome) => outcome_color(hit.outcome),
                         ResultColumn::Sortable(SortColumn::Pr) => hit.self_pr.map(rating_color),
-                        ResultColumn::Sortable(SortColumn::Bi) => hit.self_bi.map(rating_color),
+                        ResultColumn::Sortable(SortColumn::Mc) => hit.self_mc.map(rating_color),
                         _ => None,
                     };
                     div().w(width).text_sm().truncate().when_some(tint, |el, color| el.text_color(color)).child(
@@ -2472,7 +2472,7 @@ mod tests {
             self_damage: Some(112_345),
             self_kills: Some(2),
             self_pr: Some(1543.0),
-            self_bi: Some(1288.0),
+            self_mc: Some(1288.0),
             results_available: true,
             replay_path: PathBuf::from(path),
             file_mtime: None,
@@ -2716,18 +2716,18 @@ mod tests {
         assert_eq!(bar(cx), (String::new(), false), "the second clears the text and offers nothing");
     }
 
-    /// Results with their PR and BI columns, written to `WT_SHOT_DIR`. The
+    /// Results with their PR and MC columns, written to `WT_SHOT_DIR`. The
     /// results are made up: no index is read.
     #[test]
     #[ignore = "draws on the graphics device"]
     fn results_with_ratings_render() {
         use crate::shot_support;
 
-        let result = |path: &str, map: &str, outcome: MatchOutcome, pr: Option<f64>, bi: Option<f64>| MatchHit {
+        let result = |path: &str, map: &str, outcome: MatchOutcome, pr: Option<f64>, mc: Option<f64>| MatchHit {
             map: map.to_string(),
             outcome,
             self_pr: pr,
-            self_bi: bi,
+            self_mc: mc,
             ..hit(path)
         };
         let hits = vec![

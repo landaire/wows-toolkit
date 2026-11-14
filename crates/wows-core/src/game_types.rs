@@ -3664,21 +3664,21 @@ impl PersonalRatingCategory {
     }
 }
 
-/// Revision of the battle impact (BI) formula in `wows-replay-insights`.
+/// Revision of the match contribution (MC) formula in `wows-replay-insights`.
 ///
 /// Lives here for the same reason as [`PersonalRatingCategory`]: the replay
-/// index stores it beside each BI and must find ratings from an older formula
+/// index stores it beside each MC and must find ratings from an older formula
 /// without pulling the replay-parsing stack in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct BattleImpactVersion(pub u32);
+pub struct MatchContributionVersion(pub u32);
 
-impl BattleImpactVersion {
-    /// The revision `wows_replay_insights::battle_impact` computes. Raise it
+impl MatchContributionVersion {
+    /// The revision `wows_replay_insights::match_contribution` computes. Raise it
     /// with any change to that formula that alters the rating a battle gets,
     /// so stored ratings from the older formula are recomputed.
-    pub const CURRENT: BattleImpactVersion = BattleImpactVersion(4);
+    pub const CURRENT: MatchContributionVersion = MatchContributionVersion(5);
 }
 
 #[cfg(test)]

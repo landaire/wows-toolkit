@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
@@ -251,8 +251,10 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
                 is_draw: game.is_draw,
                 is_div: game.is_div,
                 achievements: serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".to_string()),
-                battle_impact: game.battle_impact.map(|bi| bi as f64),
-                battle_impact_version: game.battle_impact.map(|_| i64::from(BattleImpactVersion::CURRENT.0)),
+                match_contribution: game.match_contribution.map(|mc| mc as f64),
+                match_contribution_version: game
+                    .match_contribution
+                    .map(|_| i64::from(MatchContributionVersion::CURRENT.0)),
             })
             .collect()
     };
@@ -264,7 +266,7 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
         sqlx::query(
             "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
              damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements, \
-             battle_impact, battle_impact_version) \
+             match_contribution, match_contribution_version) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         )
         .bind(&row.sort_key)
@@ -283,8 +285,8 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
         .bind(row.is_draw)
         .bind(row.is_div)
         .bind(&row.achievements)
-        .bind(row.battle_impact)
-        .bind(row.battle_impact_version)
+        .bind(row.match_contribution)
+        .bind(row.match_contribution_version)
         .execute(&mut *tx)
         .await?;
     }

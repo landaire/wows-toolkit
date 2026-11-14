@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use wows_replays::types::GameParamId;
 
-use super::BiStats;
+use super::McStats;
 use super::PerGameStat;
 use super::PerformanceInfo;
 use super::PrStats;
@@ -21,7 +21,7 @@ use crate::personal_rating::PersonalRatingResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatLabel {
     PersonalRating,
-    BattleImpact,
+    MatchContribution,
     Damage,
     SpottingDamage,
     Frags,
@@ -34,7 +34,7 @@ impl StatLabel {
     pub const fn translation_key(self) -> &'static str {
         match self {
             Self::PersonalRating => "stat.personal_rating",
-            Self::BattleImpact => "stat.battle_impact",
+            Self::MatchContribution => "stat.match_contribution",
             Self::Damage => "stat.damage",
             Self::SpottingDamage => "stat.spotting_damage",
             Self::Frags => "stat.frags",
@@ -47,7 +47,7 @@ impl StatLabel {
     pub const fn english(self) -> &'static str {
         match self {
             Self::PersonalRating => "Personal Rating",
-            Self::BattleImpact => "Battle Impact",
+            Self::MatchContribution => "Match Contribution",
             Self::Damage => "Damage",
             Self::SpottingDamage => "Spotting Damage",
             Self::Frags => "Frags",
@@ -117,9 +117,9 @@ impl Cell {
         Self { text: format!("{:.0}", rating.pr), rating: Some(rating.clone()) }
     }
 
-    /// BI shares PR's bands, so the cell carries one as a PR of the same
+    /// MC shares PR's bands, so the cell carries one as a PR of the same
     /// figure for a renderer that colours by `rating`.
-    fn battle_impact(value: f64) -> Self {
+    fn match_contribution(value: f64) -> Self {
         Self::rated(&PersonalRatingResult::new(value))
     }
 }
@@ -231,16 +231,16 @@ pub fn ship_rows(info: &PerformanceInfo, rating: Option<&PrStats>, locale: Optio
     rows
 }
 
-/// The BI row: the worst, best and mean battle of the games in view, with no
+/// The MC row: the worst, best and mean battle of the games in view, with no
 /// total because ratings do not sum. It follows the PR row.
-pub fn battle_impact_row(stats: &BiStats) -> StatRow {
+pub fn match_contribution_row(stats: &McStats) -> StatRow {
     StatRow {
-        label: StatLabel::BattleImpact,
+        label: StatLabel::MatchContribution,
         cells: [
-            Cell::battle_impact(stats.min),
-            Cell::battle_impact(stats.max),
+            Cell::match_contribution(stats.min),
+            Cell::match_contribution(stats.max),
             Cell::default(),
-            Cell::battle_impact(stats.average),
+            Cell::match_contribution(stats.average),
         ],
     }
 }
@@ -299,8 +299,8 @@ pub struct ShipSummary {
     pub performance: PerformanceInfo,
     /// `None` without an expected-values table, or when no game rated.
     pub rating: Option<PrStats>,
-    /// `None` when no game carried a BI.
-    pub battle_impact: Option<BiStats>,
+    /// `None` when no game carried an MC.
+    pub match_contribution: Option<McStats>,
     /// The collapsed line: name, Random and Ranked record and win rate when
     /// there are any, and the ratings when there are any.
     pub header: String,
@@ -337,11 +337,11 @@ pub fn ship_summaries(
             let first = games.first()?;
             let performance = PerformanceInfo::from_games(&games);
             let rating = table.and_then(|table| PrStats::from_games(&games, table));
-            let battle_impact = BiStats::from_games(&games);
-            let header = ship_header(&first.ship_name, &performance, rating.as_ref(), battle_impact.as_ref());
+            let match_contribution = McStats::from_games(&games);
+            let header = ship_header(&first.ship_name, &performance, rating.as_ref(), match_contribution.as_ref());
             let mut rows = ship_rows(&performance, rating.as_ref(), locale);
-            if let Some(stats) = battle_impact.as_ref() {
-                rows.insert(usize::from(rating.is_some()), battle_impact_row(stats));
+            if let Some(stats) = match_contribution.as_ref() {
+                rows.insert(usize::from(rating.is_some()), match_contribution_row(stats));
             }
 
             Some(ShipSummary {
@@ -349,7 +349,7 @@ pub fn ship_summaries(
                 ship: first.ship_name.clone(),
                 performance,
                 rating,
-                battle_impact,
+                match_contribution,
                 header,
                 rows,
             })
@@ -371,7 +371,7 @@ pub fn ship_header(
     ship: &str,
     performance: &PerformanceInfo,
     rating: Option<&PrStats>,
-    battle_impact: Option<&BiStats>,
+    match_contribution: Option<&McStats>,
 ) -> String {
     let rated = performance.records().rated();
     let mut header = ship.to_string();
@@ -381,8 +381,8 @@ pub fn ship_header(
     if let Some(rating) = rating {
         header.push_str(&format!(" - PR: {:.0}", rating.average.pr));
     }
-    if let Some(stats) = battle_impact {
-        header.push_str(&format!(" - BI: {:.0}", stats.average));
+    if let Some(stats) = match_contribution {
+        header.push_str(&format!(" - MC: {:.0}", stats.average));
     }
 
     header
@@ -412,7 +412,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
-            battle_impact: None,
+            match_contribution: None,
         }
     }
 
@@ -613,14 +613,14 @@ mod tests {
         assert!(summaries[0].header.contains(" - PR: "), "the header names the rating: {}", summaries[0].header);
     }
 
-    /// BI follows PR, spans the rated games only, and names its mean in the
+    /// MC follows PR, spans the rated games only, and names its mean in the
     /// header after the PR.
     #[test]
-    fn a_ship_with_battle_impact_lists_it_after_the_rating() {
+    fn a_ship_with_match_contribution_lists_it_after_the_rating() {
         let mut table = PersonalRatingData::new();
         table.load_from_bytes(crate::personal_rating::EXPECTED_VALUES_FIXTURE).expect("the fixture parses");
-        let rated = |sort_key: &str, bi: Option<i64>| PerGameStat {
-            battle_impact: bi,
+        let rated = |sort_key: &str, mc: Option<i64>| PerGameStat {
+            match_contribution: mc,
             ..played("Yamato", 3_374_266_064, sort_key, 100_000, true)
         };
         let games = [
@@ -632,7 +632,7 @@ mod tests {
         let summaries = summaries_of(&games, Some(&table));
         let summary = &summaries[0];
         assert_eq!(summary.rows[0].label, StatLabel::PersonalRating);
-        assert_eq!(summary.rows[1].label, StatLabel::BattleImpact);
+        assert_eq!(summary.rows[1].label, StatLabel::MatchContribution);
         let row = &summary.rows[1];
         assert_eq!(row.cell(Column::Min).text, "900");
         assert_eq!(row.cell(Column::Max).text, "1500");
@@ -643,11 +643,11 @@ mod tests {
             row.cell(Column::Max).rating.as_ref().map(|r| r.category),
             "each cell carries its own band"
         );
-        assert!(summary.header.ends_with(" - BI: 1200"), "{}", summary.header);
+        assert!(summary.header.ends_with(" - MC: 1200"), "{}", summary.header);
         assert!(summary.header.contains(" - PR: "), "{}", summary.header);
 
         let unrated = summaries_of(&games, None);
-        assert_eq!(unrated[0].rows[0].label, StatLabel::BattleImpact, "BI needs no expected-values table");
+        assert_eq!(unrated[0].rows[0].label, StatLabel::MatchContribution, "MC needs no expected-values table");
     }
 
     #[test]

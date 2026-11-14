@@ -129,7 +129,7 @@ pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
         consumables: Vec::new(),
         personal_rating: None,
         rating_scope: RatingScope::Rated(RatedBattle::Random),
-        battle_impact: None,
+        match_contribution: None,
         ship_config_url: None,
         short_ship_config_url: None,
         shiptool_url: None,
@@ -176,7 +176,7 @@ pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> 
         consumables: Vec::new(),
         heal_count: None,
         personal_rating: None,
-        battle_impact: None,
+        match_contribution: None,
         time_lived_secs: None,
         survived: Some(true),
     }
@@ -246,7 +246,7 @@ pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
         players: vec![self_player, enemy_player],
         torpedo_detections: Default::default(),
         critical_bursts: None,
-        battle_impact_version: None,
+        match_contribution_version: None,
     }
 }
 

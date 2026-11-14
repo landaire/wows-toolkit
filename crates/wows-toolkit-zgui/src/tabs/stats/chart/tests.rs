@@ -58,7 +58,7 @@ fn session() -> Arc<[PerGameStat]> {
                 is_div: index % 5 == 0,
                 match_group: if index % 6 == 0 { "ranked" } else { "pvp" }.to_string(),
                 achievements: Vec::new(),
-                battle_impact: None,
+                match_contribution: None,
             }
         })
         .collect()

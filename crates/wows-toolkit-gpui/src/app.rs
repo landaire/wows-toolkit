@@ -1648,8 +1648,8 @@ impl App {
         self.index_revision_checked = true;
         let root = std::path::Path::new(&wows_dir).join("replays");
         // The table `build_replay_index` will rate with, so a pass is only started
-        // for BI it can compute.
-        let rateable_bi = wows_toolkit_viewmodel::index_rows::rateable_battle_impact(
+        // for MC it can compute.
+        let rateable_mc = wows_toolkit_viewmodel::index_rows::rateable_match_contribution(
             self.replay_inspector.read(cx).personal_rating().map(|table| table.as_ref()),
         );
 
@@ -1659,7 +1659,7 @@ impl App {
                     runtime.block_on(wows_toolkit_config::index::query::has_stale_replay_records(
                         &pool,
                         &root,
-                        rateable_bi,
+                        rateable_mc,
                     ))
                 })
                 .await;
@@ -2414,7 +2414,7 @@ impl App {
     pub fn apply_session_stats(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(table) = data.personal_rating.clone() {
             self.replay_inspector.update(cx, |view, cx| view.set_personal_rating(table.clone(), cx));
-            // A table makes stored BI from an older formula recomputable; check again.
+            // A table makes stored MC from an older formula recomputable; check again.
             self.index_revision_checked = false;
         }
         self.stats.update(cx, |stats, cx| stats.apply_session(data, window, cx));

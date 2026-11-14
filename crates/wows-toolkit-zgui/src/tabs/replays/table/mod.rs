@@ -109,8 +109,8 @@ struct TableRow {
     /// The heading over the row's team, while the order keeps each team's rows together.
     team: Option<TeamHeading>,
     debug: bool,
-    /// The battle had a battle impact computed but withheld, since the recording ended early.
-    battle_impact_withheld: bool,
+    /// The battle had a match contribution computed but withheld, since the recording ended early.
+    match_contribution_withheld: bool,
 }
 
 impl PartialEq for TableRow {
@@ -120,7 +120,7 @@ impl PartialEq for TableRow {
             && self.side == other.side
             && self.team == other.team
             && self.debug == other.debug
-            && self.battle_impact_withheld == other.battle_impact_withheld
+            && self.match_contribution_withheld == other.match_contribution_withheld
     }
 }
 
@@ -142,12 +142,12 @@ struct TeamHeading {
 struct ModelRows {
     all: Arc<[PlayerRow]>,
     by_player: Arc<HashMap<AccountId, Arc<PlayerRow>>>,
-    battle_impact_withheld: bool,
+    match_contribution_withheld: bool,
 }
 
 impl PartialEq for ModelRows {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.all, &other.all) && self.battle_impact_withheld == other.battle_impact_withheld
+        Arc::ptr_eq(&self.all, &other.all) && self.match_contribution_withheld == other.match_contribution_withheld
     }
 }
 
@@ -156,7 +156,7 @@ impl ModelRows {
         let all: Arc<[PlayerRow]> = model.rows.clone().into();
         let by_player = all.iter().map(|row| (row.db_id, Arc::new(row.clone()))).collect();
 
-        Self { all, by_player: Arc::new(by_player), battle_impact_withheld: model.battle_impact_withheld }
+        Self { all, by_player: Arc::new(by_player), match_contribution_withheld: model.match_contribution_withheld }
     }
 }
 
@@ -501,7 +501,7 @@ fn table_rows(
                 side,
                 team,
                 debug,
-                battle_impact_withheld: rows.battle_impact_withheld,
+                match_contribution_withheld: rows.match_contribution_withheld,
             })
         })
         .collect()

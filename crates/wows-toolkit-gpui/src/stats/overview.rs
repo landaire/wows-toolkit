@@ -34,7 +34,7 @@ use std::sync::Arc;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
-use wows_toolkit_viewmodel::stats::BiStats;
+use wows_toolkit_viewmodel::stats::McStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
@@ -63,7 +63,7 @@ struct Computed {
     /// Absent without an expected-values table, or when no game rated.
     personal_rating: Option<PersonalRatingResult>,
     /// Absent when no game was rated.
-    battle_impact: Option<BiStats>,
+    match_contribution: Option<McStats>,
 }
 
 pub struct StatsOverviewPanel {
@@ -132,7 +132,7 @@ impl StatsOverviewPanel {
             ships: per_ship_performance_by_id(games),
             achievements: aggregate_achievements(games),
             personal_rating: session_personal_rating(games, self.personal_rating.as_deref()),
-            battle_impact: BiStats::from_games(games),
+            match_contribution: McStats::from_games(games),
         };
         self.load_achievement_icons(&computed.achievements);
         self.computed = computed;
@@ -247,11 +247,11 @@ impl Render for StatsOverviewPanel {
             .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
                 this.child(rating_figure(t!("ui.stats.pr").into_owned(), rating.pr, rating.category, cx))
             })
-            .when_some(self.computed.battle_impact.as_ref(), |this, rating| {
+            .when_some(self.computed.match_contribution.as_ref(), |this, rating| {
                 this.child(rating_figure(
-                    t!("ui.stats.bi").into_owned(),
+                    t!("ui.stats.mc").into_owned(),
                     rating.average,
-                    BiStats::category(rating.average),
+                    McStats::category(rating.average),
                     cx,
                 ))
             })

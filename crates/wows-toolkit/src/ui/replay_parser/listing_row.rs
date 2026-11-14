@@ -105,7 +105,7 @@ mod tests {
             self_survived: Some(true),
             self_pr: Some(1500.0),
             rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
-            self_bi: Some(1300.0),
+            self_mc: Some(1300.0),
             division_id: Some(4),
             division_mates: vec![DivisionMate { player_name: "Mate".into(), clan: "MATE".into() }],
             results_available: true,

@@ -344,7 +344,7 @@ fn column_id(column: ResultColumn) -> &'static str {
         ResultColumn::Sortable(SortColumn::Damage) => "damage",
         ResultColumn::Sortable(SortColumn::Kills) => "kills",
         ResultColumn::Sortable(SortColumn::Pr) => "pr",
-        ResultColumn::Sortable(SortColumn::Bi) => "bi",
+        ResultColumn::Sortable(SortColumn::Mc) => "mc",
         ResultColumn::Ship => "ship",
     }
 }
@@ -356,11 +356,11 @@ fn sort_column_of(id: &ColumnId) -> Option<SortColumn> {
     })
 }
 
-/// The band a rating cell is drawn in, for the PR and BI columns.
+/// The band a rating cell is drawn in, for the PR and MC columns.
 fn rating_band(hit: &MatchHit, column: SortColumn) -> Option<&'static str> {
     let rating = match column {
         SortColumn::Pr => hit.self_pr,
-        SortColumn::Bi => hit.self_bi,
+        SortColumn::Mc => hit.self_mc,
         _ => None,
     }?;
 

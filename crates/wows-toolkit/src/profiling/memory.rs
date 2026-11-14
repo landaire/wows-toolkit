@@ -440,7 +440,7 @@ fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
                 rating_scope: wowsunpack::rating_scope::RatingScope::Rated(
                     wowsunpack::rating_scope::RatedBattle::Random,
                 ),
-                self_bi: Some(1320.0),
+                self_mc: Some(1320.0),
                 division_id: None,
                 division_mates: Vec::new(),
                 results_available: true,

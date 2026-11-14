@@ -18,7 +18,7 @@ use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
-use wows_toolkit_viewmodel::stats::BiStats;
+use wows_toolkit_viewmodel::stats::McStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
@@ -191,8 +191,8 @@ struct Computed {
     achievements: Vec<SerializableAchievement>,
     /// Absent without an expected-values table, or when no game rated.
     rating: Option<PersonalRatingResult>,
-    /// Absent when no game carried a battle impact.
-    battle_impact: Option<BiStats>,
+    /// Absent when no game carried a match contribution.
+    match_contribution: Option<McStats>,
     /// The name each ship goes by, for the records that name only an id.
     names: HashMap<GameParamId, String>,
 }
@@ -204,8 +204,8 @@ struct OverviewShip {
     info: PerformanceInfo,
     /// Absent without an expected-values table, or when the table does not know the ship.
     rating: Option<PersonalRatingResult>,
-    /// Absent when none of the ship's games carried a battle impact.
-    battle_impact: Option<BiStats>,
+    /// Absent when none of the ship's games carried a match contribution.
+    match_contribution: Option<McStats>,
 }
 
 impl Computed {
@@ -220,13 +220,13 @@ impl Computed {
                     let rating = table.and_then(|table| info.personal_rating(table));
                     let own: Vec<&PerGameStat> =
                         games.iter().copied().filter(|game| Some(game.ship_id) == info.ship_id()).collect();
-                    let battle_impact = BiStats::from_games(&own);
-                    OverviewShip { name, info, rating, battle_impact }
+                    let match_contribution = McStats::from_games(&own);
+                    OverviewShip { name, info, rating, match_contribution }
                 })
                 .collect(),
             achievements: aggregate_achievements(&games),
             rating: session_personal_rating(&games, table),
-            battle_impact: BiStats::from_games(&games),
+            match_contribution: McStats::from_games(&games),
             names: games.iter().map(|game| (game.ship_id, game.ship_name.clone())).collect(),
         }
     }
@@ -331,13 +331,13 @@ fn summary_line(computed: &Computed) -> AnyView {
             }
         })
     });
-    let battle_impact = computed.battle_impact.map(|bi| {
-        let category = BiStats::category(bi.average);
-        let chip = format!("{:.0} ({})", bi.average, category.name());
+    let match_contribution = computed.match_contribution.map(|mc| {
+        let category = McStats::category(mc.average);
+        let chip = format!("{:.0} ({})", mc.average, category.name());
         AnyView::new(view! {
             row(class = "wt-stats-summary__fact", attr:data-testid = "stats-overview-battle-impact") {
                 box(class = "wt-stats-rule") {}
-                text {{t!("ui.stats.bi").into_owned()}}
+                text {{t!("ui.stats.mc").into_owned()}}
                 RatingChip(text = chip, category = category)
             }
         })
@@ -369,7 +369,7 @@ fn summary_line(computed: &Computed) -> AnyView {
         row(class = "wt-stats-summary", attr:data-testid = "stats-overview-summary") {
             {record}
             {rating}
-            {battle_impact}
+            {match_contribution}
             {facts}
         }
     })
@@ -513,8 +513,10 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
                 ship.rating.as_ref().map(|rating| format!("{:.0}", rating.pr)).unwrap_or_else(|| "-".to_owned())
             })
             .sizing(number_width),
-        GridColumn::new("bi", t!("ui.replay.column.battle_impact").into_owned(), battle_impact_cell)
-            .text(|ship| ship.battle_impact.map(|bi| format!("{:.0}", bi.average)).unwrap_or_else(|| "-".to_owned()))
+        GridColumn::new("mc", t!("ui.replay.column.match_contribution").into_owned(), match_contribution_cell)
+            .text(|ship| {
+                ship.match_contribution.map(|mc| format!("{:.0}", mc.average)).unwrap_or_else(|| "-".to_owned())
+            })
             .sizing(number_width),
         GridColumn::new("avg_damage", t!("ui.stats.column_avg_damage").into_owned(), move |ship: &OverviewShip| {
             optional_number(ship.info.avg_damage(), &damage_locale)
@@ -594,16 +596,16 @@ fn rating_cell(ship: &OverviewShip) -> AnyView {
     })
 }
 
-/// A ship's mean battle impact on its band's chip, or a dash when no game carried one.
-fn battle_impact_cell(ship: &OverviewShip) -> AnyView {
-    let test_id = ship.info.ship_id().map(|id| format!("stats-overview-bi-{id}"));
-    let Some(bi) = ship.battle_impact else {
+/// A ship's mean match contribution on its band's chip, or a dash when no game carried one.
+fn match_contribution_cell(ship: &OverviewShip) -> AnyView {
+    let test_id = ship.info.ship_id().map(|id| format!("stats-overview-mc-{id}"));
+    let Some(mc) = ship.match_contribution else {
         return AnyView::new(view! {
             text(attr:data-testid = test_id) {"-"}
         });
     };
-    let category = BiStats::category(bi.average);
-    let text = format!("{:.0}", bi.average);
+    let category = McStats::category(mc.average);
+    let text = format!("{:.0}", mc.average);
 
     AnyView::new(view! {
         row(attr:data-testid = test_id, attr:data-band = rating_band_name(category).to_owned()) {

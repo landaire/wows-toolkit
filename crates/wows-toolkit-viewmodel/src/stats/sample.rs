@@ -245,7 +245,7 @@ fn sample_game(
         }
     }
 
-    // Made up like the rest: the BI core from the same damage and kills, plus
+    // Made up like the rest: the MC core from the same damage and kills, plus
     // spotting against the class baseline and average shares of the others.
     let normalize = |ratio: f64, floor: f64| ((ratio - floor) / (1.0 - floor)).max(0.0);
     let spotting_baseline = if matches!(ship.class, Species::Destroyer | Species::AirCarrier | Species::Submarine) {
@@ -254,7 +254,7 @@ fn sample_game(
         35_000.0
     };
     let damage_ratio = damage / expected_damage;
-    let battle_impact = 550.0 * normalize(damage_ratio, 0.4)
+    let match_contribution = 550.0 * normalize(damage_ratio, 0.4)
         + 150.0 * normalize(frags as f64 / expected_frags, 0.1)
         + 200.0 * damage_ratio * 0.8
         + 230.0 * (spotting_damage / spotting_baseline).min(2.5)
@@ -277,7 +277,7 @@ fn sample_game(
         is_div,
         match_group: pick_mode(rng).to_owned(),
         achievements: earned_achievements,
-        battle_impact: Some(battle_impact.round() as i64),
+        match_contribution: Some(match_contribution.round() as i64),
     }
 }
 

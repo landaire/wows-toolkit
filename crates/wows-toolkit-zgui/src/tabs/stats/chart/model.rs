@@ -258,7 +258,7 @@ mod tests {
             is_div: false,
             match_group: mode.to_string(),
             achievements: Vec::new(),
-            battle_impact: None,
+            match_contribution: None,
         }
     }
 

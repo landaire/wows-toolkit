@@ -26,82 +26,6 @@
   "players": [
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 376.7719801743691,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 89.4485
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 55.711605378450436
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 106.01205568770115
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 125.59981910821757
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 0.0
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 54397,
-          "expected_damage": 99858.00120772948,
-          "expected_kills": 0.7497252415459074,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 7,
-            "consumable_fighters": 7,
-            "rocket_planes": 2,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 10
-          },
-          "potential_damage": 1268626,
-          "ships_spotted": 0.19308521057786485,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 19714,
-          "tanking": {
-            "class": 0.778633879687512,
-            "class_peers": 5,
-            "team": 2.3808138784754487
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.05233325796175732
-          },
-          "weighted_damage": 46012.2
-        },
-        "torpedo_detection": {
-          "detected": 38,
-          "threat_weight": 0.0,
-          "threatening": 0
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -470,6 +394,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 89.4485
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 55.711605378450436
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 106.01205568770115
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 125.59981910821757
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 54397,
+          "expected_damage": 99858.00120772948,
+          "expected_kills": 0.7497252415459074,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 7,
+            "consumable_fighters": 7,
+            "rocket_planes": 2,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 10
+          },
+          "potential_damage": 1268626,
+          "ships_spotted": 0.19308521057786485,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 19714,
+          "tanking": {
+            "class": 0.778633879687512,
+            "class_peers": 5,
+            "team": 2.3808138784754487
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.05233325796175732
+          },
+          "weighted_damage": 46012.2
+        },
+        "mc": 376.7719801743691,
+        "torpedo_detection": {
+          "detected": 38,
+          "threat_weight": 0.0,
+          "threatening": 0
+        },
+        "version": 5
+      },
       "name": "patoux62",
       "observed_results": {
         "damage": 31006,
@@ -852,82 +852,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1773.4839493743966,
-        "category": "Great",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 47.7525
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 865.3660119553904
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 498.2070703853908
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 77.19103154498632
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 51.39754372981324
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 228.6968879349633
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 4.872903823852539
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 35505,
-          "expected_damage": 62377.06569543705,
-          "expected_kills": 0.6474079164376391,
-          "kills": 2.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 6,
-            "consumable_fighters": 0,
-            "rocket_planes": 4,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 1025322,
-          "ships_spotted": 0.15890650221732722,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 13164,
-          "tanking": {
-            "class": 1.5139754372981324,
-            "class_peers": 5,
-            "team": 1.9242084329867146
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.09529036997290138
-          },
-          "weighted_damage": 83837.0
-        },
-        "torpedo_detection": {
-          "detected": 12,
-          "threat_weight": 0.6091129779815674,
-          "threatening": 2
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -1299,6 +1223,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Great",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 47.7525
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 865.3660119553904
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 498.2070703853908
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 77.19103154498632
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 51.39754372981324
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 228.6968879349633
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 4.872903823852539
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 35505,
+          "expected_damage": 62377.06569543705,
+          "expected_kills": 0.6474079164376391,
+          "kills": 2.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 6,
+            "consumable_fighters": 0,
+            "rocket_planes": 4,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 1025322,
+          "ships_spotted": 0.15890650221732722,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 13164,
+          "tanking": {
+            "class": 1.5139754372981324,
+            "class_peers": 5,
+            "team": 1.9242084329867146
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.09529036997290138
+          },
+          "weighted_damage": 83837.0
+        },
+        "mc": 1773.4839493743966,
+        "torpedo_detection": {
+          "detected": 12,
+          "threat_weight": 0.6091129779815674,
+          "threatening": 2
+        },
+        "version": 5
+      },
       "name": "GoNeCraZyOne",
       "observed_results": {
         "damage": 46106,
@@ -1718,82 +1718,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 2019.9116663079294,
-        "category": "Great",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 4.6915
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 919.733306613172
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 665.8678404521297
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 218.50039799945614
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 187.14707650058756
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 23.97154474258423
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 3383,
-          "expected_damage": 49963.46496815287,
-          "expected_kills": 0.7325636942675106,
-          "kills": 3.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 1,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 298600,
-          "ships_spotted": 0.9093732240748108,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 83391,
-          "tanking": {
-            "class": 0.638635160095098,
-            "class_peers": 5,
-            "team": 0.5603787279409131
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.07797794854191148
-          },
-          "weighted_damage": 70116.0
-        },
-        "torpedo_detection": {
-          "detected": 11,
-          "threat_weight": 2.9964430928230286,
-          "threatening": 6
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -2193,6 +2117,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Great",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 4.6915
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 919.733306613172
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 665.8678404521297
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 218.50039799945614
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 187.14707650058756
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 23.97154474258423
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 3383,
+          "expected_damage": 49963.46496815287,
+          "expected_kills": 0.7325636942675106,
+          "kills": 3.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 1,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 298600,
+          "ships_spotted": 0.9093732240748107,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 83391,
+          "tanking": {
+            "class": 0.638635160095098,
+            "class_peers": 5,
+            "team": 0.5603787279409131
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.07797794854191148
+          },
+          "weighted_damage": 70116.0
+        },
+        "mc": 2019.9116663079294,
+        "torpedo_detection": {
+          "detected": 11,
+          "threat_weight": 2.9964430928230286,
+          "threatening": 6
+        },
+        "version": 5
+      },
       "name": "Qeran",
       "observed_results": {
         "damage": 59862,
@@ -2568,75 +2568,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 877.1416726507348,
-        "category": "BelowAverage",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 45.082499999999996
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 494.1913227878626
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 25.24591836734694
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 312.6219314955253
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 25665,
-          "expected_damage": 78005.97484053862,
-          "expected_kills": 0.7034372785258893,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 11,
-            "rocket_planes": 6,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 2
-          },
-          "potential_damage": 648028,
-          "ships_spotted": 0.055900621118012424,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 4050,
-          "tanking": {
-            "class": 0.8609413881017195,
-            "class_peers": 5,
-            "team": 0.6772593605766907
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.13025913812313553
-          },
-          "weighted_damage": 73256.8
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -2977,6 +2908,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 45.082499999999996
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 494.1913227878626
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 25.24591836734694
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 312.6219314955253
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 25665,
+          "expected_damage": 78005.97484053862,
+          "expected_kills": 0.7034372785258893,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 11,
+            "rocket_planes": 6,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 2
+          },
+          "potential_damage": 648028,
+          "ships_spotted": 0.055900621118012424,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 4050,
+          "tanking": {
+            "class": 0.8609413881017195,
+            "class_peers": 5,
+            "team": 0.6772593605766907
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.13025913812313553
+          },
+          "weighted_damage": 73256.8
+        },
+        "mc": 877.1416726507348,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "Kune",
       "observed_results": {
         "damage": 72485,
@@ -3275,82 +3275,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 364.90547147222037,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 12.1455
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 256.86079605222966
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 15.168763379863748
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 40.000515494716765
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 40.729896545410156
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 9291,
-          "expected_damage": 78005.97484053862,
-          "expected_kills": 0.7034372785258893,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 2,
-            "rocket_planes": 2,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 825901,
-          "ships_spotted": 0.708858426109753,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 39593,
-          "tanking": {
-            "class": 1.1516876337986375,
-            "class_peers": 5,
-            "team": 1.5499576416112797
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.016666881456131984
-          },
-          "weighted_damage": 14697.6
-        },
-        "torpedo_detection": {
-          "detected": 8,
-          "threat_weight": 5.0912370681762695,
-          "threatening": 8
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -3732,6 +3656,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 12.1455
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 256.86079605222966
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 15.168763379863748
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 40.000515494716765
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 40.729896545410156
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 9291,
+          "expected_damage": 78005.97484053862,
+          "expected_kills": 0.7034372785258893,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 2,
+            "rocket_planes": 2,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 825901,
+          "ships_spotted": 0.708858426109753,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 39593,
+          "tanking": {
+            "class": 1.1516876337986375,
+            "class_peers": 5,
+            "team": 1.5499576416112797
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.016666881456131984
+          },
+          "weighted_damage": 14697.6
+        },
+        "mc": 364.90547147222037,
+        "torpedo_detection": {
+          "detected": 8,
+          "threat_weight": 5.0912370681762695,
+          "threatening": 8
+        },
+        "version": 5
+      },
       "name": "AcidCat",
       "observed_results": {
         "damage": 12386,
@@ -4065,75 +4065,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 0.0,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 33086.951490356514,
-          "expected_kills": 0.4023904149619991,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 202923,
-          "ships_spotted": 0.0,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 0,
-          "tanking": {
-            "class": 1.1746265431265026,
-            "class_peers": 3,
-            "team": 0.21207648624180409
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.0
-          },
-          "weighted_damage": 0.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -4467,6 +4398,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 33086.951490356514,
+          "expected_kills": 0.4023904149619991,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 202923,
+          "ships_spotted": 0.0,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 0,
+          "tanking": {
+            "class": 1.1746265431265026,
+            "class_peers": 3,
+            "team": 0.21207648624180409
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.0
+          },
+          "weighted_damage": 0.0
+        },
+        "mc": 0.0,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "lagislut",
       "observed_results": {
         "damage": 0,
@@ -4606,75 +4606,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 219.06075318184907,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 148.25027264416443
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 70.81048053768465
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 42899.18382352941,
-          "expected_kills": 0.738094117647075,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 614698,
-          "ships_spotted": 0.7192763141554958,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 49932,
-          "tanking": {
-            "class": 1.520250284414107,
-            "class_peers": 5,
-            "team": 0.6424259050963395
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.029504366890701936
-          },
-          "weighted_damage": 16418.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -5046,6 +4977,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 148.25027264416443
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 70.81048053768465
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 42899.18382352941,
+          "expected_kills": 0.738094117647075,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 614698,
+          "ships_spotted": 0.7192763141554958,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 49932,
+          "tanking": {
+            "class": 1.520250284414107,
+            "class_peers": 5,
+            "team": 0.6424259050963395
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.029504366890701936
+          },
+          "weighted_damage": 16418.0
+        },
+        "mc": 219.06075318184907,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "SirTomes",
       "observed_results": {
         "damage": 16418,
@@ -5347,75 +5347,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 955.6699319789363,
-        "category": "BelowAverage",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 1.337
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 348.77225521452374
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 264.52108968385284
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 38.49739925913997
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 53.92485683626376
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 248.61733098515617
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 2674,
-          "expected_damage": 78778.30649536046,
-          "expected_kills": 0.5927237687365925,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 2216187,
-          "ships_spotted": 0.10714768883878241,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 4752,
-          "tanking": {
-            "class": 1.5392485683626376,
-            "class_peers": 5,
-            "team": 2.3161551515341534
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.1035905545771484
-          },
-          "weighted_damage": 61484.8
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -5754,6 +5685,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 1.337
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 348.77225521452374
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 264.52108968385284
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 38.49739925913997
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 53.92485683626376
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 248.61733098515617
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 2674,
+          "expected_damage": 78778.30649536046,
+          "expected_kills": 0.5927237687365925,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 2216187,
+          "ships_spotted": 0.10714768883878241,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 4752,
+          "tanking": {
+            "class": 1.5392485683626376,
+            "class_peers": 5,
+            "team": 2.3161551515341534
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.1035905545771484
+          },
+          "weighted_damage": 61484.8
+        },
+        "mc": 955.6699319789363,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "Misudumi07",
       "observed_results": {
         "damage": 51761,
@@ -6054,82 +6054,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 154.36231590377548,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 82.50820709335066
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 71.8541088104248
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 42352.52633199877,
-          "expected_kills": 0.6406898675701018,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 234540,
-          "ships_spotted": 0.38651846581957183,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 28686,
-          "tanking": {
-            "class": 0.4882470154355503,
-            "class_peers": 5,
-            "team": 0.4401581609218411
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.0
-          },
-          "weighted_damage": 0.0
-        },
-        "torpedo_detection": {
-          "detected": 10,
-          "threat_weight": 8.9817636013031,
-          "threatening": 9
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -6458,6 +6382,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 82.50820709335066
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 71.8541088104248
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 42352.52633199877,
+          "expected_kills": 0.6406898675701018,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 234540,
+          "ships_spotted": 0.38651846581957183,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 28686,
+          "tanking": {
+            "class": 0.4882470154355503,
+            "class_peers": 5,
+            "team": 0.4401581609218411
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.0
+          },
+          "weighted_damage": 0.0
+        },
+        "mc": 154.36231590377548,
+        "torpedo_detection": {
+          "detected": 10,
+          "threat_weight": 8.9817636013031,
+          "threatening": 9
+        },
+        "version": 5
+      },
       "name": "lauri_steel",
       "observed_results": {
         "damage": 0,
@@ -6702,82 +6702,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 112.17129045428396,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 95.84604140589892
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 16.32524904838504
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 0.0
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 34031.329489291595,
-          "expected_kills": 0.43429983525535376,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 45900,
-          "ships_spotted": 0.4477121211294205,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 33407,
-          "tanking": {
-            "class": 0.20391269515718455,
-            "class_peers": 3,
-            "team": 0.08613993172300037
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.006802187103493765
-          },
-          "weighted_damage": 5806.0
-        },
-        "torpedo_detection": {
-          "detected": 0,
-          "threat_weight": 0.0,
-          "threatening": 0
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -7089,6 +7013,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 95.84604140589892
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 16.32524904838504
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 34031.329489291595,
+          "expected_kills": 0.43429983525535376,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 45900,
+          "ships_spotted": 0.4477121211294205,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 33407,
+          "tanking": {
+            "class": 0.20391269515718455,
+            "class_peers": 3,
+            "team": 0.08613993172300037
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.006802187103493765
+          },
+          "weighted_damage": 5806.0
+        },
+        "mc": 112.17129045428396,
+        "torpedo_detection": {
+          "detected": 0,
+          "threat_weight": 0.0,
+          "threatening": 0
+        },
+        "version": 5
+      },
       "name": "medobedo12",
       "observed_results": {
         "damage": 5806,
@@ -7273,75 +7273,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 521.1128803377618,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 11.96
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 199.99816880557307
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 53.464095854511974
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 255.69061567767676
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 17920,
-          "expected_damage": 104484.48470248134,
-          "expected_kills": 0.7231751385208471,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 1,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 2211111,
-          "ships_spotted": 0.0,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 0,
-          "tanking": {
-            "class": 1.5346409585451197,
-            "class_peers": 5,
-            "team": 2.310850182436696
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.10653775653236532
-          },
-          "weighted_damage": 64590.2
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -7697,6 +7628,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 11.96
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 199.99816880557307
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 53.464095854511974
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 255.69061567767676
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 17920,
+          "expected_damage": 104484.48470248134,
+          "expected_kills": 0.7231751385208471,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 1,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 2211111,
+          "ships_spotted": 0.0,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 0,
+          "tanking": {
+            "class": 1.5346409585451197,
+            "class_peers": 5,
+            "team": 2.310850182436696
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.10653775653236532
+          },
+          "weighted_damage": 64590.2
+        },
+        "mc": 521.1128803377618,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "Aequitas1974",
       "observed_results": {
         "damage": 59284,
@@ -8043,82 +8043,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1152.4695559982088,
-        "category": "Average",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 863.785666741339
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 153.28754987749167
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 124.88000103098943
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 10.516338348388672
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 33086.951490356514,
-          "expected_kills": 0.4023904149619991,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 0,
-          "ships_spotted": 1.0357867880684781,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 32644,
-          "tanking": {
-            "class": 0.0,
-            "class_peers": 3,
-            "team": 0.0
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.05203333376291226
-          },
-          "weighted_damage": 44413.0
-        },
-        "torpedo_detection": {
-          "detected": 6,
-          "threat_weight": 1.314542293548584,
-          "threatening": 6
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -8451,6 +8375,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Average",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 863.785666741339
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 153.28754987749167
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 124.88000103098943
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 10.516338348388672
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 33086.951490356514,
+          "expected_kills": 0.4023904149619991,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 0,
+          "ships_spotted": 1.0357867880684781,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 32644,
+          "tanking": {
+            "class": 0.0,
+            "class_peers": 3,
+            "team": 0.0
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.05203333376291226
+          },
+          "weighted_damage": 44413.0
+        },
+        "mc": 1152.4695559982088,
+        "torpedo_detection": {
+          "detected": 6,
+          "threat_weight": 1.314542293548584,
+          "threatening": 6
+        },
+        "version": 5
+      },
       "name": "ORAC_1",
       "observed_results": {
         "damage": 26456,
@@ -8769,82 +8769,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 495.5152730032301,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 24.368000000000002
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 25.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 260.12097645279727
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 149.4953689006467
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 36.53092764978615
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [
-          {
-            "duration": 6.8636016845703125,
-            "share": 0.5033720325288319,
-            "victim_ship": 4179015632,
-            "victim_ship_name": null
-          }
-        ],
-        "inputs": {
-          "anti_air_damage": 18736,
-          "expected_damage": 76989.05609756097,
-          "expected_kills": 0.6021463414634152,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 4,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 1
-          },
-          "potential_damage": 760710,
-          "ships_spotted": 0.5262860082304527,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 11290,
-          "tanking": {
-            "class": 1.0418392885072134,
-            "class_peers": 5,
-            "team": 0.7950242399777392
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.015221219854077562
-          },
-          "weighted_damage": 10164.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -9231,6 +9155,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 24.368000000000002
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 260.12097645279727
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 149.4953689006467
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 36.53092764978615
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [
+          {
+            "duration": 6.8636016845703125,
+            "share": 0.5033720325288319,
+            "victim_ship": 4179015632,
+            "victim_ship_name": null
+          }
+        ],
+        "inputs": {
+          "anti_air_damage": 18736,
+          "expected_damage": 76989.05609756097,
+          "expected_kills": 0.6021463414634152,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 4,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 1
+          },
+          "potential_damage": 760710,
+          "ships_spotted": 0.5262860082304527,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 11290,
+          "tanking": {
+            "class": 1.0418392885072134,
+            "class_peers": 5,
+            "team": 0.7950242399777392
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.015221219854077562
+          },
+          "weighted_damage": 10164.0
+        },
+        "mc": 495.5152730032301,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "VenetheGreat",
       "observed_results": {
         "damage": 8457,
@@ -9567,75 +9567,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 28.150913894081672,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 5.8785
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 7.573783264746229
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 14.698630629335442
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 5757,
-          "expected_damage": 46287.009345794395,
-          "expected_kills": 0.7719158878504682,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 1
-          },
-          "potential_damage": 191532,
-          "ships_spotted": 0.030452674897119343,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 2960,
-          "tanking": {
-            "class": 0.39170244913218144,
-            "class_peers": 5,
-            "team": 0.20017165901778122
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.006124429428889767
-          },
-          "weighted_damage": 4089.6
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -9999,6 +9930,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 5.8785
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 7.573783264746229
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 14.698630629335442
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 5757,
+          "expected_damage": 46287.009345794395,
+          "expected_kills": 0.7719158878504682,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 1
+          },
+          "potential_damage": 191532,
+          "ships_spotted": 0.030452674897119343,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 2960,
+          "tanking": {
+            "class": 0.39170244913218144,
+            "class_peers": 5,
+            "team": 0.20017165901778122
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.006124429428889767
+          },
+          "weighted_damage": 4089.6
+        },
+        "mc": 28.150913894081672,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "coco_736",
       "observed_results": {
         "damage": 3408,
@@ -10293,82 +10293,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 962.4524503203726,
-        "category": "BelowAverage",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 8.2685
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 264.7479137530479
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 193.9416929927185
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 300.57852504607035
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": -61.04309940175598
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 181.47569735305183
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 74.48322057723999
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 4537,
-          "expected_damage": 97075.5748031496,
-          "expected_kills": 0.7913582677165096,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 2,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 527100,
-          "ships_spotted": 0.7293970196442211,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 63760,
-          "tanking": {
-            "class": 0.2965230019941467,
-            "class_peers": 5,
-            "team": 0.9892016995902724
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.07561487389710492
-          },
-          "weighted_damage": 66867.2
-        },
-        "torpedo_detection": {
-          "detected": 20,
-          "threat_weight": 9.310402572154999,
-          "threatening": 10
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -10699,6 +10623,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 8.2685
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 264.7479137530479
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 193.9416929927185
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 300.57852504607035
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": -61.04309940175598
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 181.47569735305183
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 74.48322057723999
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 4537,
+          "expected_damage": 97075.5748031496,
+          "expected_kills": 0.7913582677165096,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 2,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 527100,
+          "ships_spotted": 0.7293970196442211,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 63760,
+          "tanking": {
+            "class": 0.2965230019941467,
+            "class_peers": 5,
+            "team": 0.9892016995902724
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.07561487389710492
+          },
+          "weighted_damage": 66867.2
+        },
+        "mc": 962.4524503203726,
+        "torpedo_detection": {
+          "detected": 20,
+          "threat_weight": 9.310402572154999,
+          "threatening": 10
+        },
+        "version": 5
+      },
       "name": "Eisen_03",
       "observed_results": {
         "damage": 52962,
@@ -11069,89 +11069,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 5829.863796398835,
-        "category": "SuperUnicum",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 57.3605
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 25.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 3608.2108397645225
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 887.0784440194775
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 245.05805454436933
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 995.4071763894049
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 11.748781681060791
-          }
-        },
-        "critical_bursts": [
-          {
-            "duration": 7.99468994140625,
-            "share": 0.531626203243549,
-            "victim_ship": 4179507152,
-            "victim_ship_name": null
-          }
-        ],
-        "inputs": {
-          "anti_air_damage": 32221,
-          "expected_damage": 83959.7529215359,
-          "expected_kills": 0.7376711185308852,
-          "kills": 4.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 7,
-            "consumable_fighters": 7,
-            "rocket_planes": 5,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 565554,
-          "ships_spotted": 0.49556715616741676,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 46572,
-          "tanking": {
-            "class": 0.7352574481423229,
-            "class_peers": 5,
-            "team": 1.061367820167097
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.414752990162252
-          },
-          "weighted_damage": 364068.8
-        },
-        "torpedo_detection": {
-          "detected": 20,
-          "threat_weight": 1.4685977101325989,
-          "threatening": 4
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -11516,6 +11433,89 @@
       "is_hidden_profile": false,
       "is_self": true,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "SuperUnicum",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 57.3605
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 3608.2108397645225
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 887.0784440194775
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 245.05805454436933
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 995.4071763894049
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 11.748781681060791
+          }
+        },
+        "critical_bursts": [
+          {
+            "duration": 7.99468994140625,
+            "share": 0.531626203243549,
+            "victim_ship": 4179507152,
+            "victim_ship_name": null
+          }
+        ],
+        "inputs": {
+          "anti_air_damage": 32221,
+          "expected_damage": 83959.7529215359,
+          "expected_kills": 0.7376711185308852,
+          "kills": 4.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 7,
+            "consumable_fighters": 7,
+            "rocket_planes": 5,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 565554,
+          "ships_spotted": 0.49556715616741676,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 46572,
+          "tanking": {
+            "class": 0.7352574481423229,
+            "class_peers": 5,
+            "team": 1.061367820167097
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.414752990162252
+          },
+          "weighted_damage": 364068.8
+        },
+        "mc": 5829.863796398835,
+        "torpedo_detection": {
+          "detected": 20,
+          "threat_weight": 1.4685977101325989,
+          "threatening": 4
+        },
+        "version": 5
+      },
       "name": "tommanl",
       "observed_results": {
         "damage": 354013,
@@ -11980,75 +11980,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1837.0166699765625,
-        "category": "Great",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 178.6335
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 1258.7451509214484
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 50.70314831512361
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 7.178769672528418
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 341.75610106746217
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 100767,
-          "expected_damage": 44948.14742297725,
-          "expected_kills": 0.657443132738298,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 3,
-            "consumable_fighters": 3,
-            "rocket_planes": 14,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 25
-          },
-          "potential_damage": 1025528,
-          "ships_spotted": 0.27381954831227706,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 15269,
-          "tanking": {
-            "class": 3.18314947823226,
-            "class_peers": 5,
-            "team": 1.0717876967252842
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.1423983754447759
-          },
-          "weighted_damage": 79701.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -12420,6 +12351,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Great",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 178.6335
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1258.7451509214484
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 50.70314831512361
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 7.178769672528418
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 341.75610106746217
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 100767,
+          "expected_damage": 44948.14742297725,
+          "expected_kills": 0.657443132738298,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 3,
+            "consumable_fighters": 3,
+            "rocket_planes": 14,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 25
+          },
+          "potential_damage": 1025528,
+          "ships_spotted": 0.27381954831227706,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 15269,
+          "tanking": {
+            "class": 3.18314947823226,
+            "class_peers": 5,
+            "team": 1.0717876967252842
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.1423983754447759
+          },
+          "weighted_damage": 79701.0
+        },
+        "mc": 1837.0166699765625,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "Origami__",
       "observed_results": {
         "damage": 79241,
@@ -12835,82 +12835,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1011.996399580338,
-        "category": "BelowAverage",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 6.8975
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 336.72200723218
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 496.12105232022753
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 172.25584002793045
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 0.0
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 1795,
-          "expected_damage": 83300.4598655595,
-          "expected_kills": 0.7908264136021772,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 2,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 0,
-          "ships_spotted": 3.0356077197660056,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 157394,
-          "tanking": {
-            "class": 0.0,
-            "class_peers": 1,
-            "team": 0.0
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.07177326667830435
-          },
-          "weighted_damage": 63919.2
-        },
-        "torpedo_detection": {
-          "detected": 0,
-          "threat_weight": 0.0,
-          "threatening": 0
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -13241,6 +13165,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 6.8975
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 336.72200723218
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 496.12105232022753
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 172.25584002793045
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 1795,
+          "expected_damage": 83300.4598655595,
+          "expected_kills": 0.7908264136021772,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 2,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 0,
+          "ships_spotted": 3.0356077197660065,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 157394,
+          "tanking": {
+            "class": 0.0,
+            "class_peers": 1,
+            "team": 0.0
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.07177326667830435
+          },
+          "weighted_damage": 63919.2
+        },
+        "mc": 1011.996399580338,
+        "torpedo_detection": {
+          "detected": 0,
+          "threat_weight": 0.0,
+          "threatening": 0
+        },
+        "version": 5
+      },
       "name": "xsavierz",
       "observed_results": {
         "damage": 61263,
@@ -13768,82 +13768,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1175.6084008590165,
-        "category": "Average",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 25.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 514.8542512371005
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 390.904736010765
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 126.1260552385815
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 118.72335837256945
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [
-          {
-            "duration": 0.0,
-            "share": 0.6816396015283843,
-            "victim_ship": 4281219056,
-            "victim_ship_name": null
-          }
-        ],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 32583.47712833545,
-          "expected_kills": 0.40892630241423816,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 472366,
-          "ships_spotted": 0.6083403535643628,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 42714,
-          "tanking": {
-            "class": 5.695205025258919,
-            "class_peers": 3,
-            "team": 0.4936735682997788
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.049468065988570606
-          },
-          "weighted_damage": 31334.2
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -14194,6 +14118,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Average",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 514.8542512371005
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 390.904736010765
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 126.1260552385815
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 118.72335837256945
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [
+          {
+            "duration": 0.0,
+            "share": 0.6816396015283843,
+            "victim_ship": 4281219056,
+            "victim_ship_name": null
+          }
+        ],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 32583.47712833545,
+          "expected_kills": 0.40892630241423816,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 472366,
+          "ships_spotted": 0.6083403535643628,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 42714,
+          "tanking": {
+            "class": 5.695205025258919,
+            "class_peers": 3,
+            "team": 0.4936735682997788
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.049468065988570606
+          },
+          "weighted_damage": 31334.2
+        },
+        "mc": 1175.6084008590165,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "wivlis_2021",
       "observed_results": {
         "damage": 24101,
@@ -14555,82 +14555,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 442.56655873304743,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 248.83536995294253
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 180.2655295150832
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 13.465659265021692
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 0.0
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 0,
-          "expected_damage": 41152.74269223608,
-          "expected_kills": 0.6277415751256695,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 271500,
-          "ships_spotted": 0.7999611657031755,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 65567,
-          "tanking": {
-            "class": 0.5740205285809367,
-            "class_peers": 5,
-            "team": 0.5095205111719957
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.005610691360425705
-          },
-          "weighted_damage": 5746.8
-        },
-        "torpedo_detection": {
-          "detected": 0,
-          "threat_weight": 0.0,
-          "threatening": 0
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -14969,6 +14893,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 248.83536995294253
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 180.2655295150832
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 13.465659265021692
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 0,
+          "expected_damage": 41152.74269223608,
+          "expected_kills": 0.6277415751256695,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 271500,
+          "ships_spotted": 0.7999611657031755,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 65567,
+          "tanking": {
+            "class": 0.5740205285809367,
+            "class_peers": 5,
+            "team": 0.5095205111719957
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.005610691360425705
+          },
+          "weighted_damage": 5746.8
+        },
+        "mc": 442.56655873304743,
+        "torpedo_detection": {
+          "detected": 0,
+          "threat_weight": 0.0,
+          "threatening": 0
+        },
+        "version": 5
+      },
       "name": "dimapoet1984",
       "observed_results": {
         "damage": 4439,
@@ -15226,68 +15226,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1721.3723905380184,
-        "category": "VeryGood",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 7.1125
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 1060.4118827286873
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 175.1936570922985
-          },
-          "tanking": null,
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 478.65435071703274
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 3725,
-          "expected_damage": 71286.66232827188,
-          "expected_kills": 0.67104121475055,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 7,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 692100,
-          "ships_spotted": 0.8451651213274097,
-          "ships_spotted_baseline": 1.1538461538461537,
-          "spotting_baseline": 75000.0,
-          "spotting_damage": 59321,
-          "tanking": null,
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.19943931279876362
-          },
-          "weighted_damage": 110980.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -15633,6 +15571,68 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "VeryGood",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 7.1125
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1060.4118827286873
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 175.1936570922985
+          },
+          "tanking": null,
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 478.65435071703274
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 3725,
+          "expected_damage": 71286.66232827188,
+          "expected_kills": 0.67104121475055,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 7,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 692100,
+          "ships_spotted": 0.8451651213274097,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 59321,
+          "tanking": null,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.19943931279876362
+          },
+          "weighted_damage": 110980.0
+        },
+        "mc": 1721.3723905380184,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "IvanDok2",
       "observed_results": {
         "damage": 110981,
@@ -16081,75 +16081,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 35.394843079466625,
-        "category": "Bad",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 0.753
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 34.641843079466625
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 1506,
-          "expected_damage": 60984.524719369474,
-          "expected_kills": 0.7085359445903938,
-          "kills": 0.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 0,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 0
-          },
-          "potential_damage": 585998,
-          "ships_spotted": 0.0,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 0,
-          "tanking": {
-            "class": 0.7659073353522337,
-            "class_peers": 5,
-            "team": 0.612431300467294
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.014434101283111095
-          },
-          "weighted_damage": 8032.0
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -16506,6 +16437,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Bad",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.753
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 34.641843079466625
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 1506,
+          "expected_damage": 60984.524719369474,
+          "expected_kills": 0.7085359445903938,
+          "kills": 0.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 585998,
+          "ships_spotted": 0.0,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 0,
+          "tanking": {
+            "class": 0.7659073353522337,
+            "class_peers": 5,
+            "team": 0.612431300467294
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.014434101283111095
+          },
+          "weighted_damage": 8032.0
+        },
+        "mc": 35.394843079466625,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "Veloraptos",
       "observed_results": {
         "damage": 8032,
@@ -16798,75 +16798,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1536.5964858933207,
-        "category": "Good",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 51.284
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 624.2203606311195
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 344.0866793156898
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 6.582639455782314
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 23.16837670242411
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 487.25442978830466
-          },
-          "torpedo_warnings": null
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 36568,
-          "expected_damage": 104933.57345712723,
-          "expected_kills": 0.9239923539049748,
-          "kills": 2.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 10,
-            "consumable_fighters": 0,
-            "rocket_planes": 0,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 1
-          },
-          "potential_damage": 1860884,
-          "ships_spotted": 0.014575569358178053,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 1056,
-          "tanking": {
-            "class": 1.231683767024241,
-            "class_peers": 5,
-            "team": 1.9448250815510972
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.20302267907846028
-          },
-          "weighted_damage": 113429.8
-        },
-        "torpedo_detection": null,
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -17215,6 +17146,75 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Good",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 51.284
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 624.2203606311195
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 344.0866793156898
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 6.582639455782314
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 23.16837670242411
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 487.25442978830466
+          },
+          "torpedo_warnings": null
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 36568,
+          "expected_damage": 104933.57345712723,
+          "expected_kills": 0.9239923539049748,
+          "kills": 2.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 10,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 1
+          },
+          "potential_damage": 1860884,
+          "ships_spotted": 0.014575569358178053,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 1056,
+          "tanking": {
+            "class": 1.231683767024241,
+            "class_peers": 5,
+            "team": 1.9448250815510972
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.20302267907846028
+          },
+          "weighted_damage": 113429.8
+        },
+        "mc": 1536.5964858933207,
+        "torpedo_detection": null,
+        "version": 5
+      },
       "name": "nanfangzhainan",
       "observed_results": {
         "damage": 87749,
@@ -17666,82 +17666,6 @@
     },
     {
       "achievements": [],
-      "battle_impact": {
-        "bi": 1401.2502045877923,
-        "category": "Good",
-        "components": {
-          "anti_air": {
-            "basis": "Static",
-            "points": 76.56700000000001
-          },
-          "critical_bursts": {
-            "basis": "Static",
-            "points": 0.0
-          },
-          "damage": {
-            "basis": "Dynamic",
-            "points": 670.7485983028045
-          },
-          "kills": {
-            "basis": "Dynamic",
-            "points": 192.03976049638229
-          },
-          "objectives": null,
-          "spotting": {
-            "basis": "Static",
-            "points": 134.15389203397584
-          },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 0.0
-          },
-          "team_damage_share": {
-            "basis": "Dynamic",
-            "points": 314.74607784673174
-          },
-          "torpedo_warnings": {
-            "basis": "Static",
-            "points": 12.99487590789795
-          }
-        },
-        "critical_bursts": [],
-        "inputs": {
-          "anti_air_damage": 52634,
-          "expected_damage": 99581.36998916576,
-          "expected_kills": 0.7985698808233666,
-          "kills": 1.0,
-          "objective_points": null,
-          "planes_killed": {
-            "bombers": 6,
-            "consumable_fighters": 7,
-            "rocket_planes": 3,
-            "scouts": 0,
-            "skip_bombers": 0,
-            "torpedo_bombers": 6
-          },
-          "potential_damage": 1331204,
-          "ships_spotted": 0.27754531387145864,
-          "ships_spotted_baseline": 0.5384615384615384,
-          "spotting_baseline": 35000.0,
-          "spotting_damage": 22789,
-          "tanking": {
-            "class": 0.82336661921437,
-            "class_peers": 5,
-            "team": 2.4982531954114378
-          },
-          "team_damage_share": {
-            "even": 0.08333333333333333,
-            "share": 0.13114419910280486
-          },
-          "weighted_damage": 112698.8
-        },
-        "torpedo_detection": {
-          "detected": 29,
-          "threat_weight": 1.6243594884872437,
-          "threatening": 7
-        },
-        "version": 4
-      },
       "build": {
         "abilities": [
           {
@@ -18085,6 +18009,82 @@
       "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
+      "match_contribution": {
+        "category": "Good",
+        "components": {
+          "anti_air": {
+            "basis": "Static",
+            "points": 76.56700000000001
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 670.7485983028045
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 192.03976049638229
+          },
+          "objectives": null,
+          "spotting": {
+            "basis": "Static",
+            "points": 134.15389203397584
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 314.74607784673174
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 12.99487590789795
+          }
+        },
+        "critical_bursts": [],
+        "inputs": {
+          "anti_air_damage": 52634,
+          "expected_damage": 99581.36998916576,
+          "expected_kills": 0.7985698808233666,
+          "kills": 1.0,
+          "objective_points": null,
+          "planes_killed": {
+            "bombers": 6,
+            "consumable_fighters": 7,
+            "rocket_planes": 3,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 6
+          },
+          "potential_damage": 1331204,
+          "ships_spotted": 0.27754531387145864,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 22789,
+          "tanking": {
+            "class": 0.82336661921437,
+            "class_peers": 5,
+            "team": 2.4982531954114378
+          },
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.13114419910280486
+          },
+          "weighted_damage": 112698.8
+        },
+        "mc": 1401.2502045877923,
+        "torpedo_detection": {
+          "detected": 29,
+          "threat_weight": 1.6243594884872437,
+          "threatening": 7
+        },
+        "version": 5
+      },
       "name": "ARCHAL_1939",
       "observed_results": {
         "damage": 108135,

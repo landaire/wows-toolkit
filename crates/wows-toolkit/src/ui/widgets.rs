@@ -8,7 +8,7 @@ use egui::Ui;
 use egui::Visuals;
 use itertools::Itertools;
 use rust_i18n::t;
-use wows_replay_insights::battle_impact::BattleImpactResult;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingLine;
 use wows_toolkit_viewmodel::rating_breakdown::basis_badge;
@@ -60,15 +60,20 @@ pub fn personal_rating_chip(ui: &mut Ui, result: &PersonalRatingResult, value: &
     response
 }
 
-/// A BI chip whose hover draws the rating's breakdown.
-pub fn battle_impact_chip(ui: &mut Ui, result: &BattleImpactResult, value: &str, hover: RatingHover) -> Response {
+/// An MC chip whose hover draws the rating's breakdown.
+pub fn match_contribution_chip(
+    ui: &mut Ui,
+    result: &MatchContributionResult,
+    value: &str,
+    hover: RatingHover,
+) -> Response {
     let response = pr_chip(ui, result.category, value, false);
     if hover == RatingHover::BandOnly {
         return response.on_hover_text(result.category.name());
     }
 
     egui::Tooltip::for_enabled(&response).show(|ui| {
-        rating_breakdown(ui, &RatingBreakdown::battle_impact(result, Some(&wows_toolkit_viewmodel::locale())));
+        rating_breakdown(ui, &RatingBreakdown::match_contribution(result, Some(&wows_toolkit_viewmodel::locale())));
     });
 
     response
@@ -212,7 +217,7 @@ pub fn twitch_chip(ui: &mut Ui, candidates: &[SniperCandidate]) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use wows_replay_insights::battle_impact::FactorBasis;
+    use wows_replay_insights::match_contribution::FactorBasis;
     use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
 
     use super::*;
@@ -224,7 +229,7 @@ mod tests {
         const TRACK_WIDTH: f32 = 140.0;
 
         let breakdown = RatingBreakdown {
-            kind: RatingKind::BattleImpact,
+            kind: RatingKind::MatchContribution,
             total: 500.0,
             category: PersonalRatingCategory::Average,
             lines: vec![

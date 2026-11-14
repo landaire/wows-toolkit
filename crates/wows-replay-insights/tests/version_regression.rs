@@ -15,7 +15,7 @@
 //! `HashMap` serialization order does not matter).
 //!
 //! Goldens are captured snapshots. To (re)generate them after a deliberate
-//! builder or battle impact change, run with the game data present:
+//! builder or match contribution change, run with the game data present:
 //!   bin/buck2 test //crates/wows-replay-insights:version_regression_test \
 //!     -c wows.game_data=/path/to/game_data -- --env REGEN_GOLDENS=1
 //! which overwrites `tests/fixtures/normalized/<version_label>.json` for every
@@ -232,7 +232,7 @@ fn run_entry(entry: &Entry) {
     let report = build_report(&loaded);
     let mut normalized =
         NormalizedBattleReport::from_battle_report(&report, &loaded.replay.meta, loaded.provider, &loaded.constants);
-    normalized.populate_battle_impact(&expected_values());
+    normalized.populate_match_contribution(&expected_values());
 
     assert_structural_invariants(entry, &report, &normalized);
     assert_translations_are_rebuilt(&report, &normalized, loaded.provider, &loaded.version);
@@ -297,7 +297,8 @@ fn assert_translations_are_rebuilt(
             ribbon.description = Some(SCRIBBLE.to_string());
         }
 
-        let bursts = scribbled.battle_impact.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
+        let bursts =
+            scribbled.match_contribution.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
         for burst in bursts {
             burst.victim_ship_name = Some(SCRIBBLE.to_string());
         }
@@ -313,7 +314,7 @@ fn assert_translations_are_rebuilt(
         let ribbons: Vec<&str> = scribbled.ribbons.iter().map(|r| r.display_name.as_str()).collect();
         let expected: Vec<&str> = original.ribbons.iter().map(|r| r.display_name.as_str()).collect();
         assert_eq!(ribbons, expected, "every ribbon is named again");
-        assert_eq!(scribbled.battle_impact, original.battle_impact, "every burst victim is named again");
+        assert_eq!(scribbled.match_contribution, original.match_contribution, "every burst victim is named again");
     }
 }
 
@@ -359,7 +360,7 @@ fn sort_keys(value: &mut serde_json::Value) {
     }
 }
 
-/// The wows-numbers expected values the goldens' battle impact is rated with.
+/// The wows-numbers expected values the goldens' match contribution is rated with.
 fn expected_values() -> PersonalRatingData {
     let bytes = std::fs::read(fixtures_dir().join("pr_expected_values.json")).expect("expected values fixture");
     let mut table = PersonalRatingData::new();
@@ -431,8 +432,8 @@ fn assert_early_exit_rates_nobody(normalized: &NormalizedBattleReport) {
     let mut left_early = normalized.clone();
     left_early.metadata.battle_result = None;
 
-    left_early.populate_battle_impact(&expected_values());
+    left_early.populate_match_contribution(&expected_values());
 
-    assert!(left_early.players.iter().all(|player| player.battle_impact.is_none()));
-    assert!(left_early.battle_impact_version.is_some());
+    assert!(left_early.players.iter().all(|player| player.match_contribution.is_none()));
+    assert!(left_early.match_contribution_version.is_some());
 }

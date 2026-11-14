@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
-use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::GameParamId;
+use wows_core::game_types::MatchContributionVersion;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::IndexWriteMode;
@@ -84,9 +84,9 @@ fn sample_vehicle(arena: i64) -> IndexedVehicleRow {
         disconnected: Some(false),
         is_stream_sniper: None,
         sniper_twitch_login: None,
-        bi: None,
-        bi_version: None,
-        bi_torpedoes_observed: false,
+        mc: None,
+        mc_version: None,
+        mc_torpedoes_observed: false,
     }
 }
 
@@ -1029,22 +1029,22 @@ async fn forget_source_leaves_shared_match_and_vehicle_rows_intact() {
     assert_eq!(vehicle_count.0, 1, "indexed_vehicle is shared across sources and must survive forget_source");
 }
 
-/// A roster row's stored BI, the formula revision it came from, and whether it
+/// A roster row's stored MC, the formula revision it came from, and whether it
 /// includes the torpedo warning part.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct StoredBi {
-    bi: Option<f64>,
-    version: Option<BattleImpactVersion>,
+    mc: Option<f64>,
+    version: Option<MatchContributionVersion>,
     torpedoes_observed: bool,
 }
 
-fn stored_bi(bi: Option<f64>, version: Option<u32>) -> StoredBi {
-    StoredBi { bi, version: version.map(BattleImpactVersion), torpedoes_observed: false }
+fn stored_mc(mc: Option<f64>, version: Option<u32>) -> StoredBi {
+    StoredBi { mc, version: version.map(MatchContributionVersion), torpedoes_observed: false }
 }
 
-/// A BI rated from a replay of the player's own team.
-fn observed_bi(bi: f64, version: u32) -> StoredBi {
-    StoredBi { bi: Some(bi), version: Some(BattleImpactVersion(version)), torpedoes_observed: true }
+/// An MC rated from a replay of the player's own team.
+fn observed_mc(mc: f64, version: u32) -> StoredBi {
+    StoredBi { mc: Some(mc), version: Some(MatchContributionVersion(version)), torpedoes_observed: true }
 }
 
 /// The two write paths that merge a pass's roster row into a stored one.
@@ -1062,22 +1062,22 @@ struct MergeCase {
 }
 
 /// Stores `case.stored` as an earlier pass left it, writes `case.incoming` over
-/// it incrementally through `write`, and reads the merged BI back.
-async fn bi_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWrite) -> StoredBi {
+/// it incrementally through `write`, and reads the merged MC back.
+async fn mc_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWrite) -> StoredBi {
     let pool = mem_pool().await;
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();
     let earlier = IndexedVehicleRow {
-        bi: case.stored.bi,
-        bi_version: case.stored.version,
-        bi_torpedoes_observed: case.stored.torpedoes_observed,
+        mc: case.stored.mc,
+        mc_version: case.stored.version,
+        mc_torpedoes_observed: case.stored.torpedoes_observed,
         ..sample_vehicle(100)
     };
     query::upsert_vehicles_with_mode(&pool, &[earlier], IndexWriteMode::Replace, ResultsWrite::Store).await.unwrap();
 
     let later = IndexedVehicleRow {
-        bi: case.incoming.bi,
-        bi_version: case.incoming.version,
-        bi_torpedoes_observed: case.incoming.torpedoes_observed,
+        mc: case.incoming.mc,
+        mc_version: case.incoming.version,
+        mc_torpedoes_observed: case.incoming.torpedoes_observed,
         ..sample_vehicle(100)
     };
     match write {
@@ -1087,134 +1087,134 @@ async fn bi_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWr
         RosterWrite::Replay => write_corrected(&pool, later, IndexWriteMode::Incremental, results).await,
     }
 
-    let row = sqlx::query("SELECT bi, bi_version, bi_torpedoes_observed FROM indexed_vehicle WHERE arena_id = 100")
+    let row = sqlx::query("SELECT mc, mc_version, mc_torpedoes_observed FROM indexed_vehicle WHERE arena_id = 100")
         .fetch_one(&pool)
         .await
         .unwrap();
-    let version: Option<i64> = row.get("bi_version");
+    let version: Option<i64> = row.get("mc_version");
     StoredBi {
-        bi: row.get("bi"),
-        version: version.map(|version| BattleImpactVersion(u32::try_from(version).unwrap())),
-        torpedoes_observed: row.get("bi_torpedoes_observed"),
+        mc: row.get("mc"),
+        version: version.map(|version| MatchContributionVersion(u32::try_from(version).unwrap())),
+        torpedoes_observed: row.get("mc_torpedoes_observed"),
     }
 }
 
-async fn assert_bi_merges(cases: &[MergeCase], results: ResultsWrite) {
+async fn assert_mc_merges(cases: &[MergeCase], results: ResultsWrite) {
     for write in [RosterWrite::Upsert, RosterWrite::Replay] {
         for case in cases {
-            assert_eq!(bi_after_merge(write, case, results).await, case.expected, "{} via {write:?}", case.name);
+            assert_eq!(mc_after_merge(write, case, results).await, case.expected, "{} via {write:?}", case.name);
         }
     }
 }
 
 #[tokio::test]
-async fn a_trusted_incremental_write_replaces_only_a_missing_older_or_partial_bi() {
+async fn a_trusted_incremental_write_replaces_only_a_missing_older_or_partial_mc() {
     let cases = [
         MergeCase {
             name: "same revision",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: stored_bi(Some(1500.0), Some(1)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: stored_mc(Some(1500.0), Some(1)),
         },
         MergeCase {
             name: "older revision",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(Some(900.0), Some(2)),
-            expected: stored_bi(Some(900.0), Some(2)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(Some(900.0), Some(2)),
+            expected: stored_mc(Some(900.0), Some(2)),
         },
         MergeCase {
             name: "newer stored revision",
-            stored: stored_bi(Some(1500.0), Some(2)),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: stored_bi(Some(1500.0), Some(2)),
+            stored: stored_mc(Some(1500.0), Some(2)),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: stored_mc(Some(1500.0), Some(2)),
         },
         MergeCase {
             name: "unrated at the same revision",
-            stored: stored_bi(None, Some(1)),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: stored_bi(Some(900.0), Some(1)),
+            stored: stored_mc(None, Some(1)),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: stored_mc(Some(900.0), Some(1)),
         },
         MergeCase {
             name: "never computed",
-            stored: stored_bi(None, None),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: stored_bi(Some(900.0), Some(1)),
+            stored: stored_mc(None, None),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: stored_mc(Some(900.0), Some(1)),
         },
         MergeCase {
             name: "pass without expected values",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(None, None),
-            expected: stored_bi(Some(1500.0), Some(1)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(None, None),
+            expected: stored_mc(Some(1500.0), Some(1)),
         },
         MergeCase {
             name: "same revision, only the pass observed torpedo warnings",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: observed_bi(900.0, 1),
-            expected: observed_bi(900.0, 1),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: observed_mc(900.0, 1),
+            expected: observed_mc(900.0, 1),
         },
         MergeCase {
             name: "same revision, both observed torpedo warnings",
-            stored: observed_bi(1500.0, 1),
-            incoming: observed_bi(900.0, 1),
-            expected: observed_bi(1500.0, 1),
+            stored: observed_mc(1500.0, 1),
+            incoming: observed_mc(900.0, 1),
+            expected: observed_mc(1500.0, 1),
         },
         MergeCase {
             name: "same revision, only the stored row observed torpedo warnings",
-            stored: observed_bi(1500.0, 1),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: observed_bi(1500.0, 1),
+            stored: observed_mc(1500.0, 1),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: observed_mc(1500.0, 1),
         },
     ];
-    assert_bi_merges(&cases, ResultsWrite::Store).await;
+    assert_mc_merges(&cases, ResultsWrite::Store).await;
 }
 
 #[tokio::test]
-async fn an_untrusted_write_fills_only_a_missing_bi_and_takes_its_revision() {
+async fn an_untrusted_write_fills_only_a_missing_mc_and_takes_its_revision() {
     let cases = [
         MergeCase {
             name: "never computed",
-            stored: stored_bi(None, None),
-            incoming: stored_bi(Some(900.0), Some(1)),
-            expected: stored_bi(Some(900.0), Some(1)),
+            stored: stored_mc(None, None),
+            incoming: stored_mc(Some(900.0), Some(1)),
+            expected: stored_mc(Some(900.0), Some(1)),
         },
         MergeCase {
             name: "older revision with results suppressed",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(None, Some(2)),
-            expected: stored_bi(Some(1500.0), Some(2)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(None, Some(2)),
+            expected: stored_mc(Some(1500.0), Some(2)),
         },
         MergeCase {
             name: "older revision with a value",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(Some(900.0), Some(2)),
-            expected: stored_bi(Some(1500.0), Some(2)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(Some(900.0), Some(2)),
+            expected: stored_mc(Some(1500.0), Some(2)),
         },
         MergeCase {
             name: "pass without expected values",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: stored_bi(None, None),
-            expected: stored_bi(Some(1500.0), Some(1)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: stored_mc(None, None),
+            expected: stored_mc(Some(1500.0), Some(1)),
         },
         MergeCase {
             name: "never computed, pass observed torpedo warnings",
-            stored: stored_bi(None, None),
-            incoming: observed_bi(900.0, 1),
-            expected: observed_bi(900.0, 1),
+            stored: stored_mc(None, None),
+            incoming: observed_mc(900.0, 1),
+            expected: observed_mc(900.0, 1),
         },
         MergeCase {
             name: "stored value keeps its unobserved torpedo warnings",
-            stored: stored_bi(Some(1500.0), Some(1)),
-            incoming: observed_bi(900.0, 2),
-            expected: stored_bi(Some(1500.0), Some(2)),
+            stored: stored_mc(Some(1500.0), Some(1)),
+            incoming: observed_mc(900.0, 2),
+            expected: stored_mc(Some(1500.0), Some(2)),
         },
         MergeCase {
             name: "stored value keeps its observed torpedo warnings",
-            stored: observed_bi(1500.0, 1),
-            incoming: stored_bi(None, Some(2)),
-            expected: observed_bi(1500.0, 2),
+            stored: observed_mc(1500.0, 1),
+            incoming: stored_mc(None, Some(2)),
+            expected: observed_mc(1500.0, 2),
         },
     ];
-    assert_bi_merges(&cases, ResultsWrite::Keep).await;
+    assert_mc_merges(&cases, ResultsWrite::Keep).await;
 }
 
 async fn store_rated_replay(
@@ -1222,18 +1222,18 @@ async fn store_rated_replay(
     source: SourceId,
     arena: i64,
     path: &str,
-    version: Option<BattleImpactVersion>,
+    version: Option<MatchContributionVersion>,
 ) {
     query::upsert_match(pool, &sample_match(arena)).await.unwrap();
     query::upsert_record(pool, &sample_record(arena, source, path)).await.unwrap();
-    let vehicle = IndexedVehicleRow { bi: version.map(|_| 1500.0), bi_version: version, ..sample_vehicle(arena) };
+    let vehicle = IndexedVehicleRow { mc: version.map(|_| 1500.0), mc_version: version, ..sample_vehicle(arena) };
     query::upsert_vehicles(pool, &[vehicle]).await.unwrap();
 }
 
 #[tokio::test]
-async fn bi_from_another_revision_makes_a_record_stale_only_for_a_pass_that_can_rate() {
-    const RATED: BattleImpactVersion = BattleImpactVersion(1);
-    const NEWER: BattleImpactVersion = BattleImpactVersion(2);
+async fn mc_from_another_revision_makes_a_record_stale_only_for_a_pass_that_can_rate() {
+    const RATED: MatchContributionVersion = MatchContributionVersion(1);
+    const NEWER: MatchContributionVersion = MatchContributionVersion(2);
     const RATED_PATH: &str = "C:/wows/replays/rated.wowsreplay";
     const UNRATED_PATH: &str = "C:/wows/replays/unrated.wowsreplay";
     const ELSEWHERE_PATH: &str = "D:/old/replays/elsewhere.wowsreplay";
@@ -1245,19 +1245,19 @@ async fn bi_from_another_revision_makes_a_record_stale_only_for_a_pass_that_can_
     store_rated_replay(&pool, source, 100, RATED_PATH, Some(RATED)).await;
     store_rated_replay(&pool, source, 200, UNRATED_PATH, None).await;
     store_rated_replay(&pool, source, 300, ELSEWHERE_PATH, Some(RATED)).await;
-    let bot = IndexedVehicleRow { account_id: AccountId::from(0), bi: None, bi_version: None, ..sample_vehicle(100) };
+    let bot = IndexedVehicleRow { account_id: AccountId::from(0), mc: None, mc_version: None, ..sample_vehicle(100) };
     query::upsert_vehicles(&pool, &[bot]).await.unwrap();
 
     let without_table = query::record_paths_in_source(&pool, source, None).await.unwrap();
-    assert!(without_table.contains(UNRATED_PATH), "a pass that cannot rate does not reparse for BI");
+    assert!(without_table.contains(UNRATED_PATH), "a pass that cannot rate does not reparse for MC");
     assert!(!query::has_stale_replay_records(&pool, root, None).await.unwrap());
 
     let at_rated = query::record_paths_in_source(&pool, source, Some(RATED)).await.unwrap();
-    assert!(at_rated.contains(RATED_PATH), "BI from the pass's revision is current, and the bot row is skipped");
+    assert!(at_rated.contains(RATED_PATH), "MC from the pass's revision is current, and the bot row is skipped");
     assert!(!at_rated.contains(UNRATED_PATH), "a roster row never rated is reparsed");
 
     let at_newer = query::record_paths_in_source(&pool, source, Some(NEWER)).await.unwrap();
-    assert!(!at_newer.contains(RATED_PATH), "BI from an older revision is reparsed");
+    assert!(!at_newer.contains(RATED_PATH), "MC from an older revision is reparsed");
     assert!(query::has_stale_replay_records(&pool, root, Some(NEWER)).await.unwrap());
 
     query::mark_replay_records_current(&pool, source, root, Some(NEWER)).await.unwrap();
@@ -1268,9 +1268,9 @@ async fn bi_from_another_revision_makes_a_record_stale_only_for_a_pass_that_can_
     assert!(!marked.contains(ELSEWHERE_PATH), "a directory that was not scanned stays stale");
 
     let kept: Option<f64> =
-        sqlx::query_scalar("SELECT bi FROM indexed_vehicle WHERE arena_id = 100 AND account_id = 7")
+        sqlx::query_scalar("SELECT mc FROM indexed_vehicle WHERE arena_id = 100 AND account_id = 7")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(kept, Some(1500.0), "marking stamps the revision and keeps the stored BI");
+    assert_eq!(kept, Some(1500.0), "marking stamps the revision and keeps the stored MC");
 }

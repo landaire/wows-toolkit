@@ -16,8 +16,8 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Compare dispersion with and without one named build item at a fixed 12 km default
 - *(wows-query)* Resolve PvO as Prins van Oranje
 - *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
-- *(insights)* Rate each player's battle impact (BI) on the PR scale and store it, with its formula version, in the replay index. It weighs damage and kills against expected values, the share of the team's damage, fire drawn against class peers and the team, spotting, objectives, anti-air, torpedo warnings and critical bursts that remove half an enemy's hit points within 10 s
-- *(toolkit)* Show BI beside PR in the replay table, search results and stats, and break either rating into its parts on hover, each part marked static (a fixed expectation) or dynamic (expected values or this battle's players)
+- *(insights)* Rate each player's match contribution (MC) on the PR scale and store it, with its formula version, in the replay index. It weighs damage and kills against expected values, the share of the team's damage, fire drawn against class peers and the team, spotting, objectives, anti-air, torpedo warnings and critical bursts that remove half an enemy's hit points within 10 s
+- *(toolkit)* Show MC beside PR in the replay table, search results and stats, and break either rating into its parts on hover, each part marked static (a fixed expectation) or dynamic (expected values or this battle's players)
 
 ### Bug Fixes
 

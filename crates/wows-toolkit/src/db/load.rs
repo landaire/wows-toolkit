@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
@@ -236,10 +236,10 @@ async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), 
             achievements,
             // A rating from another formula revision would sit beside current
             // ones as if comparable; it reads as unrated until re-recorded.
-            battle_impact: row
-                .battle_impact
-                .filter(|_| row.battle_impact_version == Some(i64::from(BattleImpactVersion::CURRENT.0)))
-                .map(|bi| bi.round() as i64),
+            match_contribution: row
+                .match_contribution
+                .filter(|_| row.match_contribution_version == Some(i64::from(MatchContributionVersion::CURRENT.0)))
+                .map(|mc| mc.round() as i64),
         });
     }
 
@@ -671,15 +671,15 @@ mod tests {
         });
     }
 
-    /// The periodic save rewrites the whole table, so a game's BI has to be
+    /// The periodic save rewrites the whole table, so a game's MC has to be
     /// in what it writes for the next launch to read it back.
     #[test]
-    fn a_saved_session_game_keeps_its_battle_impact() {
+    fn a_saved_session_game_keeps_its_match_contribution() {
         let runtime = runtime();
         let directory = tempfile::tempdir().expect("a temporary directory");
         let db_path = directory.path().join("session.db");
 
-        let game = |game_time: &str, battle_impact: Option<i64>| PerGameStat {
+        let game = |game_time: &str, match_contribution: Option<i64>| PerGameStat {
             ship_name: "Vermont".to_owned(),
             ship_id: 1u64.into(),
             game_time: game_time.to_owned(),
@@ -696,7 +696,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_owned(),
             achievements: Vec::new(),
-            battle_impact,
+            match_contribution,
         };
         let saved = TabState::default();
         saved.persisted.write().session_stats.games =
@@ -711,7 +711,7 @@ mod tests {
         });
 
         let read: Vec<Option<i64>> =
-            loaded.persisted.read().session_stats.games.iter().map(|game| game.battle_impact).collect();
+            loaded.persisted.read().session_stats.games.iter().map(|game| game.match_contribution).collect();
         assert_eq!(read, vec![Some(1432), None]);
     }
 }

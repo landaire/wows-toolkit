@@ -1,4 +1,4 @@
-//! Battle impact (BI): a single-battle rating on the personal-rating scale,
+//! Match contribution (MC): a single-battle rating on the personal-rating scale,
 //! built from the server's end-of-battle results for every player and, for
 //! the recording player's team, from torpedo sightings in the packet stream.
 //!
@@ -11,7 +11,7 @@
 //! 1150 (1138 across the fixture battles) and the PR bands and colors apply.
 //!
 //! Any change here that alters the rating a battle gets must raise
-//! [`BattleImpactVersion::CURRENT`].
+//! [`MatchContributionVersion::CURRENT`].
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -40,7 +40,7 @@ use crate::battle_report::ServerResults;
 use crate::personal_rating::PersonalRatingCategory;
 use crate::personal_rating::PersonalRatingData;
 
-pub use wows_core::game_types::BattleImpactVersion;
+pub use wows_core::game_types::MatchContributionVersion;
 
 /// Points each core part earns for average play, so a front end can show
 /// what pulled a rating up or down.
@@ -92,7 +92,7 @@ const CRITICAL_BURST_POINTS: f64 = 25.0;
 
 /// One part of the rating.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-pub enum BattleImpactFactor {
+pub enum MatchContributionFactor {
     Damage,
     Kills,
     TeamDamageShare,
@@ -104,7 +104,7 @@ pub enum BattleImpactFactor {
     CriticalBursts,
 }
 
-impl BattleImpactFactor {
+impl MatchContributionFactor {
     /// What the part earns for average play: expected damage and kills, an
     /// even share of the team's damage, nothing either way for drawing the
     /// usual fire for the class and team, and spotting at the class baseline.
@@ -157,19 +157,19 @@ pub struct FactorScore {
 }
 
 impl FactorScore {
-    fn new(factor: BattleImpactFactor, points: f64) -> Self {
+    fn new(factor: MatchContributionFactor, points: f64) -> Self {
         Self { points, basis: factor.basis() }
     }
 }
 
-/// One player's battle impact.
+/// One player's match contribution.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct BattleImpactResult {
-    pub bi: f64,
+pub struct MatchContributionResult {
+    pub mc: f64,
     pub category: PersonalRatingCategory,
-    pub version: BattleImpactVersion,
-    pub components: BattleImpactComponents,
-    pub inputs: BattleImpactInputs,
+    pub version: MatchContributionVersion,
+    pub components: MatchContributionComponents,
+    pub inputs: MatchContributionInputs,
     /// `None` for players on a team no perspective of the replay belonged to,
     /// whose torpedo detections the replay does not show.
     pub torpedo_detection: Option<TorpedoDetection>,
@@ -179,7 +179,7 @@ pub struct BattleImpactResult {
     pub critical_bursts: Option<Vec<CriticalBurst>>,
 }
 
-/// Points each part of the rating contributed. They sum to `bi`.
+/// Points each part of the rating contributed. They sum to `mc`.
 ///
 /// A contribution is `None` where its input is not observable: a build whose
 /// results lack the keys, torpedo detections by a team the replay was not
@@ -187,7 +187,7 @@ pub struct BattleImpactResult {
 /// optional bonus only ever adds, so a missing one leaves the rest of the
 /// rating meaningful.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub struct BattleImpactComponents {
+pub struct MatchContributionComponents {
     pub damage: FactorScore,
     pub kills: FactorScore,
     pub team_damage_share: Option<FactorScore>,
@@ -201,19 +201,19 @@ pub struct BattleImpactComponents {
     pub critical_bursts: Option<FactorScore>,
 }
 
-impl BattleImpactComponents {
+impl MatchContributionComponents {
     /// Every present part with its factor.
-    pub fn scores(&self) -> impl Iterator<Item = (BattleImpactFactor, FactorScore)> {
+    pub fn scores(&self) -> impl Iterator<Item = (MatchContributionFactor, FactorScore)> {
         [
-            (BattleImpactFactor::Damage, Some(self.damage)),
-            (BattleImpactFactor::Kills, Some(self.kills)),
-            (BattleImpactFactor::TeamDamageShare, self.team_damage_share),
-            (BattleImpactFactor::Tanking, self.tanking),
-            (BattleImpactFactor::Spotting, self.spotting),
-            (BattleImpactFactor::Objectives, self.objectives),
-            (BattleImpactFactor::AntiAir, self.anti_air),
-            (BattleImpactFactor::TorpedoWarnings, self.torpedo_warnings),
-            (BattleImpactFactor::CriticalBursts, self.critical_bursts),
+            (MatchContributionFactor::Damage, Some(self.damage)),
+            (MatchContributionFactor::Kills, Some(self.kills)),
+            (MatchContributionFactor::TeamDamageShare, self.team_damage_share),
+            (MatchContributionFactor::Tanking, self.tanking),
+            (MatchContributionFactor::Spotting, self.spotting),
+            (MatchContributionFactor::Objectives, self.objectives),
+            (MatchContributionFactor::AntiAir, self.anti_air),
+            (MatchContributionFactor::TorpedoWarnings, self.torpedo_warnings),
+            (MatchContributionFactor::CriticalBursts, self.critical_bursts),
         ]
         .into_iter()
         .filter_map(|(factor, score)| Some((factor, score?)))
@@ -226,7 +226,7 @@ impl BattleImpactComponents {
 
 /// What the rating was computed from, for showing beside each part.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub struct BattleImpactInputs {
+pub struct MatchContributionInputs {
     /// Damage dealt, with damage to destroyers and submarines weighted up.
     pub weighted_damage: f64,
     /// wows-numbers average damage for the ship.
@@ -592,7 +592,7 @@ pub fn rate_battle(
     table: &PersonalRatingData,
     torpedoes: &TorpedoDetections,
     bursts: Option<&CriticalBursts>,
-) -> Vec<Option<BattleImpactResult>> {
+) -> Vec<Option<MatchContributionResult>> {
     let context = BattleContext::new(players);
 
     players.iter().map(|player| rate_player(player, &context, table, torpedoes, bursts)).collect()
@@ -731,7 +731,7 @@ fn rate_player(
     table: &PersonalRatingData,
     torpedoes: &TorpedoDetections,
     bursts: Option<&CriticalBursts>,
-) -> Option<BattleImpactResult> {
+) -> Option<MatchContributionResult> {
     let results = player.server_results.as_ref()?;
     let damage = results.damage? as f64;
     let kills = results.kills? as f64;
@@ -773,20 +773,21 @@ fn rate_player(
     let critical_burst_points = critical_bursts.as_ref().map(|bursts| CRITICAL_BURST_POINTS * bursts.len() as f64);
 
     let score = FactorScore::new;
-    let components = BattleImpactComponents {
-        damage: score(BattleImpactFactor::Damage, damage_points),
-        kills: score(BattleImpactFactor::Kills, kill_points),
-        team_damage_share: team_damage_share.map(|share| score(BattleImpactFactor::TeamDamageShare, share.points())),
-        tanking: tanking_points.map(|points| score(BattleImpactFactor::Tanking, points)),
-        spotting: spotting.map(|points| score(BattleImpactFactor::Spotting, points)),
-        objectives: objectives.map(|points| score(BattleImpactFactor::Objectives, points)),
-        anti_air: anti_air.map(|points| score(BattleImpactFactor::AntiAir, points)),
-        torpedo_warnings: torpedo_warnings.map(|points| score(BattleImpactFactor::TorpedoWarnings, points)),
-        critical_bursts: critical_burst_points.map(|points| score(BattleImpactFactor::CriticalBursts, points)),
+    let components = MatchContributionComponents {
+        damage: score(MatchContributionFactor::Damage, damage_points),
+        kills: score(MatchContributionFactor::Kills, kill_points),
+        team_damage_share: team_damage_share
+            .map(|share| score(MatchContributionFactor::TeamDamageShare, share.points())),
+        tanking: tanking_points.map(|points| score(MatchContributionFactor::Tanking, points)),
+        spotting: spotting.map(|points| score(MatchContributionFactor::Spotting, points)),
+        objectives: objectives.map(|points| score(MatchContributionFactor::Objectives, points)),
+        anti_air: anti_air.map(|points| score(MatchContributionFactor::AntiAir, points)),
+        torpedo_warnings: torpedo_warnings.map(|points| score(MatchContributionFactor::TorpedoWarnings, points)),
+        critical_bursts: critical_burst_points.map(|points| score(MatchContributionFactor::CriticalBursts, points)),
     };
-    let bi = components.total();
+    let mc = components.total();
 
-    let inputs = BattleImpactInputs {
+    let inputs = MatchContributionInputs {
         weighted_damage,
         expected_damage: expected.average_damage_dealt,
         kills,
@@ -803,10 +804,10 @@ fn rate_player(
         anti_air_damage: results.anti_air_damage,
     };
 
-    Some(BattleImpactResult {
-        bi,
-        category: PersonalRatingCategory::from_pr(bi),
-        version: BattleImpactVersion::CURRENT,
+    Some(MatchContributionResult {
+        mc,
+        category: PersonalRatingCategory::from_pr(mc),
+        version: MatchContributionVersion::CURRENT,
         components,
         inputs,
         torpedo_detection,

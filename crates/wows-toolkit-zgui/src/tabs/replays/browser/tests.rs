@@ -829,8 +829,8 @@ fn summary(outcome: MatchOutcome, rating_scope: RatingScope, self_pr: Option<f64
         self_survived: Some(true),
         self_pr,
         rating_scope,
-        // Rated battles in these tests also reached their end, so carry a battle impact.
-        self_bi: self_pr.map(|pr| pr - 200.0),
+        // Rated battles in these tests also reached their end, so carry a match contribution.
+        self_mc: self_pr.map(|pr| pr - 200.0),
         division_id: None,
         division_mates: Vec::new(),
         results_available: true,
@@ -868,14 +868,14 @@ fn a_rated_row_carries_its_rating_and_outcome() {
         panic!("the index rated the battle: {:?}", rated.personal_rating);
     };
     assert_eq!(format!("{:.0}", rating.pr), "1650");
-    assert_eq!(rated.battle_impact.map(|bi| format!("{bi:.0}")).as_deref(), Some("1450"));
+    assert_eq!(rated.match_contribution.map(|mc| format!("{mc:.0}")).as_deref(), Some("1450"));
     assert_eq!(rated.outcome, MatchOutcome::Win);
     let missing = tree.leaf(&missing).expect("the replay is listed");
     assert!(missing.personal_rating.is_none(), "a battle the index has not rated has no chip");
     assert_eq!(missing.outcome, MatchOutcome::Unknown);
     let unrated = tree.leaf(&unrated).expect("the replay is listed");
     assert_eq!(unrated.personal_rating, Some(BattleRating::Unrated), "an unrated battle says so");
-    assert!(unrated.battle_impact.is_none(), "an unrated battle has no BI chip");
+    assert!(unrated.match_contribution.is_none(), "an unrated battle has no MC chip");
 }
 
 #[test]

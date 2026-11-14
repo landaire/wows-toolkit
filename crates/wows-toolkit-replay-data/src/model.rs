@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use wows_core::pseudonym;
-use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::ConsumableResult;
@@ -32,6 +31,7 @@ use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedBuild;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replay_insights::personal_rating::rate_single_battle;
@@ -203,11 +203,11 @@ pub struct PlayerRow {
     /// kept per row so a cell renders from the row alone.
     pub rating_scope: RatingScope,
 
-    /// Battle impact, rated with the whole battle when the replay is parsed.
+    /// Match contribution, rated with the whole battle when the replay is parsed.
     /// `None` when no expected values were loaded then, or when the
     /// recording ended before the battle did. Unlike PR it cannot be filled
     /// in later from the row alone.
-    pub battle_impact: Option<BattleImpactResult>,
+    pub match_contribution: Option<MatchContributionResult>,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
     /// items' target URL, ported from `util::build_ship_config_url`. `None`
@@ -404,10 +404,10 @@ pub struct ReplayReportModel {
     pub self_team: TeamId,
     pub rows: Vec<PlayerRow>,
     pub battle_result: Option<BattleResult>,
-    /// BI was rated for this replay and withheld from everyone because the
-    /// recording ended before the battle did. False when BI was never
-    /// attempted, which a missing BI alone cannot tell apart.
-    pub battle_impact_withheld: bool,
+    /// MC was rated for this replay and withheld from everyone because the
+    /// recording ended before the battle did. False when MC was never
+    /// attempted, which a missing MC alone cannot tell apart.
+    pub match_contribution_withheld: bool,
     pub columns: Vec<ReplayColumn>,
     /// Translated map name (`NormalizedBattleReport::metadata.map`), used by
     /// the per-replay dock panel's tab title ("{ship} - {map}").
@@ -549,7 +549,7 @@ impl ReplayReportModel {
             self_team,
             rows,
             battle_result: normalized.metadata.resolved_battle_result(),
-            battle_impact_withheld: normalized.battle_impact_version.is_some()
+            match_contribution_withheld: normalized.match_contribution_version.is_some()
                 && normalized.metadata.battle_result.is_none(),
             columns: ReplayColumn::ALL.to_vec(),
             map: normalized.metadata.map.clone(),
@@ -931,7 +931,7 @@ impl PlayerRow {
             // field doc and `ReplayReportModel::populate_personal_ratings`.
             personal_rating: np.personal_rating.clone(),
             rating_scope,
-            battle_impact: np.battle_impact.clone(),
+            match_contribution: np.match_contribution.clone(),
             // Needs the raw `Player`, which `NormalizedPlayer` does not
             // carry; see the field docs and `populate_action_links`.
             ship_config_url: None,
@@ -1104,7 +1104,7 @@ mod tests {
                 },
             ],
             battle_result: None,
-            battle_impact_withheld: false,
+            match_contribution_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
@@ -1145,7 +1145,7 @@ mod tests {
                 },
             ],
             battle_result: None,
-            battle_impact_withheld: false,
+            match_contribution_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
@@ -1251,7 +1251,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![row],
             battle_result: Some(BattleResult::Win(0)),
-            battle_impact_withheld: false,
+            match_contribution_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),

@@ -101,7 +101,7 @@ use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
-use wows_toolkit_viewmodel::stats::BiStats;
+use wows_toolkit_viewmodel::stats::McStats;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
@@ -146,8 +146,8 @@ struct LeafInfo {
     hover: Rc<Vec<HoverFact>>,
     /// The recording player's rating in this battle, as the index scored it.
     personal_rating: Option<PersonalRatingResult>,
-    /// The recording player's battle impact, as the index scored it.
-    battle_impact: Option<f64>,
+    /// The recording player's match contribution, as the index scored it.
+    match_contribution: Option<f64>,
 }
 
 /// Writes `paths` to the clipboard, one per line.
@@ -1619,7 +1619,7 @@ fn node_to_tree_item(
             let under = vec![path.clone()];
             let summary = summaries.get(&path);
             let personal_rating = summary.and_then(|summary| summary.self_pr).map(PersonalRatingResult::new);
-            let battle_impact = summary.and_then(|summary| summary.self_bi);
+            let match_contribution = summary.and_then(|summary| summary.self_mc);
             let leaf = LeafInfo {
                 path,
                 map_name,
@@ -1629,7 +1629,7 @@ fn node_to_tree_item(
                 in_division,
                 hover,
                 personal_rating,
-                battle_impact,
+                match_contribution,
             };
             leaf_info.insert(id.clone(), leaf);
             (TreeItem::new(id, label), under)
@@ -1783,7 +1783,7 @@ fn render_browser_item(
             row.child(crate::icons::icon(DIVISION_GLYPH).text_color(gpui_kit::rgb(crate::theme::semantic().division)))
         })
         .when(arrived.is_some(), |row| row.child(new_tag(ix)))
-        .when(leaf.is_some_and(|leaf| leaf.personal_rating.is_some() || leaf.battle_impact.is_some()), |row| {
+        .when(leaf.is_some_and(|leaf| leaf.personal_rating.is_some() || leaf.match_contribution.is_some()), |row| {
             row.child(div().flex_1())
         })
         .when_some(leaf.and_then(|leaf| leaf.personal_rating.as_ref()), |row, rating| {
@@ -1794,12 +1794,12 @@ fn render_browser_item(
                 rating.category,
             ))
         })
-        .when_some(leaf.and_then(|leaf| leaf.battle_impact), |row, bi| {
+        .when_some(leaf.and_then(|leaf| leaf.match_contribution), |row, mc| {
             row.child(rating_chip(
-                ("replay-row-bi", ix),
-                t!("ui.search.column.bi").into_owned(),
-                bi,
-                BiStats::category(bi),
+                ("replay-row-mc", ix),
+                t!("ui.search.column.mc").into_owned(),
+                mc,
+                McStats::category(mc),
             ))
         });
 
@@ -2445,14 +2445,14 @@ mod tests {
         use wows_toolkit_config::index::rows::MatchOutcome;
         use wows_toolkit_config::index::rows::RowSummary;
 
-        let summary = |outcome: MatchOutcome, self_pr: Option<f64>, self_bi: Option<f64>| RowSummary {
+        let summary = |outcome: MatchOutcome, self_pr: Option<f64>, self_mc: Option<f64>| RowSummary {
             outcome,
             self_damage: Some(50_000),
             self_kills: Some(1),
             self_survived: Some(true),
             self_pr,
             rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
-            self_bi,
+            self_mc,
             division_id: None,
             division_mates: Vec::new(),
             results_available: true,
@@ -2480,8 +2480,8 @@ mod tests {
                 let rating = rated.personal_rating.expect("the index rated the battle");
                 assert_eq!(format!("{:.0}", rating.pr), "1650");
                 assert!(unrated.personal_rating.is_none(), "an unrated battle has no chip");
-                assert_eq!(rated.battle_impact, Some(1210.0));
-                assert_eq!(unrated.battle_impact, None, "an unrated battle has no BI chip");
+                assert_eq!(rated.match_contribution, Some(1210.0));
+                assert_eq!(unrated.match_contribution, None, "an unrated battle has no MC chip");
 
                 assert!(super::outcome_color(rated.outcome).is_some(), "a win has an edge");
                 assert!(super::outcome_color(unrated.outcome).is_none(), "an unknown outcome has none");

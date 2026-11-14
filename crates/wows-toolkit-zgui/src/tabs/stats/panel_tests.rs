@@ -22,7 +22,7 @@ use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
-use wows_toolkit_viewmodel::stats::BiStats;
+use wows_toolkit_viewmodel::stats::McStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
@@ -80,7 +80,7 @@ fn game(ship: &str, ship_id: u64, sort_key: &str, damage: u64, frags: i64, win: 
         is_div: false,
         match_group: "pvp".to_owned(),
         achievements: Vec::new(),
-        battle_impact: Some(400 + damage as i64 / 80 + frags * 150),
+        match_contribution: Some(400 + damage as i64 / 80 + frags * 150),
     }
 }
 
@@ -606,15 +606,15 @@ fn a_ship_played_only_in_other_modes_shows_no_record_and_no_rating() {
 }
 
 #[test]
-fn the_overview_shows_each_ships_mean_battle_impact_in_its_band() {
+fn the_overview_shows_each_ships_mean_match_contribution_in_its_band() {
     let Opened { window, .. } = open(Panel::Overview, Drawing::Recorded, Appearance::Dark, None);
 
     let games = evening();
     let yamato: Vec<&PerGameStat> = games.iter().filter(|game| game.ship_id.raw() == YAMATO).collect();
-    let bi = BiStats::from_games(&yamato).expect("the Yamato games carry a battle impact");
-    let band = rating_band_name(BiStats::category(bi.average));
-    assert_eq!(band_of(&window, &format!("stats-overview-bi-{YAMATO}")), Some(band));
-    assert!(window.by_test_id("stats-overview-battle-impact").is_some(), "the summary gives the session's BI");
+    let mc = McStats::from_games(&yamato).expect("the Yamato games carry a match contribution");
+    let band = rating_band_name(McStats::category(mc.average));
+    assert_eq!(band_of(&window, &format!("stats-overview-mc-{YAMATO}")), Some(band));
+    assert!(window.by_test_id("stats-overview-battle-impact").is_some(), "the summary gives the session's MC");
 }
 
 /// Writes `window` to `target/zgui-shots/<name>.png`.

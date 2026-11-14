@@ -33,7 +33,7 @@ use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 use crate::personal_rating::ShipBattleStats;
 use crate::stats::record::RecordBreakdown;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_config::queries::SessionStatRow;
 
 /// One achievement earned, as the session rows store it.
@@ -123,9 +123,9 @@ pub struct PerGameStat {
     pub is_div: bool,
     pub match_group: String,
     pub achievements: Vec<SerializableAchievement>,
-    /// The recording player's battle impact, in whole points. `None` when the
+    /// The recording player's match contribution, in whole points. `None` when the
     /// game was not rated, or was rated by an older formula.
-    pub battle_impact: Option<i64>,
+    pub match_contribution: Option<i64>,
 }
 
 impl PerGameStat {
@@ -208,7 +208,7 @@ impl PerGameStat {
                     })
                 })
                 .collect(),
-            battle_impact: player.battle_impact.as_ref().map(|rating| rating.bi.round() as i64),
+            match_contribution: player.match_contribution.as_ref().map(|rating| rating.mc.round() as i64),
         })
     }
 
@@ -232,8 +232,8 @@ impl PerGameStat {
             is_draw: self.is_draw,
             is_div: self.is_div,
             achievements: serde_json::to_string(&self.achievements).unwrap_or_else(|_| "[]".to_string()),
-            battle_impact: self.battle_impact.map(|bi| bi as f64),
-            battle_impact_version: self.battle_impact.map(|_| i64::from(BattleImpactVersion::CURRENT.0)),
+            match_contribution: self.match_contribution.map(|mc| mc as f64),
+            match_contribution_version: self.match_contribution.map(|_| i64::from(MatchContributionVersion::CURRENT.0)),
         }
     }
 
@@ -262,10 +262,10 @@ impl PerGameStat {
             achievements: serde_json::from_str(&row.achievements).unwrap_or_default(),
             // A rating from another formula revision would sit beside current
             // ones as if comparable; it reads as unrated until re-recorded.
-            battle_impact: row
-                .battle_impact
-                .filter(|_| row.battle_impact_version == Some(i64::from(BattleImpactVersion::CURRENT.0)))
-                .map(|bi| bi.round() as i64),
+            match_contribution: row
+                .match_contribution
+                .filter(|_| row.match_contribution_version == Some(i64::from(MatchContributionVersion::CURRENT.0)))
+                .map(|mc| mc.round() as i64),
         }
     }
 }
@@ -712,14 +712,14 @@ impl PrStats {
     }
 }
 
-/// Battle impact across the games in view: the worst, the best and the mean
+/// Match contribution across the games in view: the worst, the best and the mean
 /// of the rated games.
 ///
-/// Unlike PR, BI is not recomputed from summed totals: it rates one whole
+/// Unlike PR, MC is not recomputed from summed totals: it rates one whole
 /// battle, so the mean of the battles is the session's figure. Ships may be
 /// mixed, since every rating is already against its own ship.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BiStats {
+pub struct McStats {
     pub min: f64,
     pub max: f64,
     pub average: f64,
@@ -727,15 +727,15 @@ pub struct BiStats {
     pub rated_games: usize,
 }
 
-impl BiStats {
+impl McStats {
     /// `None` when no game in `games` was rated.
     pub fn from_games(games: &[&PerGameStat]) -> Option<Self> {
-        Self::from_ratings(games.iter().filter_map(|game| game.battle_impact))
+        Self::from_ratings(games.iter().filter_map(|game| game.match_contribution))
     }
 
     /// `None` when `ratings` is empty.
     pub fn from_ratings(ratings: impl IntoIterator<Item = i64>) -> Option<Self> {
-        let ratings: Vec<f64> = ratings.into_iter().map(|bi| bi as f64).collect();
+        let ratings: Vec<f64> = ratings.into_iter().map(|mc| mc as f64).collect();
         if ratings.is_empty() {
             return None;
         }
@@ -813,7 +813,7 @@ mod tests {
             is_div: div,
             match_group: mode.to_string(),
             achievements: Vec::new(),
-            battle_impact: None,
+            match_contribution: None,
         }
     }
 
@@ -1086,7 +1086,7 @@ mod rating_tests {
             is_div: false,
             match_group: "pvp".into(),
             achievements: Vec::new(),
-            battle_impact: None,
+            match_contribution: None,
         }
     }
 
@@ -1206,7 +1206,7 @@ mod scope_tests {
             match_group: match_group.into(),
             achievements: Vec::new(),
 
-            battle_impact: None,
+            match_contribution: None,
         }
     }
 

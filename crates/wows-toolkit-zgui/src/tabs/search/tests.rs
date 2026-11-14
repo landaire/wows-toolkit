@@ -74,7 +74,7 @@ fn hit(path: &str, outcome: MatchOutcome, map: &str) -> MatchHit {
         self_damage: Some(112_345),
         self_kills: Some(2),
         self_pr: Some(1543.0),
-        self_bi: Some(1288.0),
+        self_mc: Some(1288.0),
         results_available: true,
         replay_path: PathBuf::from(path),
         file_mtime: None,

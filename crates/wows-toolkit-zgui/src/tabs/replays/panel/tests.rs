@@ -62,7 +62,7 @@ use super::apply_result;
 use super::export_extension;
 use super::figures::BI_TILE_ID;
 use super::figures::PR_TILE_ID;
-use super::figures::battle_impact_label;
+use super::figures::match_contribution_label;
 use super::figures::personal_rating_label;
 use super::loaded_from_model;
 use super::write_export;
@@ -70,7 +70,7 @@ use crate::shell::Shell;
 use crate::shell::ShellHarnessProps;
 use crate::tabs::replays::player_table_slot;
 use crate::tabs::replays::table::PlayerDetailCx;
-use crate::tabs::replays::table::tests::sample_battle_impact;
+use crate::tabs::replays::table::tests::sample_match_contribution;
 
 thread_local! {
     /// The battle the next panel built on this thread shows instead of reading its replay.
@@ -94,7 +94,7 @@ fn model_at_expected_values() -> ReplayReportModel {
         self_team: TeamId::from(0i64),
         rows: vec![self_row, enemy],
         battle_result: Some(BattleResult::Win(0)),
-        battle_impact_withheld: false,
+        match_contribution_withheld: false,
         columns: ReplayColumn::ALL.to_vec(),
         map: "Ocean".to_string(),
         chat: Vec::new(),
@@ -286,7 +286,7 @@ fn a_replay_with_no_rating_table_shows_no_pr_badge() {
     let Opened { window } =
         open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
     assert!(window.by_test_id(PR_TILE_ID).is_none());
-    assert!(window.by_test_id(BI_TILE_ID).is_none(), "a battle without a battle impact has no tile");
+    assert!(window.by_test_id(BI_TILE_ID).is_none(), "a battle without a match contribution has no tile");
     assert!(window.by_test_id("replay-damage-tile").is_some(), "the other figures are shown");
 }
 
@@ -315,21 +315,21 @@ fn an_unrated_battle_shows_a_dash_in_place_of_the_pr_badge() {
     assert_eq!(window.texts_by_class("lui-tooltip"), [hover]);
 }
 
-/// The BI tile reads as the self row's battle impact and lists its parts on hover, each marked
+/// The MC tile reads as the self row's match contribution and lists its parts on hover, each marked
 /// static or dynamic, with the marks explained under them.
 #[test]
-fn the_bi_badge_reports_the_self_rows_battle_impact_and_explains_it() {
+fn the_mc_badge_reports_the_self_rows_match_contribution_and_explains_it() {
     let mut model = rated();
-    let battle_impact = sample_battle_impact(1_480.0);
-    let expected = battle_impact_label(&battle_impact);
-    model.rows[0].battle_impact = Some(battle_impact);
+    let match_contribution = sample_match_contribution(1_480.0);
+    let expected = match_contribution_label(&match_contribution);
+    model.rows[0].match_contribution = Some(match_contribution);
     let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
 
-    let tile = window.by_test_id(BI_TILE_ID).expect("the BI tile is shown");
+    let tile = window.by_test_id(BI_TILE_ID).expect("the MC tile is shown");
     assert_eq!(window.a11y(tile).and_then(|state| state.label), Some(expected));
     window.hover(tile).expect("the tile has a box");
     window.advance(Duration::from_millis(800));
-    assert!(window.by_test_id("rating-bi-hover").is_some(), "the hover lists the parts");
+    assert!(window.by_test_id("rating-mc-hover").is_some(), "the hover lists the parts");
 
     let badges = window.texts_by_class("wt-rh__basis");
     assert_eq!(badges, ["Dynamic", "Dynamic", "Dynamic", "Dynamic", "Static"], "largest part first");
@@ -540,7 +540,7 @@ fn the_replay_panel_renders_in_dark_and_light() {
     }
 }
 
-/// A real replay's panel with the PR and BI columns, then each rating's hover open, written to
+/// A real replay's panel with the PR and MC columns, then each rating's hover open, written to
 /// `target/zgui-shots`. Reads the replay named by `WT_SHOT_REPLAY`, the game data dumps under
 /// `WT_SHOT_GAME_DATA` and the expected values in `WT_SHOT_EXPECTED_VALUES`.
 #[test]
@@ -557,7 +557,7 @@ fn a_real_replays_ratings_render_with_their_hovers() {
     let seed = super::loaded_state(parsed, ReplayColumn::ALL.to_vec(), Some(Arc::clone(&table)));
     let self_row = seed.model.get_untracked().rows.iter().find(|row| row.is_self).cloned();
     let self_row = self_row.expect("the replay has a self row");
-    assert!(self_row.battle_impact.is_some(), "the recording reached the battle's end");
+    assert!(self_row.match_contribution.is_some(), "the recording reached the battle's end");
 
     let Opened { mut window } = open(Opening {
         seed: Some(seed),
@@ -574,7 +574,7 @@ fn a_real_replays_ratings_render_with_their_hovers() {
     let line = window.bounds(name).expect("the name has a box");
     let middle = line.origin.y.0 + line.size.height.0 / 2.0;
     for (column, shot) in
-        [(ReplayColumn::BattleImpact, "replay-bi-hover"), (ReplayColumn::PersonalRating, "replay-pr-hover")]
+        [(ReplayColumn::MatchContribution, "replay-mc-hover"), (ReplayColumn::PersonalRating, "replay-pr-hover")]
     {
         let cell = window
             .all_by_attribute("data-column", column.storage_key())
@@ -592,10 +592,10 @@ fn a_real_replays_ratings_render_with_their_hovers() {
         window.advance(Duration::from_millis(400));
     }
 
-    let tile = window.by_test_id(BI_TILE_ID).expect("the BI tile is shown");
+    let tile = window.by_test_id(BI_TILE_ID).expect("the MC tile is shown");
     window.hover(tile).expect("the tile has a box");
     window.advance(Duration::from_millis(900));
-    println!("{}", crate::interaction_tests::save_shot(&mut window, "replay-bi-tile-hover").display());
+    println!("{}", crate::interaction_tests::save_shot(&mut window, "replay-mc-tile-hover").display());
 }
 
 /// Lands a read, asked for with `cause`, that failed on the recording it had on trial.

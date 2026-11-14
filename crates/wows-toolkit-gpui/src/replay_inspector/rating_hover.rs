@@ -1,4 +1,4 @@
-//! The hover beside a PR or BI: the rating in its band's colour over one row
+//! The hover beside a PR or MC: the rating in its band's colour over one row
 //! per part, largest first, each with its points, a bar on one scale for the
 //! whole rating, a tick where average play would reach, and its inputs.
 
@@ -10,7 +10,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use wows_replay_insights::battle_impact::BattleImpactResult;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_toolkit_replay_data::columns::ColorRole;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
@@ -36,7 +36,7 @@ const ROW_HEIGHT: Pixels = px(18.);
 /// opens.
 pub enum RatedFigure {
     Personal(PersonalRatingResult),
-    BattleImpact(Box<BattleImpactResult>),
+    MatchContribution(Box<MatchContributionResult>),
 }
 
 impl RatedFigure {
@@ -49,7 +49,7 @@ impl RatedFigure {
         let locale = wows_toolkit_viewmodel::locale();
         match self {
             Self::Personal(result) => RatingBreakdown::personal_rating(result, Some(&locale)),
-            Self::BattleImpact(result) => Some(RatingBreakdown::battle_impact(result, Some(&locale))),
+            Self::MatchContribution(result) => Some(RatingBreakdown::match_contribution(result, Some(&locale))),
         }
     }
 }
@@ -154,7 +154,7 @@ fn bar(index: usize, line: &RatingLine, scale: f64, band: Hsla, foreground: Hsla
 
 #[cfg(test)]
 mod tests {
-    use wows_replay_insights::battle_impact::FactorBasis;
+    use wows_replay_insights::match_contribution::FactorBasis;
     use wows_replay_insights::personal_rating::PersonalRatingCategory;
     use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
     use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
@@ -184,7 +184,7 @@ mod tests {
         }
 
         let breakdown = RatingBreakdown {
-            kind: RatingKind::BattleImpact,
+            kind: RatingKind::MatchContribution,
             total: 1_200.0,
             category: PersonalRatingCategory::Good,
             lines: vec![line(800.0, Some(400.0)), line(200.0, Some(400.0)), line(200.0, None)],

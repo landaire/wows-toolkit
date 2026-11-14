@@ -131,7 +131,7 @@ fn synth_summary(i: usize) -> RowSummary {
         self_survived: Some(i.is_multiple_of(3)),
         self_pr: Some(600.0 + (i % 1400) as f64),
         rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
-        self_bi: Some(500.0 + (i % 1500) as f64),
+        self_mc: Some(500.0 + (i % 1500) as f64),
         division_id: in_division.then_some(i as i64),
         division_mates: if in_division {
             vec![DivisionMate { player_name: format!("mate_{}", i % 97), clan: "CLAN".to_string() }]

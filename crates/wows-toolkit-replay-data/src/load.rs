@@ -1215,7 +1215,7 @@ fn read_replay_with_alts(
         normalized.populate_personal_ratings(table);
         // An unloaded table rates nobody, and its revision would mark the rows rated.
         if table.is_loaded() {
-            normalized.populate_battle_impact(table);
+            normalized.populate_match_contribution(table);
         }
     }
     let model = ReplayReportModel::from_normalized(

@@ -10,10 +10,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use rust_i18n::t;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
-use wows_toolkit_viewmodel::index_rows::rateable_battle_impact;
+use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use zgui::reactive::LocalStorage;
@@ -200,12 +200,12 @@ impl Shell {
         });
     }
 
-    /// Indexes the install's replays again when their BI is from an older formula or missing and
+    /// Indexes the install's replays again when their MC is from an older formula or missing and
     /// `table` can rate them. For a table that loads after the startup check, which had none to
     /// rate with when no cache existed yet. Skipped while a pass runs, since it would refuse this
     /// one.
-    pub fn rebuild_stale_battle_impact(self, table: &PersonalRatingData) {
-        let Some(rateable_bi) = rateable_battle_impact(Some(table)) else { return };
+    pub fn rebuild_stale_match_contribution(self, table: &PersonalRatingData) {
+        let Some(rateable_mc) = rateable_match_contribution(Some(table)) else { return };
         let index = self.replay_index;
         let busy = move || index.is_running_untracked() || index.folder_pass.get_untracked();
         if busy() {
@@ -224,14 +224,14 @@ impl Shell {
 
         let root = Path::new(&wows_dir).join("replays");
         let stale = services.on_tokio(async move {
-            wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root, Some(rateable_bi)).await
+            wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root, Some(rateable_mc)).await
         });
         spawn_local(async move {
             match stale.await {
                 Ok(Ok(true)) if !busy() => self.build_replay_index(IndexMode::FillGaps),
                 Ok(Ok(_)) => {}
-                Ok(Err(err)) => tracing::warn!(%err, "replay index BI revision could not be checked"),
-                Err(err) => tracing::warn!(%err, "replay index BI revision check did not complete"),
+                Ok(Err(err)) => tracing::warn!(%err, "replay index MC revision could not be checked"),
+                Err(err) => tracing::warn!(%err, "replay index MC revision check did not complete"),
             }
         });
     }
@@ -243,9 +243,9 @@ pub fn owner_rating(runtime: &tokio::runtime::Runtime, proxy_url: &str) -> Optio
     runtime.block_on(wows_toolkit_services::personal_rating::load_refreshed(crate::http::USER_AGENT, proxy_url))
 }
 
-/// The BI revision a pass rating against [`owner_rating`] writes, for the staleness queries that
+/// The MC revision a pass rating against [`owner_rating`] writes, for the staleness queries that
 /// decide whether to start one. Read from the cache without a refresh, which the pass itself makes;
 /// no usable cache means no table to rate with.
-pub fn cached_rateable_bi() -> Option<BattleImpactVersion> {
-    rateable_battle_impact(personal_rating::load_cached().ok().as_ref())
+pub fn cached_rateable_mc() -> Option<MatchContributionVersion> {
+    rateable_match_contribution(personal_rating::load_cached().ok().as_ref())
 }

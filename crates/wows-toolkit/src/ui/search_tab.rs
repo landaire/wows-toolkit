@@ -495,7 +495,7 @@ const RESULT_COLUMNS: [ResultColumn; 9] = [
     ResultColumn::Damage,
     ResultColumn::Kills,
     ResultColumn::Pr,
-    ResultColumn::Bi,
+    ResultColumn::Mc,
 ];
 
 const fn column_label_key(column: ResultColumn) -> &'static str {
@@ -508,7 +508,7 @@ const fn column_label_key(column: ResultColumn) -> &'static str {
         ResultColumn::Damage => "ui.search.column.damage",
         ResultColumn::Kills => "ui.search.column.kills",
         ResultColumn::Pr => "ui.search.column.pr",
-        ResultColumn::Bi => "ui.search.column.bi",
+        ResultColumn::Mc => "ui.search.column.mc",
     }
 }
 
@@ -623,7 +623,7 @@ const fn column_extent(column: ResultColumn) -> (f32, f32) {
         ResultColumn::Damage => (80.0, 180.0),
         ResultColumn::Kills => (50.0, 120.0),
         ResultColumn::Pr => (60.0, 140.0),
-        ResultColumn::Bi => (60.0, 140.0),
+        ResultColumn::Mc => (60.0, 140.0),
     }
 }
 
@@ -727,9 +727,9 @@ impl ResultsTable<'_> {
                     pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
                 }
             }
-            ResultColumn::Bi => {
-                if let Some(bi) = hit.self_bi {
-                    pr_chip(ui, PersonalRatingCategory::from_pr(bi), &format!("{bi:.0}"), false);
+            ResultColumn::Mc => {
+                if let Some(mc) = hit.self_mc {
+                    pr_chip(ui, PersonalRatingCategory::from_pr(mc), &format!("{mc:.0}"), false);
                 }
             }
         }
@@ -1411,7 +1411,7 @@ mod tests {
             self_damage: Some(80_000),
             self_kills: Some(2),
             self_pr: Some(1500.0),
-            self_bi: Some(1300.0),
+            self_mc: Some(1300.0),
             results_available: true,
             replay_path: std::path::PathBuf::from("1.wowsreplay"),
             file_mtime: Some(42),

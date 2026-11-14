@@ -843,7 +843,7 @@ impl UiReport {
                         consumables,
                         heal_count: np.heal_count,
                         personal_rating: None,
-                        battle_impact: None,
+                        match_contribution: None,
                         has_vehicle_entity: vehicle.is_some(),
                         fire_chance: np.is_self.then(|| self_fire_chance.clone()).flatten(),
                     }
@@ -872,7 +872,7 @@ impl UiReport {
                 ReplayColumn::Name,
                 ReplayColumn::ShipName,
                 ReplayColumn::PersonalRating,
-                ReplayColumn::BattleImpact,
+                ReplayColumn::MatchContribution,
                 ReplayColumn::BaseXp,
                 ReplayColumn::RawXp,
                 ReplayColumn::Kills,
@@ -960,7 +960,7 @@ impl UiReport {
                 }
                 SortColumn::Heals => SortKey::U64(report.heal_count.map(|c| c as u64)),
                 SortColumn::PersonalRating => SortKey::F64(report.personal_rating.as_ref().map(|pr| pr.pr)),
-                SortColumn::BattleImpact => SortKey::F64(report.battle_impact.as_ref().map(|bi| bi.bi)),
+                SortColumn::MatchContribution => SortKey::F64(report.match_contribution.as_ref().map(|mc| mc.mc)),
             };
 
             (team_id, key, db_id)
@@ -1906,12 +1906,12 @@ impl UiReport {
                             ui.label("-");
                         }
                     }
-                    ReplayColumn::BattleImpact => {
-                        if let Some(bi) = report.battle_impact.as_ref() {
-                            crate::ui::widgets::battle_impact_chip(
+                    ReplayColumn::MatchContribution => {
+                        if let Some(mc) = report.match_contribution.as_ref() {
+                            crate::ui::widgets::match_contribution_chip(
                                 ui,
-                                bi,
-                                &format!("{:.0}", bi.bi),
+                                mc,
+                                &format!("{:.0}", mc.mc),
                                 self.rating_hover(report),
                             );
                         } else if self.rated_without_battle_end() {
@@ -2496,7 +2496,7 @@ impl UiReport {
         }
     }
 
-    /// Rates every player's PR and BI, and carries both onto the rows the
+    /// Rates every player's PR and MC, and carries both onto the rows the
     /// table draws.
     ///
     /// The report is rated rather than the rows, so the export and the index
@@ -2505,10 +2505,10 @@ impl UiReport {
         self.normalized.populate_personal_ratings(pr_data);
         // Rated once: the player list calls this on every frame it draws. An
         // unloaded table rates nobody, and its revision would mark the rows rated.
-        if self.normalized.battle_impact_version.is_none() && pr_data.is_loaded() {
-            self.normalized.populate_battle_impact(pr_data);
+        if self.normalized.match_contribution_version.is_none() && pr_data.is_loaded() {
+            self.normalized.populate_match_contribution(pr_data);
             for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
-                report.battle_impact = np.battle_impact.clone();
+                report.match_contribution = np.match_contribution.clone();
             }
         }
 
@@ -2519,10 +2519,10 @@ impl UiReport {
         }
     }
 
-    /// BI was rated, and rated nobody because the recording stopped before
+    /// MC was rated, and rated nobody because the recording stopped before
     /// the battle ended.
     fn rated_without_battle_end(&self) -> bool {
-        self.normalized.battle_impact_version.is_some() && self.normalized.metadata.battle_result.is_none()
+        self.normalized.match_contribution_version.is_some() && self.normalized.metadata.battle_result.is_none()
     }
 
     /// A row that hides its stats shows only the band: a breakdown's inputs
@@ -2774,18 +2774,18 @@ impl egui_table::TableDelegate for UiReport {
                         self.sort_players(new_sort);
                     };
                 }
-                ReplayColumn::BattleImpact => {
+                ReplayColumn::MatchContribution => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            &t!("ui.replay.column.battle_impact"),
+                            &t!("ui.replay.column.match_contribution"),
                             false,
                             *self.replay_sort.lock(),
-                            SortColumn::BattleImpact,
+                            SortColumn::MatchContribution,
                         ))
-                        .on_hover_text(t!("ui.rating.battle_impact"))
+                        .on_hover_text(t!("ui.rating.match_contribution"))
                         .clicked()
                     {
-                        let new_sort = self.replay_sort.lock().update_column(SortColumn::BattleImpact);
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::MatchContribution);
 
                         self.sort_players(new_sort);
                     };
@@ -3372,11 +3372,11 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if let Some(bi_result) = self_report.and_then(|report| report.battle_impact.as_ref()) {
-                    crate::ui::widgets::battle_impact_chip(
+                if let Some(mc_result) = self_report.and_then(|report| report.match_contribution.as_ref()) {
+                    crate::ui::widgets::match_contribution_chip(
                         ui,
-                        bi_result,
-                        &format!("BI: {:.0} ({})", bi_result.bi, bi_result.category.name()),
+                        mc_result,
+                        &format!("MC: {:.0} ({})", mc_result.mc, mc_result.category.name()),
                         hover,
                     );
                 }

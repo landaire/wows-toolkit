@@ -81,9 +81,9 @@ use super::team_bands::RowMark;
 use crate::replay_inspector::player_colors::class_icon_tint;
 use crate::replay_inspector::player_colors::player_color_kind_rgb;
 use crate::replay_inspector::player_colors::relation_color_rgb;
-use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
@@ -719,11 +719,11 @@ impl PlayerTable {
         self.model.rows.iter().find(|row| row.is_self)?.personal_rating.clone()
     }
 
-    pub fn self_battle_impact(&self) -> Option<BattleImpactResult> {
-        self.model.rows.iter().find(|row| row.is_self)?.battle_impact.clone()
+    pub fn self_match_contribution(&self) -> Option<MatchContributionResult> {
+        self.model.rows.iter().find(|row| row.is_self)?.match_contribution.clone()
     }
 
-    /// The id of the self row's PR or BI cell, which carries the rating's
+    /// The id of the self row's PR or MC cell, which carries the rating's
     /// hover. Test-only.
     #[cfg(test)]
     pub(crate) fn self_rating_cell_for_test(&self, col: ReplayColumn) -> Option<ElementId> {
@@ -2293,7 +2293,7 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         ReplayColumn::Name => name_cell(ix, row, layout, width),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width, &layout.entity),
         ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(ix, col, row, layout, width),
-        ReplayColumn::PersonalRating | ReplayColumn::BattleImpact => rating_cell(ix, col, row, layout, width),
+        ReplayColumn::PersonalRating | ReplayColumn::MatchContribution => rating_cell(ix, col, row, layout, width),
         ReplayColumn::ShipName => ship_name_cell(ix, row, layout, width),
         _ => number_cell(ix, col, row, layout, width),
     }
@@ -2422,21 +2422,24 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         .into_any_element()
 }
 
-/// A PR or BI chip whose hover breaks the rating into its parts. A PR read
+/// A PR or MC chip whose hover breaks the rating into its parts. A PR read
 /// back from storage has no parts, and a hidden player's parts would give
-/// away the figures their stats hide, so both keep the band's name. A BI
+/// away the figures their stats hide, so both keep the band's name. An MC
 /// withheld for a recording that ended early is a dash that says why.
 fn rating_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let mut cell = cell_value(row, col, layout.debug);
     let hidden = row.should_hide_stats() && !layout.debug;
     let figure = match col {
-        ReplayColumn::BattleImpact => {
-            row.battle_impact.clone().map(|rating| RatedFigure::BattleImpact(Box::new(rating)))
+        ReplayColumn::MatchContribution => {
+            row.match_contribution.clone().map(|rating| RatedFigure::MatchContribution(Box::new(rating)))
         }
         _ => row.personal_rating.as_ref().and_then(RatedFigure::personal),
     };
     let Some(figure) = figure.filter(|_| !hidden) else {
-        if col == ReplayColumn::BattleImpact && row.battle_impact.is_none() && layout.battle_impact_withheld {
+        if col == ReplayColumn::MatchContribution
+            && row.match_contribution.is_none()
+            && layout.match_contribution_withheld
+        {
             cell.hover = Some(t!("ui.rating.unrated_early_exit").into_owned());
         }
         return cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
@@ -2634,8 +2637,8 @@ struct RowLayout<'a> {
     /// Which side the row's player is on, for the stripe in its gutter.
     mark: RowMark,
     alt_held: bool,
-    /// Whether BI was withheld because the recording ended before the battle.
-    battle_impact_withheld: bool,
+    /// Whether MC was withheld because the recording ended before the battle.
+    match_contribution_withheld: bool,
     /// How far each column is drawn from its place while the columns slide.
     column_shift: &'a [Pixels],
     /// The column being moved by its header, whose cells mark its slot.
@@ -2953,7 +2956,7 @@ impl Render for PlayerTable {
                 selected,
                 mark: RowMark::of(row, self_team),
                 alt_held,
-                battle_impact_withheld: table.model.battle_impact_withheld,
+                match_contribution_withheld: table.model.match_contribution_withheld,
                 column_shift: &table.column_shift,
                 moving: table.moving_column(),
                 pinned_reserve: reserve,
@@ -3077,7 +3080,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![base_row(1, Relation::new(0), true), base_row(2, Relation::new(2), false)],
             battle_result: Some(BattleResult::Win(0)),
-            battle_impact_withheld: false,
+            match_contribution_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),

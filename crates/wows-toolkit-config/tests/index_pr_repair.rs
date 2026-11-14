@@ -87,9 +87,9 @@ fn a_vehicle(arena: i64, account: i64, pr: Option<f64>) -> IndexedVehicleRow {
         disconnected: Some(false),
         is_stream_sniper: None,
         sniper_twitch_login: None,
-        bi: None,
-        bi_version: None,
-        bi_torpedoes_observed: false,
+        mc: None,
+        mc_version: None,
+        mc_torpedoes_observed: false,
     }
 }
 

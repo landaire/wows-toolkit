@@ -26,7 +26,7 @@ pub enum ReplayColumn {
     ShipName,
     Skills,
     PersonalRating,
-    BattleImpact,
+    MatchContribution,
     BaseXp,
     RawXp,
     Kills,
@@ -47,7 +47,7 @@ impl ReplayColumn {
         ReplayColumn::ShipName,
         ReplayColumn::Skills,
         ReplayColumn::PersonalRating,
-        ReplayColumn::BattleImpact,
+        ReplayColumn::MatchContribution,
         ReplayColumn::BaseXp,
         ReplayColumn::RawXp,
         ReplayColumn::Kills,
@@ -85,7 +85,7 @@ impl ReplayColumn {
             ReplayColumn::ShipName => "ship_name",
             ReplayColumn::Skills => "skills",
             ReplayColumn::PersonalRating => "personal_rating",
-            ReplayColumn::BattleImpact => "battle_impact",
+            ReplayColumn::MatchContribution => "match_contribution",
             ReplayColumn::BaseXp => "base_xp",
             ReplayColumn::RawXp => "raw_xp",
             ReplayColumn::Kills => "kills",
@@ -112,7 +112,7 @@ impl ReplayColumn {
             ReplayColumn::ShipName => "ui.replay.column.ship_name",
             ReplayColumn::Skills => "ui.replay.column.skills",
             ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
-            ReplayColumn::BattleImpact => "ui.replay.column.battle_impact",
+            ReplayColumn::MatchContribution => "ui.replay.column.match_contribution",
             ReplayColumn::BaseXp => "stat.base_xp",
             ReplayColumn::RawXp => "stat.raw_xp",
             ReplayColumn::Kills => "ui.replay.column.kills",
@@ -141,7 +141,7 @@ impl ReplayColumn {
             ReplayColumn::Name => Some(SortColumn::Name),
             ReplayColumn::ShipName => Some(SortColumn::ShipName),
             ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
-            ReplayColumn::BattleImpact => Some(SortColumn::BattleImpact),
+            ReplayColumn::MatchContribution => Some(SortColumn::MatchContribution),
             ReplayColumn::BaseXp => Some(SortColumn::BaseXp),
             ReplayColumn::RawXp => Some(SortColumn::RawXp),
             ReplayColumn::Kills => Some(SortColumn::Kills),
@@ -508,9 +508,9 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 .with_hover(pr.category.name()),
             None => CellValue::plain(DASH),
         },
-        ReplayColumn::BattleImpact => match row.battle_impact.as_ref() {
-            Some(bi) => CellValue::colored(format!("{:.0}", bi.bi), ColorRole::PrTier(bi.category))
-                .with_hover(bi.category.name()),
+        ReplayColumn::MatchContribution => match row.match_contribution.as_ref() {
+            Some(mc) => CellValue::colored(format!("{:.0}", mc.mc), ColorRole::PrTier(mc.category))
+                .with_hover(mc.category.name()),
             None => CellValue::plain(DASH),
         },
         ReplayColumn::BaseXp => match row.base_xp_text.as_ref() {
@@ -848,7 +848,7 @@ mod tests {
                 pinned: vec![ReplayColumn::Skills, ReplayColumn::Name, ReplayColumn::ShipName],
                 scrolling: vec![
                     ReplayColumn::PersonalRating,
-                    ReplayColumn::BattleImpact,
+                    ReplayColumn::MatchContribution,
                     ReplayColumn::Kills,
                     ReplayColumn::ObservedDamage,
                     ReplayColumn::ActualDamage,

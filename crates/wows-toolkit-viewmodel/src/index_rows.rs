@@ -9,10 +9,10 @@
 use std::path::PathBuf;
 
 use jiff::Timestamp;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::battle_report::NormalizedPlayer;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_replays::analyzer::battle_controller::BattleResult;
@@ -208,10 +208,10 @@ pub fn map_rows(report: &NormalizedBattleReport, context: &IndexContext) -> Mapp
             potential: player.potential_damage(),
             received: player.server_results.as_ref().map(|results| results.received_damage),
             pr: player.personal_rating.as_ref().map(|rating| rating.pr),
-            bi: player.battle_impact.as_ref().map(|rating| rating.bi),
-            bi_version: report.battle_impact_version,
-            bi_torpedoes_observed: player
-                .battle_impact
+            mc: player.match_contribution.as_ref().map(|rating| rating.mc),
+            mc_version: report.match_contribution_version,
+            mc_torpedoes_observed: player
+                .match_contribution
                 .as_ref()
                 .is_some_and(|rating| rating.torpedo_detection.is_some()),
             is_test_ship: player.is_test_ship,
@@ -250,8 +250,8 @@ pub fn map_rows(report: &NormalizedBattleReport, context: &IndexContext) -> Mapp
 ///
 /// Used when the constants do not match the build: the keys the results are
 /// read through moved, so the numbers would be wrong rather than missing.
-/// `bi_version` stays: a reparse through the same constants could not supply a
-/// BI either, so the row is not left stale.
+/// `mc_version` stays: a reparse through the same constants could not supply a
+/// MC either, so the row is not left stale.
 pub fn suppress_untrusted_results(rows: &mut MappedRows) {
     for vehicle in &mut rows.vehicles {
         vehicle.damage = None;
@@ -260,8 +260,8 @@ pub fn suppress_untrusted_results(rows: &mut MappedRows) {
         vehicle.potential = None;
         vehicle.received = None;
         vehicle.pr = None;
-        vehicle.bi = None;
-        vehicle.bi_torpedoes_observed = false;
+        vehicle.mc = None;
+        vehicle.mc_torpedoes_observed = false;
     }
     rows.record.self_damage = None;
     rows.record.self_kills = None;
@@ -269,11 +269,11 @@ pub fn suppress_untrusted_results(rows: &mut MappedRows) {
     rows.record.results_available = false;
 }
 
-/// The BI revision an indexing pass rating against `table` writes, or `None`
+/// The MC revision an indexing pass rating against `table` writes, or `None`
 /// when it has no expected values to rate with. Handed to the replay index's
-/// staleness queries, so BI only marks a replay stale for a pass that can fill it.
-pub fn rateable_battle_impact(table: Option<&PersonalRatingData>) -> Option<BattleImpactVersion> {
-    table.filter(|table| table.is_loaded()).map(|_| BattleImpactVersion::CURRENT)
+/// staleness queries, so MC only marks a replay stale for a pass that can fill it.
+pub fn rateable_match_contribution(table: Option<&PersonalRatingData>) -> Option<MatchContributionVersion> {
+    table.filter(|table| table.is_loaded()).map(|_| MatchContributionVersion::CURRENT)
 }
 
 /// The single-battle rating for one stored row's worth of stats, or `None` when

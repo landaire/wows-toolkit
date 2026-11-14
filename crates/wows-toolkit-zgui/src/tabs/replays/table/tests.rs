@@ -13,16 +13,16 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use wows_replay_insights::battle_impact::BattleImpactComponents;
-use wows_replay_insights::battle_impact::BattleImpactFactor;
-use wows_replay_insights::battle_impact::BattleImpactInputs;
-use wows_replay_insights::battle_impact::BattleImpactResult;
-use wows_replay_insights::battle_impact::BattleImpactVersion;
-use wows_replay_insights::battle_impact::FactorScore;
-use wows_replay_insights::battle_impact::Ratio;
-use wows_replay_insights::battle_impact::Share;
-use wows_replay_insights::battle_impact::TankingRatios;
-use wows_replay_insights::battle_impact::TeamDamageShare;
+use wows_replay_insights::match_contribution::FactorScore;
+use wows_replay_insights::match_contribution::MatchContributionComponents;
+use wows_replay_insights::match_contribution::MatchContributionFactor;
+use wows_replay_insights::match_contribution::MatchContributionInputs;
+use wows_replay_insights::match_contribution::MatchContributionResult;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
+use wows_replay_insights::match_contribution::Ratio;
+use wows_replay_insights::match_contribution::Share;
+use wows_replay_insights::match_contribution::TankingRatios;
+use wows_replay_insights::match_contribution::TeamDamageShare;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
@@ -504,21 +504,21 @@ fn a_disconnect_chip_deepens_from_thirty_to_ninety_seconds() {
     assert_eq!(cells::offline_label(offline(45)), "45s");
 }
 
-/// A battle impact with every part filled in, adding up to `bi`.
-pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
-    let score = |factor: BattleImpactFactor, share: f64| FactorScore { points: bi * share, basis: factor.basis() };
-    let components = BattleImpactComponents {
-        damage: score(BattleImpactFactor::Damage, 0.4),
-        kills: score(BattleImpactFactor::Kills, 0.2),
-        team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 0.15)),
-        tanking: Some(score(BattleImpactFactor::Tanking, 0.1)),
-        spotting: Some(score(BattleImpactFactor::Spotting, 0.1)),
-        objectives: Some(score(BattleImpactFactor::Objectives, 0.05)),
+/// A match contribution with every part filled in, adding up to `mc`.
+pub(crate) fn sample_match_contribution(mc: f64) -> MatchContributionResult {
+    let score = |factor: MatchContributionFactor, share: f64| FactorScore { points: mc * share, basis: factor.basis() };
+    let components = MatchContributionComponents {
+        damage: score(MatchContributionFactor::Damage, 0.4),
+        kills: score(MatchContributionFactor::Kills, 0.2),
+        team_damage_share: Some(score(MatchContributionFactor::TeamDamageShare, 0.15)),
+        tanking: Some(score(MatchContributionFactor::Tanking, 0.1)),
+        spotting: Some(score(MatchContributionFactor::Spotting, 0.1)),
+        objectives: Some(score(MatchContributionFactor::Objectives, 0.05)),
         anti_air: None,
         torpedo_warnings: None,
         critical_bursts: None,
     };
-    let inputs = BattleImpactInputs {
+    let inputs = MatchContributionInputs {
         weighted_damage: 84_000.0,
         expected_damage: 61_000.0,
         kills: 2.0,
@@ -535,10 +535,10 @@ pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
         anti_air_damage: None,
     };
 
-    BattleImpactResult {
-        bi,
-        category: PersonalRatingCategory::from_pr(bi),
-        version: BattleImpactVersion::CURRENT,
+    MatchContributionResult {
+        mc,
+        category: PersonalRatingCategory::from_pr(mc),
+        version: MatchContributionVersion::CURRENT,
         components,
         inputs,
         torpedo_detection: None,
@@ -552,7 +552,7 @@ fn rated_model() -> ReplayReportModel {
     let table = fixture_personal_rating_data();
     let row = model.rows.iter_mut().find(|row| row.is_self).expect("the sample has a self row");
     row.personal_rating = rate_single_battle(&table, FIXTURE_PR_SHIP_ID.into(), 72_000, 2, true);
-    row.battle_impact = Some(sample_battle_impact(1_480.0));
+    row.match_contribution = Some(sample_match_contribution(1_480.0));
 
     model
 }
@@ -582,9 +582,9 @@ fn a_rating_cell_lists_its_parts_largest_first_on_hover() {
 
     let cases = [
         (
-            ReplayColumn::BattleImpact,
-            "bi",
-            row.battle_impact.as_ref().map(|bi| RatingBreakdown::battle_impact(bi, None)),
+            ReplayColumn::MatchContribution,
+            "mc",
+            row.match_contribution.as_ref().map(|mc| RatingBreakdown::match_contribution(mc, None)),
         ),
         (
             ReplayColumn::PersonalRating,
@@ -622,21 +622,21 @@ fn a_hidden_rows_rating_names_only_its_band() {
     let mut model = rated_model();
     let row = model.rows.iter_mut().find(|row| row.is_self).expect("the sample has a self row");
     row.manual_stat_hide_toggle = true;
-    let band = row.battle_impact.as_ref().expect("the row is rated").category.name().to_owned();
+    let band = row.match_contribution.as_ref().expect("the row is rated").category.name().to_owned();
     let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
 
-    let hover = plain_hover(&mut window, ReplayColumn::BattleImpact);
-    assert!(window.by_test_id("rating-bi-hover").is_none(), "the parts would show the hidden inputs");
+    let hover = plain_hover(&mut window, ReplayColumn::MatchContribution);
+    assert!(window.by_test_id("rating-mc-hover").is_none(), "the parts would show the hidden inputs");
     assert_eq!(hover, [band]);
 }
 
 #[test]
-fn a_withheld_battle_impact_says_why_it_is_missing() {
+fn a_withheld_match_contribution_says_why_it_is_missing() {
     let mut model = sample_model();
-    model.battle_impact_withheld = true;
+    model.match_contribution_withheld = true;
     let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
 
-    let hover = plain_hover(&mut window, ReplayColumn::BattleImpact);
+    let hover = plain_hover(&mut window, ReplayColumn::MatchContribution);
     assert_eq!(hover, [t!("ui.rating.unrated_early_exit").into_owned()]);
 }
 

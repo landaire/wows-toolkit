@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
-use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::BattleType;
 use wows_core::game_types::GameParamId;
+use wows_core::game_types::MatchContributionVersion;
 use wows_core::rating_scope::RatingScope;
 use wows_core::version::Version;
 
@@ -181,14 +181,14 @@ pub struct IndexedVehicleRow {
     pub potential: Option<u64>,
     pub received: Option<u64>,
     pub pr: Option<f64>,
-    /// `None` when the player was not rated, or BI was not computed.
-    pub bi: Option<f64>,
-    /// The formula revision BI was computed with for this row's report. `Some`
-    /// with `bi` `None` means the player could not be rated.
-    pub bi_version: Option<BattleImpactVersion>,
-    /// Whether `bi` includes the torpedo warning part, which only a replay
+    /// `None` when the player was not rated, or MC was not computed.
+    pub mc: Option<f64>,
+    /// The formula revision MC was computed with for this row's report. `Some`
+    /// with `mc` `None` means the player could not be rated.
+    pub mc_version: Option<MatchContributionVersion>,
+    /// Whether `mc` includes the torpedo warning part, which only a replay
     /// recorded from the player's own team observes.
-    pub bi_torpedoes_observed: bool,
+    pub mc_torpedoes_observed: bool,
     pub is_test_ship: bool,
     /// `Some(true)` if the player had a mid-match disconnect: a `Disconnected`
     /// connection event that was not accompanied by a death. `Some(false)` if no
@@ -252,9 +252,9 @@ pub struct MatchHit {
     pub self_damage: Option<u64>,
     pub self_kills: Option<i64>,
     pub self_pr: Option<f64>,
-    /// The perspective player's battle impact, from their roster row. `None`
+    /// The perspective player's match contribution, from their roster row. `None`
     /// when the roster carries no rating for them.
-    pub self_bi: Option<f64>,
+    pub self_mc: Option<f64>,
     pub results_available: bool,
     pub replay_path: PathBuf,
     pub file_mtime: Option<i64>,
@@ -320,8 +320,8 @@ pub struct RowSummary {
     /// Whether a rating applies to the battle. `self_pr` is `None` when it
     /// does not.
     pub rating_scope: RatingScope,
-    /// The perspective player's battle impact, from their roster row.
-    pub self_bi: Option<f64>,
+    /// The perspective player's match contribution, from their roster row.
+    pub self_mc: Option<f64>,
     /// The self player's division, resolved from the roster row belonging to
     /// `replay_record.self_account_id`. `None` when the perspective player had
     /// no account (a spectator recording), had no roster row, or was solo.

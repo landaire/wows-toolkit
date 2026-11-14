@@ -1,10 +1,10 @@
-//! The hover over a PR or BI figure: the rating's parts, largest first, each with a bar of its
+//! The hover over a PR or MC figure: the rating's parts, largest first, each with a bar of its
 //! points and a mark where average play would have put it.
 
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use wows_replay_insights::battle_impact::BattleImpactResult;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
@@ -65,7 +65,7 @@ const CSS: &str = css!(
 #[derive(Clone, Debug)]
 pub enum RatedFigure {
     Personal(PersonalRatingResult),
-    BattleImpact(Box<BattleImpactResult>),
+    MatchContribution(Box<MatchContributionResult>),
 }
 
 impl RatedFigure {
@@ -74,7 +74,7 @@ impl RatedFigure {
         let locale = wows_toolkit_viewmodel::locale();
         match self {
             Self::Personal(rating) => RatingBreakdown::personal_rating(rating, Some(&locale)),
-            Self::BattleImpact(rating) => Some(RatingBreakdown::battle_impact(rating, Some(&locale))),
+            Self::MatchContribution(rating) => Some(RatingBreakdown::match_contribution(rating, Some(&locale))),
         }
     }
 }
@@ -108,7 +108,7 @@ pub fn listing(breakdown: &RatingBreakdown) -> AnyView {
     };
     let kind = match breakdown.kind {
         RatingKind::Personal => "pr",
-        RatingKind::BattleImpact => "bi",
+        RatingKind::MatchContribution => "mc",
     };
 
     let lines: Vec<AnyView> = breakdown

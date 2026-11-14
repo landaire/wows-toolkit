@@ -237,7 +237,7 @@ pub struct PlayerReport {
     pub heal_count: Option<u32>,
     pub personal_rating: Option<crate::util::personal_rating::PersonalRatingResult>,
     /// `None` when the recording did not reach the battle's end.
-    pub battle_impact: Option<wows_replay_insights::battle_impact::BattleImpactResult>,
+    pub match_contribution: Option<wows_replay_insights::match_contribution::MatchContributionResult>,
     pub has_vehicle_entity: bool,
     /// Effective fire chance for the recording player. `None` for every other
     /// player: attribution relies on the self-player SetFire ribbon, which the

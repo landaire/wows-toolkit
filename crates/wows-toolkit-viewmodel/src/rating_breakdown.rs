@@ -1,13 +1,13 @@
-//! What a PR or BI was made of, for the hover beside the rating: each part's
+//! What a PR or MC was made of, for the hover beside the rating: each part's
 //! points, what it was computed from, what average play would have earned
 //! there, and whether it was measured against a fixed expectation or this
 //! battle's data, largest part first.
 
 use rust_i18n::t;
-use wows_replay_insights::battle_impact::BattleImpactFactor;
-use wows_replay_insights::battle_impact::BattleImpactResult;
-use wows_replay_insights::battle_impact::FactorBasis;
-use wows_replay_insights::battle_impact::FactorScore;
+use wows_replay_insights::match_contribution::FactorBasis;
+use wows_replay_insights::match_contribution::FactorScore;
+use wows_replay_insights::match_contribution::MatchContributionFactor;
+use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingTerm;
 
 use crate::formatting::separate_number;
@@ -18,7 +18,7 @@ use crate::personal_rating::PersonalRatingResult;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RatingKind {
     Personal,
-    BattleImpact,
+    MatchContribution,
 }
 
 impl RatingKind {
@@ -26,7 +26,7 @@ impl RatingKind {
     pub fn title(self) -> String {
         match self {
             Self::Personal => t!("ui.rating.personal_rating").into(),
-            Self::BattleImpact => t!("ui.rating.battle_impact").into(),
+            Self::MatchContribution => t!("ui.rating.match_contribution").into(),
         }
     }
 }
@@ -103,14 +103,14 @@ impl RatingBreakdown {
         Some(Self { kind: RatingKind::Personal, total: result.pr, category: result.category, lines })
     }
 
-    pub fn battle_impact(result: &BattleImpactResult, locale: Option<&str>) -> Self {
+    pub fn match_contribution(result: &MatchContributionResult, locale: Option<&str>) -> Self {
         let parts = &result.components;
         let inputs = &result.inputs;
         let whole = |value: f64| separate_number(value.round() as i64, locale);
 
         let mut lines = vec![
-            bi_line(
-                BattleImpactFactor::Damage,
+            mc_line(
+                MatchContributionFactor::Damage,
                 parts.damage,
                 t!(
                     "ui.rating.detail.weighted_damage",
@@ -119,8 +119,8 @@ impl RatingBreakdown {
                 )
                 .into(),
             ),
-            bi_line(
-                BattleImpactFactor::Kills,
+            mc_line(
+                MatchContributionFactor::Kills,
                 parts.kills,
                 t!(
                     "ui.rating.detail.versus_expected",
@@ -132,8 +132,8 @@ impl RatingBreakdown {
         ];
 
         if let (Some(score), Some(ratios)) = (parts.tanking, inputs.tanking) {
-            lines.push(bi_line(
-                BattleImpactFactor::Tanking,
+            lines.push(mc_line(
+                MatchContributionFactor::Tanking,
                 score,
                 t!(
                     "ui.rating.detail.tanking",
@@ -146,8 +146,8 @@ impl RatingBreakdown {
         }
 
         if let (Some(score), Some(share)) = (parts.team_damage_share, inputs.team_damage_share) {
-            lines.push(bi_line(
-                BattleImpactFactor::TeamDamageShare,
+            lines.push(mc_line(
+                MatchContributionFactor::TeamDamageShare,
                 score,
                 t!(
                     "ui.rating.detail.team_damage_share",
@@ -159,8 +159,8 @@ impl RatingBreakdown {
         }
 
         if let (Some(score), Some(spotting_damage)) = (parts.spotting, inputs.spotting_damage) {
-            lines.push(bi_line(
-                BattleImpactFactor::Spotting,
+            lines.push(mc_line(
+                MatchContributionFactor::Spotting,
                 score,
                 t!(
                     "ui.rating.detail.spotting",
@@ -176,8 +176,8 @@ impl RatingBreakdown {
         if let (Some(score), Some(objective)) = (parts.objectives, inputs.objective_points) {
             // The server's victory points run at 100 to a score point.
             let points = |victory_points: f64| format!("{:.0}", victory_points / 100.0);
-            lines.push(bi_line(
-                BattleImpactFactor::Objectives,
+            lines.push(mc_line(
+                MatchContributionFactor::Objectives,
                 score,
                 t!(
                     "ui.rating.detail.objectives",
@@ -201,8 +201,8 @@ impl RatingBreakdown {
             let damage = inputs.anti_air_damage.map(|damage| {
                 t!("ui.rating.detail.anti_air_damage", damage = separate_number(damage, locale)).into_owned()
             });
-            lines.push(bi_line(
-                BattleImpactFactor::AntiAir,
+            lines.push(mc_line(
+                MatchContributionFactor::AntiAir,
                 score,
                 [planes, damage].into_iter().flatten().collect::<Vec<_>>().join(", "),
             ));
@@ -213,7 +213,7 @@ impl RatingBreakdown {
                 1 => t!("ui.rating.detail.torpedo_warnings_one"),
                 count => t!("ui.rating.detail.torpedo_warnings", threatening = count),
             };
-            lines.push(bi_line(BattleImpactFactor::TorpedoWarnings, score, detail.into()));
+            lines.push(mc_line(MatchContributionFactor::TorpedoWarnings, score, detail.into()));
         }
 
         if let (Some(score), Some(bursts)) = (parts.critical_bursts, &result.critical_bursts) {
@@ -237,7 +237,7 @@ impl RatingBreakdown {
                 1 => t!("ui.rating.detail.critical_bursts_one", bursts = listed),
                 count => t!("ui.rating.detail.critical_bursts", count = count, bursts = listed),
             };
-            lines.push(bi_line(BattleImpactFactor::CriticalBursts, score, detail.into()));
+            lines.push(mc_line(MatchContributionFactor::CriticalBursts, score, detail.into()));
         }
 
         // A bonus with nothing earned says nothing; a core part at zero still
@@ -245,7 +245,7 @@ impl RatingBreakdown {
         lines.retain(|line| line.average.is_some() || line.points > 0.0);
         sort_largest_first(&mut lines);
 
-        Self { kind: RatingKind::BattleImpact, total: result.bi, category: result.category, lines }
+        Self { kind: RatingKind::MatchContribution, total: result.mc, category: result.category, lines }
     }
 
     /// The widest a bar needs to reach: the largest of every line's points
@@ -289,23 +289,23 @@ impl RatingBreakdown {
     }
 }
 
-fn bi_label(factor: BattleImpactFactor) -> String {
+fn mc_label(factor: MatchContributionFactor) -> String {
     match factor {
-        BattleImpactFactor::Damage => t!("ui.rating.damage").into(),
-        BattleImpactFactor::Kills => t!("ui.rating.kills").into(),
-        BattleImpactFactor::TeamDamageShare => t!("ui.rating.team_damage_share").into(),
-        BattleImpactFactor::Tanking => t!("ui.rating.tanking").into(),
-        BattleImpactFactor::Spotting => t!("ui.rating.spotting").into(),
-        BattleImpactFactor::Objectives => t!("ui.rating.objectives").into(),
-        BattleImpactFactor::AntiAir => t!("ui.rating.anti_air").into(),
-        BattleImpactFactor::TorpedoWarnings => t!("ui.rating.torpedo_warnings").into(),
-        BattleImpactFactor::CriticalBursts => t!("ui.rating.critical_bursts").into(),
+        MatchContributionFactor::Damage => t!("ui.rating.damage").into(),
+        MatchContributionFactor::Kills => t!("ui.rating.kills").into(),
+        MatchContributionFactor::TeamDamageShare => t!("ui.rating.team_damage_share").into(),
+        MatchContributionFactor::Tanking => t!("ui.rating.tanking").into(),
+        MatchContributionFactor::Spotting => t!("ui.rating.spotting").into(),
+        MatchContributionFactor::Objectives => t!("ui.rating.objectives").into(),
+        MatchContributionFactor::AntiAir => t!("ui.rating.anti_air").into(),
+        MatchContributionFactor::TorpedoWarnings => t!("ui.rating.torpedo_warnings").into(),
+        MatchContributionFactor::CriticalBursts => t!("ui.rating.critical_bursts").into(),
     }
 }
 
-fn bi_line(factor: BattleImpactFactor, score: FactorScore, detail: String) -> RatingLine {
+fn mc_line(factor: MatchContributionFactor, score: FactorScore, detail: String) -> RatingLine {
     RatingLine {
-        label: bi_label(factor),
+        label: mc_label(factor),
         detail,
         points: score.points,
         average: factor.average_points(),
@@ -345,25 +345,28 @@ fn sort_largest_first(lines: &mut [RatingLine]) {
 #[cfg(test)]
 mod tests {
     use wows_core::units::Seconds;
-    use wows_replay_insights::battle_impact::BattleImpactComponents;
-    use wows_replay_insights::battle_impact::BattleImpactInputs;
-    use wows_replay_insights::battle_impact::BattleImpactVersion;
-    use wows_replay_insights::battle_impact::CriticalBurst;
-    use wows_replay_insights::battle_impact::Ratio;
-    use wows_replay_insights::battle_impact::Share;
-    use wows_replay_insights::battle_impact::TankingRatios;
-    use wows_replay_insights::battle_impact::TeamDamageShare;
-    use wows_replay_insights::battle_impact::TorpedoDetection;
+    use wows_replay_insights::match_contribution::CriticalBurst;
+    use wows_replay_insights::match_contribution::MatchContributionComponents;
+    use wows_replay_insights::match_contribution::MatchContributionInputs;
+    use wows_replay_insights::match_contribution::MatchContributionVersion;
+    use wows_replay_insights::match_contribution::Ratio;
+    use wows_replay_insights::match_contribution::Share;
+    use wows_replay_insights::match_contribution::TankingRatios;
+    use wows_replay_insights::match_contribution::TeamDamageShare;
+    use wows_replay_insights::match_contribution::TorpedoDetection;
     use wows_replays::types::GameParamId;
 
     use super::*;
 
-    fn score(factor: BattleImpactFactor, points: f64) -> FactorScore {
+    fn score(factor: MatchContributionFactor, points: f64) -> FactorScore {
         FactorScore { points, basis: factor.basis() }
     }
 
-    fn rating(components: BattleImpactComponents, torpedo_detection: Option<TorpedoDetection>) -> BattleImpactResult {
-        let inputs = BattleImpactInputs {
+    fn rating(
+        components: MatchContributionComponents,
+        torpedo_detection: Option<TorpedoDetection>,
+    ) -> MatchContributionResult {
+        let inputs = MatchContributionInputs {
             weighted_damage: 90_000.0,
             expected_damage: 60_000.0,
             kills: 1.0,
@@ -381,10 +384,10 @@ mod tests {
         };
         let total = components.total();
 
-        BattleImpactResult {
-            bi: total,
+        MatchContributionResult {
+            mc: total,
             category: PersonalRatingCategory::from_pr(total),
-            version: BattleImpactVersion::CURRENT,
+            version: MatchContributionVersion::CURRENT,
             components,
             inputs,
             torpedo_detection,
@@ -396,24 +399,24 @@ mod tests {
     /// account for the whole rating.
     #[test]
     fn lines_run_largest_first_and_sum_to_the_rating() {
-        let components = BattleImpactComponents {
-            damage: score(BattleImpactFactor::Damage, 600.0),
-            kills: score(BattleImpactFactor::Kills, 150.0),
-            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 240.0)),
-            tanking: Some(score(BattleImpactFactor::Tanking, 90.0)),
-            spotting: Some(score(BattleImpactFactor::Spotting, 260.0)),
+        let components = MatchContributionComponents {
+            damage: score(MatchContributionFactor::Damage, 600.0),
+            kills: score(MatchContributionFactor::Kills, 150.0),
+            team_damage_share: Some(score(MatchContributionFactor::TeamDamageShare, 240.0)),
+            tanking: Some(score(MatchContributionFactor::Tanking, 90.0)),
+            spotting: Some(score(MatchContributionFactor::Spotting, 260.0)),
             objectives: None,
             anti_air: None,
-            torpedo_warnings: Some(score(BattleImpactFactor::TorpedoWarnings, 40.0)),
+            torpedo_warnings: Some(score(MatchContributionFactor::TorpedoWarnings, 40.0)),
             critical_bursts: None,
         };
         let result = rating(components, Some(TorpedoDetection { detected: 22, threatening: 9, threat_weight: 5.0 }));
 
-        let breakdown = RatingBreakdown::battle_impact(&result, None);
+        let breakdown = RatingBreakdown::match_contribution(&result, None);
 
         let points: Vec<f64> = breakdown.lines.iter().map(|line| line.points).collect();
         assert_eq!(points, vec![600.0, 260.0, 240.0, 150.0, 90.0, 40.0]);
-        assert!((points.iter().sum::<f64>() - result.bi).abs() < 1e-9);
+        assert!((points.iter().sum::<f64>() - result.mc).abs() < 1e-9);
         assert_eq!(breakdown.scale(), 600.0);
 
         // A whole count of threatening torpedoes and nothing about the rest.
@@ -426,24 +429,27 @@ mod tests {
     /// for, is left out; a core part at zero stays, since it shows a deficit.
     #[test]
     fn unobservable_parts_and_empty_bonuses_are_not_listed() {
-        let components = BattleImpactComponents {
-            damage: score(BattleImpactFactor::Damage, 300.0),
-            kills: score(BattleImpactFactor::Kills, 0.0),
-            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
-            tanking: Some(score(BattleImpactFactor::Tanking, 50.0)),
+        let components = MatchContributionComponents {
+            damage: score(MatchContributionFactor::Damage, 300.0),
+            kills: score(MatchContributionFactor::Kills, 0.0),
+            team_damage_share: Some(score(MatchContributionFactor::TeamDamageShare, 100.0)),
+            tanking: Some(score(MatchContributionFactor::Tanking, 50.0)),
             spotting: None,
             objectives: None,
-            anti_air: Some(score(BattleImpactFactor::AntiAir, 0.0)),
+            anti_air: Some(score(MatchContributionFactor::AntiAir, 0.0)),
             torpedo_warnings: None,
             critical_bursts: None,
         };
 
-        let breakdown = RatingBreakdown::battle_impact(&rating(components, None), None);
+        let breakdown = RatingBreakdown::match_contribution(&rating(components, None), None);
 
         assert_eq!(breakdown.lines.len(), 4, "only the four core parts");
         assert!(breakdown.lines.iter().all(|line| line.average.is_some()), "every core part has an average");
         let damage = breakdown.lines.iter().find(|line| line.points == 300.0).expect("damage is listed");
-        assert_eq!(damage.versus_average(), BattleImpactFactor::Damage.average_points().map(|average| 300.0 - average));
+        assert_eq!(
+            damage.versus_average(),
+            MatchContributionFactor::Damage.average_points().map(|average| 300.0 - average)
+        );
     }
 
     /// Each line shows the basis the rating recorded for that player, not
@@ -451,20 +457,20 @@ mod tests {
     /// shown once.
     #[test]
     fn lines_carry_the_recorded_basis_and_the_legend_lists_each_once() {
-        let components = BattleImpactComponents {
-            damage: score(BattleImpactFactor::Damage, 300.0),
-            kills: score(BattleImpactFactor::Kills, 100.0),
-            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
+        let components = MatchContributionComponents {
+            damage: score(MatchContributionFactor::Damage, 300.0),
+            kills: score(MatchContributionFactor::Kills, 100.0),
+            team_damage_share: Some(score(MatchContributionFactor::TeamDamageShare, 100.0)),
             // Recorded as static although the factor is dynamic when complete.
             tanking: Some(FactorScore { points: 50.0, basis: FactorBasis::Static }),
-            spotting: Some(score(BattleImpactFactor::Spotting, 200.0)),
+            spotting: Some(score(MatchContributionFactor::Spotting, 200.0)),
             objectives: None,
             anti_air: None,
             torpedo_warnings: None,
             critical_bursts: None,
         };
 
-        let breakdown = RatingBreakdown::battle_impact(&rating(components, None), None);
+        let breakdown = RatingBreakdown::match_contribution(&rating(components, None), None);
 
         let bases: Vec<(f64, FactorBasis)> = breakdown.lines.iter().map(|line| (line.points, line.basis)).collect();
         assert_eq!(
@@ -484,11 +490,11 @@ mod tests {
     /// so the hover lists no line for it rather than a zero.
     #[test]
     fn a_team_without_damage_lists_no_share_of_it() {
-        let components = BattleImpactComponents {
-            damage: score(BattleImpactFactor::Damage, 0.0),
-            kills: score(BattleImpactFactor::Kills, 0.0),
+        let components = MatchContributionComponents {
+            damage: score(MatchContributionFactor::Damage, 0.0),
+            kills: score(MatchContributionFactor::Kills, 0.0),
             team_damage_share: None,
-            tanking: Some(score(BattleImpactFactor::Tanking, 50.0)),
+            tanking: Some(score(MatchContributionFactor::Tanking, 50.0)),
             spotting: None,
             objectives: None,
             anti_air: None,
@@ -498,9 +504,9 @@ mod tests {
         let mut result = rating(components, None);
         result.inputs.team_damage_share = None;
 
-        let breakdown = RatingBreakdown::battle_impact(&result, None);
+        let breakdown = RatingBreakdown::match_contribution(&result, None);
 
-        let share_label = bi_label(BattleImpactFactor::TeamDamageShare);
+        let share_label = mc_label(MatchContributionFactor::TeamDamageShare);
         assert!(breakdown.lines.iter().all(|line| line.label != share_label));
         assert_eq!(breakdown.lines.len(), 3, "damage, kills and tanking");
     }
@@ -510,16 +516,16 @@ mod tests {
     /// cannot see.
     #[test]
     fn critical_bursts_list_each_victim() {
-        let components = BattleImpactComponents {
-            damage: score(BattleImpactFactor::Damage, 300.0),
-            kills: score(BattleImpactFactor::Kills, 100.0),
+        let components = MatchContributionComponents {
+            damage: score(MatchContributionFactor::Damage, 300.0),
+            kills: score(MatchContributionFactor::Kills, 100.0),
             team_damage_share: None,
             tanking: None,
             spotting: None,
             objectives: None,
             anti_air: None,
             torpedo_warnings: None,
-            critical_bursts: Some(score(BattleImpactFactor::CriticalBursts, 50.0)),
+            critical_bursts: Some(score(MatchContributionFactor::CriticalBursts, 50.0)),
         };
         let mut result = rating(components, None);
         let burst = |ship: &str, share: f64, seconds: f32| CriticalBurst {
@@ -530,7 +536,7 @@ mod tests {
         };
         result.critical_bursts = Some(vec![burst("Montana", 0.92, 8.0), burst("Zao", 1.0, 0.4)]);
 
-        let breakdown = RatingBreakdown::battle_impact(&result, None);
+        let breakdown = RatingBreakdown::match_contribution(&result, None);
 
         let line = breakdown.lines.iter().find(|line| line.points == 50.0).expect("the bursts are listed");
         assert_eq!(line.basis, FactorBasis::Static);

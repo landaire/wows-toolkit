@@ -12,9 +12,9 @@ use sqlx::Sqlite;
 use sqlx::SqlitePool;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
-use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::GameParamId;
 use wows_core::rating_scope::RatingScope;
+use wows_core::game_types::MatchContributionVersion;
 
 use super::query_ast::MatchExpr;
 use super::query_sql::CompileCtx;
@@ -95,18 +95,18 @@ struct RecordRevision {
     path: String,
     written_by: IndexRevision,
     build: Option<u32>,
-    /// A roster row of the arena carries no BI from the formula the caller rates with.
-    bi_stale: bool,
+    /// A roster row of the arena carries no MC from the formula the caller rates with.
+    mc_stale: bool,
 }
 
 impl RecordRevision {
     fn is_stale(&self) -> bool {
-        self.bi_stale || needs_reparse(self.written_by, self.build)
+        self.mc_stale || needs_reparse(self.written_by, self.build)
     }
 }
 
-/// `rateable_bi` is the BI formula revision the caller's indexing pass computes,
-/// or `None` when it has no expected values to rate with. Under `None` BI never
+/// `rateable_mc` is the MC formula revision the caller's indexing pass computes,
+/// or `None` when it has no expected values to rate with. Under `None` MC never
 /// makes a row stale, since a reparse could not fill it.
 ///
 /// Bot rows (`account_id = 0`) from older indexers are skipped: no parse
@@ -114,18 +114,18 @@ impl RecordRevision {
 async fn record_revisions(
     pool: &SqlitePool,
     source: SourceId,
-    rateable_bi: Option<BattleImpactVersion>,
+    rateable_mc: Option<MatchContributionVersion>,
 ) -> Result<Vec<RecordRevision>, IndexError> {
     let rows = sqlx::query(
         "SELECT r.replay_path, r.index_revision, m.version_build, \
            (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM indexed_vehicle v \
               WHERE v.arena_id = r.arena_id AND v.account_id <> 0 \
-                AND (v.bi_version IS NULL OR v.bi_version < ?2))) AS bi_stale \
+                AND (v.mc_version IS NULL OR v.mc_version < ?2))) AS mc_stale \
          FROM replay_record r \
          LEFT JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
     )
     .bind(source.0)
-    .bind(rateable_bi.map(|version| i64::from(version.0)))
+    .bind(rateable_mc.map(|version| i64::from(version.0)))
     .fetch_all(pool)
     .await?;
     rows.into_iter()
@@ -135,7 +135,7 @@ async fn record_revisions(
                 path: row.try_get("replay_path")?,
                 written_by: IndexRevision(row.try_get("index_revision")?),
                 build: build.and_then(|build| u32::try_from(build).ok()),
-                bi_stale: row.try_get("bi_stale")?,
+                mc_stale: row.try_get("mc_stale")?,
             })
         })
         .collect()
@@ -157,8 +157,8 @@ const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.
      m.match_group, m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
      (SELECT v.ship_name FROM indexed_vehicle v \
         WHERE v.arena_id = m.arena_id AND v.ship_id = r.self_ship_id LIMIT 1) AS self_ship_name, \
-     (SELECT v.bi FROM indexed_vehicle v \
-        WHERE v.arena_id = m.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_bi, \
+     (SELECT v.mc FROM indexed_vehicle v \
+        WHERE v.arena_id = m.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_mc, \
      r.self_survived, r.self_damage, r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime";
 
 /// The live source's id, or `None` when the indexer has not created it yet.
@@ -490,13 +490,13 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
 /// `pr` at all, so every one of those columns only fills a NULL a stored row
 /// already has, whatever `mode` says.
 ///
-/// `bi` follows `pr`, except that a BI from an older formula is not a fact: under
-/// Incremental with Store, the pass's `bi`, `bi_version` and
-/// `bi_torpedoes_observed` replace the stored ones when the pass carries a
-/// revision and the stored `bi` is NULL, its `bi_version` is NULL or older, or
+/// `mc` follows `pr`, except that an MC from an older formula is not a fact: under
+/// Incremental with Store, the pass's `mc`, `mc_version` and
+/// `mc_torpedoes_observed` replace the stored ones when the pass carries a
+/// revision and the stored `mc` is NULL, its `mc_version` is NULL or older, or
 /// at the same revision only the pass observed torpedo warnings (a replay from
-/// the player's own team). Under Keep `bi` and its `bi_torpedoes_observed` only
-/// fill a NULL, but the pass's `bi_version` is taken whenever it has one: a
+/// the player's own team). Under Keep `mc` and its `mc_torpedoes_observed` only
+/// fill a NULL, but the pass's `mc_version` is taken whenever it has one: a
 /// reparse with the same constants could not vouch for more, so the row is not
 /// left stale.
 pub async fn upsert_vehicles_with_mode(
@@ -509,31 +509,31 @@ pub async fn upsert_vehicles_with_mode(
         ResultsWrite::Store => {
             let ratings = match mode {
                 IndexWriteMode::Incremental => {
-                    let new_bi_wins = "?26 IS NOT NULL AND (bi IS NULL OR bi_version IS NULL OR bi_version < ?26 \
-                         OR (bi_version = ?26 AND ?25 IS NOT NULL AND ?27 AND NOT bi_torpedoes_observed))";
+                    let new_mc_wins = "?26 IS NOT NULL AND (mc IS NULL OR mc_version IS NULL OR mc_version < ?26 \
+                         OR (mc_version = ?26 AND ?25 IS NOT NULL AND ?27 AND NOT mc_torpedoes_observed))";
                     format!(
                         "pr=COALESCE(pr, ?20), \
-                         bi=CASE WHEN {new_bi_wins} THEN ?25 ELSE bi END, \
-                         bi_version=CASE WHEN {new_bi_wins} THEN ?26 ELSE bi_version END, \
-                         bi_torpedoes_observed=CASE WHEN {new_bi_wins} THEN ?27 ELSE bi_torpedoes_observed END"
+                         mc=CASE WHEN {new_mc_wins} THEN ?25 ELSE mc END, \
+                         mc_version=CASE WHEN {new_mc_wins} THEN ?26 ELSE mc_version END, \
+                         mc_torpedoes_observed=CASE WHEN {new_mc_wins} THEN ?27 ELSE mc_torpedoes_observed END"
                     )
                 }
-                IndexWriteMode::Replace => "pr=?20, bi=?25, bi_version=?26, bi_torpedoes_observed=?27".to_owned(),
+                IndexWriteMode::Replace => "pr=?20, mc=?25, mc_version=?26, mc_torpedoes_observed=?27".to_owned(),
             };
             format!("damage=?15, kills=?16, spotting=?17, potential=?18, received=?19, {ratings}")
         }
         ResultsWrite::Keep => "damage=COALESCE(damage, ?15), kills=COALESCE(kills, ?16), \
              spotting=COALESCE(spotting, ?17), potential=COALESCE(potential, ?18), \
              received=COALESCE(received, ?19), pr=COALESCE(pr, ?20), \
-             bi=COALESCE(bi, ?25), bi_version=COALESCE(?26, bi_version), \
-             bi_torpedoes_observed=CASE WHEN bi IS NULL THEN ?27 ELSE bi_torpedoes_observed END"
+             mc=COALESCE(mc, ?25), mc_version=COALESCE(?26, mc_version), \
+             mc_torpedoes_observed=CASE WHEN mc IS NULL THEN ?27 ELSE mc_torpedoes_observed END"
             .to_string(),
     };
     let sql = format!(
         "INSERT INTO indexed_vehicle \
          (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
           tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
-          disconnected, is_stream_sniper, sniper_twitch_login, bi, bi_version, bi_torpedoes_observed) \
+          disconnected, is_stream_sniper, sniper_twitch_login, mc, mc_version, mc_torpedoes_observed) \
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27) \
          ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
            player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
@@ -567,9 +567,9 @@ pub async fn upsert_vehicles_with_mode(
             .bind(v.disconnected)
             .bind(v.is_stream_sniper)
             .bind(&v.sniper_twitch_login)
-            .bind(v.bi)
-            .bind(v.bi_version.map(|version| i64::from(version.0)))
-            .bind(v.bi_torpedoes_observed)
+            .bind(v.mc)
+            .bind(v.mc_version.map(|version| i64::from(version.0)))
+            .bind(v.mc_torpedoes_observed)
             .execute(&mut *tx)
             .await?;
     }
@@ -585,9 +585,9 @@ struct StoredVehicleFacts {
     potential: Option<u64>,
     received: Option<u64>,
     pr: Option<f64>,
-    bi: Option<f64>,
-    bi_version: Option<BattleImpactVersion>,
-    bi_torpedoes_observed: bool,
+    mc: Option<f64>,
+    mc_version: Option<MatchContributionVersion>,
+    mc_torpedoes_observed: bool,
     is_stream_sniper: Option<bool>,
     sniper_twitch_login: Option<String>,
 }
@@ -617,8 +617,8 @@ pub async fn write_indexed_replay(
     upsert_match_with_mode(&mut *tx, objective, mode).await?;
 
     let old_rows = sqlx::query(
-        "SELECT account_id, damage, kills, spotting, potential, received, pr, bi, bi_version, \
-         bi_torpedoes_observed, is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = ?1",
+        "SELECT account_id, damage, kills, spotting, potential, received, pr, mc, mc_version, \
+         mc_torpedoes_observed, is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = ?1",
     )
     .bind(arena_id.raw())
     .fetch_all(&mut *tx)
@@ -632,12 +632,12 @@ pub async fn write_indexed_replay(
             potential: old.try_get::<Option<i64>, _>("potential")?.and_then(|value| u64::try_from(value).ok()),
             received: old.try_get::<Option<i64>, _>("received")?.and_then(|value| u64::try_from(value).ok()),
             pr: old.try_get("pr")?,
-            bi: old.try_get("bi")?,
-            bi_version: old
-                .try_get::<Option<i64>, _>("bi_version")?
+            mc: old.try_get("mc")?,
+            mc_version: old
+                .try_get::<Option<i64>, _>("mc_version")?
                 .and_then(|value| u32::try_from(value).ok())
-                .map(BattleImpactVersion),
-            bi_torpedoes_observed: old.try_get("bi_torpedoes_observed")?,
+                .map(MatchContributionVersion),
+            mc_torpedoes_observed: old.try_get("mc_torpedoes_observed")?,
             is_stream_sniper: old.try_get("is_stream_sniper")?,
             sniper_twitch_login: old.try_get("sniper_twitch_login")?,
         };
@@ -655,26 +655,26 @@ pub async fn write_indexed_replay(
                     vehicle.potential = old.potential.or(vehicle.potential);
                     vehicle.received = old.received.or(vehicle.received);
                     vehicle.pr = old.pr.or(vehicle.pr);
-                    if old.bi.is_some() {
-                        vehicle.bi = old.bi;
-                        vehicle.bi_torpedoes_observed = old.bi_torpedoes_observed;
+                    if old.mc.is_some() {
+                        vehicle.mc = old.mc;
+                        vehicle.mc_torpedoes_observed = old.mc_torpedoes_observed;
                     }
-                    vehicle.bi_version = vehicle.bi_version.or(old.bi_version);
+                    vehicle.mc_version = vehicle.mc_version.or(old.mc_version);
                 }
                 (ResultsWrite::Store, IndexWriteMode::Incremental) => {
                     vehicle.pr = old.pr.or(vehicle.pr);
-                    let new_bi_wins = vehicle.bi_version.is_some_and(|new| {
-                        old.bi.is_none()
-                            || old.bi_version.is_none_or(|stored| stored < new)
-                            || (old.bi_version == Some(new)
-                                && vehicle.bi.is_some()
-                                && vehicle.bi_torpedoes_observed
-                                && !old.bi_torpedoes_observed)
+                    let new_mc_wins = vehicle.mc_version.is_some_and(|new| {
+                        old.mc.is_none()
+                            || old.mc_version.is_none_or(|stored| stored < new)
+                            || (old.mc_version == Some(new)
+                                && vehicle.mc.is_some()
+                                && vehicle.mc_torpedoes_observed
+                                && !old.mc_torpedoes_observed)
                     });
-                    if !new_bi_wins {
-                        vehicle.bi = old.bi;
-                        vehicle.bi_version = old.bi_version;
-                        vehicle.bi_torpedoes_observed = old.bi_torpedoes_observed;
+                    if !new_mc_wins {
+                        vehicle.mc = old.mc;
+                        vehicle.mc_version = old.mc_version;
+                        vehicle.mc_torpedoes_observed = old.mc_torpedoes_observed;
                     }
                 }
                 (ResultsWrite::Store, IndexWriteMode::Replace) => {}
@@ -694,7 +694,7 @@ pub async fn write_indexed_replay(
             "INSERT INTO indexed_vehicle \
              (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
               tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
-              disconnected, is_stream_sniper, sniper_twitch_login, bi, bi_version, bi_torpedoes_observed) \
+              disconnected, is_stream_sniper, sniper_twitch_login, mc, mc_version, mc_torpedoes_observed) \
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)",
         )
         .bind(vehicle.arena_id.raw())
@@ -721,9 +721,9 @@ pub async fn write_indexed_replay(
         .bind(vehicle.disconnected)
         .bind(vehicle.is_stream_sniper)
         .bind(&vehicle.sniper_twitch_login)
-        .bind(vehicle.bi)
-        .bind(vehicle.bi_version.map(|version| i64::from(version.0)))
-        .bind(vehicle.bi_torpedoes_observed)
+        .bind(vehicle.mc)
+        .bind(vehicle.mc_version.map(|version| i64::from(version.0)))
+        .bind(vehicle.mc_torpedoes_observed)
         .execute(&mut *tx)
         .await?;
     }
@@ -846,15 +846,15 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
 
 /// Absolute replay paths current enough for the startup pass to skip.
 ///
-/// A row that [`REPARSE_RULES`] marks stale, or whose arena lacks BI from
-/// `rateable_bi` (see [`record_revisions`]), stays readable, but its replay
+/// A row that [`REPARSE_RULES`] marks stale, or whose arena lacks MC from
+/// `rateable_mc` (see [`record_revisions`]), stays readable, but its replay
 /// file, if still on disk, is parsed and upserted once.
 pub async fn record_paths_in_source(
     pool: &SqlitePool,
     source: SourceId,
-    rateable_bi: Option<BattleImpactVersion>,
+    rateable_mc: Option<MatchContributionVersion>,
 ) -> Result<HashSet<String>, IndexError> {
-    Ok(record_revisions(pool, source, rateable_bi)
+    Ok(record_revisions(pool, source, rateable_mc)
         .await?
         .into_iter()
         .filter(|record| !record.is_stale())
@@ -866,9 +866,9 @@ async fn stale_paths_under(
     pool: &SqlitePool,
     source: SourceId,
     root: &Path,
-    rateable_bi: Option<BattleImpactVersion>,
+    rateable_mc: Option<MatchContributionVersion>,
 ) -> Result<Vec<String>, IndexError> {
-    Ok(record_revisions(pool, source, rateable_bi)
+    Ok(record_revisions(pool, source, rateable_mc)
         .await?
         .into_iter()
         .filter(RecordRevision::is_stale)
@@ -881,31 +881,31 @@ async fn stale_paths_under(
 pub async fn has_stale_replay_records(
     pool: &SqlitePool,
     root: &Path,
-    rateable_bi: Option<BattleImpactVersion>,
+    rateable_mc: Option<MatchContributionVersion>,
 ) -> Result<bool, IndexError> {
     let Some(source) = live_source_id(pool).await? else { return Ok(false) };
-    Ok(!stale_paths_under(pool, source, root, rateable_bi).await?.is_empty())
+    Ok(!stale_paths_under(pool, source, root, rateable_mc).await?.is_empty())
 }
 
 /// Marks the rows under a completely scanned `root` as handled by the current
 /// parser, so a replay that could not be reparsed does not start the scan again.
 ///
-/// Under `rateable_bi` the roster rows of those replays' arenas are stamped
-/// with that BI revision too, keeping whatever `bi` they hold.
+/// Under `rateable_mc` the roster rows of those replays' arenas are stamped
+/// with that MC revision too, keeping whatever `mc` they hold.
 pub async fn mark_replay_records_current(
     pool: &SqlitePool,
     source: SourceId,
     root: &Path,
-    rateable_bi: Option<BattleImpactVersion>,
+    rateable_mc: Option<MatchContributionVersion>,
 ) -> Result<(), IndexError> {
-    let stale = stale_paths_under(pool, source, root, rateable_bi).await?;
+    let stale = stale_paths_under(pool, source, root, rateable_mc).await?;
     let mut tx = pool.begin().await?;
     for path in stale {
-        if let Some(version) = rateable_bi {
+        if let Some(version) = rateable_mc {
             sqlx::query(
-                "UPDATE indexed_vehicle SET bi_version = ?1 \
+                "UPDATE indexed_vehicle SET mc_version = ?1 \
                  WHERE arena_id = (SELECT arena_id FROM replay_record WHERE source_id = ?2 AND replay_path = ?3) \
-                   AND (bi_version IS NULL OR bi_version < ?1)",
+                   AND (mc_version IS NULL OR mc_version < ?1)",
             )
             .bind(i64::from(version.0))
             .bind(source.0)
@@ -945,8 +945,8 @@ pub async fn row_summaries_for_source(
                 r.results_available, r.file_mtime, m.game_type, m.match_group, \
                 (SELECT v.division_id FROM indexed_vehicle v \
                    WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS division_id, \
-                (SELECT v.bi FROM indexed_vehicle v \
-                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_bi \
+                (SELECT v.mc FROM indexed_vehicle v \
+                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_mc \
          FROM replay_record r JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
     )
     .bind(source.0)
@@ -1006,7 +1006,7 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_pr: row.try_get("self_pr")?,
         rating_scope: row_rating_scope(row)?,
-        self_bi: row.try_get("self_bi")?,
+        self_mc: row.try_get("self_mc")?,
         division_id: row.try_get("division_id")?,
         division_mates: Vec::new(),
         results_available: row.try_get("results_available")?,
@@ -1114,7 +1114,7 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
         self_damage: self_damage.map(|d| d as u64),
         self_kills: row.try_get("self_kills")?,
         self_pr: row.try_get("self_pr")?,
-        self_bi: row.try_get("self_bi")?,
+        self_mc: row.try_get("self_mc")?,
         results_available: row.try_get("results_available")?,
         replay_path: std::path::PathBuf::from(row.try_get::<String, _>("replay_path")?),
         file_mtime: row.try_get("file_mtime")?,
@@ -1629,8 +1629,8 @@ pub enum SortColumn {
     Damage,
     Kills,
     Pr,
-    /// The perspective player's battle impact, read off their roster row.
-    Bi,
+    /// The perspective player's match contribution, read off their roster row.
+    Mc,
 }
 
 impl SortColumn {
@@ -1643,7 +1643,7 @@ impl SortColumn {
         SortColumn::Damage,
         SortColumn::Kills,
         SortColumn::Pr,
-        SortColumn::Bi,
+        SortColumn::Mc,
     ];
 
     /// The column's header name, so both front ends label it the same.
@@ -1659,7 +1659,7 @@ impl SortColumn {
             SortColumn::Damage => "Damage",
             SortColumn::Kills => "Kills",
             SortColumn::Pr => "PR",
-            SortColumn::Bi => "BI",
+            SortColumn::Mc => "MC",
         }
     }
 
@@ -1678,8 +1678,8 @@ impl SortColumn {
             SortColumn::Damage => "r.self_damage",
             SortColumn::Kills => "r.self_kills",
             SortColumn::Pr => "r.self_pr",
-            SortColumn::Bi => {
-                "(SELECT v.bi FROM indexed_vehicle v \
+            SortColumn::Mc => {
+                "(SELECT v.mc FROM indexed_vehicle v \
                   WHERE v.arena_id = m.arena_id AND v.account_id = r.self_account_id LIMIT 1)"
             }
         }
@@ -1689,7 +1689,7 @@ impl SortColumn {
     /// where a NULL goes rather than take SQLite's default.
     fn is_nullable(self) -> bool {
         match self {
-            SortColumn::Damage | SortColumn::Kills | SortColumn::Pr | SortColumn::Bi => true,
+            SortColumn::Damage | SortColumn::Kills | SortColumn::Pr | SortColumn::Mc => true,
             SortColumn::Date | SortColumn::Map | SortColumn::Mode | SortColumn::Outcome => false,
         }
     }
@@ -1705,7 +1705,7 @@ impl SortColumn {
             | SortColumn::Damage
             | SortColumn::Kills
             | SortColumn::Pr
-            | SortColumn::Bi => SortDirection::Descending,
+            | SortColumn::Mc => SortDirection::Descending,
         }
     }
 }

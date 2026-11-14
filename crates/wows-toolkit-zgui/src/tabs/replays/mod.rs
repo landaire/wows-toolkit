@@ -321,7 +321,7 @@ fn load_personal_rating(workspace: ReplayWorkspace) {
             match rating {
                 Ok(table) => {
                     if let Some(table) = &table {
-                        workspace.shell.rebuild_stale_battle_impact(table);
+                        workspace.shell.rebuild_stale_match_contribution(table);
                     }
                     workspace.personal_rating.set(table.map(Arc::new));
                 }

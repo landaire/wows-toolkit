@@ -38,11 +38,11 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::rating_scope::RatingScope;
 use wowsunpack::recognized::Recognized;
 
-use crate::battle_impact::BattleImpactResult;
-use crate::battle_impact::BattleImpactVersion;
-use crate::battle_impact::CriticalBursts;
-use crate::battle_impact::TorpedoDetections;
-use crate::battle_impact::rate_battle;
+use crate::match_contribution::CriticalBursts;
+use crate::match_contribution::MatchContributionResult;
+use crate::match_contribution::MatchContributionVersion;
+use crate::match_contribution::TorpedoDetections;
+use crate::match_contribution::rate_battle;
 use crate::personal_rating::PersonalRatingResult;
 
 /// Match-level metadata, mirroring the fields the replay export emits.
@@ -140,7 +140,7 @@ pub struct NormalizedPlayer {
     pub consumables: Vec<ConsumableResult>,
     pub heal_count: Option<u32>,
     pub personal_rating: Option<PersonalRatingResult>,
-    pub battle_impact: Option<BattleImpactResult>,
+    pub match_contribution: Option<MatchContributionResult>,
     pub time_lived_secs: Option<u64>,
     /// Whether this player's ship was still afloat at the end. `None` when
     /// the player had no ship at all, which is not the same as surviving:
@@ -224,7 +224,7 @@ impl NormalizedPlayer {
     ///
     /// `player` is the same entity this was built from; the provider names
     /// the ship, the bot, the build, the earned awards and the ships a
-    /// battle impact burst landed on, and all of those change with the
+    /// match contribution burst landed on, and all of those change with the
     /// active language. What is left alone is what the provider never named:
     /// the raw username, the results figures, and the rating's figures.
     pub fn refresh_translations(&mut self, player: &Player, provider: &GameMetadataProvider, version: &Version) {
@@ -266,7 +266,7 @@ impl NormalizedPlayer {
             ribbon.description = translation.description;
         }
 
-        let bursts = self.battle_impact.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
+        let bursts = self.match_contribution.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
         for burst in bursts {
             burst.victim_ship_name = GameParamProvider::game_param_by_id(provider, burst.victim_ship)
                 .and_then(|param| provider.localized_name_from_param(&param));
@@ -313,15 +313,15 @@ impl NormalizedBattleReport {
         }
     }
 
-    /// Rates every player's battle impact against `table`, replacing any
-    /// rating already present. Unlike PR, BI is recomputed whenever asked:
-    /// a stored BI from an older formula is meant to be replaced.
+    /// Rates every player's match contribution against `table`, replacing any
+    /// rating already present. Unlike PR, MC is recomputed whenever asked:
+    /// a stored MC from an older formula is meant to be replaced.
     ///
     /// A recording that did not reach the battle's end rates nobody. Its
     /// player left early and was sent nothing after that, so two recordings
     /// of one battle would rate the same player differently. The version is
     /// still stamped: the replay was rated, and no later pass can do better.
-    pub fn populate_battle_impact(&mut self, table: &crate::personal_rating::PersonalRatingData) {
+    pub fn populate_match_contribution(&mut self, table: &crate::personal_rating::PersonalRatingData) {
         let saw_battle_end = self.metadata.battle_result.is_some();
         let ratings = if saw_battle_end {
             rate_battle(&self.players, table, &self.torpedo_detections, self.critical_bursts.as_ref())
@@ -329,9 +329,9 @@ impl NormalizedBattleReport {
             vec![None; self.players.len()]
         };
         for (player, rating) in self.players.iter_mut().zip(ratings) {
-            player.battle_impact = rating;
+            player.match_contribution = rating;
         }
-        self.battle_impact_version = Some(BattleImpactVersion::CURRENT);
+        self.match_contribution_version = Some(MatchContributionVersion::CURRENT);
     }
 }
 
@@ -390,18 +390,18 @@ impl NormalizedPlayer {
 pub struct NormalizedBattleReport {
     pub metadata: MatchMetadata,
     pub players: Vec<NormalizedPlayer>,
-    /// Kept from the packet stream so battle impact can be rated once the
+    /// Kept from the packet stream so match contribution can be rated once the
     /// expected values are loaded, after the `BattleReport` is gone.
     #[serde(skip)]
     pub torpedo_detections: TorpedoDetections,
     /// As `torpedo_detections`. `None` for a replay with no damage events.
     #[serde(skip)]
     pub critical_bursts: Option<CriticalBursts>,
-    /// The formula `populate_battle_impact` rated this report with. `None`
-    /// until it runs; once it has, a player's `battle_impact` being `None`
+    /// The formula `populate_match_contribution` rated this report with. `None`
+    /// until it runs; once it has, a player's `match_contribution` being `None`
     /// means that player could not be rated, not that nobody tried.
     #[serde(skip)]
-    pub battle_impact_version: Option<BattleImpactVersion>,
+    pub match_contribution_version: Option<MatchContributionVersion>,
 }
 
 impl NormalizedBattleReport {
@@ -447,7 +447,13 @@ impl NormalizedBattleReport {
         let torpedo_detections = TorpedoDetections::from_report(report, &players, provider);
         let critical_bursts = CriticalBursts::from_report(report, &players);
 
-        NormalizedBattleReport { metadata, players, torpedo_detections, critical_bursts, battle_impact_version: None }
+        NormalizedBattleReport {
+            metadata,
+            players,
+            torpedo_detections,
+            critical_bursts,
+            match_contribution_version: None,
+        }
     }
 }
 
@@ -1042,7 +1048,7 @@ fn build_player(
         consumables,
         heal_count,
         personal_rating: None,
-        battle_impact: None,
+        match_contribution: None,
         time_lived_secs,
         survived,
         is_hidden_profile: state.is_hidden(),
