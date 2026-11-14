@@ -47,7 +47,6 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
-use zgui::view::ShowProps;
 use zgui_image::ImageBytes;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -110,8 +109,20 @@ struct RosterContext {
     met: HashMap<AccountId, TrackedPlayer>,
     count_division_mates: bool,
     twitch: HashMap<String, Vec<SniperCandidate>>,
-    modes: Vec<WinRateMode>,
+    view_mode: CurrentMatchViewMode,
+    /// The selected scope. It colours the rows and picks the team averages in either view.
+    mode: WinRateMode,
     class_icons: HashMap<ClassIconKey, ImageBytes>,
+}
+
+impl RosterContext {
+    fn is_detailed(&self) -> bool {
+        self.view_mode == CurrentMatchViewMode::Detailed
+    }
+
+    fn modes(&self) -> Vec<WinRateMode> {
+        visible_stat_modes(self.view_mode, self.mode)
+    }
 }
 
 /// The Current Match section.
@@ -164,10 +175,9 @@ fn ModeBar(model: TrackerModel) -> impl IntoView {
         locale.track();
         CurrentMatchViewMode::ALL.to_vec()
     });
-    // Detailed shows both scopes, so the scope selector would say nothing there.
     let scopes = Signal::derive_local(move || {
         locale.track();
-        if model.view_mode.get() == CurrentMatchViewMode::Compact { WinRateMode::ALL.to_vec() } else { Vec::new() }
+        WinRateMode::ALL.to_vec()
     });
 
     view! {
@@ -183,9 +193,7 @@ fn ModeBar(model: TrackerModel) -> impl IntoView {
                     on:click = move |_| model.set_view_mode(mode)
                 ) {{t!(mode.label_key()).into_owned()}}
             }
-            if move || !scopes.with(Vec::is_empty) {
-                box(class = "wt-tracker-modes__gap")
-            } else {}
+            box(class = "wt-tracker-modes__gap")
             for mode in move || scopes.get(), key = |mode: &WinRateMode| *mode as usize {
                 Button(
                     variant = ButtonVariant::Ghost,
@@ -246,7 +254,8 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             met: model.tracked.get(),
             count_division_mates: model.show_division_mates.get(),
             twitch: live.twitch.get(),
-            modes: visible_stat_modes(model.view_mode.get(), model.win_rate_mode.get()),
+            view_mode: model.view_mode.get(),
+            mode: model.win_rate_mode.get(),
             class_icons: live.class_icons.get(),
         };
         Some(
@@ -300,27 +309,30 @@ fn TeamColumn(
     context: RosterContext,
     shell: Shell,
 ) -> impl IntoView {
-    // The averages are the shared ones, over the scope the rows lead with, so the heading and the
-    // cells under it cannot disagree. A team nobody has stats for shows no average.
-    let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
-    let win_rate = context.stats.as_ref().and_then(|stats| team_average_win_rate(&rows, stats, lead));
-    let rating = context.stats.as_ref().and_then(|stats| team_average_personal_rating(&rows, stats, lead));
+    // The averages are the shared ones, over the selected scope that also colours the rows, so the
+    // heading and the rows under it cannot disagree. A team nobody has stats for shows no average.
+    let win_rate = context.stats.as_ref().and_then(|stats| team_average_win_rate(&rows, stats, context.mode));
+    let rating = context.stats.as_ref().and_then(|stats| team_average_personal_rating(&rows, stats, context.mode));
     let players = t!("ui.player_tracker.team_players", count = rows.len()).into_owned();
 
     let mut headings = vec![
         ("name", t!("ui.player_tracker.column.player_name").into_owned()),
         ("ship", t!("ui.player_tracker.win_rate_ship").into_owned()),
     ];
-    for mode in &context.modes {
-        let scope = t!(mode.label_key()).into_owned();
-        for key in [
-            "ui.player_tracker.column.win_rate",
-            "ui.player_tracker.column.personal_rating",
-            "ui.player_tracker.column.avg_damage",
-            "ui.player_tracker.column.battles",
-        ] {
-            headings.push(("stat", scoped_heading(&scope, key)));
-        }
+    // Compact names the one scope its figures come from. Detailed stacks both scopes in each
+    // column, and the ship cell labels the second line.
+    let scope = (!context.is_detailed()).then(|| t!(context.mode.label_key()).into_owned());
+    for key in [
+        "ui.player_tracker.column.win_rate",
+        "ui.player_tracker.column.personal_rating",
+        "ui.player_tracker.column.avg_damage",
+        "ui.player_tracker.column.battles",
+    ] {
+        let heading = match &scope {
+            Some(scope) => scoped_heading(scope, key),
+            None => t!(key).into_owned(),
+        };
+        headings.push(("stat", heading));
     }
     headings.push(("met", t!("ui.player_tracker.column.encounters").into_owned()));
     let indexed: Vec<(usize, LiveRosterRow)> = rows.into_iter().enumerate().collect();
@@ -376,18 +388,10 @@ fn RosterRow(
     let pending = context.stats.is_none();
     let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
     let both_scopes = win_rate_hover(player, None);
-    let lead = context.modes.first().copied().unwrap_or(WinRateMode::Overall);
-    // The lead scope's band, far fainter than a chip, so a screen of rows reads as bands first.
-    let band = row_stats(player, lead).band.map(rating_band_name);
-
-    let cells: Vec<AnyView> = context
-        .modes
-        .iter()
-        .flat_map(|mode| {
-            let id = format!("tracker-roster-{side}-{index}-status-{}", *mode as usize);
-            scope_cells(id, row_stats(player, *mode), status, pending, *mode, both_scopes.clone())
-        })
-        .collect();
+    // The selected scope's band, far fainter than a chip, so a screen of rows reads as bands first.
+    let band = row_stats(player, context.mode).band.map(rating_band_name);
+    let detailed = context.is_detailed();
+    let cells = stat_columns(side, index, player, status, pending, &context.modes(), both_scopes);
 
     // How often this player has been met, counted the way the tables count.
     let tracked = row.tracked.and_then(|account| context.met.get(&account));
@@ -406,7 +410,7 @@ fn RosterRow(
     let met_hover = StoredValue::new(met_hover);
     let note = tracked.map(|tracked| tracked.notes.clone()).filter(|notes| !notes.trim().is_empty());
     let candidates = context.twitch.get(&row.name).cloned().filter(|candidates| !candidates.is_empty());
-    let ship = row.ship_name.clone().unwrap_or_else(|| "-".to_owned());
+    let ship = ship_cell(side, index, &row, detailed);
     let class = class_icon_cell(&row, &context.class_icons);
 
     view! {
@@ -414,13 +418,14 @@ fn RosterRow(
             class = "wt-tracker-roster-row",
             attr:data-testid = format!("tracker-roster-{side}-{index}"),
             attr:data-band = band.map(str::to_owned),
+            attr:data-view = detailed.then(|| "detailed".to_owned()),
             a11y:label = name.clone()
         ) {
             {class}
             {notes_mark(side, index, note)}
             {twitch_chip(side, index, candidates, shell)}
             text(class = "wt-tracker-roster-col--name", attr:data-tint = tint_name(row.tint)) {{name}}
-            text(class = "wt-tracker-roster-col--ship wt-tracker-small wt-tracker-dim") {{ship}}
+            {ship}
             {cells}
             Tooltip {
                 TooltipTrigger(class = "wt-tracker-roster-col--met") {
@@ -602,22 +607,73 @@ fn stat_text(text: Option<String>, pending: bool) -> String {
     }
 }
 
-fn stat_cell(text: Option<String>, pending: bool) -> AnyView {
+fn stat_line(text: Option<String>, pending: bool) -> AnyView {
     let text = stat_text(text, pending);
-    AnyView::new(
-        view! { text(class = "wt-tracker-roster-col--stat wt-tracker-small wt-tracker-dim", class = TABULAR_CLASS) {{text}} },
-    )
+    AnyView::new(view! { text(class = "wt-tracker-small wt-tracker-dim", class = TABULAR_CLASS) {{text}} })
 }
 
-/// The cells one scope contributes to a row.
-fn scope_cells(
+/// The ship cell. In Detailed it also carries the "Ship Stats" caption on the second line, which
+/// labels the per-ship figures beside it.
+fn ship_cell(side: &'static str, index: usize, row: &LiveRosterRow, detailed: bool) -> AnyView {
+    let ship = row.ship_name.clone().unwrap_or_else(|| "-".to_owned());
+    if !detailed {
+        return AnyView::new(
+            view! { text(class = "wt-tracker-roster-col--ship wt-tracker-small wt-tracker-dim") {{ship}} },
+        );
+    }
+
+    AnyView::new(view! {
+        column(class = "wt-tracker-roster-col--ship wt-tracker-roster-lines") {
+            row(class = "wt-tracker-roster-line") {
+                text(class = "wt-tracker-truncate wt-tracker-small wt-tracker-dim") {{ship}}
+            }
+            row(class = "wt-tracker-roster-line") {
+                text(
+                    class = "wt-tracker-truncate wt-tracker-small wt-tracker-faint",
+                    attr:data-testid = format!("tracker-roster-{side}-{index}-ship-stats")
+                ) {{t!("ui.player_tracker.ship_stats").into_owned()}}
+            }
+        }
+    })
+}
+
+/// The four stat columns, each with one line per scope in `modes`: the selected scope alone in
+/// Compact, Overall over Ship in Detailed.
+fn stat_columns(
+    side: &'static str,
+    index: usize,
+    player: Option<&PlayerStatsOut>,
+    status: PlayerStatsStatus,
+    pending: bool,
+    modes: &[WinRateMode],
+    both_scopes: Option<String>,
+) -> Vec<AnyView> {
+    let mut columns: [Vec<AnyView>; 4] = Default::default();
+    for mode in modes {
+        let id = format!("tracker-roster-{side}-{index}-status-{}", *mode as usize);
+        let lines = scope_lines(id, row_stats(player, *mode), status, pending, *mode, both_scopes.clone());
+        for (column, line) in columns.iter_mut().zip(lines) {
+            column.push(AnyView::new(view! { row(class = "wt-tracker-roster-line") { {line} } }));
+        }
+    }
+
+    columns
+        .into_iter()
+        .map(|lines| {
+            AnyView::new(view! { column(class = "wt-tracker-roster-col--stat wt-tracker-roster-lines") { {lines} } })
+        })
+        .collect()
+}
+
+/// One scope's line in each of the four stat columns.
+fn scope_lines(
     id: String,
     stats: RowStats,
     status: PlayerStatsStatus,
     pending: bool,
     mode: WinRateMode,
     both_scopes: Option<String>,
-) -> Vec<AnyView> {
+) -> [AnyView; 4] {
     // A hidden profile, a service with nothing, and a service out of reach are three answers.
     if !matches!(status, PlayerStatsStatus::Ok) {
         let (glyph, hover) = match status {
@@ -627,28 +683,27 @@ fn scope_cells(
         };
         let hover = StoredValue::new(hover.into_owned());
         let status_id = StoredValue::new(id.clone());
-        let mut cells = vec![AnyView::new(view! {
+        let icon = AnyView::new(view! {
             Tooltip {
-                TooltipTrigger(class = "wt-tracker-roster-col--stat wt-tracker-dim") {
+                TooltipTrigger(class = "wt-tracker-dim") {
                     AppIcon(glyph = glyph, label = hover.get_value(), attr:data-testid = status_id.get_value())
                 }
                 TooltipContent {{hover.get_value()}}
             }
-        })];
-        cells.extend((0..3).map(|_| stat_cell(None, false)));
-        return cells;
+        });
+        return [icon, stat_line(None, false), stat_line(None, false), stat_line(None, false)];
     }
 
     let win_rate = stat_text(stats.win_rate.map(|rate| format!("{rate:.1}%")), pending);
     let rate_band = stats.band.map(rating_band_name);
     let rate_cell = match rate_band {
         Some(band) => AnyView::new(view! {
-            box(attr:data-band = band.to_owned(), class = "wt-tracker-band wt-tracker-roster-col--stat") {
+            box(attr:data-band = band.to_owned(), class = "wt-tracker-band") {
                 HoverText(text = win_rate.clone(), hover = both_scopes.clone().unwrap_or_default(), class = "wt-tracker-small")
             }
         }),
         None => AnyView::new(view! {
-            HoverText(text = win_rate, hover = both_scopes.unwrap_or_default(), class = "wt-tracker-roster-col--stat wt-tracker-small")
+            HoverText(text = win_rate, hover = both_scopes.unwrap_or_default(), class = "wt-tracker-small")
         }),
     };
 
@@ -665,7 +720,7 @@ fn scope_cells(
             );
             AnyView::new(view! {
                 Tooltip {
-                    TooltipTrigger(class = "wt-tracker-roster-col--stat") {
+                    TooltipTrigger {
                         text(
                             class = "wt-tracker-chip wt-tracker-small",
                             class = TABULAR_CLASS,
@@ -678,13 +733,13 @@ fn scope_cells(
                 }
             })
         }
-        None => stat_cell(None, pending),
+        None => stat_line(None, pending),
     };
 
-    vec![
+    [
         rate_cell,
         rating,
-        stat_cell(stats.avg_damage.map(|damage| separate_number(damage, None)), pending),
-        stat_cell(stats.battles.map(|battles| separate_number(battles, None)), pending),
+        stat_line(stats.avg_damage.map(|damage| separate_number(damage, None)), pending),
+        stat_line(stats.battles.map(|battles| separate_number(battles, None)), pending),
     ]
 }

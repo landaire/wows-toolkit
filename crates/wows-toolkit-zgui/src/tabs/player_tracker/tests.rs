@@ -6,16 +6,22 @@ use std::time::Duration;
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
+use sqlx::sqlite::SqlitePool;
+use tokio::runtime::Runtime;
 use wows_replays::ReplayFile;
 use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::rows::PlayerFacet;
+use wows_toolkit_config::queries;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::match_stats::Region;
+use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
+use wows_toolkit_viewmodel::player_tracker::store;
+use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::reactive::prelude::GetUntracked;
@@ -25,6 +31,7 @@ use zgui::vocab::Role;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::open_shell;
+use crate::interaction_tests::returning_reader;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
@@ -54,6 +61,51 @@ const ARENA_INFO: &str = r#"{
     "logic": null,
     "playerVehicle": "PFSD110-Kleber"
 }"#;
+
+/// The ally's rating chip in each scope, and the caption Detailed labels the ship line with.
+const OVERALL_PR: &str = "tracker-roster-ally-0-status-0-pr";
+const SHIP_PR: &str = "tracker-roster-ally-0-status-1-pr";
+const SHIP_STATS: &str = "tracker-roster-ally-0-ship-stats";
+
+/// Held by the tests that save the view settings: they share one database, and a test that opens
+/// the tab reads back what another saved.
+static VIEW_MODES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The settings database the tests share, read and written outside any window.
+struct SavedView {
+    runtime: Runtime,
+    pool: SqlitePool,
+}
+
+impl SavedView {
+    fn open() -> Self {
+        let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+        returning_reader(&runtime);
+        let pool = runtime.block_on(wows_toolkit_config::open_db()).expect("the settings database opens");
+        Self { runtime, pool }
+    }
+
+    fn mode(&self) -> CurrentMatchViewMode {
+        self.runtime.block_on(store::load_view_modes(&self.pool)).current_match_view_mode
+    }
+
+    fn set(&self, mode: CurrentMatchViewMode) {
+        let write = queries::set_setting(&self.pool, tracked::CURRENT_MATCH_VIEW_MODE_KEY, &mode);
+        self.runtime.block_on(write).expect("the view is saved");
+    }
+
+    /// Runs `window`'s frames until the database holds `mode`: the tab saves on the tokio runtime.
+    fn wait_for(&self, window: &mut HeadlessWindow, mode: CurrentMatchViewMode) {
+        for _ in 0..100 {
+            if self.mode() == mode {
+                return;
+            }
+            window.advance(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("the tab did not save {mode:?}");
+    }
+}
 
 /// The shell, open on the Player Tracker tab.
 struct TrackerWindow {
@@ -92,6 +144,16 @@ impl TrackerWindow {
     fn top(&self, test_id: &str) -> f32 {
         let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
         self.window.bounds(element).expect("a shown row has bounds").origin.y.0
+    }
+
+    fn left(&self, test_id: &str) -> f32 {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.bounds(element).expect("a shown row has bounds").origin.x.0
+    }
+
+    fn height(&self, test_id: &str) -> f32 {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.bounds(element).expect("a shown row has bounds").size.height.0
     }
 
     fn label(&mut self, test_id: &str) -> String {
@@ -159,15 +221,24 @@ impl TrackerWindow {
             status: PlayerStatsStatus::Ok,
             battles: Some(1234),
             overall_win_rate: Some(54.25),
-            overall_avg_damage: None,
-            ship_win_rate: None,
-            ship_battles: None,
-            ship_avg_damage: None,
-            ship_pr: None,
+            overall_avg_damage: Some(48_210),
+            ship_win_rate: Some(61.0),
+            ship_battles: Some(120),
+            ship_avg_damage: Some(83_266),
+            ship_pr: Some(2834.0),
             pr: Some(1650.0),
         }];
         self.model.live.seed_stats(identities, stats);
         self.settle();
+    }
+
+    /// The tab on a battle with the ally's figures in, open on Current Match.
+    fn open_on_battle() -> Self {
+        let mut tracker = Self::open(HeadlessOptions::new(REVIEW_SIZE));
+        tracker.seed_battle();
+        tracker.show_current_match();
+        tracker.seed_harvey_stats();
+        tracker
     }
 }
 
@@ -231,6 +302,7 @@ fn the_filter_marks_names_and_tags() {
 /// The words beside the division mates box tick and untick it, as the box itself does.
 #[test]
 fn the_division_mates_label_toggles_its_box() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
     let before = tracker.model.show_division_mates.get_untracked();
 
@@ -294,6 +366,59 @@ fn a_scanned_identity_joins_its_player_to_the_looked_up_statistics() {
     assert!(window.by_test_id("tracker-roster-ally-0-status-0-pr").is_some(), "the rating chip is drawn");
 }
 
+/// Detailed stacks the ship's figures under the account's on a second line, as the egui app does;
+/// Compact shows the selected scope alone on one line.
+#[test]
+fn detailed_stacks_ship_figures_under_overall_and_compact_shows_one_scope() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut tracker = TrackerWindow::open_on_battle();
+
+    tracker.press("tracker-view-mode-Detailed");
+    tracker.press("tracker-win-rate-mode-Overall");
+    assert!(tracker.has(SHIP_STATS), "Detailed labels the ship line");
+    assert!(tracker.has(OVERALL_PR) && tracker.has(SHIP_PR), "and shows both scopes");
+    assert_eq!(tracker.left(SHIP_PR), tracker.left(OVERALL_PR), "in the same column");
+    assert!(tracker.top(SHIP_PR) > tracker.top(OVERALL_PR), "the ship's under the account's");
+    let detailed = tracker.height("tracker-roster-ally-0");
+
+    tracker.press("tracker-view-mode-Compact");
+    assert!(!tracker.has(SHIP_STATS), "Compact has no ship line");
+    assert!(tracker.has(OVERALL_PR) && !tracker.has(SHIP_PR), "only the selected scope");
+    let compact = tracker.height("tracker-roster-ally-0");
+    assert!(compact < detailed, "a Compact row ({compact}) is one line, a Detailed row ({detailed}) two");
+
+    tracker.press("tracker-win-rate-mode-Ship");
+    assert!(!tracker.has(OVERALL_PR) && tracker.has(SHIP_PR), "the scope selector picks the figures");
+
+    // The scope still colours the rows and picks the team averages, so Detailed keeps its selector.
+    tracker.press("tracker-view-mode-Detailed");
+    assert!(tracker.has("tracker-win-rate-mode-Overall"), "Detailed keeps the scope selector");
+    assert!(tracker.has(OVERALL_PR) && tracker.has(SHIP_PR), "and still shows both scopes");
+}
+
+/// The view chosen is saved where the egui app keeps its own, and the tab opens on it.
+#[test]
+fn the_current_match_opens_on_the_saved_view() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    let saved = SavedView::open();
+
+    for (mode, other, detailed) in [
+        (CurrentMatchViewMode::Compact, CurrentMatchViewMode::Detailed, false),
+        (CurrentMatchViewMode::Detailed, CurrentMatchViewMode::Compact, true),
+    ] {
+        saved.set(other);
+        let mut chooser = TrackerWindow::open_on_battle();
+        chooser.press(&format!("tracker-view-mode-{mode:?}"));
+        saved.wait_for(&mut chooser.window, mode);
+        drop(chooser);
+
+        let tracker = TrackerWindow::open_on_battle();
+        assert_eq!(tracker.model.view_mode.get_untracked(), mode, "the saved view is read back");
+        assert_eq!(tracker.has(SHIP_STATS), detailed, "and drawn: {mode:?}");
+    }
+}
+
 #[test]
 fn a_chat_login_that_names_a_player_puts_a_chip_on_their_row() {
     let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
@@ -334,6 +459,7 @@ fn a_chat_login_that_names_a_player_puts_a_chip_on_their_row() {
 #[test]
 #[ignore = "draws on the graphics device; run by hand to review the tab"]
 fn the_tracker_renders_in_dark_and_light() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for (appearance, name) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
         let mut tracker = TrackerWindow::open(review_options(appearance));
         tracker.seed_two_players();
@@ -344,6 +470,9 @@ fn the_tracker_renders_in_dark_and_light() {
         tracker.seed_harvey_stats();
         tracker.model.live.seed_chat(vec![("harvey_635".to_owned(), live.started_at)]);
         tracker.show_current_match();
-        println!("{}", save_shot(&mut tracker.window, &format!("tracker-live-{name}")).display());
+        for mode in CurrentMatchViewMode::ALL {
+            tracker.press(&format!("tracker-view-mode-{mode:?}"));
+            println!("{}", save_shot(&mut tracker.window, &format!("tracker-live-{mode:?}-{name}")).display());
+        }
     }
 }

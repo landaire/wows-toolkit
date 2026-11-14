@@ -198,6 +198,9 @@ const CSS: &str = css!(
     .wt-tracker-roster-col--ship { width: 130px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wt-tracker-roster-col--stat { width: 64px; min-width: 0; overflow: hidden; }
     .wt-tracker-roster-col--met { width: 80px; min-width: 0; overflow: hidden; }
+    .wt-tracker-roster-row[data-view=\"detailed\"] { height: auto; align-items: flex-start; padding-top: 3px; padding-bottom: 3px; }
+    .wt-tracker-roster-lines { display: flex; flex-direction: column; gap: 2px; }
+    .wt-tracker-roster-line { display: flex; flex-direction: row; align-items: center; min-width: 0; overflow: hidden; }
     [data-tint=\"self\"] { color: var(--wt-color-text-strong); }
     [data-tint=\"ally\"] { color: var(--wt-color-win); }
     [data-tint=\"enemy\"] { color: var(--wt-color-loss); }
