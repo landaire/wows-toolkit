@@ -165,15 +165,15 @@ jobs:
         run: ./bootstrap.sh
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
-      # graph itself is already covered there in both modes. The tactics site is
-      # host-independent, and its release link needs more memory than this
-      # runner has, so only Linux builds it.
+      # graph itself is already covered there in both modes. The wasm sites are
+      # host-independent, and the tactics site's release link needs more memory
+      # than this runner has, so only Linux builds them.
       - name: Build the affected aliases
         run: |
           aliases=$(jq -r '.aliases | join(" ")' affected.json)
           if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
           nix develop --command bash -euo pipefail -c '
-            targets=$(buck2 uquery "set($0) - root//:wt_web_site")
+            targets=$(buck2 uquery "set($0) - root//:wt_web_site - root//:replay_demo_site")
             if [ -z "$targets" ]; then echo "No alias is affected."; exit 0; fi
             buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $targets
           ' "$aliases"
@@ -232,7 +232,7 @@ jobs:
             Write-Host "No alias is affected."
             exit 0
           }
-          $query = "set(" + ($aliases -join " ") + ") - root//:wt_web_site"
+          $query = "set(" + ($aliases -join " ") + ") - root//:wt_web_site - root//:replay_demo_site"
           $targets = @(& $buck2 uquery $query)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($targets.Count -eq 0) {
