@@ -81,7 +81,13 @@ workspace_binary(
     rustc_flags = os_select(
         macos = [],
         linux = LINUX_GUI_RUSTC_FLAGS,
-        windows = ["-Clink-arg=$(location toolchains//windows:app_resource)"],
+        # The release ships this binary and its PDB as wows_toolkit.exe and wows_toolkit.pdb. The
+        # debug directory must name the shipped PDB, or a crash backtrace on a user's machine finds
+        # no symbols beside the executable.
+        windows = [
+            "-Clink-arg=$(location toolchains//windows:app_resource)",
+            "-Clink-arg=/PDBALTPATH:wows_toolkit.pdb",
+        ],
     ),
 )
 

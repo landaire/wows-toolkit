@@ -30,6 +30,12 @@
                 Source="$(var.BinDir)\wows_toolkit.exe"/>
         </Component>
 
+        <!-- Lets a crash backtrace name its functions. -->
+        <Component Id="DebugSymbols">
+          <File Id="pdb0"
+                Source="$(var.BinDir)\wows_toolkit.pdb"/>
+        </Component>
+
       </Directory>
     </StandardDirectory>
 
@@ -51,6 +57,7 @@
 
     <Feature Id="Main" Title="Application" Level="1">
       <ComponentRef Id="MainExecutable"/>
+      <ComponentRef Id="DebugSymbols"/>
       <ComponentRef Id="ApplicationShortcut"/>
     </Feature>
 

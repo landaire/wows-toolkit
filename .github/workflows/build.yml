@@ -160,6 +160,14 @@ jobs:
           Copy-Item $pdb dist/wows_toolkit.pdb
           Copy-Item $msi "dist/$msiName"
           Get-ChildItem dist | ForEach-Object { $_.IsReadOnly = $false }
+
+          # A backtrace on a user's machine looks beside the executable for the PDB file its debug
+          # directory names (the CodeView "RSDS" record), so that name must be the shipped one.
+          $image = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("dist/wows_toolkit.exe"))
+          if ($image -notmatch 'RSDS[\s\S]{20}(?:[^\x00]*\\)?wows_toolkit\.pdb\x00') {
+            Write-Host "::error::wows_toolkit.exe does not name wows_toolkit.pdb in its debug directory"
+            exit 1
+          }
           "msi=C:\w\dist\$msiName" >> $env:GITHUB_OUTPUT
           "slug=$slug" >> $env:GITHUB_OUTPUT
 

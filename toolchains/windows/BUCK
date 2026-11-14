@@ -54,6 +54,11 @@ windows_resource(
     visibility = ["PUBLIC"],
 )
 
+_APP_BINARY = {
+    "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
+    "zgui": "root//crates/wows-toolkit-zgui:zgui_bin",
+}[read_root_config("release", "frontend", "egui")]
+
 wix_msi(
     name = "wows_toolkit_msi",
     tools = ":msvc_tools",
@@ -63,11 +68,9 @@ wix_msi(
         "root//wix:banner_bmp",
         "root//wix:license_rtf",
     ],
-    binaries = {"wows_toolkit.exe": {
-        "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
-        "zgui": "root//crates/wows-toolkit-zgui:zgui_bin",
-    }[read_root_config("release", "frontend", "egui")]},
-    pdbs = {},
+    binaries = {"wows_toolkit.exe": _APP_BINARY},
+    # Installed beside the executable so a crash backtrace names its functions.
+    pdbs = {"wows_toolkit.pdb": _APP_BINARY + "[pdb]"},
     # MSI ProductVersion is numeric only, so a pre-release tag ships under its
     # release version. scripts/test-workspace-package-metadata.nu holds this to
     # the numeric core of the workspace version.
