@@ -4137,7 +4137,7 @@ dependencies = [
 [[package]]
 name = "fontique"
 version = "0.11.1"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "hashbrown 0.17.1",
  "linebender_resource_handle",
@@ -17735,7 +17735,7 @@ dependencies = [
 [[package]]
 name = "zgui"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-atlas",
  "zgui-bits",
@@ -17765,7 +17765,7 @@ dependencies = [
 [[package]]
 name = "zgui-a11y"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "zgui-bits",
@@ -17781,7 +17781,7 @@ dependencies = [
 [[package]]
 name = "zgui-anim"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-bits",
  "zgui-dom",
@@ -17794,12 +17794,12 @@ dependencies = [
 [[package]]
 name = "zgui-arena"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 
 [[package]]
 name = "zgui-atlas"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "etagere 0.3.0",
  "rustc-hash 2.1.3",
@@ -17811,7 +17811,7 @@ dependencies = [
 [[package]]
 name = "zgui-bits"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bitflags 2.13.2",
  "zgui-geom",
@@ -17820,7 +17820,7 @@ dependencies = [
 [[package]]
 name = "zgui-canvas"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "kurbo 0.13.1",
  "peniko",
@@ -17833,12 +17833,12 @@ dependencies = [
 [[package]]
 name = "zgui-color"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 
 [[package]]
 name = "zgui-css"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "app_units",
  "cssparser",
@@ -17855,7 +17855,7 @@ dependencies = [
 [[package]]
 name = "zgui-custom"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "zgui-elements",
@@ -17870,7 +17870,7 @@ dependencies = [
 [[package]]
 name = "zgui-dom"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "app_units",
  "bitflags 2.13.2",
@@ -17895,7 +17895,7 @@ dependencies = [
 [[package]]
 name = "zgui-edit"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-dom",
  "zgui-geom",
@@ -17906,7 +17906,7 @@ dependencies = [
 [[package]]
 name = "zgui-elements"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "kurbo 0.13.1",
  "zgui-canvas",
@@ -17920,7 +17920,7 @@ dependencies = [
 [[package]]
 name = "zgui-geom"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bytemuck",
 ]
@@ -17928,7 +17928,7 @@ dependencies = [
 [[package]]
 name = "zgui-image"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "image",
  "thiserror 2.0.20",
@@ -17938,7 +17938,7 @@ dependencies = [
 [[package]]
 name = "zgui-input"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "smallvec",
@@ -17955,7 +17955,7 @@ dependencies = [
 [[package]]
 name = "zgui-interned"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
 ]
@@ -17963,7 +17963,7 @@ dependencies = [
 [[package]]
 name = "zgui-layout"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "cephal",
  "rayon",
@@ -17985,7 +17985,7 @@ dependencies = [
 [[package]]
 name = "zgui-paint"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "smallvec",
@@ -18012,7 +18012,7 @@ dependencies = [
 [[package]]
 name = "zgui-platform"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "raw-window-handle",
@@ -18024,7 +18024,7 @@ dependencies = [
 [[package]]
 name = "zgui-platform-headless"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "zgui-geom",
@@ -18035,7 +18035,7 @@ dependencies = [
 [[package]]
 name = "zgui-platform-wayland"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_unix 0.22.1",
@@ -18058,7 +18058,7 @@ dependencies = [
 [[package]]
 name = "zgui-platform-winit"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_winit 0.33.2",
@@ -18081,7 +18081,7 @@ dependencies = [
 [[package]]
 name = "zgui-profile"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "tracing",
 ]
@@ -18089,7 +18089,7 @@ dependencies = [
 [[package]]
 name = "zgui-reactive"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "any_spawner",
  "futures",
@@ -18104,7 +18104,7 @@ dependencies = [
 [[package]]
 name = "zgui-render"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "thiserror 2.0.20",
  "zgui-atlas",
@@ -18116,7 +18116,7 @@ dependencies = [
 [[package]]
 name = "zgui-render-vector-coverage"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bytemuck",
  "kurbo 0.13.1",
@@ -18134,7 +18134,7 @@ dependencies = [
 [[package]]
 name = "zgui-render-vector-vello"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "kurbo 0.13.1",
  "peniko",
@@ -18154,7 +18154,7 @@ dependencies = [
 [[package]]
 name = "zgui-render-wgpu"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -18177,7 +18177,7 @@ dependencies = [
 [[package]]
 name = "zgui-runtime"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "thiserror 2.0.20",
@@ -18213,7 +18213,7 @@ dependencies = [
 [[package]]
 name = "zgui-scene"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bytemuck",
  "kurbo 0.13.1",
@@ -18231,7 +18231,7 @@ dependencies = [
 [[package]]
 name = "zgui-scroll"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "smallvec",
@@ -18245,7 +18245,7 @@ dependencies = [
 [[package]]
 name = "zgui-shader"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-geom",
  "zgui-paint",
@@ -18259,7 +18259,7 @@ dependencies = [
 [[package]]
 name = "zgui-shader-macro"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "bincode",
  "naga",
@@ -18272,7 +18272,7 @@ dependencies = [
 [[package]]
 name = "zgui-style"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "app_units",
  "bitflags 2.13.2",
@@ -18300,7 +18300,7 @@ dependencies = [
 [[package]]
 name = "zgui-svg"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "kurbo 0.13.1",
  "peniko",
@@ -18313,7 +18313,7 @@ dependencies = [
 [[package]]
 name = "zgui-testkit-scene"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "smallvec",
  "zgui-atlas",
@@ -18331,7 +18331,7 @@ dependencies = [
 [[package]]
 name = "zgui-text"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "kurbo 0.13.1",
@@ -18348,7 +18348,7 @@ dependencies = [
 [[package]]
 name = "zgui-text-parley"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "fontique",
  "kurbo 0.13.1",
@@ -18369,7 +18369,7 @@ dependencies = [
 [[package]]
 name = "zgui-text-style"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "smallvec",
@@ -18383,7 +18383,7 @@ dependencies = [
 [[package]]
 name = "zgui-ui"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui",
  "zgui-ui-icons",
@@ -18394,7 +18394,7 @@ dependencies = [
 [[package]]
 name = "zgui-ui-icons"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui",
 ]
@@ -18402,7 +18402,7 @@ dependencies = [
 [[package]]
 name = "zgui-ui-primitives"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui",
 ]
@@ -18410,7 +18410,7 @@ dependencies = [
 [[package]]
 name = "zgui-ui-tokens"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui",
 ]
@@ -18418,7 +18418,7 @@ dependencies = [
 [[package]]
 name = "zgui-view"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-geom",
  "zgui-interned",
@@ -18429,7 +18429,7 @@ dependencies = [
 [[package]]
 name = "zgui-view-dom"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "tracing",
@@ -18442,7 +18442,7 @@ dependencies = [
 [[package]]
 name = "zgui-view-macro"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -18452,7 +18452,7 @@ dependencies = [
 [[package]]
 name = "zgui-vocab"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "accesskit 0.24.1",
  "zgui-geom",
@@ -18462,7 +18462,7 @@ dependencies = [
 [[package]]
 name = "zgui-wgpu"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "rustc-hash 2.1.3",
  "tracing",
@@ -18483,7 +18483,7 @@ dependencies = [
 [[package]]
 name = "zgui-wgsl"
 version = "0.1.0"
-source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#6294c2f0ead0a9240962b10232feeed2433eeb1a"
+source = "git+https://github.com/landaire-contrib/zgui?branch=wows-toolkit#734fb88a95350473f3fe6a3943bf7665b62ef1ad"
 dependencies = [
  "zgui-scene",
 ]

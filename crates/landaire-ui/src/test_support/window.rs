@@ -512,13 +512,12 @@ impl HeadlessWindow {
     }
 
     /// Changes who the platform says draws the window's frame, as a compositor that answers again
-    /// would.
+    /// would. The harness records the new source on the surface before the event arrives.
     pub fn set_decoration_source(&mut self, source: DecorationSource) -> Result<(), HeadlessError> {
-        let Some(surface) = self.surface() else {
+        if self.surface().is_none() {
             return Err(HeadlessError::NoWindow);
-        };
+        }
 
-        surface.set_decoration_source(source);
         self.deliver(SurfaceEvent::DecorationSourceChanged(source));
 
         Ok(())

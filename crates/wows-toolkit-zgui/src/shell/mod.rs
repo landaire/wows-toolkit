@@ -688,9 +688,9 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                     ev.stop_propagation();
                 }
             },
-            on:drag_enter = move |ev| shell.drag_entered(ev.paths.clone()),
+            on:drag_enter = move |ev| shell.drag_entered(ev.data.paths.clone()),
             on:drag_leave = move |_| shell.drag_left(),
-            on:drop = move |ev| shell.dropped(ev.paths.clone())
+            on:drop = move |ev| shell.dropped(ev.data.paths.clone())
         ) {
             row(class = "wt-shell__strip") {
                 box(class = "wt-shell__tabs") {
