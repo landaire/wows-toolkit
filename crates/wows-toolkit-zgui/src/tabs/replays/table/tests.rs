@@ -19,6 +19,8 @@ use wows_replay_insights::battle_impact::BattleImpactInputs;
 use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::battle_impact::BattleImpactVersion;
 use wows_replay_insights::battle_impact::FactorScore;
+use wows_replay_insights::battle_impact::Share;
+use wows_replay_insights::battle_impact::TeamDamageShare;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
@@ -506,7 +508,7 @@ pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
     let components = BattleImpactComponents {
         damage: score(BattleImpactFactor::Damage, 0.4),
         kills: score(BattleImpactFactor::Kills, 0.2),
-        enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, 0.15),
+        team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 0.15)),
         tanking: score(BattleImpactFactor::Tanking, 0.1),
         spotting: Some(score(BattleImpactFactor::Spotting, 0.1)),
         objectives: Some(score(BattleImpactFactor::Objectives, 0.05)),
@@ -518,8 +520,7 @@ pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
         expected_damage: 61_000.0,
         kills: 2.0,
         expected_kills: 0.85,
-        enemy_hp_share: 0.18,
-        even_share: 0.083,
+        team_damage_share: Some(TeamDamageShare { share: Share(0.18), even: Share(0.083) }),
         potential_damage: 1_250_000,
         tanking_ratio: 1.4,
         spotting_damage: Some(32_000),

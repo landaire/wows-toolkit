@@ -3,10 +3,10 @@
 //! the recording player's team, from torpedo sightings in the packet stream.
 //!
 //! The rating is a core of damage and kills against each ship's wows-numbers
-//! expected values, which can fall below average, plus contributions that only
-//! ever add: share of the enemy hit point pool, spotting, drawing fire,
-//! capture points, anti-air and torpedo warnings. 1150 is average play, as in
-//! PR, so the PR bands and colors apply unchanged.
+//! expected values, which can fall below average, plus each player's share of
+//! the damage their team dealt and the fire they drew, and contributions that
+//! only ever add: spotting, capture points, anti-air and torpedo warnings.
+//! 1150 is average play, as in PR, so the PR bands and colors apply unchanged.
 //!
 //! Any change here that alters the rating a battle gets must raise
 //! [`BattleImpactVersion::CURRENT`].
@@ -41,7 +41,7 @@ pub use wows_core::game_types::BattleImpactVersion;
 /// what pulled a rating up or down.
 const DAMAGE_POINTS: f64 = 550.0;
 const KILL_POINTS: f64 = 150.0;
-const ENEMY_HP_SHARE_POINTS: f64 = 200.0;
+const TEAM_DAMAGE_SHARE_POINTS: f64 = 200.0;
 const TANKING_POINTS: f64 = 120.0;
 const SPOTTING_SCALE: f64 = 0.2;
 
@@ -50,7 +50,7 @@ const SPOTTING_SCALE: f64 = 0.2;
 pub enum BattleImpactFactor {
     Damage,
     Kills,
-    EnemyHpShare,
+    TeamDamageShare,
     Tanking,
     Spotting,
     Objectives,
@@ -60,14 +60,14 @@ pub enum BattleImpactFactor {
 
 impl BattleImpactFactor {
     /// What the part earns for average play: expected damage and kills, an
-    /// even share of the enemy pool, drawing the team's average fire and
+    /// even share of the team's damage, drawing the team's average fire and
     /// spotting at the class baseline. `None` for objectives, anti-air and
     /// torpedo warnings, which have no average; any of them is a bonus.
     pub fn average_points(self) -> Option<f64> {
         match self {
             Self::Damage => Some(DAMAGE_POINTS),
             Self::Kills => Some(KILL_POINTS),
-            Self::EnemyHpShare => Some(ENEMY_HP_SHARE_POINTS),
+            Self::TeamDamageShare => Some(TEAM_DAMAGE_SHARE_POINTS),
             Self::Tanking => Some(TANKING_POINTS),
             Self::Spotting => Some(SPOTTING_SCALE * 1150.0),
             Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => None,
@@ -80,7 +80,7 @@ impl BattleImpactFactor {
             // wows-numbers expected values for the ship.
             Self::Damage | Self::Kills => FactorBasis::Dynamic,
             // The other players in this battle.
-            Self::EnemyHpShare | Self::Tanking => FactorBasis::Dynamic,
+            Self::TeamDamageShare | Self::Tanking => FactorBasis::Dynamic,
             // A class baseline.
             Self::Spotting => FactorBasis::Static,
             // Fixed points per unit of what the player did.
@@ -129,14 +129,15 @@ pub struct BattleImpactResult {
 /// Points each part of the rating contributed. They sum to `bi`.
 ///
 /// A contribution is `None` where its input is not observable: a build whose
-/// results lack the keys, or torpedo detections by a team the replay was not
-/// recorded from. Every optional contribution only ever adds, so a missing
-/// one leaves the rest of the rating meaningful.
+/// results lack the keys, torpedo detections by a team the replay was not
+/// recorded from, or a share of team damage when the team dealt none. Every
+/// optional bonus only ever adds, so a missing one leaves the rest of the
+/// rating meaningful.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct BattleImpactComponents {
     pub damage: FactorScore,
     pub kills: FactorScore,
-    pub enemy_hp_share: FactorScore,
+    pub team_damage_share: Option<FactorScore>,
     pub tanking: FactorScore,
     pub spotting: Option<FactorScore>,
     pub objectives: Option<FactorScore>,
@@ -150,7 +151,7 @@ impl BattleImpactComponents {
         [
             (BattleImpactFactor::Damage, Some(self.damage)),
             (BattleImpactFactor::Kills, Some(self.kills)),
-            (BattleImpactFactor::EnemyHpShare, Some(self.enemy_hp_share)),
+            (BattleImpactFactor::TeamDamageShare, self.team_damage_share),
             (BattleImpactFactor::Tanking, Some(self.tanking)),
             (BattleImpactFactor::Spotting, self.spotting),
             (BattleImpactFactor::Objectives, self.objectives),
@@ -176,10 +177,8 @@ pub struct BattleImpactInputs {
     pub kills: f64,
     /// wows-numbers average kills for the ship.
     pub expected_kills: f64,
-    /// `weighted_damage` over the opposing teams' weighted hit points.
-    pub enemy_hp_share: f64,
-    /// One player's share of a team that sank the whole enemy team.
-    pub even_share: f64,
+    /// `None` when the player's team dealt no damage.
+    pub team_damage_share: Option<TeamDamageShare>,
     pub potential_damage: u64,
     /// Fire drawn relative to the team average; 1 is average.
     pub tanking_ratio: f64,
@@ -192,6 +191,37 @@ pub struct BattleImpactInputs {
     pub objective_points: Option<ObjectivePoints>,
     pub planes_killed: Option<PlanesKilled>,
     pub anti_air_damage: Option<u64>,
+}
+
+/// A fraction of a whole: 1 is all of it.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct Share(pub f64);
+
+/// A player's part of the damage their team dealt to enemies.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct TeamDamageShare {
+    /// The player's damage over the team's.
+    pub share: Share,
+    /// One player's share had every teammate dealt the same.
+    pub even: Share,
+}
+
+impl TeamDamageShare {
+    /// `None` when the team dealt no damage, where a share is undefined.
+    fn new(damage: f64, team: &TeamTotals) -> Option<Self> {
+        if team.damage_dealt <= 0.0 || team.damage_dealers == 0 {
+            return None;
+        }
+
+        Some(Self { share: Share(damage / team.damage_dealt), even: Share(1.0 / f64::from(team.damage_dealers)) })
+    }
+
+    /// Average play's points at an even share. Over a team the shares sum to
+    /// one, so the team's mean is exactly that average.
+    fn points(self) -> f64 {
+        TEAM_DAMAGE_SHARE_POINTS * self.share.0 / self.even.0
+    }
 }
 
 /// Opposing torpedoes a player was the first of their team to see.
@@ -362,12 +392,15 @@ struct BattleContext {
 
 #[derive(Default)]
 struct TeamTotals {
+    /// Teammates with hit points, which the tanking axis is measured over.
     players: u32,
-    /// Hit points, with destroyers and submarines weighted up.
-    weighted_hp_pool: f64,
     potential_damage: f64,
     /// Sum over the team of potential damage per hit point.
     potential_per_hp: f64,
+
+    /// Damage dealt to enemies by every teammate whose results carry it.
+    damage_dealt: f64,
+    damage_dealers: u32,
 }
 
 struct Victim {
@@ -384,31 +417,23 @@ impl BattleContext {
             let Some(results) = &player.server_results else {
                 continue;
             };
+            let team = teams.entry(player.team_id).or_default();
+            if let Some(damage) = results.damage {
+                team.damage_dealt += damage as f64;
+                team.damage_dealers += 1;
+            }
+
             let Some(max_health) = results.max_health.filter(|hp| *hp > 0) else {
                 continue;
             };
-            let is_priority = is_priority_target(player.ship_class);
-
-            let team = teams.entry(player.team_id).or_default();
             team.players += 1;
-            team.weighted_hp_pool += max_health as f64 * priority_weight(is_priority);
             team.potential_damage += results.potential_damage as f64;
             team.potential_per_hp += results.potential_damage as f64 / max_health as f64;
 
-            victims.insert(player.db_id, Victim { max_health, is_priority });
+            victims.insert(player.db_id, Victim { max_health, is_priority: is_priority_target(player.ship_class) });
         }
 
         Self { teams, victims }
-    }
-
-    /// Hit points of every team but `team_id`, weighted as in `TeamTotals`.
-    /// `None` when no other team has a rated player.
-    fn opposing_hp_pool(&self, team_id: u32) -> Option<f64> {
-        self.teams
-            .iter()
-            .filter(|(id, _)| **id != team_id)
-            .map(|(_, totals)| totals.weighted_hp_pool)
-            .reduce(|a, b| a + b)
     }
 }
 
@@ -427,16 +452,13 @@ fn rate_player(
         .filter(|expected| expected.average_damage_dealt > 0.0 && expected.average_frags > 0.0)?;
     let spotting_baseline = spotting_baseline(player.ship_class)?;
     let team = context.teams.get(&player.team_id)?;
-    let opposing_hp_pool = context.opposing_hp_pool(player.team_id).filter(|pool| *pool > 0.0)?;
 
     let weighted_damage = damage + priority_damage(results, context) * (priority_weight(true) - 1.0);
 
     let damage_points = DAMAGE_POINTS * normalize(weighted_damage / expected.average_damage_dealt, 0.4);
     let kill_points = KILL_POINTS * normalize(kills / expected.average_frags, 0.1);
 
-    let enemy_hp_share = weighted_damage / opposing_hp_pool;
-    let even_share = 1.0 / f64::from(team.players);
-    let enemy_hp_share_points = ENEMY_HP_SHARE_POINTS * enemy_hp_share / even_share;
+    let team_damage_share = TeamDamageShare::new(damage, team);
 
     let tanking_ratio = tanking_ratio(results.potential_damage as f64, max_health, team);
     let tanking = TANKING_POINTS * tanking_ratio;
@@ -461,7 +483,7 @@ fn rate_player(
     let components = BattleImpactComponents {
         damage: score(BattleImpactFactor::Damage, damage_points),
         kills: score(BattleImpactFactor::Kills, kill_points),
-        enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, enemy_hp_share_points),
+        team_damage_share: team_damage_share.map(|share| score(BattleImpactFactor::TeamDamageShare, share.points())),
         tanking: score(BattleImpactFactor::Tanking, tanking),
         spotting: spotting.map(|points| score(BattleImpactFactor::Spotting, points)),
         objectives: objectives.map(|points| score(BattleImpactFactor::Objectives, points)),
@@ -475,8 +497,7 @@ fn rate_player(
         expected_damage: expected.average_damage_dealt,
         kills,
         expected_kills: expected.average_frags,
-        enemy_hp_share,
-        even_share,
+        team_damage_share,
         potential_damage: results.potential_damage,
         tanking_ratio,
         spotting_damage: results.spotting_damage,
@@ -666,6 +687,47 @@ fn threat_weight(closest_km: f32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn team_dealing(damage: &[f64]) -> TeamTotals {
+        TeamTotals { damage_dealt: damage.iter().sum(), damage_dealers: damage.len() as u32, ..TeamTotals::default() }
+    }
+
+    /// The share is of what the player's own team dealt, not of the enemy
+    /// hit point pool: a team that dealt 100k leaves a 25k player a quarter.
+    #[test]
+    fn team_damage_share_divides_by_the_teams_damage() {
+        let team = team_dealing(&[25_000.0, 50_000.0, 25_000.0, 0.0]);
+
+        let share = TeamDamageShare::new(25_000.0, &team).expect("the team dealt damage");
+
+        assert_eq!(share.share, Share(0.25));
+        assert_eq!(share.even, Share(0.25));
+        assert_eq!(share.points(), TEAM_DAMAGE_SHARE_POINTS);
+    }
+
+    /// Shares over a team sum to one, so the team's mean points are exactly
+    /// what average play earns.
+    #[test]
+    fn a_teams_mean_team_damage_points_are_the_average() {
+        let damage = [12_000.0, 87_000.0, 0.0, 41_500.0, 140_000.0, 3_300.0, 60_000.0];
+        let team = team_dealing(&damage);
+
+        let points: Vec<f64> = damage
+            .iter()
+            .map(|dealt| TeamDamageShare::new(*dealt, &team).expect("the team dealt damage").points())
+            .collect();
+
+        let mean = points.iter().sum::<f64>() / points.len() as f64;
+        assert!((mean - TEAM_DAMAGE_SHARE_POINTS).abs() < 1e-9, "mean {mean}");
+    }
+
+    /// A team that dealt nothing has no shares to hand out: the part is
+    /// absent rather than zero or not a number.
+    #[test]
+    fn a_team_that_dealt_nothing_gives_no_share() {
+        assert_eq!(TeamDamageShare::new(0.0, &team_dealing(&[0.0, 0.0, 0.0])), None);
+        assert_eq!(TeamDamageShare::new(0.0, &team_dealing(&[])), None);
+    }
 
     #[test]
     fn spotting_score_meets_the_band_anchors() {

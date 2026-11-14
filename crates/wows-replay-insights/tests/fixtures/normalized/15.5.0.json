@@ -27,7 +27,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 845.7266488175055,
+        "bi": 891.0744961035099,
         "category": "BelowAverage",
         "components": {
           "anti_air": {
@@ -37,10 +37,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 275.7963373073383
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 219.9241192411924
           },
           "kills": {
             "basis": "Dynamic",
@@ -58,12 +54,14 @@
             "basis": "Dynamic",
             "points": 197.39610426000672
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 265.2719665271967
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.09163504968383017,
-          "even_share": 0.08333333333333333,
           "expected_damage": 43420.39903846154,
           "expected_kills": 0.6938521634615059,
           "kills": 0.0,
@@ -88,10 +86,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 11969,
           "tanking_ratio": 1.644967535500056,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.1105299860529986
+          },
           "weighted_damage": 30432.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -469,7 +471,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 141.3275332463328,
+        "bi": 151.84342961519883,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -479,10 +481,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 50.999096657633245
           },
           "kills": {
             "basis": "Dynamic",
@@ -500,12 +498,14 @@
             "basis": "Dynamic",
             "points": 90.32843658869953
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 61.5149930264993
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.021249623607347185,
-          "even_share": 0.08333333333333333,
           "expected_damage": 54982.23264781491,
           "expected_kills": 0.7191316766638081,
           "kills": 0.0,
@@ -530,10 +530,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 0,
           "tanking_ratio": 0.7527369715724961,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.02563124709437471
+          },
           "weighted_damage": 7057.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -851,7 +855,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 353.72528448657476,
+        "bi": 383.82009007898216,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -861,10 +865,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 90.28400288548501
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 145.95121951219514
           },
           "kills": {
             "basis": "Dynamic",
@@ -882,12 +882,14 @@
             "basis": "Dynamic",
             "points": 78.6483289297058
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 176.0460251046025
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.0608130081300813,
-          "even_share": 0.08333333333333333,
           "expected_damage": 40514.220097640355,
           "expected_kills": 0.6634784377542772,
           "kills": 0.0,
@@ -912,10 +914,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 6661,
           "tanking_ratio": 0.6554027410808816,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.07335251046025104
+          },
           "weighted_damage": 20196.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -1216,7 +1222,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 470.9346504492211,
+        "bi": 497.6319438238285,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -1226,10 +1232,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 97.59650220013587
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 129.47425474254743
           },
           "kills": {
             "basis": "Dynamic",
@@ -1247,12 +1249,14 @@
             "basis": "Dynamic",
             "points": 68.1919899060732
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 156.17154811715483
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.053947606142728095,
-          "even_share": 0.08333333333333333,
           "expected_damage": 35374.333139727845,
           "expected_kills": 0.5811765682044547,
           "kills": 0.0,
@@ -1277,10 +1281,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 15221,
           "tanking_ratio": 0.56826658255061,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.06507147838214784
+          },
           "weighted_damage": 17916.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -1616,7 +1624,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 370.94652300714415,
+        "bi": 391.2570894670626,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -1626,10 +1634,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 98.50045167118338
           },
           "kills": {
             "basis": "Dynamic",
@@ -1647,12 +1651,14 @@
             "basis": "Dynamic",
             "points": 128.92342673665766
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 118.81101813110182
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.041041854862993075,
-          "even_share": 0.08333333333333333,
           "expected_damage": 53680.396357491554,
           "expected_kills": 0.7396551508324403,
           "kills": 0.0,
@@ -1677,10 +1683,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 24093,
           "tanking_ratio": 1.0743618894721472,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.04950459088795909
+          },
           "weighted_damage": 13630.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -1968,7 +1978,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1035.0426583050967,
+        "bi": 1090.4280680029874,
         "category": "BelowAverage",
         "components": {
           "anti_air": {
@@ -1978,10 +1988,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 177.11898688248493
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 268.6034327009937
           },
           "kills": {
             "basis": "Dynamic",
@@ -1999,12 +2005,14 @@
             "basis": "Dynamic",
             "points": 178.47168013646706
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 323.9888423988843
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.11191809695874737,
-          "even_share": 0.08333333333333333,
           "expected_damage": 62654.58907254362,
           "expected_kills": 0.7871235078053355,
           "kills": 1.0,
@@ -2029,10 +2037,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 22704,
           "tanking_ratio": 1.4872640011372256,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.1349953509995351
+          },
           "weighted_damage": 37168.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -2421,7 +2433,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 614.1286765828297,
+        "bi": 671.2158226634956,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -2431,10 +2443,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 242.4553199450923
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 276.85636856368563
           },
           "kills": {
             "basis": "Dynamic",
@@ -2452,12 +2460,14 @@
             "basis": "Dynamic",
             "points": 74.29467497886716
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 333.94351464435147
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.11535682023486901,
-          "even_share": 0.08333333333333333,
           "expected_damage": 57652.6554152824,
           "expected_kills": 0.7965794019933068,
           "kills": 0.0,
@@ -2482,10 +2492,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 1515,
           "tanking_ratio": 0.6191222914905596,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.13914313110181312
+          },
           "weighted_damage": 38310.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -2788,7 +2802,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1229.9426191948278,
+        "bi": 1320.0079858422182,
         "category": "Average",
         "components": {
           "anti_air": {
@@ -2798,10 +2812,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 548.7435041505555
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 436.79132791327913
           },
           "kills": {
             "basis": "Dynamic",
@@ -2819,12 +2829,14 @@
             "basis": "Dynamic",
             "points": 159.54992593258496
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 526.8566945606696
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.18199638663053297,
-          "even_share": 0.08333333333333333,
           "expected_damage": 60523.96157073334,
           "expected_kills": 0.7487053196846152,
           "kills": 0.0,
@@ -2849,10 +2861,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 11617,
           "tanking_ratio": 1.3295827161048746,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.21952362273361228
+          },
           "weighted_damage": 60441.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -3182,7 +3198,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 286.583227260909,
+        "bi": 315.3994953608285,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -3192,10 +3208,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 139.75067750677508
           },
           "kills": {
             "basis": "Dynamic",
@@ -3213,12 +3225,14 @@
             "basis": "Dynamic",
             "points": 87.71363453926742
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 168.5669456066946
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.058229448961156276,
-          "even_share": 0.08333333333333333,
           "expected_damage": 66490.14082278482,
           "expected_kills": 0.8407346292947512,
           "kills": 0.0,
@@ -3243,10 +3257,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 6634,
           "tanking_ratio": 0.7309469544938951,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.07023622733612274
+          },
           "weighted_damage": 19338.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -3549,7 +3567,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 425.2799420732614,
+        "bi": 451.2113050619261,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -3559,10 +3577,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 125.75971093044264
           },
           "kills": {
             "basis": "Dynamic",
@@ -3580,12 +3594,14 @@
             "basis": "Dynamic",
             "points": 148.07489911485047
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 151.6910739191074
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.052399879554351096,
-          "even_share": 0.08333333333333333,
           "expected_damage": 67303.07094639311,
           "expected_kills": 0.8357749834546362,
           "kills": 0.0,
@@ -3610,10 +3626,14 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 10103,
           "tanking_ratio": 1.233957492623754,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.06320461413296141
+          },
           "weighted_damage": 17402.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -3940,7 +3960,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 134.81770375329222,
+        "bi": 137.7040990014846,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -3950,10 +3970,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 13.998193315266487
           },
           "kills": {
             "basis": "Dynamic",
@@ -3971,12 +3987,14 @@
             "basis": "Dynamic",
             "points": 117.2793096955171
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 16.884588563458856
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.005832580548027703,
-          "even_share": 0.08333333333333333,
           "expected_damage": 25526.12234348076,
           "expected_kills": 0.6614727168293802,
           "kills": 0.0,
@@ -4001,10 +4019,14 @@
           "spotting_baseline": 75000.0,
           "spotting_damage": 1135,
           "tanking_ratio": 0.9773275807959758,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.0070352452347745235
+          },
           "weighted_damage": 1937.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -4328,7 +4350,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 169.24023546616522,
+        "bi": 186.37830038586603,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -4338,10 +4360,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 83.11472448057815
           },
           "kills": {
             "basis": "Dynamic",
@@ -4359,12 +4377,14 @@
             "basis": "Dynamic",
             "points": 67.38034762842787
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 100.25278940027894
+          },
           "torpedo_warnings": null
         },
         "inputs": {
           "anti_air_damage": 0,
-          "enemy_hp_share": 0.034631135200240894,
-          "even_share": 0.08333333333333333,
           "expected_damage": 55626.773858472196,
           "expected_kills": 0.7324713265527384,
           "kills": 0.0,
@@ -4389,10 +4409,14 @@
           "spotting_baseline": 75000.0,
           "spotting_damage": 6314,
           "tanking_ratio": 0.5615028969035656,
+          "team_damage_share": {
+            "even": 0.08333333333333333,
+            "share": 0.04177199558344956
+          },
           "weighted_damage": 11501.0
         },
         "torpedo_detection": null,
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -4777,7 +4801,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 5013.395036170849,
+        "bi": 4966.553161330314,
         "category": "SuperUnicum",
         "components": {
           "anti_air": {
@@ -4787,10 +4811,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 3024.8156645594513
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 477.0833333333333
           },
           "kills": {
             "basis": "Dynamic",
@@ -4808,6 +4828,10 @@
             "basis": "Dynamic",
             "points": 190.94995401329618
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 430.24145849279796
+          },
           "torpedo_warnings": {
             "basis": "Static",
             "points": 0.0
@@ -4815,8 +4839,6 @@
         },
         "inputs": {
           "anti_air_damage": 19418,
-          "enemy_hp_share": 0.47708333333333336,
-          "even_share": 0.2,
           "expected_damage": 73531.56397245379,
           "expected_kills": 0.6890395070677695,
           "kills": 4.0,
@@ -4841,13 +4863,17 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 37864,
           "tanking_ratio": 1.5912496167774681,
+          "team_damage_share": {
+            "even": 0.2,
+            "share": 0.430241458492798
+          },
           "weighted_damage": 272052.0
         },
         "torpedo_detection": {
           "detected": 4,
           "threatening": 0.0
         },
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -5665,7 +5691,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 2393.0667735573024,
+        "bi": 2374.946900661035,
         "category": "Unicum",
         "components": {
           "anti_air": {
@@ -5675,10 +5701,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 1200.8984188220522
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 180.01788720538718
           },
           "kills": {
             "basis": "Dynamic",
@@ -5696,6 +5718,10 @@
             "basis": "Dynamic",
             "points": 117.36757950389406
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 161.89801430912001
+          },
           "torpedo_warnings": {
             "basis": "Static",
             "points": 0.0
@@ -5703,8 +5729,6 @@
         },
         "inputs": {
           "anti_air_damage": 14229,
-          "enemy_hp_share": 0.1800178872053872,
-          "even_share": 0.2,
           "expected_damage": 60028.7355664488,
           "expected_kills": 0.6434150326797623,
           "kills": 3.0,
@@ -5729,13 +5753,17 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 5522,
           "tanking_ratio": 0.9780631625324505,
+          "team_damage_share": {
+            "even": 0.2,
+            "share": 0.16189801430912001
+          },
           "weighted_damage": 102653.4
         },
         "torpedo_detection": {
           "detected": 0,
           "threatening": 0.0
         },
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -6523,7 +6551,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1020.6030571726884,
+        "bi": 1008.3274941672483,
         "category": "BelowAverage",
         "components": {
           "anti_air": {
@@ -6533,10 +6561,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 494.2819691999631
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 125.0263047138047
           },
           "kills": {
             "basis": "Dynamic",
@@ -6554,6 +6578,10 @@
             "basis": "Dynamic",
             "points": 95.18438669077008
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 112.7507417083647
+          },
           "torpedo_warnings": {
             "basis": "Static",
             "points": 0.0
@@ -6561,8 +6589,6 @@
         },
         "inputs": {
           "anti_air_damage": 13588,
-          "enemy_hp_share": 0.12502630471380471,
-          "even_share": 0.2,
           "expected_damage": 75909.0,
           "expected_kills": 0.815,
           "kills": 1.0,
@@ -6582,18 +6608,22 @@
             "torpedo_bombers": 3
           },
           "potential_damage": 712700,
-          "ships_spotted": 0.22549939806550706,
+          "ships_spotted": 0.2254993980655071,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 12029,
           "tanking_ratio": 0.793203222423084,
+          "team_damage_share": {
+            "even": 0.2,
+            "share": 0.1127507417083647
+          },
           "weighted_damage": 71295.0
         },
         "torpedo_detection": {
           "detected": 0,
           "threatening": 0.0
         },
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -7301,7 +7331,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1845.5987601673141,
+        "bi": 1819.7199052372232,
         "category": "Great",
         "components": {
           "anti_air": {
@@ -7311,10 +7341,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 866.0347841546027
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 234.72748316498314
           },
           "kills": {
             "basis": "Dynamic",
@@ -7332,6 +7358,10 @@
             "basis": "Dynamic",
             "points": 74.34548099352135
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 208.8486282348922
+          },
           "torpedo_warnings": {
             "basis": "Static",
             "points": 0.0
@@ -7339,8 +7369,6 @@
         },
         "inputs": {
           "anti_air_damage": 5506,
-          "enemy_hp_share": 0.23472748316498315,
-          "even_share": 0.2,
           "expected_damage": 99534.84675324676,
           "expected_kills": 0.8076935064934776,
           "kills": 2.0,
@@ -7365,13 +7393,17 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 19591,
           "tanking_ratio": 0.6195456749460112,
+          "team_damage_share": {
+            "even": 0.2,
+            "share": 0.20884862823489223
+          },
           "weighted_damage": 133851.0
         },
         "torpedo_detection": {
           "detected": 3,
           "threatening": 0.0
         },
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [
@@ -8153,7 +8185,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1540.704840818818,
+        "bi": 1530.8966237751022,
         "category": "Good",
         "components": {
           "anti_air": {
@@ -8163,10 +8195,6 @@
           "damage": {
             "basis": "Dynamic",
             "points": 606.4083929279478
-          },
-          "enemy_hp_share": {
-            "basis": "Dynamic",
-            "points": 96.06937429854096
           },
           "kills": {
             "basis": "Dynamic",
@@ -8184,6 +8212,10 @@
             "basis": "Dynamic",
             "points": 111.58646276700567
           },
+          "team_damage_share": {
+            "basis": "Dynamic",
+            "points": 86.26115725482504
+          },
           "torpedo_warnings": {
             "basis": "Static",
             "points": 0.0
@@ -8191,8 +8223,6 @@
         },
         "inputs": {
           "anti_air_damage": 16417,
-          "enemy_hp_share": 0.09606937429854097,
-          "even_share": 0.2,
           "expected_damage": 51606.89593077642,
           "expected_kills": 0.653126753975698,
           "kills": 2.0,
@@ -8217,13 +8247,17 @@
           "spotting_baseline": 35000.0,
           "spotting_damage": 20984,
           "tanking_ratio": 0.9298871897250472,
+          "team_damage_share": {
+            "even": 0.2,
+            "share": 0.08626115725482505
+          },
           "weighted_damage": 54782.6
         },
         "torpedo_detection": {
           "detected": 3,
           "threatening": 0.0
         },
-        "version": 1
+        "version": 2
       },
       "build": {
         "abilities": [

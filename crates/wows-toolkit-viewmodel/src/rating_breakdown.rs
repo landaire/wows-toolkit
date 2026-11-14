@@ -130,16 +130,6 @@ impl RatingBreakdown {
                 .into(),
             ),
             bi_line(
-                BattleImpactFactor::EnemyHpShare,
-                parts.enemy_hp_share,
-                t!(
-                    "ui.rating.detail.enemy_hp_share",
-                    share = format!("{:.1}", inputs.enemy_hp_share * 100.0),
-                    even = format!("{:.1}", inputs.even_share * 100.0)
-                )
-                .into(),
-            ),
-            bi_line(
                 BattleImpactFactor::Tanking,
                 parts.tanking,
                 t!(
@@ -150,6 +140,19 @@ impl RatingBreakdown {
                 .into(),
             ),
         ];
+
+        if let (Some(score), Some(share)) = (parts.team_damage_share, inputs.team_damage_share) {
+            lines.push(bi_line(
+                BattleImpactFactor::TeamDamageShare,
+                score,
+                t!(
+                    "ui.rating.detail.team_damage_share",
+                    share = format!("{:.1}", share.share.0 * 100.0),
+                    even = format!("{:.1}", share.even.0 * 100.0)
+                )
+                .into(),
+            ));
+        }
 
         if let (Some(score), Some(spotting_damage)) = (parts.spotting, inputs.spotting_damage) {
             lines.push(bi_line(
@@ -267,7 +270,7 @@ fn bi_label(factor: BattleImpactFactor) -> String {
     match factor {
         BattleImpactFactor::Damage => t!("ui.rating.damage").into(),
         BattleImpactFactor::Kills => t!("ui.rating.kills").into(),
-        BattleImpactFactor::EnemyHpShare => t!("ui.rating.enemy_hp_share").into(),
+        BattleImpactFactor::TeamDamageShare => t!("ui.rating.team_damage_share").into(),
         BattleImpactFactor::Tanking => t!("ui.rating.tanking").into(),
         BattleImpactFactor::Spotting => t!("ui.rating.spotting").into(),
         BattleImpactFactor::Objectives => t!("ui.rating.objectives").into(),
@@ -320,6 +323,8 @@ mod tests {
     use wows_replay_insights::battle_impact::BattleImpactComponents;
     use wows_replay_insights::battle_impact::BattleImpactInputs;
     use wows_replay_insights::battle_impact::BattleImpactVersion;
+    use wows_replay_insights::battle_impact::Share;
+    use wows_replay_insights::battle_impact::TeamDamageShare;
     use wows_replay_insights::battle_impact::TorpedoDetection;
 
     use super::*;
@@ -334,8 +339,7 @@ mod tests {
             expected_damage: 60_000.0,
             kills: 1.0,
             expected_kills: 0.8,
-            enemy_hp_share: 0.1,
-            even_share: 1.0 / 12.0,
+            team_damage_share: Some(TeamDamageShare { share: Share(0.1), even: Share(1.0 / 12.0) }),
             potential_damage: 500_000,
             tanking_ratio: 1.0,
             spotting_damage: Some(40_000),
@@ -365,7 +369,7 @@ mod tests {
         let components = BattleImpactComponents {
             damage: score(BattleImpactFactor::Damage, 600.0),
             kills: score(BattleImpactFactor::Kills, 150.0),
-            enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, 240.0),
+            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 240.0)),
             tanking: score(BattleImpactFactor::Tanking, 90.0),
             spotting: Some(score(BattleImpactFactor::Spotting, 260.0)),
             objectives: None,
@@ -389,7 +393,7 @@ mod tests {
         let components = BattleImpactComponents {
             damage: score(BattleImpactFactor::Damage, 300.0),
             kills: score(BattleImpactFactor::Kills, 0.0),
-            enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, 100.0),
+            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
             tanking: score(BattleImpactFactor::Tanking, 50.0),
             spotting: None,
             objectives: None,
@@ -413,7 +417,7 @@ mod tests {
         let components = BattleImpactComponents {
             damage: score(BattleImpactFactor::Damage, 300.0),
             kills: score(BattleImpactFactor::Kills, 100.0),
-            enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, 100.0),
+            team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
             // Recorded as static although the factor is dynamic when complete.
             tanking: FactorScore { points: 50.0, basis: FactorBasis::Static },
             spotting: Some(score(BattleImpactFactor::Spotting, 200.0)),
@@ -436,5 +440,29 @@ mod tests {
             ]
         );
         assert_eq!(breakdown.bases(), vec![FactorBasis::Dynamic, FactorBasis::Static]);
+    }
+
+    /// A team that dealt no damage leaves its players without a share of it,
+    /// so the hover lists no line for it rather than a zero.
+    #[test]
+    fn a_team_without_damage_lists_no_share_of_it() {
+        let components = BattleImpactComponents {
+            damage: score(BattleImpactFactor::Damage, 0.0),
+            kills: score(BattleImpactFactor::Kills, 0.0),
+            team_damage_share: None,
+            tanking: score(BattleImpactFactor::Tanking, 50.0),
+            spotting: None,
+            objectives: None,
+            anti_air: None,
+            torpedo_warnings: None,
+        };
+        let mut result = rating(components, None);
+        result.inputs.team_damage_share = None;
+
+        let breakdown = RatingBreakdown::battle_impact(&result, None);
+
+        let share_label = bi_label(BattleImpactFactor::TeamDamageShare);
+        assert!(breakdown.lines.iter().all(|line| line.label != share_label));
+        assert_eq!(breakdown.lines.len(), 3, "damage, kills and tanking");
     }
 }
