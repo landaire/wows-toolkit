@@ -14,6 +14,11 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_toolkit_viewmodel::stats::GameLimit;
+use wows_toolkit_viewmodel::stats::plot::PlotCanvas;
+use wows_toolkit_viewmodel::stats::plot::PlotColor;
+use wows_toolkit_viewmodel::stats::plot::PlotColors;
+use wows_toolkit_viewmodel::stats::plot::draw;
+use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
@@ -22,6 +27,25 @@ use zgui::vocab::NamedKey;
 
 use super::*;
 use crate::theme::SemanticTokensProps;
+
+/// A canvas that draws nothing and measures every label as empty.
+struct Unmeasured;
+
+impl PlotCanvas for Unmeasured {
+    fn fill(&mut self, _bounds: PlotRect, _color: PlotColor, _radius: f32) {}
+
+    fn polyline(&mut self, _points: &[PlotPoint], _width: f32, _color: PlotColor) {}
+
+    fn measure(&mut self, _text: &str, _size: f32) -> f32 {
+        0.0
+    }
+
+    fn text(&mut self, _origin: PlotPoint, _text: &str, _size: f32, _color: PlotColor) {}
+
+    fn clipped(&mut self, _area: PlotRect, body: &mut dyn FnMut(&mut dyn PlotCanvas)) {
+        body(self);
+    }
+}
 
 /// A session of four ships over twenty games, oldest first, with the spread a real one has.
 fn session() -> Arc<[PerGameStat]> {
@@ -129,6 +153,65 @@ fn shown(window: &HeadlessWindow, id: &str) -> bool {
 fn press(window: &mut HeadlessWindow, id: &str) {
     let element = element(window, id);
     window.click(element).unwrap_or_else(|err| panic!("`{id}` is pressed: {err}"));
+    window.advance(Duration::from_millis(50));
+}
+
+/// What the window's plot draws for `settings`, where the shared layout puts it in the plot's
+/// box, and the box's top-left corner in device pixels.
+///
+/// Laid out without measuring labels, so a line chart's legend is at its narrowest and the area
+/// is wider than the window's. The left edge, the heights and the bars do not depend on the
+/// legend, so a line's first game and every bar sit where the window drew them.
+fn drawn(window: &HeadlessWindow, settings: &ChartSettings) -> (PlotData, PlotLayout, Point<DevicePx, Device>) {
+    let filters = StatsFilters { limit: GameLimit::All, ..StatsFilters::default() };
+    let model = ChartModel::new(settings, &session(), &filters, None);
+    let data = PlotData { series: model.series, bars: model.bars, ..PlotData::default() };
+
+    let plot = window.bounds(element(window, "chart-plot")).expect("the plot has a box");
+    let bounds = PlotRect::new(0.0, 0.0, plot.size.width.0, plot.size.height.0);
+    let color = PlotColor::new(0.0, 0.0, 0.0, 1.0);
+    let colors = PlotColors { axis: color, grid: color, text: color };
+    let layout = draw(&data.plot(), bounds, colors, &mut Unmeasured).expect("the plot has room");
+
+    (data, layout, plot.origin)
+}
+
+/// `at`, in the plot's logical pixels, in window device pixels. The test windows draw at scale
+/// one.
+fn on_window(origin: Point<DevicePx, Device>, at: PlotPoint) -> Point<DevicePx, Device> {
+    Point::new(DevicePx(origin.x.0 + at.x), DevicePx(origin.y.0 + at.y))
+}
+
+/// The hover tooltip's name, value and game lines, in that order. Empty when it is not shown.
+fn tooltip_lines(window: &HeadlessWindow) -> Vec<String> {
+    ["wt-chart__tip-name", "wt-chart__tip-value", "wt-chart__tip-game"]
+        .into_iter()
+        .flat_map(|class| window.texts_by_class(class))
+        .collect()
+}
+
+/// Hovers Des Moines' first game on the line chart, where every line starts at the value axis.
+/// The pointer stands a little right of the point, inside the plot.
+fn hover_first_game(window: &mut HeadlessWindow, settings: &ChartSettings) {
+    let (data, layout, origin) = drawn(window, settings);
+    let series = data.series.iter().position(|series| series.name == "Des Moines").expect("Des Moines is plotted");
+    let first = layout
+        .line_points(&data.plot())
+        .nth(series)
+        .and_then(|mut points| points.next())
+        .expect("Des Moines has a first game");
+
+    window.hover_at(on_window(origin, PlotPoint::new(first.x + 3.0, first.y + 2.0)));
+    window.advance(Duration::from_millis(50));
+}
+
+/// Hovers the Yamato bar near its base.
+fn hover_yamato_bar(window: &mut HeadlessWindow, settings: &ChartSettings) {
+    let (data, layout, origin) = drawn(window, settings);
+    let index = data.bars.iter().position(|bar| bar.label == "Yamato").expect("Yamato has a bar");
+    let rect = layout.bar_rects(&data.plot()).nth(index).expect("the bar is laid out");
+
+    window.hover_at(on_window(origin, PlotPoint::new(rect.x + rect.width * 0.5, rect.bottom() - 4.0)));
     window.advance(Duration::from_millis(50));
 }
 
@@ -247,6 +330,29 @@ fn a_bar_chart_does_not_pan() {
     assert!(!shown(&window, "chart-reset-view"));
 }
 
+#[test]
+fn hovering_a_line_point_shows_its_ship_value_and_game() {
+    let settings = ChartSettings::default();
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+    assert!(window.by_test_id("chart-hover-tooltip").is_none(), "no tooltip before the pointer comes");
+
+    hover_first_game(&mut window, &settings);
+    assert_eq!(tooltip_lines(&window), ["Des Moines", "127,850", "Game 1, 2026-11-01 20:06"]);
+
+    window.hover_at(Point::new(DevicePx(1.0), DevicePx(1.0)));
+    window.advance(Duration::from_millis(50));
+    assert!(window.by_test_id("chart-hover-tooltip").is_none(), "leaving the plot takes the tooltip down");
+}
+
+#[test]
+fn hovering_a_bar_shows_its_ship_and_average() {
+    let settings = ChartSettings { mode: ChartMode::Bar, ..ChartSettings::default() };
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    hover_yamato_bar(&mut window, &settings);
+    assert_eq!(tooltip_lines(&window), ["Yamato", "87,326"]);
+}
+
 fn shot_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots").join(format!("{name}.png"))
 }
@@ -261,6 +367,29 @@ fn line_and_bar_charts_render_in_dark_and_light() {
             let Some((mut window, _)) = open(settings, scheme, Drawing::Device) else { return };
             window.advance(Duration::from_millis(200));
             let name = format!("stats-chart-{kind}-{}", if appearance == Appearance::Dark { "dark" } else { "light" });
+            let path = shot_path(&name);
+            window.save_png(&path).expect("the chart is drawn to a PNG");
+            println!("{}", path.display());
+        }
+    }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the chart"]
+fn hovered_line_and_bar_charts_render_in_dark_and_light() {
+    let line = ChartSettings::default();
+    let bar = ChartSettings { mode: ChartMode::Bar, ..ChartSettings::default() };
+    for (appearance, scheme) in [(Appearance::Dark, Scheme::Dark), (Appearance::Light, Scheme::Light)] {
+        for (kind, settings) in [("line", &line), ("bar", &bar)] {
+            let Some((mut window, _)) = open(settings.clone(), scheme, Drawing::Device) else { return };
+            window.advance(Duration::from_millis(200));
+            match settings.mode {
+                ChartMode::Line => hover_first_game(&mut window, settings),
+                ChartMode::Bar => hover_yamato_bar(&mut window, settings),
+            }
+            window.advance(Duration::from_millis(200));
+            let name =
+                format!("stats-chart-{kind}-hover-{}", if appearance == Appearance::Dark { "dark" } else { "light" });
             let path = shot_path(&name);
             window.save_png(&path).expect("the chart is drawn to a PNG");
             println!("{}", path.display());

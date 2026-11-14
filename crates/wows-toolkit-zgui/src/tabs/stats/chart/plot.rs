@@ -38,6 +38,9 @@ use zgui::scene::kurbo;
 use zgui::scene::peniko;
 use zgui::view::Ident;
 
+use crate::tabs::stats::chart::hover::PlotHit;
+use crate::tabs::stats::chart::hover::paint_hit;
+
 /// The custom properties the element reads its colours from, set by the chart's stylesheet.
 pub(super) const AXIS_PROPERTY: &str = "wt-plot-axis";
 pub(super) const GRID_PROPERTY: &str = "wt-plot-grid";
@@ -92,6 +95,11 @@ pub(super) struct PlotElement {
     /// Where the last paint put the data, which turns a pointer into data. `None` before the
     /// first paint and while the box is too small to plot in.
     pub layout: Option<PlotLayout>,
+    /// Whether `layout` was painted from `data` as it is. A pan between paints still measures
+    /// against the last layout, but a hover is not found in geometry the data has moved out of.
+    pub layout_is_current: bool,
+    /// What the pointer rests on, marked over the plot.
+    pub hover: Option<PlotHit>,
     shaper: Shaper,
     families: Vec<Ident>,
     shaped: HashMap<(Arc<str>, u32), Shaped>,
@@ -103,6 +111,8 @@ impl PlotElement {
             data: PlotData::default(),
             colors: None,
             layout: None,
+            layout_is_current: false,
+            hover: None,
             shaper,
             families: UI_FAMILIES.iter().copied().map(Ident::new).collect(),
             shaped: HashMap::new(),
@@ -133,12 +143,19 @@ impl CustomElement for PlotElement {
         let size = painter.size();
         let bounds = PlotRect::new(0.0, 0.0, size.width.0 / scale, size.height.0 / scale);
 
-        let Self { data, layout, shaper, families, shaped, .. } = self;
+        let Self { data, layout, layout_is_current, hover, shaper, families, shaped, .. } = self;
         if shaped.len() > SHAPED_CACHE_LIMIT {
             shaped.clear();
         }
         let mut canvas = SceneCanvas { painter, scale, shaper, families, shaped, clip: None };
-        *layout = draw(&data.plot(), bounds, colors.plot, &mut canvas);
+        let plot = data.plot();
+        *layout = draw(&plot, bounds, colors.plot, &mut canvas);
+        *layout_is_current = true;
+
+        // Unclipped, so a dot on the area's edge is drawn whole. The rulers end at the edges.
+        if let (Some(drawn), Some(hit)) = (*layout, *hover) {
+            paint_hit(&plot, &drawn, hit, colors, &mut canvas);
+        }
     }
 
     fn custom_properties_read(&self) -> Option<&'static [&'static str]> {

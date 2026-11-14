@@ -4,6 +4,7 @@
 //! the shared plot layout, which the window draws through [`plot`] and a copy draws through the
 //! shared image renderer.
 
+mod hover;
 mod model;
 mod plot;
 #[cfg(test)]
@@ -14,6 +15,8 @@ use std::sync::Arc;
 
 use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::OverlaySurfaceProps;
+use landaire_ui::PointerTipProps;
 use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
@@ -44,6 +47,9 @@ use zgui::css;
 use zgui::custom::Custom;
 use zgui::custom::CustomHandle;
 use zgui::elements::Element;
+use zgui::geom::Css;
+use zgui::geom::CssPx;
+use zgui::geom::Point;
 use zgui::prelude::Fonts;
 use zgui::prelude::PointerButton;
 use zgui::reactive::Callable;
@@ -66,6 +72,7 @@ use zgui::reactive::use_context;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
+use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
@@ -88,6 +95,10 @@ use zgui_ui_primitives::Binding;
 use crate::i18n::Locale;
 use crate::icons::AppIconProps;
 use crate::services::Services;
+use crate::tabs::stats::chart::hover::Hovered;
+use crate::tabs::stats::chart::hover::PlotHit;
+use crate::tabs::stats::chart::hover::hover_at;
+use crate::tabs::stats::chart::hover::hover_text;
 use crate::tabs::stats::chart::model::ChartModel;
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::PlotElement;
@@ -200,6 +211,34 @@ const CSS: &str = css!(
     }
     .wt-chart__ships[data-narrowed=true] {
         background-color: var(--zui-color-secondary);
+    }
+    .wt-chart__tip {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px 8px;
+        pointer-events: none;
+    }
+    .wt-chart__tip-head {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--zui-type-size-sm);
+        font-weight: 700;
+    }
+    .wt-chart__swatch {
+        flex: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+    }
+    .wt-chart__tip-value {
+        font-size: var(--zui-type-size-sm);
+    }
+    .wt-chart__tip-game {
+        font-size: var(--zui-type-size-xs);
+        color: var(--wt-color-text-dim);
     }"
 );
 
@@ -264,7 +303,7 @@ pub fn StatsChart(
                 box(class = "wt-chart__empty", class:wt-chart__gone = move || !empty.get(), attr:data-testid = "chart-empty") {
                     {tr(locale, || t!("ui.stats.nothing_to_plot"))}
                 }
-                {plot.view(empty, element)}
+                {plot.view(empty, element, model, locale)}
             }
         }
     }
@@ -279,6 +318,11 @@ struct PlotSurface {
     view_state: RwSignal<PlotView, LocalStorage>,
     pannable: Signal<bool, LocalStorage>,
     drag: RwSignal<Option<Drag>, LocalStorage>,
+
+    /// What the pointer rests on, and where its mark is in window CSS pixels, which the tooltip
+    /// stands beside.
+    hit: RwSignal<Option<PlotHit>, LocalStorage>,
+    anchor: RwSignal<Option<Point<CssPx, Css>>, LocalStorage>,
 }
 
 /// Where the pointer was last seen while the primary button is held over a line plot, in window
@@ -302,6 +346,8 @@ impl PlotSurface {
         let fonts = use_context::<Fonts>().expect("every window provides its fonts");
         let (element, handle) = zgui::custom::custom(PlotElement::new(fonts.shaper()));
         let handle = StoredValue::new_local(handle);
+        let hit = RwSignal::new_local(None);
+        let anchor = RwSignal::new_local(None);
 
         // The element is retained, so what it draws is handed to it and it is told to paint again.
         effect(move |_| {
@@ -323,16 +369,28 @@ impl PlotSurface {
                     view: view_state.get(),
                 }
             });
-            handle.with_value(|handle| {
-                let changed = handle.update(|element| {
+            // A changed picture moves or drops what the pointer rested on; the next move finds it
+            // again.
+            let changed = handle.with_value(|handle| {
+                handle.update(|element| {
                     let changed = element.data != data;
-                    element.data = data;
+                    if changed {
+                        element.data = data;
+                        element.hover = None;
+                        element.layout_is_current = false;
+                    }
                     changed
-                });
-                if changed {
-                    handle.repaint();
-                }
+                })
             });
+            if !changed {
+                return;
+            }
+
+            handle.with_value(CustomHandle::repaint);
+            if hit.get_untracked().is_some() {
+                hit.set(None);
+                anchor.set(None);
+            }
         });
 
         let surface = Self {
@@ -343,6 +401,8 @@ impl PlotSurface {
             // plot refuses drag and zoom for the same reason.
             pannable: Signal::derive_local(move || settings.with(|settings| settings.mode == ChartMode::Line)),
             drag: RwSignal::new_local(None),
+            hit,
+            anchor,
         };
 
         (surface, element)
@@ -355,13 +415,85 @@ impl PlotSurface {
         Some(PlotPoint::new(x_css - bounds.origin.x.0 / scale, y_css - bounds.origin.y.0 / scale))
     }
 
+    /// Where `at`, in the plot's own logical pixels, sits in the window, in CSS pixels.
+    fn on_window(&self, at: PlotPoint) -> Option<Point<CssPx, Css>> {
+        let bounds = self.area.window_bounds()?;
+        let scale = self.area.scale();
+        Some(Point::new(CssPx(bounds.origin.x.0 / scale + at.x), CssPx(bounds.origin.y.0 / scale + at.y)))
+    }
+
     /// Where the plot last drew its data, which a pan or a zoom is measured against.
     fn layout(&self) -> Option<PlotLayout> {
         self.handle.with_value(|handle| handle.update(|element| element.layout))
     }
 
-    fn view(self, empty: Signal<bool, LocalStorage>, element: Element<Custom>) -> impl IntoView {
-        let Self { area, view_state, pannable, drag, .. } = self;
+    /// Marks what the pointer at `x_css`, `y_css` in window CSS pixels rests on, and shows its
+    /// tooltip.
+    fn hover(&self, x_css: f32, y_css: f32) {
+        let hovered = self.local(x_css, y_css).and_then(|cursor| {
+            self.handle.with_value(|handle| {
+                handle.update(|element| {
+                    // Data not yet painted has no geometry to find the pointer in.
+                    if !element.layout_is_current {
+                        return None;
+                    }
+                    hover_at(&element.data, &element.layout?, cursor)
+                })
+            })
+        });
+        self.show(hovered);
+    }
+
+    /// Written only when the pointer moves onto another point or bar, or off them, which is when
+    /// the plot paints again and the tooltip moves. The tooltip stands by the mark rather than
+    /// following the pointer.
+    fn show(&self, hovered: Option<Hovered>) {
+        let hit = hovered.map(|hovered| hovered.hit);
+        if self.hit.get_untracked() == hit {
+            return;
+        }
+
+        self.anchor.set(hovered.and_then(|hovered| self.on_window(hovered.at)));
+        self.hit.set(hit);
+        self.handle.with_value(|handle| {
+            handle.update(|element| element.hover = hit);
+            handle.repaint();
+        });
+    }
+
+    /// The tooltip for what the pointer rests on, in the egui chart's terms: the ship or line, its
+    /// value, and for a line's point the game it is.
+    fn tooltip(self, model: Memo<ChartModel>, locale: Locale) -> Option<AnyView> {
+        locale.track();
+        let hit = self.hit.get()?;
+        let stat = model.with_untracked(|model| model.stat);
+        let language = rust_i18n::locale();
+        let text = self
+            .handle
+            .with_value(|handle| handle.update(|element| hover_text(&element.data, hit, stat, &language)))?;
+        let swatch = format!("rgb({}, {}, {})", text.color.r, text.color.g, text.color.b);
+        let game = text.game.map(|game| AnyView::new(view! { text(class = "wt-chart__tip-game") {{game}} }));
+
+        Some(AnyView::new(view! {
+            OverlaySurface(class = "wt-chart__tip", attr:data-testid = "chart-hover-tooltip") {
+                row(class = "wt-chart__tip-head") {
+                    box(class = "wt-chart__swatch", style:background-color = swatch)
+                    text(class = "wt-chart__tip-name") {{text.name}}
+                }
+                text(class = "wt-chart__tip-value") {{text.value}}
+                {game}
+            }
+        }))
+    }
+
+    fn view(
+        self,
+        empty: Signal<bool, LocalStorage>,
+        element: Element<Custom>,
+        model: Memo<ChartModel>,
+        locale: Locale,
+    ) -> impl IntoView {
+        let Self { area, view_state, pannable, drag, anchor, .. } = self;
 
         view! {
             box(
@@ -377,7 +509,10 @@ impl PlotSurface {
                 },
                 on:pointer_move = move |ev| {
                     let last = match drag.get_untracked() {
-                        None => return,
+                        None => {
+                            self.hover(ev.position.x.0, ev.position.y.0);
+                            return;
+                        }
                         Some(Drag::Panning(last)) => last,
                         Some(Drag::Pressed(last)) => {
                             ev.capture_pointer();
@@ -402,6 +537,7 @@ impl PlotSurface {
                     }
                     drag.set(None);
                 },
+                on:pointer_leave = move |_| self.show(None),
                 on:double_click = move |_| {
                     if pannable.get_untracked() {
                         drag.set(None);
@@ -426,6 +562,9 @@ impl PlotSurface {
                 }
             ) {
                 {element.class("wt-chart__canvas")}
+                PointerTip(pointer = anchor) {
+                    {move || self.tooltip(model, locale)}
+                }
             }
         }
     }

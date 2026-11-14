@@ -36,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
 - *(insights)* Rate each player's match contribution (MC) on the PR scale and store it, with its formula version, in the replay index. It weighs damage and kills against expected values, the share of the team's damage, fire drawn against class peers and the team, spotting, objectives, anti-air, torpedo warnings and critical bursts that remove half an enemy's hit points within 10 s. Only Random and Ranked battles are rated
 - *(toolkit)* Show MC beside PR in the replay table, search results and stats, and break either rating into its parts on hover, each part marked static (a fixed expectation) or dynamic (expected values or this battle's players)
+- *(zgui)* Show a ship's value when the pointer rests on a point or bar in a stats chart, with the game for a point, and mark it on the plot
 
 ### Bug Fixes
 

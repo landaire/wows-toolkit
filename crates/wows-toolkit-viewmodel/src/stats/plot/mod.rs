@@ -273,6 +273,24 @@ impl PlotLayout {
         let y = f64::from((self.area.bottom() - point.y) / self.area.height);
         (window.x.at(x), window.y.at(y))
     }
+
+    /// Where `draw` put each line's points, one iterator per series in `plot`'s order, in the
+    /// canvas's space. For finding the point under a pointer.
+    pub fn line_points<'a>(
+        &self,
+        plot: &'a Plot<'a>,
+    ) -> impl Iterator<Item = impl Iterator<Item = PlotPoint> + use<'a>> + use<'a> {
+        self.frame().line_points(plot)
+    }
+
+    /// The rectangle `draw` filled for each bar, in `plot`'s order, in the canvas's space.
+    pub fn bar_rects<'a>(&self, plot: &'a Plot<'a>) -> impl Iterator<Item = PlotRect> + use<'a> {
+        self.frame().bar_rects(plot)
+    }
+
+    fn frame(&self) -> Frame {
+        Frame { area: self.area, window: self.window }
+    }
 }
 
 /// Everything one plot draws.
@@ -359,6 +377,7 @@ pub fn format_value(value: f64) -> String {
 }
 
 /// Where the data is drawn and which of it is shown.
+#[derive(Clone, Copy)]
 struct Frame {
     area: PlotRect,
     window: DataWindow,
@@ -371,6 +390,33 @@ impl Frame {
 
     fn y(&self, value: f64) -> f32 {
         self.area.bottom() - self.window.y.fraction(value) as f32 * self.area.height
+    }
+
+    fn line_points<'a>(
+        self,
+        plot: &'a Plot<'a>,
+    ) -> impl Iterator<Item = impl Iterator<Item = PlotPoint> + use<'a>> + use<'a> {
+        let longest = longest_line(plot);
+
+        plot.series.iter().map(move |series| {
+            let count = series.points.len();
+            series.points.iter().enumerate().map(move |(index, point)| {
+                PlotPoint::new(self.x(game_position(index, count, longest)), self.y(point.value))
+            })
+        })
+    }
+
+    fn bar_rects<'a>(self, plot: &'a Plot<'a>) -> impl Iterator<Item = PlotRect> + use<'a> {
+        let slot = self.area.width / self.window.x.span() as f32;
+        let width = (slot * 0.7).max(1.0);
+        let baseline = self.y(0.0f64.max(self.window.y.min));
+
+        plot.bars.iter().enumerate().map(move |(index, bar)| {
+            let centre = PlotPoint::new(self.x(index as f64 + 0.5), self.y(bar.value));
+            let top = centre.y.min(baseline);
+            let height = (centre.y - baseline).abs().max(1.0);
+            PlotRect::new(centre.x - width * 0.5, top, width, height)
+        })
     }
 }
 
@@ -528,16 +574,11 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
         8..=15 => (1.2, 2.25, 0.82),
         _ => (1.0, 1.75, 0.68),
     };
-    let longest = longest_line(plot);
-    for series in plot.series {
-        let count = series.points.len();
-        let positions: Vec<PlotPoint> = series
-            .points
-            .iter()
-            .enumerate()
-            .map(|(index, point)| PlotPoint::new(frame.x(game_position(index, count, longest)), frame.y(point.value)))
-            .collect();
+    let mut positions = Vec::new();
+    for (series, points) in plot.series.iter().zip(frame.line_points(plot)) {
         let color = PlotColor::from(series.color);
+        positions.clear();
+        positions.extend(points);
 
         canvas.polyline(&positions, line_width, color.opacity(opacity));
 
@@ -555,26 +596,24 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
 
 fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
     let slot = frame.area.width / frame.window.x.span() as f32;
-    let width = (slot * 0.7).max(1.0);
     let baseline = frame.y(0.0f64.max(frame.window.y.min));
 
-    for (index, bar) in plot.bars.iter().enumerate() {
-        let centre = PlotPoint::new(frame.x(index as f64 + 0.5), frame.y(bar.value));
-        let top = centre.y.min(baseline);
-        let height = (centre.y - baseline).abs().max(1.0);
-        canvas.fill(PlotRect::new(centre.x - width * 0.5, top, width, height), PlotColor::from(bar.color), 0.0);
+    for (bar, rect) in plot.bars.iter().zip(frame.bar_rects(plot)) {
+        let centre = rect.x + rect.width * 0.5;
+        let top = rect.y;
+        canvas.fill(rect, PlotColor::from(bar.color), 0.0);
 
         // A label per bar is unreadable once the bars are thinner than the names, so they are
         // dropped rather than overlapped.
         if slot >= 48.0 {
             let label_width = canvas.measure(&bar.label, TICK_FONT);
-            let origin = PlotPoint::new(centre.x - label_width * 0.5, baseline + 4.0);
+            let origin = PlotPoint::new(centre - label_width * 0.5, baseline + 4.0);
             canvas.text(origin, &bar.label, TICK_FONT, colors.text);
         }
         if plot.show_values {
             let label = format_value(bar.value);
             let label_width = canvas.measure(&label, TICK_FONT);
-            let origin = PlotPoint::new(centre.x - label_width * 0.5, top - (TICK_FONT + 4.0));
+            let origin = PlotPoint::new(centre - label_width * 0.5, top - (TICK_FONT + 4.0));
             canvas.text(origin, &label, TICK_FONT, PlotColor::from(bar.color));
         }
     }
