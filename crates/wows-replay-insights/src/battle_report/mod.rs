@@ -40,6 +40,7 @@ use wowsunpack::recognized::Recognized;
 
 use crate::battle_impact::BattleImpactResult;
 use crate::battle_impact::BattleImpactVersion;
+use crate::battle_impact::CriticalBursts;
 use crate::battle_impact::TorpedoDetections;
 use crate::battle_impact::rate_battle;
 use crate::personal_rating::PersonalRatingResult;
@@ -222,10 +223,10 @@ impl NormalizedPlayer {
     /// change.
     ///
     /// `player` is the same entity this was built from; the provider names
-    /// the ship, the bot, the build and the earned awards, and all of those
-    /// change with the active language. What is left alone is what the
-    /// provider never named: the raw username, the results figures, and the
-    /// rating.
+    /// the ship, the bot, the build, the earned awards and the ships a
+    /// battle impact burst landed on, and all of those change with the
+    /// active language. What is left alone is what the provider never named:
+    /// the raw username, the results figures, and the rating's figures.
     pub fn refresh_translations(&mut self, player: &Player, provider: &GameMetadataProvider, version: &Version) {
         let state = player.initial_state();
         let vehicle_param = player.vehicle();
@@ -263,6 +264,12 @@ impl NormalizedPlayer {
             };
             ribbon.display_name = translation.display_name;
             ribbon.description = translation.description;
+        }
+
+        let bursts = self.battle_impact.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
+        for burst in bursts {
+            burst.victim_ship_name = GameParamProvider::game_param_by_id(provider, burst.victim_ship)
+                .and_then(|param| provider.localized_name_from_param(&param));
         }
     }
 
@@ -317,7 +324,7 @@ impl NormalizedBattleReport {
     pub fn populate_battle_impact(&mut self, table: &crate::personal_rating::PersonalRatingData) {
         let saw_battle_end = self.metadata.battle_result.is_some();
         let ratings = if saw_battle_end {
-            rate_battle(&self.players, table, &self.torpedo_detections)
+            rate_battle(&self.players, table, &self.torpedo_detections, self.critical_bursts.as_ref())
         } else {
             vec![None; self.players.len()]
         };
@@ -387,6 +394,9 @@ pub struct NormalizedBattleReport {
     /// expected values are loaded, after the `BattleReport` is gone.
     #[serde(skip)]
     pub torpedo_detections: TorpedoDetections,
+    /// As `torpedo_detections`. `None` for a replay with no damage events.
+    #[serde(skip)]
+    pub critical_bursts: Option<CriticalBursts>,
     /// The formula `populate_battle_impact` rated this report with. `None`
     /// until it runs; once it has, a player's `battle_impact` being `None`
     /// means that player could not be rated, not that nobody tried.
@@ -435,8 +445,9 @@ impl NormalizedBattleReport {
         };
 
         let torpedo_detections = TorpedoDetections::from_report(report, &players, provider);
+        let critical_bursts = CriticalBursts::from_report(report, &players);
 
-        NormalizedBattleReport { metadata, players, torpedo_detections, battle_impact_version: None }
+        NormalizedBattleReport { metadata, players, torpedo_detections, critical_bursts, battle_impact_version: None }
     }
 }
 

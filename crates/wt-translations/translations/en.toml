@@ -710,6 +710,7 @@ spotting = "Spotting"
 objectives = "Objectives"
 anti_air = "Anti-air"
 torpedo_warnings = "Torpedo warnings"
+critical_bursts = "Critical bursts"
 unrated_early_exit = "No BI: the recording ended before the battle did"
 
 [ui.rating.detail]
@@ -724,6 +725,10 @@ anti_air_planes = "%{strike} attack planes, %{support} fighters and scouts"
 anti_air_damage = "%{damage} AA damage"
 torpedo_warnings = "%{threatening} threatening torpedoes spotted"
 torpedo_warnings_one = "1 threatening torpedo spotted"
+critical_bursts = "%{count} critical bursts: %{bursts}. Seen only for ships near the recording player"
+critical_bursts_one = "1 critical burst: %{bursts}. Seen only for ships near the recording player"
+critical_burst = "%{share}% of %{ship} in %{seconds} s"
+critical_burst_at_once = "%{share}% of %{ship} at once"
 
 [ui.personal_rating]
 unrated_hover = "Personal rating applies only to Random and Ranked battles."

@@ -216,6 +216,30 @@ impl RatingBreakdown {
             lines.push(bi_line(BattleImpactFactor::TorpedoWarnings, score, detail.into()));
         }
 
+        if let (Some(score), Some(bursts)) = (parts.critical_bursts, &result.critical_bursts) {
+            let listed = bursts
+                .iter()
+                .map(|burst| {
+                    let ship = burst.victim_ship_name.clone().unwrap_or_else(|| burst.victim_ship.to_string());
+                    let share = format!("{:.0}", burst.share.0 * 100.0);
+                    // A single salvo or torpedo spread lands within a second.
+                    if burst.duration.value() < 1.0 {
+                        t!("ui.rating.detail.critical_burst_at_once", share = share, ship = ship).into_owned()
+                    } else {
+                        let seconds = format!("{:.0}", burst.duration.value());
+                        t!("ui.rating.detail.critical_burst", share = share, ship = ship, seconds = seconds)
+                            .into_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let detail = match bursts.len() {
+                1 => t!("ui.rating.detail.critical_bursts_one", bursts = listed),
+                count => t!("ui.rating.detail.critical_bursts", count = count, bursts = listed),
+            };
+            lines.push(bi_line(BattleImpactFactor::CriticalBursts, score, detail.into()));
+        }
+
         // A bonus with nothing earned says nothing; a core part at zero still
         // shows how far below average it fell.
         lines.retain(|line| line.average.is_some() || line.points > 0.0);
@@ -275,6 +299,7 @@ fn bi_label(factor: BattleImpactFactor) -> String {
         BattleImpactFactor::Objectives => t!("ui.rating.objectives").into(),
         BattleImpactFactor::AntiAir => t!("ui.rating.anti_air").into(),
         BattleImpactFactor::TorpedoWarnings => t!("ui.rating.torpedo_warnings").into(),
+        BattleImpactFactor::CriticalBursts => t!("ui.rating.critical_bursts").into(),
     }
 }
 
@@ -319,14 +344,17 @@ fn sort_largest_first(lines: &mut [RatingLine]) {
 
 #[cfg(test)]
 mod tests {
+    use wows_core::units::Seconds;
     use wows_replay_insights::battle_impact::BattleImpactComponents;
     use wows_replay_insights::battle_impact::BattleImpactInputs;
     use wows_replay_insights::battle_impact::BattleImpactVersion;
+    use wows_replay_insights::battle_impact::CriticalBurst;
     use wows_replay_insights::battle_impact::Ratio;
     use wows_replay_insights::battle_impact::Share;
     use wows_replay_insights::battle_impact::TankingRatios;
     use wows_replay_insights::battle_impact::TeamDamageShare;
     use wows_replay_insights::battle_impact::TorpedoDetection;
+    use wows_replays::types::GameParamId;
 
     use super::*;
 
@@ -360,6 +388,7 @@ mod tests {
             components,
             inputs,
             torpedo_detection,
+            critical_bursts: None,
         }
     }
 
@@ -376,6 +405,7 @@ mod tests {
             objectives: None,
             anti_air: None,
             torpedo_warnings: Some(score(BattleImpactFactor::TorpedoWarnings, 40.0)),
+            critical_bursts: None,
         };
         let result = rating(components, Some(TorpedoDetection { detected: 22, threatening: 9, threat_weight: 5.0 }));
 
@@ -405,6 +435,7 @@ mod tests {
             objectives: None,
             anti_air: Some(score(BattleImpactFactor::AntiAir, 0.0)),
             torpedo_warnings: None,
+            critical_bursts: None,
         };
 
         let breakdown = RatingBreakdown::battle_impact(&rating(components, None), None);
@@ -430,6 +461,7 @@ mod tests {
             objectives: None,
             anti_air: None,
             torpedo_warnings: None,
+            critical_bursts: None,
         };
 
         let breakdown = RatingBreakdown::battle_impact(&rating(components, None), None);
@@ -461,6 +493,7 @@ mod tests {
             objectives: None,
             anti_air: None,
             torpedo_warnings: None,
+            critical_bursts: None,
         };
         let mut result = rating(components, None);
         result.inputs.team_damage_share = None;
@@ -470,5 +503,41 @@ mod tests {
         let share_label = bi_label(BattleImpactFactor::TeamDamageShare);
         assert!(breakdown.lines.iter().all(|line| line.label != share_label));
         assert_eq!(breakdown.lines.len(), 3, "damage, kills and tanking");
+    }
+
+    /// Each burst names its victim, the share and the time it took, a burst
+    /// within a second reads as at once, and the line says what the replay
+    /// cannot see.
+    #[test]
+    fn critical_bursts_list_each_victim() {
+        let components = BattleImpactComponents {
+            damage: score(BattleImpactFactor::Damage, 300.0),
+            kills: score(BattleImpactFactor::Kills, 100.0),
+            team_damage_share: None,
+            tanking: None,
+            spotting: None,
+            objectives: None,
+            anti_air: None,
+            torpedo_warnings: None,
+            critical_bursts: Some(score(BattleImpactFactor::CriticalBursts, 50.0)),
+        };
+        let mut result = rating(components, None);
+        let burst = |ship: &str, share: f64, seconds: f32| CriticalBurst {
+            victim_ship: GameParamId::from(1u64),
+            victim_ship_name: Some(ship.to_owned()),
+            share: Share(share),
+            duration: Seconds::new(seconds),
+        };
+        result.critical_bursts = Some(vec![burst("Montana", 0.92, 8.0), burst("Zao", 1.0, 0.4)]);
+
+        let breakdown = RatingBreakdown::battle_impact(&result, None);
+
+        let line = breakdown.lines.iter().find(|line| line.points == 50.0).expect("the bursts are listed");
+        assert_eq!(line.basis, FactorBasis::Static);
+        assert_eq!(
+            line.detail,
+            "2 critical bursts: 92% of Montana in 8 s, 100% of Zao at once. Seen only for ships near the recording \
+             player"
+        );
     }
 }

@@ -245,6 +245,7 @@ pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
         },
         players: vec![self_player, enemy_player],
         torpedo_detections: Default::default(),
+        critical_bursts: None,
         battle_impact_version: None,
     }
 }

@@ -34,6 +34,10 @@
             "basis": "Static",
             "points": 1.4745
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
@@ -60,6 +64,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 2949,
           "expected_damage": 53575.68586919688,
@@ -97,7 +102,7 @@
           "weighted_damage": 3616.7999999999997
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -782,6 +787,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 1181.9801872995547
@@ -811,6 +820,7 @@
             "points": 0.0
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 77099.24292565948,
@@ -852,7 +862,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -1546,6 +1556,10 @@
             "basis": "Static",
             "points": 3.4699999999999998
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
@@ -1572,6 +1586,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 940,
           "expected_damage": 38652.793333333335,
@@ -1609,7 +1624,7 @@
           "weighted_damage": 13288.4
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -2358,6 +2373,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 314.92888553413394
@@ -2387,6 +2406,7 @@
             "points": 27.619768142700195
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 38037.07332931969,
@@ -2408,7 +2428,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 153050,
-          "ships_spotted": 0.33006714575234813,
+          "ships_spotted": 0.3300671457523482,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 27944,
@@ -2428,7 +2448,7 @@
           "threat_weight": 3.4524710178375244,
           "threatening": 6
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -3195,6 +3215,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 972.160328768678
@@ -3224,6 +3248,7 @@
             "points": 0.0
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 29635.780775716696,
@@ -3265,7 +3290,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -4064,6 +4089,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
@@ -4093,6 +4122,7 @@
             "points": 72.32910585403442
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 41152.74269223608,
@@ -4134,7 +4164,7 @@
           "threat_weight": 9.041138231754303,
           "threatening": 10
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -4750,12 +4780,16 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 513.6965900207832,
+        "bi": 538.6965900207832,
         "category": "Bad",
         "components": {
           "anti_air": {
             "basis": "Static",
             "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
           },
           "damage": {
             "basis": "Dynamic",
@@ -4783,6 +4817,14 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [
+          {
+            "duration": 0.85211181640625,
+            "share": 0.6858887321566358,
+            "victim_ship": 4076746032,
+            "victim_ship_name": null
+          }
+        ],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 44510.45999226904,
@@ -4820,7 +4862,7 @@
           "weighted_damage": 35130.4
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -5530,6 +5572,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 41.19972426989956
@@ -5556,6 +5602,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 57011.071558520314,
@@ -5593,7 +5640,7 @@
           "weighted_damage": 25366.8
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -6358,6 +6405,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 1109.379731935165
@@ -6384,6 +6435,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 90724.7903093348,
@@ -6421,7 +6473,7 @@
           "weighted_damage": 146088.0
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -7144,6 +7196,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 153.35063465110792
@@ -7170,6 +7226,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 60367.54274735831,
@@ -7207,7 +7264,7 @@
           "weighted_damage": 34246.0
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -7898,12 +7955,16 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1492.6101582210858,
+        "bi": 1517.6101582210858,
         "category": "Good",
         "components": {
           "anti_air": {
             "basis": "Static",
             "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
           },
           "damage": {
             "basis": "Dynamic",
@@ -7931,6 +7992,14 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [
+          {
+            "duration": 1.594482421875,
+            "share": 0.605,
+            "victim_ship": 4181604048,
+            "victim_ship_name": null
+          }
+        ],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 45819.436320754714,
@@ -7968,7 +8037,7 @@
           "weighted_damage": 58468.4
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -8652,6 +8721,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 652.8365216898591
@@ -8681,6 +8754,7 @@
             "points": 31.29224967956543
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 81153.38360707517,
@@ -8722,7 +8796,7 @@
           "threat_weight": 3.9115312099456787,
           "threatening": 8
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -9421,6 +9495,10 @@
             "basis": "Static",
             "points": 4.183
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 532.5993400657779
@@ -9450,6 +9528,7 @@
             "points": 0.0
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 2366,
           "expected_damage": 40380.32098193608,
@@ -9491,7 +9570,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -10171,12 +10250,16 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 3357.019588702317,
+        "bi": 3407.019588702317,
         "category": "SuperUnicum",
         "components": {
           "anti_air": {
             "basis": "Static",
             "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 50.0
           },
           "damage": {
             "basis": "Dynamic",
@@ -10207,6 +10290,20 @@
             "points": 32.0
           }
         },
+        "critical_bursts": [
+          {
+            "duration": 0.0,
+            "share": 0.6717169260700389,
+            "victim_ship": 4179572720,
+            "victim_ship_name": null
+          },
+          {
+            "duration": 0.0,
+            "share": 0.5551685393258426,
+            "victim_ship": 4076779216,
+            "victim_ship_name": null
+          }
+        ],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 81153.38360707517,
@@ -10248,7 +10345,7 @@
           "threat_weight": 4.0,
           "threatening": 4
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -10962,6 +11059,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 846.9711088499729
@@ -10991,6 +11092,7 @@
             "points": 32.92322015762329
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 99534.84675324676,
@@ -11032,7 +11134,7 @@
           "threat_weight": 4.115402519702911,
           "threatening": 11
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -11879,6 +11981,10 @@
             "basis": "Static",
             "points": 0.133
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 657.5616548078668
@@ -11905,6 +12011,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 266,
           "expected_damage": 30009.30816781516,
@@ -11926,7 +12033,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 446668,
-          "ships_spotted": 0.6621752228209798,
+          "ships_spotted": 0.66217522282098,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 33596,
@@ -11942,7 +12049,7 @@
           "weighted_damage": 33530.6
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -12741,6 +12848,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 1342.0847747835896
@@ -12770,6 +12881,7 @@
             "points": 0.0
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 56990.734660243405,
@@ -12791,7 +12903,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 1418950,
-          "ships_spotted": 0.785921277920468,
+          "ships_spotted": 0.7859212779204678,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 61000,
@@ -12811,7 +12923,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -13585,12 +13697,16 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1260.53231971046,
+        "bi": 1285.53231971046,
         "category": "Average",
         "components": {
           "anti_air": {
             "basis": "Static",
             "points": 0.0
+          },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 25.0
           },
           "damage": {
             "basis": "Dynamic",
@@ -13618,6 +13734,14 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [
+          {
+            "duration": 0.591583251953125,
+            "share": 0.5248529411764706,
+            "victim_ship": 4180588336,
+            "victim_ship_name": null
+          }
+        ],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 90724.7903093348,
@@ -13655,7 +13779,7 @@
           "weighted_damage": 92981.8
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -14425,6 +14549,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
@@ -14454,6 +14582,7 @@
             "points": 2.6287736892700195
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 30388.938088829073,
@@ -14495,7 +14624,7 @@
           "threat_weight": 0.32859671115875244,
           "threatening": 1
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -15083,6 +15212,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 0.0
@@ -15109,6 +15242,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 60984.524719369474,
@@ -15146,7 +15280,7 @@
           "weighted_damage": 0.0
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -15760,6 +15894,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 281.7225912597803
@@ -15786,6 +15924,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 63328.23916811092,
@@ -15823,7 +15962,7 @@
           "weighted_damage": 44794.2
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -16591,6 +16730,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 291.0388177092249
@@ -16617,6 +16760,7 @@
           },
           "torpedo_warnings": null
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 97654.77840629611,
@@ -16654,7 +16798,7 @@
           "weighted_damage": 70067.0
         },
         "torpedo_detection": null,
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -17442,6 +17586,10 @@
             "basis": "Static",
             "points": 2.4945
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 390.20533052787135
@@ -17471,6 +17619,7 @@
             "points": 37.4507737159729
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 489,
           "expected_damage": 52807.234003656304,
@@ -17492,7 +17641,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 838900,
-          "ships_spotted": 0.41211264369181655,
+          "ships_spotted": 0.4121126436918165,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 28152,
@@ -17512,7 +17661,7 @@
           "threat_weight": 4.6813467144966125,
           "threatening": 12
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [
@@ -18344,6 +18493,10 @@
             "basis": "Static",
             "points": 0.0
           },
+          "critical_bursts": {
+            "basis": "Static",
+            "points": 0.0
+          },
           "damage": {
             "basis": "Dynamic",
             "points": 336.95318934959226
@@ -18373,6 +18526,7 @@
             "points": 3.9501428604125977
           }
         },
+        "critical_bursts": [],
         "inputs": {
           "anti_air_damage": 0,
           "expected_damage": 61228.374429223746,
@@ -18414,7 +18568,7 @@
           "threat_weight": 0.4937678575515747,
           "threatening": 2
         },
-        "version": 3
+        "version": 4
       },
       "build": {
         "abilities": [

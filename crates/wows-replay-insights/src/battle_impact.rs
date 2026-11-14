@@ -5,8 +5,10 @@
 //! The rating is a core of damage and kills against each ship's wows-numbers
 //! expected values, which can fall below average, plus each player's share of
 //! the damage their team dealt and the fire they drew, and contributions that
-//! only ever add: spotting, capture points, anti-air and torpedo warnings.
-//! 1150 is average play, as in PR, so the PR bands and colors apply unchanged.
+//! only ever add: spotting, capture points, anti-air, torpedo warnings and
+//! critical bursts. The parts with an average sum to 1130 at average play and
+//! the bonuses add the rest, so a typical battle lands near PR's average of
+//! 1150 (1138 across the fixture battles) and the PR bands and colors apply.
 //!
 //! Any change here that alters the rating a battle gets must raise
 //! [`BattleImpactVersion::CURRENT`].
@@ -18,8 +20,11 @@ use serde::Serialize;
 use wows_battle_world::report::BattleReport;
 use wows_battle_world::resources::SightingObserver;
 use wows_core::units::Km;
+use wows_core::units::Seconds;
+use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::types::AccountId;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameParamId;
 use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -70,6 +75,21 @@ const TANKING_WEIGHTS: [(Species, TankingWeights); 5] = [
     (Species::Battleship, TankingWeights { max_penalty: 150.0 }),
 ];
 
+/// A critical burst removes at least this share of one enemy's maximum hit
+/// points. Half is where a ship stops trading: a destroyer at half must
+/// disengage, a battleship has lost more than its heal restores. The six
+/// random fixture battles hold about three such bursts each; at 90% they
+/// held one between them, too rare to score.
+const CRITICAL_BURST_SHARE: f64 = 0.5;
+/// The span a burst's damage must land in. Across the fixture battles 22
+/// bursts land within 3 s, 28 within 10 s and 35 within 20 s: the count
+/// levels off once one salvo or torpedo spread fits with its spread of
+/// arrival times, and the span stays under battleship reloads.
+const CRITICAL_BURST_WINDOW_SECS: f32 = 10.0;
+/// Points per burst. Most bursts end in a kill the kill part already
+/// credits, so this rewards the tempo, not the kill again.
+const CRITICAL_BURST_POINTS: f64 = 25.0;
+
 /// One part of the rating.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum BattleImpactFactor {
@@ -81,6 +101,7 @@ pub enum BattleImpactFactor {
     Objectives,
     AntiAir,
     TorpedoWarnings,
+    CriticalBursts,
 }
 
 impl BattleImpactFactor {
@@ -96,7 +117,7 @@ impl BattleImpactFactor {
             Self::TeamDamageShare => Some(TEAM_DAMAGE_SHARE_POINTS),
             Self::Tanking => Some(0.0),
             Self::Spotting => Some(SPOTTING_SCALE * 1150.0),
-            Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => None,
+            Self::Objectives | Self::AntiAir | Self::TorpedoWarnings | Self::CriticalBursts => None,
         }
     }
 
@@ -111,6 +132,8 @@ impl BattleImpactFactor {
             Self::Spotting => FactorBasis::Static,
             // Fixed points per unit of what the player did.
             Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => FactorBasis::Static,
+            // Fixed points per burst past a fixed share of the victim's hit points.
+            Self::CriticalBursts => FactorBasis::Static,
         }
     }
 }
@@ -150,6 +173,10 @@ pub struct BattleImpactResult {
     /// `None` for players on a team no perspective of the replay belonged to,
     /// whose torpedo detections the replay does not show.
     pub torpedo_detection: Option<TorpedoDetection>,
+    /// `None` when the replay carries no damage events. Only damage to ships
+    /// the recording client was told about is seen, so a burst on a ship far
+    /// from the recording player can be missing.
+    pub critical_bursts: Option<Vec<CriticalBurst>>,
 }
 
 /// Points each part of the rating contributed. They sum to `bi`.
@@ -171,6 +198,7 @@ pub struct BattleImpactComponents {
     pub objectives: Option<FactorScore>,
     pub anti_air: Option<FactorScore>,
     pub torpedo_warnings: Option<FactorScore>,
+    pub critical_bursts: Option<FactorScore>,
 }
 
 impl BattleImpactComponents {
@@ -185,6 +213,7 @@ impl BattleImpactComponents {
             (BattleImpactFactor::Objectives, self.objectives),
             (BattleImpactFactor::AntiAir, self.anti_air),
             (BattleImpactFactor::TorpedoWarnings, self.torpedo_warnings),
+            (BattleImpactFactor::CriticalBursts, self.critical_bursts),
         ]
         .into_iter()
         .filter_map(|(factor, score)| Some((factor, score?)))
@@ -422,6 +451,138 @@ impl TorpedoDetections {
     }
 }
 
+/// One enemy that lost a large part of its hit points to one player within
+/// a short window, which changes how that enemy can go on playing.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CriticalBurst {
+    pub victim_ship: GameParamId,
+    /// The victim ship's localized name. `None` for an untranslated ship.
+    pub victim_ship_name: Option<String>,
+    /// Damage within the window over the victim's maximum hit points.
+    pub share: Share,
+    /// From the first hit in the window to the last.
+    pub duration: Seconds,
+}
+
+/// Critical bursts keyed by aggressor vehicle entity.
+#[derive(Clone, Debug, Default)]
+pub struct CriticalBursts(HashMap<EntityId, Vec<CriticalBurst>>);
+
+impl CriticalBursts {
+    /// `None` when the replay carries no damage events at all, which leaves
+    /// bursts unobservable rather than absent.
+    ///
+    /// The client is only sent damage to ships inside its area of interest,
+    /// so a burst on a ship far from the recording player can be missed.
+    /// Nothing unobserved is estimated.
+    pub fn from_report(report: &BattleReport, players: &[NormalizedPlayer]) -> Option<Self> {
+        if report.damage_events().is_empty() {
+            return None;
+        }
+
+        let by_vehicle: HashMap<EntityId, &NormalizedPlayer> =
+            players.iter().map(|player| (player.entity_id, player)).collect();
+        let mut bursts = HashMap::new();
+        for (aggressor, events) in report.damage_events() {
+            let Some(attacker) = by_vehicle.get(aggressor) else {
+                continue;
+            };
+            let found = find_bursts(events, |victim| {
+                let victim = by_vehicle.get(&victim).filter(|victim| victim.team_id != attacker.team_id)?;
+                let max_health = victim.server_results.as_ref()?.max_health.filter(|hp| *hp > 0)?;
+
+                Some(BurstVictim {
+                    max_health: max_health as f64,
+                    ship: victim.ship_id,
+                    ship_name: victim.ship_name.as_deref(),
+                })
+            });
+            bursts.insert(*aggressor, found);
+        }
+
+        Some(Self(bursts))
+    }
+
+    /// Empty for a player the replay saw deal no burst.
+    pub fn get(&self, vehicle: EntityId) -> &[CriticalBurst] {
+        self.0.get(&vehicle).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// What a burst on one victim is measured against.
+struct BurstVictim<'a> {
+    max_health: f64,
+    ship: GameParamId,
+    ship_name: Option<&'a str>,
+}
+
+/// The heaviest stretch of damage within the window.
+struct BurstWindow {
+    damage: f64,
+    duration: Seconds,
+}
+
+/// One aggressor's bursts: per victim `victim` describes, at most one, the
+/// heaviest window. A ship cannot lose half its hit points twice without
+/// healing back more than most ships can, and counting once keeps
+/// overlapping windows from each counting.
+fn find_bursts<'a>(events: &[DamageEvent], victim: impl Fn(EntityId) -> Option<BurstVictim<'a>>) -> Vec<CriticalBurst> {
+    let mut by_victim: HashMap<EntityId, Vec<&DamageEvent>> = HashMap::new();
+    for event in events {
+        by_victim.entry(event.victim).or_default().push(event);
+    }
+
+    let mut bursts = Vec::new();
+    for (victim_id, mut hits) in by_victim {
+        let Some(victim) = victim(victim_id) else {
+            continue;
+        };
+        hits.sort_by(|a, b| a.clock.seconds().total_cmp(&b.clock.seconds()));
+        let Some(window) = heaviest_window(&hits) else {
+            continue;
+        };
+        let share = window.damage / victim.max_health;
+        if share < CRITICAL_BURST_SHARE {
+            continue;
+        }
+
+        bursts.push(CriticalBurst {
+            victim_ship: victim.ship,
+            victim_ship_name: victim.ship_name.map(str::to_owned),
+            share: Share(share),
+            duration: window.duration,
+        });
+    }
+
+    // `by_victim` iterates in no fixed order.
+    bursts.sort_by(|a, b| b.share.0.total_cmp(&a.share.0).then_with(|| a.victim_ship.raw().cmp(&b.victim_ship.raw())));
+
+    bursts
+}
+
+/// The most damage `hits`, in clock order, deal within any span of
+/// [`CRITICAL_BURST_WINDOW_SECS`]. `None` without hits.
+fn heaviest_window(hits: &[&DamageEvent]) -> Option<BurstWindow> {
+    let mut heaviest: Option<BurstWindow> = None;
+    let mut start = 0;
+    let mut damage = 0.0;
+
+    for hit in hits {
+        damage += f64::from(hit.amount);
+        while hit.clock.seconds() - hits[start].clock.seconds() > CRITICAL_BURST_WINDOW_SECS {
+            damage -= f64::from(hits[start].amount);
+            start += 1;
+        }
+
+        if heaviest.as_ref().is_none_or(|heaviest| damage > heaviest.damage) {
+            let duration = Seconds::new(hit.clock.seconds() - hits[start].clock.seconds());
+            heaviest = Some(BurstWindow { damage, duration });
+        }
+    }
+
+    heaviest
+}
+
 /// Rate every player in one battle. The result is positional with `players`;
 /// a player is `None` without server results carrying damage, kills and hit
 /// points, without expected values for the ship, or in a ship class the
@@ -430,10 +591,11 @@ pub fn rate_battle(
     players: &[NormalizedPlayer],
     table: &PersonalRatingData,
     torpedoes: &TorpedoDetections,
+    bursts: Option<&CriticalBursts>,
 ) -> Vec<Option<BattleImpactResult>> {
     let context = BattleContext::new(players);
 
-    players.iter().map(|player| rate_player(player, &context, table, torpedoes)).collect()
+    players.iter().map(|player| rate_player(player, &context, table, torpedoes, bursts)).collect()
 }
 
 /// A quantity relative to a reference: 1 is equal to it.
@@ -568,6 +730,7 @@ fn rate_player(
     context: &BattleContext,
     table: &PersonalRatingData,
     torpedoes: &TorpedoDetections,
+    bursts: Option<&CriticalBursts>,
 ) -> Option<BattleImpactResult> {
     let results = player.server_results.as_ref()?;
     let damage = results.damage? as f64;
@@ -606,6 +769,9 @@ fn rate_player(
     let torpedo_detection = torpedoes.get(player.entity_id);
     let torpedo_warnings = torpedo_detection.map(TorpedoDetection::points);
 
+    let critical_bursts = bursts.map(|bursts| bursts.get(player.entity_id).to_vec());
+    let critical_burst_points = critical_bursts.as_ref().map(|bursts| CRITICAL_BURST_POINTS * bursts.len() as f64);
+
     let score = FactorScore::new;
     let components = BattleImpactComponents {
         damage: score(BattleImpactFactor::Damage, damage_points),
@@ -616,6 +782,7 @@ fn rate_player(
         objectives: objectives.map(|points| score(BattleImpactFactor::Objectives, points)),
         anti_air: anti_air.map(|points| score(BattleImpactFactor::AntiAir, points)),
         torpedo_warnings: torpedo_warnings.map(|points| score(BattleImpactFactor::TorpedoWarnings, points)),
+        critical_bursts: critical_burst_points.map(|points| score(BattleImpactFactor::CriticalBursts, points)),
     };
     let bi = components.total();
 
@@ -643,6 +810,7 @@ fn rate_player(
         components,
         inputs,
         torpedo_detection,
+        critical_bursts,
     })
 }
 
@@ -944,6 +1112,65 @@ mod tests {
         assert_eq!(threat_weight(2.0), 0.5);
         assert_eq!(threat_weight(3.0), 0.0);
         assert_eq!(threat_weight(5.0), 0.0);
+    }
+
+    const TEAMMATE: u32 = 99;
+
+    fn hit(victim: u32, at: f32, amount: f32) -> DamageEvent {
+        DamageEvent { amount, victim: EntityId::from(victim), clock: wows_replays::types::GameClock(at) }
+    }
+
+    /// Every victim an enemy with 10,000 hit points, except `TEAMMATE`.
+    fn bursts_in(events: &[DamageEvent]) -> Vec<(u64, f64, f32)> {
+        let victim = |id: EntityId| {
+            (id.raw() != TEAMMATE).then_some(BurstVictim {
+                max_health: 10_000.0,
+                ship: GameParamId::from(u64::from(id.raw())),
+                ship_name: Some("Montana"),
+            })
+        };
+
+        find_bursts(events, victim)
+            .into_iter()
+            .map(|burst| (burst.victim_ship.raw(), burst.share.0, burst.duration.value()))
+            .collect()
+    }
+
+    /// Half the victim's hit points counts, a hair under does not.
+    #[test]
+    fn a_burst_needs_half_the_victims_hit_points() {
+        assert_eq!(bursts_in(&[hit(1, 100.0, 3_000.0), hit(1, 104.0, 2_000.0)]), vec![(1, 0.5, 4.0)]);
+        assert_eq!(bursts_in(&[hit(1, 100.0, 3_000.0), hit(1, 104.0, 1_990.0)]), vec![]);
+    }
+
+    /// Hits exactly the window apart still form one burst; a little further
+    /// apart they do not.
+    #[test]
+    fn a_burst_lands_within_the_window() {
+        let edge = CRITICAL_BURST_WINDOW_SECS;
+        assert_eq!(bursts_in(&[hit(1, 0.0, 2_500.0), hit(1, edge, 2_500.0)]), vec![(1, 0.5, edge)]);
+        assert_eq!(bursts_in(&[hit(1, 0.0, 2_500.0), hit(1, edge + 0.5, 2_500.0)]), vec![]);
+    }
+
+    /// Of every window, the heaviest is the one measured, once per victim.
+    #[test]
+    fn the_heaviest_window_is_measured_once_per_victim() {
+        let events = [
+            hit(1, 0.0, 2_000.0),
+            hit(1, 5.0, 2_000.0),
+            hit(1, 12.0, 2_000.0),
+            hit(1, 14.0, 2_000.0),
+            hit(2, 30.0, 9_000.0),
+            hit(2, 31.0, 1_000.0),
+            hit(2, 90.0, 8_000.0),
+        ];
+        assert_eq!(bursts_in(&events), vec![(2, 1.0, 1.0), (1, 0.6, 9.0)]);
+    }
+
+    /// Damage to a ship of the aggressor's own team is never a burst.
+    #[test]
+    fn damage_to_a_teammate_is_not_a_burst() {
+        assert_eq!(bursts_in(&[hit(TEAMMATE, 0.0, 9_000.0)]), vec![]);
     }
 
     /// The count is whole torpedoes; the weighting only scales the points,

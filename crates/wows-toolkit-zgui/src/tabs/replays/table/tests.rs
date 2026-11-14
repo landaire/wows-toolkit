@@ -516,6 +516,7 @@ pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
         objectives: Some(score(BattleImpactFactor::Objectives, 0.05)),
         anti_air: None,
         torpedo_warnings: None,
+        critical_bursts: None,
     };
     let inputs = BattleImpactInputs {
         weighted_damage: 84_000.0,
@@ -541,6 +542,7 @@ pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
         components,
         inputs,
         torpedo_detection: None,
+        critical_bursts: None,
     }
 }
 

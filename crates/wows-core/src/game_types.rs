@@ -3678,7 +3678,7 @@ impl BattleImpactVersion {
     /// The revision `wows_replay_insights::battle_impact` computes. Raise it
     /// with any change to that formula that alters the rating a battle gets,
     /// so stored ratings from the older formula are recomputed.
-    pub const CURRENT: BattleImpactVersion = BattleImpactVersion(3);
+    pub const CURRENT: BattleImpactVersion = BattleImpactVersion(4);
 }
 
 #[cfg(test)]

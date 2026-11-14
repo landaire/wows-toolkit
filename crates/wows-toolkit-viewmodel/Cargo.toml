@@ -72,6 +72,8 @@ insta = { workspace = true }
 # The store's tests drive a real in-memory database, which needs an executor.
 tokio = { version = "1.53", features = ["rt", "macros"] }
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
+# `Seconds`, for building a battle impact burst in the breakdown's tests.
+wows-core = { workspace = true }
 # `ZoneGuard`, so the query bar's date assertions read a fixed zone rather than
 # the machine's.
 wows-toolkit-config = { workspace = true, features = ["test-support"] }

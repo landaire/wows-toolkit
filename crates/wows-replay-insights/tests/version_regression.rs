@@ -297,6 +297,11 @@ fn assert_translations_are_rebuilt(
             ribbon.description = Some(SCRIBBLE.to_string());
         }
 
+        let bursts = scribbled.battle_impact.iter_mut().flat_map(|rating| rating.critical_bursts.iter_mut().flatten());
+        for burst in bursts {
+            burst.victim_ship_name = Some(SCRIBBLE.to_string());
+        }
+
         scribbled.refresh_translations(player, provider, version);
 
         assert_eq!(scribbled.ship_name, original.ship_name, "the ship is named again");
@@ -308,6 +313,7 @@ fn assert_translations_are_rebuilt(
         let ribbons: Vec<&str> = scribbled.ribbons.iter().map(|r| r.display_name.as_str()).collect();
         let expected: Vec<&str> = original.ribbons.iter().map(|r| r.display_name.as_str()).collect();
         assert_eq!(ribbons, expected, "every ribbon is named again");
+        assert_eq!(scribbled.battle_impact, original.battle_impact, "every burst victim is named again");
     }
 }
 
