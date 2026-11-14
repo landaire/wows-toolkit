@@ -15,9 +15,9 @@
 //! `HashMap` serialization order does not matter).
 //!
 //! Goldens are captured snapshots. To (re)generate them after a deliberate
-//! builder change, run with the game data present:
-//!   REGEN_GOLDENS=1 cargo test -p wows-replay-insights --features battle-report \
-//!     --test version_regression
+//! builder or battle impact change, run with the game data present:
+//!   bin/buck2 test //crates/wows-replay-insights:version_regression_test \
+//!     -c wows.game_data=/path/to/game_data -- --env REGEN_GOLDENS=1
 //! which overwrites `tests/fixtures/normalized/<version_label>.json` for every
 //! runnable entry without comparing. Commit the updated goldens. Goldens are
 //! keyed by `version_label`, not `build`, since more than one entry can share a
@@ -29,6 +29,7 @@ use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::report::BattleReport;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::game_constants::GameConstants;
@@ -229,11 +230,13 @@ fn run_entry(entry: &Entry) {
     };
 
     let report = build_report(&loaded);
-    let normalized =
+    let mut normalized =
         NormalizedBattleReport::from_battle_report(&report, &loaded.replay.meta, loaded.provider, &loaded.constants);
+    normalized.populate_battle_impact(&expected_values());
 
     assert_structural_invariants(entry, &report, &normalized);
     assert_translations_are_rebuilt(&report, &normalized, loaded.provider, &loaded.version);
+    assert_early_exit_rates_nobody(&normalized);
 
     let mut produced = serde_json::to_value(&normalized).expect("normalized report serializes");
     sort_players(&mut produced);
@@ -243,6 +246,9 @@ fn run_entry(entry: &Entry) {
     let golden_path = fixtures_dir().join("normalized").join(format!("{}.json", entry.version_label));
 
     if std::env::var_os("REGEN_GOLDENS").is_some() {
+        // serde_json keeps insertion order when another crate in the build
+        // enables `preserve_order`, so sort to write the same file either way.
+        sort_keys(&mut produced);
         std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
         std::fs::write(&golden_path, serde_json::to_string_pretty(&produced).unwrap()).unwrap();
         eprintln!("captured golden for {} (build {})", entry.version_label, entry.build);
@@ -333,6 +339,28 @@ fn player_identity(player: &serde_json::Value) -> (i64, String, String, u64) {
     )
 }
 
+fn sort_keys(value: &mut serde_json::Value) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.sort_keys();
+                pending.extend(map.values_mut());
+            }
+            serde_json::Value::Array(items) => pending.extend(items.iter_mut()),
+            _ => {}
+        }
+    }
+}
+
+/// The wows-numbers expected values the goldens' battle impact is rated with.
+fn expected_values() -> PersonalRatingData {
+    let bytes = std::fs::read(fixtures_dir().join("pr_expected_values.json")).expect("expected values fixture");
+    let mut table = PersonalRatingData::new();
+    table.load_from_bytes(&bytes).expect("expected values fixture parses");
+    table
+}
+
 /// Deep structural compare of two JSON values, order-insensitive for objects and
 /// tolerant of tiny float drift. Percentage fields are ratios summed over a hash
 /// map, so their last f64 bits vary run-to-run; a 1e-9 tolerance absorbs that
@@ -389,4 +417,16 @@ fn version_matrix_regression() {
     for entry in MATRIX {
         run_entry(entry);
     }
+}
+
+/// A recording that stopped before the battle ended rates nobody, but still
+/// records that it was rated, so the index does not parse it again.
+fn assert_early_exit_rates_nobody(normalized: &NormalizedBattleReport) {
+    let mut left_early = normalized.clone();
+    left_early.metadata.battle_result = None;
+
+    left_early.populate_battle_impact(&expected_values());
+
+    assert!(left_early.players.iter().all(|player| player.battle_impact.is_none()));
+    assert!(left_early.battle_impact_version.is_some());
 }

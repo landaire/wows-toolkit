@@ -494,6 +494,39 @@ pub struct ObservedResults {
     pub kills: i64,
 }
 
+/// Victory points a player earned through capture points, summed from the
+/// server's `victory_points_cp_*` keys, in the server's units.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
+pub struct ObjectivePoints {
+    /// Capturing a base, neutral or team point.
+    pub capture: f64,
+    /// Score a point earned for the team while held, credited to its captors.
+    pub hold: f64,
+    /// Standing in a point to stop the enemy capturing or earning from it.
+    pub block: f64,
+    /// Resetting an enemy capture.
+    pub drop: f64,
+    /// Points held when the battle ended.
+    pub battle_end: f64,
+}
+
+/// Aircraft a player shot down, by kind, from the server's
+/// `planes_killed_*` keys. Counts every kill credited to the player, by the
+/// ship's own anti-air or by its fighters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct PlanesKilled {
+    /// Carrier attack aircraft, which the server calls `fighters`.
+    pub rocket_planes: u64,
+    /// Dive bombers, from carriers or airstrikes.
+    pub bombers: u64,
+    pub torpedo_bombers: u64,
+    pub skip_bombers: u64,
+    /// Fighters launched by a consumable (catapult and patrol fighters), the
+    /// server's `sfighters`.
+    pub consumable_fighters: u64,
+    pub scouts: u64,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ServerResults {
     /// Base XP. `None` when the resolved object omits the `exp` key.
@@ -538,4 +571,16 @@ pub struct ServerResults {
     pub distance_traveled: Option<f64>,
     pub kills: Option<i64>,
     pub damage_interactions: HashMap<AccountId, DamageInteraction>,
+
+    /// Ship hit points at the start of the battle. `None` when the resolved
+    /// object omits the `max_health` key.
+    pub max_health: Option<u64>,
+    /// Enemy torpedoes this player was first to detect (`tpds_spotted`).
+    pub torpedoes_spotted: Option<u64>,
+    /// `None` on builds whose results carry no capture victory points.
+    pub objective_points: Option<ObjectivePoints>,
+    /// `None` on builds whose results carry no per-kind plane kills.
+    pub planes_killed: Option<PlanesKilled>,
+    /// Damage dealt to aircraft (`damage_airdefense`).
+    pub anti_air_damage: Option<u64>,
 }

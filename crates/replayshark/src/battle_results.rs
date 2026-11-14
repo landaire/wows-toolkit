@@ -119,6 +119,7 @@ pub fn battle_results(
                 NormalizedBattleReport::from_battle_report(&report, &replay.meta, &provider, constants()?);
             if let Some(pr_data) = pr_data {
                 populate_personal_ratings(&mut normalized, &report, pr_data);
+                normalized.populate_battle_impact(pr_data);
             }
             serde_json::to_value(&normalized).map_err(BattleResultsError::Serialize)
         }

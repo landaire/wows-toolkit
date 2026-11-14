@@ -38,6 +38,10 @@ use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::rating_scope::RatingScope;
 use wowsunpack::recognized::Recognized;
 
+use crate::battle_impact::BattleImpactResult;
+use crate::battle_impact::BattleImpactVersion;
+use crate::battle_impact::TorpedoDetections;
+use crate::battle_impact::rate_battle;
 use crate::personal_rating::PersonalRatingResult;
 
 /// Match-level metadata, mirroring the fields the replay export emits.
@@ -135,6 +139,7 @@ pub struct NormalizedPlayer {
     pub consumables: Vec<ConsumableResult>,
     pub heal_count: Option<u32>,
     pub personal_rating: Option<PersonalRatingResult>,
+    pub battle_impact: Option<BattleImpactResult>,
     pub time_lived_secs: Option<u64>,
     /// Whether this player's ship was still afloat at the end. `None` when
     /// the player had no ship at all, which is not the same as surviving:
@@ -300,6 +305,27 @@ impl NormalizedBattleReport {
                 crate::personal_rating::rate_single_battle(table, player.ship_id, damage, frags, is_win);
         }
     }
+
+    /// Rates every player's battle impact against `table`, replacing any
+    /// rating already present. Unlike PR, BI is recomputed whenever asked:
+    /// a stored BI from an older formula is meant to be replaced.
+    ///
+    /// A recording that did not reach the battle's end rates nobody. Its
+    /// player left early and was sent nothing after that, so two recordings
+    /// of one battle would rate the same player differently. The version is
+    /// still stamped: the replay was rated, and no later pass can do better.
+    pub fn populate_battle_impact(&mut self, table: &crate::personal_rating::PersonalRatingData) {
+        let saw_battle_end = self.metadata.battle_result.is_some();
+        let ratings = if saw_battle_end {
+            rate_battle(&self.players, table, &self.torpedo_detections)
+        } else {
+            vec![None; self.players.len()]
+        };
+        for (player, rating) in self.players.iter_mut().zip(ratings) {
+            player.battle_impact = rating;
+        }
+        self.battle_impact_version = Some(BattleImpactVersion::CURRENT);
+    }
 }
 
 impl NormalizedPlayer {
@@ -357,6 +383,15 @@ impl NormalizedPlayer {
 pub struct NormalizedBattleReport {
     pub metadata: MatchMetadata,
     pub players: Vec<NormalizedPlayer>,
+    /// Kept from the packet stream so battle impact can be rated once the
+    /// expected values are loaded, after the `BattleReport` is gone.
+    #[serde(skip)]
+    pub torpedo_detections: TorpedoDetections,
+    /// The formula `populate_battle_impact` rated this report with. `None`
+    /// until it runs; once it has, a player's `battle_impact` being `None`
+    /// means that player could not be rated, not that nobody tried.
+    #[serde(skip)]
+    pub battle_impact_version: Option<BattleImpactVersion>,
 }
 
 impl NormalizedBattleReport {
@@ -399,7 +434,9 @@ impl NormalizedBattleReport {
             results_battle_result: results_battle_result(&resolved_results, report),
         };
 
-        NormalizedBattleReport { metadata, players }
+        let torpedo_detections = TorpedoDetections::from_report(report, &players, provider);
+
+        NormalizedBattleReport { metadata, players, torpedo_detections, battle_impact_version: None }
     }
 }
 
@@ -502,6 +539,83 @@ fn damage_breakdown<F: Fn(&str) -> Option<u64>>(get: F) -> Damage {
 fn get_u64_or_f64(v: &Value, key: &str) -> Option<u64> {
     let field = v.get(key)?;
     field.as_u64().or_else(|| field.as_f64().map(|f| f as u64))
+}
+
+/// Sum the victory-point keys present in `pr`. `None` when none of them is.
+fn sum_present_f64(pr: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().filter_map(|key| pr.get(*key)?.as_f64()).reduce(|a, b| a + b)
+}
+
+/// Capture victory points. `None` when the results carry none of the keys,
+/// which is what a build predating them sends.
+fn extract_objective_points(pr: &Value) -> Option<ObjectivePoints> {
+    let capture = sum_present_f64(
+        pr,
+        &["victory_points_cp_base_capture", "victory_points_cp_neutral_capture", "victory_points_cp_team_capture"],
+    );
+    let hold = sum_present_f64(pr, &["victory_points_cp_hold"]);
+    let block = sum_present_f64(
+        pr,
+        &[
+            "victory_points_cp_base_block",
+            "victory_points_cp_neutral_block",
+            "victory_points_cp_team_block",
+            "victory_points_cp_earning_block",
+        ],
+    );
+    let drop = sum_present_f64(
+        pr,
+        &["victory_points_cp_base_drop", "victory_points_cp_neutral_drop", "victory_points_cp_team_drop"],
+    );
+    let battle_end = sum_present_f64(
+        pr,
+        &[
+            "victory_points_cp_battle_end_base",
+            "victory_points_cp_battle_end_neutral",
+            "victory_points_cp_battle_end_team",
+        ],
+    );
+
+    if [capture, hold, block, drop, battle_end].iter().all(Option::is_none) {
+        return None;
+    }
+
+    // A key a build carries for one group but not another is a point never
+    // earned that way, so a missing group is zero.
+    Some(ObjectivePoints {
+        capture: capture.unwrap_or(0.0),
+        hold: hold.unwrap_or(0.0),
+        block: block.unwrap_or(0.0),
+        drop: drop.unwrap_or(0.0),
+        battle_end: battle_end.unwrap_or(0.0),
+    })
+}
+
+/// Plane kills by kind. `None` when the results carry none of the keys.
+fn extract_planes_killed(pr: &Value) -> Option<PlanesKilled> {
+    let read = |key: &str| get_u64_or_f64(pr, key);
+    let rocket_planes = read("planes_killed_fighters");
+    let bombers = read("planes_killed_bombers");
+    let torpedo_bombers = read("planes_killed_tbombers");
+    let skip_bombers = read("planes_killed_skipbombers");
+    let consumable_fighters = read("planes_killed_sfighters");
+    let scouts = read("planes_killed_scouts");
+
+    if [rocket_planes, bombers, torpedo_bombers, skip_bombers, consumable_fighters, scouts].iter().all(Option::is_none)
+    {
+        return None;
+    }
+
+    // As with the objective keys, a kind the build does not report was never
+    // shot down.
+    Some(PlanesKilled {
+        rocket_planes: rocket_planes.unwrap_or(0),
+        bombers: bombers.unwrap_or(0),
+        torpedo_bombers: torpedo_bombers.unwrap_or(0),
+        skip_bombers: skip_bombers.unwrap_or(0),
+        consumable_fighters: consumable_fighters.unwrap_or(0),
+        scouts: scouts.unwrap_or(0),
+    })
 }
 
 /// Purely-JSON per-player numeric extraction. Built for any resolved player
@@ -667,6 +781,11 @@ fn extract_server_results(pr: &Value, is_air_carrier: bool) -> ServerResults {
         distance_traveled: pr.get("distance").and_then(|v| v.as_f64()),
         kills: pr.get("ships_killed").and_then(|v| v.as_i64()),
         damage_interactions,
+        max_health: get_u64_or_f64(pr, "max_health"),
+        torpedoes_spotted: get_u64_or_f64(pr, "tpds_spotted"),
+        objective_points: extract_objective_points(pr),
+        planes_killed: extract_planes_killed(pr),
+        anti_air_damage: get_u64_or_f64(pr, "damage_airdefense"),
     }
 }
 
@@ -912,6 +1031,7 @@ fn build_player(
         consumables,
         heal_count,
         personal_rating: None,
+        battle_impact: None,
         time_lived_secs,
         survived,
         is_hidden_profile: state.is_hidden(),

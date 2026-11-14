@@ -26,6 +26,22 @@
   "players": [
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 256.20353009837373,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 119.5212300107042,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 64.16324853228963,
+          "tanking": 72.5190515553799,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -142,6 +158,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 15353,
@@ -254,6 +271,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 37100,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 346800,
         "potential_damage_by_type": {
           "agro_art": 346800
@@ -281,6 +308,7 @@
           "torps": null
         },
         "spotting_damage": 10330,
+        "torpedoes_spotted": 0,
         "xp": 130
       },
       "ship_class": "Cruiser",
@@ -301,6 +329,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 67.32755047181655,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 29.28671056472802,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 0.0,
+          "tanking": 38.040839907088525,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -417,6 +461,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 3762,
@@ -531,6 +576,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 39600,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 187948,
         "potential_damage_by_type": {
           "agro_art": 117900,
@@ -561,6 +616,7 @@
           "torps": null
         },
         "spotting_damage": 0,
+        "torpedoes_spotted": 4,
         "xp": 79
       },
       "ship_class": "Cruiser",
@@ -581,6 +637,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 397.49913683082605,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 113.56257264322048,
+          "enemy_hp_share": 168.56596062149276,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 0.0,
+          "tanking": 115.3706035661128,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -684,6 +756,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 21653,
@@ -803,6 +876,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 32200,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 514000,
         "potential_damage_by_type": {
           "agro_art": 514000
@@ -831,6 +914,7 @@
           "torps": null
         },
         "spotting_damage": 0,
+        "torpedoes_spotted": 0,
         "xp": 126
       },
       "ship_class": "Cruiser",
@@ -851,6 +935,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 364.56024247452217,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 118.19001589412565,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 149.9608621313915,
+          "tanking": 96.40936444900498,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -967,6 +1067,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 15182,
@@ -1122,6 +1223,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 30700,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 419400,
         "potential_damage_by_type": {
           "agro_art": 419400
@@ -1149,6 +1260,7 @@
           "torps": null
         },
         "spotting_damage": 23148,
+        "torpedoes_spotted": 0,
         "xp": 120
       },
       "ship_class": "Cruiser",
@@ -1169,6 +1281,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 264.2144689280639,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 40.16996983359824,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 46.36783790133125,
+          "tanking": 177.67666119313444,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -1272,6 +1400,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 5160,
@@ -1424,6 +1553,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 27100,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 726198,
         "potential_damage_by_type": {
           "agro_art": 656150,
@@ -1454,6 +1593,7 @@
           "torps": null
         },
         "spotting_damage": 6993,
+        "torpedoes_spotted": 2,
         "xp": 93
       },
       "ship_class": "Cruiser",
@@ -1474,6 +1614,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 284.98198410121324,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 102.58133575529536,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 7.54812324929972,
+          "tanking": 174.8525250966182,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -1603,6 +1759,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 13177,
@@ -1724,6 +1881,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 35600,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 819100,
         "potential_damage_by_type": {
           "agro_art": 819100
@@ -1750,6 +1917,7 @@
           "torps": null
         },
         "spotting_damage": 1160,
+        "torpedoes_spotted": 0,
         "xp": 104
       },
       "ship_class": "Cruiser",
@@ -1770,6 +1938,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 634.3467694417045,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.326,
+          "damage": 178.82113531486107,
+          "enemy_hp_share": 212.947549385319,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 77.07059442806899,
+          "tanking": 165.18149031345553,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -1855,6 +2039,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 652,
         "citadels_dealt": 1,
         "crits_dealt": 0,
         "damage": 27354,
@@ -2045,6 +2230,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 41300,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 833444,
         "potential_damage_by_type": {
           "agro_art": 623300,
@@ -2077,6 +2272,7 @@
           "torps": null
         },
         "spotting_damage": 12155,
+        "torpedoes_spotted": 10,
         "xp": 128
       },
       "ship_class": "Battleship",
@@ -2097,6 +2293,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 694.9797355231034,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 332.3095433968868,
+          "enemy_hp_share": 244.58529306821498,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 16.130971144622233,
+          "tanking": 101.9539279133794,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -2195,6 +2407,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 31418,
@@ -2343,6 +2556,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 53200,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 583848,
         "potential_damage_by_type": {
           "agro_art": 513800,
@@ -2373,6 +2596,7 @@
           "torps": null
         },
         "spotting_damage": 2521,
+        "torpedoes_spotted": 4,
         "xp": 132
       },
       "ship_class": "Battleship",
@@ -2393,6 +2617,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 750.0553206834034,
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 172.7856632929342,
+          "enemy_hp_share": 272.17334328067733,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 115.74029707937228,
+          "tanking": 189.35601703041954,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -2478,6 +2718,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 1,
         "damage": 34846,
@@ -2675,6 +2916,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 53400,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 1086400,
         "potential_damage_by_type": {
           "agro_art": 1086400
@@ -2704,6 +2955,7 @@
           "torps": null
         },
         "spotting_damage": 17987,
+        "torpedoes_spotted": 0,
         "xp": 160
       },
       "ship_class": "Battleship",
@@ -2724,6 +2976,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 582.135264670603,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.12,
+          "damage": 91.23783877798765,
+          "enemy_hp_share": 180.59359693794804,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 137.5610806231735,
+          "tanking": 172.6227483314937,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -2827,6 +3095,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 240,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 23198,
@@ -3013,6 +3282,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 58200,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 1033950,
         "potential_damage_by_type": {
           "agro_art": 1033950
@@ -3041,6 +3320,7 @@
           "torps": null
         },
         "spotting_damage": 21296,
+        "torpedoes_spotted": 0,
         "xp": 131
       },
       "ship_class": "Battleship",
@@ -3061,6 +3341,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 346.1754270066511,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.3105,
+          "damage": 0.0,
+          "enemy_hp_share": 125.52337085211974,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 153.18071378177643,
+          "tanking": 67.16084237275493,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -3164,6 +3460,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 621,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 16124,
@@ -3384,6 +3681,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 58200,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 402270,
         "potential_damage_by_type": {
           "agro_art": 227150,
@@ -3415,6 +3722,7 @@
           "torps": null
         },
         "spotting_damage": 23378,
+        "torpedoes_spotted": 6,
         "xp": 122
       },
       "ship_class": "Battleship",
@@ -3435,6 +3743,22 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 98.45693748727368,
+        "category": "Bad",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 0.0,
+          "enemy_hp_share": 0.0,
+          "kills": 0.0,
+          "objectives": null,
+          "spotting": 42.028943412325596,
+          "tanking": 56.427994074948074,
+          "torpedo_warnings": null
+        },
+        "torpedo_detection": null,
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -3530,6 +3854,7 @@
       "relation": 2,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 0,
         "damage": 0,
@@ -3707,6 +4032,16 @@
           "torps": null
         },
         "kills": 0,
+        "max_health": 42700,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 289500,
         "potential_damage_by_type": {
           "agro_art": 289500
@@ -3734,6 +4069,7 @@
           "torps": null
         },
         "spotting_damage": 14126,
+        "torpedoes_spotted": 0,
         "xp": 71
       },
       "ship_class": "AirCarrier",
@@ -3754,6 +4090,25 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 2120.8792734291787,
+        "category": "Unicum",
+        "components": {
+          "anti_air": 121.2465,
+          "damage": 1175.778572199855,
+          "enemy_hp_share": 215.42705674455135,
+          "kills": 207.61002823684632,
+          "objectives": null,
+          "spotting": 204.49919783111534,
+          "tanking": 196.31791841681056,
+          "torpedo_warnings": 0.0
+        },
+        "torpedo_detection": {
+          "detected": 2,
+          "threatening": 0.0
+        },
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -4145,6 +4500,7 @@
       "relation": 1,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 56493,
         "citadels_dealt": 2,
         "crits_dealt": 4,
         "damage": 109717,
@@ -4535,6 +4891,16 @@
           "torps": null
         },
         "kills": 1,
+        "max_health": 63850,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 10,
+          "consumable_fighters": 0,
+          "rocket_planes": 12,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 9
+        },
         "potential_damage": 990200,
         "potential_damage_by_type": {
           "agro_art": 990200
@@ -4565,6 +4931,7 @@
           "torps": null
         },
         "spotting_damage": 24977,
+        "torpedoes_spotted": 2,
         "xp": 1027
       },
       "ship_class": "Cruiser",
@@ -4585,6 +4952,25 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 3997.6902170777357,
+        "category": "SuperUnicum",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 2420.6643773243777,
+          "enemy_hp_share": 336.59336344001576,
+          "kills": 720.7236842105129,
+          "objectives": null,
+          "spotting": 294.8502363798347,
+          "tanking": 224.85855572299425,
+          "torpedo_warnings": 0.0
+        },
+        "torpedo_detection": {
+          "detected": 6,
+          "threatening": 0.0
+        },
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -4955,6 +5341,7 @@
       "relation": 1,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 6,
         "crits_dealt": 1,
         "damage": 171427,
@@ -5229,6 +5616,16 @@
           "torps": null
         },
         "kills": 3,
+        "max_health": 73000,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 1212700,
         "potential_damage_by_type": {
           "agro_art": 1157700,
@@ -5258,6 +5655,7 @@
           "torps": null
         },
         "spotting_damage": 42362,
+        "torpedoes_spotted": 6,
         "xp": 1276
       },
       "ship_class": "Battleship",
@@ -5278,6 +5676,25 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 942.2079406017892,
+        "category": "BelowAverage",
+        "components": {
+          "anti_air": 9.638,
+          "damage": 267.86924580949864,
+          "enemy_hp_share": 95.70979776163361,
+          "kills": 417.92041669035234,
+          "objectives": null,
+          "spotting": 57.986481538040714,
+          "tanking": 93.08399880226395,
+          "torpedo_warnings": 0.0
+        },
+        "torpedo_detection": {
+          "detected": 0,
+          "threatening": 0.0
+        },
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -5653,6 +6070,7 @@
       "relation": 1,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 7276,
         "citadels_dealt": 1,
         "crits_dealt": 1,
         "damage": 48745,
@@ -5911,6 +6329,16 @@
           "torps": null
         },
         "kills": 2,
+        "max_health": 88100,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 1,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 1
+        },
         "potential_damage": 551500,
         "potential_damage_by_type": {
           "agro_art": 551500
@@ -5937,6 +6365,7 @@
           "torps": null
         },
         "spotting_damage": 7298,
+        "torpedoes_spotted": 0,
         "xp": 744
       },
       "ship_class": "Battleship",
@@ -5957,6 +6386,25 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 1779.9459730385897,
+        "category": "Great",
+        "components": {
+          "anti_air": 3.6334999999999997,
+          "damage": 679.7344717626926,
+          "enemy_hp_share": 140.43196544276458,
+          "kills": 830.299101800181,
+          "objectives": null,
+          "spotting": 38.8246323024055,
+          "tanking": 84.84920698109518,
+          "torpedo_warnings": 2.1730947494506836
+        },
+        "torpedo_detection": {
+          "detected": 5,
+          "threatening": 0.27163684368133545
+        },
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -6275,6 +6723,7 @@
       "relation": 0,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 1267,
         "citadels_dealt": 2,
         "crits_dealt": 0,
         "damage": 71522,
@@ -6687,6 +7136,16 @@
           "torps": null
         },
         "kills": 4,
+        "max_health": 66300,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 1
+        },
         "potential_damage": 436101,
         "potential_damage_by_type": {
           "agro_art": 388500,
@@ -6717,6 +7176,7 @@
           "torps": null
         },
         "spotting_damage": 5582,
+        "torpedoes_spotted": 5,
         "xp": 915
       },
       "ship_class": "Battleship",
@@ -6737,6 +7197,25 @@
     },
     {
       "achievements": [],
+      "battle_impact": {
+        "bi": 7055.023650571775,
+        "category": "SuperUnicum",
+        "components": {
+          "anti_air": 0.0,
+          "damage": 5692.708265239361,
+          "enemy_hp_share": 304.03298645199294,
+          "kills": 863.456152070221,
+          "objectives": null,
+          "spotting": 194.82624681019988,
+          "tanking": 0.0,
+          "torpedo_warnings": 0.0
+        },
+        "torpedo_detection": {
+          "detected": 0,
+          "threatening": 0.0
+        },
+        "version": 1
+      },
       "build": {
         "abilities": [
           {
@@ -7035,6 +7514,7 @@
       "relation": 1,
       "ribbons": [],
       "server_results": {
+        "anti_air_damage": 0,
         "citadels_dealt": 0,
         "crits_dealt": 1,
         "damage": 154844,
@@ -7360,6 +7840,16 @@
           "torps": 14
         },
         "kills": 2,
+        "max_health": 14200,
+        "objective_points": null,
+        "planes_killed": {
+          "bombers": 0,
+          "consumable_fighters": 0,
+          "rocket_planes": 0,
+          "scouts": 0,
+          "skip_bombers": 0,
+          "torpedo_bombers": 0
+        },
         "potential_damage": 0,
         "potential_damage_by_type": {},
         "potential_damage_details": {
@@ -7384,6 +7874,7 @@
           "torps": null
         },
         "spotting_damage": 50957,
+        "torpedoes_spotted": 0,
         "xp": 1410
       },
       "ship_class": "Submarine",

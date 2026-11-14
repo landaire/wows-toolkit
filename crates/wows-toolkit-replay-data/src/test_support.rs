@@ -175,6 +175,7 @@ pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> 
         consumables: Vec::new(),
         heal_count: None,
         personal_rating: None,
+        battle_impact: None,
         time_lived_secs: None,
         survived: Some(true),
     }
@@ -216,6 +217,11 @@ pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
             distance_traveled: Some(12.5),
             kills: Some(1),
             damage_interactions: HashMap::new(),
+            max_health: Some(20_000),
+            torpedoes_spotted: Some(0),
+            objective_points: None,
+            planes_killed: None,
+            anti_air_damage: None,
         }),
         ..base_normalized_player(1, Relation::new(0), true)
     };
@@ -237,6 +243,8 @@ pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
             results_battle_result: None,
         },
         players: vec![self_player, enemy_player],
+        torpedo_detections: Default::default(),
+        battle_impact_version: None,
     }
 }
 

@@ -5,6 +5,8 @@
 //! such as Discord bots.
 
 #[cfg(feature = "battle-report")]
+pub mod battle_impact;
+#[cfg(feature = "battle-report")]
 pub mod battle_report;
 pub mod cap_layout;
 
