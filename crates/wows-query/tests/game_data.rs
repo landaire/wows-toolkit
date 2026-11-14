@@ -1471,6 +1471,27 @@ fn worst_tier_10_destroyer_torpedoes() {
     insta::assert_yaml_snapshot!(output);
 }
 
+/// A named ship's torpedoes rank among its own class and tier, and only its
+/// options are listed.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn one_ships_torpedoes_rank_within_its_class_and_tier() {
+    let verdicts: Vec<String> = ["F. Sherman", "Khabarovsk"]
+        .into_iter()
+        .flat_map(|ship| {
+            let output = game().call_tool("torpedo_rankings", json!({ "ship": ship })).expect("ship torpedoes rank");
+            assert_eq!(output["group"], "tier 10 destroyers");
+            output["verdicts"].as_array().cloned().unwrap_or_default()
+        })
+        .map(|verdict| verdict.as_str().unwrap_or_default().to_owned())
+        .collect();
+
+    insta::assert_snapshot!(verdicts.join("\n"), @"
+    F. Sherman's Mk17 ranks 33 of the 39 torpedo options of tier 10 destroyers (score 36.4): better than 13% of the others.
+    Khabarovsk's ET-46 ranks 6 of the 39 torpedo options of tier 10 destroyers (score 62.3): better than 87% of the others.
+    ");
+}
+
 /// Khabarovsk's torpedoes are spotted from 0.6 km, later than most, which
 /// counts for them; F. Sherman and Hull bring only two of their four
 /// single tubes to one broadside, and those bear across a narrow arc.
