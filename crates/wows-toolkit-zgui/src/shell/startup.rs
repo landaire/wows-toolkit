@@ -128,14 +128,15 @@ pub(crate) fn check_wows_dir(shell: Shell, wows_dir: String) {
     });
 }
 
-/// Puts up the message that stays until the game directory is fixed, with a way to fix it.
+/// Puts up the message that stays until the game directory is fixed or its button opens the
+/// setting.
 pub fn warn_wows_dir_invalid(shell: Shell) {
     let open = shell.settings_drawer;
     shell.toasts().show(
         landaire_ui::Notice::warn(t!("ui.messages.wows_dir_invalid").into_owned())
             .keyed(landaire_ui::ToastKey::new(STUCK_WOWS_DIR))
             .sticky()
-            .lasting_action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::WowsDirectory)),
+            .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::WowsDirectory)),
     );
 }
 

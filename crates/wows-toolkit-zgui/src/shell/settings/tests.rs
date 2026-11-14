@@ -156,6 +156,17 @@ fn at_top_of_scroll(window: &HeadlessWindow, id: &str) -> bool {
     (top(window, id) - top(window, "settings-drawer-scroll")).abs() < 1.5
 }
 
+/// Whether the element `id` lies wholly inside the scrolled list: a row near the end of the list
+/// cannot be scrolled to its top.
+fn in_view_of_scroll(window: &HeadlessWindow, id: &str) -> bool {
+    let element = find(window, id);
+    let row = window.bounds(element).unwrap_or_else(|| panic!("{id} is laid out"));
+    let scroll = find(window, "settings-drawer-scroll");
+    let port = window.bounds(scroll).expect("the list is laid out");
+
+    row.top().0 >= port.top().0 - 1.0 && row.bottom().0 <= port.bottom().0 + 1.0
+}
+
 /// The search reads names and descriptions across every section, and says how many settings it
 /// kept.
 #[test]
@@ -411,21 +422,44 @@ fn choosing_a_tab_shuts_the_drawer() {
     assert!(window.by_test_id("settings-search").is_none(), "and the drawer is shut");
 }
 
-/// The warning about the game directory stays up after its button opens the drawer: it is
-/// withdrawn once the directory is put right.
+/// The warning about the game directory goes once its button opens the drawer at the setting.
 #[test]
-fn the_game_directory_warning_outlasts_its_button() {
+fn the_game_directory_warning_goes_with_its_button() {
     let mut window = open_unsaved();
     crate::shell::startup::warn_wows_dir_invalid(shell());
     settle(&mut window);
-    let warning = t!("ui.messages.wows_dir_invalid").into_owned();
 
-    let open = window.by_role_and_label(Role::Button, &t!("ui.settings.panel.open")).expect("the warning has a button");
-    window.click(open).expect("the button can be pressed");
+    press_warning_button(&mut window, &t!("ui.messages.wows_dir_invalid"), Setting::WowsDirectory);
+}
+
+/// The warning about a Twitch credential Twitch refused goes once its button opens the drawer at
+/// the setting, and a later refusal puts it up again.
+#[test]
+fn the_twitch_warning_goes_with_its_button() {
+    let mut window = open_unsaved();
+    let warning = t!("ui.messages.twitch_token_invalid").into_owned();
+    shell().twitch_refused();
     settle(&mut window);
 
+    press_warning_button(&mut window, &warning, Setting::TwitchToken);
+
+    shell().twitch_refused();
+    settle(&mut window);
+    assert!(window.texts_by_class("lui-toasts").concat().contains(&warning), "a later refusal warns again");
+}
+
+/// Presses the button on the warning that says `warning`, and checks that the drawer opens with
+/// `setting` at the top and the warning is gone.
+fn press_warning_button(window: &mut HeadlessWindow, warning: &str, setting: Setting) {
+    assert!(window.texts_by_class("lui-toasts").concat().contains(warning), "the warning is up");
+    let open = window.by_role_and_label(Role::Button, &t!("ui.settings.panel.open")).expect("the warning has a button");
+    window.click(open).expect("the button can be pressed");
+    settle(window);
+    settle(window);
+
     assert!(window.by_test_id("settings-search").is_some(), "the button opens the drawer");
-    assert!(window.texts_by_class("lui-toasts").concat().contains(&warning), "and the warning stays up");
+    assert!(in_view_of_scroll(window, &row_test_id(setting)), "with the setting it is about in view");
+    assert!(!window.texts_by_class("lui-toasts").concat().contains(warning), "and the warning is gone");
 }
 
 /// A message about a setting opens the drawer with that setting at the top.

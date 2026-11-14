@@ -143,14 +143,7 @@ impl Notice {
 
     /// The same message with a button that runs `run` and then takes the message down.
     pub fn action(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
-        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keeps_message: false };
-        Self { action: Some(action), ..self }
-    }
-
-    /// The same message with a button that runs `run` and leaves the message up, for a message
-    /// that is withdrawn once what it is about is put right.
-    pub fn lasting_action(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
-        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keeps_message: true };
+        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run) };
         Self { action: Some(action), ..self }
     }
 
@@ -164,10 +157,7 @@ impl Notice {
         let Some(action) = self.action else {
             return toast;
         };
-        let button = ToastAction::new(action.label, move || (action.run)());
-        let button = if action.keeps_message { button.keep_open() } else { button };
-
-        toast.action_with(button)
+        toast.action_with(ToastAction::new(action.label, move || (action.run)()))
     }
 }
 
@@ -232,7 +222,6 @@ impl Toasts {
 struct NoticeAction {
     label: String,
     run: std::rc::Rc<dyn Fn()>,
-    keeps_message: bool,
 }
 
 impl std::fmt::Debug for NoticeAction {

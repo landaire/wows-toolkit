@@ -246,7 +246,7 @@ impl Shell {
 
     /// Twitch would not take the stored credential. Said out loud rather than only logged: the
     /// credential goes stale on its own schedule, and nothing else on screen would show it.
-    fn twitch_refused(self) {
+    pub(crate) fn twitch_refused(self) {
         self.twitch.status.set(TwitchStatus::Refused);
         let Some(toasts) = self.try_toasts() else { return };
         let open = self.settings_drawer;
@@ -254,7 +254,7 @@ impl Shell {
             Notice::warn(t!("ui.messages.twitch_token_invalid").into_owned())
                 .keyed(ToastKey::new(STUCK_TWITCH_TOKEN))
                 .sticky()
-                .lasting_action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::TwitchToken)),
+                .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::TwitchToken)),
         );
     }
 }
