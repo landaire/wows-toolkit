@@ -129,17 +129,21 @@ impl RatingBreakdown {
                 )
                 .into(),
             ),
-            bi_line(
+        ];
+
+        if let (Some(score), Some(ratios)) = (parts.tanking, inputs.tanking) {
+            lines.push(bi_line(
                 BattleImpactFactor::Tanking,
-                parts.tanking,
+                score,
                 t!(
                     "ui.rating.detail.tanking",
                     potential = separate_number(inputs.potential_damage, locale),
-                    ratio = format!("{:.2}", inputs.tanking_ratio)
+                    class = format!("{:.2}", ratios.class.0),
+                    team = format!("{:.2}", ratios.team.0)
                 )
                 .into(),
-            ),
-        ];
+            ));
+        }
 
         if let (Some(score), Some(share)) = (parts.team_damage_share, inputs.team_damage_share) {
             lines.push(bi_line(
@@ -318,7 +322,9 @@ mod tests {
     use wows_replay_insights::battle_impact::BattleImpactComponents;
     use wows_replay_insights::battle_impact::BattleImpactInputs;
     use wows_replay_insights::battle_impact::BattleImpactVersion;
+    use wows_replay_insights::battle_impact::Ratio;
     use wows_replay_insights::battle_impact::Share;
+    use wows_replay_insights::battle_impact::TankingRatios;
     use wows_replay_insights::battle_impact::TeamDamageShare;
     use wows_replay_insights::battle_impact::TorpedoDetection;
 
@@ -336,7 +342,7 @@ mod tests {
             expected_kills: 0.8,
             team_damage_share: Some(TeamDamageShare { share: Share(0.1), even: Share(1.0 / 12.0) }),
             potential_damage: 500_000,
-            tanking_ratio: 1.0,
+            tanking: Some(TankingRatios { class: Ratio(1.0), class_peers: 5, team: Ratio(1.0) }),
             spotting_damage: Some(40_000),
             spotting_baseline: 35_000.0,
             ships_spotted: 0.6,
@@ -365,7 +371,7 @@ mod tests {
             damage: score(BattleImpactFactor::Damage, 600.0),
             kills: score(BattleImpactFactor::Kills, 150.0),
             team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 240.0)),
-            tanking: score(BattleImpactFactor::Tanking, 90.0),
+            tanking: Some(score(BattleImpactFactor::Tanking, 90.0)),
             spotting: Some(score(BattleImpactFactor::Spotting, 260.0)),
             objectives: None,
             anti_air: None,
@@ -394,7 +400,7 @@ mod tests {
             damage: score(BattleImpactFactor::Damage, 300.0),
             kills: score(BattleImpactFactor::Kills, 0.0),
             team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
-            tanking: score(BattleImpactFactor::Tanking, 50.0),
+            tanking: Some(score(BattleImpactFactor::Tanking, 50.0)),
             spotting: None,
             objectives: None,
             anti_air: Some(score(BattleImpactFactor::AntiAir, 0.0)),
@@ -419,7 +425,7 @@ mod tests {
             kills: score(BattleImpactFactor::Kills, 100.0),
             team_damage_share: Some(score(BattleImpactFactor::TeamDamageShare, 100.0)),
             // Recorded as static although the factor is dynamic when complete.
-            tanking: FactorScore { points: 50.0, basis: FactorBasis::Static },
+            tanking: Some(FactorScore { points: 50.0, basis: FactorBasis::Static }),
             spotting: Some(score(BattleImpactFactor::Spotting, 200.0)),
             objectives: None,
             anti_air: None,
@@ -450,7 +456,7 @@ mod tests {
             damage: score(BattleImpactFactor::Damage, 0.0),
             kills: score(BattleImpactFactor::Kills, 0.0),
             team_damage_share: None,
-            tanking: score(BattleImpactFactor::Tanking, 50.0),
+            tanking: Some(score(BattleImpactFactor::Tanking, 50.0)),
             spotting: None,
             objectives: None,
             anti_air: None,

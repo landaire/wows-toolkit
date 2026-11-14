@@ -42,8 +42,33 @@ pub use wows_core::game_types::BattleImpactVersion;
 const DAMAGE_POINTS: f64 = 550.0;
 const KILL_POINTS: f64 = 150.0;
 const TEAM_DAMAGE_SHARE_POINTS: f64 = 200.0;
-const TANKING_POINTS: f64 = 120.0;
 const SPOTTING_SCALE: f64 = 0.2;
+
+/// Tanking reward per unit of fire drawn above both the class peers' mean
+/// and an even share of the team's: drawing twice both earns this much.
+const TANKING_REWARD_PER_EXCESS: f64 = 100.0;
+/// Reached at two and a half times both references, about the top tenth of
+/// battleships in the fixture battles.
+const TANKING_MAX_REWARD: f64 = 150.0;
+/// Fire drawn, relative to the class peers' mean, below which a class that
+/// is penalized starts losing points. About the bottom fifth of battleships
+/// and cruisers in the fixture battles sit under it.
+const TANKING_PENALTY_BELOW: f64 = 0.5;
+
+/// How far tanking can move each class's rating, the one place its
+/// asymmetry lives. Only the penalty differs by class:
+/// - destroyers, submarines and carriers survive by not being shot at, so
+///   drawing little fire is the class played well and costs nothing;
+/// - cruisers screen and trade, so hiding from fire costs a little;
+/// - battleships carry the hit points and armor to absorb fire, and one
+///   drawing far less than its peers leaves that fire on its teammates.
+const TANKING_WEIGHTS: [(Species, TankingWeights); 5] = [
+    (Species::Destroyer, TankingWeights { max_penalty: 0.0 }),
+    (Species::Submarine, TankingWeights { max_penalty: 0.0 }),
+    (Species::AirCarrier, TankingWeights { max_penalty: 0.0 }),
+    (Species::Cruiser, TankingWeights { max_penalty: 40.0 }),
+    (Species::Battleship, TankingWeights { max_penalty: 150.0 }),
+];
 
 /// One part of the rating.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -60,15 +85,16 @@ pub enum BattleImpactFactor {
 
 impl BattleImpactFactor {
     /// What the part earns for average play: expected damage and kills, an
-    /// even share of the team's damage, drawing the team's average fire and
-    /// spotting at the class baseline. `None` for objectives, anti-air and
-    /// torpedo warnings, which have no average; any of them is a bonus.
+    /// even share of the team's damage, nothing either way for drawing the
+    /// usual fire for the class and team, and spotting at the class baseline.
+    /// `None` for objectives, anti-air and torpedo warnings, which have no
+    /// average; any of them is a bonus.
     pub fn average_points(self) -> Option<f64> {
         match self {
             Self::Damage => Some(DAMAGE_POINTS),
             Self::Kills => Some(KILL_POINTS),
             Self::TeamDamageShare => Some(TEAM_DAMAGE_SHARE_POINTS),
-            Self::Tanking => Some(TANKING_POINTS),
+            Self::Tanking => Some(0.0),
             Self::Spotting => Some(SPOTTING_SCALE * 1150.0),
             Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => None,
         }
@@ -138,7 +164,9 @@ pub struct BattleImpactComponents {
     pub damage: FactorScore,
     pub kills: FactorScore,
     pub team_damage_share: Option<FactorScore>,
-    pub tanking: FactorScore,
+    /// `None` without a class peer to compare against or fire drawn by the
+    /// team. Negative only for cruisers and battleships.
+    pub tanking: Option<FactorScore>,
     pub spotting: Option<FactorScore>,
     pub objectives: Option<FactorScore>,
     pub anti_air: Option<FactorScore>,
@@ -152,7 +180,7 @@ impl BattleImpactComponents {
             (BattleImpactFactor::Damage, Some(self.damage)),
             (BattleImpactFactor::Kills, Some(self.kills)),
             (BattleImpactFactor::TeamDamageShare, self.team_damage_share),
-            (BattleImpactFactor::Tanking, Some(self.tanking)),
+            (BattleImpactFactor::Tanking, self.tanking),
             (BattleImpactFactor::Spotting, self.spotting),
             (BattleImpactFactor::Objectives, self.objectives),
             (BattleImpactFactor::AntiAir, self.anti_air),
@@ -180,8 +208,8 @@ pub struct BattleImpactInputs {
     /// `None` when the player's team dealt no damage.
     pub team_damage_share: Option<TeamDamageShare>,
     pub potential_damage: u64,
-    /// Fire drawn relative to the team average; 1 is average.
-    pub tanking_ratio: f64,
+    /// `None` when `tanking` in the components is.
+    pub tanking: Option<TankingRatios>,
     pub spotting_damage: Option<u64>,
     /// Spotting damage at which the ship's class is average.
     pub spotting_baseline: f64,
@@ -408,9 +436,74 @@ pub fn rate_battle(
     players.iter().map(|player| rate_player(player, &context, table, torpedoes)).collect()
 }
 
-/// Per-team totals the per-player axes are measured against.
+/// A quantity relative to a reference: 1 is equal to it.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct Ratio(pub f64);
+
+/// Fire a player drew, as potential damage, against two references.
+///
+/// The class reference is every other ship of the class in the battle, on
+/// both teams: matchmaking mirrors class counts, so the two teams together
+/// give a peer for nearly every ship, where one team often has a single
+/// carrier, submarine or battleship.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct TankingRatios {
+    /// Over the class peers' mean.
+    pub class: Ratio,
+    pub class_peers: u32,
+    /// Over an even share of the potential damage the team drew.
+    pub team: Ratio,
+}
+
+impl TankingRatios {
+    /// `None` with no class peer, peers that drew no fire, or a team that
+    /// drew none.
+    fn new(potential: f64, class: Species, context: &BattleContext, team: &TeamTotals) -> Option<Self> {
+        let peers = context.classes.get(&class)?;
+        let class_peers = peers.players.checked_sub(1).filter(|peers| *peers > 0)?;
+        let peer_mean = (peers.potential_damage - potential) / f64::from(class_peers);
+        if peer_mean <= 0.0 || team.potential_damage <= 0.0 {
+            return None;
+        }
+
+        Some(Self {
+            class: Ratio(potential / peer_mean),
+            class_peers,
+            team: Ratio(potential / team.potential_damage * f64::from(team.players)),
+        })
+    }
+
+    /// A reward needs both: more fire than the class usually draws, and more
+    /// than an even part of what the team drew. A penalty follows only the
+    /// class, weighted by `weights`.
+    fn points(self, weights: TankingWeights) -> f64 {
+        let excess = self.class.0.min(self.team.0) - 1.0;
+        let reward = (TANKING_REWARD_PER_EXCESS * excess).clamp(0.0, TANKING_MAX_REWARD);
+
+        let shortfall = ((TANKING_PENALTY_BELOW - self.class.0) / TANKING_PENALTY_BELOW).clamp(0.0, 1.0);
+        let penalty = weights.max_penalty * shortfall;
+
+        reward - penalty
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TankingWeights {
+    /// Points taken from a ship that drew no fire at all.
+    max_penalty: f64,
+}
+
+impl TankingWeights {
+    fn of(class: Species) -> Option<Self> {
+        TANKING_WEIGHTS.iter().find(|(species, _)| *species == class).map(|(_, weights)| *weights)
+    }
+}
+
+/// Per-team and per-class totals the per-player axes are measured against.
 struct BattleContext {
     teams: HashMap<u32, TeamTotals>,
+    classes: HashMap<Species, ClassTotals>,
     victims: HashMap<AccountId, Victim>,
 }
 
@@ -419,12 +512,17 @@ struct TeamTotals {
     /// Teammates with hit points, which the tanking axis is measured over.
     players: u32,
     potential_damage: f64,
-    /// Sum over the team of potential damage per hit point.
-    potential_per_hp: f64,
 
     /// Damage dealt to enemies by every teammate whose results carry it.
     damage_dealt: f64,
     damage_dealers: u32,
+}
+
+/// Ships of one class on both teams, with hit points.
+#[derive(Default)]
+struct ClassTotals {
+    players: u32,
+    potential_damage: f64,
 }
 
 struct Victim {
@@ -435,6 +533,7 @@ struct Victim {
 impl BattleContext {
     fn new(players: &[NormalizedPlayer]) -> Self {
         let mut teams: HashMap<u32, TeamTotals> = HashMap::new();
+        let mut classes: HashMap<Species, ClassTotals> = HashMap::new();
         let mut victims = HashMap::new();
 
         for player in players {
@@ -452,12 +551,15 @@ impl BattleContext {
             };
             team.players += 1;
             team.potential_damage += results.potential_damage as f64;
-            team.potential_per_hp += results.potential_damage as f64 / max_health as f64;
+
+            let class = classes.entry(player.ship_class).or_default();
+            class.players += 1;
+            class.potential_damage += results.potential_damage as f64;
 
             victims.insert(player.db_id, Victim { max_health, is_priority: is_priority_target(player.ship_class) });
         }
 
-        Self { teams, victims }
+        Self { teams, classes, victims }
     }
 }
 
@@ -470,7 +572,8 @@ fn rate_player(
     let results = player.server_results.as_ref()?;
     let damage = results.damage? as f64;
     let kills = results.kills? as f64;
-    let max_health = results.max_health.filter(|hp| *hp > 0)? as f64;
+    results.max_health.filter(|hp| *hp > 0)?;
+    let tanking_weights = TankingWeights::of(player.ship_class)?;
     let expected = table
         .get_ship_expected(player.ship_id)
         .filter(|expected| expected.average_damage_dealt > 0.0 && expected.average_frags > 0.0)?;
@@ -484,8 +587,8 @@ fn rate_player(
 
     let team_damage_share = TeamDamageShare::new(damage, team);
 
-    let tanking_ratio = tanking_ratio(results.potential_damage as f64, max_health, team);
-    let tanking = TANKING_POINTS * tanking_ratio;
+    let tanking = TankingRatios::new(results.potential_damage as f64, player.ship_class, context, team);
+    let tanking_points = tanking.map(|ratios| ratios.points(tanking_weights));
 
     let ships_spotted = ships_spotted(results, context);
     let spotting = results.spotting_damage.map(|spotting_damage| {
@@ -508,7 +611,7 @@ fn rate_player(
         damage: score(BattleImpactFactor::Damage, damage_points),
         kills: score(BattleImpactFactor::Kills, kill_points),
         team_damage_share: team_damage_share.map(|share| score(BattleImpactFactor::TeamDamageShare, share.points())),
-        tanking: score(BattleImpactFactor::Tanking, tanking),
+        tanking: tanking_points.map(|points| score(BattleImpactFactor::Tanking, points)),
         spotting: spotting.map(|points| score(BattleImpactFactor::Spotting, points)),
         objectives: objectives.map(|points| score(BattleImpactFactor::Objectives, points)),
         anti_air: anti_air.map(|points| score(BattleImpactFactor::AntiAir, points)),
@@ -523,7 +626,7 @@ fn rate_player(
         expected_kills: expected.average_frags,
         team_damage_share,
         potential_damage: results.potential_damage,
-        tanking_ratio,
+        tanking,
         spotting_damage: results.spotting_damage,
         spotting_baseline,
         ships_spotted,
@@ -619,19 +722,6 @@ fn spotting_score(ratio: f64) -> f64 {
     let (first, first_score) = ANCHORS[0];
     let (last, last_score) = ANCHORS[ANCHORS.len() - 1];
     last_score + (ratio - last) * (last_score - first_score) / (last - first)
-}
-
-/// Geometric mean of the player's share of the team's potential damage and
-/// their potential damage per hit point, each relative to the team average.
-fn tanking_ratio(potential: f64, max_health: f64, team: &TeamTotals) -> f64 {
-    if team.potential_damage <= 0.0 || team.potential_per_hp <= 0.0 {
-        return 0.0;
-    }
-    let players = f64::from(team.players);
-    let share = potential / team.potential_damage * players;
-    let per_hp = (potential / max_health) / (team.potential_per_hp / players);
-
-    (share * per_hp).sqrt()
 }
 
 /// `None` on builds whose results report neither plane kills by kind nor
@@ -757,6 +847,72 @@ mod tests {
     fn a_team_that_dealt_nothing_gives_no_share() {
         assert_eq!(TeamDamageShare::new(0.0, &team_dealing(&[0.0, 0.0, 0.0])), None);
         assert_eq!(TeamDamageShare::new(0.0, &team_dealing(&[])), None);
+    }
+
+    fn tanking(class: f64, team: f64, of: Species) -> f64 {
+        let ratios = TankingRatios { class: Ratio(class), class_peers: 3, team: Ratio(team) };
+        ratios.points(TankingWeights::of(of).expect("a rated class"))
+    }
+
+    /// Drawing almost none of the fire class peers drew costs a destroyer,
+    /// submarine or carrier nothing, a cruiser a little and a battleship a
+    /// clear amount.
+    #[test]
+    fn low_tanking_costs_by_class() {
+        for class in [Species::Destroyer, Species::Submarine, Species::AirCarrier] {
+            assert_eq!(tanking(0.1, 0.1, class), 0.0, "{class:?}");
+            assert_eq!(tanking(0.0, 0.0, class), 0.0, "{class:?}");
+        }
+
+        let cruiser = tanking(0.1, 0.1, Species::Cruiser);
+        assert!((-40.0..0.0).contains(&cruiser), "a small capped penalty, got {cruiser}");
+        assert_eq!(tanking(0.0, 0.0, Species::Cruiser), -40.0, "the cap");
+
+        let battleship = tanking(0.1, 0.1, Species::Battleship);
+        assert!(battleship <= -100.0, "a clear penalty, got {battleship}");
+        assert!(battleship < 2.0 * cruiser);
+    }
+
+    /// Drawing about what the class draws is neutral for every class.
+    #[test]
+    fn ordinary_tanking_is_neutral() {
+        for class in TANKING_WEIGHTS.map(|(class, _)| class) {
+            assert_eq!(tanking(1.0, 1.0, class), 0.0, "{class:?}");
+            assert_eq!(tanking(TANKING_PENALTY_BELOW, 0.4, class), 0.0, "{class:?}");
+        }
+    }
+
+    /// More fire than the class peers and more than an even part of the
+    /// team's earns the same reward in any class, up to the cap; either alone
+    /// earns nothing.
+    #[test]
+    fn high_tanking_is_rewarded_only_against_both_references() {
+        for class in TANKING_WEIGHTS.map(|(class, _)| class) {
+            assert_eq!(tanking(2.0, 1.8, class), 80.0, "{class:?}");
+            assert_eq!(tanking(6.0, 5.0, class), TANKING_MAX_REWARD, "{class:?}");
+            assert_eq!(tanking(2.0, 0.7, class), 0.0, "above the class alone, {class:?}");
+            assert_eq!(tanking(0.7, 2.0, class), 0.0, "above the team alone, {class:?}");
+        }
+    }
+
+    /// The class reference leaves the player out, and spans both teams.
+    #[test]
+    fn tanking_ratios_compare_against_the_other_ships_of_the_class() {
+        let context = BattleContext {
+            teams: HashMap::new(),
+            classes: HashMap::from([
+                (Species::Battleship, ClassTotals { players: 3, potential_damage: 3_000_000.0 }),
+                (Species::AirCarrier, ClassTotals { players: 1, potential_damage: 200_000.0 }),
+            ]),
+            victims: HashMap::new(),
+        };
+        let team = TeamTotals { players: 12, potential_damage: 6_000_000.0, ..TeamTotals::default() };
+
+        let ratios = TankingRatios::new(1_500_000.0, Species::Battleship, &context, &team).expect("two peers");
+        assert_eq!(ratios, TankingRatios { class: Ratio(2.0), class_peers: 2, team: Ratio(3.0) });
+
+        assert_eq!(TankingRatios::new(200_000.0, Species::AirCarrier, &context, &team), None, "no peer");
+        assert_eq!(TankingRatios::new(3_000_000.0, Species::Battleship, &context, &team), None, "peers drew none");
     }
 
     #[test]

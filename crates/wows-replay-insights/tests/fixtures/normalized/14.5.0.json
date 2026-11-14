@@ -27,7 +27,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 604.0176261652568,
+        "bi": 376.7719801743691,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -49,7 +49,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 227.24564599088777
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -79,7 +79,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 19714,
-          "tanking_ratio": 1.8937137165907314,
+          "tanking": {
+            "class": 0.778633879687512,
+            "class_peers": 5,
+            "team": 2.3808138784754487
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.05233325796175732
@@ -91,7 +95,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -844,7 +848,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1959.2627523893725,
+        "bi": 1773.4839493743966,
         "category": "Great",
         "components": {
           "anti_air": {
@@ -866,7 +870,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 237.17634674478893
+            "points": 51.39754372981324
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -896,7 +900,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 13164,
-          "tanking_ratio": 1.9764695562065744,
+          "tanking": {
+            "class": 1.5139754372981324,
+            "class_peers": 5,
+            "team": 1.9242084329867146
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.09529036997290138
@@ -908,7 +916,7 @@
           "threat_weight": 0.6091129779815674,
           "threatening": 2
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -1701,8 +1709,8 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 2111.948673691355,
-        "category": "Unicum",
+        "bi": 2019.9116663079294,
+        "category": "Great",
         "components": {
           "anti_air": {
             "basis": "Static",
@@ -1723,7 +1731,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 92.03700738342555
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -1753,7 +1761,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 83391,
-          "tanking_ratio": 0.7669750615285462,
+          "tanking": {
+            "class": 0.638635160095098,
+            "class_peers": 5,
+            "team": 0.5603787279409131
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.07797794854191148
@@ -1765,7 +1777,7 @@
           "threat_weight": 2.9964430928230286,
           "threatening": 6
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -2542,7 +2554,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 941.5412288246457,
+        "bi": 877.1416726507348,
         "category": "BelowAverage",
         "components": {
           "anti_air": {
@@ -2564,7 +2576,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 64.39955617391088
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -2591,7 +2603,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 4050,
-          "tanking_ratio": 0.536662968115924,
+          "tanking": {
+            "class": 0.8609413881017195,
+            "class_peers": 5,
+            "team": 0.6772593605766907
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.13025913812313553
@@ -2599,7 +2615,7 @@
           "weighted_damage": 73256.8
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -3240,7 +3256,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 511.90096930622,
+        "bi": 364.90547147222037,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -3262,7 +3278,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 162.16426121386343
+            "points": 15.168763379863748
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -3292,7 +3308,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 39593,
-          "tanking_ratio": 1.351368843448862,
+          "tanking": {
+            "class": 1.1516876337986375,
+            "class_peers": 5,
+            "team": 1.5499576416112797
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.016666881456131984
@@ -3304,7 +3324,7 @@
           "threat_weight": 5.0912370681762695,
           "threatening": 8
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -4021,7 +4041,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 40.69057128829195,
+        "bi": 0.0,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -4043,7 +4063,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 40.69057128829195
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -4070,7 +4090,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 0,
-          "tanking_ratio": 0.33908809406909957,
+          "tanking": {
+            "class": 1.1746265431265026,
+            "class_peers": 3,
+            "team": 0.21207648624180409
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.0
@@ -4078,7 +4102,7 @@
           "weighted_damage": 0.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -4553,7 +4577,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 336.5568792207065,
+        "bi": 219.06075318184907,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -4575,7 +4599,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 117.4961260388574
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -4602,7 +4626,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 49932,
-          "tanking_ratio": 0.979134383657145,
+          "tanking": {
+            "class": 1.520250284414107,
+            "class_peers": 5,
+            "team": 0.6424259050963395
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.029504366890701936
@@ -4610,7 +4638,7 @@
           "weighted_damage": 16418.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -5285,7 +5313,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1092.9446609293682,
+        "bi": 955.6699319789363,
         "category": "BelowAverage",
         "components": {
           "anti_air": {
@@ -5307,7 +5335,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 191.1995857866955
+            "points": 53.92485683626376
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -5334,7 +5362,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 4752,
-          "tanking_ratio": 1.593329881555796,
+          "tanking": {
+            "class": 1.5392485683626376,
+            "class_peers": 5,
+            "team": 2.3161551515341534
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.1035905545771484
@@ -5342,7 +5374,7 @@
           "weighted_damage": 61484.8
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -5983,7 +6015,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 236.2739387721075,
+        "bi": 154.36231590377548,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -6005,7 +6037,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 81.91162286833202
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -6035,7 +6067,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 28686,
-          "tanking_ratio": 0.6825968572361002,
+          "tanking": {
+            "class": 0.4882470154355503,
+            "class_peers": 5,
+            "team": 0.4401581609218411
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.0
@@ -6047,7 +6083,7 @@
           "threat_weight": 8.9817636013031,
           "threatening": 9
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -6622,7 +6658,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 130.8869180705904,
+        "bi": 112.17129045428396,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -6644,7 +6680,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 18.715627616306467
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -6674,7 +6710,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 33407,
-          "tanking_ratio": 0.15596356346922055,
+          "tanking": {
+            "class": 0.20391269515718455,
+            "class_peers": 3,
+            "team": 0.08613993172300037
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.006802187103493765
@@ -6686,7 +6726,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -7184,7 +7224,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 679.3516297795661,
+        "bi": 521.1128803377618,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -7206,7 +7246,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 211.70284529631618
+            "points": 53.464095854511974
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -7233,7 +7273,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 0,
-          "tanking_ratio": 1.7641903774693015,
+          "tanking": {
+            "class": 1.5346409585451197,
+            "class_peers": 5,
+            "team": 2.310850182436696
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.10653775653236532
@@ -7241,7 +7285,7 @@
           "weighted_damage": 64590.2
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -7997,7 +8041,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 32644,
-          "tanking_ratio": 0.0,
+          "tanking": {
+            "class": 0.0,
+            "class_peers": 3,
+            "team": 0.0
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.05203333376291226
@@ -8009,7 +8057,7 @@
           "threat_weight": 1.314542293548584,
           "threatening": 6
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -8662,7 +8710,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 551.9586505960914,
+        "bi": 470.5152730032301,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -8684,7 +8732,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 81.44337759286121
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -8711,7 +8759,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 11290,
-          "tanking_ratio": 0.6786948132738434,
+          "tanking": {
+            "class": 1.0418392885072134,
+            "class_peers": 5,
+            "team": 0.7950242399777392
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.015221219854077562
@@ -8719,7 +8771,7 @@
           "weighted_damage": 10164.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -9444,7 +9496,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 63.350981671867686,
+        "bi": 28.150913894081672,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -9466,7 +9518,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 35.20006777778601
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -9493,7 +9545,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 2960,
-          "tanking_ratio": 0.29333389814821675,
+          "tanking": {
+            "class": 0.39170244913218144,
+            "class_peers": 5,
+            "team": 0.20017165901778122
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.006124429428889767
@@ -9501,7 +9557,7 @@
           "weighted_damage": 4089.6
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -10161,8 +10217,8 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1115.4384134284594,
-        "category": "Average",
+        "bi": 962.4524503203726,
+        "category": "BelowAverage",
         "components": {
           "anti_air": {
             "basis": "Static",
@@ -10183,7 +10239,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 91.94286370633091
+            "points": -61.04309940175598
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -10213,7 +10269,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 63760,
-          "tanking_ratio": 0.7661905308860909,
+          "tanking": {
+            "class": 0.2965230019941467,
+            "class_peers": 5,
+            "team": 0.9892016995902724
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.07561487389710492
@@ -10225,7 +10285,7 @@
           "threat_weight": 9.310402572154999,
           "threatening": 10
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -10928,7 +10988,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 5946.793604995837,
+        "bi": 5804.863796398835,
         "category": "SuperUnicum",
         "components": {
           "anti_air": {
@@ -10950,7 +11010,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 141.92980859700216
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -10980,7 +11040,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 46572,
-          "tanking_ratio": 1.182748404975018,
+          "tanking": {
+            "class": 0.7352574481423229,
+            "class_peers": 5,
+            "team": 1.061367820167097
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.414752990162252
@@ -10992,7 +11056,7 @@
           "threat_weight": 1.4685977101325989,
           "threatening": 4
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -11823,7 +11887,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 2012.8992861639847,
+        "bi": 1837.0166699765625,
         "category": "Great",
         "components": {
           "anti_air": {
@@ -11845,7 +11909,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 183.06138585995066
+            "points": 7.178769672528418
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -11872,7 +11936,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 15269,
-          "tanking_ratio": 1.5255115488329223,
+          "tanking": {
+            "class": 3.18314947823226,
+            "class_peers": 5,
+            "team": 1.0717876967252842
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.1423983754447759
@@ -11880,7 +11948,7 @@
           "weighted_damage": 79701.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -12721,7 +12789,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 157394,
-          "tanking_ratio": 0.0,
+          "tanking": {
+            "class": 0.0,
+            "class_peers": 1,
+            "team": 0.0
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.07177326667830435
@@ -12733,7 +12805,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -13593,7 +13665,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1257.4668381390086,
+        "bi": 1150.6084008590165,
         "category": "Average",
         "components": {
           "anti_air": {
@@ -13615,7 +13687,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 106.85843727999205
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -13642,7 +13714,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 42714,
-          "tanking_ratio": 0.8904869773332671,
+          "tanking": {
+            "class": 5.695205025258919,
+            "class_peers": 3,
+            "team": 0.4936735682997788
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.049468065988570606
@@ -13650,7 +13726,7 @@
           "weighted_damage": 31334.2
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -14364,7 +14440,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 549.8146741036926,
+        "bi": 442.56655873304743,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -14386,7 +14462,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 107.24811537064512
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -14416,7 +14492,11 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 65567,
-          "tanking_ratio": 0.893734294755376,
+          "tanking": {
+            "class": 0.5740205285809367,
+            "class_peers": 5,
+            "team": 0.5095205111719957
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.005610691360425705
@@ -14428,7 +14508,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -15026,8 +15106,8 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1792.97569907753,
-        "category": "Great",
+        "bi": 1721.3723905380184,
+        "category": "VeryGood",
         "components": {
           "anti_air": {
             "basis": "Static",
@@ -15046,10 +15126,7 @@
             "basis": "Static",
             "points": 175.1936570922985
           },
-          "tanking": {
-            "basis": "Dynamic",
-            "points": 71.60330853951146
-          },
+          "tanking": null,
           "team_damage_share": {
             "basis": "Dynamic",
             "points": 478.65435071703274
@@ -15075,7 +15152,7 @@
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 59321,
-          "tanking_ratio": 0.5966942378292621,
+          "tanking": null,
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.19943931279876362
@@ -15083,7 +15160,7 @@
           "weighted_damage": 110980.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -15879,7 +15956,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 113.02770573107036,
+        "bi": 35.394843079466625,
         "category": "Bad",
         "components": {
           "anti_air": {
@@ -15901,7 +15978,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 77.63286265160373
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -15928,7 +16005,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 0,
-          "tanking_ratio": 0.6469405220966977,
+          "tanking": {
+            "class": 0.7659073353522337,
+            "class_peers": 5,
+            "team": 0.612431300467294
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.014434101283111095
@@ -15936,7 +16017,7 @@
           "weighted_damage": 8032.0
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -16587,8 +16668,8 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1691.7060251224082,
-        "category": "VeryGood",
+        "bi": 1536.5964858933207,
+        "category": "Good",
         "components": {
           "anti_air": {
             "basis": "Static",
@@ -16609,7 +16690,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 178.27791593151161
+            "points": 23.16837670242411
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -16636,7 +16717,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 1056,
-          "tanking_ratio": 1.4856492994292634,
+          "tanking": {
+            "class": 1.231683767024241,
+            "class_peers": 5,
+            "team": 1.9448250815510972
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.20302267907846028
@@ -16644,7 +16729,7 @@
           "weighted_damage": 113429.8
         },
         "torpedo_detection": null,
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
@@ -17446,8 +17531,8 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1626.9118924921013,
-        "category": "VeryGood",
+        "bi": 1401.2502045877923,
+        "category": "Good",
         "components": {
           "anti_air": {
             "basis": "Static",
@@ -17468,7 +17553,7 @@
           },
           "tanking": {
             "basis": "Dynamic",
-            "points": 225.66168790430908
+            "points": 0.0
           },
           "team_damage_share": {
             "basis": "Dynamic",
@@ -17498,7 +17583,11 @@
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 22789,
-          "tanking_ratio": 1.8805140658692423,
+          "tanking": {
+            "class": 0.82336661921437,
+            "class_peers": 5,
+            "team": 2.4982531954114378
+          },
           "team_damage_share": {
             "even": 0.08333333333333333,
             "share": 0.13114419910280486
@@ -17510,7 +17599,7 @@
           "threat_weight": 1.6243594884872437,
           "threatening": 7
         },
-        "version": 2
+        "version": 3
       },
       "build": {
         "abilities": [
