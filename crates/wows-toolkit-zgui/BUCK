@@ -4,7 +4,7 @@ buildscript = workspace_buildscript(
     name = "zgui_build",
     crate = "wows_toolkit_zgui",
     package = "wows-toolkit-zgui",
-    version = "1.0.5",
+    version = "1.1.0-beta4",
     rustc_flags = ["--cfg=wows_buck_build"],
 )
 
@@ -74,7 +74,7 @@ workspace_binary(
     name = "zgui_bin",
     crate = "wows_toolkit_zgui",
     package = "wows-toolkit-zgui",
-    version = "1.0.5",
+    version = "1.1.0-beta4",
     crate_root = "src/main.rs",
     buildscript = buildscript,
     deps = ZGUI_DEPS + ZGUI_PLATFORM_DEPS,
@@ -99,7 +99,7 @@ workspace_test(
     name = "zgui_test",
     crate = "wows_toolkit_zgui",
     package = "wows-toolkit-zgui",
-    version = "1.0.5",
+    version = "1.1.0-beta4",
     crate_root = "src/main.rs",
     buildscript = buildscript,
     # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
