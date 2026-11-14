@@ -6,6 +6,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use landaire_ui::TreeModel;
+use wows_core::pseudonym::NameDisplay;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
@@ -98,6 +99,7 @@ pub struct TreeInputs<'a> {
     pub fallback: Option<&'a GameMetadataProvider>,
     pub grouping: ReplayGrouping,
     pub locale: Option<&'a str>,
+    pub names: NameDisplay,
 }
 
 impl BrowserTree {
@@ -109,7 +111,17 @@ impl BrowserTree {
             .collect();
         let mut hover: HashMap<PathBuf, Vec<HoverFact>> = lites
             .iter()
-            .map(|lite| (lite.path.clone(), hover_facts(&lite.identity, &lite.stats, inputs.locale)))
+            .map(|lite| {
+                let facts = match inputs.names {
+                    NameDisplay::Real => hover_facts(&lite.identity, &lite.stats, inputs.locale),
+                    NameDisplay::Pseudonym => {
+                        let mut stats = lite.stats.clone();
+                        stats.anonymize();
+                        hover_facts(&lite.identity, &stats, inputs.locale)
+                    }
+                };
+                (lite.path.clone(), facts)
+            })
             .collect();
         let nodes = build_browser_tree(&lites, inputs.grouping, inputs.locale);
 

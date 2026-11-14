@@ -15,6 +15,7 @@ ZGUI_DEPS = [
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
     "//crates/wgc-install:wgc-install",
+    "//crates/wows-core:wows_core",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",

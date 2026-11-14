@@ -9,6 +9,7 @@ use futures::channel::mpsc;
 use jiff::Timestamp;
 use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query_text;
@@ -114,6 +115,8 @@ pub struct TrackerModel {
     owner: StoredValue<Owner, LocalStorage>,
     pub rows: Memo<Vec<PlayerRow>>,
     pub clans: Memo<Vec<ClanRow>>,
+    /// How player names and clan tags are shown. The filter and every key read the real ones.
+    pub names: Memo<NameDisplay>,
     pub live: LiveModel,
 }
 
@@ -160,6 +163,8 @@ impl TrackerModel {
             },
             always_changed,
         );
+        let settings = services.settings;
+        let names = Memo::new(move |_| settings.name_display());
 
         let note_error = RwSignal::new_local(None);
         let (note_writes, mut writes) = mpsc::unbounded::<NoteWrite>();
@@ -204,6 +209,7 @@ impl TrackerModel {
             owner: StoredValue::new_local(owner),
             rows,
             clans,
+            names,
             live: LiveModel::new(),
         }
     }

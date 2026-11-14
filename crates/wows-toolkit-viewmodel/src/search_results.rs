@@ -2,6 +2,7 @@
 //! query bar's value completions.
 
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query_text;
@@ -125,23 +126,35 @@ impl NameList {
 }
 
 impl ValueNames {
+    /// Players found by their real names are labelled as `display` shows them.
+    pub fn with_display(self, display: NameDisplay) -> Self {
+        match self {
+            Self::Players(players) => Self::Players(players.with_display(display)),
+            Self::Ships(ships) => Self::Ships(ships),
+        }
+    }
+
     /// The values whose names `needle` matches, best first, ranked over every name before the
     /// dropdown's cap.
     pub fn options(&self, needle: &str) -> Vec<ValueOption> {
         let query = FilterQuery::new(needle);
         match self {
-            Self::Players(players) => players
-                .find(&query, VALUE_LIMIT)
-                .into_iter()
-                .map(|facet| ValueOption {
-                    label: if facet.clan.is_empty() {
-                        facet.latest_name.clone()
-                    } else {
-                        format!("[{}] {}", facet.clan, facet.latest_name)
-                    },
-                    token: facet.account_id.raw().to_string(),
-                })
-                .collect(),
+            Self::Players(players) => {
+                let display = players.display();
+                players
+                    .find(&query, VALUE_LIMIT)
+                    .into_iter()
+                    .map(|facet| {
+                        let name = display.player_name(&facet.latest_name);
+                        let label = if facet.clan.is_empty() {
+                            name.into_owned()
+                        } else {
+                            format!("[{}] {name}", display.clan_tag(&facet.clan))
+                        };
+                        ValueOption { label, token: facet.account_id.raw().to_string() }
+                    })
+                    .collect()
+            }
             Self::Ships(ships) => ships
                 .find(&query, VALUE_LIMIT)
                 .into_iter()

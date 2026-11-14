@@ -113,6 +113,11 @@ fn loaded(model: ReplayReportModel, results: bool) -> Loaded {
     loaded_from_model(model, export, "battle".to_string(), payloads)
 }
 
+/// Has the next panel built on this thread show `model` rather than read its replay.
+pub(crate) fn seed_next_panel(model: ReplayReportModel) {
+    SEED.with(|slot| *slot.borrow_mut() = Some(loaded(model, true)));
+}
+
 fn chat_message() -> ChatMessage {
     ChatMessage {
         clock: Default::default(),

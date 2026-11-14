@@ -230,7 +230,7 @@ fn HeaderAction(
 }
 
 /// The listing's options: the selected directory's path and the actions on it as a whole, then
-/// autoload, grouping and the column filters of the egui app's replay header.
+/// autoload, name anonymization, grouping and the column filters of the egui app's replay header.
 ///
 /// Grouping is a row of exclusive toggles rather than a select: a select's list is drawn outside
 /// the popover, and a press on it would dismiss the popover before the choice landed.
@@ -300,6 +300,17 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
             on
         });
     };
+    let anonymize = Signal::derive_local(move || {
+        // Unchecked until the settings are read, as the setting's own default is.
+        let on = services.settings.read(|settings| settings.replay.anonymize_player_names).unwrap_or(false);
+        if on { Checked::Yes } else { Checked::No }
+    });
+    let set_anonymize = move |checked: Checked| {
+        services.settings.edit(keys::REPLAY_SETTINGS, |settings| {
+            settings.replay.anonymize_player_names = checked == Checked::Yes;
+            settings.replay.clone()
+        });
+    };
     let grouping = Signal::derive_local(move || vec![grouping_value(control.grouping.get()).to_owned()]);
     let set_grouping = move |values: Vec<String>| {
         // A press on the grouping already chosen would leave none; the choice stays.
@@ -360,6 +371,19 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                 }
                             }
                             TooltipContent {{locale.text("ui.replay.autoload_latest_tooltip")}}
+                        }
+                        Tooltip {
+                            TooltipTrigger {
+                                row(class = "wt-listing-options__check") {
+                                    Checkbox(
+                                        checked = Binding::controlled(anonymize, set_anonymize),
+                                        attr:data-testid = "replay-listing-anonymize-names",
+                                        a11y:label = t!("ui.replay.anonymize_names").into_owned()
+                                    )
+                                    text {{locale.text("ui.replay.anonymize_names")}}
+                                }
+                            }
+                            TooltipContent {{locale.text("ui.replay.anonymize_names_tooltip")}}
                         }
                         Separator()
                         text(class = "wt-listing-options__title") {{locale.text("ui.replay.group_label")}}

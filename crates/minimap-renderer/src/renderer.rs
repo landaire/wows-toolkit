@@ -27,9 +27,11 @@ use wows_battle_world::PositionTimeline;
 use wows_battle_world::SalvoFlightTimes;
 use wows_battle_world::SampledPos;
 use wows_battle_world::view::BattleView;
+use wows_core::pseudonym;
 use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
+use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
@@ -630,6 +632,7 @@ impl<'a> MinimapRenderer<'a> {
             return;
         }
 
+        let names = self.options.player_names;
         for (entity_id, player) in players {
             self.player_relations.insert(*entity_id, player.relation());
             if let Some(species) = player.vehicle().species().and_then(|s| s.known()) {
@@ -646,11 +649,11 @@ impl<'a> MinimapRenderer<'a> {
                     raw_name.to_string()
                 }
             };
-            self.player_names.insert(*entity_id, player_name);
+            self.player_names.insert(*entity_id, names.player_name(&player_name).into_owned());
             // Cache clan info
-            let clan_tag = player.initial_state().clan().to_string();
+            let clan_tag = player.initial_state().clan();
             if !clan_tag.is_empty() {
-                self.player_clan_tags.insert(*entity_id, clan_tag);
+                self.player_clan_tags.insert(*entity_id, names.clan_tag(clan_tag).into_owned());
             }
             let clan_color_raw = player.initial_state().clan_color();
             let clan_color = if clan_color_raw != 0 {
@@ -1068,6 +1071,21 @@ impl<'a> MinimapRenderer<'a> {
             victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
             cause: kill.cause.clone(),
         }
+    }
+
+    /// A chat sender's name as `options.player_names` shows it. A player
+    /// sender reads the name cache, so a bot's pseudonym follows its
+    /// translated name as the other labels do. A sender with no relation is a
+    /// system source, whose label stays.
+    fn chat_sender_name(&self, msg: &GameMessage) -> String {
+        if !self.options.player_names.is_pseudonym() || msg.sender_relation.is_none() {
+            return msg.sender_name.clone();
+        }
+
+        msg.player
+            .as_ref()
+            .and_then(|player| self.player_names.get(&player.initial_state().entity_id()).cloned())
+            .unwrap_or_else(|| pseudonym::player_name(&msg.sender_name))
     }
 
     /// Produce draw commands for the current frame from controller state.
@@ -2110,7 +2128,7 @@ impl<'a> MinimapRenderer<'a> {
                 let team_color = msg.sender_relation.map(|r| ship_color_rgb(r, is_div_mate)).unwrap_or([255, 255, 255]);
                 let (clan_tag, clan_color, ship_species, ship_name) = if let Some(ref player) = msg.player {
                     let state = player.initial_state();
-                    let tag = state.clan().to_string();
+                    let tag = self.options.player_names.clan_tag(state.clan()).into_owned();
                     let color_raw = state.clan_color();
                     let color = if color_raw != 0 {
                         Some([
@@ -2142,7 +2160,7 @@ impl<'a> MinimapRenderer<'a> {
                 chat_entries.push(ChatEntry {
                     clan_tag,
                     clan_color,
-                    player_name: msg.sender_name.clone(),
+                    player_name: self.chat_sender_name(msg),
                     team_color,
                     ship_species,
                     ship_name,
@@ -2374,7 +2392,7 @@ impl<'a> MinimapRenderer<'a> {
                         msg.sender_relation.map(|r| ship_color_rgb(r, is_div_mate)).unwrap_or([255, 255, 255]);
                     let (clan_tag, clan_color, ship_species, ship_name) = if let Some(ref player) = msg.player {
                         let state = player.initial_state();
-                        let tag = state.clan().to_string();
+                        let tag = self.options.player_names.clan_tag(state.clan()).into_owned();
                         let color_raw = state.clan_color();
                         let color = if color_raw != 0 {
                             Some([
@@ -2410,7 +2428,7 @@ impl<'a> MinimapRenderer<'a> {
                         kind: ActivityFeedKind::Chat(ChatEntry {
                             clan_tag,
                             clan_color,
-                            player_name: msg.sender_name.clone(),
+                            player_name: self.chat_sender_name(msg),
                             team_color,
                             ship_species,
                             ship_name,
@@ -2552,17 +2570,18 @@ impl<'a> MinimapRenderer<'a> {
 
             let player_name = self.player_names.get(&entity_id).cloned().unwrap_or_else(|| {
                 let raw = player.initial_state().username();
-                if player.is_bot() && raw.starts_with("IDS_") {
+                let name = if player.is_bot() && raw.starts_with("IDS_") {
                     self.game_params
                         .localized_name_from_id(&TranslationKey::new(raw))
                         .unwrap_or_else(|| raw.to_string())
                 } else {
                     raw.to_string()
-                }
+                };
+                self.options.player_names.player_name(&name).into_owned()
             });
             let clan_tag = self.player_clan_tags.get(&entity_id).cloned().or_else(|| {
-                let c = player.initial_state().clan().to_string();
-                (!c.is_empty()).then_some(c)
+                let c = player.initial_state().clan();
+                (!c.is_empty()).then(|| self.options.player_names.clan_tag(c).into_owned())
             });
             let clan_color = self.player_clan_colors.get(&entity_id).copied().flatten().or_else(|| {
                 let raw = player.initial_state().clan_color();

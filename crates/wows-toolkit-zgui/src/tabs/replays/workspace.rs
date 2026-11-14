@@ -15,6 +15,7 @@ use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
 use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use zgui::reactive::LocalStorage;
@@ -555,13 +556,19 @@ impl ReplayWorkspace {
 fn view_armor(shell: Shell, session: RendererSession, source: FeedSource, asked: ArmorRequest) {
     match asked {
         ArmorRequest::Show(shown) => {
-            let seek = UnsyncCallback::new(move |clock: wows_replays::types::GameClock| session.go_to_clock(clock));
-            shell.armor.send(ViewerFeed::Show { source, shown: Box::new(shown), seek: Some(seek) });
+            show_armor(shell, session, source, shown);
             shell.select(crate::shell::tabs::TabKey::App(crate::shell::tabs::AppTab::ArmorViewer));
         }
-        // Not shown: playback moving must not pull the reader to the viewer.
+        // Not shown: renaming the players or playback moving must not pull the reader to the viewer.
+        ArmorRequest::Renamed(shown) => show_armor(shell, session, source, shown),
         ArmorRequest::Followed(followed) => shell.armor.send(ViewerFeed::Followed { source, followed }),
     }
+}
+
+/// Hands the Armor Viewer tab a ship to show, whose incoming-fire log seeks this viewport.
+fn show_armor(shell: Shell, session: RendererSession, source: FeedSource, shown: ShowArmor) {
+    let seek = UnsyncCallback::new(move |clock: wows_replays::types::GameClock| session.go_to_clock(clock));
+    shell.armor.send(ViewerFeed::Show { source, shown: Box::new(shown), seek: Some(seek) });
 }
 
 #[cfg(test)]

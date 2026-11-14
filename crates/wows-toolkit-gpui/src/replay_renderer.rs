@@ -111,6 +111,7 @@ use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::options::TOGGLES;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
+use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::playback::DEFAULT_SPEED;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
@@ -1084,7 +1085,8 @@ impl ReplayRendererPanel {
         let cancel = Arc::clone(&self.cancel);
         let alts = self.alts.clone();
         self._bake = Some(cx.spawn(async move |this, cx| {
-            let baked = cx.background_spawn(async move { bake(&path, &alts, &game_data, &cancel) }).await;
+            let baked =
+                cx.background_spawn(async move { bake(&path, &alts, &game_data, &cancel, playback_options()) }).await;
             let _ = this.update(cx, |this, cx| {
                 match baked {
                     Ok((track, renderer)) => {

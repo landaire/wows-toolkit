@@ -9,8 +9,9 @@
 //!
 //! The panel does not draw the player table. Its owner passes a [`TableSlot`], built once per
 //! loaded battle with a [`PanelTable`]: the model (a signal, replaced when the recording player's
-//! figures are hidden or a rating table arrives), the debug flag, the [`PlayerDetail`] that draws
-//! a row's expanded content, and the callback that shows a row's raw metadata in the side panel.
+//! figures are hidden, a rating table arrives or player names are anonymized), the debug flag, the
+//! [`PlayerDetail`] that draws a row's expanded content, and the callback that shows a row's raw
+//! metadata in the side panel.
 //! [`player_table_slot`](crate::tabs::replays::player_table_slot) is the slot that draws the
 //! replay's [`PlayerTable`](crate::tabs::replays::table::PlayerTable).
 
@@ -19,7 +20,7 @@ pub mod expanded;
 mod figures;
 mod raw_json;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_replay_data::columns::ReplayColumn;
@@ -53,6 +55,7 @@ use zgui::css;
 use zgui::reactive::ArcRwSignal;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -606,6 +609,8 @@ pub fn ReplayPanel(
     let owner = StoredValue::new_local(Owner::current());
     let export_status: RwSignal<Option<String>, LocalStorage> = RwSignal::new_local(None);
     let debug = Signal::derive_local(move || shell.debug_mode.get());
+    let settings = services.settings;
+    let names = Memo::new(move |_| settings.name_display());
     let path = StoredValue::new(path);
     let columns_now = StoredValue::new(initial_columns);
     let rating_now = StoredValue::new(initial_rating);
@@ -808,7 +813,17 @@ pub fn ReplayPanel(
             let table_view = move || {
                 let loaded = loaded.get()?;
                 let read = ArcRwSignal::clone(&loaded.model);
-                let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || read.get());
+                // Pseudonyms go on a copy, so the loaded model and its exports keep the real names.
+                let shown = RwSignal::new_local(read.get_untracked());
+                follow(move |_| {
+                    let model = read.get();
+                    let model = match names.get() {
+                        NameDisplay::Real => model,
+                        NameDisplay::Pseudonym => edited_model(&model, ReplayReportModel::anonymize),
+                    };
+                    shown.set(model);
+                });
+                let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || shown.get());
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
                     let PlayerDetailCx { row, rows, column, art } = cx;
@@ -1016,13 +1031,24 @@ fn result_name(result: Option<BattleResult>) -> Option<&'static str> {
 #[component]
 fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
     let loaded = header.loaded;
+    let settings = Services::current().settings;
+    let names = Memo::new(move |_| settings.name_display());
     // Tiles built again for a later read of the model show their figures as they are.
     let count_next = StoredValue::new(run_count);
     let result = move || {
         loaded.with(|loaded| loaded.as_ref().and_then(|loaded| result_name(loaded.battle_result)).map(str::to_owned))
     };
-    let context =
-        move || loaded.with(|loaded| loaded.as_ref().map(|loaded| loaded.model.with(|model| model.context.clone())));
+    let context = move || {
+        let names = names.get();
+        loaded.with(|loaded| {
+            let loaded = loaded.as_ref()?;
+            let mut context = loaded.model.with(|model| model.context.clone());
+            if names.is_pseudonym() {
+                context.anonymize();
+            }
+            Some(context)
+        })
+    };
     let figures = move || {
         let loaded = loaded.get()?;
         let model = loaded.model.get();
@@ -1387,6 +1413,8 @@ fn SideContent(
     loaded: Signal<Option<Rc<Loaded>>, LocalStorage>,
     player_metadata: RwSignal<Option<Rc<str>>, LocalStorage>,
 ) -> impl IntoView {
+    let settings = Services::current().settings;
+    let names = Memo::new(move |_| settings.name_display());
     let title = move || kind.get().title_key().map(|key| t!(key).into_owned()).unwrap_or_default();
     let close_label = StoredValue::new(t!("ui.replay.close_side_panel").into_owned());
     let content = move || {
@@ -1395,7 +1423,10 @@ fn SideContent(
             SidePanel::None => None,
             SidePanel::Chat => {
                 let messages = loaded.chat.clone()?;
-                Some(AnyView::new(view! { ChatPanel(messages = messages, title = loaded.title.clone()) }))
+                let names = names.get();
+                Some(AnyView::new(
+                    view! { ChatPanel(messages = messages, names = names, title = loaded.title.clone()) },
+                ))
             }
             SidePanel::RawMetadata => Some(raw(Rc::clone(&loaded.raw_metadata))),
             SidePanel::RawResults => loaded.raw_results.clone().map(raw),

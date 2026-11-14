@@ -427,6 +427,7 @@ fn a_batch_says_which_replay_it_has_reached() {
         &GameDataCache::new(dir.path().to_path_buf()),
         dir.path(),
         &SavedRenderOptions::default(),
+        playback_options(),
         |step| reached.push(step),
     );
 

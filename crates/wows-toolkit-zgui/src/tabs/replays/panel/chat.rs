@@ -8,6 +8,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 use wows_toolkit_replay_data::model::ChatMessage;
@@ -91,16 +92,28 @@ pub fn transcript(messages: &[ChatMessage]) -> String {
     messages.iter().map(copy_text).collect::<Vec<_>>().join("\n")
 }
 
-/// One replay's chat log. Only built for a replay with chat; `title` names a saved log.
+/// One replay's chat log. Only built for a replay with chat; `title` names a saved log. Rows and
+/// copies read the names as `names` shows them; a saved log keeps the real ones.
 #[component]
-pub fn ChatPanel(messages: Rc<[ChatMessage]>, title: String) -> impl IntoView {
+pub fn ChatPanel(messages: Rc<[ChatMessage]>, names: NameDisplay, title: String) -> impl IntoView {
     let shell = Shell::current();
     let appearance = use_local_context::<Appearance>();
     let theme = Signal::derive_local(move || {
         palette_choice(appearance.map_or(ThemeChoice::System, |appearance| appearance.shown_theme()))
     });
-    let rows: Vec<AnyView> = messages.iter().map(|message| message_row(message, shell, theme)).collect();
-    let all = Rc::clone(&messages);
+    let shown: Rc<[ChatMessage]> = match names {
+        NameDisplay::Real => Rc::clone(&messages),
+        NameDisplay::Pseudonym => messages
+            .iter()
+            .cloned()
+            .map(|mut message| {
+                message.anonymize();
+                message
+            })
+            .collect(),
+    };
+    let rows: Vec<AnyView> = shown.iter().map(|message| message_row(message, shell, theme)).collect();
+    let all = shown;
     let saved = Rc::clone(&messages);
 
     let title = Rc::<str>::from(title);

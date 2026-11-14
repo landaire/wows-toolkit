@@ -51,6 +51,7 @@ use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_replay_data::replay_render::export::batch_export;
 use wows_toolkit_replay_data::replay_render::export::temporary_batch_dir;
+use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ListingWatch;
@@ -1032,7 +1033,7 @@ impl ReplayInspectorView {
                 // different video than the reader has been watching.
                 let defaults = crate::render_defaults::defaults(cx);
                 cx.background_spawn(async move {
-                    batch_export(paths, &game_data, &out_dir, &defaults, |step| {
+                    batch_export(paths, &game_data, &out_dir, &defaults, playback_options(), |step| {
                         let _ = report.unbounded_send(step);
                     })
                 })

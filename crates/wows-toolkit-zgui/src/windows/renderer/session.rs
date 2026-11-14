@@ -8,6 +8,7 @@ use std::sync::atomic::Ordering;
 
 use landaire_ui::Toasts;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::drawing::DrawnRegion;
@@ -50,6 +51,7 @@ use wows_toolkit_replay_data::replay_render::hover::consumable_at;
 use wows_toolkit_replay_data::replay_render::hover::hover_changed;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
+use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
@@ -78,9 +80,11 @@ use wt_collab_client::drawing::Tool;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
@@ -157,6 +161,9 @@ pub enum ArmorRequest {
     /// Playback moved, and the ship an armor viewer is already open on has taken different hits.
     /// Separate from `Show` because it must not pull the reader to the armor viewer again.
     Followed(ArmorFollowed),
+    /// The battle was baked again with its players named differently. The open viewer shows the
+    /// same ship with the new names, without pulling the reader to it.
+    Renamed(ShowArmor),
 }
 
 /// The consumable icon under the pointer, and where its reading is anchored.
@@ -225,6 +232,10 @@ struct Run {
     /// The bake in flight. A newer one cancels it and drops whatever it produces.
     bake_generation: Generation,
     bake_cancel: Arc<AtomicBool>,
+    /// The event scan in flight. A newer one drops whatever an older one reads.
+    event_generation: Generation,
+    /// The ship an open armor viewer follows, shown again once a bake for new names lands.
+    armor_renamed: Option<EntityId>,
     ticker: Option<IntervalHandle>,
     collab_ticker: Option<IntervalHandle>,
     tasks: Vec<Task>,
@@ -250,6 +261,7 @@ impl RendererSession {
         session.start_bake();
         session.start_event_scan();
         session.follow_collab();
+        session.follow_names();
         session.read_remembered_window();
         session
     }
@@ -291,6 +303,8 @@ impl RendererSession {
                 cancel: Arc::new(AtomicBool::new(false)),
                 bake_generation: Generation::default(),
                 bake_cancel: Arc::new(AtomicBool::new(false)),
+                event_generation: Generation::default(),
+                armor_renamed: None,
                 ticker: None,
                 collab_ticker: None,
                 tasks: Vec::new(),
@@ -430,16 +444,18 @@ impl RendererSession {
                 game_data,
                 cancel: Arc::clone(&run.bake_cancel),
                 generation,
+                names: run.services.settings.name_display_untracked(),
             })
         });
         let Some(started) = started else { return };
-        let Some(BakeStart { request, game_data, cancel, generation }) = started else {
+        let Some(BakeStart { request, game_data, cancel, generation, names }) = started else {
             self.status.set(Status::Failed(t!("ui.replay.loading_game_data").into_owned()));
             return;
         };
         self.status.set(Status::Baking);
         self.spawn(async move {
-            let baked = blocking(move || bake(&request.path, &request.alts, &game_data, &cancel)).await;
+            let options = RenderOptions { player_names: names, ..playback_options() };
+            let baked = blocking(move || bake(&request.path, &request.alts, &game_data, &cancel, options)).await;
             let current = self.run.try_with_value(|run| run.bake_generation == generation);
             if current != Some(true) {
                 return;
@@ -456,6 +472,7 @@ impl RendererSession {
                     self.status.set(Status::Ready(Arc::new(track)));
                     self.share_playback();
                     self.adopt_saved_defaults().await;
+                    self.show_renamed_armor();
                 }
                 Err(err) => self.status.set(Status::Failed(err.to_string())),
             }
@@ -465,8 +482,13 @@ impl RendererSession {
     /// Reads what happened in the battle, which the event controls step between. A second walk of
     /// the replay, so the viewport is worth showing before it finishes.
     fn start_event_scan(self) {
-        let Some((path, game_data)) =
-            self.run.with_value(|run| run.game_data.clone().map(|data| (run.request.path.clone(), data)))
+        let Some((path, game_data, names, generation)) = self
+            .with_run(|run| {
+                let names = run.services.settings.name_display_untracked();
+                let generation = run.event_generation.next();
+                run.game_data.clone().map(|data| (run.request.path.clone(), data, names, generation))
+            })
+            .flatten()
         else {
             return;
         };
@@ -474,7 +496,15 @@ impl RendererSession {
             let read =
                 blocking(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
             match read {
-                Ok((read, shots)) => {
+                Ok((mut read, shots)) => {
+                    if self.run.try_with_value(|run| run.event_generation == generation) != Some(true) {
+                        return;
+                    }
+                    if names.is_pseudonym() {
+                        for event in &mut read.events {
+                            event.kind.anonymize();
+                        }
+                    }
                     let filter = self.events.with_untracked(|events| events.filter().clone());
                     let mut events = BattleEvents::from_extraction(read, shots);
                     events.set_filter(|kept| *kept = filter);
@@ -973,6 +1003,33 @@ impl RendererSession {
         });
     }
 
+    /// Bakes and reads the battle again when player names are anonymized or shown again, since
+    /// the names are drawn into the baked frames. The per-ship choices are keyed by the names
+    /// drawn, so they start over, and an open armor viewer is shown the new names once the bake
+    /// lands.
+    fn follow_names(self) {
+        let Some((owner, settings)) = self.run.try_with_value(|run| (run.owner.clone(), run.services.settings)) else {
+            return;
+        };
+        owner.with(|| {
+            let effect = RenderEffect::new(move |previous: Option<NameDisplay>| {
+                let names = settings.name_display();
+                if previous.is_some_and(|previous| previous != names) {
+                    self.menu.set(None);
+                    self.hovered.set(None);
+                    self.choices.set(ShipChoices::new());
+                    // The events on screen carry the old names until the new scan lands.
+                    self.events.update(BattleEvents::forget_events);
+                    self.with_run(|run| run.armor_renamed = run.armor.as_ref().map(ArmorFollow::entity_id));
+                    self.start_bake();
+                    self.start_event_scan();
+                }
+                names
+            });
+            on_cleanup_local(move || drop(effect));
+        });
+    }
+
     /// Tells the session this playback is open. The map art travels with it, since a peer may not
     /// have the build the replay was recorded on.
     fn share_playback(self) {
@@ -1045,23 +1102,37 @@ impl RendererSession {
     /// Opens the armor viewer on a ship and follows it from then on, closing the ship's menu. The
     /// menu stays open when there is no armor to show.
     pub fn show_armor(self, entity_id: EntityId) {
-        let Some(track) = self.track_untracked() else { return };
+        let Some((shown, listener)) = self.follow_armor_of(entity_id) else { return };
+        if let Some(listener) = listener {
+            listener.run(ArmorRequest::Show(shown));
+        }
+        self.menu.set(None);
+    }
+
+    /// Shows the ship an open armor viewer followed again, from the bake that renamed its players.
+    fn show_renamed_armor(self) {
+        let Some(entity_id) = self.with_run(|run| run.armor_renamed.take()).flatten() else { return };
+        let Some((shown, Some(listener))) = self.follow_armor_of(entity_id) else { return };
+        listener.run(ArmorRequest::Renamed(shown));
+    }
+
+    /// Follows `entity_id` with the armor viewer from where playback is, and says what to show and
+    /// who to tell. `None` when the ship has no armor to show.
+    fn follow_armor_of(self, entity_id: EntityId) -> Option<(ShowArmor, Option<UnsyncCallback<ArmorRequest>>)> {
+        let track = self.track_untracked()?;
         let at = self.playback.with_untracked(Playback::at);
         let clock = GameClock(track.seconds_at(at));
-        let Some(commands) = track.commands(at) else { return };
-        let Some(game_data) = self.run.with_value(|run| run.game_data.clone()) else { return };
-        let started = self
+        let commands = track.commands(at)?;
+        let game_data = self.run.with_value(|run| run.game_data.clone())?;
+        let (follow, shown) = self
             .events
-            .with_untracked(|events| ArmorFollow::start(entity_id, commands, events.shots(), clock, &game_data));
-        let Some((follow, shown)) = started else { return };
+            .with_untracked(|events| ArmorFollow::start(entity_id, commands, events.shots(), clock, &game_data))?;
         let listener = self.with_run(|run| {
             run.armor = Some(follow);
             run.on_armor
         });
-        if let Some(listener) = listener.flatten() {
-            listener.run(ArmorRequest::Show(shown));
-        }
-        self.menu.set(None);
+
+        Some((shown, listener.flatten()))
     }
 
     fn follow_armor(self) {
@@ -1397,6 +1468,7 @@ struct BakeStart {
     game_data: GameDataCache,
     cancel: Arc<AtomicBool>,
     generation: Generation,
+    names: NameDisplay,
 }
 
 /// A frame rasterised off the UI thread, and where its pieces landed on the canvas.

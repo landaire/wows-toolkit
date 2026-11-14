@@ -6,6 +6,7 @@
 //! assembled lines with its own text layout.
 
 use rust_i18n::t;
+use wows_core::pseudonym;
 use wows_replays::ReplayMeta;
 use wows_replays::ReplayMetaRef;
 use wows_replays::types::GameParamId;
@@ -144,6 +145,16 @@ pub struct RowStats {
     pub division_mates: Vec<DivisionMate>,
     /// False only when neither an index summary nor a parsed report exists.
     pub known: bool,
+}
+
+impl RowStats {
+    /// Replaces the division mates' names and clan tags with their pseudonyms.
+    pub fn anonymize(&mut self) {
+        for mate in &mut self.division_mates {
+            mate.player_name = pseudonym::player_name(&mate.player_name);
+            mate.clan = pseudonym::clan_tag(&mate.clan);
+        }
+    }
 }
 
 /// A parsed report in memory is fresher than the index for everything it

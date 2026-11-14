@@ -286,6 +286,8 @@ pub fn encode_track(
 ///
 /// `defaults` is what the reader saved as what a renderer opens with, so a
 /// batch writes what a viewport would have shown rather than the built-in set.
+/// `bake_options` is what each replay is baked with, normally
+/// [`playback_options`](crate::replay_render::options::playback_options).
 /// `report` is told which replay the batch has reached before it is read, so the
 /// reader is not left watching a still line for forty files.
 pub fn batch_export(
@@ -293,6 +295,7 @@ pub fn batch_export(
     game_data: &GameDataCache,
     out_dir: &Path,
     defaults: &SavedRenderOptions,
+    bake_options: RenderOptions,
     mut report: impl FnMut(BatchStep),
 ) -> BatchOutcome {
     let settings = export_settings_of(defaults);
@@ -311,7 +314,7 @@ pub fn batch_export(
         };
         let output = out_dir.join(stem).with_extension("mp4");
 
-        let (track, renderer) = match bake(&path, &[], game_data, &cancel) {
+        let (track, renderer) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
             Ok(baked) => baked,
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");

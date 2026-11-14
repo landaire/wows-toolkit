@@ -101,6 +101,14 @@ impl BattleEvents {
         self.read
     }
 
+    /// Drops the events while they are read again, keeping the hits each ship took and the
+    /// filter.
+    pub fn forget_events(&mut self) {
+        self.read = false;
+        self.events.clear();
+        self.event_keys.clear();
+    }
+
     /// Every event, oldest first.
     pub fn events(&self) -> &[TimelineEvent] {
         &self.events

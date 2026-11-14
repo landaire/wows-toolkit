@@ -11,6 +11,7 @@ buildscript = workspace_buildscript(
 REPLAY_DATA_COMMON_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-core:wows_core",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",

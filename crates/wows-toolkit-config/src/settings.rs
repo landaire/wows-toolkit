@@ -83,6 +83,10 @@ pub struct ReplaySettings {
     /// looping preview. Off is for machines where that read is expensive.
     #[serde(default = "default_bool::<true>")]
     pub enable_replay_previews: bool,
+    /// Display generated pseudonyms in place of player names and clan tags.
+    /// Exports keep the real values.
+    #[serde(default)]
+    pub anonymize_player_names: bool,
 }
 
 impl Default for ReplaySettings {
@@ -100,6 +104,7 @@ impl Default for ReplaySettings {
             grouping: ReplayGrouping::default(),
             listing_collapsed: false,
             enable_replay_previews: true,
+            anonymize_player_names: false,
         }
     }
 }
@@ -127,5 +132,13 @@ mod tests {
         let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
         assert!(parsed.enable_replay_previews);
         assert!(ReplaySettings::default().enable_replay_previews);
+    }
+
+    #[test]
+    fn anonymize_player_names_defaults_off_and_survives_a_missing_field() {
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+        assert!(!parsed.anonymize_player_names);
+        assert!(!ReplaySettings::default().anonymize_player_names);
     }
 }

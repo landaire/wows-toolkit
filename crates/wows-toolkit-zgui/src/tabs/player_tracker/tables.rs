@@ -14,6 +14,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::formatting::separate_number;
@@ -293,12 +294,13 @@ fn PlayerListRow(model: TrackerModel, shell: Shell, index: usize) -> impl IntoVi
         let Some(row) = model.rows.with(|rows| rows.get(index).cloned()) else {
             return AnyView::new(());
         };
-        AnyView::new(view! { PlayerRowView(model = model, shell = shell, index = index, row = row) })
+        let names = model.names.get();
+        AnyView::new(view! { PlayerRowView(model = model, shell = shell, index = index, row = row, names = names) })
     }
 }
 
 #[component]
-fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow) -> impl IntoView {
+fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow, names: NameDisplay) -> impl IntoView {
     let account = row.facet.account_id;
     let open = Signal::derive(move || model.expanded_players.with(|expanded| expanded.contains(&account)));
     let note = Signal::derive(move || {
@@ -309,8 +311,8 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
     // Both counts are read in the tone the in-range one deserves: how often you have met someone
     // lately is what the ramp warns about.
     let tone = severity(row.encounters_in_range);
-    let name = row.facet.latest_name.clone();
-    let clan = row.facet.clan.clone();
+    let name = names.player_name(&row.facet.latest_name).into_owned();
+    let clan = names.clan_tag(&row.facet.clan).into_owned();
     // Kept by its name or its tag; whichever the filter did not match is drawn plain.
     let (name_marks, clan_marks) = model.query.with_untracked(|query| (marks(query, &name), marks(query, &clan)));
 
@@ -372,10 +374,15 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
     let lines = Signal::derive_local(move || {
         locale.track();
         let show_division_mates = model.show_division_mates.get();
+        let names = model.names.get();
         model.tracked.with(|tracked| {
             let Some(player) = tracked.get(&account) else { return Vec::new() };
-            let mut aliases: Vec<String> =
-                player.names.iter().filter(|name| **name != player.last_name).cloned().collect();
+            let mut aliases: Vec<String> = player
+                .names
+                .iter()
+                .filter(|name| **name != player.last_name)
+                .map(|name| names.player_name(name).into_owned())
+                .collect();
             aliases.sort();
             let mut lines = Vec::new();
             if !aliases.is_empty() {
@@ -508,13 +515,15 @@ fn ClanListRow(model: TrackerModel, shell: Shell, index: usize) -> impl IntoView
         let Some(row) = model.clans.with(|clans| clans.get(index).cloned()) else {
             return AnyView::new(());
         };
-        AnyView::new(view! { ClanRowView(model = model, shell = shell, index = index, row = row) })
+        let names = model.names.get();
+        AnyView::new(view! { ClanRowView(model = model, shell = shell, index = index, row = row, names = names) })
     }
 }
 
 #[component]
-fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) -> impl IntoView {
+fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow, names: NameDisplay) -> impl IntoView {
     let tag = row.clan.clone();
+    let shown_tag = names.clan_tag(&tag).into_owned();
     let open_tag = tag.clone();
     let open = Signal::derive(move || model.expanded_clans.with(|expanded| expanded.contains(&open_tag)));
     let toggle_tag = tag.clone();
@@ -524,14 +533,14 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
     let sightings_hover = t!("ui.player_tracker.clan_sightings_hover", range = row.sightings_in_range).into_owned();
     let sightings = separate_number(row.sightings as i64, None);
     let members = row.members.clone();
-    let tag_marks = model.query.with_untracked(|query| marks(query, &tag));
+    let tag_marks = model.query.with_untracked(|query| marks(query, &shown_tag));
 
     view! {
         column(
             class = "wt-tracker-row",
             class:lui-stripe = RowIndex(index).is_striped(),
             attr:data-testid = format!("tracker-clan-{tag}"),
-            a11y:label = tag.clone()
+            a11y:label = shown_tag.clone()
         ) {
             row(class = "wt-tracker-cells") {
                 row(class = "wt-tracker-col--tag") {
@@ -540,7 +549,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
                         open = open,
                         on_toggle = move || model.toggle_clan_expanded(toggle_tag.clone())
                     )
-                    MarkedText(class = "wt-tracker-truncate", attr:data-severity = tone.clone(), text = tag.clone(), ranges = tag_marks)
+                    MarkedText(class = "wt-tracker-truncate", attr:data-severity = tone.clone(), text = shown_tag.clone(), ranges = tag_marks)
                 }
                 text(class = "wt-tracker-col--members", class = TABULAR_CLASS) {{row.members.len().to_string()}}
                 text(class = "wt-tracker-col--count", class = TABULAR_CLASS) {{separate_number(row.matches as i64, None)}}
@@ -555,7 +564,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
                 )
             }
             if move || open.get() {
-                ClanMembers(model = model, shell = shell, members = members.clone())
+                ClanMembers(model = model, shell = shell, members = members.clone(), names = names)
             } else {}
         }
     }
@@ -563,7 +572,12 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow) ->
 
 /// The members met from a clan, most-met first, each offering to look up their matches.
 #[component]
-fn ClanMembers(model: TrackerModel, shell: Shell, members: Vec<(AccountId, usize)>) -> impl IntoView {
+fn ClanMembers(
+    model: TrackerModel,
+    shell: Shell,
+    members: Vec<(AccountId, usize)>,
+    names: NameDisplay,
+) -> impl IntoView {
     let named: Vec<(AccountId, String, usize)> = model.tracked.with_untracked(|tracked| {
         members
             .iter()
@@ -571,9 +585,9 @@ fn ClanMembers(model: TrackerModel, shell: Shell, members: Vec<(AccountId, usize
                 // A member recorded under no name is still worth a row: the id is what the search needs.
                 let name = tracked
                     .get(account)
-                    .map(|player| player.last_name.clone())
+                    .map(|player| player.last_name.as_str())
                     .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| account.raw().to_string());
+                    .map_or_else(|| account.raw().to_string(), |name| names.player_name(name).into_owned());
                 (*account, name, *matches)
             })
             .collect()

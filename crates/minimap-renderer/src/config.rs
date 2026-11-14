@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::pseudonym::NameDisplay;
 
 use crate::draw_command::DrawCommand;
 use crate::draw_command::ShipConfigVisibility;
@@ -38,6 +39,9 @@ pub struct RenderOptions {
     /// Controls which ships have their config circles rendered when show_ship_config is true.
     /// Defaults to SelfOnly (only the replay owner's circles).
     pub ship_config_visibility: ShipConfigVisibility,
+    /// Whether player names and clan tags are drawn as they are or as
+    /// pseudonyms. Read once, when the renderer first caches the players.
+    pub player_names: NameDisplay,
 }
 
 impl Default for RenderOptions {
@@ -72,6 +76,7 @@ impl Default for RenderOptions {
             show_stats_panel: true,
             show_team_rosters: false,
             ship_config_visibility: ShipConfigVisibility::default(),
+            player_names: NameDisplay::Real,
         }
     }
 }
@@ -235,6 +240,7 @@ impl RendererConfig {
             show_stats_panel,
             show_team_rosters,
             ship_config_visibility: ShipConfigVisibility::default(),
+            player_names: NameDisplay::Real,
         }
     }
 

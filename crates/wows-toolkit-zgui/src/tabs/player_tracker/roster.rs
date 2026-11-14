@@ -12,6 +12,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::formatting::separate_number;
@@ -113,6 +114,7 @@ struct RosterContext {
     /// The selected scope. It colours the rows and picks the team averages in either view.
     mode: WinRateMode,
     class_icons: HashMap<ClassIconKey, ImageBytes>,
+    names: NameDisplay,
 }
 
 impl RosterContext {
@@ -257,6 +259,7 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             view_mode: model.view_mode.get(),
             mode: model.win_rate_mode.get(),
             class_icons: live.class_icons.get(),
+            names: model.names.get(),
         };
         Some(
             view! {
@@ -378,9 +381,10 @@ fn RosterRow(
     context: RosterContext,
     shell: Shell,
 ) -> impl IntoView {
+    let shown_name = context.names.player_name(&row.name);
     let name = match row.clan.as_deref() {
-        Some(clan) => format!("[{clan}] {}", row.name),
-        None => row.name.clone(),
+        Some(clan) => format!("[{}] {shown_name}", context.names.clan_tag(clan)),
+        None => shown_name.clone().into_owned(),
     };
     // A row whose account the scan never named cannot be looked up at all, which is a different
     // absence from a player the service had no data for.
@@ -439,7 +443,7 @@ fn RosterRow(
                 }
                 TooltipContent {{met_hover.get_value()}}
             }
-            {row_menu(side, index, &row, shell)}
+            {row_menu(side, index, &row, &shown_name, shell)}
         }
     }
 }
@@ -558,14 +562,14 @@ fn twitch_chip(side: &'static str, index: usize, candidates: Option<Vec<SniperCa
 
 /// A roster row's menu: where to read more about this player. Both links need an account id and
 /// a region, which only the identity scan supplies; a row it never named has no menu.
-fn row_menu(side: &'static str, index: usize, row: &LiveRosterRow, shell: Shell) -> AnyView {
+fn row_menu(side: &'static str, index: usize, row: &LiveRosterRow, label: &str, shell: Shell) -> AnyView {
     let Some((account, region)) = row.account_id.zip(row.region) else {
         // The column holds its width, so a row with no menu does not pull the others out of line.
         return AnyView::new(view! { box(class = "wt-tracker-roster-col--chip") });
     };
     let numbers = StoredValue::new(wows_numbers_player_url(region, account, &row.name));
     let builds = StoredValue::new(shipbuilds_player_url(region, account, &row.name));
-    let name = StoredValue::new(row.name.clone());
+    let name = StoredValue::new(label.to_owned());
 
     AnyView::new(view! {
         box(class = "wt-tracker-roster-col--chip") {

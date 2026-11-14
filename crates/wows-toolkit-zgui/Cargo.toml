@@ -26,6 +26,8 @@ wows-toolkit-icons = { workspace = true }
 wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 wows-toolkit-replay-data = { workspace = true }
+# Player name pseudonyms.
+wows-core = { workspace = true }
 # The replay's own types a player row and a loaded replay's panel carry.
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }

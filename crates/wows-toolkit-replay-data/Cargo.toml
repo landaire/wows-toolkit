@@ -57,6 +57,8 @@ wows_minimap_renderer = { workspace = true, features = ["rendering"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-toolkit-config = { workspace = true }
+# Player name pseudonyms.
+wows-core = { workspace = true }
 # The renderer toolbar names its tools' icons.
 wows-toolkit-icons = { workspace = true }
 # A directory watch that stops reports why, panics included.

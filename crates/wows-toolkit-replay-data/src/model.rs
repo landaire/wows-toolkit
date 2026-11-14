@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use wows_core::pseudonym;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::ConsumableResult;
@@ -251,6 +252,12 @@ impl PlayerRow {
     pub fn should_hide_stats(&self) -> bool {
         self.manual_stat_hide_toggle || (!self.relation.is_self() && self.is_test_ship)
     }
+
+    /// Replaces the name and clan tag with their pseudonyms.
+    pub fn anonymize(&mut self) {
+        self.display_name = pseudonym::player_name(&self.display_name);
+        self.clan_tag = self.clan_tag.as_deref().map(bracketed_pseudonym_tag);
+    }
 }
 
 /// One in-game chat message, presentation-ready: bot/no-relation sender name
@@ -282,6 +289,19 @@ pub struct ChatMessage {
     pub clan_tag: Option<String>,
     /// `Some` exactly when `clan_tag` is (mirrors `clan_color_for_player`).
     pub clan_color: Option<ClanColor>,
+}
+
+impl ChatMessage {
+    /// Replaces a player sender's name and clan tag with their pseudonyms. A
+    /// sender with no relation is a system source, whose label stays.
+    pub fn anonymize(&mut self) {
+        if self.sender_relation.is_none() {
+            return;
+        }
+
+        self.sender_name = pseudonym::player_name(&self.sender_name);
+        self.clan_tag = self.clan_tag.as_deref().map(pseudonym::clan_tag);
+    }
 }
 
 /// The colour a chat clan tag is drawn in.
@@ -357,6 +377,13 @@ pub fn battle_title(ship: &str, map: &str) -> String {
     if ship.is_empty() { map.to_owned() } else { format!("{ship} - {map}") }
 }
 
+/// `[TAG]` with the bare tag replaced by its pseudonym.
+fn bracketed_pseudonym_tag(tag: &str) -> String {
+    let bare = tag.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')).unwrap_or(tag);
+
+    format!("[{}]", pseudonym::clan_tag(bare))
+}
+
 /// A replay's player table: rows plus the outcome and the active column set.
 /// `columns` starts as every `ReplayColumn` (mirroring `UiReport::new`'s
 /// initial full list); callers apply `columns::default_columns(&settings)` to
@@ -395,6 +422,17 @@ pub struct MatchContext {
     pub version: String,
     pub game_mode: String,
     pub map: String,
+}
+
+impl MatchContext {
+    /// Replaces the recording player's name and clan tag with their
+    /// pseudonyms.
+    pub fn anonymize(&mut self) {
+        if !self.player_name.is_empty() {
+            self.player_name = pseudonym::player_name(&self.player_name);
+        }
+        self.clan_tag = self.clan_tag.as_deref().map(bracketed_pseudonym_tag);
+    }
 }
 
 impl ReplayReportModel {
@@ -556,6 +594,18 @@ impl ReplayReportModel {
             row.twitch_candidates =
                 wows_toolkit_viewmodel::twitch::sniper_candidates(seen, &row.display_name, self.timestamp);
         }
+    }
+
+    /// Replaces every player name and clan tag with its pseudonym. Twitch
+    /// candidates keep the matches made against the real names.
+    pub fn anonymize(&mut self) {
+        for row in &mut self.rows {
+            row.anonymize();
+        }
+        for message in &mut self.chat {
+            message.anonymize();
+        }
+        self.context.anonymize();
     }
 }
 
@@ -1047,6 +1097,48 @@ mod tests {
             model.rows[0].twitch_candidates.iter().map(|candidate| candidate.login.as_str()).collect();
         assert_eq!(flagged, vec!["harvey_635"], "only the in-window login that names the row counts");
         assert!(model.rows[1].twitch_candidates.is_empty(), "a row nobody named is not flagged");
+    }
+
+    /// Anonymizing swaps every shown name and tag, keeps a clanless row
+    /// clanless, and leaves the Twitch matches made against the real names.
+    #[test]
+    fn anonymizing_swaps_names_and_tags_and_keeps_twitch_matches() {
+        let battle_at = jiff::Timestamp::from_second(1_700_000_000).expect("a valid instant");
+        let mut model = ReplayReportModel {
+            self_team: TeamId::from(0i64),
+            rows: vec![
+                PlayerRow {
+                    display_name: "harvey635".to_string(),
+                    clan_tag: Some("[WTK]".to_string()),
+                    ..test_support::base_row(1, Relation::new(0), true)
+                },
+                PlayerRow {
+                    display_name: "somebodyelse".to_string(),
+                    ..test_support::base_row(2, Relation::new(2), false)
+                },
+            ],
+            battle_result: None,
+            columns: ReplayColumn::ALL.to_vec(),
+            map: "Test Map".to_string(),
+            chat: Vec::new(),
+            context: MatchContext {
+                clan_tag: Some("[WTK]".to_string()),
+                player_name: "harvey635".to_string(),
+                ..MatchContext::default()
+            },
+            timestamp: battle_at,
+        };
+        model.populate_twitch_candidates(&[("harvey_635".to_string(), battle_at)]);
+
+        model.anonymize();
+
+        let fake_tag = format!("[{}]", pseudonym::clan_tag("WTK"));
+        assert_eq!(model.rows[0].display_name, pseudonym::player_name("harvey635"));
+        assert_eq!(model.rows[0].clan_tag.as_deref(), Some(fake_tag.as_str()));
+        assert_eq!(model.rows[1].clan_tag, None, "a clanless row stays clanless");
+        assert_eq!(model.context.player_name, model.rows[0].display_name, "the header names the same pseudonym");
+        assert_eq!(model.context.clan_tag.as_deref(), Some(fake_tag.as_str()));
+        assert_eq!(model.rows[0].twitch_candidates.len(), 1, "the Twitch match made on the real name stays");
     }
 
     #[test]

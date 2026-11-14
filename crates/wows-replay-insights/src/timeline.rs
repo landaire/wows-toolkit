@@ -12,6 +12,7 @@ use thiserror::Error;
 use wows_battle_world::scan::WorldScanCollector;
 use wows_battle_world::scan::scan_replay_world;
 use wows_battle_world::view::BattleView;
+use wows_core::pseudonym;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
@@ -77,6 +78,28 @@ pub enum TimelineEventKind {
     },
 }
 
+impl TimelineEventKind {
+    /// Replaces every player name with its pseudonym.
+    pub fn anonymize(&mut self) {
+        match self {
+            Self::HealthLost { player_name, .. }
+            | Self::RadarUsed { player_name, .. }
+            | Self::Disconnected { player_name, .. } => anonymize_name(player_name),
+            Self::Death { player_name, killer, .. } => {
+                anonymize_name(player_name);
+                if let Some(killer) = killer {
+                    anonymize_name(&mut killer.player_name);
+                }
+            }
+            // Captures and the advantage name no player.
+            Self::CapContested { .. }
+            | Self::CapFlipped { .. }
+            | Self::CapBeingCaptured { .. }
+            | Self::AdvantageChanged { .. } => {}
+        }
+    }
+}
+
 /// The player whose ship destroyed another.
 #[derive(Debug)]
 pub struct DeathKiller {
@@ -115,6 +138,13 @@ pub struct ShipShotTimeline {
 /// Capture points use a negative team id to mean "no team holds this".
 fn cap_team(raw: i64) -> Option<TeamId> {
     (raw >= 0).then(|| TeamId::new(raw))
+}
+
+/// An unknown player's empty name stays empty.
+fn anonymize_name(name: &mut String) {
+    if !name.is_empty() {
+        *name = pseudonym::player_name(name);
+    }
 }
 
 pub fn format_timeline_event(event: &TimelineEvent) -> String {

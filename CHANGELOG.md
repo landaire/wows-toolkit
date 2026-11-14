@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- *(toolkit)* Add an "Anonymize player names" listing option that shows generated names and clan tags everywhere the app displays players, while exports keep the real ones
+
 ### Bug Fixes
 
 - *(toolkit)* Keep replay export ship data attached after roster sorting

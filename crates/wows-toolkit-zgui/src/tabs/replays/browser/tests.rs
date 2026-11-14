@@ -9,6 +9,7 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
+use wows_core::pseudonym::NameDisplay;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -851,6 +852,7 @@ fn a_rated_row_carries_its_rating_and_outcome() {
         fallback: None,
         grouping: ReplayGrouping::Date,
         locale: None,
+        names: NameDisplay::Real,
     });
 
     let rated = tree.leaf(&rated).expect("the replay is listed");
@@ -874,6 +876,7 @@ fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
         fallback: None,
         grouping: ReplayGrouping::Date,
         locale: None,
+        names: NameDisplay::Real,
     };
     let tree = BrowserTree::build(&inputs);
 

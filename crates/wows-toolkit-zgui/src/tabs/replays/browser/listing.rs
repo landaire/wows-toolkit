@@ -248,6 +248,7 @@ impl Listing {
             let state = services.game_data.state();
             let cache = services.game_data.cache();
             let locale = services.settings.read(|settings| settings.locale.clone()).flatten();
+            let names = services.settings.name_display();
             let grouping = self.grouping.get();
             let fallback = match &state {
                 GameDataState::Ready(loaded) => Some(std::sync::Arc::clone(loaded.provider())),
@@ -264,6 +265,7 @@ impl Listing {
                             fallback: fallback.as_deref(),
                             grouping,
                             locale: locale.as_deref(),
+                            names,
                         })
                     })
                 })

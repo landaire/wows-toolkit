@@ -12,7 +12,9 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
+use wows_core::pseudonym;
 use wows_replays::types::AccountId;
+use wows_toolkit_replay_data::sample::sample_model;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -510,6 +512,43 @@ fn the_listing_options_open_on_click() {
     window.advance(Duration::from_millis(300));
     assert!(laid_out(&window, "replay-listing-options-menu"), "the options popover opened");
     assert!(laid_out(&window, "directory-game-data"));
+}
+
+/// The listing options' anonymize box saves the setting, and the open replay's table names its
+/// players and clans by pseudonym while it is ticked.
+#[test]
+fn the_anonymize_box_swaps_the_tables_names_for_pseudonyms() {
+    let (mut window, workspace) = open();
+    super::panel::tests::seed_next_panel(sample_model());
+    workspace.open(PathBuf::from("battle.wowsreplay"), OpenTarget::ShowingTab);
+    window.advance(Duration::from_millis(600));
+    let real_clan = "[WTK]".to_owned();
+    let fake_name = pseudonym::player_name("Ally_Alpha");
+    let fake_clan = format!("[{}]", pseudonym::clan_tag("WTK"));
+    let names = window.texts_by_class("wt-pt-text");
+    assert!(names.iter().any(|text| text == "Ally_Alpha"), "the table starts with the real names: {names:?}");
+    assert!(names.contains(&real_clan), "and the real clan tags: {names:?}");
+
+    let options = window.by_test_id("replay-listing-options").expect("the options button is drawn");
+    window.click(options).expect("the button has a box");
+    window.advance(Duration::from_millis(300));
+    let anonymize = window.by_test_id("replay-listing-anonymize-names").expect("the anonymize box is drawn");
+    window.click(anonymize).expect("the box has a box");
+    window.advance(Duration::from_millis(300));
+
+    let saved = workspace.services.settings.read_untracked(|settings| settings.replay.anonymize_player_names);
+    assert_eq!(saved, Some(true), "the box sets the replay setting");
+    let names = window.texts_by_class("wt-pt-text");
+    assert!(names.contains(&fake_name), "the row reads its pseudonym: {names:?}");
+    assert!(names.contains(&fake_clan), "and its clan's: {names:?}");
+    assert!(!names.iter().any(|text| text == "Ally_Alpha" || *text == real_clan), "no real name is left: {names:?}");
+
+    window.click(anonymize).expect("the box has a box");
+    window.advance(Duration::from_millis(300));
+    let saved = workspace.services.settings.read_untracked(|settings| settings.replay.anonymize_player_names);
+    assert_eq!(saved, Some(false), "a second press clears it");
+    let names = window.texts_by_class("wt-pt-text");
+    assert!(names.iter().any(|text| text == "Ally_Alpha"), "and the real names return: {names:?}");
 }
 
 /// The tab empty, with a replay open, and playing it back, in both themes, for review. Reads the

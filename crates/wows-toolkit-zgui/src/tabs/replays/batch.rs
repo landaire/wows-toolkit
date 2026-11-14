@@ -6,10 +6,12 @@ use std::path::PathBuf;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use rust_i18n::t;
+use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_toolkit_replay_data::replay_render::export::BatchOutcome;
 use wows_toolkit_replay_data::replay_render::export::batch_export;
 use wows_toolkit_replay_data::replay_render::export::temporary_batch_dir;
+use wows_toolkit_replay_data::replay_render::options::playback_options;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 
@@ -75,8 +77,10 @@ pub fn render_many(workspace: ReplayWorkspace, paths: Vec<PathBuf>, target: Batc
                 progress: None,
             });
             let (report, mut steps) = mpsc::unbounded();
+            let bake_options =
+                RenderOptions { player_names: services.settings.name_display_untracked(), ..playback_options() };
             let batch = blocking(move || {
-                batch_export(paths, &game_data, &out_dir, &defaults, |step| {
+                batch_export(paths, &game_data, &out_dir, &defaults, bake_options, |step| {
                     let _ = report.unbounded_send(step);
                 })
             });

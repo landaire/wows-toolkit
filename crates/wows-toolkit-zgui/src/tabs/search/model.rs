@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
@@ -150,9 +151,10 @@ struct HistoryWalk {
     started_from: String,
 }
 
-/// The names a player or ship field ranks, read for one list.
+/// The names a player or ship field ranks, read for one list and labelled for one display.
 struct FieldNames {
     list: NameList,
+    display: NameDisplay,
     names: Arc<ValueNames>,
 }
 
@@ -426,16 +428,19 @@ impl Search {
     /// The names `list` ranks: those held for the caret's field, or a read of them made now and
     /// held while the caret stays in a field of that list.
     async fn field_names(self, list: NameList, pool: SqlitePool) -> Option<Arc<ValueNames>> {
-        let held = self
-            .value_names
-            .with_value(|held| held.as_ref().filter(|held| held.list == list).map(|held| Arc::clone(&held.names)));
+        let display = self.services.settings.name_display_untracked();
+        let held = self.value_names.with_value(|held| {
+            held.as_ref()
+                .filter(|held| held.list == list && held.display == display)
+                .map(|held| Arc::clone(&held.names))
+        });
         if held.is_some() {
             return held;
         }
 
         let started = self.value_field.with_value(|(visit, _)| *visit);
         let names = match self.services.on_tokio(async move { list.load(&pool).await }).await {
-            Ok(Ok(names)) => Arc::new(names),
+            Ok(Ok(names)) => Arc::new(names.with_display(display)),
             Ok(Err(err)) => {
                 tracing::warn!(?list, %err, "search: the name lookup failed");
                 return None;
@@ -447,7 +452,7 @@ impl Search {
         };
         // A read that outlived its field visit is not kept for a later one.
         if self.value_field.with_value(|(visit, _)| *visit == started) {
-            self.value_names.set_value(Some(FieldNames { list, names: Arc::clone(&names) }));
+            self.value_names.set_value(Some(FieldNames { list, display, names: Arc::clone(&names) }));
         }
 
         Some(names)

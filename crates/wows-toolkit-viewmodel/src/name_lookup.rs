@@ -5,6 +5,7 @@
 //! a capped SQL search would drop a fuzzy match before it could be ranked.
 
 use sqlx::SqlitePool;
+use wows_core::pseudonym::NameDisplay;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::MatchFilter;
@@ -23,6 +24,8 @@ pub struct PlayerLookup {
     names: FilterKeyTable,
     /// Where each player's names end in `names`.
     name_ends: Vec<usize>,
+    /// How a found player is labelled. Matching always reads the real names.
+    display: NameDisplay,
 }
 
 /// Ships the index has seen.
@@ -52,7 +55,15 @@ impl PlayerLookup {
             facets.push(player.facet);
         }
 
-        Self { players: facets, names, name_ends }
+        Self { players: facets, names, name_ends, display: NameDisplay::Real }
+    }
+
+    pub fn with_display(self, display: NameDisplay) -> Self {
+        Self { display, ..self }
+    }
+
+    pub fn display(&self) -> NameDisplay {
+        self.display
     }
 
     /// The players `query` matches one of the names of, best first, ties in

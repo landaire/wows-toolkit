@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_replays::types::GameClock;
 use wowsunpack::data::Version;
@@ -13,7 +14,6 @@ use wowsunpack::data::Version;
 use crate::load::GameDataCache;
 use crate::minimap_preview::PreviewError;
 use crate::minimap_preview::SharedPreviewRenderer;
-use crate::replay_render::options::playback_options;
 use crate::replay_render::playback::mmss;
 
 /// How many frames of a battle the track keeps.
@@ -165,8 +165,10 @@ pub enum RenderError {
     Preview(#[from] PreviewError),
 }
 
-/// Walks `path`'s battle once, keeping every frame's draw commands and the
-/// renderer they are drawn through.
+/// Walks `path`'s battle once under `options`, normally
+/// [`playback_options`](crate::replay_render::options::playback_options),
+/// keeping every frame's draw commands and the renderer they are drawn
+/// through.
 ///
 /// `alts` are other recordings of the same battle, read alongside it: the map
 /// then shows what the primary's team could not see.
@@ -175,16 +177,10 @@ pub fn bake(
     alts: &[PathBuf],
     game_data: &GameDataCache,
     cancel: &AtomicBool,
+    options: RenderOptions,
 ) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked = crate::minimap_preview::bake_track(
-        path,
-        alts,
-        game_data,
-        cancel,
-        TRACK_BUDGET,
-        BAKE_INTERVAL,
-        playback_options(),
-    )?;
+    let baked =
+        crate::minimap_preview::bake_track(path, alts, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL, options)?;
 
     let track = Track {
         frames: baked.frames,

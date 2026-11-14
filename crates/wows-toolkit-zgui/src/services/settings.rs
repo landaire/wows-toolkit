@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sqlx::sqlite::SqlitePool;
 use tokio::runtime::Runtime;
+use wows_core::pseudonym::NameDisplay;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_services::settings_writer::PendingWrite;
@@ -83,6 +84,19 @@ impl Settings {
     /// Whether the read has finished, and how.
     pub fn with_state<R>(self, read: impl FnOnce(&SettingsState) -> R) -> R {
         self.state.with(read)
+    }
+
+    /// How player names and clan tags are shown, subscribing to changes. Real names until the
+    /// settings are loaded, which is the default the setting itself has.
+    pub fn name_display(self) -> NameDisplay {
+        self.read(|settings| NameDisplay::from_anonymize(settings.replay.anonymize_player_names))
+            .unwrap_or(NameDisplay::Real)
+    }
+
+    /// [`Self::name_display`] without subscribing.
+    pub fn name_display_untracked(self) -> NameDisplay {
+        self.read_untracked(|settings| NameDisplay::from_anonymize(settings.replay.anonymize_player_names))
+            .unwrap_or(NameDisplay::Real)
     }
 
     /// Changes the loaded settings with `apply`, and saves what it returns under `key`. Nothing
