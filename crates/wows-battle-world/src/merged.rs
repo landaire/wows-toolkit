@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Packet;
 use wows_replays::packet2::PacketType;
@@ -334,6 +335,59 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
     }
 }
 
+/// Damage hits from several recordings of one battle, each hit counted once.
+///
+/// Recordings that both saw a hit report it with the same aggressor, victim,
+/// clock and amount, but one recording also reports several hits under that
+/// key when they land in the same tick. A key keeps as many hits as the
+/// recording that reported it most often.
+#[derive(Default)]
+struct DamageUnion {
+    by_aggressor: HashMap<EntityId, Vec<DamageEvent>>,
+    kept: HashMap<DamageKey, usize>,
+}
+
+impl DamageUnion {
+    fn add(&mut self, ledger: &HashMap<EntityId, Vec<DamageEvent>>) {
+        let mut reported: HashMap<DamageKey, usize> = HashMap::new();
+        for (aggressor, events) in ledger {
+            for event in events {
+                let key = DamageKey {
+                    aggressor: *aggressor,
+                    victim: event.victim,
+                    clock_bits: event.clock.0.to_bits(),
+                    amount_bits: event.amount.to_bits(),
+                };
+                let reported = reported.entry(key).or_default();
+                *reported += 1;
+                let kept = self.kept.entry(key).or_default();
+                if *reported <= *kept {
+                    continue;
+                }
+
+                *kept = *reported;
+                self.by_aggressor.entry(*aggressor).or_default().push(*event);
+            }
+        }
+    }
+
+    fn finish(mut self) -> HashMap<EntityId, Vec<DamageEvent>> {
+        for events in self.by_aggressor.values_mut() {
+            events.sort_by(|a, b| a.clock.0.total_cmp(&b.clock.0));
+        }
+
+        self.by_aggressor
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct DamageKey {
+    aggressor: EntityId,
+    victim: EntityId,
+    clock_bits: u32,
+    amount_bits: u32,
+}
+
 /// Walk a replay's stream to find the first `onArenaStateReceived` and
 /// extract its arena id. Lets callers reject merge candidates that
 /// don't belong to the same match before a full re-parse is kicked off.
@@ -406,20 +460,15 @@ fn is_cross_perspective_method(method: &str) -> bool {
 /// victim. Damage dealt by a teammate to an enemy spotted by no one on the
 /// recording player's perspective is invisible to the merged session, so we
 /// run a per-replay BattleWorld for each alt perspective and combine
-/// the results. Duplicate events (same aggressor + victim + clock) are
-/// kept once.
+/// the results, counting a hit several perspectives saw once.
 pub fn gather_damage_events<G: ResourceLoader>(
     game_resources: &G,
     constants: &GameConstants,
     version: Version,
     specs: &[EntitySpec],
     replays: &[&ReplayFile],
-) -> HashMap<EntityId, Vec<wows_replays::analyzer::battle_controller::DamageEvent>> {
-    use wows_replays::analyzer::battle_controller::DamageEvent;
-
-    let mut combined: HashMap<EntityId, Vec<DamageEvent>> = HashMap::new();
-    let mut seen: std::collections::HashSet<(EntityId, EntityId, u64)> = std::collections::HashSet::new();
-
+) -> HashMap<EntityId, Vec<DamageEvent>> {
+    let mut union = DamageUnion::default();
     for replay in replays {
         let mut world = BattleWorld::new(&replay.meta, game_resources, Some(constants));
         let mut parser = Parser::with_version(specs, version);
@@ -429,23 +478,10 @@ pub fn gather_damage_events<G: ResourceLoader>(
             world.process(&packet);
         }
         world.finish();
-        for (aggressor, events) in world.damage_ledger() {
-            for event in events {
-                // Same physical damage hit may be reported by multiple
-                // perspectives; key by aggressor + victim + clock-bits.
-                let key = (*aggressor, event.victim, event.clock.0.to_bits() as u64);
-                if !seen.insert(key) {
-                    continue;
-                }
-                combined.entry(*aggressor).or_default().push(*event);
-            }
-        }
+        union.add(world.damage_ledger());
     }
 
-    for events in combined.values_mut() {
-        events.sort_by(|a, b| a.clock.0.partial_cmp(&b.clock.0).unwrap_or(std::cmp::Ordering::Equal));
-    }
-    combined
+    union.finish()
 }
 
 /// Snapshot per-vehicle facts from a world that has finished processing
@@ -465,4 +501,59 @@ pub fn capture_vehicle_facts<G: ResourceLoader>(world: &mut BattleWorld<'_, '_, 
         );
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AGGRESSOR: u32 = 10;
+    const VICTIM: u32 = 20;
+
+    fn hit(amount: f32, clock: f32) -> DamageEvent {
+        DamageEvent { amount, victim: EntityId::from(VICTIM), clock: GameClock(clock) }
+    }
+
+    fn ledger(events: Vec<DamageEvent>) -> HashMap<EntityId, Vec<DamageEvent>> {
+        HashMap::from([(EntityId::from(AGGRESSOR), events)])
+    }
+
+    fn total(union: DamageUnion) -> f32 {
+        union.finish()[&EntityId::from(AGGRESSOR)].iter().map(|event| event.amount).sum()
+    }
+
+    #[test]
+    fn hits_landing_in_the_same_tick_all_count() {
+        let mut union = DamageUnion::default();
+        union.add(&ledger(vec![hit(100.0, 5.0), hit(100.0, 5.0), hit(250.0, 5.0)]));
+
+        assert_eq!(total(union), 450.0);
+    }
+
+    #[test]
+    fn a_hit_two_recordings_saw_counts_once() {
+        let mut union = DamageUnion::default();
+        union.add(&ledger(vec![hit(100.0, 5.0), hit(300.0, 9.0)]));
+        union.add(&ledger(vec![hit(100.0, 5.0)]));
+
+        assert_eq!(total(union), 400.0);
+    }
+
+    #[test]
+    fn a_tick_keeps_the_hits_of_the_recording_that_saw_the_most() {
+        let mut union = DamageUnion::default();
+        union.add(&ledger(vec![hit(100.0, 5.0)]));
+        union.add(&ledger(vec![hit(100.0, 5.0), hit(100.0, 5.0), hit(100.0, 5.0)]));
+
+        assert_eq!(total(union), 300.0);
+    }
+
+    #[test]
+    fn same_tick_hits_of_different_amounts_are_told_apart() {
+        let mut union = DamageUnion::default();
+        union.add(&ledger(vec![hit(100.0, 5.0), hit(250.0, 5.0)]));
+        union.add(&ledger(vec![hit(300.0, 5.0), hit(100.0, 5.0), hit(250.0, 5.0)]));
+
+        assert_eq!(total(union), 650.0);
+    }
 }

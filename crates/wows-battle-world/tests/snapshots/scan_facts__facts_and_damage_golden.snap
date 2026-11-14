@@ -242,8 +242,16 @@ damage:
     amount: 653.4
   - aggressor: 968041
     victim: 968047
+    clock: 236.099
+    amount: 47.7
+  - aggressor: 968041
+    victim: 968047
     clock: 237.661
     amount: 1354.5
+  - aggressor: 968041
+    victim: 968047
+    clock: 240.22
+    amount: 1306.8
   - aggressor: 968041
     victim: 968047
     clock: 240.22
@@ -262,12 +270,20 @@ damage:
     amount: 1306.8
   - aggressor: 968041
     victim: 968057
+    clock: 415.673
+    amount: 1306.8
+  - aggressor: 968041
+    victim: 968057
     clock: 416.786
     amount: 2613.6
   - aggressor: 968041
     victim: 968057
     clock: 420.119
     amount: 1960.2
+  - aggressor: 968041
+    victim: 968057
+    clock: 420.119
+    amount: 1159.7
   - aggressor: 968041
     victim: 968057
     clock: 421.272
@@ -278,8 +294,16 @@ damage:
     amount: 653.4
   - aggressor: 968041
     victim: 968057
+    clock: 425.674
+    amount: 529.557
+  - aggressor: 968041
+    victim: 968057
     clock: 426.788
     amount: 819.3
+  - aggressor: 968041
+    victim: 968057
+    clock: 426.788
+    amount: 358.403
   - aggressor: 968041
     victim: 968057
     clock: 430.278
@@ -296,6 +320,10 @@ damage:
     victim: 968057
     clock: 437.074
     amount: 487.535
+  - aggressor: 968041
+    victim: 968057
+    clock: 437.074
+    amount: 326.7
   - aggressor: 968041
     victim: 968057
     clock: 440.699
@@ -320,6 +348,10 @@ damage:
     victim: 968057
     clock: 184.201
     amount: 14800
+  - aggressor: 968043
+    victim: 968057
+    clock: 184.201
+    amount: 2960
   - aggressor: 968043
     victim: 968071
     clock: 255.547
@@ -375,6 +407,14 @@ damage:
   - aggressor: 968045
     victim: 968059
     clock: 219.924
+    amount: 1584
+  - aggressor: 968045
+    victim: 968059
+    clock: 219.924
+    amount: 4752
+  - aggressor: 968045
+    victim: 968059
+    clock: 221.93
     amount: 1584
   - aggressor: 968045
     victim: 968059
@@ -762,6 +802,10 @@ damage:
     amount: 291.465
   - aggressor: 968055
     victim: 968071
+    clock: 550.294
+    amount: 291.465
+  - aggressor: 968055
+    victim: 968071
     clock: 553.278
     amount: 291.465
   - aggressor: 968055
@@ -952,14 +996,26 @@ damage:
     victim: 968067
     clock: 200.369
     amount: 3315.333
+  - aggressor: 968061
+    victim: 968067
+    clock: 200.369
+    amount: 610
   - aggressor: 968063
     victim: 968059
     clock: 209.825
     amount: 2908.95
   - aggressor: 968063
     victim: 968059
+    clock: 209.825
+    amount: 3790.45
+  - aggressor: 968063
+    victim: 968059
     clock: 217.919
     amount: 881.5
+  - aggressor: 968063
+    victim: 968059
+    clock: 217.919
+    amount: 440.75
   - aggressor: 968063
     victim: 968085
     clock: 599.783
@@ -1084,6 +1140,10 @@ damage:
     victim: 968067
     clock: 689.262
     amount: 7183.003
+  - aggressor: 968071
+    victim: 968067
+    clock: 689.262
+    amount: 4486.781
   - aggressor: 968073
     victim: 968049
     clock: 243.2
@@ -1102,8 +1162,16 @@ damage:
     amount: 3200
   - aggressor: 968073
     victim: 968049
+    clock: 525.377
+    amount: 2442
+  - aggressor: 968073
+    victim: 968049
     clock: 605.274
     amount: 4771.535
+  - aggressor: 968073
+    victim: 968049
+    clock: 605.274
+    amount: 1480
   - aggressor: 968073
     victim: 968049
     clock: 635.071
@@ -1112,6 +1180,10 @@ damage:
     victim: 968049
     clock: 665.099
     amount: 1480
+  - aggressor: 968073
+    victim: 968049
+    clock: 665.099
+    amount: 6364
   - aggressor: 968073
     victim: 968071
     clock: 492.102
@@ -1142,11 +1214,31 @@ damage:
     amount: 3510.5
   - aggressor: 968077
     victim: 968083
+    clock: 252.934
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 254.957
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 254.957
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
     clock: 254.957
     amount: 333.3
   - aggressor: 968077
     victim: 968083
     clock: 256.97
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 258.971
+    amount: 333.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 258.971
     amount: 333.3
   - aggressor: 968077
     victim: 968083
@@ -1160,6 +1252,14 @@ damage:
     victim: 968083
     clock: 262.964
     amount: 2280.3
+  - aggressor: 968077
+    victim: 968083
+    clock: 262.964
+    amount: 1306.8
+  - aggressor: 968077
+    victim: 968083
+    clock: 262.964
+    amount: 333.3
   - aggressor: 968079
     victim: 968041
     clock: 394.659
@@ -1186,6 +1286,14 @@ damage:
     amount: 396
   - aggressor: 968081
     victim: 968051
+    clock: 385.671
+    amount: 1461.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 387.367
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
     clock: 387.367
     amount: 273.105
   - aggressor: 968081
@@ -1198,7 +1306,19 @@ damage:
     amount: 273.105
   - aggressor: 968081
     victim: 968051
+    clock: 390.667
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
     clock: 392.351
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 392.351
+    amount: 273.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 394.098
     amount: 273.105
   - aggressor: 968081
     victim: 968051
@@ -1210,15 +1330,35 @@ damage:
     amount: 273.105
   - aggressor: 968081
     victim: 968051
+    clock: 395.675
+    amount: 396
+  - aggressor: 968081
+    victim: 968051
     clock: 397.36
     amount: 1065.105
+  - aggressor: 968081
+    victim: 968051
+    clock: 397.36
+    amount: 546.21
   - aggressor: 968081
     victim: 968051
     clock: 398.968
     amount: 546.21
   - aggressor: 968081
     victim: 968051
+    clock: 398.968
+    amount: 396
+  - aggressor: 968081
+    victim: 968051
+    clock: 398.968
+    amount: 2526.21
+  - aggressor: 968081
+    victim: 968051
     clock: 400.707
+    amount: 546.21
+  - aggressor: 968081
+    victim: 968051
+    clock: 402.229
     amount: 546.21
   - aggressor: 968081
     victim: 968051
@@ -1262,6 +1402,10 @@ damage:
     amount: 441.3
   - aggressor: 968081
     victim: 968069
+    clock: 530.289
+    amount: 639.3
+  - aggressor: 968081
+    victim: 968069
     clock: 531.691
     amount: 1046.35
   - aggressor: 968081
@@ -1272,6 +1416,10 @@ damage:
     victim: 968069
     clock: 534.519
     amount: 684.6
+  - aggressor: 968081
+    victim: 968069
+    clock: 534.519
+    amount: 288.6
   - aggressor: 968081
     victim: 968073
     clock: 734.397
