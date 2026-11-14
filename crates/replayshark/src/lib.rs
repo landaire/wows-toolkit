@@ -2,13 +2,17 @@
 //! replays with game data loaded ahead of time.
 
 pub mod analysis;
+pub mod battle_results;
+pub mod cli;
 pub mod error;
+pub mod game_data;
 pub mod loaded_build;
 pub mod packets;
 
 pub use analysis::ReplayAnalysis;
 pub use analysis::analyze;
 pub use error::AnalysisError;
+pub use error::CommandError;
 pub use loaded_build::LoadedBuild;
 pub use packets::PacketFilter;
 pub use packets::PacketRecord;

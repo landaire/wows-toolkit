@@ -69,7 +69,7 @@ pub fn classify(requested: u32, actual: u32, data: serde_json::Value) -> Constan
     }
 }
 
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum ResultsFormat {
     Raw,
     Merged,
@@ -89,13 +89,13 @@ impl Drop for RestorePanicHook {
     }
 }
 
-/// Run the `battle-results` command. Exits the process with a nonzero status
-/// if any replay in the batch failed, after writing every successful result.
+/// Run the `battle-results` command. Fails if any replay in the batch failed,
+/// after writing every successful result.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     ctx: &dyn wows_replays::context::GameDataContext,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
+    game_dir: Option<&Path>,
+    extracted_dir: Option<&Path>,
     constants_path: Option<&Path>,
     format: ResultsFormat,
     out_dir: Option<PathBuf>,
@@ -208,7 +208,7 @@ pub fn run(
     }
 
     if had_failure {
-        std::process::exit(1);
+        bail!("one or more replays failed");
     }
 
     Ok(())
