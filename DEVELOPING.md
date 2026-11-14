@@ -139,7 +139,7 @@ Then open <http://localhost:8000/wows-toolkit/tactics/>. Asset names carry a has
 
 ### Desktop release channels
 
-Suffixed versions such as `1.1.0-beta1` ship the GPUI frontend. Stable versions
+Suffixed versions such as `1.1.0-beta1` ship the zgui frontend. Stable versions
 ship egui. The release tag must match `[workspace.package].version` in
 `Cargo.toml`. Manual and `ci/**` builds select the frontend from that version.
 
@@ -151,7 +151,7 @@ same numeric version replace each other in either direction, including beta
 and stable builds.
 
 For a local Buck beta installer, use
-`buck2 build -m release -c release.frontend=gpui toolchains//windows:wows_toolkit_msi`.
+`buck2 build -m release -c release.frontend=zgui toolchains//windows:wows_toolkit_msi`.
 The Cargo installer script, `scripts/build-msi.ps1`, selects the frontend from
 the workspace version and stages it under the installed executable name.
 

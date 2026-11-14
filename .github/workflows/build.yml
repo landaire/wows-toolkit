@@ -37,9 +37,9 @@ jobs:
               tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
               if tag_version != version:
                   raise SystemExit(f"Release tag {tag_version} does not match workspace version {version}")
-          frontend = "gpui" if "-" in version else "egui"
+          frontend = "zgui" if "-" in version else "egui"
           # The alias names the front end; the binary keeps its crate's name.
-          binary = "wows_toolkit_gpui" if frontend == "gpui" else "wows_toolkit"
+          binary = "wows_toolkit_zgui" if frontend == "zgui" else "wows_toolkit"
           target = f"//:wows_toolkit_{frontend}"
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"frontend={frontend}", file=output)
@@ -390,7 +390,7 @@ jobs:
 
       - name: Create .dmg
         # hdiutil's size estimate from -srcfolder can leave the image too small
-        # for the GPUI binary, so size it from the bundle with headroom.
+        # for the desktop binary, so size it from the bundle with headroom.
         run: |
           size_mb=$(( $(du -sm "WoWs Toolkit.app" | cut -f1) * 12 / 10 + 32 ))
           hdiutil create -volname "WoWs Toolkit" \

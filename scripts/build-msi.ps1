@@ -25,7 +25,7 @@ if (-not $wixCmd) {
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' |
     Select-Object -First 1).Matches.Groups[1].Value
 $msiVersion = ($version -split '-', 2)[0]
-$package = if ($version.Contains('-')) { 'wows-toolkit-gpui' } else { 'wows_toolkit' }
+$package = if ($version.Contains('-')) { 'wows-toolkit-zgui' } else { 'wows_toolkit' }
 $binaryName = "$package.exe"
 Write-Host "Version: $version ($package)"
 

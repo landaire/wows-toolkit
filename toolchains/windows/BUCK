@@ -65,7 +65,7 @@ wix_msi(
     ],
     binaries = {"wows_toolkit.exe": {
         "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
-        "gpui": "root//crates/wows-toolkit-gpui:gpui_bin",
+        "zgui": "root//crates/wows-toolkit-zgui:zgui_bin",
     }[read_root_config("release", "frontend", "egui")]},
     pdbs = {},
     # MSI ProductVersion is numeric only, so a pre-release tag ships under its
