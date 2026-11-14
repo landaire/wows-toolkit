@@ -307,32 +307,25 @@ fn main() -> Result<(), Report> {
     let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
     let flag_icons = load_flag_icons(vfs, version);
 
-    // Load game constants from game data (falls back to hardcoded defaults per-field)
-    let mut game_constants = GameConstants::from_vfs(vfs);
-
-    // Auto-load constants.json from extracted dir if present (and no explicit --constants)
-    if args.constants.is_none()
-        && let Some(ref resolved) = resolved_extracted
-    {
-        let auto_constants = resolved.join("constants.json");
-        if auto_constants.exists()
-            && let Ok(data) = std::fs::read_to_string(&auto_constants)
-            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
-        {
-            game_constants.merge_replay_constants(&json, replay_version);
-            info!("Merged constants from dump: {}", auto_constants.display());
-        }
-    }
-
-    // Explicit --constants flag takes priority (overrides auto-loaded)
-    if let Some(ref constants_path) = args.constants {
+    // The wows-constants JSON for the build: --constants, else the dump's own
+    // constants.json.
+    let overrides: Option<serde_json::Value> = if let Some(constants_path) = &args.constants {
         let data = std::fs::read_to_string(constants_path)
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
         let json: serde_json::Value =
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        game_constants.merge_replay_constants(&json, replay_version);
-        info!("Merged replay constants from {}", constants_path.display());
-    }
+        info!("Merging replay constants from {}", constants_path.display());
+        Some(json)
+    } else {
+        resolved_extracted.as_ref().and_then(|resolved| {
+            let auto_constants = resolved.join("constants.json");
+            let data = std::fs::read_to_string(&auto_constants).ok()?;
+            let json = serde_json::from_str::<serde_json::Value>(&data).ok()?;
+            info!("Merging constants from dump: {}", auto_constants.display());
+            Some(json)
+        })
+    };
+    let game_constants = GameConstants::for_build(Some(vfs), overrides.as_ref(), Some(replay_version));
 
     if let Some(mode_name) = game_constants.game_mode_name(replay_file.meta.gameMode as i32) {
         info!(mode = %mode_name, id = replay_file.meta.gameMode, "Game mode");

@@ -782,12 +782,7 @@ impl SurveyResults {
     }
 }
 
-fn survey_file(
-    skip_decode: bool,
-    ctx: &dyn GameDataContext,
-    game_constants: &'static GameConstants,
-    replay: std::path::PathBuf,
-) -> SurveyResult {
+fn survey_file(skip_decode: bool, ctx: &dyn GameDataContext, replay: std::path::PathBuf) -> SurveyResult {
     let filename = replay.file_name().unwrap().to_str().unwrap();
     let filename = filename.to_string();
 
@@ -797,8 +792,9 @@ fn survey_file(
     let survey_stats = std::rc::Rc::new(std::cell::RefCell::new(wows_replays::analyzer::survey::SurveyStats::new()));
     let stats_clone = survey_stats.clone();
     match parse_replay(&replay, ctx, |meta| {
+        let version = Version::from_client_exe(&meta.clientVersionFromExe);
         wows_replays::analyzer::survey::SurveyBuilder::new(stats_clone, skip_decode)
-            .game_constants(game_constants)
+            .game_constants(static_game_constants(ctx, &version))
             .build(meta)
     }) {
         Ok(_) => {
@@ -993,24 +989,18 @@ fn report_bench(parsed: usize, failed: usize, bytes: usize, sink: usize, elapsed
 }
 
 /// Game data sourced the way the CLI flags describe: a live install (-g), an
-/// extracted/dump directory (-e), and an optional constants.json (-c) merged
-/// over whatever constants the game files provide.
+/// extracted/dump directory (-e), and the build's constants JSON (see
+/// [`versioned_constants`]) merged over whatever constants the game files
+/// provide.
 struct CliGameDataContext<'a> {
     game_dir: Option<&'a str>,
     extracted: Option<&'a str>,
     constants_path: Option<&'a Path>,
-    /// Parsed -c/--constants overrides, read on first use so commands that
-    /// never touch constants never pay for (or fail on) the file.
-    constants_overrides: std::sync::OnceLock<Option<serde_json::Value>>,
 }
 
 impl<'a> CliGameDataContext<'a> {
     fn new(game_dir: Option<&'a str>, extracted: Option<&'a str>, constants_path: Option<&'a Path>) -> Self {
-        Self { game_dir, extracted, constants_path, constants_overrides: std::sync::OnceLock::new() }
-    }
-
-    fn constants_overrides(&self) -> Option<&serde_json::Value> {
-        self.constants_overrides.get_or_init(|| self.constants_path.map(read_constants_overrides)).as_ref()
+        Self { game_dir, extracted, constants_path }
     }
 }
 
@@ -1023,7 +1013,8 @@ impl GameDataContext for CliGameDataContext<'_> {
 
     fn game_constants(&self, version: &Version) -> Result<std::sync::Arc<GameConstants>, GameDataContextError> {
         let vfs = open_build_vfs(self.game_dir, self.extracted, version);
-        Ok(std::sync::Arc::new(GameConstants::for_build(vfs.as_ref(), self.constants_overrides(), Some(*version))))
+        let overrides = versioned_constants(self.constants_path, self.extracted, version);
+        Ok(std::sync::Arc::new(GameConstants::for_build(vfs.as_ref(), overrides.as_ref(), Some(*version))))
     }
 
     fn metadata_provider(
@@ -1036,10 +1027,11 @@ impl GameDataContext for CliGameDataContext<'_> {
     }
 }
 
-/// The wows-constants JSON that names a build's battle results fields: the
-/// -c file, else the resolved dump's `constants.json`. `None` when neither
-/// exists, which leaves the server's results out of an analysis.
-fn results_constants(
+/// The wows-constants JSON for `version`'s build: the -c file, else the
+/// resolved dump's `constants.json`. Decoding merges it over the game's own
+/// constants, and battle results read their field names from it. `None` when
+/// neither exists, which leaves the server's results out of an analysis.
+fn versioned_constants(
     constants_path: Option<&Path>,
     extracted: Option<&str>,
     version: &Version,
@@ -1062,19 +1054,24 @@ fn read_constants_overrides(path: &Path) -> serde_json::Value {
     serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"))
 }
 
-/// Load a constants JSON file and merge it into a `GameConstants`.
-fn load_game_constants_owned(constants_path: Option<&Path>, version: Version) -> GameConstants {
-    let mut gc = GameConstants::defaults();
-    if let Some(path) = constants_path {
-        gc.merge_replay_constants(&read_constants_overrides(path), version);
-    }
-    gc
-}
+/// `version`'s decode constants, for analyzers that borrow them for `'static`.
+///
+/// Each build's set is leaked once and reused, so a survey of many replays
+/// holds one copy per build rather than one per replay.
+fn static_game_constants(ctx: &dyn GameDataContext, version: &Version) -> &'static GameConstants {
+    static LEAKED: std::sync::LazyLock<std::sync::Mutex<HashMap<Version, &'static GameConstants>>> =
+        std::sync::LazyLock::new(Default::default);
 
-/// [`load_game_constants_owned`], leaked for analyzers that require a
-/// `&'static` reference (the CLI is short-lived).
-fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'static GameConstants {
-    Box::leak(Box::new(load_game_constants_owned(constants_path, version)))
+    let mut leaked = LEAKED.lock().expect("constants cache poisoned");
+    if let Some(constants) = leaked.get(version).copied() {
+        return constants;
+    }
+
+    let constants = ctx.game_constants(version).expect("failed to load game constants");
+    let constants: &'static std::sync::Arc<GameConstants> = Box::leak(Box::new(constants));
+    leaked.insert(*version, constants);
+
+    constants
 }
 
 /// Open the game-file VFS for a build from whichever source the CLI flags
@@ -1361,7 +1358,7 @@ fn main() {
         Commands::Dump { output, no_meta, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version);
+            let gc = static_game_constants(ctx, &version);
             parse_replay(&replay, ctx, |meta| {
                 wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
                     .game_constants(gc)
@@ -1372,7 +1369,7 @@ fn main() {
         Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let gc = load_game_constants(constants_path, version);
+            let gc = static_game_constants(ctx, &version);
             let no_meta = !meta;
             parse_replay(&replay, ctx, |meta| {
                 build_investigative_printer(
@@ -1414,9 +1411,6 @@ fn main() {
                 .unwrap();
         }
         Commands::Survey { skip_decode, replays } => {
-            // For survey, we use build 0 since we don't know the build ahead of time.
-            // The constants override is still useful for consumable ID mapping.
-            let gc = load_game_constants(constants_path, Version::default());
             let mut survey_result = SurveyResults::empty();
             for replay_path in &replays {
                 for entry in walkdir::WalkDir::new(replay_path) {
@@ -1425,7 +1419,7 @@ fn main() {
                         continue;
                     }
                     let replay = entry.path().to_path_buf();
-                    let result = survey_file(skip_decode, ctx, gc, replay);
+                    let result = survey_file(skip_decode, ctx, replay);
                     survey_result.add(result);
                 }
             }
@@ -1483,7 +1477,7 @@ fn main() {
         Commands::Analyze { replay } => {
             let replay_file = ReplayFile::from_file(&replay).expect("failed to read replay");
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-            let results_constants = results_constants(constants_path, extracted, &version);
+            let results_constants = versioned_constants(constants_path, extracted, &version);
             let analysis =
                 replayshark::analyze(&replay_file, ctx, results_constants.as_ref()).expect("failed to analyze replay");
             println!("{}", serde_json::to_string_pretty(&analysis).expect("an analysis serializes"));
