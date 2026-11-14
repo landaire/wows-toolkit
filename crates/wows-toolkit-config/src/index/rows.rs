@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::BattleType;
 use wows_core::game_types::GameParamId;
 use wows_core::rating_scope::RatingScope;
@@ -180,6 +181,14 @@ pub struct IndexedVehicleRow {
     pub potential: Option<u64>,
     pub received: Option<u64>,
     pub pr: Option<f64>,
+    /// `None` when the player was not rated, or BI was not computed.
+    pub bi: Option<f64>,
+    /// The formula revision BI was computed with for this row's report. `Some`
+    /// with `bi` `None` means the player could not be rated.
+    pub bi_version: Option<BattleImpactVersion>,
+    /// Whether `bi` includes the torpedo warning part, which only a replay
+    /// recorded from the player's own team observes.
+    pub bi_torpedoes_observed: bool,
     pub is_test_ship: bool,
     /// `Some(true)` if the player had a mid-match disconnect: a `Disconnected`
     /// connection event that was not accompanied by a death. `Some(false)` if no

@@ -511,6 +511,9 @@ mod tests {
                 disconnected: None,
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             };
             query::upsert_vehicles(&pool, &[enemy]).await.unwrap();
 
@@ -600,6 +603,9 @@ mod tests {
                 disconnected: None,
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             };
             let enemy = IndexedVehicleRow {
                 arena_id: ArenaId::new(100),
@@ -626,6 +632,9 @@ mod tests {
                 disconnected: None,
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             };
             query::upsert_vehicles(&pool, &[self_vehicle, enemy]).await.unwrap();
 
@@ -705,6 +714,9 @@ mod tests {
                 disconnected: None,
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             };
             query::upsert_vehicles(
                 &pool,
@@ -825,6 +837,9 @@ mod tests {
                 disconnected: None,
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             };
             query::upsert_vehicles(
                 &pool,

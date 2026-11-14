@@ -12,6 +12,7 @@ use sqlx::Sqlite;
 use sqlx::SqlitePool;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::GameParamId;
 use wows_core::rating_scope::RatingScope;
 
@@ -94,14 +95,37 @@ struct RecordRevision {
     path: String,
     written_by: IndexRevision,
     build: Option<u32>,
+    /// A roster row of the arena carries no BI from the formula the caller rates with.
+    bi_stale: bool,
 }
 
-async fn record_revisions(pool: &SqlitePool, source: SourceId) -> Result<Vec<RecordRevision>, IndexError> {
+impl RecordRevision {
+    fn is_stale(&self) -> bool {
+        self.bi_stale || needs_reparse(self.written_by, self.build)
+    }
+}
+
+/// `rateable_bi` is the BI formula revision the caller's indexing pass computes,
+/// or `None` when it has no expected values to rate with. Under `None` BI never
+/// makes a row stale, since a reparse could not fill it.
+///
+/// Bot rows (`account_id = 0`) from older indexers are skipped: no parse
+/// rewrites them, so they would keep the record stale forever.
+async fn record_revisions(
+    pool: &SqlitePool,
+    source: SourceId,
+    rateable_bi: Option<BattleImpactVersion>,
+) -> Result<Vec<RecordRevision>, IndexError> {
     let rows = sqlx::query(
-        "SELECT r.replay_path, r.index_revision, m.version_build FROM replay_record r \
+        "SELECT r.replay_path, r.index_revision, m.version_build, \
+           (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM indexed_vehicle v \
+              WHERE v.arena_id = r.arena_id AND v.account_id <> 0 \
+                AND (v.bi_version IS NULL OR v.bi_version < ?2))) AS bi_stale \
+         FROM replay_record r \
          LEFT JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
     )
     .bind(source.0)
+    .bind(rateable_bi.map(|version| i64::from(version.0)))
     .fetch_all(pool)
     .await?;
     rows.into_iter()
@@ -111,6 +135,7 @@ async fn record_revisions(pool: &SqlitePool, source: SourceId) -> Result<Vec<Rec
                 path: row.try_get("replay_path")?,
                 written_by: IndexRevision(row.try_get("index_revision")?),
                 build: build.and_then(|build| u32::try_from(build).ok()),
+                bi_stale: row.try_get("bi_stale")?,
             })
         })
         .collect()
@@ -462,6 +487,16 @@ pub async fn upsert_vehicles(pool: &SqlitePool, rows: &[IndexedVehicleRow]) -> R
 /// cannot vouch for `damage`, `kills`, `spotting`, `potential`, `received`, or
 /// `pr` at all, so every one of those columns only fills a NULL a stored row
 /// already has, whatever `mode` says.
+///
+/// `bi` follows `pr`, except that a BI from an older formula is not a fact: under
+/// Incremental with Store, the pass's `bi`, `bi_version` and
+/// `bi_torpedoes_observed` replace the stored ones when the pass carries a
+/// revision and the stored `bi` is NULL, its `bi_version` is NULL or older, or
+/// at the same revision only the pass observed torpedo warnings (a replay from
+/// the player's own team). Under Keep `bi` and its `bi_torpedoes_observed` only
+/// fill a NULL, but the pass's `bi_version` is taken whenever it has one: a
+/// reparse with the same constants could not vouch for more, so the row is not
+/// left stale.
 pub async fn upsert_vehicles_with_mode(
     pool: &SqlitePool,
     rows: &[IndexedVehicleRow],
@@ -470,23 +505,34 @@ pub async fn upsert_vehicles_with_mode(
 ) -> Result<(), IndexError> {
     let results_cols = match results {
         ResultsWrite::Store => {
-            let pr = match mode {
-                IndexWriteMode::Incremental => "pr=COALESCE(pr, ?20)",
-                IndexWriteMode::Replace => "pr=?20",
+            let ratings = match mode {
+                IndexWriteMode::Incremental => {
+                    let new_bi_wins = "?26 IS NOT NULL AND (bi IS NULL OR bi_version IS NULL OR bi_version < ?26 \
+                         OR (bi_version = ?26 AND ?25 IS NOT NULL AND ?27 AND NOT bi_torpedoes_observed))";
+                    format!(
+                        "pr=COALESCE(pr, ?20), \
+                         bi=CASE WHEN {new_bi_wins} THEN ?25 ELSE bi END, \
+                         bi_version=CASE WHEN {new_bi_wins} THEN ?26 ELSE bi_version END, \
+                         bi_torpedoes_observed=CASE WHEN {new_bi_wins} THEN ?27 ELSE bi_torpedoes_observed END"
+                    )
+                }
+                IndexWriteMode::Replace => "pr=?20, bi=?25, bi_version=?26, bi_torpedoes_observed=?27".to_owned(),
             };
-            format!("damage=?15, kills=?16, spotting=?17, potential=?18, received=?19, {pr}")
+            format!("damage=?15, kills=?16, spotting=?17, potential=?18, received=?19, {ratings}")
         }
         ResultsWrite::Keep => "damage=COALESCE(damage, ?15), kills=COALESCE(kills, ?16), \
              spotting=COALESCE(spotting, ?17), potential=COALESCE(potential, ?18), \
-             received=COALESCE(received, ?19), pr=COALESCE(pr, ?20)"
+             received=COALESCE(received, ?19), pr=COALESCE(pr, ?20), \
+             bi=COALESCE(bi, ?25), bi_version=COALESCE(?26, bi_version), \
+             bi_torpedoes_observed=CASE WHEN bi IS NULL THEN ?27 ELSE bi_torpedoes_observed END"
             .to_string(),
     };
     let sql = format!(
         "INSERT INTO indexed_vehicle \
          (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
           tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
-          disconnected, is_stream_sniper, sniper_twitch_login) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24) \
+          disconnected, is_stream_sniper, sniper_twitch_login, bi, bi_version, bi_torpedoes_observed) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27) \
          ON CONFLICT(arena_id, account_id, ship_id) DO UPDATE SET \
            player_name=?3, clan=?4, realm=?5, ship_index=?7, ship_name=?8, nation=?9, species=?10, \
            tier=?11, relation=?12, division_id=?13, survived=?14, {results_cols}, is_test_ship=?21, disconnected=?22, \
@@ -519,6 +565,9 @@ pub async fn upsert_vehicles_with_mode(
             .bind(v.disconnected)
             .bind(v.is_stream_sniper)
             .bind(&v.sniper_twitch_login)
+            .bind(v.bi)
+            .bind(v.bi_version.map(|version| i64::from(version.0)))
+            .bind(v.bi_torpedoes_observed)
             .execute(&mut *tx)
             .await?;
     }
@@ -534,6 +583,9 @@ struct StoredVehicleFacts {
     potential: Option<u64>,
     received: Option<u64>,
     pr: Option<f64>,
+    bi: Option<f64>,
+    bi_version: Option<BattleImpactVersion>,
+    bi_torpedoes_observed: bool,
     is_stream_sniper: Option<bool>,
     sniper_twitch_login: Option<String>,
 }
@@ -543,7 +595,8 @@ struct StoredVehicleFacts {
 /// A parser revision can correct a ship identity, which changes the roster's
 /// primary key. Each account's stored facts are read by account before its
 /// rows are deleted, so retained facts move onto the corrected identity
-/// instead of leaving a stale row behind.
+/// instead of leaving a stale row behind. Retained ratings merge as
+/// [`upsert_vehicles_with_mode`] describes.
 pub async fn write_indexed_replay(
     pool: &SqlitePool,
     objective: &ObjectiveMatch,
@@ -562,8 +615,8 @@ pub async fn write_indexed_replay(
     upsert_match_with_mode(&mut *tx, objective, mode).await?;
 
     let old_rows = sqlx::query(
-        "SELECT account_id, damage, kills, spotting, potential, received, pr, \
-         is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = ?1",
+        "SELECT account_id, damage, kills, spotting, potential, received, pr, bi, bi_version, \
+         bi_torpedoes_observed, is_stream_sniper, sniper_twitch_login FROM indexed_vehicle WHERE arena_id = ?1",
     )
     .bind(arena_id.raw())
     .fetch_all(&mut *tx)
@@ -577,6 +630,12 @@ pub async fn write_indexed_replay(
             potential: old.try_get::<Option<i64>, _>("potential")?.and_then(|value| u64::try_from(value).ok()),
             received: old.try_get::<Option<i64>, _>("received")?.and_then(|value| u64::try_from(value).ok()),
             pr: old.try_get("pr")?,
+            bi: old.try_get("bi")?,
+            bi_version: old
+                .try_get::<Option<i64>, _>("bi_version")?
+                .and_then(|value| u32::try_from(value).ok())
+                .map(BattleImpactVersion),
+            bi_torpedoes_observed: old.try_get("bi_torpedoes_observed")?,
             is_stream_sniper: old.try_get("is_stream_sniper")?,
             sniper_twitch_login: old.try_get("sniper_twitch_login")?,
         };
@@ -594,8 +653,28 @@ pub async fn write_indexed_replay(
                     vehicle.potential = old.potential.or(vehicle.potential);
                     vehicle.received = old.received.or(vehicle.received);
                     vehicle.pr = old.pr.or(vehicle.pr);
+                    if old.bi.is_some() {
+                        vehicle.bi = old.bi;
+                        vehicle.bi_torpedoes_observed = old.bi_torpedoes_observed;
+                    }
+                    vehicle.bi_version = vehicle.bi_version.or(old.bi_version);
                 }
-                (ResultsWrite::Store, IndexWriteMode::Incremental) => vehicle.pr = old.pr.or(vehicle.pr),
+                (ResultsWrite::Store, IndexWriteMode::Incremental) => {
+                    vehicle.pr = old.pr.or(vehicle.pr);
+                    let new_bi_wins = vehicle.bi_version.is_some_and(|new| {
+                        old.bi.is_none()
+                            || old.bi_version.is_none_or(|stored| stored < new)
+                            || (old.bi_version == Some(new)
+                                && vehicle.bi.is_some()
+                                && vehicle.bi_torpedoes_observed
+                                && !old.bi_torpedoes_observed)
+                    });
+                    if !new_bi_wins {
+                        vehicle.bi = old.bi;
+                        vehicle.bi_version = old.bi_version;
+                        vehicle.bi_torpedoes_observed = old.bi_torpedoes_observed;
+                    }
+                }
                 (ResultsWrite::Store, IndexWriteMode::Replace) => {}
             }
             if vehicle.is_stream_sniper.is_none() {
@@ -613,8 +692,8 @@ pub async fn write_indexed_replay(
             "INSERT INTO indexed_vehicle \
              (arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
               tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, is_test_ship, \
-              disconnected, is_stream_sniper, sniper_twitch_login) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+              disconnected, is_stream_sniper, sniper_twitch_login, bi, bi_version, bi_torpedoes_observed) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)",
         )
         .bind(vehicle.arena_id.raw())
         .bind(vehicle.account_id.raw())
@@ -640,6 +719,9 @@ pub async fn write_indexed_replay(
         .bind(vehicle.disconnected)
         .bind(vehicle.is_stream_sniper)
         .bind(&vehicle.sniper_twitch_login)
+        .bind(vehicle.bi)
+        .bind(vehicle.bi_version.map(|version| i64::from(version.0)))
+        .bind(vehicle.bi_torpedoes_observed)
         .execute(&mut *tx)
         .await?;
     }
@@ -762,39 +844,73 @@ pub async fn arena_ids_in_source(pool: &SqlitePool, source: SourceId) -> Result<
 
 /// Absolute replay paths current enough for the startup pass to skip.
 ///
-/// A row that [`REPARSE_RULES`] marks stale stays readable, but its replay file,
-/// if still on disk, is parsed and upserted once.
-pub async fn record_paths_in_source(pool: &SqlitePool, source: SourceId) -> Result<HashSet<String>, IndexError> {
-    Ok(record_revisions(pool, source)
+/// A row that [`REPARSE_RULES`] marks stale, or whose arena lacks BI from
+/// `rateable_bi` (see [`record_revisions`]), stays readable, but its replay
+/// file, if still on disk, is parsed and upserted once.
+pub async fn record_paths_in_source(
+    pool: &SqlitePool,
+    source: SourceId,
+    rateable_bi: Option<BattleImpactVersion>,
+) -> Result<HashSet<String>, IndexError> {
+    Ok(record_revisions(pool, source, rateable_bi)
         .await?
         .into_iter()
-        .filter(|record| !needs_reparse(record.written_by, record.build))
+        .filter(|record| !record.is_stale())
         .map(|record| record.path)
         .collect())
 }
 
-async fn stale_paths_under(pool: &SqlitePool, source: SourceId, root: &Path) -> Result<Vec<String>, IndexError> {
-    Ok(record_revisions(pool, source)
+async fn stale_paths_under(
+    pool: &SqlitePool,
+    source: SourceId,
+    root: &Path,
+    rateable_bi: Option<BattleImpactVersion>,
+) -> Result<Vec<String>, IndexError> {
+    Ok(record_revisions(pool, source, rateable_bi)
         .await?
         .into_iter()
-        .filter(|record| needs_reparse(record.written_by, record.build))
+        .filter(RecordRevision::is_stale)
         .map(|record| record.path)
         .filter(|path| Path::new(path).parent() == Some(root))
         .collect())
 }
 
 /// Whether a live replay directly in `root` needs the current parser to refresh it.
-pub async fn has_stale_replay_records(pool: &SqlitePool, root: &Path) -> Result<bool, IndexError> {
+pub async fn has_stale_replay_records(
+    pool: &SqlitePool,
+    root: &Path,
+    rateable_bi: Option<BattleImpactVersion>,
+) -> Result<bool, IndexError> {
     let Some(source) = live_source_id(pool).await? else { return Ok(false) };
-    Ok(!stale_paths_under(pool, source, root).await?.is_empty())
+    Ok(!stale_paths_under(pool, source, root, rateable_bi).await?.is_empty())
 }
 
 /// Marks the rows under a completely scanned `root` as handled by the current
 /// parser, so a replay that could not be reparsed does not start the scan again.
-pub async fn mark_replay_records_current(pool: &SqlitePool, source: SourceId, root: &Path) -> Result<(), IndexError> {
-    let stale = stale_paths_under(pool, source, root).await?;
+///
+/// Under `rateable_bi` the roster rows of those replays' arenas are stamped
+/// with that BI revision too, keeping whatever `bi` they hold.
+pub async fn mark_replay_records_current(
+    pool: &SqlitePool,
+    source: SourceId,
+    root: &Path,
+    rateable_bi: Option<BattleImpactVersion>,
+) -> Result<(), IndexError> {
+    let stale = stale_paths_under(pool, source, root, rateable_bi).await?;
     let mut tx = pool.begin().await?;
     for path in stale {
+        if let Some(version) = rateable_bi {
+            sqlx::query(
+                "UPDATE indexed_vehicle SET bi_version = ?1 \
+                 WHERE arena_id = (SELECT arena_id FROM replay_record WHERE source_id = ?2 AND replay_path = ?3) \
+                   AND (bi_version IS NULL OR bi_version < ?1)",
+            )
+            .bind(i64::from(version.0))
+            .bind(source.0)
+            .bind(&path)
+            .execute(&mut *tx)
+            .await?;
+        }
         sqlx::query("UPDATE replay_record SET index_revision = ?1 WHERE source_id = ?2 AND replay_path = ?3")
             .bind(REPLAY_INDEX_REVISION.0)
             .bind(source.0)

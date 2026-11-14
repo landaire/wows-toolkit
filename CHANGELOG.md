@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Compare dispersion with and without one named build item at a fixed 12 km default
 - *(wows-query)* Resolve PvO as Prins van Oranje
 - *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
+- *(insights)* Rate each player's battle impact (BI) on the PR scale and store it, with its formula version, in the replay index
 
 ### Bug Fixes
 

@@ -1213,6 +1213,10 @@ fn read_replay_with_alts(
     // all carry the same numbers.
     if let Some(table) = personal_rating {
         normalized.populate_personal_ratings(table);
+        // An unloaded table rates nobody, and its revision would mark the rows rated.
+        if table.is_loaded() {
+            normalized.populate_battle_impact(table);
+        }
     }
     let model = ReplayReportModel::from_normalized(
         &normalized,

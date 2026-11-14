@@ -318,7 +318,12 @@ fn load_personal_rating(workspace: ReplayWorkspace) {
                 })
                 .await;
             match rating {
-                Ok(table) => workspace.personal_rating.set(table.map(Arc::new)),
+                Ok(table) => {
+                    if let Some(table) = &table {
+                        workspace.shell.rebuild_stale_battle_impact(table);
+                    }
+                    workspace.personal_rating.set(table.map(Arc::new));
+                }
                 Err(err) => tracing::warn!("replays: the personal rating table was not read: {err}"),
             }
         });

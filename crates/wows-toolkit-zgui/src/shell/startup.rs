@@ -296,8 +296,10 @@ fn rebuild_stale_index(services: Services, shell: Shell) {
         }
 
         let root = Path::new(&wows_dir).join("replays");
-        let stale = services
-            .on_tokio(async move { wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root).await });
+        let stale = services.on_tokio(async move {
+            let rateable_bi = crate::shell::replay_index::cached_rateable_bi();
+            wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root, rateable_bi).await
+        });
         spawn_local(async move {
             match stale.await {
                 Ok(Ok(true)) => shell.build_replay_index(IndexMode::FillGaps),

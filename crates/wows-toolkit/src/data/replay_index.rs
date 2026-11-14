@@ -364,6 +364,9 @@ mod tests {
             disconnected: Some(false),
             is_stream_sniper: None,
             sniper_twitch_login: None,
+            bi: None,
+            bi_version: None,
+            bi_torpedoes_observed: false,
         }
     }
 
@@ -596,6 +599,9 @@ mod tests {
                 disconnected: Some(false),
                 is_stream_sniper: None,
                 sniper_twitch_login: None,
+                bi: None,
+                bi_version: None,
+                bi_torpedoes_observed: false,
             }],
             record: ReplayRecord {
                 arena_id: ArenaId::new(7),

@@ -105,6 +105,9 @@ fn a_vehicle(arena: i64, account: i64, relation: VehicleRelation) -> IndexedVehi
         disconnected: Some(false),
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     }
 }
 

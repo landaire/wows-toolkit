@@ -109,12 +109,16 @@ impl App {
         };
 
         let reading = scope.clone();
+        // The table `prepare_force_reindex` will rate with.
+        let rateable_bi = wows_toolkit_viewmodel::index_rows::rateable_battle_impact(
+            self.replay_inspector.read(cx).personal_rating().map(|table| table.as_ref()),
+        );
         cx.spawn_in(window, async move |this, cx| {
             let held = crate::runtime::block_on(cx, move || async move {
                 let Some(source) = reading.existing(&pool).await? else {
                     return Ok(std::collections::HashSet::new());
                 };
-                wows_toolkit_config::index::query::record_paths_in_source(&pool, source).await
+                wows_toolkit_config::index::query::record_paths_in_source(&pool, source, rateable_bi).await
             })
             .await;
 

@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::BattleImpactVersion;
 use wows_core::game_types::GameParamId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
@@ -83,6 +84,9 @@ fn sample_vehicle(arena: i64) -> IndexedVehicleRow {
         disconnected: Some(false),
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     }
 }
 
@@ -214,7 +218,7 @@ async fn single_live_source_read_write_round_trips_after_migration_008() {
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();
     query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("a.wowsreplay"));
 }
 
@@ -232,17 +236,17 @@ async fn an_old_index_revision_is_reparsed_once_within_the_scanned_directory() {
     query::upsert_record(&pool, &elsewhere).await.unwrap();
     sqlx::query("UPDATE replay_record SET index_revision = 0").execute(&pool).await.unwrap();
 
-    assert!(query::record_paths_in_source(&pool, source).await.unwrap().is_empty());
-    assert!(query::has_stale_replay_records(&pool, root).await.unwrap());
+    assert!(query::record_paths_in_source(&pool, source, None).await.unwrap().is_empty());
+    assert!(query::has_stale_replay_records(&pool, root, None).await.unwrap());
 
     query::upsert_record(&pool, &record).await.unwrap();
-    assert!(query::record_paths_in_source(&pool, source).await.unwrap().contains("C:/wows/replays/a.wowsreplay"));
-    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
+    assert!(query::record_paths_in_source(&pool, source, None).await.unwrap().contains("C:/wows/replays/a.wowsreplay"));
+    assert!(!query::has_stale_replay_records(&pool, root, None).await.unwrap());
 
     sqlx::query("UPDATE replay_record SET index_revision = 0").execute(&pool).await.unwrap();
-    query::mark_replay_records_current(&pool, source, root).await.unwrap();
-    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
-    let current = query::record_paths_in_source(&pool, source).await.unwrap();
+    query::mark_replay_records_current(&pool, source, root, None).await.unwrap();
+    assert!(!query::has_stale_replay_records(&pool, root, None).await.unwrap());
+    let current = query::record_paths_in_source(&pool, source, None).await.unwrap();
     assert!(!current.contains("D:/old/replays/b.wowsreplay"), "a directory that was not scanned stays stale");
 }
 
@@ -266,13 +270,15 @@ async fn a_reparse_rule_refreshes_only_the_builds_it_names() {
     // Both rows as the 1.0.3 indexer left them.
     sqlx::query("UPDATE replay_record SET index_revision = 1").execute(&pool).await.unwrap();
 
-    let current = query::record_paths_in_source(&pool, source).await.unwrap();
+    let current = query::record_paths_in_source(&pool, source, None).await.unwrap();
     assert!(current.contains("C:/wows/replays/15_9.wowsreplay"), "a 15.9 row needs no reparse");
     assert!(!current.contains("C:/wows/replays/15_10.wowsreplay"), "a 15.10 row from the old indexer is reparsed");
 
     query::upsert_record(&pool, &newer).await.unwrap();
-    assert!(query::record_paths_in_source(&pool, source).await.unwrap().contains("C:/wows/replays/15_10.wowsreplay"));
-    assert!(!query::has_stale_replay_records(&pool, root).await.unwrap());
+    assert!(
+        query::record_paths_in_source(&pool, source, None).await.unwrap().contains("C:/wows/replays/15_10.wowsreplay")
+    );
+    assert!(!query::has_stale_replay_records(&pool, root, None).await.unwrap());
 }
 
 async fn store_stale_ship(pool: &SqlitePool) {
@@ -373,7 +379,7 @@ async fn migration_dedupes_two_live_sources_repointing_non_colliding_records() {
         .unwrap();
     assert_eq!(live_sources, vec![(survivor.0,)], "exactly one live source must remain, at the lowest id");
 
-    let paths = query::record_paths_in_source(&pool, survivor).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, survivor, None).await.unwrap();
     assert!(paths.contains("a.wowsreplay"), "the survivor's own record must be untouched");
     assert!(paths.contains("b.wowsreplay"), "the non-colliding doomed record must be repointed onto the survivor");
     assert!(paths.contains("shared.wowsreplay"), "the survivor's copy of the colliding record must remain");
@@ -713,7 +719,7 @@ async fn relocate_source_rewrites_matching_prefixes_only() {
     let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
     assert_eq!(moved, 1, "only the record under the old root is repointed");
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("F:/new/a.wowsreplay"), "prefix rewritten: {paths:?}");
     assert!(paths.contains("E:/elsewhere/b.wowsreplay"), "non-matching path untouched: {paths:?}");
 
@@ -733,7 +739,7 @@ async fn relocate_source_accepts_a_trailing_separator_on_old_root() {
     let moved = query::relocate_source(&pool, src, Path::new("D:/old/"), Path::new("F:/new")).await.unwrap();
     assert_eq!(moved, 1, "a trailing separator on old_root must not prevent the match");
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("F:/new/a.wowsreplay"), "prefix rewritten despite trailing separator: {paths:?}");
 }
 
@@ -753,7 +759,7 @@ async fn relocate_source_leaves_a_sibling_directory_with_a_shared_name_prefix_un
     let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
     assert_eq!(moved, 1, "only the record actually under D:/old is repointed");
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("F:/new/a.wowsreplay"), "the record under old_root is rewritten: {paths:?}");
     assert!(
         paths.contains("D:/oldarchive/b.wowsreplay"),
@@ -781,7 +787,7 @@ async fn relocate_source_rejects_relocating_into_its_own_subdirectory() {
         other => panic!("expected RelocationNested, got {other:?}"),
     }
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("D:/replays/x.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
     assert!(
         paths.contains("D:/replays/archive/x.wowsreplay"),
@@ -865,7 +871,7 @@ async fn relocate_source_precheck_does_not_treat_a_sibling_directory_as_collidin
     let moved = query::relocate_source(&pool, src, Path::new("D:/old"), Path::new("F:/new")).await.unwrap();
     assert_eq!(moved, 0, "neither record is actually under D:/old, so nothing moves and nothing collides");
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("D:/oldarchive/x.wowsreplay"), "untouched: {paths:?}");
     assert!(paths.contains("F:/newarchive/x.wowsreplay"), "untouched: {paths:?}");
 }
@@ -897,7 +903,7 @@ async fn relocate_source_precheck_still_detects_a_collision_that_shares_old_root
         other => panic!("expected RelocationCollision, got {other:?}"),
     }
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(paths.contains("D:/old/a.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
     assert!(paths.contains("D:/oldish/a.wowsreplay"), "a rejected relocate must leave records untouched: {paths:?}");
 }
@@ -923,7 +929,7 @@ async fn relocate_source_rejects_a_collision_and_leaves_the_database_unchanged()
         other => panic!("expected RelocationCollision, got {other:?}"),
     }
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert!(
         paths.contains("D:/old/a.wowsreplay"),
         "failed relocate must leave the moving record's path intact: {paths:?}"
@@ -964,7 +970,7 @@ async fn relocate_source_onto_anothers_root_fails_and_leaves_both_sources_untouc
         other => panic!("expected RootAlreadyOwned, got {other:?}"),
     }
 
-    let paths = query::record_paths_in_source(&pool, a).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, a, None).await.unwrap();
     assert!(paths.contains("D:/a/x.wowsreplay"), "a rejected relocate must never rewrite a record's path: {paths:?}");
 
     let sources = query::list_sources(&pool).await.unwrap();
@@ -985,7 +991,7 @@ async fn forget_source_removes_its_records() {
     query::forget_source(&pool, src).await.unwrap();
 
     assert!(query::list_sources(&pool).await.unwrap().iter().all(|s| s.id != src));
-    assert!(query::record_paths_in_source(&pool, src).await.unwrap().is_empty());
+    assert!(query::record_paths_in_source(&pool, src, None).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1000,7 +1006,7 @@ async fn forget_source_leaves_other_sources_alone() {
 
     query::forget_source(&pool, drop).await.unwrap();
 
-    assert!(query::record_paths_in_source(&pool, keep).await.unwrap().contains("D:/keep/a.wowsreplay"));
+    assert!(query::record_paths_in_source(&pool, keep, None).await.unwrap().contains("D:/keep/a.wowsreplay"));
 }
 
 #[tokio::test]
@@ -1021,4 +1027,250 @@ async fn forget_source_leaves_shared_match_and_vehicle_rows_intact() {
     let vehicle_count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM indexed_vehicle WHERE arena_id = 100").fetch_one(&pool).await.unwrap();
     assert_eq!(vehicle_count.0, 1, "indexed_vehicle is shared across sources and must survive forget_source");
+}
+
+/// A roster row's stored BI, the formula revision it came from, and whether it
+/// includes the torpedo warning part.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StoredBi {
+    bi: Option<f64>,
+    version: Option<BattleImpactVersion>,
+    torpedoes_observed: bool,
+}
+
+fn stored_bi(bi: Option<f64>, version: Option<u32>) -> StoredBi {
+    StoredBi { bi, version: version.map(BattleImpactVersion), torpedoes_observed: false }
+}
+
+/// A BI rated from a replay of the player's own team.
+fn observed_bi(bi: f64, version: u32) -> StoredBi {
+    StoredBi { bi: Some(bi), version: Some(BattleImpactVersion(version)), torpedoes_observed: true }
+}
+
+/// The two write paths that merge a pass's roster row into a stored one.
+#[derive(Debug, Clone, Copy)]
+enum RosterWrite {
+    Upsert,
+    Replay,
+}
+
+struct MergeCase {
+    name: &'static str,
+    stored: StoredBi,
+    incoming: StoredBi,
+    expected: StoredBi,
+}
+
+/// Stores `case.stored` as an earlier pass left it, writes `case.incoming` over
+/// it incrementally through `write`, and reads the merged BI back.
+async fn bi_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWrite) -> StoredBi {
+    let pool = mem_pool().await;
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    let earlier = IndexedVehicleRow {
+        bi: case.stored.bi,
+        bi_version: case.stored.version,
+        bi_torpedoes_observed: case.stored.torpedoes_observed,
+        ..sample_vehicle(100)
+    };
+    query::upsert_vehicles_with_mode(&pool, &[earlier], IndexWriteMode::Replace, ResultsWrite::Store).await.unwrap();
+
+    let later = IndexedVehicleRow {
+        bi: case.incoming.bi,
+        bi_version: case.incoming.version,
+        bi_torpedoes_observed: case.incoming.torpedoes_observed,
+        ..sample_vehicle(100)
+    };
+    match write {
+        RosterWrite::Upsert => {
+            query::upsert_vehicles_with_mode(&pool, &[later], IndexWriteMode::Incremental, results).await.unwrap()
+        }
+        RosterWrite::Replay => write_corrected(&pool, later, IndexWriteMode::Incremental, results).await,
+    }
+
+    let row = sqlx::query("SELECT bi, bi_version, bi_torpedoes_observed FROM indexed_vehicle WHERE arena_id = 100")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let version: Option<i64> = row.get("bi_version");
+    StoredBi {
+        bi: row.get("bi"),
+        version: version.map(|version| BattleImpactVersion(u32::try_from(version).unwrap())),
+        torpedoes_observed: row.get("bi_torpedoes_observed"),
+    }
+}
+
+async fn assert_bi_merges(cases: &[MergeCase], results: ResultsWrite) {
+    for write in [RosterWrite::Upsert, RosterWrite::Replay] {
+        for case in cases {
+            assert_eq!(bi_after_merge(write, case, results).await, case.expected, "{} via {write:?}", case.name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_trusted_incremental_write_replaces_only_a_missing_older_or_partial_bi() {
+    let cases = [
+        MergeCase {
+            name: "same revision",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: stored_bi(Some(1500.0), Some(1)),
+        },
+        MergeCase {
+            name: "older revision",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(Some(900.0), Some(2)),
+            expected: stored_bi(Some(900.0), Some(2)),
+        },
+        MergeCase {
+            name: "newer stored revision",
+            stored: stored_bi(Some(1500.0), Some(2)),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: stored_bi(Some(1500.0), Some(2)),
+        },
+        MergeCase {
+            name: "unrated at the same revision",
+            stored: stored_bi(None, Some(1)),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: stored_bi(Some(900.0), Some(1)),
+        },
+        MergeCase {
+            name: "never computed",
+            stored: stored_bi(None, None),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: stored_bi(Some(900.0), Some(1)),
+        },
+        MergeCase {
+            name: "pass without expected values",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(None, None),
+            expected: stored_bi(Some(1500.0), Some(1)),
+        },
+        MergeCase {
+            name: "same revision, only the pass observed torpedo warnings",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: observed_bi(900.0, 1),
+            expected: observed_bi(900.0, 1),
+        },
+        MergeCase {
+            name: "same revision, both observed torpedo warnings",
+            stored: observed_bi(1500.0, 1),
+            incoming: observed_bi(900.0, 1),
+            expected: observed_bi(1500.0, 1),
+        },
+        MergeCase {
+            name: "same revision, only the stored row observed torpedo warnings",
+            stored: observed_bi(1500.0, 1),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: observed_bi(1500.0, 1),
+        },
+    ];
+    assert_bi_merges(&cases, ResultsWrite::Store).await;
+}
+
+#[tokio::test]
+async fn an_untrusted_write_fills_only_a_missing_bi_and_takes_its_revision() {
+    let cases = [
+        MergeCase {
+            name: "never computed",
+            stored: stored_bi(None, None),
+            incoming: stored_bi(Some(900.0), Some(1)),
+            expected: stored_bi(Some(900.0), Some(1)),
+        },
+        MergeCase {
+            name: "older revision with results suppressed",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(None, Some(2)),
+            expected: stored_bi(Some(1500.0), Some(2)),
+        },
+        MergeCase {
+            name: "older revision with a value",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(Some(900.0), Some(2)),
+            expected: stored_bi(Some(1500.0), Some(2)),
+        },
+        MergeCase {
+            name: "pass without expected values",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: stored_bi(None, None),
+            expected: stored_bi(Some(1500.0), Some(1)),
+        },
+        MergeCase {
+            name: "never computed, pass observed torpedo warnings",
+            stored: stored_bi(None, None),
+            incoming: observed_bi(900.0, 1),
+            expected: observed_bi(900.0, 1),
+        },
+        MergeCase {
+            name: "stored value keeps its unobserved torpedo warnings",
+            stored: stored_bi(Some(1500.0), Some(1)),
+            incoming: observed_bi(900.0, 2),
+            expected: stored_bi(Some(1500.0), Some(2)),
+        },
+        MergeCase {
+            name: "stored value keeps its observed torpedo warnings",
+            stored: observed_bi(1500.0, 1),
+            incoming: stored_bi(None, Some(2)),
+            expected: observed_bi(1500.0, 2),
+        },
+    ];
+    assert_bi_merges(&cases, ResultsWrite::Keep).await;
+}
+
+async fn store_rated_replay(
+    pool: &SqlitePool,
+    source: SourceId,
+    arena: i64,
+    path: &str,
+    version: Option<BattleImpactVersion>,
+) {
+    query::upsert_match(pool, &sample_match(arena)).await.unwrap();
+    query::upsert_record(pool, &sample_record(arena, source, path)).await.unwrap();
+    let vehicle = IndexedVehicleRow { bi: version.map(|_| 1500.0), bi_version: version, ..sample_vehicle(arena) };
+    query::upsert_vehicles(pool, &[vehicle]).await.unwrap();
+}
+
+#[tokio::test]
+async fn bi_from_another_revision_makes_a_record_stale_only_for_a_pass_that_can_rate() {
+    const RATED: BattleImpactVersion = BattleImpactVersion(1);
+    const NEWER: BattleImpactVersion = BattleImpactVersion(2);
+    const RATED_PATH: &str = "C:/wows/replays/rated.wowsreplay";
+    const UNRATED_PATH: &str = "C:/wows/replays/unrated.wowsreplay";
+    const ELSEWHERE_PATH: &str = "D:/old/replays/elsewhere.wowsreplay";
+
+    let pool = mem_pool().await;
+    let root = Path::new("C:/wows/replays");
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let source = query::ensure_default_source(&pool, root, now).await.unwrap();
+    store_rated_replay(&pool, source, 100, RATED_PATH, Some(RATED)).await;
+    store_rated_replay(&pool, source, 200, UNRATED_PATH, None).await;
+    store_rated_replay(&pool, source, 300, ELSEWHERE_PATH, Some(RATED)).await;
+    let bot = IndexedVehicleRow { account_id: AccountId::from(0), bi: None, bi_version: None, ..sample_vehicle(100) };
+    query::upsert_vehicles(&pool, &[bot]).await.unwrap();
+
+    let without_table = query::record_paths_in_source(&pool, source, None).await.unwrap();
+    assert!(without_table.contains(UNRATED_PATH), "a pass that cannot rate does not reparse for BI");
+    assert!(!query::has_stale_replay_records(&pool, root, None).await.unwrap());
+
+    let at_rated = query::record_paths_in_source(&pool, source, Some(RATED)).await.unwrap();
+    assert!(at_rated.contains(RATED_PATH), "BI from the pass's revision is current, and the bot row is skipped");
+    assert!(!at_rated.contains(UNRATED_PATH), "a roster row never rated is reparsed");
+
+    let at_newer = query::record_paths_in_source(&pool, source, Some(NEWER)).await.unwrap();
+    assert!(!at_newer.contains(RATED_PATH), "BI from an older revision is reparsed");
+    assert!(query::has_stale_replay_records(&pool, root, Some(NEWER)).await.unwrap());
+
+    query::mark_replay_records_current(&pool, source, root, Some(NEWER)).await.unwrap();
+    assert!(!query::has_stale_replay_records(&pool, root, Some(NEWER)).await.unwrap());
+    let marked = query::record_paths_in_source(&pool, source, Some(NEWER)).await.unwrap();
+    assert!(marked.contains(RATED_PATH));
+    assert!(marked.contains(UNRATED_PATH));
+    assert!(!marked.contains(ELSEWHERE_PATH), "a directory that was not scanned stays stale");
+
+    let kept: Option<f64> =
+        sqlx::query_scalar("SELECT bi FROM indexed_vehicle WHERE arena_id = 100 AND account_id = 7")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kept, Some(1500.0), "marking stamps the revision and keeps the stored BI");
 }

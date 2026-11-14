@@ -2475,13 +2475,18 @@ impl UiReport {
         }
     }
 
-    /// Rates every player, and carries the ratings onto the rows the table
-    /// draws.
+    /// Rates every player's PR and BI, and carries the PR onto the rows the
+    /// table draws.
     ///
-    /// The report is rated rather than the rows, so the export writes the
-    /// same numbers the table shows; the rows then read them back.
+    /// The report is rated rather than the rows, so the export and the index
+    /// write the same numbers the table shows; the rows then read them back.
     pub fn populate_personal_ratings(&mut self, pr_data: &crate::util::personal_rating::PersonalRatingData) {
         self.normalized.populate_personal_ratings(pr_data);
+        // Rated once: the player list calls this on every frame it draws. An
+        // unloaded table rates nobody, and its revision would mark the rows rated.
+        if self.normalized.battle_impact_version.is_none() && pr_data.is_loaded() {
+            self.normalized.populate_battle_impact(pr_data);
+        }
 
         for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
             if report.personal_rating.is_none() {

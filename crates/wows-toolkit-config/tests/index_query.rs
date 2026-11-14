@@ -106,6 +106,9 @@ async fn upserts_are_idempotent_and_ledger_tracks_arena() {
         disconnected: Some(false),
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
     query::upsert_vehicles(&pool, &[veh.clone()]).await.unwrap();
     query::upsert_vehicles(&pool, &[veh]).await.unwrap(); // idempotent
@@ -137,7 +140,7 @@ async fn record_paths_in_source_returns_recorded_paths() {
     // Re-recording the same path is idempotent (keyed on source + path).
     query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay")).await.unwrap();
 
-    let paths = query::record_paths_in_source(&pool, src).await.unwrap();
+    let paths = query::record_paths_in_source(&pool, src, None).await.unwrap();
     assert_eq!(paths.len(), 2, "two distinct paths recorded, idempotent on re-record");
     assert!(paths.contains("a.wowsreplay"));
     assert!(paths.contains("b.wowsreplay"));
@@ -265,6 +268,9 @@ async fn seed_rosters(pool: &sqlx::SqlitePool) {
             disconnected,
             is_stream_sniper: None,
             sniper_twitch_login: None,
+            bi: None,
+            bi_version: None,
+            bi_torpedoes_observed: false,
         };
         query::upsert_vehicles(pool, &[v]).await.unwrap();
     }
@@ -438,6 +444,9 @@ async fn named_players_and_distinct_ships_list_the_whole_roster() {
         disconnected: None,
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
     query::upsert_vehicles(&pool, &[renamed]).await.unwrap();
 
@@ -578,6 +587,9 @@ async fn seeded_pool() -> sqlx::SqlitePool {
         disconnected: None,
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
 
     for (arena, second, clan) in [(100, 1_700_000_100, "RAIN"), (101, 1_700_000_200, "WOLF")] {
@@ -646,6 +658,9 @@ async fn division_pool() -> sqlx::SqlitePool {
         disconnected: None,
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
 
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();
@@ -727,6 +742,9 @@ async fn division_mate_encounters_covers_the_division_match_alone() {
         disconnected: None,
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
     query::upsert_vehicles(&pool, &[vehicle(7, VehicleRelation::SelfPlayer), vehicle(9, VehicleRelation::Enemy)])
         .await
@@ -777,6 +795,9 @@ async fn division_mate_encounters_is_empty_when_the_self_player_had_no_division(
         disconnected: None,
         is_stream_sniper: None,
         sniper_twitch_login: None,
+        bi: None,
+        bi_version: None,
+        bi_torpedoes_observed: false,
     };
 
     query::upsert_match(&pool, &sample_match(100)).await.unwrap();

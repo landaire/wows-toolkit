@@ -105,6 +105,7 @@ use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
 use crate::shell::palette::modes;
 use crate::shell::replay_index::ReplayIndexJobs;
+use crate::shell::replay_index::cached_rateable_bi;
 use crate::shell::replay_index::owner_rating;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
@@ -488,7 +489,7 @@ pub fn index_selected_folder(control: BrowserControl) {
     let reading = scope.clone();
     let held = services.on_tokio(async move {
         match reading.existing(&pool).await? {
-            Some(source) => record_paths_in_source(&pool, source).await,
+            Some(source) => record_paths_in_source(&pool, source, cached_rateable_bi()).await,
             None => Ok::<_, IndexError>(HashSet::new()),
         }
     });

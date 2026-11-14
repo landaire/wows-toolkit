@@ -1,5 +1,6 @@
 //! Durable, queryable replay index: groups, objective match facts, per-replay
-//! records, and rosters. Schema in `migrations/005_replay_index.sql`.
+//! records, and rosters. Schema in `migrations/005_replay_index.sql` and the
+//! migrations after it.
 
 pub mod query;
 pub mod query_ast;

@@ -25,6 +25,7 @@ use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
 use wows_toolkit_viewmodel::index_rows::pr_repairs;
+use wows_toolkit_viewmodel::index_rows::rateable_battle_impact;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use crate::load::GameDataCache;
@@ -265,6 +266,10 @@ async fn store_battle(
 ) -> Result<(), IndexOneError> {
     if let Some(table) = personal_rating {
         battle.normalized.populate_personal_ratings(table);
+        // An unloaded table rates nobody, and its revision would mark the rows rated.
+        if table.is_loaded() {
+            battle.normalized.populate_battle_impact(table);
+        }
     }
 
     let context = IndexContext {
@@ -335,8 +340,11 @@ pub fn build_index(
     // What is already in, so a second run costs a directory listing rather than
     // a re-parse of every replay in it. The egui app skips on the same ledger
     // (`task/replays.rs:1434`).
+    let rateable_bi = rateable_battle_impact(personal_rating);
     let indexed: std::collections::HashSet<String> = match mode {
-        IndexMode::FillGaps => runtime.block_on(query::record_paths_in_source(pool, source_id)).unwrap_or_default(),
+        IndexMode::FillGaps => {
+            runtime.block_on(query::record_paths_in_source(pool, source_id, rateable_bi)).unwrap_or_default()
+        }
         IndexMode::RefreshAll => std::collections::HashSet::new(),
     };
     // And what could not be read before, so an unreadable file is not re-read on
@@ -380,7 +388,7 @@ pub fn build_index(
         tracing::warn!("replay index: the unreadable-file ledger was not written: {err}");
     }
     if !cancel.load(Ordering::Relaxed) {
-        runtime.block_on(query::mark_replay_records_current(pool, source_id, root))?;
+        runtime.block_on(query::mark_replay_records_current(pool, source_id, root, rateable_bi))?;
     }
 
     Ok(progress)
