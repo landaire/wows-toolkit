@@ -31,6 +31,7 @@ use crate::gameparams::GameParamsQueryArgs;
 use crate::gun_module_matchups::GunModuleMatchupsArgs;
 use crate::healing::HealingSourcesArgs;
 use crate::hit_locations::ShipHitLocationsArgs;
+use crate::module_comparison::ModuleComparisonArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::quantities::QuantitySearchArgs;
 use crate::quantities::QuantityValuesArgs;
@@ -192,9 +193,15 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "gun_module_matchups",
-        description: "Compare one ship's main battery gun modules as the attacker, for questions such as \"GK with the 406 mm or the 420 mm guns\", \"how do their pens compare\" or \"how many tier 10 battleships does the larger gun penetrate or citadel\". Per gun module (default: every one the ship can mount, stock first): shell, caliber, raw AP penetration at range_km (default 12), overmatch and fuse threshold, and how many target ships (default: the shooter's class and tier, test ships included; broadside unless target_angle_deg is given) it penetrates the armor over the citadel of (armor stops at most 10% of the rays there that do not ricochet), citadels (at least 5% of the rays over the citadel detonate inside it) and citadels often (at least 25%). differences names the ships each module gains or loses against the first module, with both shares. For one target ship use armor_trace.",
+        description: "Compare one ship's main battery gun modules as the attacker, for questions such as \"GK with the 406 mm or the 420 mm guns\", \"how do their pens compare\" or \"how many tier 10 battleships does the larger gun penetrate or citadel\". Per gun module (default: every one the ship can mount, stock first): shell, caliber, raw AP penetration at range_km (default 12), overmatch and fuse threshold, and how many target ships (default: the shooter's class and tier, test ships included; broadside unless target_angle_deg is given) it penetrates the armor over the citadel of (armor stops at most 10% of the rays there that do not ricochet), citadels (at least 5% of the rays over the citadel detonate inside it) and citadels often (at least 25%). differences names the ships each module gains or loses against the first module, with both shares. For one target ship use armor_trace. For barrels, reload, damage per minute, dispersion and the other values of the modules, use module_comparison.",
         schema: input_schema::<GunModuleMatchupsArgs>,
         call: |game, arguments| run(arguments, |args| game.gun_module_matchups(args)),
+    },
+    Tool {
+        name: "module_comparison",
+        description: "Compare one ship's alternative modules of each kind (guns, torpedoes, hull, engine, fire_control) on the stock build, for questions such as \"X with module A or B\", \"how do GK's 406 mm and 420 mm guns compare\" (also when the question assumes one is worse: answer from the data), \"Shimakaze 12 km or 20 km torpedoes\" or \"which hull should I use\". Per kind with more than one module (or kind given), every option, stock first, with its values: guns give caliber, mounts x barrels, barrels, reload, turret turn time, maximum range, per shell alpha damage, salvo damage, damage per minute, HE fire chance and fires per minute, HE and SAP penetration, muzzle velocity, flight time and impact velocity at range_km (default 12), AP raw penetration at range_km, overmatch, fuse threshold and fuse time, and dispersion at range_km with sigma; torpedoes give launchers x tubes, tubes, reload, damage, range, speed, detectability, reaction time, damage by distance, damage and torpedoes per minute; hulls give hit points, speed, turning circle, rudder shift, detectability and the guns and launchers the hull carries; engines give speed; fire control gives maximum range and dispersion at range_km. Other stat card values that differ between the options follow. differences gives one sentence per option naming every value that differs from the stock option, e.g. \"reload 32.0 s instead of 29.0 s\": quote values from it and never assume two options share a value it does not list. Values are game data only; a value the data lacks for an option is left out of its values. For how many target ships a gun module penetrates or citadels, use gun_module_matchups.",
+        schema: input_schema::<ModuleComparisonArgs>,
+        call: |game, arguments| run(arguments, |args| game.module_comparison(args)),
     },
     Tool {
         name: "armor_assessment",

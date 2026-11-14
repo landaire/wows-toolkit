@@ -37,6 +37,7 @@ pub mod healing;
 pub mod hit_locations;
 pub mod jq_worker;
 pub mod loadout;
+pub mod module_comparison;
 pub mod modules;
 pub mod names;
 pub mod penetration;

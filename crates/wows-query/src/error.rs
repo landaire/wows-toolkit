@@ -191,6 +191,21 @@ pub enum QueryError {
     #[error("{ship}'s {hull} does not take the stock {kind}; add {} to modules", modules.join(" or "))]
     HullNeedsModule { ship: String, hull: String, kind: &'static str, modules: Vec<String> },
 
+    #[error("{module} is {ship}'s {kind} module, not a {requested} module")]
+    ModuleKindMismatch { ship: String, module: String, kind: &'static str, requested: &'static str },
+
+    #[error("{ship} has no alternative {kind} module to compare; its {kind} modules: {}", if modules.is_empty() { "none".to_owned() } else { modules.join(", ") })]
+    NoAlternativeModule { ship: String, kind: &'static str, modules: Vec<String> },
+
+    #[error("{ship} has one module of each kind; there is no alternative module to compare")]
+    NoAlternativeModules { ship: String },
+
+    #[error("{ship}'s module {module} fits none of its hulls")]
+    ModuleFitsNoHull { ship: String, module: String },
+
+    #[error("{} on {ship} are stock; name a module that is not stock, or leave modules out to compare every alternative", modules.join(", "))]
+    StockModulesOnly { ship: String, modules: Vec<String> },
+
     #[error("{ship}'s hull model has no hardpoint {hardpoint}, so that mount's facing is unknown")]
     MountFacingMissing { ship: String, hardpoint: String },
 

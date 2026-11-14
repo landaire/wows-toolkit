@@ -1,5 +1,7 @@
 //! Ship modules (hull, guns, torpedoes, engine, fire control) by English name.
 
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::translations::translate_unit;
@@ -13,7 +15,7 @@ use crate::ships::Ship;
 use crate::text::clean;
 
 /// The kind of module a ship mounts in one research slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModuleKind {
     Hull,
@@ -58,6 +60,17 @@ impl ModuleKind {
             Self::Torpedoes => selection.torpedoes = name,
             Self::Engine => selection.engine = name,
             Self::FireControl => selection.fire_control = name,
+        }
+    }
+
+    /// The module of this kind `selection` mounts.
+    pub(crate) fn mounted(self, selection: &ShipUpgradeSelection) -> Option<&str> {
+        match self {
+            Self::Hull => selection.hull.as_deref(),
+            Self::Guns => selection.artillery.as_deref(),
+            Self::Torpedoes => selection.torpedoes.as_deref(),
+            Self::Engine => selection.engine.as_deref(),
+            Self::FireControl => selection.fire_control.as_deref(),
         }
     }
 }
@@ -105,8 +118,8 @@ impl GameData {
             };
             params.sort();
 
-            let stock_param = slot_name(stock, slot);
             let kind = ModuleKind::from_slot(slot);
+            let stock_param = kind.mounted(stock);
             let mut slot_modules: Vec<Module> = params
                 .into_iter()
                 .map(|param| Module {
@@ -185,16 +198,6 @@ impl GameData {
                     || components.component_on_hull(param, hull, component_type).is_some()
             })
         })
-    }
-}
-
-fn slot_name(selection: &ShipUpgradeSelection, slot: ModuleSlot) -> Option<&str> {
-    match slot {
-        ModuleSlot::Hull => selection.hull.as_deref(),
-        ModuleSlot::Engine => selection.engine.as_deref(),
-        ModuleSlot::Artillery => selection.artillery.as_deref(),
-        ModuleSlot::Torpedoes => selection.torpedoes.as_deref(),
-        ModuleSlot::FireControl => selection.fire_control.as_deref(),
     }
 }
 
