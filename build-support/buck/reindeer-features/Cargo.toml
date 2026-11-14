@@ -30,3 +30,7 @@ postage = { version = "0.5", features = ["blocking"] }
 proptest = { version = "1", features = ["attr-macro"] }
 rust-crypto = "0.2.36"
 rustls-graviola = "0.4"
+
+[lints.cargo]
+# Every dependency here exists only for reindeer to resolve it for Buck.
+unused_dependencies = "allow"

@@ -14,7 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 # The policies themselves, the module inventory a crash report carries, and the
 # text-service probe that decides whether code integrity guard may be applied.

@@ -1,9 +1,7 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 WGC_DOWNLOAD_DEPS = [
-    "//crates/wgc-core:wgc-core",
     "//third-party/rust:thiserror",
-    "//third-party/rust:rootcause",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
     "//third-party/rust:serde_bencode",

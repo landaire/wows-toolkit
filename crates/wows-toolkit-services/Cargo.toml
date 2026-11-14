@@ -64,3 +64,8 @@ url = "2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "0.17"
+
+[lints.cargo]
+# Dependents enable test-support from their dev-dependencies, which compiles out
+# the dialog backend that uses ashpd and rfd.
+unused_dependencies = "allow"

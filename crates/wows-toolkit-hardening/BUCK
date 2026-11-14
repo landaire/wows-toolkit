@@ -3,7 +3,6 @@ load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library
 HARDENING_DEPS = [
     "//third-party/rust:serde",
     "//third-party/rust:thiserror",
-    "//third-party/rust:tracing",
 ]
 
 # The policies, the module inventory and the text-service probe are all Windows

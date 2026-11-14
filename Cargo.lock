@@ -15321,12 +15321,10 @@ version = "0.1.0"
 dependencies = [
  "quick-xml 0.36.2",
  "reqwest 0.12.28",
- "rootcause",
  "serde",
  "thiserror 2.0.20",
  "tokio",
  "url",
- "wgc-core",
 ]
 
 [[package]]
@@ -15345,7 +15343,6 @@ dependencies = [
  "futures",
  "hex",
  "reqwest 0.12.28",
- "rootcause",
  "serde",
  "serde_bencode",
  "serde_bytes",
@@ -15354,7 +15351,6 @@ dependencies = [
  "sha1 0.10.7",
  "thiserror 2.0.20",
  "tokio",
- "wgc-core",
 ]
 
 [[package]]
@@ -16722,7 +16718,6 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.20",
- "tracing",
  "windows-sys 0.61.2",
 ]
 

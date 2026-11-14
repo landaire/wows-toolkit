@@ -6,12 +6,7 @@ publish = false
 description = "Parses WG .torrent (bencode) manifests and downloads WGC-managed game builds over HTTP webseeds"
 
 [dependencies]
-# Unused by the bencode parser and webseed downloader in this crate. Kept as
-# a workspace dep for a future consumer of wgc-catalog's PartDownload /
-# InfoHash types built on wgc-core.
-wgc-core = { workspace = true }
 thiserror = "2"
-rootcause = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Pure-Rust bencode decoder (no C deps); serde-backed, so the wire structs
