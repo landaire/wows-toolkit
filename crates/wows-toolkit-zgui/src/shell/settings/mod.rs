@@ -4,6 +4,7 @@
 
 mod cache;
 mod controls;
+mod faults;
 #[cfg(test)]
 pub(crate) mod tests;
 mod zoom_anchor;
@@ -65,9 +66,13 @@ use crate::services::SettingsState;
 use crate::shell::Shell;
 use crate::shell::settings::controls::SettingControlProps;
 use crate::shell::settings::controls::SettingNoteProps;
+use crate::shell::settings::faults::any_faulted;
+use crate::shell::settings::faults::section_faulted;
+use crate::shell::settings::faults::setting_faults;
 use crate::shell::settings::zoom_anchor::ZoomAnchor;
 use crate::text_marks::marks;
 
+pub use faults::watch_auto_export_dir;
 pub use wows_toolkit_viewmodel::settings_drawer::Setting;
 pub use wows_toolkit_viewmodel::settings_drawer::SettingsSection;
 
@@ -138,6 +143,7 @@ const CSS: &str = css!(
         background-color: var(--lui-color-selection);
     }
     .wt-settings__strip [data-selected] .wt-icon { color: var(--lui-color-accent); }
+    .wt-settings__strip [data-error] .wt-icon { color: var(--wt-color-error); }
     .wt-settings__scroll {
         flex: 1 1 auto;
         min-height: 0;
@@ -178,6 +184,10 @@ const CSS: &str = css!(
         border-top: 1px solid var(--lui-color-border);
     }
     .wt-settings__row:first-child { border-top-width: 0; }
+    .wt-settings__row[data-error] {
+        background-color: color-mix(in srgb, var(--wt-color-error) 10%, transparent);
+        box-shadow: inset 3px 0 0 var(--wt-color-error);
+    }
     .wt-settings__row-body {
         display: flex;
         flex-direction: row;
@@ -199,6 +209,17 @@ const CSS: &str = css!(
         gap: 2px;
         min-width: 112px;
     }
+    .wt-settings__row-heading {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+    }
+    .wt-settings__row-heading > .wt-settings__row-title {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .wt-settings__row-fault { color: var(--wt-color-error); }
     .wt-settings__row-title {
         font-size: 13px;
         font-weight: 500;
@@ -216,7 +237,7 @@ const CSS: &str = css!(
         font-size: 13px;
         color: var(--lui-color-text-dim);
     }
-    .wt-settings-open[data-invalid] .wt-icon { color: var(--zui-color-destructive); }
+    .wt-settings-open[data-error] .wt-icon { color: var(--wt-color-error); }
     .wt-settings-open[data-open] { background-color: var(--lui-color-selection); }"
 );
 
@@ -237,11 +258,12 @@ pub struct SettingsDrawerControl {
     /// The place to bring to the top of the list once it is drawn, as a message about a setting
     /// or a section button asks. Cleared once it is in place.
     jump: RwSignal<Option<SettingsTarget>, LocalStorage>,
-    /// Whether the game directory in the field is one an install could be in. The field says so,
-    /// and the gear that opens the drawer carries the mark.
+    /// Whether the game directory holds no install. Read through `faults`.
     pub wows_dir_invalid: RwSignal<bool, LocalStorage>,
     /// Advanced by each look at a game directory, so an earlier answer arriving late is dropped.
     wows_dir_check: StoredValue<WowsDirCheck>,
+    /// Whether the auto-export directory was found missing. Read through `faults`.
+    auto_export_missing: RwSignal<bool, LocalStorage>,
 }
 
 impl SettingsDrawerControl {
@@ -250,6 +272,7 @@ impl SettingsDrawerControl {
             open: RwSignal::new_local(false),
             jump: RwSignal::new_local(None),
             wows_dir_invalid: RwSignal::new_local(false),
+            auto_export_missing: RwSignal::new_local(false),
             wows_dir_check: StoredValue::new(WowsDirCheck::default()),
         }
     }
@@ -336,13 +359,22 @@ pub fn category_test_id(section: SettingsSection) -> String {
     format!("settings-category-{section:?}")
 }
 
+/// `name`, saying a setting under it needs attention when one is `faulted`.
+fn fault_label(name: String, faulted: bool) -> String {
+    if faulted { t!("ui.settings.panel.in_error", name = name).into_owned() } else { name }
+}
+
 /// The gear at the end of the tab strip, which opens and shuts the drawer.
 #[component]
 pub fn SettingsButton(shell: Shell) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let locale = Services::current().locale;
     let control = shell.settings_drawer;
-    let tip = locale.text("ui.tabs.settings");
+    let faulted = Memo::new(move |_| any_faulted(shell));
+    let tip = move || {
+        locale.track();
+        fault_label(t!("ui.tabs.settings").into_owned(), faulted.get())
+    };
 
     view! {
         Tooltip {
@@ -353,7 +385,7 @@ pub fn SettingsButton(shell: Shell) -> impl IntoView {
                     class = "wt-settings-open",
                     attr:data-testid = "settings-open",
                     attr:data-open = move || control.is_open().then(String::new),
-                    attr:data-invalid = move || control.wows_dir_invalid.get().then(String::new),
+                    attr:data-error = move || faulted.get().then(String::new),
                     a11y:label = tip,
                     on:click = move |_| control.toggle()
                 ) {
@@ -645,9 +677,10 @@ fn section_at_top(list: ListContext) -> Option<SettingsSection> {
 fn SectionButton(shell: Shell, section: SettingsSection, at_top: Memo<Option<SettingsSection>>) -> impl IntoView {
     let list = use_local_context::<ListContext>().expect("a section button is inside the settings list");
     let locale = Services::current().locale;
+    let faulted = Memo::new(move |_| section_faulted(shell, section));
     let name = move || {
         locale.track();
-        section.name()
+        fault_label(section.name(), faulted.get())
     };
     let listed = move || list.rows.get().iter().any(|setting| setting.section() == section);
     let current = move || at_top.get() == Some(section);
@@ -661,6 +694,7 @@ fn SectionButton(shell: Shell, section: SettingsSection, at_top: Memo<Option<Set
                     disabled = Signal::derive_local(move || !listed()),
                     attr:data-testid = category_test_id(section),
                     attr:data-selected = move || current().then(String::new),
+                    attr:data-error = move || faulted.get().then(String::new),
                     a11y:label = name,
                     a11y:selected = current,
                     on:click = move |_| shell.settings_drawer.jump.set(Some(SettingsTarget::Section(section)))
@@ -712,30 +746,42 @@ fn SectionHeading(shell: Shell, section: SettingsSection, first: Signal<bool, Lo
 }
 
 /// One setting: its name and description, each marked where `query` matched it, the control that
-/// changes it, and a line about it.
+/// changes it, and the lines about it. A setting with a fault is marked as a whole.
 #[component]
 fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalStorage>) -> impl IntoView {
     let locale = Services::current().locale;
     let node = NodeRef::new();
     follow_jump(shell, node, move |target| target == SettingsTarget::Setting(setting));
+    let faults = Memo::new(move |_| setting_faults(shell, setting));
+    let faulted = Memo::new(move |_| faults.with(|faults| !faults.is_empty()));
 
     view! {
-        column(class = "wt-settings__row", node_ref = node, attr:data-testid = row_test_id(setting)) {
+        column(
+            class = "wt-settings__row",
+            node_ref = node,
+            attr:data-testid = row_test_id(setting),
+            attr:data-error = move || faulted.get().then(String::new)
+        ) {
             row(class = "wt-settings__row-body", attr:data-stacked = setting.stacked().then(String::new)) {
                 column(class = "wt-settings__row-text") {
-                    {move || {
-                        locale.track();
-                        let title = setting.title().into_owned();
-                        let ranges = query.with(|query| marks(query, &title));
-                        view! {
-                            MarkedText(
-                                class = "wt-settings__row-title",
-                                attr:data-testid = "settings-row-title",
-                                text = title,
-                                ranges = ranges
-                            )
-                        }
-                    }}
+                    row(class = "wt-settings__row-heading") {
+                        if move || faulted.get() {
+                            AppIcon(glyph = Glyph::CircleX, class = "wt-settings__row-fault", attr:data-testid = "settings-row-fault")
+                        } else {}
+                        {move || {
+                            locale.track();
+                            let title = setting.title().into_owned();
+                            let ranges = query.with(|query| marks(query, &title));
+                            view! {
+                                MarkedText(
+                                    class = "wt-settings__row-title",
+                                    attr:data-testid = "settings-row-title",
+                                    text = title,
+                                    ranges = ranges
+                                )
+                            }
+                        }}
+                    }
                     {move || {
                         locale.track();
                         let description = setting.description().into_owned();
@@ -760,7 +806,7 @@ fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalSt
                     view! { SettingControl(shell = shell, setting = setting) }
                 }}
             }
-            SettingNote(shell = shell, setting = setting)
+            SettingNote(faults = faults, shell = shell, setting = setting)
         }
     }
 }

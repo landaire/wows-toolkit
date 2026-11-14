@@ -24,23 +24,18 @@ use zgui::platform::ColorScheme;
 use zgui::prelude::try_use_window;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
-use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::SetValue;
-use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::use_local_context;
-use zgui::task::Task;
-use zgui::task::blocking;
 use zgui::task::spawn_detached;
-use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
@@ -73,6 +68,8 @@ use crate::icons::AppIconProps;
 use crate::shell::Shell;
 use crate::shell::settings::Setting;
 use crate::shell::settings::cache::CachedBuildsProps;
+use crate::shell::settings::faults::SettingFault;
+use crate::shell::settings::faults::setting_faults;
 use crate::shell::settings::zoom_anchor::ZoomAnchor;
 use crate::shell::twitch::TwitchPaste;
 use crate::shell::twitch::TwitchStatus;
@@ -437,58 +434,36 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
     })
 }
 
-/// What is reported under a setting.
-#[derive(Clone, Debug, PartialEq)]
-struct Note {
-    text: String,
-    error: bool,
-}
-
-impl Note {
-    fn dim(text: String) -> Self {
-        Self { text, error: false }
-    }
-
-    fn error(text: String) -> Self {
-        Self { text, error: true }
-    }
-}
-
-/// The line under a setting that reports on it, when there is something to report.
+/// The lines under a setting that report on it: each of its faults, or else a remark when there is
+/// one.
 #[component]
-pub fn SettingNote(shell: Shell, setting: Setting) -> impl IntoView {
+pub fn SettingNote(shell: Shell, setting: Setting, faults: Memo<Vec<SettingFault>>) -> impl IntoView {
     let services = shell.services();
     let locale = services.locale;
-    let note = move || -> Option<Note> {
+    let remark = move || -> Option<String> {
         locale.track();
         match setting {
-            Setting::DataSharing => {
-                services.settings.read(|settings| Note::dim(settings.data_sharing.description().to_owned()))
-            }
-            Setting::CodeIntegrity => Some(Note::dim(t!("ui.settings.app.code_integrity_tooltip").into_owned())),
-            Setting::Zoom => Some(Note::dim(crate::zoom::shortcuts_hint())),
-            Setting::WowsDirectory => shell
-                .settings_drawer
-                .wows_dir_invalid
-                .get()
-                .then(|| Note::error(t!("ui.messages.wows_dir_invalid").into_owned())),
+            Setting::DataSharing => services.settings.read(|settings| settings.data_sharing.description().to_owned()),
+            Setting::CodeIntegrity => Some(t!("ui.settings.app.code_integrity_tooltip").into_owned()),
+            Setting::Zoom => Some(crate::zoom::shortcuts_hint()),
             Setting::TwitchToken => match shell.twitch.paste()? {
-                TwitchPaste::Stored { who } => {
-                    Some(Note::dim(t!("ui.settings.twitch.signed_in_as", who = who).into_owned()))
-                }
-                TwitchPaste::Refused { reason } => Some(Note::error(reason)),
+                TwitchPaste::Stored { who } => Some(t!("ui.settings.twitch.signed_in_as", who = who).into_owned()),
+                // The fault says it.
+                TwitchPaste::Refused { .. } => None,
             },
             _ => None,
         }
     };
 
     view! {
-        {move || note().map(|note| view! {
-            text(
-                class = "wt-settings__note",
-                attr:data-testid = "settings-row-note",
-                attr:data-error = note.error.then(String::new)
-            ) {{note.text.clone()}}
+        for fault in move || faults.get(), key = |fault: &SettingFault| fault.clone() {
+            text(class = "wt-settings__note", attr:data-testid = "settings-row-note", attr:data-error = "") {{move || {
+                locale.track();
+                fault.message()
+            }}}
+        }
+        {move || faults.with(Vec::is_empty).then(remark).flatten().map(|remark| view! {
+            text(class = "wt-settings__note", attr:data-testid = "settings-row-note") {{remark}}
         }.into_view())}
     }
 }
@@ -789,7 +764,7 @@ fn WowsDirectory(shell: Shell) -> impl IntoView {
                 test_id = "wows-dir",
                 value = value,
                 placeholder = t!("ui.settings.wows.directory_hint").into_owned(),
-                invalid = Signal::derive_local(move || shell.settings_drawer.wows_dir_invalid.get()),
+                invalid = Signal::derive_local(move || !setting_faults(shell, Setting::WowsDirectory).is_empty()),
                 commit = commit
             )
             Button(variant = ButtonVariant::Outline, size = ButtonSize::Sm, attr:data-testid = "wows-dir-browse", on:click = browse) {
@@ -1077,7 +1052,8 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
 /// Whether to write a file per battle, in which format, and where.
 ///
 /// The directory is shown rather than typed: a path typed into a field is only checked when it is
-/// left, and one that does not exist reads as working until the first battle fails to write.
+/// left, and one that does not exist reads as working until the first battle fails to write. The
+/// shell looks for it; `faults` reports what it found.
 #[component]
 fn AutoExport(shell: Shell) -> impl IntoView {
     let settings = shell.services().settings;
@@ -1085,30 +1061,6 @@ fn AutoExport(shell: Shell) -> impl IntoView {
         Signal::derive_local(move || settings.read(|settings| settings.replay.auto_export_data) == Some(true));
     let chosen = move || settings.read(|settings| settings.replay.auto_export_format);
     let directory = move || settings.read(|settings| settings.replay.auto_export_path.clone()).unwrap_or_default();
-    // A directory that is not there cannot be written to, and the reader has no other way to find
-    // that out until a battle is lost. Looked for off the UI thread, since a directory on an
-    // offline share can take many seconds to answer.
-    let missing = RwSignal::new_local(false);
-    let looking = StoredValue::new_local(None::<Task>);
-    let checking = RenderEffect::new(move |_| {
-        let directory = directory();
-        if let Some(Some(earlier)) = looking.try_update_value(Option::take) {
-            earlier.cancel();
-        }
-        // Unmarked until the new directory has been looked for.
-        missing.set(false);
-        if directory.is_empty() {
-            return;
-        }
-
-        let task = spawn_local(async move {
-            let present = blocking(move || std::path::Path::new(&directory).is_dir()).await;
-            missing.try_set(!present);
-        });
-        looking.set_value(Some(task));
-    });
-    on_cleanup_local(move || drop(checking));
-
     let shown = move || {
         let directory = directory();
         if directory.is_empty() { t!("ui.settings.not_set").into_owned() } else { directory }
@@ -1163,7 +1115,7 @@ fn AutoExport(shell: Shell) -> impl IntoView {
                         text(
                             class = "wt-settings__clip",
                             attr:data-testid = "settings-auto-export-path",
-                            attr:data-error = move || missing.get().then(String::new)
+                            attr:data-error = move || (!setting_faults(shell, Setting::AutoExport).is_empty()).then(String::new)
                         ) {{shown}}
                     }
                     TooltipContent {{shown}}

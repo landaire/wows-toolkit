@@ -50,7 +50,6 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
     let progress = move || cache.with(|cache| cache.progress.filter(|step| step.total > 0));
     let updates = move || cache.with(|cache| cache.updates.len());
     let repair = move || cache.with(|cache| cache.repair.len());
-    let failure = move || cache.with(|cache| cache.failure.clone());
     let with_base = move |run: fn(Shell, std::path::PathBuf)| {
         UnsyncCallback::new(move |()| {
             if let Some(base) = base() {
@@ -143,11 +142,9 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                     }
                 }
             } else {}
+            // The row's note says how many builds need repair, and why a download failed.
             if move || repair() > 0 {
                 row(class = "wt-settings__control-row") {
-                    text(class = "wt-settings__line wt-settings__line--error", attr:data-testid = "cache-repair-needed") {{move || {
-                        t!("ui.settings.wows.cache.repair_needed", count = repair()).into_owned()
-                    }}}
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Sm,
@@ -163,9 +160,6 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                     }
                 }
             } else {}
-            {move || failure().map(|reason| view! {
-                text(class = "wt-settings__line wt-settings__line--dim wt-settings__line--error", attr:data-testid = "cache-failure") {{reason}}
-            }.into_view())}
         }
     }
 }

@@ -232,7 +232,7 @@ fn a_switch_is_saved_to_the_shared_database() {
     let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
     let mut window = open(Some(Arc::clone(&runtime)), None, HeadlessOptions::new(REVIEW_SIZE));
     // The settings are read on the tokio runtime, in real time rather than the window's clock.
-    let loaded = wait(&mut window, || shell().services().settings.read_untracked(|_| ()).is_some());
+    let loaded = wait(&mut window, |_| shell().services().settings.read_untracked(|_| ()).is_some());
     assert!(loaded, "the settings load");
     let before = shell()
         .services()
@@ -257,7 +257,7 @@ fn a_switch_is_saved_to_the_shared_database() {
             wows_toolkit_config::queries::get_setting::<bool>(&pool, keys::SUPPRESS_P2P_IP_WARNING).await
         })
     };
-    let saved = wait(&mut window, || read() == Some(!before));
+    let saved = wait(&mut window, |_| read() == Some(!before));
     assert!(saved, "the row reads {} once written", !before);
 }
 
@@ -512,7 +512,8 @@ fn the_controls_follow_the_language() {
     assert_eq!(searched, Some(asked), "the search asks in German");
 }
 
-/// An auto-export directory that is not there is marked once it has been looked for.
+/// An auto-export directory that is not there marks the path and its row once it has been looked
+/// for, while exporting is on.
 #[test]
 fn a_missing_auto_export_directory_is_marked() {
     let mut settings = test_settings();
@@ -523,15 +524,66 @@ fn a_missing_auto_export_directory_is_marked() {
     settle(&mut window);
 
     let path = find(&window, "settings-auto-export-path");
+    let row = find(&window, &row_test_id(Setting::AutoExport));
     // The directory is looked for off the UI thread.
-    for _ in 0..80 {
-        if window.by_attribute("data-error", "") == Some(path) {
-            break;
-        }
-        window.advance(Duration::from_millis(50));
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    assert_eq!(window.by_attribute("data-error", ""), Some(path), "the directory is marked");
+    let marked = wait(&mut window, |window| window.attribute(path, "data-error").is_some());
+    assert!(marked, "the directory is marked");
+    assert!(window.attribute(row, "data-error").is_some(), "and so is its row");
+    let note = t!("ui.settings.replay.export_path_missing").into_owned();
+    assert!(window.texts_by_class("wt-settings__note").contains(&note), "whose note says why");
+
+    click(&mut window, "auto-export-data");
+    assert_eq!(window.attribute(row, "data-error"), None, "nothing is lost while exporting is off");
+}
+
+/// A setting in error is marked as a whole, along with its section's button and the gear, until
+/// the error clears.
+#[test]
+fn a_setting_in_error_is_marked_until_the_error_clears() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    let row = find(&window, &row_test_id(Setting::WowsDirectory));
+    let section = find(&window, &category_test_id(SettingsSection::Game));
+    let gear = find(&window, "settings-open");
+    let marks =
+        |window: &HeadlessWindow| [row, section, gear].map(|element| window.attribute(element, "data-error").is_some());
+    assert_eq!(marks(&window), [false; 3], "nothing is marked while the setting works");
+
+    shell().settings_drawer.wows_dir_invalid.set(true);
+    settle(&mut window);
+    assert_eq!(marks(&window), [true; 3], "the row, its section's button and the gear are marked");
+    assert!(window.by_test_id("settings-row-fault").is_some(), "the row's title carries the error icon");
+    let note = t!("ui.messages.wows_dir_invalid").into_owned();
+    assert!(window.texts_by_class("wt-settings__note").contains(&note), "and its note says why");
+    let named = t!("ui.settings.panel.in_error", name = SettingsSection::Game.name()).into_owned();
+    assert_eq!(label(&mut window, &category_test_id(SettingsSection::Game)), Some(named));
+
+    shell().settings_drawer.wows_dir_invalid.set(false);
+    settle(&mut window);
+    assert_eq!(marks(&window), [false; 3], "every mark goes with the error");
+    assert!(window.by_test_id("settings-row-fault").is_none(), "and so does the icon");
+}
+
+/// A Twitch credential Twitch refused, and a paste that held none, each mark the credential's row.
+#[test]
+fn a_refused_twitch_credential_marks_its_row() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    let row = find(&window, &row_test_id(Setting::TwitchToken));
+
+    shell().twitch_refused();
+    settle(&mut window);
+    assert!(window.attribute(row, "data-error").is_some(), "a refused credential marks the row");
+    shell().restart_twitch_poll();
+    settle(&mut window);
+    assert_eq!(window.attribute(row, "data-error"), None, "with no credential stored nothing is refused");
+
+    // Nothing is on the headless window's clipboard, so the paste finds no credential.
+    shell().paste_twitch_token();
+    settle(&mut window);
+    assert!(window.attribute(row, "data-error").is_some(), "a paste that held no credential marks the row");
+    let note = t!("ui.collab.clipboard_empty").into_owned();
+    assert!(window.texts_by_class("wt-settings__note").contains(&note), "and its note says why");
 }
 
 /// A game directory read at startup that holds no install marks the gear once it has been looked
@@ -544,8 +596,8 @@ fn a_startup_game_directory_with_no_install_is_marked() {
     let mut window = open(None, Some(settings), HeadlessOptions::new(REVIEW_SIZE));
     crate::shell::startup::check_wows_dir(shell(), wows_dir);
 
-    let invalid = shell().settings_drawer.wows_dir_invalid;
-    assert!(wait(&mut window, move || invalid.get_untracked()), "the gear is marked");
+    let gear = find(&window, "settings-open");
+    assert!(wait(&mut window, |window| window.attribute(gear, "data-error").is_some()), "the gear is marked");
 }
 
 /// A game directory refused while the startup directory is still being looked for stays marked
@@ -570,16 +622,16 @@ fn a_late_startup_check_leaves_a_later_refusal_marked() {
 }
 
 /// Advances the window in real time until `done` holds, for work on the tokio runtime.
-fn wait(window: &mut HeadlessWindow, mut done: impl FnMut() -> bool) -> bool {
+fn wait(window: &mut HeadlessWindow, mut done: impl FnMut(&HeadlessWindow) -> bool) -> bool {
     for _ in 0..80 {
-        if done() {
+        if done(window) {
             return true;
         }
         window.advance(Duration::from_millis(50));
         std::thread::sleep(Duration::from_millis(25));
     }
 
-    done()
+    done(window)
 }
 
 /// What a shot of the drawer shows.
@@ -597,7 +649,7 @@ fn shoot(desktop: DesktopAppearance, shot: Shot, name: &str) -> PathBuf {
     let options =
         HeadlessOptions { drawing: Drawing::Device, desktop: Some(desktop), ..HeadlessOptions::new(REVIEW_SIZE) };
     let mut window = open(Some(runtime), None, options);
-    let loaded = wait(&mut window, || shell().services().settings.read_untracked(|_| ()).is_some());
+    let loaded = wait(&mut window, |_| shell().services().settings.read_untracked(|_| ()).is_some());
     assert!(loaded, "the settings load");
 
     match shot {

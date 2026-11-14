@@ -300,6 +300,11 @@ impl HeadlessWindow {
         self.find_a11y(|node| node.role() == role && node.label().as_deref() == Some(label)).into_iter().next()
     }
 
+    /// The value of `element`'s attribute `name`, or `None` when it does not carry one.
+    pub fn attribute(&self, element: Element, name: &str) -> Option<String> {
+        self.window().dom().attribute(element.0, AttrName::new(name))
+    }
+
     /// Where `element` is, in device pixels from the window's top-left corner. `None` when it
     /// produced no box.
     pub fn bounds(&self, element: Element) -> Option<Rect<DevicePx, Device>> {

@@ -103,6 +103,7 @@ use crate::shell::replay_index::ReplayIndexJobs;
 use crate::shell::settings::SettingsButtonProps;
 use crate::shell::settings::SettingsDrawerControl;
 use crate::shell::settings::SettingsDrawerProps;
+use crate::shell::settings::watch_auto_export_dir;
 use crate::shell::status_bar::ShellStatusBarProps;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::DirectoryStatsId;
@@ -648,6 +649,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     crate::interaction_tests::capture_shell(shell);
 
     startup::begin(services, shell);
+    watch_auto_export_dir(shell);
     supervision::begin(services);
     shell.tactics.begin(services);
     shell.collab.begin(shell);
