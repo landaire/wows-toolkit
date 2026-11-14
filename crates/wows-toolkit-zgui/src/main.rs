@@ -91,6 +91,8 @@ mod i18n;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+#[cfg(test)]
+mod pool_trace;
 mod preview;
 mod services;
 mod shell;
