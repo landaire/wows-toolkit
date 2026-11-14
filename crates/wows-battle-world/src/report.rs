@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use wows_replays::Rc;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::DamageEvent;
 use wows_replays::analyzer::battle_controller::DeathInfo;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
@@ -98,6 +99,7 @@ pub struct BattleReport {
     hit_history: Vec<ResolvedShotHit>,
     salvos: Vec<SalvoEvent>,
     torpedo_sightings: Vec<TorpedoSighting>,
+    damage_events: HashMap<EntityId, Vec<DamageEvent>>,
     deaths: HashMap<EntityId, GameClock>,
     max_duration: u32,
     played_duration: Option<f32>,
@@ -299,6 +301,16 @@ impl BattleReport {
     /// for why an opposing torpedo appears at its detection, not its launch.
     pub fn torpedo_sightings(&self) -> &[TorpedoSighting] {
         &self.torpedo_sightings
+    }
+
+    /// Every `receiveDamagesOnShip` entry, keyed by aggressor entity id, in
+    /// packet order per aggressor.
+    ///
+    /// The client is only sent this for a victim inside its area of interest,
+    /// so damage to ships far from the recording player, damage over time in
+    /// particular, is missing.
+    pub fn damage_events(&self) -> &HashMap<EntityId, Vec<DamageEvent>> {
+        &self.damage_events
     }
 
     /// When each vehicle died, keyed by victim entity id, from `KillLog`.
@@ -522,6 +534,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let hit_history = std::mem::take(&mut self.world_mut().resource_mut::<HitHistoryLog>().0);
         let salvos = std::mem::take(&mut self.world_mut().resource_mut::<SalvoLog>().0);
         let torpedo_sightings = std::mem::take(&mut self.world_mut().resource_mut::<TorpedoSightingLog>().0);
+        let damage_events = std::mem::take(&mut self.world_mut().resource_mut::<DamageLedger>().0);
 
         BattleReport {
             arena_id,
@@ -555,6 +568,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             hit_history,
             salvos,
             torpedo_sightings,
+            damage_events,
             deaths: death_clock_by_victim,
             max_duration,
             played_duration,
