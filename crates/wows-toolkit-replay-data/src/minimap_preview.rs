@@ -39,6 +39,7 @@ use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
+use wows_replays::game_constants::GameConstants;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -47,6 +48,7 @@ use wowsunpack::vfs::VfsPath;
 use crate::frame::BgraFrame;
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
+use crate::load::decode_constants;
 
 /// A renderer shared between the previews that draw the same map.
 ///
@@ -404,7 +406,8 @@ pub fn bake_from_file(
     // that has since been replaced, and so did `loaded`, so walking again
     // with it would only repeat that. The owner bakes afresh on the next
     // hover, against the cache it holds then.
-    let frames = walk(&replay, &loaded, cancel)?;
+    let constants = decode_constants(&loaded, build.get(), version, game_data);
+    let frames = walk(&replay, &loaded, &constants, cancel)?;
     if track_generation() != started_in {
         return Err(PreviewError::Cancelled);
     }
@@ -482,7 +485,7 @@ pub fn extract_events(
     Ok(wows_replay_insights::timeline::extract_timeline_and_shots(
         &replay,
         loaded.provider(),
-        Some(loaded.base_constants()),
+        Some(&decode_constants(&loaded, build.get(), version, game_data)),
     ))
 }
 
@@ -531,15 +534,15 @@ pub fn bake_track(
     renderer.set_fonts(assets::load_game_fonts(vfs));
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
-    let constants = loaded.base_constants();
+    let constants = decode_constants(&loaded, build.get(), version, game_data);
     let mut session =
-        MergedReplays::new(provider.entity_specs(), provider, constants, session_version, &replay, &merged)
+        MergedReplays::new(provider.entity_specs(), provider, &constants, session_version, &replay, &merged)
             .map_err(PreviewError::UnwalkableBattle)?;
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     // The roster's damage column reads only these scans: without them every
     // player's damage stays at zero for the whole track.
-    let scans = BattleScans::gather(provider, constants, session_version, &replay, &merged);
+    let scans = BattleScans::gather(provider, &constants, session_version, &replay, &merged);
     scans.install(&mut renderer, &session);
     let vehicle_facts = session.vehicle_facts().clone();
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
@@ -700,6 +703,7 @@ fn map_only_frame(canvas: &RgbImage) -> BgraFrame {
 fn walk(
     replay: &ReplayFile,
     loaded: &LoadedGameData,
+    constants: &GameConstants,
     cancel: &AtomicBool,
 ) -> Result<Vec<Vec<DrawCommand>>, PreviewError> {
     let provider = loaded.provider().as_ref();
@@ -712,9 +716,8 @@ fn walk(
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, paint_options());
     renderer.set_fonts(assets::load_game_fonts(vfs));
 
-    let mut session =
-        MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, replay, &[])
-            .map_err(PreviewError::UnwalkableBattle)?;
+    let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
+        .map_err(PreviewError::UnwalkableBattle)?;
     // Tracked, not Untracked: the tracer commands come from `active_shots()`,
     // which stays empty unless shot recording is on.
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);

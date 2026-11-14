@@ -990,15 +990,16 @@ impl TacticsBoard {
             crate::toast::warn(t!("ui.messages.wows_dir_not_set").into_owned(), window, cx);
             return;
         };
-        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
+        let Some((game_data, loaded)) = self.game_data.clone().and_then(|data| {
+            let loaded = data.newest_loaded()?;
+            Some((data, loaded))
+        }) else {
             crate::toast::warn(t!("ui.tactics.scan_needs_game_data").into_owned(), window, cx);
             return;
         };
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         let Some(runtime) = crate::runtime::runtime(cx) else { return };
 
-        let provider = loaded.provider().clone();
-        let constants = loaded.base_constants().clone();
         let known = self.layouts.clone();
         self.scan_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let cancelled = std::sync::Arc::clone(&self.scan_cancelled);
@@ -1013,6 +1014,9 @@ impl TacticsBoard {
         cx.spawn_in(window, async move |this, cx| {
             let walk = cx.background_spawn(async move {
                 let mut found = known;
+                // Resolved off the UI thread: it reads the build's constants files.
+                let constants = wows_toolkit_replay_data::load::loaded_build_constants(&loaded, &game_data);
+                let provider = loaded.provider();
                 let files = replay_files(&dir);
                 let total = files.len();
                 let _ = reports.unbounded_send(ScanProgress { read: 0, total: Some(total) });

@@ -710,7 +710,11 @@ impl Board {
             self.notices.push(BoardNotice::NoReplaysDir);
             return None;
         };
-        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
+        let Some(game_data) = self.game_data.clone() else {
+            self.notices.push(BoardNotice::ScanNeedsGameData);
+            return None;
+        };
+        let Some(loaded) = game_data.newest_loaded() else {
             self.notices.push(BoardNotice::ScanNeedsGameData);
             return None;
         };
@@ -719,8 +723,8 @@ impl Board {
         self.changed();
         Some(ScanJob {
             dir,
-            provider: loaded.provider().clone(),
-            constants: loaded.base_constants().clone(),
+            loaded,
+            game_data,
             known: self.layouts.clone(),
             cancelled: Arc::clone(&self.scan_cancelled),
         })

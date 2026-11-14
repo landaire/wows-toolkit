@@ -16,13 +16,17 @@ use wows_replay_insights::cap_layout::CapLayoutKey;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use crate::load::GameDataCache;
+use crate::load::LoadedGameData;
+use crate::load::loaded_build_constants;
 use crate::tactics::ScanProgress;
 
 /// A walk the board has asked for, to run off the UI thread.
 pub struct ScanJob {
     pub(super) dir: PathBuf,
-    pub(super) provider: Arc<GameMetadataProvider>,
-    pub(super) constants: GameConstants,
+    /// The newest open build, which every replay is read through.
+    pub(super) loaded: Arc<LoadedGameData>,
+    pub(super) game_data: GameDataCache,
     /// What the board already held when the walk was asked for.
     pub(super) known: CapLayoutDb,
     pub(super) cancelled: Arc<AtomicBool>,
@@ -42,6 +46,9 @@ impl ScanJob {
     /// Reads every replay, reporting as it goes. Stops early once the board has gone.
     pub fn run(self, mut report: impl FnMut(ScanProgress)) -> ScanOutcome {
         let mut found = self.known;
+        // Resolved here rather than when the walk was asked for: it reads the
+        // build's constants files.
+        let constants = loaded_build_constants(&self.loaded, &self.game_data);
         let files = replay_files(&self.dir);
         let total = files.len();
         report(ScanProgress { read: 0, total: Some(total) });
@@ -50,7 +57,7 @@ impl ScanJob {
             if self.cancelled.load(Ordering::Relaxed) {
                 break;
             }
-            if let Some(layout) = layout_of(path, &self.provider, &self.constants, &found) {
+            if let Some(layout) = layout_of(path, self.loaded.provider(), &constants, &found) {
                 let kept = layout.clone();
                 if found.insert(layout) {
                     fresh.push(kept);

@@ -999,6 +999,17 @@ pub fn decode_constants(
     merge_decode_constants(loaded, &constants_json, version)
 }
 
+/// The constants the build `loaded` holds decodes with, for a walk over
+/// replays that all read through that one build.
+pub fn loaded_build_constants(loaded: &LoadedGameData, game_data: &GameDataCache) -> GameConstants {
+    match loaded.version() {
+        Some(version) => decode_constants(loaded, loaded.build(), version, game_data),
+        // Versioned constants are looked up by version, so a build that names
+        // none has only its own.
+        None => loaded.base_constants().clone(),
+    }
+}
+
 /// The build's game constants overlaid with its resolved versioned constants.
 fn merge_decode_constants(loaded: &LoadedGameData, constants_json: &Value, version: Version) -> GameConstants {
     let mut constants = loaded.base_constants.clone();
