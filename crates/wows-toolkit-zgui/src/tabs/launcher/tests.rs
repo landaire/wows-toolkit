@@ -40,9 +40,9 @@ use crate::tabs::launcher::model::LauncherModel;
 use crate::tabs::launcher::testing;
 
 /// The shell, open on the Launcher tab, with the tab's own startup held.
-struct LauncherWindow {
-    window: HeadlessWindow,
-    model: LauncherModel,
+pub(crate) struct LauncherWindow {
+    pub(crate) window: HeadlessWindow,
+    pub(crate) model: LauncherModel,
     runtime: Arc<Runtime>,
 }
 
@@ -53,11 +53,14 @@ impl LauncherWindow {
     }
 
     fn open_drawn(drawing: Drawing, desktop: Option<Appearance>, size: WindowSize) -> Self {
+        Self::open_with(HeadlessOptions { drawing, desktop, ..HeadlessOptions::new(size) })
+    }
+
+    pub(crate) fn open_with(options: HeadlessOptions) -> Self {
         let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
         returning_reader(&runtime);
         testing::hold_startup();
 
-        let options = HeadlessOptions { drawing, desktop, ..HeadlessOptions::new(size) };
         let shown = Arc::clone(&runtime);
         let mut window = HeadlessWindow::open(options, move || {
             let runtime = Some(Arc::clone(&shown));
@@ -81,7 +84,7 @@ impl LauncherWindow {
     }
 
     /// Adopts `settings`, with every known game already checked so the tab asks no server.
-    fn adopt(&mut self, settings: LauncherSettings) {
+    pub(crate) fn adopt(&mut self, settings: LauncherSettings) {
         self.model.adopt_quietly(settings);
         for game in wgc_catalog::known_games::known_games() {
             self.model.apply(test_support::game_checked(game.game_id, CatalogCheckState::Ready(fresh_build())));
@@ -89,7 +92,7 @@ impl LauncherWindow {
         self.settle();
     }
 
-    fn settle(&mut self) {
+    pub(crate) fn settle(&mut self) {
         self.window.advance(Duration::from_millis(400));
     }
 
@@ -104,7 +107,7 @@ impl LauncherWindow {
     }
 
     /// Finds `install` with its catalog check already answered, so none is sent.
-    fn found(&mut self, installs: Vec<GameInstall>, catalog: impl Fn(&GameInstall) -> CatalogCheckState) {
+    pub(crate) fn found(&mut self, installs: Vec<GameInstall>, catalog: impl Fn(&GameInstall) -> CatalogCheckState) {
         for install in &installs {
             self.model.apply(test_support::catalog_checked(install.path.clone(), catalog(install)));
         }
@@ -113,7 +116,7 @@ impl LauncherWindow {
     }
 }
 
-fn wgc_install(path: &Path) -> GameInstall {
+pub(crate) fn wgc_install(path: &Path) -> GameInstall {
     GameInstall {
         path: path.to_path_buf(),
         version: Some(wowsunpack::data::Version { major: 14, minor: 3, patch: 0, build: NonZeroU32::new(9_876_543) }),
@@ -124,7 +127,7 @@ fn wgc_install(path: &Path) -> GameInstall {
     }
 }
 
-fn up_to_date() -> CatalogCheckState {
+pub(crate) fn up_to_date() -> CatalogCheckState {
     CatalogCheckState::Ready(LatestBuild {
         chain_type: ChainType::Install,
         parts: vec![(PartName::Client, PartStatus::UpToDate)],
@@ -133,7 +136,7 @@ fn up_to_date() -> CatalogCheckState {
     })
 }
 
-fn update_available() -> CatalogCheckState {
+pub(crate) fn update_available() -> CatalogCheckState {
     CatalogCheckState::Ready(LatestBuild {
         chain_type: ChainType::Install,
         parts: vec![(
@@ -157,7 +160,7 @@ fn fresh_build() -> LatestBuild {
     }
 }
 
-fn session(expires_in: Duration) -> wgc_auth::StoredSession {
+pub(crate) fn session(expires_in: Duration) -> wgc_auth::StoredSession {
     wgc_auth::StoredSession {
         realm: wgc_auth::AccountRealm::Eu,
         account_id: wgc_auth::AccountId::new(1),
@@ -170,7 +173,7 @@ fn session(expires_in: Duration) -> wgc_auth::StoredSession {
     }
 }
 
-fn downloading(done_bytes: u64, total_bytes: u64) -> DownloadState {
+pub(crate) fn downloading(done_bytes: u64, total_bytes: u64) -> DownloadState {
     DownloadState::Running {
         phase: DownloadPhase::Downloading,
         done_bytes,
@@ -180,7 +183,7 @@ fn downloading(done_bytes: u64, total_bytes: u64) -> DownloadState {
 }
 
 /// Settings with Proton configured, so no install asks for it.
-fn configured() -> LauncherSettings {
+pub(crate) fn configured() -> LauncherSettings {
     LauncherSettings {
         proton_binary: Some(PathBuf::from("/opt/proton/proton")),
         proton_prefix: Some(PathBuf::from("/var/lib/wows-prefix")),

@@ -12,7 +12,7 @@ mod options;
 #[cfg(test)]
 pub mod testing;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

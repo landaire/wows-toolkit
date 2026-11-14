@@ -3,12 +3,12 @@
 
 pub mod armor_viewer;
 mod directory_stats;
-mod launcher;
-mod player_tracker;
-mod replays;
-mod search;
-mod stats;
-mod unpacker;
+pub(crate) mod launcher;
+pub(crate) mod player_tracker;
+pub(crate) mod replays;
+pub(crate) mod search;
+pub(crate) mod stats;
+pub(crate) mod unpacker;
 
 use landaire_ui::DockMenuStrings;
 use landaire_ui::TabStripStrings;

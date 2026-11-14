@@ -3,9 +3,9 @@
 //!
 //! The version selector appears only when the install carries more than one build.
 
-mod browser;
-mod model;
-mod pane;
+pub(crate) mod browser;
+pub(crate) mod model;
+pub(crate) mod pane;
 mod queue;
 mod search;
 #[cfg(test)]

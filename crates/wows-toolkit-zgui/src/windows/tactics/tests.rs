@@ -54,9 +54,9 @@ fn BoardUnderTest(runtime: Option<Arc<Runtime>>) -> impl IntoView {
     }
 }
 
-struct BoardWindow {
-    window: HeadlessWindow,
-    model: BoardModel,
+pub(crate) struct BoardWindow {
+    pub(crate) window: HeadlessWindow,
+    pub(crate) model: BoardModel,
     _runtime: Arc<Runtime>,
 }
 
@@ -66,10 +66,16 @@ impl BoardWindow {
     }
 
     fn open_drawn(drawing: Drawing, desktop: Option<Appearance>) -> Self {
+        Self::open_with(HeadlessOptions {
+            drawing,
+            desktop,
+            ..HeadlessOptions::new(WindowSize { width: 1200.0, height: 800.0 })
+        })
+    }
+
+    pub(crate) fn open_with(options: HeadlessOptions) -> Self {
         let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
         let shown = Arc::clone(&runtime);
-        let options =
-            HeadlessOptions { drawing, desktop, ..HeadlessOptions::new(WindowSize { width: 1200.0, height: 800.0 }) };
         let mut window = HeadlessWindow::open(options, move || {
             let runtime = Some(Arc::clone(&shown));
             view! { BoardUnderTest(runtime = runtime) }
@@ -81,7 +87,7 @@ impl BoardWindow {
         Self { window, model, _runtime: runtime }
     }
 
-    fn settle(&mut self) {
+    pub(crate) fn settle(&mut self) {
         self.window.advance(Duration::from_millis(300));
     }
 
@@ -95,7 +101,7 @@ impl BoardWindow {
         self.window.by_attribute("data-chosen", test_id).is_some()
     }
 
-    fn press(&mut self, test_id: &str) {
+    pub(crate) fn press(&mut self, test_id: &str) {
         let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
         self.window.click(element).unwrap_or_else(|err| panic!("{test_id} can be pressed: {err}"));
         self.settle();
@@ -113,7 +119,7 @@ impl BoardWindow {
     }
 }
 
-fn tool_id(tool: BoardTool) -> String {
+pub(crate) fn tool_id(tool: BoardTool) -> String {
     format!("tactics-tool-{}", tool as u8)
 }
 

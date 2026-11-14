@@ -94,6 +94,8 @@ mod interaction_tests;
 mod preview;
 mod services;
 mod shell;
+#[cfg(test)]
+mod site_shots;
 mod tabs;
 mod text_marks;
 mod theme;

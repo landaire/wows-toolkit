@@ -8,7 +8,7 @@
 mod map;
 mod model;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod toolbar;
 
 use std::path::Path;

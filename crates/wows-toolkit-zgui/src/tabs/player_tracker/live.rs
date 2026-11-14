@@ -132,6 +132,9 @@ pub struct LiveModel {
     gate: StoredValue<StatsLookupGate<HeldLookup>, LocalStorage>,
     watch: StoredValue<Option<Task>, LocalStorage>,
     tasks: StoredValue<BattleTasks, LocalStorage>,
+    /// Set by [`Self::seed_over`], after which the watch stays off so no poll replaces the seed.
+    #[cfg(test)]
+    seeded: StoredValue<bool>,
 }
 
 impl LiveModel {
@@ -155,6 +158,8 @@ impl LiveModel {
             gate: StoredValue::new_local(StatsLookupGate::default()),
             watch: StoredValue::new_local(None),
             tasks: StoredValue::new_local(BattleTasks::default()),
+            #[cfg(test)]
+            seeded: StoredValue::new(false),
         }
     }
 
@@ -222,6 +227,10 @@ impl LiveModel {
 
     /// Starts watching `config`'s replays directory, replacing any watch already running.
     pub fn watch(self, services: Services, config: Option<LiveSourceConfig>) {
+        #[cfg(test)]
+        if self.seeded.get_value() {
+            return;
+        }
         if let Some(previous) = self.watch.get_value() {
             previous.cancel();
         }
@@ -513,6 +522,27 @@ impl LiveModel {
             replay_dir: std::env::temp_dir(),
             game_data: GameDataCache::without_install(),
         }));
+        self.checked.set(true);
+        self.live_match.set(Some(live));
+    }
+
+    /// Seeds a battle with its build loaded from `game_data`, so its ships are named. The watch
+    /// and the battle's tasks are stopped first and the watch stays off, so a late poll or scan
+    /// cannot adopt over the seed.
+    #[cfg(test)]
+    pub fn seed_over(self, live: LiveMatch, game_data: GameDataCache) {
+        self.seeded.set_value(true);
+        if let Some(previous) = self.watch.get_value() {
+            previous.cancel();
+        }
+        self.watch.set_value(None);
+        self.tasks.update_value(BattleTasks::cancel);
+
+        let build = live.build.expect("the battle names its build");
+        let data = game_data.get_or_load_build(build).expect("the battle's build loads");
+        self.metadata_build.set_value(Some(build));
+        self.metadata.set(Some(data));
+        self.source.set(Some(LiveSourceConfig { replay_dir: std::env::temp_dir(), game_data }));
         self.checked.set(true);
         self.live_match.set(Some(live));
     }
