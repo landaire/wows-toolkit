@@ -1,322 +1,54 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>WoWs Toolkit — Networking</title>
+        <title>WoWs Toolkit: Networking</title>
+        <meta name="color-scheme" content="dark light" />
+        <link rel="icon" type="image/png" href="../img/favicon.png" />
+        <script>
+            // Apply the stored or system theme before first paint.
+            (function () {
+                var t = localStorage.getItem("wt-theme");
+                if (t !== "light" && t !== "dark") {
+                    t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+                }
+                document.documentElement.dataset.theme = t;
+            })();
+        </script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap"
             rel="stylesheet"
         />
-        <style>
-            * {
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-            }
-
-            :root {
-                --bg: #060608;
-                --bg-raised: #0a0a14;
-                --border: #1a1a30;
-                --text: #5588dd;
-                --text-bright: #bbccff;
-                --text-dim: #2850a0;
-                --accent: #ffaa22;
-                --accent-hover: #ffbb44;
-                --glow-blue: rgba(85, 136, 221, 0.4);
-                --glow-amber: rgba(255, 170, 34, 0.35);
-            }
-
-            body {
-                font-family: "IBM Plex Mono", monospace;
-                background: var(--bg);
-                color: var(--text);
-                line-height: 1.6;
-                -webkit-font-smoothing: antialiased;
-                position: relative;
-            }
-
-            /* CRT scan line overlay */
-            body::after {
-                content: "";
-                position: fixed;
-                inset: 0;
-                z-index: 1;
-                pointer-events: none;
-                background: repeating-linear-gradient(
-                    0deg,
-                    transparent,
-                    transparent 2px,
-                    rgba(0, 0, 0, 0.08) 2px,
-                    rgba(0, 0, 0, 0.08) 4px
-                );
-            }
-
-            a {
-                color: var(--accent);
-                text-decoration: none;
-                transition: text-shadow 0.15s;
-            }
-            a:hover {
-                text-decoration: none;
-                text-shadow: 0 0 8px var(--glow-amber);
-            }
-
-            .container {
-                max-width: 1120px;
-                margin: 0 auto;
-                padding: 0 24px;
-            }
-
-            /* Header */
-            header {
-                border-bottom: 1px solid var(--border);
-                padding: 16px 0;
-            }
-            header .container {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-            .logo {
-                font-weight: 600;
-                font-size: 15px;
-                color: var(--text-bright);
-                letter-spacing: 0.12em;
-                text-transform: uppercase;
-                text-shadow: 0 0 10px var(--glow-blue);
-            }
-            .logo a {
-                color: inherit;
-            }
-            .logo a:hover {
-                text-shadow: 0 0 10px var(--glow-blue);
-            }
-            nav {
-                display: flex;
-                gap: 24px;
-                font-size: 13px;
-            }
-            nav a {
-                color: var(--text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                transition:
-                    color 0.15s,
-                    text-shadow 0.15s;
-            }
-            nav a:hover {
-                color: var(--text);
-                text-shadow: 0 0 8px var(--glow-blue);
-            }
-
-            /* Content */
-            .content {
-                padding: 60px 0;
-                max-width: 760px;
-                margin: 0 auto;
-            }
-            .content h1 {
-                font-size: 28px;
-                font-weight: 600;
-                color: var(--text-bright);
-                margin-bottom: 32px;
-                letter-spacing: 0.06em;
-                text-transform: uppercase;
-                text-shadow:
-                    0 0 20px var(--glow-blue),
-                    0 0 40px rgba(85, 136, 221, 0.2);
-            }
-            .content h2 {
-                font-size: 15px;
-                font-weight: 600;
-                color: var(--accent);
-                margin-top: 40px;
-                margin-bottom: 12px;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                text-shadow: 0 0 10px var(--glow-amber);
-            }
-            .content h2::before {
-                content: "// ";
-            }
-            .content p {
-                font-size: 14px;
-                color: var(--text);
-                line-height: 1.8;
-                margin-bottom: 16px;
-                opacity: 0.85;
-            }
-            .content strong {
-                color: var(--text-bright);
-                font-weight: 500;
-            }
-            .content code {
-                background: var(--bg-raised);
-                border: 1px solid var(--border);
-                padding: 2px 6px;
-                font-size: 13px;
-                color: var(--text-bright);
-                word-break: break-all;
-            }
-            .content pre {
-                background: var(--bg-raised);
-                border: 1px solid var(--border);
-                padding: 16px 20px;
-                font-size: 13px;
-                color: var(--text);
-                line-height: 1.7;
-                overflow-x: auto;
-                margin-bottom: 16px;
-            }
-            .content pre code {
-                background: none;
-                border: none;
-                padding: 0;
-                word-break: normal;
-            }
-            .content .prompt {
-                color: var(--text-dim);
-                user-select: none;
-            }
-            .content .output {
-                color: var(--text-dim);
-            }
-
-            .tldr {
-                background: var(--bg-raised);
-                border: 1px solid var(--border);
-                border-left: 3px solid var(--accent);
-                padding: 16px 20px;
-                margin: 32px 0;
-            }
-            .tldr p {
-                margin-bottom: 0;
-                opacity: 1;
-            }
-            .tldr strong {
-                color: var(--accent);
-            }
-
-            /* Diagram */
-            .diagram {
-                margin: 32px 0;
-                text-align: center;
-            }
-            .diagram svg {
-                max-width: 100%;
-                height: auto;
-            }
-
-            /* Message tables */
-            .msg-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 24px;
-                font-size: 13px;
-            }
-            .msg-table th {
-                text-align: left;
-                font-size: 11px;
-                font-weight: 500;
-                color: var(--text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                padding: 8px 12px;
-                border-bottom: 1px solid var(--border);
-            }
-            .msg-table td {
-                padding: 8px 12px;
-                border-bottom: 1px solid var(--border);
-                vertical-align: top;
-            }
-            .msg-table td:first-child {
-                color: var(--text-bright);
-                white-space: nowrap;
-                font-size: 12px;
-            }
-            .msg-table td:last-child {
-                color: var(--text);
-                opacity: 0.7;
-                font-size: 12px;
-            }
-            .msg-table tr:last-child td {
-                border-bottom: none;
-            }
-            .msg-group {
-                background: var(--bg-raised);
-                border: 1px solid var(--border);
-                padding: 20px;
-                margin-bottom: 20px;
-            }
-            .msg-group h3 {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--accent);
-                margin-bottom: 12px;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-            .msg-direction {
-                font-size: 11px;
-                color: var(--text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                margin-bottom: 12px;
-                display: block;
-            }
-
-            /* Footer */
-            footer {
-                border-top: 1px solid var(--border);
-                padding: 32px 0;
-                text-align: center;
-            }
-            footer nav {
-                justify-content: center;
-                margin-bottom: 16px;
-            }
-            footer nav a {
-                color: var(--text-dim);
-            }
-            footer nav a:hover {
-                color: var(--text);
-            }
-            .legal {
-                font-size: 11px;
-                color: var(--text-dim);
-                opacity: 0.6;
-            }
-
-            /* Responsive */
-            @media (max-width: 700px) {
-                .content h1 {
-                    font-size: 22px;
-                }
-                nav {
-                    gap: 16px;
-                }
-            }
-        </style>
+        <link rel="stylesheet" href="../css/site.css" />
     </head>
-    <body>
-        <header>
-            <div class="container">
-                <span class="logo"><a href="..">WoWs Toolkit</a></span>
-                <nav>
-                    <a href="..#features">Features</a>
-                    <a href="https://github.com/landaire/wows-toolkit">Source</a>
-                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+    <body class="plain">
+        <header class="top">
+            <div class="wrap">
+                <a class="brand" href="../">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="5.5" stroke-dasharray="2 2" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                    </svg>
+                    WoWs Toolkit
+                </a>
+                <nav aria-label="Primary">
+                    <a href="../#features">Features</a>
+                    <a class="optional" href="../#new">Changes</a>
+                    <a href="../#download">Download</a>
+                    <a class="optional" href="https://github.com/landaire/wows-toolkit">Source</a>
+                    <a class="optional js-discord" href="#" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
+                <button class="theme-toggle" type="button" aria-label="Toggle dark mode" data-theme-toggle><svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
             </div>
         </header>
 
-        <div class="container">
-            <div class="content">
-                <h1>How Connections Work</h1>
+        <main class="wrap prose">
+            <h1>How Connections Work</h1>
 
                 <p>
                     Sessions are end-to-end encrypted using
@@ -349,7 +81,7 @@
 
                 <p>
                     Once a direct connection is negotiated, all traffic flows
-                    directly between peers over QUIC&mdash;the relay is no
+                    directly between peers over QUIC. The relay is no
                     longer in the path. If a direct connection cannot be
                     established (e.g. due to restrictive NAT), the relay
                     continues to forward encrypted traffic. In either case, the
@@ -357,7 +89,7 @@
                     because the connection is end-to-end encrypted.
                 </p>
 
-                <div class="tldr">
+                <div class="note">
                     <p>
                         <strong>tl;dr:</strong> Connections are secure and use a
                         central relay to establish the initial connection until a
@@ -367,55 +99,53 @@
                 </div>
 
                 <div class="diagram">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" fill="none">
-                        <!-- Background -->
-                        <rect width="680" height="340" rx="0" fill="#0a120a"/>
+                    <svg class="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" fill="none" role="img" aria-label="Connection diagram">
 
                         <!-- Host box -->
-                        <rect x="40" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060608"/>
-                        <text x="110" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">HOST</text>
-                        <text x="110" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">EndpointId</text>
-                        <text x="110" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">f4683b31...</text>
+                        <rect x="40" y="130" width="140" height="80" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="110" y="162" text-anchor="middle" style="fill: var(--ink)" font-size="13" font-weight="600">HOST</text>
+                        <text x="110" y="182" text-anchor="middle" style="fill: var(--dim)" font-size="10">EndpointId</text>
+                        <text x="110" y="196" text-anchor="middle" style="fill: var(--dim)" font-size="10">f4683b31...</text>
 
                         <!-- Relay box -->
-                        <rect x="260" y="40" width="160" height="60" rx="0" stroke="#287038" fill="#060608"/>
-                        <text x="340" y="67" text-anchor="middle" fill="#ffaa22" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">RELAY SERVER</text>
-                        <text x="340" y="85" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">cannot read traffic</text>
+                        <rect x="260" y="40" width="160" height="60" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="340" y="67" text-anchor="middle" style="fill: var(--accent)" font-size="13" font-weight="600">RELAY SERVER</text>
+                        <text x="340" y="85" text-anchor="middle" style="fill: var(--dim)" font-size="10">cannot read traffic</text>
 
                         <!-- Peer box -->
-                        <rect x="500" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060608"/>
-                        <text x="570" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">PEER</text>
-                        <text x="570" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">joins with</text>
-                        <text x="570" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">session token</text>
+                        <rect x="500" y="130" width="140" height="80" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="570" y="162" text-anchor="middle" style="fill: var(--ink)" font-size="13" font-weight="600">PEER</text>
+                        <text x="570" y="182" text-anchor="middle" style="fill: var(--dim)" font-size="10">joins with</text>
+                        <text x="570" y="196" text-anchor="middle" style="fill: var(--dim)" font-size="10">session token</text>
 
                         <!-- Phase 1: Relay lines (dashed) -->
                         <!-- Host to Relay -->
-                        <line x1="155" y1="130" x2="270" y2="100" stroke="#287038" stroke-width="1" stroke-dasharray="6 4"/>
+                        <line x1="155" y1="130" x2="270" y2="100" style="stroke: var(--dim)" stroke-width="1" stroke-dasharray="6 4"/>
                         <!-- Relay to Peer -->
-                        <line x1="410" y1="100" x2="525" y2="130" stroke="#287038" stroke-width="1" stroke-dasharray="6 4"/>
+                        <line x1="410" y1="100" x2="525" y2="130" style="stroke: var(--dim)" stroke-width="1" stroke-dasharray="6 4"/>
 
                         <!-- Phase 1 label -->
-                        <text x="340" y="128" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">1. initial relay</text>
+                        <text x="340" y="128" text-anchor="middle" style="fill: var(--dim)" font-size="10">1. initial relay</text>
 
                         <!-- Phase 2: Direct connection (solid, bright) -->
-                        <line x1="180" y1="180" x2="500" y2="180" stroke="#33dd55" stroke-width="2"/>
+                        <line x1="180" y1="180" x2="500" y2="180" style="stroke: var(--ok)" stroke-width="2"/>
                         <!-- Arrow head -->
-                        <polygon points="500,180 490,174 490,186" fill="#33dd55"/>
-                        <polygon points="180,180 190,174 190,186" fill="#33dd55"/>
+                        <polygon points="500,180 490,174 490,186" style="fill: var(--ok)"/>
+                        <polygon points="180,180 190,174 190,186" style="fill: var(--ok)"/>
 
                         <!-- Phase 2 label -->
-                        <text x="340" y="202" text-anchor="middle" fill="#33dd55" font-family="IBM Plex Mono, monospace" font-size="10">2. direct P2P (QUIC, encrypted)</text>
+                        <text x="340" y="202" text-anchor="middle" style="fill: var(--ok)" font-size="10">2. direct P2P (QUIC, encrypted)</text>
 
                         <!-- Lock icon (simplified) -->
-                        <rect x="326" y="228" width="28" height="20" rx="3" stroke="#33dd55" stroke-width="1.5" fill="none"/>
-                        <path d="M333 228 V221 A7 7 0 0 1 347 221 V228" stroke="#33dd55" stroke-width="1.5" fill="none"/>
+                        <rect x="326" y="228" width="28" height="20" rx="3" style="stroke: var(--ok)" stroke-width="1.5" fill="none"/>
+                        <path d="M333 228 V221 A7 7 0 0 1 347 221 V228" style="stroke: var(--ok)" stroke-width="1.5" fill="none"/>
 
                         <!-- Encryption label -->
-                        <text x="340" y="268" text-anchor="middle" fill="#33dd55" font-family="IBM Plex Mono, monospace" font-size="10" opacity="0.7">end-to-end encrypted</text>
+                        <text x="340" y="268" text-anchor="middle" style="fill: var(--ok)" font-size="10" opacity="0.7">end-to-end encrypted</text>
 
                         <!-- Token flow -->
-                        <text x="340" y="300" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">token = toolkit-&lt;base64(zlib(EndpointId))&gt;</text>
-                        <text x="340" y="320" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="9" opacity="0.6">shared out-of-band (copy/paste)</text>
+                        <text x="340" y="300" text-anchor="middle" style="fill: var(--dim)" font-size="10">token = toolkit-&lt;base64(zlib(EndpointId))&gt;</text>
+                        <text x="340" y="320" text-anchor="middle" style="fill: var(--dim)" font-size="9" opacity="0.6">shared out-of-band (copy/paste)</text>
                     </svg>
                 </div>
 
@@ -433,7 +163,7 @@
 
                 <div class="msg-group">
                     <h3>Handshake</h3>
-                    <span class="msg-direction">Peer &rarr; Host, then Host &rarr; Peer</span>
+                    <span class="msg-direction">Peer to Host, then Host to Peer</span>
                     <table class="msg-table">
                         <tr>
                             <td>Join / SessionInfo</td>
@@ -448,7 +178,7 @@
 
                 <div class="msg-group">
                     <h3>Session Sync</h3>
-                    <span class="msg-direction">Any peer &harr; All peers</span>
+                    <span class="msg-direction">Any peer and All peers</span>
                     <table class="msg-table">
                         <tr>
                             <td>Cursors &amp; Pings</td>
@@ -471,7 +201,7 @@
 
                 <div class="msg-group">
                     <h3>Replay Streaming</h3>
-                    <span class="msg-direction">Frame source &rarr; All peers</span>
+                    <span class="msg-direction">Frame source to All peers</span>
                     <table class="msg-table">
                         <tr>
                             <td>Frames</td>
@@ -490,7 +220,7 @@
 
                 <div class="msg-group">
                     <h3>Tactics Boards</h3>
-                    <span class="msg-direction">Any peer &harr; All peers</span>
+                    <span class="msg-direction">Any peer and All peers</span>
                     <table class="msg-table">
                         <tr>
                             <td>Board Lifecycle</td>
@@ -505,7 +235,7 @@
 
                 <div class="msg-group">
                     <h3>Host Authority</h3>
-                    <span class="msg-direction">Host / Co-host &rarr; All peers</span>
+                    <span class="msg-direction">Host / Co-host to All peers</span>
                     <table class="msg-table">
                         <tr>
                             <td>Permissions</td>
@@ -525,39 +255,50 @@
                         </tr>
                     </table>
                 </div>
-            </div>
-        </div>
+        </main>
 
         <footer>
-            <div class="container">
+            <div class="wrap">
                 <nav>
                     <a href="https://github.com/landaire/wows-toolkit">GitHub</a>
                     <a href="https://github.com/landaire/wows-toolkit/releases/latest">Releases</a>
+                    <a href="./">Networking</a>
                     <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
-                <p class="legal">
-                    Not affiliated with or endorsed by Wargaming.net. World of
-                    Warships is a trademark of Wargaming.net.
+                <p>
+                    Not affiliated with or endorsed by Wargaming.net. World of Warships is a trademark of
+                    Wargaming.net.
                 </p>
             </div>
         </footer>
-        <script>
-            // Discord invite is ROT13-encoded so scrapers can't harvest the raw
-            // invite from the page source; decoded only on user click.
-            (function () {
-                function rot13(s) {
-                    return s.replace(/[a-z]/gi, function (c) {
-                        var base = c <= "Z" ? 65 : 97;
-                        return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
-                    });
-                }
-                document.querySelectorAll("a.js-discord").forEach(function (a) {
-                    a.addEventListener("click", function (e) {
-                        e.preventDefault();
-                        window.open(rot13(a.dataset.h), "_blank", "noopener,noreferrer");
-                    });
+
+        <script type="module">
+            const root = document.documentElement;
+            const scheme = matchMedia("(prefers-color-scheme: light)");
+            document.querySelector("[data-theme-toggle]").addEventListener("click", () => {
+                const t = root.dataset.theme === "dark" ? "light" : "dark";
+                root.dataset.theme = t;
+                localStorage.setItem("wt-theme", t);
+            });
+            scheme.addEventListener("change", (e) => {
+                localStorage.removeItem("wt-theme");
+                root.dataset.theme = e.matches ? "light" : "dark";
+            });
+
+            // The Discord invite is ROT13-encoded so scrapers cannot harvest it from the
+            // page source. It is decoded only on click.
+            function rot13(s) {
+                return s.replace(/[a-z]/gi, (c) => {
+                    const base = c <= "Z" ? 65 : 97;
+                    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
                 });
-            })();
+            }
+            for (const a of document.querySelectorAll("a.js-discord")) {
+                a.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    window.open(rot13(a.dataset.h), "_blank", "noopener,noreferrer");
+                });
+            }
         </script>
     </body>
 </html>

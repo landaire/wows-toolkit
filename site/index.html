@@ -1,735 +1,445 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>WoWs Toolkit</title>
+        <meta
+            name="description"
+            content="Open-source desktop tool for World of Warships: replay analysis, minimap playback, session stats, player tracking, an armor viewer, and a game file browser."
+        />
+        <meta name="color-scheme" content="dark light" />
+        <link rel="icon" type="image/png" href="img/favicon.png" />
+        <script>
+            // Apply the stored or system theme before first paint.
+            (function () {
+                var t = localStorage.getItem("wt-theme");
+                if (t !== "light" && t !== "dark") {
+                    t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+                }
+                document.documentElement.dataset.theme = t;
+            })();
+        </script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap"
             rel="stylesheet"
         />
-        <style>
-            * {
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-            }
-
-            :root {
-                --bg: #060608;
-                --bg-raised: #0a0a14;
-                --border: #1a1a30;
-                --text: #5588dd;
-                --text-bright: #bbccff;
-                --text-dim: #2850a0;
-                --accent: #ffaa22;
-                --accent-hover: #ffbb44;
-                --glow-blue: rgba(85, 136, 221, 0.4);
-                --glow-amber: rgba(255, 170, 34, 0.35);
-            }
-
-            body {
-                font-family: "IBM Plex Mono", monospace;
-                background: var(--bg);
-                color: var(--text);
-                line-height: 1.6;
-                -webkit-font-smoothing: antialiased;
-                position: relative;
-            }
-
-            /* CRT scan line overlay — sits below screenshots and lightbox */
-            body::after {
-                content: "";
-                position: fixed;
-                inset: 0;
-                z-index: 1;
-                pointer-events: none;
-                background: repeating-linear-gradient(
-                    0deg,
-                    transparent,
-                    transparent 2px,
-                    rgba(0, 0, 0, 0.08) 2px,
-                    rgba(0, 0, 0, 0.08) 4px
-                );
-            }
-
-            a {
-                color: var(--accent);
-                text-decoration: none;
-                transition: text-shadow 0.15s;
-            }
-            a:hover {
-                text-decoration: none;
-                text-shadow: 0 0 8px var(--glow-amber);
-            }
-
-            .container {
-                max-width: 1120px;
-                margin: 0 auto;
-                padding: 0 24px;
-            }
-
-            /* Header */
-            header {
-                border-bottom: 1px solid var(--border);
-                padding: 16px 0;
-            }
-            header .container {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-            .logo {
-                font-weight: 600;
-                font-size: 15px;
-                color: var(--text-bright);
-                letter-spacing: 0.12em;
-                text-transform: uppercase;
-                text-shadow: 0 0 10px var(--glow-blue);
-            }
-            nav {
-                display: flex;
-                gap: 24px;
-                font-size: 13px;
-            }
-            nav a {
-                color: var(--text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                transition:
-                    color 0.15s,
-                    text-shadow 0.15s;
-            }
-            nav a:hover {
-                color: var(--text);
-                text-shadow: 0 0 8px var(--glow-blue);
-            }
-
-            /* Hero — artillery plotting room */
-            .hero {
-                padding: 80px 0 60px;
-                text-align: center;
-                position: relative;
-                overflow: hidden;
-                background:
-                    radial-gradient(
-                        ellipse at 50% 55%,
-                        rgba(85, 136, 221, 0.05) 0%,
-                        transparent 60%
-                    ),
-                    linear-gradient(
-                        rgba(26, 26, 48, 0.25) 1px,
-                        transparent 1px
-                    ),
-                    linear-gradient(
-                        90deg,
-                        rgba(26, 26, 48, 0.25) 1px,
-                        transparent 1px
-                    );
-                background-size:
-                    100% 100%,
-                    48px 48px,
-                    48px 48px;
-                background-position: center, center, center;
-            }
-            /* Range rings + crosshair reticle */
-            .hero::before {
-                content: "";
-                position: absolute;
-                inset: 0;
-                pointer-events: none;
-                background:
-                    /* Vertical crosshair */
-                    linear-gradient(
-                        90deg,
-                        transparent calc(50% - 0.5px),
-                        rgba(85, 136, 221, 0.1) calc(50% - 0.5px),
-                        rgba(85, 136, 221, 0.1) calc(50% + 0.5px),
-                        transparent calc(50% + 0.5px)
-                    ),
-                    /* Horizontal crosshair */
-                    linear-gradient(
-                            0deg,
-                            transparent calc(55% - 0.5px),
-                            rgba(85, 136, 221, 0.1) calc(55% - 0.5px),
-                            rgba(85, 136, 221, 0.1) calc(55% + 0.5px),
-                            transparent calc(55% + 0.5px)
-                        ),
-                    /* Range rings (concentric, fading out) */
-                    radial-gradient(
-                            circle at 50% 55%,
-                            transparent 79px,
-                            rgba(85, 136, 221, 0.06) 80px,
-                            transparent 82px
-                        ),
-                    radial-gradient(
-                        circle at 50% 55%,
-                        transparent 159px,
-                        rgba(85, 136, 221, 0.06) 160px,
-                        transparent 162px
-                    ),
-                    radial-gradient(
-                        circle at 50% 55%,
-                        transparent 249px,
-                        rgba(85, 136, 221, 0.05) 250px,
-                        transparent 252px
-                    ),
-                    radial-gradient(
-                        circle at 50% 55%,
-                        transparent 349px,
-                        rgba(85, 136, 221, 0.04) 350px,
-                        transparent 352px
-                    ),
-                    radial-gradient(
-                        circle at 50% 55%,
-                        transparent 459px,
-                        rgba(85, 136, 221, 0.03) 460px,
-                        transparent 462px
-                    );
-            }
-            .hero > * {
-                position: relative;
-                z-index: 1;
-            }
-            .hero h1 {
-                font-size: 36px;
-                font-weight: 600;
-                color: var(--text-bright);
-                margin-bottom: 12px;
-                letter-spacing: 0.08em;
-                text-transform: uppercase;
-                text-shadow:
-                    0 0 20px var(--glow-blue),
-                    0 0 40px rgba(85, 136, 221, 0.2),
-                    0 0 80px rgba(85, 136, 221, 0.1);
-            }
-            .hero p {
-                font-size: 14px;
-                color: var(--text-dim);
-                max-width: 520px;
-                margin: 0 auto 32px;
-            }
-            .hero-buttons {
-                display: flex;
-                justify-content: center;
-                gap: 12px;
-                margin-bottom: 16px;
-            }
-            .btn {
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                padding: 10px 24px;
-                font-family: inherit;
-                font-size: 14px;
-                font-weight: 500;
-                border-radius: 0;
-                cursor: pointer;
-                transition: all 0.15s;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-            .btn-primary {
-                background: var(--accent);
-                color: #0a0a00;
-                border: 1px solid var(--accent);
-            }
-            .btn-primary:hover {
-                background: var(--accent-hover);
-                box-shadow:
-                    0 0 16px var(--glow-amber),
-                    inset 0 0 16px rgba(255, 170, 34, 0.15);
-                text-decoration: none;
-            }
-            .btn-secondary {
-                background: transparent;
-                color: var(--text);
-                border: 1px solid var(--text-dim);
-            }
-            .btn-secondary:hover {
-                border-color: var(--text);
-                box-shadow: 0 0 12px var(--glow-blue);
-                text-shadow: 0 0 6px var(--glow-blue);
-                text-decoration: none;
-            }
-            .version-tag {
-                font-size: 12px;
-                opacity: 0.6;
-            }
-            .hero-meta {
-                font-size: 12px;
-                color: var(--text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.1em;
-            }
-            .nix-cmd {
-                display: inline-block;
-                margin-top: 20px;
-                padding: 12px 20px;
-                background: var(--bg-raised);
-                border: 1px solid var(--border);
-                font-size: 13px;
-                color: var(--text);
-                text-align: left;
-                line-height: 1.8;
-                text-transform: none;
-                letter-spacing: normal;
-            }
-            .nix-prompt {
-                color: var(--text-dim);
-                user-select: none;
-                margin-right: 6px;
-            }
-
-            /* Screenshots — above the CRT overlay so images render clean */
-            .screenshot {
-                position: relative;
-                z-index: 2;
-                border: 1px solid var(--border);
-                border-radius: 0;
-                overflow: hidden;
-                cursor: pointer;
-                transition:
-                    border-color 0.15s,
-                    box-shadow 0.15s;
-            }
-            .screenshot:hover {
-                border-color: var(--text-dim);
-                box-shadow: 0 0 20px rgba(85, 136, 221, 0.1);
-            }
-            .screenshot img {
-                display: block;
-                width: 100%;
-            }
-            .screenshot--narrow {
-                max-width: 560px;
-                margin: 0 auto;
-            }
-            .screenshot-caption {
-                font-size: 11px;
-                color: var(--text-dim);
-                text-align: center;
-                margin-top: 12px;
-                text-transform: uppercase;
-                letter-spacing: 0.04em;
-            }
-
-            /* Hero screenshot */
-            .hero-screenshot {
-                padding: 0 0 60px;
-            }
-
-            /* Divider */
-            .divider {
-                border: none;
-                border-top: 1px solid var(--border);
-                margin: 0;
-            }
-
-            /* Features */
-            .features {
-                padding: 60px 0;
-            }
-            .features h2 {
-                font-size: 14px;
-                font-weight: 600;
-                color: var(--text-dim);
-                margin-bottom: 40px;
-                text-transform: uppercase;
-                letter-spacing: 0.2em;
-            }
-            .features h2::before {
-                content: "// ";
-            }
-            .feature {
-                margin-bottom: 56px;
-            }
-            .feature:last-child {
-                margin-bottom: 0;
-            }
-            .feature h3 {
-                font-size: 15px;
-                font-weight: 600;
-                color: var(--accent);
-                margin-bottom: 8px;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                text-shadow: 0 0 10px var(--glow-amber);
-            }
-            .feature p {
-                font-size: 13px;
-                color: var(--text);
-                line-height: 1.7;
-                max-width: 640px;
-                margin-bottom: 20px;
-                opacity: 0.7;
-            }
-            .feature .screenshot {
-                margin: 0;
-            }
-
-            /* Specs */
-            .specs {
-                padding: 40px 0 60px;
-            }
-            .specs-grid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 1px;
-                background: var(--border);
-                border: 1px solid var(--border);
-                border-radius: 0;
-                overflow: hidden;
-            }
-            .spec {
-                background: var(--bg-raised);
-                padding: 20px 24px;
-            }
-            .spec-label {
-                font-size: 10px;
-                color: #5580bb;
-                text-transform: uppercase;
-                letter-spacing: 0.12em;
-                margin-bottom: 4px;
-            }
-            .spec-value {
-                font-size: 14px;
-                color: var(--text-bright);
-                font-weight: 500;
-                text-shadow: 0 0 6px var(--glow-blue);
-            }
-
-            /* Footer */
-            footer {
-                border-top: 1px solid var(--border);
-                padding: 32px 0;
-                text-align: center;
-            }
-            footer nav {
-                justify-content: center;
-                margin-bottom: 16px;
-            }
-            footer nav a {
-                color: var(--text-dim);
-            }
-            footer nav a:hover {
-                color: var(--text);
-            }
-            .legal {
-                font-size: 11px;
-                color: var(--text-dim);
-                opacity: 0.6;
-            }
-
-            /* Lightbox */
-            .lightbox {
-                display: none;
-                position: fixed;
-                inset: 0;
-                z-index: 1000;
-                background: rgba(4, 4, 8, 0.92);
-                cursor: zoom-out;
-                align-items: center;
-                justify-content: center;
-                padding: 32px;
-            }
-            .lightbox.open {
-                display: flex;
-            }
-            .lightbox img {
-                max-width: 100%;
-                max-height: 100%;
-                border-radius: 0;
-                border: 1px solid var(--border);
-                box-shadow: 0 0 40px rgba(85, 136, 221, 0.15);
-            }
-
-            /* Responsive */
-            @media (max-width: 700px) {
-                .specs-grid {
-                    grid-template-columns: 1fr;
-                }
-                .hero h1 {
-                    font-size: 28px;
-                }
-                nav {
-                    gap: 16px;
-                }
-            }
-        </style>
+        <link rel="stylesheet" href="css/site.css" />
+        <link rel="modulepreload" href="js/scene.js" />
+        <link rel="preload" href="assets/benchy.bin" as="fetch" crossorigin />
     </head>
     <body>
-        <header>
-            <div class="container">
-                <span class="logo">WoWs Toolkit</span>
-                <nav>
+        <canvas id="scene" aria-hidden="true"></canvas>
+        <div class="graticule" aria-hidden="true"></div>
+
+        <header class="top">
+            <div class="wrap">
+                <a class="brand" href="#top">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="5.5" stroke-dasharray="2 2" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                    </svg>
+                    WoWs Toolkit
+                </a>
+                <nav aria-label="Primary">
                     <a href="#features">Features</a>
-                    <a href="https://github.com/landaire/wows-toolkit"
-                        >Source</a
-                    >
-                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+                    <a class="optional" href="#new">Changes</a>
+                    <a href="#download">Download</a>
+                    <a class="optional" href="https://github.com/landaire/wows-toolkit">Source</a>
+                    <a class="optional js-discord" href="#" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
+                <button class="theme-toggle" type="button" aria-label="Switch to light theme" data-theme-toggle>
+                    <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" /></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+                </button>
             </div>
         </header>
 
-        <section class="hero">
-            <div class="container">
-                <h1>WoWs Toolkit</h1>
-                <p>
-                    Open-source desktop tool for World of Warships. Replay
-                    analysis, stat tracking, armor inspection, and game file
-                    browsing. Runs locally, doesn't modify game files.
-                </p>
-                <div class="hero-buttons">
-                    <a
-                        id="download-btn"
-                        href="https://github.com/landaire/wows-toolkit/releases/latest"
-                        class="btn btn-primary"
-                    >
-                        Download<span
-                            id="download-version"
-                            class="version-tag"
-                        ></span>
-                    </a>
-                    <a
-                        href="https://github.com/landaire/wows-toolkit"
-                        class="btn btn-secondary"
-                        >View Source</a
-                    >
+        <main id="top">
+            <section class="hero" aria-labelledby="hero-title">
+                <div class="wrap">
+                    <div class="hero-copy">
+                        <h1 id="hero-title">WoWs Toolkit</h1>
+                        <p class="lede">An open-source desktop tool for players who want to understand World of Warships in more depth.</p>
+                        <div class="ctas">
+                            <a
+                                id="download-btn"
+                                class="btn primary"
+                                href="https://github.com/landaire/wows-toolkit/releases/latest"
+                                >Download <span id="download-version" class="tag"></span
+                            ></a>
+                            <a class="btn" href="https://github.com/landaire/wows-toolkit">Source</a>
+                        </div>
+                        <p class="meta">Windows, Linux, macOS. MIT license. Runs locally.</p>
+                        <button class="cmd" type="button" aria-label="Copy the command nix run github:landaire/wows-toolkit">nix run github:landaire/wows-toolkit</button>
+                    </div>
                 </div>
-                <p class="hero-meta">
-                    Windows, Linux, macOS &middot; Portable &middot; MIT License
-                </p>
-                <pre
-                    class="nix-cmd"
-                ><span class="nix-prompt">$</span> nix run github:landaire/wows-toolkit</pre>
+            </section>
+
+            <div class="model-ctl" id="model-ctl">
+                <button class="toggle" type="button" data-mode-toggle aria-pressed="false">
+                    <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                    Armor view
+                </button>
             </div>
-        </section>
 
-        <section class="hero-screenshot">
-            <div class="container">
-                <div class="screenshot" onclick="openLightbox(this)">
-                    <img
-                        src="img/replay_inspector.png"
-                        alt="Replay analysis showing post-battle statistics"
-                    />
-                </div>
-                <p class="screenshot-caption">
-                    Post-battle breakdown showing damage, XP, fires, floods,
-                    citadels, and more for every player.
-                </p>
-            </div>
-        </section>
-
-        <hr class="divider container" />
-
-        <section id="features" class="features">
-            <div class="container">
-                <h2>Features</h2>
-
-                <div class="feature">
-                    <h3>Replay Analysis</h3>
-                    <p>
-                        Full post-battle breakdown beyond what the game shows.
-                        Every player's damage dealt and received with type
-                        breakdowns (AP, HE, SAP, fire, flooding, torpedoes).
-                        View other players' builds and captain skills. See
-                        damage numbers the game hides from you. Export match
-                        data.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/replay_inspector.png" alt="Replay inspector showing player stats, ribbons, and builds" />
+            <div class="armor-hud" aria-label="Armor view controls">
+                <div class="card">
+                    <h3>Armor view</h3>
+                    <p class="hint">Drag to orbit. Hover a plate to read it. Click to fire a shell from your viewing direction. The armor values on this model are samples.</p>
+                    <div class="field wide">
+                        <span>Shell</span>
+                        <div class="switch shell-pick" role="group" aria-label="Shell">
+                            <button type="button" data-shell="ap203" aria-pressed="true">203 AP</button>
+                            <button type="button" data-shell="ap460" aria-pressed="false">460 AP</button>
+                            <button type="button" data-shell="he152" aria-pressed="false">152 HE</button>
+                        </div>
                     </div>
+                    <label class="field">
+                        <span>Range</span>
+                        <input id="range-km" type="range" min="4" max="22" step="1" value="12" />
+                        <output id="range-out">12 km</output>
+                    </label>
+                    <label class="field">
+                        <span>Section</span>
+                        <input id="section" type="range" min="0.5" max="1" step="0.01" value="1" />
+                        <output id="section-out">off</output>
+                    </label>
                 </div>
-
-                <div class="feature">
-                    <h3>Replay Renderer</h3>
-                    <p>
-                        Animated minimap playback of any replay. Watch ship
-                        movements, torpedo spreads, and engagements unfold in
-                        real time. Scrub through the timeline, zoom and pan,
-                        or export to video.
-                    </p>
-                    <div class="screenshot screenshot--narrow" onclick="openLightbox(this)">
-                        <img src="img/replay_renderer.png" alt="Replay renderer showing animated minimap playback" />
-                    </div>
+                <div class="card legend-card">
+                    <h3>Thickness, mm</h3>
+                    <div class="legend" id="legend"></div>
+                    <div class="legend-scale"><span>0</span><span>33</span><span>160</span><span>999</span></div>
                 </div>
-
-                <div class="feature">
-                    <h3>Session Stats</h3>
-                    <p>
-                        Track your session performance across games with
-                        win rate, personal rating, per-ship breakdowns,
-                        and charting. Filter by division, game mode, and
-                        game count. Side-by-side overview and charts in
-                        a dockable layout.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/session_stats.png" alt="Session stats showing per-ship performance and charts" />
+                <div class="card result" id="shot-card" hidden>
+                    <div class="result-head">
+                        <span class="label">Last shot</span>
+                        <span class="outcome" id="shot-outcome"></span>
                     </div>
+                    <table class="plates">
+                        <thead>
+                            <tr>
+                                <th>Plate</th>
+                                <th class="num">mm</th>
+                                <th class="num">Angle</th>
+                                <th class="num">Eff.</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="shot-plates"></tbody>
+                    </table>
                 </div>
-
-                <div class="feature">
-                    <h3>Armor Viewer</h3>
-                    <p>
-                        3D armor model inspection for any ship. Color-coded
-                        thickness visualization with detailed layer tooltips.
-                        Simulate artillery impacts at any angle and range
-                        against layered protection&mdash;deck plating, belt
-                        armor, citadel bulkheads, torpedo protection.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/armor_viewer.png" alt="Armor viewer showing color-coded thickness on Montana" />
-                    </div>
-                </div>
-
-                <div class="feature">
-                    <h3>Ballistic Trajectory Analysis</h3>
-                    <p>
-                        Trace shell trajectories through layered armor.
-                        See exactly which plates get hit, whether shells
-                        overmatch, ricochet, or penetrate, with per-plate
-                        angle and velocity breakdowns. AP and HE analysis
-                        side by side.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/armor_trajectory.png" alt="Trajectory analysis showing shell path through armor plates" />
-                    </div>
-                </div>
-
-                <div class="feature">
-                    <h3>Resource Browser</h3>
-                    <p>
-                        Browse and extract game assets from packed IDX/PKG
-                        archives. Filter by path, view metadata, pull out
-                        textures, models, scripts, and config files. For
-                        modders, data miners, and the curious.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/resource_browser.png" alt="Resource browser showing game file tree" />
-                    </div>
+                <div class="card teaser">
+                    <p>Want to see this for every ship? The armor viewer in WoWs Toolkit loads the real armor model of every ship from your game files.</p>
+                    <a class="btn primary" href="https://github.com/landaire/wows-toolkit/releases/latest" data-download>Try it in WoWs Toolkit</a>
                 </div>
             </div>
-        </section>
 
-        <hr class="divider container" />
+            <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
 
-        <section class="specs">
-            <div class="container">
-                <div class="specs-grid">
-                    <div class="spec">
-                        <div class="spec-label">Language</div>
-                        <div class="spec-value">Rust</div>
+            <div class="viewer-overlay" aria-hidden="true">
+                <div class="ruler" id="ruler"></div>
+                <svg class="gizmo" id="gizmo" viewBox="-32 -32 64 64">
+                    <line data-axis="x" x1="0" y1="0" x2="20" y2="0" />
+                    <line data-axis="y" x1="0" y1="0" x2="0" y2="-20" />
+                    <line data-axis="z" x1="0" y1="0" x2="0" y2="20" />
+                    <circle data-axis="x" cx="20" cy="0" r="5.5" /><text data-axis="x" x="20" y="0">X</text>
+                    <circle data-axis="y" cx="0" cy="-20" r="5.5" /><text data-axis="y" x="0" y="-20">Y</text>
+                    <circle data-axis="z" cx="0" cy="20" r="5.5" /><text data-axis="z" x="0" y="20">Z</text>
+                </svg>
+                <div class="dims">Length 60.0 mm, beam 31.0 mm</div>
+            </div>
+
+            <section id="features" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">01</div>
+                        <div>
+                            <h2>Features</h2>
+                            <p>The toolkit reads the replays in your game folder and the game's own data files.</p>
+                        </div>
                     </div>
-                    <div class="spec">
-                        <div class="spec-label">Platform</div>
-                        <div class="spec-value">Windows, Linux, macOS</div>
+
+                    <div class="features">
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Replays</div>
+                                <h3 class="feature-title">Replay inspector</h3>
+                                <p>Post-battle statistics for every player in a replay.</p>
+                                <ul class="ticks">
+                                    <li>Damage dealt and received by type: AP, HE, SAP, fire, flooding, torpedoes</li>
+                                    <li>Spotting damage, potential damage, ribbons, and achievements</li>
+                                    <li>Builds, captain skills, and consumables for both teams</li>
+                                    <li>Damage between each pair of players</li>
+                                    <li>Chat log and match export</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Replay inspector</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/replay-dark.webp" alt="Replay inspector with the player table for both teams" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/replay-light.webp" alt="Replay inspector with the player table for both teams" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Ratings <span class="badge">New</span></div>
+                                <h3 class="feature-title">Battle impact</h3>
+                                <p>Battle impact (BI) rates a player's performance in one battle on the personal rating (PR) scale. Hover either rating to see its breakdown.</p>
+                                <ul class="ticks">
+                                    <li>Shown in the replay table, search results, and stats</li>
+                                    <li>Stored in the replay index with the formula version</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Rating breakdown</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/rating-dark.webp" alt="Rating breakdown hover card over the replay table" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/rating-light.webp" alt="Rating breakdown hover card over the replay table" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature wide reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Renderer</div>
+                                <h3 class="feature-title">Replay renderer</h3>
+                                <p>Animated minimap playback of a replay. The player below is the toolkit's renderer compiled to WebAssembly, playing three and a half minutes of a recorded battle. Change the layers, speed, or position while it plays.</p>
+                                <ul class="ticks">
+                                    <li>Timeline scrubbing and playback speed</li>
+                                    <li>Detection, firing, and radar ranges per ship</li>
+                                    <li>Kill feed, chat, and roster overlays</li>
+                                    <li>Video export</li>
+                                </ul>
+                            </div>
+                            <figure class="shot live" data-live="replay-demo/">
+                                <div class="bar"><i></i><i></i><i></i><span>Replay renderer</span></div>
+                                <div class="live-frame">
+                                    <img class="dark" loading="lazy" src="img/shots/renderer-dark.webp" alt="Minimap playback of a replay" width="1600" height="1000" />
+                                    <img class="light" loading="lazy" src="img/shots/renderer-light.webp" alt="Minimap playback of a replay" width="1600" height="1000" />
+                                    <button class="live-play btn primary" type="button">Run the renderer in your browser</button>
+                                </div>
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal" id="armor">
+                            <div class="feature-copy">
+                                <div class="kicker">Armor</div>
+                                <h3 class="feature-title">Armor and model viewer</h3>
+                                <p>The 3D armor model of any ship, colored by thickness with the game's color scale. Any other model in the game can be opened too, including armored buildings and gun mounts.</p>
+                                <ul class="ticks">
+                                    <li>Shell trajectory through each plate, with overmatch, ricochet, and penetration results</li>
+                                    <li>Penetration checker</li>
+                                    <li>Incoming fire from a replay plotted on the hull</li>
+                                    <li>Camouflage rendering and GLB export</li>
+                                </ul>
+                                <p class="aside">The model at the top of this page has an armor view with sample values. <button class="link" type="button" data-mode-jump="armor">Show it</button></p>
+                            </div>
+                            <figure class="shot views" data-zoom data-view="armor">
+                                <div class="bar">
+                                    <i></i><i></i><i></i>
+                                    <div class="switch small" role="group" aria-label="View">
+                                        <button type="button" data-show="model" aria-pressed="false">Model</button>
+                                        <button type="button" data-show="armor" aria-pressed="true">Armor</button>
+                                    </div>
+                                    <span>Model viewer</span>
+                                </div>
+                                <img class="dark" data-view="model" loading="lazy" src="img/shots/model-dark.webp" alt="Model viewer showing a ship's textured hull" width="1600" height="1000" />
+                                <img class="light" data-view="model" loading="lazy" src="img/shots/model-light.webp" alt="Model viewer showing a ship's textured hull" width="1600" height="1000" />
+                                <img class="dark" data-view="armor" loading="lazy" src="img/shots/armor-dark.webp" alt="Model viewer showing a ship's armor plates colored by thickness" width="1600" height="1000" />
+                                <img class="light" data-view="armor" loading="lazy" src="img/shots/armor-light.webp" alt="Model viewer showing a ship's armor plates colored by thickness" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Stats</div>
+                                <h3 class="feature-title">Session stats</h3>
+                                <p>Win rate, personal rating, damage, and other statistics across a session or a folder of replays.</p>
+                                <ul class="ticks">
+                                    <li>Filters for division, game mode, and number of games</li>
+                                    <li>Per-ship table</li>
+                                    <li>Charts for any statistic</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Session stats</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/stats-dark.webp" alt="Session statistics with per-ship table and chart" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/stats-light.webp" alt="Session statistics with per-ship table and chart" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Players <span class="badge">Redesigned</span></div>
+                                <h3 class="feature-title">Current match and player tracker</h3>
+                                <p>During a battle, the current match view lists every player with their win rate, PR, average damage, and battles, for the whole account or for the ship they are in.</p>
+                                <ul class="ticks">
+                                    <li>Team averages for win rate and PR</li>
+                                    <li>How often you have met each player, and your notes on them</li>
+                                    <li>Players and clans you have met over a chosen time period</li>
+                                    <li>Marks players who may be watching your Twitch stream</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Current match</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/tracker-dark.webp" alt="Current match view with stats for both teams" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/tracker-light.webp" alt="Current match view with stats for both teams" width="1600" height="1000" />
+                            </figure>
+                        </article>
                     </div>
-                    <div class="spec">
-                        <div class="spec-label">Install</div>
-                        <div class="spec-value">Portable</div>
-                    </div>
-                    <div class="spec">
-                        <div class="spec-label">License</div>
-                        <div class="spec-value">MIT</div>
-                    </div>
-                    <div class="spec">
-                        <div class="spec-label">Game Files</div>
-                        <div class="spec-value">Read-only</div>
-                    </div>
-                    <div class="spec">
-                        <div class="spec-label">Updates</div>
-                        <div class="spec-value">In-app</div>
+
+                    <div class="gallery">
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Search</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/search-dark.webp" alt="Search tab with a query and results" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/search-light.webp" alt="Search tab with a query and results" width="1600" height="1000" />
+                            </figure>
+                            <h4>Search</h4>
+                            <p>Search all indexed battles with a query language, for example <code class="mono">outcome:win map:ocean self.damage&gt;=150000</code>.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Unpacker</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/unpacker-dark.webp" alt="Unpacker browsing game archives" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/unpacker-light.webp" alt="Unpacker browsing game archives" width="1600" height="1000" />
+                            </figure>
+                            <h4>Unpacker</h4>
+                            <p>Browse and extract files from the game's packed archives.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Launcher</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/launcher-dark.webp" alt="Launcher showing game installs" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/launcher-light.webp" alt="Launcher showing game installs" width="1600" height="1000" />
+                            </figure>
+                            <h4>Launcher <span class="badge">New</span></h4>
+                            <p>Sign in to Wargaming Game Center, download and install game builds, and start the game. Supports Proton on Linux.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Tactics board</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/tactics-dark.webp" alt="Tactics board with ships and capture points on a map" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/tactics-light.webp" alt="Tactics board with ships and capture points on a map" width="1600" height="1000" />
+                            </figure>
+                            <h4>Tactics board</h4>
+                            <p>Place ships, capture points, and drawings on any map. A <a href="tactics/">browser version</a> is also available.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Listing</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/listing-dark.webp" alt="Replay listing with a minimap hover preview" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/listing-light.webp" alt="Replay listing with a minimap hover preview" width="1600" height="1000" />
+                            </figure>
+                            <h4>Listing previews</h4>
+                            <p>Hover a replay in the listing to see a minimap preview.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Command palette</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/palette-dark.webp" alt="Command palette open over the app" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/palette-light.webp" alt="Command palette open over the app" width="1600" height="1000" />
+                            </figure>
+                            <h4>Command palette</h4>
+                            <p>Ctrl+K opens a command palette for navigation, replays, players, and settings.</p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </section>
+            </section>
+
+            <section id="new" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">02</div>
+                        <div>
+                            <h2>Changes since 1.0</h2>
+                            <p>These are in the <a href="https://github.com/landaire/wows-toolkit/releases">1.1 beta releases</a>.</p>
+                        </div>
+                    </div>
+                    <div class="changes reveal">
+                        <div class="change">
+                            <div class="num">01</div>
+                            <h4>New interface</h4>
+                            <p>A new desktop interface with panels that dock and split, and light and dark themes.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">02</div>
+                            <h4>Launcher</h4>
+                            <p>Sign in to your Wargaming account, update or install the game, and launch it, with safe mode and Proton on Linux.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">03</div>
+                            <h4>Battle impact</h4>
+                            <p>A per-battle rating on the PR scale, shown beside PR in replays, search, and stats. Hover either rating for its breakdown.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">04</div>
+                            <h4>Model viewer</h4>
+                            <p>Open any model in the game, including armored buildings and gun mounts, and export it to GLB with its textures.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">05</div>
+                            <h4>Current match and player tracker</h4>
+                            <p>Redesigned. Current match, players, and clans are panels you can place side by side, and your filters are kept.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">06</div>
+                            <h4>Anonymized names</h4>
+                            <p>Replace every player name and clan tag with a generated one before you share a screenshot or stream.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="download" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">03</div>
+                        <div>
+                            <h2>Download</h2>
+                            <p>Releases are published on GitHub. No account is required.</p>
+                        </div>
+                    </div>
+                    <div class="platforms reveal">
+                        <a class="card platform" data-asset="windows" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">Windows</span><span class="pkg">.msi installer or portable .zip</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" data-asset="macos" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">macOS</span><span class="pkg">.dmg</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" data-asset="linux" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">Linux</span><span class="pkg">Flatpak bundle</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" href="https://github.com/landaire/wows-toolkit">
+                            <span class="os">Nix</span><span class="pkg">nix run github:landaire/wows-toolkit</span><span class="go">Source</span>
+                        </a>
+                    </div>
+                </div>
+            </section>
+        </main>
 
         <footer>
-            <div class="container">
+            <div class="wrap">
                 <nav>
-                    <a href="https://github.com/landaire/wows-toolkit"
-                        >GitHub</a
-                    >
-                    <a
-                        href="https://github.com/landaire/wows-toolkit/releases/latest"
-                        >Releases</a
-                    >
+                    <a href="https://github.com/landaire/wows-toolkit">GitHub</a>
+                    <a href="https://github.com/landaire/wows-toolkit/releases/latest">Releases</a>
+                    <a href="networking/">Networking</a>
                     <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
                 </nav>
-                <p class="legal">
-                    Not affiliated with or endorsed by Wargaming.net. World of
-                    Warships is a trademark of Wargaming.net.
+                <p>
+                    Not affiliated with or endorsed by Wargaming.net. World of Warships is a trademark of
+                    Wargaming.net. Background model: 3DBenchy by Creative Tools, public domain.
                 </p>
             </div>
         </footer>
 
-        <!-- Lightbox overlay -->
-        <div class="lightbox" id="lightbox" onclick="closeLightbox()">
-            <img id="lightbox-img" src="" alt="" />
+        <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" tabindex="-1">
+            <img alt="" />
         </div>
 
-        <script>
-            function openLightbox(el) {
-                const img = el.querySelector("img");
-                if (!img) return;
-                document.getElementById("lightbox-img").src = img.src;
-                document.getElementById("lightbox").classList.add("open");
-            }
-            function closeLightbox() {
-                document.getElementById("lightbox").classList.remove("open");
-            }
-            document.addEventListener("keydown", (e) => {
-                if (e.key === "Escape") closeLightbox();
-            });
-
-            (async () => {
-                try {
-                    const resp = await fetch(
-                        "https://api.github.com/repos/landaire/wows-toolkit/releases/latest",
-                    );
-                    if (!resp.ok) return;
-                    const data = await resp.json();
-                    const tag = data.tag_name;
-                    const el = document.getElementById("download-version");
-                    if (el && tag) el.textContent = tag;
-
-                    // Detect platform and pick the right asset
-                    const ua = navigator.userAgent.toLowerCase();
-                    let asset;
-                    if (ua.includes("mac")) {
-                        asset = data.assets?.find((a) => a.name.endsWith("_macos.dmg"));
-                    } else if (ua.includes("linux")) {
-                        asset = data.assets?.find((a) => a.name.endsWith(".flatpak"));
-                    } else {
-                        asset = data.assets?.find((a) => a.name.endsWith(".msi"))
-                            || data.assets?.find((a) => a.name.endsWith("_windows.zip"));
-                    }
-                    if (asset)
-                        document.getElementById("download-btn").href =
-                            asset.browser_download_url;
-                } catch (e) {}
-            })();
-        </script>
-        <script>
-            // Discord invite is ROT13-encoded so scrapers can't harvest the raw
-            // invite from the page source; decoded only on user click.
-            (function () {
-                function rot13(s) {
-                    return s.replace(/[a-z]/gi, function (c) {
-                        var base = c <= "Z" ? 65 : 97;
-                        return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
-                    });
-                }
-                document.querySelectorAll("a.js-discord").forEach(function (a) {
-                    a.addEventListener("click", function (e) {
-                        e.preventDefault();
-                        window.open(rot13(a.dataset.h), "_blank", "noopener,noreferrer");
-                    });
-                });
-            })();
-        </script>
+        <script type="module" src="js/main.js"></script>
     </body>
 </html>
