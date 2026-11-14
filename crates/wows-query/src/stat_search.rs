@@ -65,6 +65,7 @@ use crate::loadout::ResolvedLoadout;
 use crate::loadout::build_failed;
 use crate::modules::Module;
 use crate::modules::ModuleKind;
+use crate::names::Interpretations;
 use crate::names::search_key;
 use crate::shells::Ammo;
 use crate::shells::Battery;
@@ -1240,9 +1241,15 @@ impl GameData {
     pub fn stat_search(&self, args: &StatSearchArgs) -> Result<StatSearchOutput, QueryError> {
         const CONDITION_RULE: &str = "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count with their triggers unmet, as on the always-on build; health-scaled effects use full health.";
 
-        let conditions: Vec<Condition> =
+        let mut conditions: Vec<Condition> =
             args.conditions.iter().map(resolve_condition).collect::<Result<_, QueryError>>()?;
-        let rank = args.rank.as_ref().map(resolve_rank).transpose()?;
+        let mut rank = args.rank.as_ref().map(resolve_rank).transpose()?;
+        for condition in &mut conditions {
+            condition.qualifier = self.consumable_qualifier(condition.stat, condition.qualifier.take());
+        }
+        if let Some(rank) = &mut rank {
+            rank.qualifier = self.consumable_qualifier(rank.stat, rank.qualifier.take());
+        }
         if conditions.is_empty() && rank.is_none() {
             return Err(QueryError::InvalidArguments { reason: "give at least one condition, or rank" });
         }
@@ -1304,6 +1311,21 @@ impl GameData {
             searched_without_skills,
             unmatched_qualifiers,
         })
+    }
+
+    /// `qualifier` of a consumable stat as the consumable type rows are keyed
+    /// by, when it names one consumable as players write it ("Surveillance
+    /// Radar", "ATWC"); otherwise as given, such as a type itself.
+    fn consumable_qualifier(&self, stat: SearchStat, qualifier: Option<String>) -> Option<String> {
+        let qualifier = qualifier?;
+        if !stat.name().starts_with("consumable.") {
+            return Some(qualifier);
+        }
+
+        match self.resolve_consumable(&qualifier, &mut Interpretations::default()) {
+            Ok(types) if types.len() == 1 => types.into_iter().next(),
+            _ => Some(qualifier),
+        }
     }
 
     /// Ships that meet every condition, fewest requirements first, then in
