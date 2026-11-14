@@ -37,3 +37,29 @@ impl fmt::Display for VideoError {
 }
 
 impl std::error::Error for VideoError {}
+
+/// Why a track file could not be written or read.
+#[cfg(feature = "track-file")]
+#[derive(Debug, thiserror::Error)]
+pub enum TrackFileError {
+    #[error("not a track file")]
+    NotATrackFile,
+    #[error("track file version {} is not the supported version {}", found.get(), supported.get())]
+    UnsupportedVersion { found: crate::track_file::TrackFileVersion, supported: crate::track_file::TrackFileVersion },
+    #[error("track file payload could not be compressed")]
+    Compress(#[source] std::io::Error),
+    #[error("track file payload is not valid zlib")]
+    Decompress(#[source] std::io::Error),
+    #[error("track file payload decompresses to more than {limit} bytes")]
+    PayloadTooLarge { limit: usize },
+    #[error("track file archive is malformed")]
+    Archive(#[source] rkyv::rancor::Error),
+    #[error("track file holds no frames")]
+    NoFrames,
+    #[error("track file holds {frames} frames but {clocks} clocks")]
+    ClockCount { frames: usize, clocks: usize },
+    #[error("track file clock {index} is not finite or runs backwards")]
+    BadClock { index: usize },
+    #[error("track file icon {key} is {width}x{height} but holds {bytes} bytes of RGBA")]
+    IconSize { key: String, width: u32, height: u32, bytes: usize },
+}

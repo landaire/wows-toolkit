@@ -16856,6 +16856,7 @@ dependencies = [
  "ab_glyph",
  "clap",
  "convert_case 0.11.0",
+ "flate2",
  "gettext",
  "gpu-video",
  "image",
@@ -16876,6 +16877,7 @@ dependencies = [
  "roxmltree 0.21.1",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tiny-skia 0.12.0",
  "toml 1.1.6+spec-1.1.0",
  "tracing",
@@ -17141,6 +17143,27 @@ dependencies = [
  "web-time",
  "wows_minimap_renderer",
  "wowsunpack",
+]
+
+[[package]]
+name = "wt-replay-demo"
+version = "1.1.0-beta4"
+dependencies = [
+ "eframe",
+ "egui",
+ "getrandom 0.4.3",
+ "js-sys",
+ "png 0.18.1",
+ "ring",
+ "thiserror 2.0.20",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+ "wows_minimap_renderer",
+ "wows_replays",
+ "wt-collab-egui",
+ "wt-translations",
 ]
 
 [[package]]

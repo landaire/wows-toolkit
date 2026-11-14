@@ -19,6 +19,7 @@ MINIMAP_CPU_DEPS = [
     "//third-party/rust:ab_glyph",
     "//third-party/rust:clap",
     "//third-party/rust:convert_case",
+    "//third-party/rust:flate2",
     "//third-party/rust:gettext",
     "//third-party/rust:image",
     "//third-party/rust:indicatif",
@@ -31,6 +32,7 @@ MINIMAP_CPU_DEPS = [
     "//third-party/rust:roxmltree",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
     "//third-party/rust:tiny-skia",
     "//third-party/rust:toml",
     "//third-party/rust:tracing",
@@ -60,7 +62,7 @@ MINIMAP_DEPS = MINIMAP_CPU_DEPS + os_select(
 # The CPU encoders (openh264, rav1e) are always compiled in; the os_select
 # adds hardware encode on top. The _cpu variant below is exactly this list
 # without it.
-MINIMAP_CPU_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv"]
+MINIMAP_CPU_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv", "track-file"]
 
 MINIMAP_FEATURES = MINIMAP_CPU_FEATURES + os_select(
     macos = ["videotoolbox"],
@@ -74,8 +76,10 @@ MINIMAP_WASM_DEPS = [
     "//crates/wows-replays:wows_replays",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-translations:wt_translations",
+    "//third-party/rust:flate2",
     "//third-party/rust:rkyv",
     "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
     "//third-party/rust:tracing",
 ]
 
@@ -84,7 +88,7 @@ workspace_library(
     crate = "wows_minimap_renderer",
     package = "wows_minimap_renderer",
     version = "0.41.0",
-    features = wasm_select(wasm = ["rkyv"], native = MINIMAP_FEATURES),
+    features = wasm_select(wasm = ["rkyv", "track-file"], native = MINIMAP_FEATURES),
     deps = wasm_select(wasm = MINIMAP_WASM_DEPS, native = MINIMAP_DEPS),
     buildscript = buildscript,
 )

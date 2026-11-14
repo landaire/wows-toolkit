@@ -52,8 +52,9 @@ walkdir = { workspace = true }
 wows-battle-world = { workspace = true }
 # Builds the game-data cache holds, and the auto-dump that writes them.
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
-# The damage-mix kinds take the replay renderer's armament colours.
-wows_minimap_renderer = { workspace = true, features = ["rendering"] }
+# The damage-mix kinds take the replay renderer's armament colours, and the
+# demo exporter writes its track file.
+wows_minimap_renderer = { workspace = true, features = ["rendering", "track-file"] }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "wowssb", "fire-sections"] }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 wows-toolkit-config = { workspace = true }

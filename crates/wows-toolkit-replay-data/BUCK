@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "replay_data_build",
@@ -59,6 +59,16 @@ workspace_library(
     version = "0.1.0",
     buildscript = buildscript,
     deps = REPLAY_DATA_DEPS,
+)
+
+# Writes the track file the site's replay demo plays.
+workspace_binary(
+    name = "export_demo_track_bin",
+    crate = "export_demo_track",
+    package = "wows-toolkit-replay-data",
+    version = "0.1.0",
+    crate_root = "src/bin/export_demo_track.rs",
+    deps = [":wows_toolkit_replay_data"] + REPLAY_DATA_DEPS,
 )
 
 # The heap-sampling build, for a front end built with dhat's allocator.

@@ -114,7 +114,7 @@ buck2 build //:wows_toolkit_egui?release
 
 `-m release` does the same for every target on the command line, which is the form queries take (`buck2 aquery -m release ...`).
 
-Aliases: `wows_toolkit_egui`, `wows_toolkit_gpui`, `wows_toolkit_zgui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`, `wt_web_site`. `buck2 build root//:` builds all of them.
+Aliases: `wows_toolkit_egui`, `wows_toolkit_gpui`, `wows_toolkit_zgui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`, `wt_web_site`, `replay_demo_site`. `buck2 build root//:` builds all of them.
 
 The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). The desktop app aliases name their front end, so `//:wows_toolkit_egui` builds `wows_toolkit`. `build-support/release-tools.json` holds the CLI tool mapping and `scripts/package-tools.*` checks the finished archive against it.
 
@@ -136,6 +136,23 @@ python3 -m http.server -d /tmp/site
 ```
 
 Then open <http://localhost:8000/wows-toolkit/tactics/>. Asset names carry a hash of their contents, so a deploy never serves a stale module. A debug build skips `wasm-opt`.
+
+### The site's replay demo
+
+`wt-replay-demo` plays a baked replay clip in the browser through the same egui renderer the desktop viewer uses. GitHub Pages serves `//:replay_demo_site` under `/wows-toolkit/replay-demo/`, and the demo fetches its clip from `site/assets/replay-demo.bin`. The page can pass `?theme=light` or `?theme=dark`.
+
+```bash
+buck2 build -m release //:replay_demo_site --out site/replay-demo
+python3 -m http.server -d site
+```
+
+The clip is written by `export_demo_track`, which needs a game install that can load the replay's build. `--from` and `--to` are seconds since the battle started, and `--activity` prints how busy each half minute is so you can choose a window. Player names are written as pseudonyms and chat is left out.
+
+```bash
+cargo run -p wows-toolkit-replay-data --bin export_demo_track -- \
+    showcase.wowsreplay /path/to/World_of_Warships site/assets/replay-demo.bin \
+    --from 90 --to 300 --interval 0.25
+```
 
 ### Desktop release channels
 

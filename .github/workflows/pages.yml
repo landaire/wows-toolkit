@@ -48,6 +48,9 @@ jobs:
       - name: Build wt-web WASM app
         run: nix develop --command buck2 build -m release //crates/wt-web:site --out _tactics
 
+      - name: Build replay demo WASM app
+        run: nix develop --command buck2 build -m release //crates/wt-replay-demo:site --out _replay_demo
+
       - name: Check latest stable tag
         id: latest
         run: |
@@ -66,13 +69,18 @@ jobs:
       - name: Assemble deploy directory
         if: steps.latest.outputs.is_latest == 'true'
         run: |
-          mkdir -p _deploy/tactics
+          mkdir -p _deploy/tactics _deploy/replay-demo
           cp -r site/* _deploy/
           if [ ! -f _tactics/index.html ]; then
             echo "::error::The tactics build produced no index.html in _tactics."
             exit 1
           fi
           cp -r _tactics/* _deploy/tactics/
+          if [ ! -f _replay_demo/index.html ]; then
+            echo "::error::The replay demo build produced no index.html in _replay_demo."
+            exit 1
+          fi
+          cp -r _replay_demo/* _deploy/replay-demo/
 
       - name: Setup Pages
         if: steps.latest.outputs.is_latest == 'true'

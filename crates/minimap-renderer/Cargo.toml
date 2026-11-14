@@ -41,6 +41,8 @@ rendering = [
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wows-core/rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
+# The single-file clip format a viewer with no game install plays.
+track-file = ["rkyv", "dep:flate2", "dep:thiserror"]
 vulkan = ["dep:gpu-video", "dep:yuvutils-rs", "rendering"]
 videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
 cpu = ["dep:openh264", "rendering"]
@@ -74,6 +76,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 wows-data-mgr = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 yuvutils-rs = { version = "0.8", optional = true }
 

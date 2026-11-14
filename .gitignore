@@ -10,6 +10,8 @@ buck-out/
 # vendored prelude fails to load with an error that never names the ignore rule.
 /dist/
 crates/wt-web/dist/
+# The replay demo build, copied in for local previews. CI builds it.
+/site/replay-demo/
 .cargo/config.toml
 wows_toolkit.log.*
 .claude/

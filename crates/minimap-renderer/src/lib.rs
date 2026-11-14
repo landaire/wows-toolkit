@@ -25,6 +25,10 @@ pub mod preview;
 #[cfg(feature = "rendering")]
 pub mod renderer;
 pub mod saved_options;
+pub mod toggles;
+#[cfg(feature = "track-file")]
+pub mod track_file;
+pub mod trail;
 #[cfg(feature = "rendering")]
 pub mod video;
 pub mod viewport;

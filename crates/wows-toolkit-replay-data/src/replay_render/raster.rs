@@ -7,7 +7,7 @@ use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
-use wows_minimap_renderer::frame_track::trails_through;
+use wows_minimap_renderer::trail::trails_through;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;

@@ -65,6 +65,7 @@ use crate::draw_command::STATS_RIBBON_ROW_H;
 use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
+use crate::trail::hue_to_rgb;
 
 use crate::HUD_HEIGHT;
 use crate::MINIMAP_SIZE;
@@ -2879,10 +2880,6 @@ fn hp_bar_color(fraction: f32) -> [u8; 3] {
         HP_BAR_LOW_COLOR
     }
 }
-
-/// Convert HSV hue (0-360) to RGB with full saturation and value.
-/// Used for position trail rainbow coloring (240=blue → 0=red).
-use crate::frame_track::hue_to_rgb;
 
 fn species_key(species: &Recognized<Species>) -> Option<String> {
     species.known().map(|s| s.name()).or_else(|| species.unknown().map(String::as_str)).map(String::from)

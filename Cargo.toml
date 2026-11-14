@@ -22,6 +22,7 @@ members = [
     "crates/wt-collab-protocol",
     "crates/wt-collab-egui",
     "crates/wt-web",
+    "crates/wt-replay-demo",
     "crates/wt-translations",
     "crates/wows-replay-insights",
     "crates/wgcheck",
