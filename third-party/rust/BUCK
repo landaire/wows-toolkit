@@ -26,9 +26,9 @@ git_fetch(
 )
 
 git_fetch(
-    name = "gpui-fast-ad75764e51727957.git",
+    name = "gpui-fast-7a4eb61fc7b62a81.git",
     repo = "https://github.com/landaire-contrib/gpui-fast",
-    rev = "4a978514a48e6c4227f06678419b4f3a3dc05a5b",
+    rev = "cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7",
     sub_targets = [
         "gpui_apple",
         "gpui_windows",
@@ -16108,13 +16108,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui",
-    crate_root = "gpui-fast-ad75764e51727957/gpui/src/gpui.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui/src/gpui.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui",
         "CARGO_PKG_AUTHORS": "Nathan Sobo <nathan@zed.dev>:Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast",
@@ -16227,13 +16227,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-apple-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_apple",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_apple/src/gpui_apple.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_apple/src/gpui_apple.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_apple",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_apple",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_apple",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_apple: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-apple",
@@ -16296,13 +16296,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-fast-apple-0.1-build-script-build",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "build_script_build",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_apple/build.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_apple/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_apple",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_apple",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_apple: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-apple",
@@ -16340,19 +16340,19 @@ buildscript_run(
         "font-kit",
         "runtime_shaders",
     ],
-    manifest_dir = ":gpui-fast-ad75764e51727957.git[gpui_apple]",
+    manifest_dir = ":gpui-fast-7a4eb61fc7b62a81.git[gpui_apple]",
     version = "0.1.14",
 )
 
 cargo.rust_library(
     name = "gpui-fast-linux-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_linux",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_linux/src/gpui_linux.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_linux/src/gpui_linux.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_linux",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_linux",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_linux",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_linux: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-linux",
@@ -16427,13 +16427,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-macos-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_macos",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_macos/src/gpui_macos.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_macos/src/gpui_macos.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_macos",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_macos",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_macos",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_macos: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-macos",
@@ -16493,13 +16493,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-macros-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_macros",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_macros/src/gpui_macros.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_macros/src/gpui_macros.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_macros",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_macros",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_macros",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_macros: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-macros",
@@ -16522,13 +16522,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-platform-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_platform",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_platform/src/gpui_platform.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_platform/src/gpui_platform.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_platform",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_platform",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_platform",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_platform: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-platform",
@@ -16580,13 +16580,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-web-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_web",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_web/src/gpui_web.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_web/src/gpui_web.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_web",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_web",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_web",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_web: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-web",
@@ -16636,13 +16636,13 @@ alias(
 
 cargo.rust_library(
     name = "gpui-fast-wgpu-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_wgpu",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_wgpu/src/gpui_wgpu.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_wgpu/src/gpui_wgpu.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_wgpu",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_wgpu",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_wgpu",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_wgpu: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-wgpu",
@@ -16701,13 +16701,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "gpui-fast-windows-0.1",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "gpui_windows",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_windows/src/gpui_windows.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_windows/src/gpui_windows.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "gpui_windows",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_windows",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_windows",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_windows: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-windows",
@@ -16754,13 +16754,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "gpui-fast-windows-0.1-build-script-build",
-    srcs = [":gpui-fast-ad75764e51727957.git"],
+    srcs = [":gpui-fast-7a4eb61fc7b62a81.git"],
     crate = "build_script_build",
-    crate_root = "gpui-fast-ad75764e51727957/gpui_windows/build.rs",
+    crate_root = "gpui-fast-7a4eb61fc7b62a81/gpui_windows/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "gpui-fast-ad75764e51727957/gpui_windows",
+        "CARGO_MANIFEST_DIR": "gpui-fast-7a4eb61fc7b62a81/gpui_windows",
         "CARGO_PKG_AUTHORS": "Longbridge",
         "CARGO_PKG_DESCRIPTION": "gpui_windows: GPUI with gpui-fast rendering and layout optimizations",
         "CARGO_PKG_NAME": "gpui-fast-windows",
@@ -16788,7 +16788,7 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "14",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    manifest_dir = ":gpui-fast-ad75764e51727957.git[gpui_windows]",
+    manifest_dir = ":gpui-fast-7a4eb61fc7b62a81.git[gpui_windows]",
     version = "0.1.14",
 )
 

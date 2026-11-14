@@ -4935,7 +4935,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "accesskit 0.24.1",
  "anyhow",
@@ -5005,7 +5005,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "anyhow",
  "async-task",
@@ -5044,7 +5044,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-linux"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_unix 0.22.1",
@@ -5088,7 +5088,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_macos 0.26.3",
@@ -5129,7 +5129,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macros"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5140,7 +5140,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-platform"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -5156,7 +5156,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-web"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -5185,7 +5185,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-wgpu"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5215,7 +5215,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-windows"
 version = "0.1.14"
-source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#4a978514a48e6c4227f06678419b4f3a3dc05a5b"
+source = "git+https://github.com/landaire-contrib/gpui-fast?branch=wows-toolkit-release#cecfbe81cd539d8f848a79ff7ca1dad2cd6509d7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_windows 0.34.0",
