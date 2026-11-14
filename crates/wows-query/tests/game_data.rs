@@ -614,6 +614,45 @@ fn shell_trait_rows(output: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// A consumable stat's qualifier may name the consumable as players do: the
+/// English name or its initials find the tier 10 battleships that carry
+/// Auxiliary and Torpedo Weaponry Coordination, as its type does.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn consumable_qualifiers_accept_english_names() {
+    let carriers = |qualifier: &str| -> Vec<String> {
+        let output = game()
+            .call_tool(
+                "stat_search",
+                json!({
+                    "rank": { "stat": "consumable.charges", "order": "desc", "qualifier": qualifier, "limit": 25 },
+                    "class": "battleship", "min_tier": 10, "max_tier": 10, "exclude_test_ships": true,
+                }),
+            )
+            .expect("the consumable ranks");
+        let mut ships: Vec<String> = output["ranking"]["ships"]
+            .as_array()
+            .expect("ships is a list")
+            .iter()
+            .map(|ship| ship["ship"].as_str().unwrap_or_default().to_owned())
+            .collect();
+        ships.sort();
+        ships
+    };
+    let by_type = carriers("auxTorpBooster");
+
+    assert_eq!(carriers("Auxiliary and Torpedo Weaponry Coordination"), by_type);
+    assert_eq!(carriers("ATWC"), by_type);
+    insta::assert_snapshot!(by_type.join("\n"), @"
+    T10 Mecklenburg (battleship, Germany, premium)
+    T10 Sete de Setembro (battleship, Pan_America, premium)
+    T10 St. Vincent (battleship, United_Kingdom)
+    T10 Thunderer (battleship, United_Kingdom, premium)
+    T10 Vermont (battleship, USA)
+    T10 Wisconsin (battleship, USA, premium) [replicas: Wisconsin G]
+    ");
+}
+
 /// Destroyers without any anti-submarine weapon are listed apart from the
 /// ranked ships the limit leaves out, with the tiers that meet submarines.
 #[test]

@@ -412,7 +412,7 @@ impl GameData {
     }
 
     /// The consumable types a player-written consumable name refers to.
-    fn resolve_consumable(
+    pub(crate) fn resolve_consumable(
         &self,
         query: &str,
         interpretations: &mut Interpretations,
