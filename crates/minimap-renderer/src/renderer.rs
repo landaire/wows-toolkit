@@ -2461,6 +2461,19 @@ impl<'a> MinimapRenderer<'a> {
         let inventories = controller.consumable_inventories();
         let clock = controller.clock();
 
+        // The recording player's damage comes from receiveDamageStat, as in the
+        // battle report: receiveDamagesOnShip only covers targets inside the
+        // client's area of interest, so it misses fire and flooding on distant
+        // ships.
+        let self_damage_stats = controller.self_damage_stats();
+        let self_damage: Option<f32> = (!self_damage_stats.is_empty()).then(|| {
+            self_damage_stats
+                .iter()
+                .filter(|((_, category), _)| matches!(category.known(), Some(DamageStatCategory::Enemy)))
+                .map(|(_, entry)| entry.total)
+                .sum::<f64>() as f32
+        });
+
         let mut friendly: Vec<RosterRow> = Vec::new();
         let mut enemy: Vec<RosterRow> = Vec::new();
 
@@ -2518,7 +2531,7 @@ impl<'a> MinimapRenderer<'a> {
             // damage events for this entity that have already happened.
             let kills =
                 controller.kills().iter().filter(|k| k.killer == Some(entity_id) && k.clock <= clock).count() as u32;
-            let (damage_dealt, last_damage_clock): (f32, Option<f32>) = self
+            let (observed_damage, last_damage_clock): (f32, Option<f32>) = self
                 .damage_events
                 .get(&entity_id)
                 .map(|events| {
@@ -2531,6 +2544,10 @@ impl<'a> MinimapRenderer<'a> {
                     (sum, last)
                 })
                 .unwrap_or((0.0, None));
+            let damage_dealt = match self_damage {
+                Some(total) if is_self => total,
+                _ => observed_damage,
+            };
             let seconds_since_damage = last_damage_clock.map(|c| (clock.0 - c).max(0.0));
 
             let player_name = self.player_names.get(&entity_id).cloned().unwrap_or_else(|| {
