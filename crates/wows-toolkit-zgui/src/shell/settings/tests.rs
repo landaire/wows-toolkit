@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use landaire_ui::Appearance as DesktopAppearance;
 use landaire_ui::MARK_CLASS;
+use landaire_ui::MotionPreference;
 use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
@@ -470,6 +471,81 @@ fn opening_at_a_setting_brings_it_to_the_top() {
     settle(&mut window);
     settle(&mut window);
     assert!(at_top_of_scroll(&window, &row_test_id(Setting::WowsDirectory)), "at the setting it is about");
+}
+
+/// Opening the drawer at a setting highlights its row for a moment. Opening it there again
+/// highlights the row again: after the highlight has gone, while it is still up, and after the
+/// drawer was shut.
+#[test]
+fn opening_at_a_setting_highlights_its_row_each_time() {
+    let mut window = open_unsaved();
+    let control = shell().settings_drawer;
+    let id = row_test_id(Setting::WowsDirectory);
+    control.open_at(Setting::WowsDirectory);
+    settle(&mut window);
+    let row = find(&window, &id);
+    assert!(window.attribute(row, "data-attention").is_some(), "the row is highlighted");
+    assert!(window.running_animations(row) > 0, "and the highlight fades");
+    window.advance(Duration::from_millis(1000));
+    assert_eq!(window.attribute(row, "data-attention"), None, "the highlight goes after its time");
+
+    control.open_at(Setting::WowsDirectory);
+    window.advance(Duration::from_millis(600));
+    let first = window.attribute(row, "data-attention");
+    assert!(first.is_some(), "a second opening highlights it again");
+    control.open_at(Setting::WowsDirectory);
+    window.advance(Duration::from_millis(100));
+    let second = window.attribute(row, "data-attention");
+    assert!(second.is_some() && second != first, "one while it is up starts the animation over");
+    // Past the end of the earlier highlight, short of the later one's.
+    window.advance(Duration::from_millis(900));
+    assert!(window.attribute(row, "data-attention").is_some(), "and its time over");
+    assert!(window.running_animations(row) > 0, "with the animation still running");
+    window.advance(Duration::from_millis(400));
+    assert_eq!(window.attribute(row, "data-attention"), None);
+
+    control.close();
+    settle(&mut window);
+    control.open_at(Setting::WowsDirectory);
+    settle(&mut window);
+    let row = find(&window, &id);
+    assert!(window.attribute(row, "data-attention").is_some(), "opening the shut drawer there highlights it");
+}
+
+/// Opening the drawer at a setting the search hides clears the search, and brings the setting's
+/// row into view highlighted.
+#[test]
+fn opening_at_a_searched_away_setting_clears_the_search() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    window.type_text("zoom");
+    settle(&mut window);
+    let id = row_test_id(Setting::TwitchToken);
+    assert!(window.by_test_id(&id).is_none(), "the search hides the setting");
+
+    shell().settings_drawer.open_at(Setting::TwitchToken);
+    settle(&mut window);
+    settle(&mut window);
+    let search = find(&window, "settings-search");
+    assert_eq!(window.a11y(search).and_then(|state| state.value).unwrap_or_default(), "", "the search is cleared");
+    assert!(in_view_of_scroll(&window, &id), "the setting is in view");
+    let row = find(&window, &id);
+    assert!(window.attribute(row, "data-attention").is_some(), "and highlighted");
+}
+
+/// Under reduced motion the highlight holds still, and goes after the same time.
+#[test]
+fn under_reduced_motion_the_highlight_holds_still() {
+    let mut window = open_unsaved();
+    shell().appearance.motion.set(MotionPreference::Reduced);
+    shell().settings_drawer.open_at(Setting::WowsDirectory);
+    settle(&mut window);
+    let row = find(&window, &row_test_id(Setting::WowsDirectory));
+    assert!(window.attribute(row, "data-attention").is_some(), "the row is highlighted");
+    assert_eq!(window.running_animations(row), 0, "without moving");
+
+    window.advance(Duration::from_millis(1000));
+    assert_eq!(window.attribute(row, "data-attention"), None, "the highlight goes after its time");
 }
 
 /// The drawer's name follows a change of language.

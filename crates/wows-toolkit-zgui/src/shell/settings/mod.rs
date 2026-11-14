@@ -9,6 +9,8 @@ mod faults;
 pub(crate) mod tests;
 mod zoom_anchor;
 
+use std::time::Duration;
+
 use landaire_ui::DrawerProps;
 use landaire_ui::EscapeClears;
 use landaire_ui::LoadingPlacement;
@@ -34,6 +36,7 @@ use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
@@ -49,6 +52,8 @@ use zgui::view::NodeRef;
 use zgui::view::ScrollBehavior;
 use zgui::view::ScrollTarget;
 use zgui::view::ShowProps;
+use zgui::view::TimeoutHandle;
+use zgui::view::Timers;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -182,11 +187,31 @@ const CSS: &str = css!(
         gap: 4px;
         padding: 10px 12px;
         border-top: 1px solid var(--lui-color-border);
+        --wt-settings-row-ground: transparent;
+        background-color: var(--wt-settings-row-ground);
     }
     .wt-settings__row:first-child { border-top-width: 0; }
     .wt-settings__row[data-error] {
-        background-color: color-mix(in srgb, var(--wt-color-error) 10%, transparent);
+        --wt-settings-row-ground: color-mix(in srgb, var(--wt-color-error) 10%, transparent);
         box-shadow: inset 3px 0 0 var(--wt-color-error);
+    }
+    /* One animation under two names, as long as ATTENTION: a changed name starts it over, so a
+       second landing replays it. */
+    .wt-settings__row[data-attention=\"even\"] { animation: wt-settings-attention-even 1200ms ease-out; }
+    .wt-settings__row[data-attention=\"odd\"] { animation: wt-settings-attention-odd 1200ms ease-out; }
+    [reduced-motion] .wt-settings__row[data-attention] {
+        animation: none;
+        background-color: color-mix(in srgb, var(--lui-color-accent) 25%, var(--wt-settings-row-ground));
+    }
+    @keyframes wt-settings-attention-even {
+        from { background-color: color-mix(in srgb, var(--lui-color-accent) 30%, var(--wt-settings-row-ground)); }
+        35% { background-color: color-mix(in srgb, var(--lui-color-accent) 30%, var(--wt-settings-row-ground)); }
+        to { background-color: var(--wt-settings-row-ground); }
+    }
+    @keyframes wt-settings-attention-odd {
+        from { background-color: color-mix(in srgb, var(--lui-color-accent) 30%, var(--wt-settings-row-ground)); }
+        35% { background-color: color-mix(in srgb, var(--lui-color-accent) 30%, var(--wt-settings-row-ground)); }
+        to { background-color: var(--wt-settings-row-ground); }
     }
     .wt-settings__row-body {
         display: flex;
@@ -243,6 +268,10 @@ const CSS: &str = css!(
 
 /// How wide the drawer is.
 const DRAWER_WIDTH: PanelWidth = PanelWidth(440.0);
+
+/// How long a row the drawer was opened at stays highlighted. The highlight's animation in `CSS`
+/// runs as long.
+const ATTENTION: Duration = Duration::from_millis(1200);
 
 /// A place in the drawer to bring into view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,6 +357,66 @@ impl Default for SettingsDrawerControl {
 /// Names one look at a game directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WowsDirCheck(u64);
+
+/// The highlight on a row the drawer was opened at, taken off again after `ATTENTION`.
+#[derive(Clone, Copy)]
+struct Attention {
+    pulse: RwSignal<Option<Pulse>, LocalStorage>,
+    /// Takes the highlight off. Replaced, and so cancelled, by a later landing.
+    fading: StoredValue<Option<TimeoutHandle>, LocalStorage>,
+    timers: StoredValue<Option<Timers>, LocalStorage>,
+}
+
+impl Attention {
+    /// Called in a component's body, where the window's clock is found.
+    fn new() -> Self {
+        Self {
+            pulse: RwSignal::new_local(None),
+            fading: StoredValue::new_local(None),
+            timers: StoredValue::new_local(Timers::current()),
+        }
+    }
+
+    /// Highlights the row afresh, for `ATTENTION` from now.
+    fn light(self) {
+        let Some(timers) = self.timers.get_value() else { return };
+
+        self.pulse.set(Some(self.pulse.get_untracked().map_or(Pulse::Even, Pulse::next)));
+        let pulse = self.pulse;
+        self.fading.set_value(Some(timers.set_timeout(ATTENTION, move || {
+            pulse.try_set(None);
+        })));
+    }
+
+    /// The highlight's mark on the row, while it has one.
+    fn mark(self) -> Option<String> {
+        self.pulse.get().map(|pulse| pulse.mark().to_owned())
+    }
+}
+
+/// Which of the two names of the highlight's animation a row runs. Flipped by each landing: a
+/// changed name starts the animation over, where the same name carries on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pulse {
+    Even,
+    Odd,
+}
+
+impl Pulse {
+    fn next(self) -> Self {
+        match self {
+            Self::Even => Self::Odd,
+            Self::Odd => Self::Even,
+        }
+    }
+
+    fn mark(self) -> &'static str {
+        match self {
+            Self::Even => "even",
+            Self::Odd => "odd",
+        }
+    }
+}
 
 /// The glyph a section's heading and its button in the strip carry.
 pub const fn section_glyph(section: SettingsSection) -> Glyph {
@@ -452,6 +541,16 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
     });
     on_cleanup_local(move || drop(focusing));
 
+    // A setting the drawer is asked to open at is brought out from under a search that hides it,
+    // and its row then takes the jump.
+    let revealing = RenderEffect::new(move |_| {
+        let Some(SettingsTarget::Setting(setting)) = control.jump.get() else { return };
+        if !query.with_untracked(|query| setting.matches(query)) {
+            typed.set(String::new());
+        }
+    });
+    on_cleanup_local(move || drop(revealing));
+
     let loaded = Memo::new(move |_| {
         services.settings.with_state(|state| match state {
             SettingsState::Loading => SettingsRead::Loading,
@@ -536,10 +635,11 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
     }
 }
 
-/// What the parts of the list share: the rows the search kept, the headings drawn, and the
+/// What the parts of the list share: the search, the rows it kept, the headings drawn, and the
 /// scrolling element.
 #[derive(Clone, Copy)]
 struct ListContext {
+    query: Signal<FilterQuery, LocalStorage>,
     rows: Memo<Vec<Setting>>,
     /// Each drawn section's heading, for which section is at the top.
     headings: StoredValue<Vec<(SettingsSection, NodeRef)>, LocalStorage>,
@@ -562,7 +662,7 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
     });
     let viewport = NodeRef::new();
     let headings = StoredValue::new_local(Vec::new());
-    let list = ListContext { rows, headings, viewport };
+    let list = ListContext { query, rows, headings, viewport };
     provide_local_context(list);
     let anchor = ZoomAnchor::follow(shell, viewport);
     provide_local_context(anchor);
@@ -720,14 +820,17 @@ fn SectionHeading(shell: Shell, section: SettingsSection, first: Signal<bool, Lo
     });
 
     // A jump to this section, or to a setting of it that has no row now (the cache contents
-    // before the cache is measured), lands on the heading.
+    // before the cache is measured), lands on the heading. One the search hides is not taken:
+    // the search is cleared, and the setting's row takes it.
     let wanted = move |target: SettingsTarget| match target {
         SettingsTarget::Section(wanted) => wanted == section,
         SettingsTarget::Setting(setting) => {
-            setting.section() == section && !list.rows.with_untracked(|rows| rows.contains(&setting))
+            setting.section() == section
+                && !list.rows.with_untracked(|rows| rows.contains(&setting))
+                && list.query.with_untracked(|query| setting.matches(query))
         }
     };
-    follow_jump(shell, node, wanted);
+    follow_jump(shell, node, wanted, || {});
 
     view! {
         row(
@@ -746,12 +849,14 @@ fn SectionHeading(shell: Shell, section: SettingsSection, first: Signal<bool, Lo
 }
 
 /// One setting: its name and description, each marked where `query` matched it, the control that
-/// changes it, and the lines about it. A setting with a fault is marked as a whole.
+/// changes it, and the lines about it. A setting with a fault is marked as a whole, and one the
+/// drawer was opened at is highlighted for a moment.
 #[component]
 fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalStorage>) -> impl IntoView {
     let locale = Services::current().locale;
     let node = NodeRef::new();
-    follow_jump(shell, node, move |target| target == SettingsTarget::Setting(setting));
+    let attention = Attention::new();
+    follow_jump(shell, node, move |target| target == SettingsTarget::Setting(setting), move || attention.light());
     let faults = Memo::new(move |_| setting_faults(shell, setting));
     let faulted = Memo::new(move |_| faults.with(|faults| !faults.is_empty()));
 
@@ -760,7 +865,8 @@ fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalSt
             class = "wt-settings__row",
             node_ref = node,
             attr:data-testid = row_test_id(setting),
-            attr:data-error = move || faulted.get().then(String::new)
+            attr:data-error = move || faulted.get().then(String::new),
+            attr:data-attention = move || attention.mark()
         ) {
             row(class = "wt-settings__row-body", attr:data-stacked = setting.stacked().then(String::new)) {
                 column(class = "wt-settings__row-text") {
@@ -812,8 +918,13 @@ fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalSt
 }
 
 /// Scrolls `node` to the top of the list when the drawer is asked to jump to a place `wanted`
-/// says is this one, once the node is laid out.
-fn follow_jump(shell: Shell, node: NodeRef, wanted: impl Fn(SettingsTarget) -> bool + 'static) {
+/// says is this one, once the node is laid out, and then runs `landed`.
+fn follow_jump(
+    shell: Shell,
+    node: NodeRef,
+    wanted: impl Fn(SettingsTarget) -> bool + 'static,
+    landed: impl Fn() + 'static,
+) {
     let jump = shell.settings_drawer.jump;
     let jumping = RenderEffect::new(move |_| {
         let Some(target) = jump.get() else { return };
@@ -823,6 +934,7 @@ fn follow_jump(shell: Shell, node: NodeRef, wanted: impl Fn(SettingsTarget) -> b
 
         node.scroll_to(ScrollTarget::IntoViewStart, ScrollBehavior::Instant);
         jump.set(None);
+        landed();
     });
     on_cleanup_local(move || drop(jumping));
 }
