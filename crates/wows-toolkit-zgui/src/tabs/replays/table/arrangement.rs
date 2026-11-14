@@ -14,7 +14,7 @@ use wows_toolkit_replay_data::columns::StoredArrangement;
 
 /// The settings row the resized widths are kept in, one entry per column in `ReplayColumn::ALL`
 /// order.
-pub const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
+pub const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v3";
 
 /// The settings row the column order and the pinned set are kept in, by column name.
 pub const COLUMN_ARRANGEMENT_KEY: &str = "replay_column_arrangement";

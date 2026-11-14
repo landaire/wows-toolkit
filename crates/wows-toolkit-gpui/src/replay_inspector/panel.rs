@@ -1432,6 +1432,7 @@ impl Render for ReplayPanel {
                 let table = loaded.table.clone();
                 let battle_result = loaded.battle_result;
                 let personal_rating = loaded.table.read(cx).self_personal_rating();
+                let battle_impact = loaded.table.read(cx).self_battle_impact();
                 let team_damage = loaded.table.read(cx).team_damage();
                 let border = cx.theme().border;
 
@@ -1496,6 +1497,7 @@ impl Render for ReplayPanel {
                 // A test ship's own figures stay off the tiles while the table hides them.
                 let own_figures = loaded.own_figures.filter(|_| !self_stats_hidden);
                 let personal_rating = personal_rating.filter(|_| !self_stats_hidden);
+                let battle_impact = battle_impact.filter(|_| !self_stats_hidden);
                 let figures = h_flex()
                     .flex_none()
                     .flex_wrap()
@@ -1503,7 +1505,13 @@ impl Render for ReplayPanel {
                     .gap_2()
                     .px_2()
                     .pb_1()
-                    .children(header_figures::stat_tiles(own_figures, personal_rating.as_ref(), progress, cx))
+                    .children(header_figures::stat_tiles(
+                        own_figures,
+                        personal_rating.as_ref(),
+                        battle_impact.as_ref(),
+                        progress,
+                        cx,
+                    ))
                     .child(header_figures::damage_split(team_damage.0, team_damage.1, cx));
 
                 let header_band = v_flex()
@@ -1598,6 +1606,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![self_row, enemy],
             battle_result: Some(BattleResult::Win(0)),
+            battle_impact_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),
@@ -2277,5 +2286,65 @@ mod tests {
             };
             assert!(!matches!(err, ReplayLoadError::Panicked { .. }), "the later read is its own: {err}");
         });
+    }
+
+    /// A real replay's table with its PR and BI columns, then each rating's
+    /// hover open, and the BI tile's, written to `WT_SHOT_DIR`. Reads the
+    /// replay named by `WT_SHOT_REPLAY`, the game data dumps under
+    /// `WT_SHOT_GAME_DATA` and the expected values in `WT_SHOT_EXPECTED_VALUES`.
+    #[test]
+    #[ignore = "reads a replay and game data from the machine and draws on the graphics device"]
+    fn a_real_replays_ratings_render_with_their_hovers() {
+        use std::time::Duration;
+
+        use gpui_kit::AppContext as _;
+        use wows_toolkit_replay_data::load::GameDataCache;
+        use wows_toolkit_replay_data::load::parse_replay;
+
+        use super::header_figures::BI_TILE_ID;
+        use crate::shot_support;
+
+        let variable = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is set"));
+        let cache = GameDataCache::without_install().with_cache_dir(&variable("WT_SHOT_GAME_DATA"));
+        let mut table = PersonalRatingData::new();
+        let bytes = std::fs::read(variable("WT_SHOT_EXPECTED_VALUES")).expect("the expected values read");
+        table.load_from_bytes(&bytes).expect("the expected values parse");
+        let table = Arc::new(table);
+        let parsed = parse_replay(std::path::Path::new(&variable("WT_SHOT_REPLAY")), &cache, Some(&table))
+            .expect("the replay parses");
+        let self_row = parsed.model.rows.iter().find(|row| row.is_self).expect("the replay has a self row");
+        assert!(self_row.battle_impact.is_some(), "the recording reached the battle's end");
+
+        let mut cx = shot_support::headless_app();
+        let (any, panel) = shot_support::open(&mut cx, size(px(1700.), px(950.)), |window, cx| {
+            cx.new(|cx| {
+                let mut panel = ReplayPanel::loaded_for_test(model_at_expected_values(), Some(table), window, cx);
+                panel.columns = wows_toolkit_replay_data::columns::default_columns(&Default::default());
+                panel.apply_result(Ok(parsed), window, cx);
+                panel
+            })
+        });
+        shot_support::save(&mut cx, any, "replay-table-ratings");
+
+        let player_table = cx
+            .update(|cx| match &panel.read(cx).state {
+                super::LoadState::Loaded(loaded) => Some(loaded.table.clone()),
+                _ => None,
+            })
+            .expect("the replay loaded");
+        for (column, name) in
+            [(ReplayColumn::BattleImpact, "replay-bi-hover"), (ReplayColumn::PersonalRating, "replay-pr-hover")]
+        {
+            let id = cx
+                .update(|cx| player_table.read(cx).self_rating_cell_for_test(column))
+                .expect("the self row is listed");
+            cx.update_window(any, |_, window, cx| window.hover(id, cx)).expect("the window is open");
+            shot_support::settle(&mut cx, any, Duration::from_millis(1000));
+            shot_support::save(&mut cx, any, name);
+        }
+
+        cx.update_window(any, |_, window, cx| window.hover(BI_TILE_ID, cx)).expect("the window is open");
+        shot_support::settle(&mut cx, any, Duration::from_millis(1000));
+        shot_support::save(&mut cx, any, "replay-bi-tile-hover");
     }
 }

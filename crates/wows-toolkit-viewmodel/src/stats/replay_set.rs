@@ -123,6 +123,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 

@@ -99,7 +99,9 @@ use wows_toolkit_viewmodel::listing_row::hover_facts;
 use wows_toolkit_viewmodel::listing_row::listed_row_identity;
 use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
@@ -144,6 +146,8 @@ struct LeafInfo {
     hover: Rc<Vec<HoverFact>>,
     /// The recording player's rating in this battle, as the index scored it.
     personal_rating: Option<PersonalRatingResult>,
+    /// The recording player's battle impact, as the index scored it.
+    battle_impact: Option<f64>,
 }
 
 /// Writes `paths` to the clipboard, one per line.
@@ -1613,8 +1617,9 @@ fn node_to_tree_item(
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
             let under = vec![path.clone()];
-            let personal_rating =
-                summaries.get(&path).and_then(|summary| summary.self_pr).map(PersonalRatingResult::new);
+            let summary = summaries.get(&path);
+            let personal_rating = summary.and_then(|summary| summary.self_pr).map(PersonalRatingResult::new);
+            let battle_impact = summary.and_then(|summary| summary.self_bi);
             let leaf = LeafInfo {
                 path,
                 map_name,
@@ -1624,6 +1629,7 @@ fn node_to_tree_item(
                 in_division,
                 hover,
                 personal_rating,
+                battle_impact,
             };
             leaf_info.insert(id.clone(), leaf);
             (TreeItem::new(id, label), under)
@@ -1652,25 +1658,32 @@ fn result_edge(outcome: Option<MatchOutcome>) -> impl IntoElement {
     div().flex_none().w(WIDTH).h_full().when_some(outcome.and_then(outcome_color), |edge, color| edge.bg(color))
 }
 
-/// The recording player's rating in a battle, in its band's colour over a
-/// faint tint of it, as the replay header and the player table colour it.
-fn personal_rating_chip(ix: usize, rating: &PersonalRatingResult) -> impl IntoElement {
-    let mut tint = resolve_color(ColorRole::PrTierTint(rating.category));
+/// A rating of the recording player's in a battle, after its short name, in
+/// its band's colour over a faint tint of it, as the replay header and the
+/// player table colour it.
+fn rating_chip(
+    id: (&'static str, usize),
+    short: String,
+    value: f64,
+    category: PersonalRatingCategory,
+) -> impl IntoElement {
+    let mut tint = resolve_color(ColorRole::PrTierTint(category));
     tint.a = f32::from(personal_rating::CHIP_TINT_ALPHA) / 255.;
-    let shown = format!("{:.0}", rating.pr);
+    let shown = format!("{value:.0}");
 
-    crate::ui::tabular(div())
-        .id(("replay-row-pr", ix))
+    crate::ui::tabular(h_flex())
+        .id(id)
         .test_support()
-        .aria_label(shown.clone())
+        .aria_label(format!("{short} {shown}"))
         .flex_none()
+        .gap_1()
         .px_1()
         .rounded(px(2.))
         .bg(tint)
         .text_xs()
-        .font_weight(FontWeight::BOLD)
-        .text_color(resolve_color(ColorRole::PrTier(rating.category)))
-        .child(shown)
+        .text_color(resolve_color(ColorRole::PrTier(category)))
+        .child(short)
+        .child(div().font_weight(FontWeight::BOLD).child(shown))
 }
 
 /// The tag on a row the watcher has listed and the reader not yet opened.
@@ -1770,8 +1783,24 @@ fn render_browser_item(
             row.child(crate::icons::icon(DIVISION_GLYPH).text_color(gpui_kit::rgb(crate::theme::semantic().division)))
         })
         .when(arrived.is_some(), |row| row.child(new_tag(ix)))
+        .when(leaf.is_some_and(|leaf| leaf.personal_rating.is_some() || leaf.battle_impact.is_some()), |row| {
+            row.child(div().flex_1())
+        })
         .when_some(leaf.and_then(|leaf| leaf.personal_rating.as_ref()), |row, rating| {
-            row.child(div().flex_1()).child(personal_rating_chip(ix, rating))
+            row.child(rating_chip(
+                ("replay-row-pr", ix),
+                t!("ui.search.column.pr").into_owned(),
+                rating.pr,
+                rating.category,
+            ))
+        })
+        .when_some(leaf.and_then(|leaf| leaf.battle_impact), |row, bi| {
+            row.child(rating_chip(
+                ("replay-row-bi", ix),
+                t!("ui.search.column.bi").into_owned(),
+                bi,
+                BiStats::category(bi),
+            ))
         });
 
     let mut lines = v_flex().flex_1().justify_center().overflow_hidden().child(identity_el);
@@ -2407,7 +2436,7 @@ mod tests {
         });
     }
 
-    /// A row the index rated carries a chip with that rating; a row it did not
+    /// A row the index rated carries a chip with each rating; a row it did not
     /// rate has none. Only a known outcome gets a coloured edge.
     #[gpui_kit::test]
     fn a_rated_row_carries_its_rating_and_outcome(cx: &mut gpui_kit::TestAppContext) {
@@ -2416,13 +2445,14 @@ mod tests {
         use wows_toolkit_config::index::rows::MatchOutcome;
         use wows_toolkit_config::index::rows::RowSummary;
 
-        let summary = |outcome: MatchOutcome, self_pr: Option<f64>| RowSummary {
+        let summary = |outcome: MatchOutcome, self_pr: Option<f64>, self_bi: Option<f64>| RowSummary {
             outcome,
             self_damage: Some(50_000),
             self_kills: Some(1),
             self_survived: Some(true),
             self_pr,
             rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
+            self_bi,
             division_id: None,
             division_mates: Vec::new(),
             results_available: true,
@@ -2436,8 +2466,8 @@ mod tests {
 
         cx.update(|cx| {
             browser.update(cx, |browser, cx| {
-                browser.summaries.insert(rated.clone(), summary(MatchOutcome::Win, Some(1650.4)));
-                browser.summaries.insert(unrated.clone(), summary(MatchOutcome::Unknown, None));
+                browser.summaries.insert(rated.clone(), summary(MatchOutcome::Win, Some(1650.4), Some(1210.0)));
+                browser.summaries.insert(unrated.clone(), summary(MatchOutcome::Unknown, None, None));
                 browser.seed_listing_for_test(rated.clone(), cx);
                 browser.seed_listing_for_test(unrated.clone(), cx);
 
@@ -2450,6 +2480,8 @@ mod tests {
                 let rating = rated.personal_rating.expect("the index rated the battle");
                 assert_eq!(format!("{:.0}", rating.pr), "1650");
                 assert!(unrated.personal_rating.is_none(), "an unrated battle has no chip");
+                assert_eq!(rated.battle_impact, Some(1210.0));
+                assert_eq!(unrated.battle_impact, None, "an unrated battle has no BI chip");
 
                 assert!(super::outcome_color(rated.outcome).is_some(), "a win has an edge");
                 assert!(super::outcome_color(unrated.outcome).is_none(), "an unknown outcome has none");

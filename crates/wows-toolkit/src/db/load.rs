@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+use wows_replay_insights::battle_impact::BattleImpactVersion;
 use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
@@ -233,6 +234,12 @@ async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), 
             is_div: row.is_div,
             match_group: row.match_group,
             achievements,
+            // A rating from another formula revision would sit beside current
+            // ones as if comparable; it reads as unrated until re-recorded.
+            battle_impact: row
+                .battle_impact
+                .filter(|_| row.battle_impact_version == Some(i64::from(BattleImpactVersion::CURRENT.0)))
+                .map(|bi| bi.round() as i64),
         });
     }
 
@@ -508,6 +515,8 @@ mod tests {
     use wows_toolkit_viewmodel::player_tracker::tracked;
     use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 
+    use crate::data::session_stats::PerGameStat;
+    use crate::tab_state::TabState;
     use crate::ui::player_tracker::PlayerTracker;
 
     fn runtime() -> Arc<tokio::runtime::Runtime> {
@@ -660,5 +669,49 @@ mod tests {
             assert!(left.is_none(), "the blob is gone, so the next launch has nothing to import");
             pool.close().await;
         });
+    }
+
+    /// The periodic save rewrites the whole table, so a game's BI has to be
+    /// in what it writes for the next launch to read it back.
+    #[test]
+    fn a_saved_session_game_keeps_its_battle_impact() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db_path = directory.path().join("session.db");
+
+        let game = |game_time: &str, battle_impact: Option<i64>| PerGameStat {
+            ship_name: "Vermont".to_owned(),
+            ship_id: 1u64.into(),
+            game_time: game_time.to_owned(),
+            sort_key: game_time.to_owned(),
+            player_id: 1,
+            damage: 100_000,
+            spotting_damage: 0,
+            frags: 2,
+            raw_xp: 2000,
+            base_xp: 2000,
+            is_win: true,
+            is_loss: false,
+            is_draw: false,
+            is_div: false,
+            match_group: "pvp".to_owned(),
+            achievements: Vec::new(),
+            battle_impact,
+        };
+        let saved = TabState::default();
+        saved.persisted.write().session_stats.games =
+            vec![game("2026-02-13 14:00:00", Some(1432)), game("2026-02-13 15:00:00", None)];
+
+        let mut loaded = TabState::default();
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            crate::db::migrate_ron::save_tab_state_to_db(&pool, &saved).await.expect("the save lands");
+            super::load_session_stats(&pool, &mut loaded).await.expect("the games read back");
+            pool.close().await;
+        });
+
+        let read: Vec<Option<i64>> =
+            loaded.persisted.read().session_stats.games.iter().map(|game| game.battle_impact).collect();
+        assert_eq!(read, vec![Some(1432), None]);
     }
 }

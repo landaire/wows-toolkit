@@ -17,6 +17,8 @@ use wows_replays::types::TeamId;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::parse_replay;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
@@ -58,7 +60,9 @@ use super::ReplayPanelProps;
 use super::TableSlot;
 use super::apply_result;
 use super::export_extension;
+use super::figures::BI_TILE_ID;
 use super::figures::PR_TILE_ID;
+use super::figures::battle_impact_label;
 use super::figures::personal_rating_label;
 use super::loaded_from_model;
 use super::write_export;
@@ -66,6 +70,7 @@ use crate::shell::Shell;
 use crate::shell::ShellHarnessProps;
 use crate::tabs::replays::player_table_slot;
 use crate::tabs::replays::table::PlayerDetailCx;
+use crate::tabs::replays::table::tests::sample_battle_impact;
 
 thread_local! {
     /// The battle the next panel built on this thread shows instead of reading its replay.
@@ -89,6 +94,7 @@ fn model_at_expected_values() -> ReplayReportModel {
         self_team: TeamId::from(0i64),
         rows: vec![self_row, enemy],
         battle_result: Some(BattleResult::Win(0)),
+        battle_impact_withheld: false,
         columns: ReplayColumn::ALL.to_vec(),
         map: "Ocean".to_string(),
         chat: Vec::new(),
@@ -280,6 +286,7 @@ fn a_replay_with_no_rating_table_shows_no_pr_badge() {
     let Opened { window } =
         open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
     assert!(window.by_test_id(PR_TILE_ID).is_none());
+    assert!(window.by_test_id(BI_TILE_ID).is_none(), "a battle without a battle impact has no tile");
     assert!(window.by_test_id("replay-damage-tile").is_some(), "the other figures are shown");
 }
 
@@ -306,6 +313,22 @@ fn an_unrated_battle_shows_a_dash_in_place_of_the_pr_badge() {
     window.hover(tile).expect("the tile takes the pointer");
     window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
     assert_eq!(window.texts_by_class("lui-tooltip"), [hover]);
+}
+
+/// The BI tile reads as the self row's battle impact and lists its parts on hover.
+#[test]
+fn the_bi_badge_reports_the_self_rows_battle_impact_and_explains_it() {
+    let mut model = rated();
+    let battle_impact = sample_battle_impact(1_480.0);
+    let expected = battle_impact_label(&battle_impact);
+    model.rows[0].battle_impact = Some(battle_impact);
+    let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
+
+    let tile = window.by_test_id(BI_TILE_ID).expect("the BI tile is shown");
+    assert_eq!(window.a11y(tile).and_then(|state| state.label), Some(expected));
+    window.hover(tile).expect("the tile has a box");
+    window.advance(Duration::from_millis(800));
+    assert!(window.by_test_id("rating-bi-hover").is_some(), "the hover lists the parts");
 }
 
 /// A rating table that lands after the battle is read still rates it.
@@ -508,6 +531,64 @@ fn the_replay_panel_renders_in_dark_and_light() {
         let path = crate::interaction_tests::save_shot(&mut window, name);
         println!("{}", path.display());
     }
+}
+
+/// A real replay's panel with the PR and BI columns, then each rating's hover open, written to
+/// `target/zgui-shots`. Reads the replay named by `WT_SHOT_REPLAY`, the game data dumps under
+/// `WT_SHOT_GAME_DATA` and the expected values in `WT_SHOT_EXPECTED_VALUES`.
+#[test]
+#[ignore = "reads a replay and game data from the machine and draws on the graphics device"]
+fn a_real_replays_ratings_render_with_their_hovers() {
+    let variable = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is set"));
+    let replay = PathBuf::from(variable("WT_SHOT_REPLAY"));
+    let cache = GameDataCache::without_install().with_cache_dir(&variable("WT_SHOT_GAME_DATA"));
+    let mut table = PersonalRatingData::new();
+    let bytes = std::fs::read(variable("WT_SHOT_EXPECTED_VALUES")).expect("the expected values read");
+    table.load_from_bytes(&bytes).expect("the expected values parse");
+    let table = Arc::new(table);
+    let parsed = parse_replay(&replay, &cache, Some(&table)).expect("the replay parses");
+    let seed = super::loaded_state(parsed, ReplayColumn::ALL.to_vec(), Some(Arc::clone(&table)));
+    let self_row = seed.model.get_untracked().rows.iter().find(|row| row.is_self).cloned();
+    let self_row = self_row.expect("the replay has a self row");
+    assert!(self_row.battle_impact.is_some(), "the recording reached the battle's end");
+
+    let Opened { mut window } = open(Opening {
+        seed: Some(seed),
+        theme: Some(ThemeChoice::Dark),
+        drawing: Some(Drawing::Device),
+        size: Some(WindowSize { width: 1700.0, height: 950.0 }),
+        table: Some(player_table_slot()),
+        ..Opening::default()
+    });
+    window.advance(Duration::from_millis(1500));
+    println!("{}", crate::interaction_tests::save_shot(&mut window, "replay-table-ratings").display());
+
+    let name = window.by_test_id(&format!("player-name-{}", self_row.db_id.raw())).expect("the name is drawn");
+    let line = window.bounds(name).expect("the name has a box");
+    let middle = line.origin.y.0 + line.size.height.0 / 2.0;
+    for (column, shot) in
+        [(ReplayColumn::BattleImpact, "replay-bi-hover"), (ReplayColumn::PersonalRating, "replay-pr-hover")]
+    {
+        let cell = window
+            .all_by_attribute("data-column", column.storage_key())
+            .into_iter()
+            .find(|cell| {
+                window
+                    .bounds(*cell)
+                    .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
+            })
+            .expect("the self row has the cell");
+        window.hover(cell).expect("the cell has a box");
+        window.advance(Duration::from_millis(900));
+        println!("{}", crate::interaction_tests::save_shot(&mut window, shot).display());
+        window.hover_at(zgui::geom::Point::new(zgui::geom::DevicePx(1.0), zgui::geom::DevicePx(1.0)));
+        window.advance(Duration::from_millis(400));
+    }
+
+    let tile = window.by_test_id(BI_TILE_ID).expect("the BI tile is shown");
+    window.hover(tile).expect("the tile has a box");
+    window.advance(Duration::from_millis(900));
+    println!("{}", crate::interaction_tests::save_shot(&mut window, "replay-bi-tile-hover").display());
 }
 
 /// Lands a read, asked for with `cause`, that failed on the recording it had on trial.

@@ -104,6 +104,7 @@ pub enum ReplayColumn {
     ShipName,
     Skills,
     PersonalRating,
+    BattleImpact,
     BaseXp,
     RawXp,
     Kills,
@@ -142,4 +143,5 @@ pub enum SortColumn {
     ReceivedDamage,
     DistanceTraveled,
     PersonalRating,
+    BattleImpact,
 }

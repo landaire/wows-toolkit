@@ -129,6 +129,7 @@ pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
         consumables: Vec::new(),
         personal_rating: None,
         rating_scope: RatingScope::Rated(RatedBattle::Random),
+        battle_impact: None,
         ship_config_url: None,
         short_ship_config_url: None,
         shiptool_url: None,

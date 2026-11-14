@@ -636,6 +636,7 @@ mod tests {
             self_survived: Some(true),
             self_pr: None,
             rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
+            self_bi: None,
             division_id: None,
             division_mates: Vec::new(),
             results_available: true,
@@ -691,6 +692,7 @@ mod tests {
                 rating_scope: wowsunpack::rating_scope::RatingScope::Rated(
                     wowsunpack::rating_scope::RatedBattle::Random,
                 ),
+                self_bi: None,
                 division_id: None,
                 division_mates: Vec::new(),
                 results_available: false,

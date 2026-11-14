@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Resolve PvO as Prins van Oranje
 - *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
 - *(insights)* Rate each player's battle impact (BI) on the PR scale and store it, with its formula version, in the replay index
+- *(toolkit)* Show BI beside PR in the replay table, search results and stats, and break either rating into its parts on hover
 
 ### Bug Fixes
 

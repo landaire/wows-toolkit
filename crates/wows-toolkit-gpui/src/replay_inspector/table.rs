@@ -74,11 +74,14 @@ use super::damage_mix;
 use super::expanded;
 use super::icons::IconCache;
 use super::icons::nation_flag_key;
+use super::rating_hover;
+use super::rating_hover::RatedFigure;
 use super::team_bands;
 use super::team_bands::RowMark;
 use crate::replay_inspector::player_colors::class_icon_tint;
 use crate::replay_inspector::player_colors::player_color_kind_rgb;
 use crate::replay_inspector::player_colors::relation_color_rgb;
+use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
@@ -556,7 +559,7 @@ const COLUMN_DRAG_MIN: Pixels = px(28.);
 /// carries a version because of that -- dropping the Actions column shifted
 /// every index, and the stored list would otherwise be read onto the wrong
 /// columns.
-const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
+const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v3";
 
 /// The width of the strip on a header's trailing edge that starts a drag.
 const RESIZE_GRIP: Pixels = px(6.);
@@ -714,6 +717,19 @@ impl PlayerTable {
 
     pub fn self_personal_rating(&self) -> Option<PersonalRatingResult> {
         self.model.rows.iter().find(|row| row.is_self)?.personal_rating.clone()
+    }
+
+    pub fn self_battle_impact(&self) -> Option<BattleImpactResult> {
+        self.model.rows.iter().find(|row| row.is_self)?.battle_impact.clone()
+    }
+
+    /// The id of the self row's PR or BI cell, which carries the rating's
+    /// hover. Test-only.
+    #[cfg(test)]
+    pub(crate) fn self_rating_cell_for_test(&self, col: ReplayColumn) -> Option<ElementId> {
+        let ix = self.model.rows.iter().position(|row| row.is_self)?;
+
+        Some(("replay-rating", ix * CELL_ID_STRIDE + col as usize).into())
     }
 
     /// Fills in the Personal Rating column from an expected-values table that
@@ -2277,6 +2293,7 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
         ReplayColumn::Name => name_cell(ix, row, layout, width),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width, &layout.entity),
         ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(ix, col, row, layout, width),
+        ReplayColumn::PersonalRating | ReplayColumn::BattleImpact => rating_cell(ix, col, row, layout, width),
         ReplayColumn::ShipName => ship_name_cell(ix, row, layout, width),
         _ => number_cell(ix, col, row, layout, width),
     }
@@ -2402,6 +2419,38 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
             })
             .build(window, cx)
         })
+        .into_any_element()
+}
+
+/// A PR or BI chip whose hover breaks the rating into its parts. A PR read
+/// back from storage has no parts, and a hidden player's parts would give
+/// away the figures their stats hide, so both keep the band's name. A BI
+/// withheld for a recording that ended early is a dash that says why.
+fn rating_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
+    let mut cell = cell_value(row, col, layout.debug);
+    let hidden = row.should_hide_stats() && !layout.debug;
+    let figure = match col {
+        ReplayColumn::BattleImpact => {
+            row.battle_impact.clone().map(|rating| RatedFigure::BattleImpact(Box::new(rating)))
+        }
+        _ => row.personal_rating.as_ref().and_then(RatedFigure::personal),
+    };
+    let Some(figure) = figure.filter(|_| !hidden) else {
+        if col == ReplayColumn::BattleImpact && row.battle_impact.is_none() && layout.battle_impact_withheld {
+            cell.hover = Some(t!("ui.rating.unrated_early_exit").into_owned());
+        }
+        return cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
+    };
+
+    cell.hover = None;
+    let element = cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
+    div()
+        .id(("replay-rating", ix * CELL_ID_STRIDE + col as usize))
+        .test_support()
+        .w(px(width))
+        .flex_none()
+        .child(element)
+        .tooltip(rating_hover::tooltip(Rc::new(figure)))
         .into_any_element()
 }
 
@@ -2585,6 +2634,8 @@ struct RowLayout<'a> {
     /// Which side the row's player is on, for the stripe in its gutter.
     mark: RowMark,
     alt_held: bool,
+    /// Whether BI was withheld because the recording ended before the battle.
+    battle_impact_withheld: bool,
     /// How far each column is drawn from its place while the columns slide.
     column_shift: &'a [Pixels],
     /// The column being moved by its header, whose cells mark its slot.
@@ -2902,6 +2953,7 @@ impl Render for PlayerTable {
                 selected,
                 mark: RowMark::of(row, self_team),
                 alt_held,
+                battle_impact_withheld: table.model.battle_impact_withheld,
                 column_shift: &table.column_shift,
                 moving: table.moving_column(),
                 pinned_reserve: reserve,
@@ -3025,6 +3077,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![base_row(1, Relation::new(0), true), base_row(2, Relation::new(2), false)],
             battle_result: Some(BattleResult::Win(0)),
+            battle_impact_withheld: false,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),

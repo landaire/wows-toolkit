@@ -102,6 +102,7 @@ pub enum ResultColumn {
     Damage,
     Kills,
     Pr,
+    Bi,
 }
 
 impl ResultColumn {
@@ -116,6 +117,7 @@ impl ResultColumn {
             ResultColumn::Damage,
             ResultColumn::Kills,
             ResultColumn::Pr,
+            ResultColumn::Bi,
         ]
     }
 
@@ -136,6 +138,7 @@ impl ResultColumn {
             ResultColumn::Damage => Some(SortColumn::Damage),
             ResultColumn::Kills => Some(SortColumn::Kills),
             ResultColumn::Pr => Some(SortColumn::Pr),
+            ResultColumn::Bi => Some(SortColumn::Bi),
             ResultColumn::Ship => None,
         }
     }
@@ -151,6 +154,7 @@ impl From<SortColumn> for ResultColumn {
             SortColumn::Damage => ResultColumn::Damage,
             SortColumn::Kills => ResultColumn::Kills,
             SortColumn::Pr => ResultColumn::Pr,
+            SortColumn::Bi => ResultColumn::Bi,
         }
     }
 }

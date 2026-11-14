@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use wows_replays::types::GameParamId;
 
+use super::BiStats;
 use super::PerGameStat;
 use super::PerformanceInfo;
 use super::PrStats;
@@ -20,6 +21,7 @@ use crate::personal_rating::PersonalRatingResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatLabel {
     PersonalRating,
+    BattleImpact,
     Damage,
     SpottingDamage,
     Frags,
@@ -32,6 +34,7 @@ impl StatLabel {
     pub const fn translation_key(self) -> &'static str {
         match self {
             Self::PersonalRating => "stat.personal_rating",
+            Self::BattleImpact => "stat.battle_impact",
             Self::Damage => "stat.damage",
             Self::SpottingDamage => "stat.spotting_damage",
             Self::Frags => "stat.frags",
@@ -44,6 +47,7 @@ impl StatLabel {
     pub const fn english(self) -> &'static str {
         match self {
             Self::PersonalRating => "Personal Rating",
+            Self::BattleImpact => "Battle Impact",
             Self::Damage => "Damage",
             Self::SpottingDamage => "Spotting Damage",
             Self::Frags => "Frags",
@@ -111,6 +115,12 @@ impl Cell {
 
     fn rated(rating: &PersonalRatingResult) -> Self {
         Self { text: format!("{:.0}", rating.pr), rating: Some(rating.clone()) }
+    }
+
+    /// BI shares PR's bands, so the cell carries one as a PR of the same
+    /// figure for a renderer that colours by `rating`.
+    fn battle_impact(value: f64) -> Self {
+        Self::rated(&PersonalRatingResult::new(value))
     }
 }
 
@@ -221,6 +231,20 @@ pub fn ship_rows(info: &PerformanceInfo, rating: Option<&PrStats>, locale: Optio
     rows
 }
 
+/// The BI row: the worst, best and mean battle of the games in view, with no
+/// total because ratings do not sum. It follows the PR row.
+pub fn battle_impact_row(stats: &BiStats) -> StatRow {
+    StatRow {
+        label: StatLabel::BattleImpact,
+        cells: [
+            Cell::battle_impact(stats.min),
+            Cell::battle_impact(stats.max),
+            Cell::default(),
+            Cell::battle_impact(stats.average),
+        ],
+    }
+}
+
 /// The table as a Markdown block headed by `header`, with the average column
 /// emphasised as it is on screen.
 pub fn to_markdown(
@@ -275,8 +299,10 @@ pub struct ShipSummary {
     pub performance: PerformanceInfo,
     /// `None` without an expected-values table, or when no game rated.
     pub rating: Option<PrStats>,
+    /// `None` when no game carried a BI.
+    pub battle_impact: Option<BiStats>,
     /// The collapsed line: name, Random and Ranked record and win rate when
-    /// there are any, and the rating when there is one.
+    /// there are any, and the ratings when there are any.
     pub header: String,
     pub rows: Vec<StatRow>,
 }
@@ -311,14 +337,19 @@ pub fn ship_summaries(
             let first = games.first()?;
             let performance = PerformanceInfo::from_games(&games);
             let rating = table.and_then(|table| PrStats::from_games(&games, table));
-            let header = ship_header(&first.ship_name, &performance, rating.as_ref());
-            let rows = ship_rows(&performance, rating.as_ref(), locale);
+            let battle_impact = BiStats::from_games(&games);
+            let header = ship_header(&first.ship_name, &performance, rating.as_ref(), battle_impact.as_ref());
+            let mut rows = ship_rows(&performance, rating.as_ref(), locale);
+            if let Some(stats) = battle_impact.as_ref() {
+                rows.insert(usize::from(rating.is_some()), battle_impact_row(stats));
+            }
 
             Some(ShipSummary {
                 ship_id: first.ship_id,
                 ship: first.ship_name.clone(),
                 performance,
                 rating,
+                battle_impact,
                 header,
                 rows,
             })
@@ -336,7 +367,12 @@ pub fn ship_summaries(
 /// The record and win rate count Random and Ranked battles, the ones the
 /// rating counts; a ship played in neither shows no record rather than a
 /// rate over battles it does not describe.
-pub fn ship_header(ship: &str, performance: &PerformanceInfo, rating: Option<&PrStats>) -> String {
+pub fn ship_header(
+    ship: &str,
+    performance: &PerformanceInfo,
+    rating: Option<&PrStats>,
+    battle_impact: Option<&BiStats>,
+) -> String {
     let rated = performance.records().rated();
     let mut header = ship.to_string();
     if let Some(win_rate) = rated.win_rate() {
@@ -344,6 +380,9 @@ pub fn ship_header(ship: &str, performance: &PerformanceInfo, rating: Option<&Pr
     }
     if let Some(rating) = rating {
         header.push_str(&format!(" - PR: {:.0}", rating.average.pr));
+    }
+    if let Some(stats) = battle_impact {
+        header.push_str(&format!(" - BI: {:.0}", stats.average));
     }
 
     header
@@ -373,6 +412,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 
@@ -571,6 +611,43 @@ mod tests {
         let summaries = summaries_of(&games, Some(&table));
         assert_eq!(summaries[0].rows[0].label, StatLabel::PersonalRating);
         assert!(summaries[0].header.contains(" - PR: "), "the header names the rating: {}", summaries[0].header);
+    }
+
+    /// BI follows PR, spans the rated games only, and names its mean in the
+    /// header after the PR.
+    #[test]
+    fn a_ship_with_battle_impact_lists_it_after_the_rating() {
+        let mut table = PersonalRatingData::new();
+        table.load_from_bytes(crate::personal_rating::EXPECTED_VALUES_FIXTURE).expect("the fixture parses");
+        let rated = |sort_key: &str, bi: Option<i64>| PerGameStat {
+            battle_impact: bi,
+            ..played("Yamato", 3_374_266_064, sort_key, 100_000, true)
+        };
+        let games = [
+            rated("2026-02-13 14:00:00", Some(900)),
+            rated("2026-02-13 15:00:00", Some(1_500)),
+            rated("2026-02-13 16:00:00", None),
+        ];
+
+        let summaries = summaries_of(&games, Some(&table));
+        let summary = &summaries[0];
+        assert_eq!(summary.rows[0].label, StatLabel::PersonalRating);
+        assert_eq!(summary.rows[1].label, StatLabel::BattleImpact);
+        let row = &summary.rows[1];
+        assert_eq!(row.cell(Column::Min).text, "900");
+        assert_eq!(row.cell(Column::Max).text, "1500");
+        assert_eq!(row.cell(Column::Average).text, "1200");
+        assert!(row.cell(Column::Total).text.is_empty(), "a rating does not sum");
+        assert_ne!(
+            row.cell(Column::Min).rating.as_ref().map(|r| r.category),
+            row.cell(Column::Max).rating.as_ref().map(|r| r.category),
+            "each cell carries its own band"
+        );
+        assert!(summary.header.ends_with(" - BI: 1200"), "{}", summary.header);
+        assert!(summary.header.contains(" - PR: "), "{}", summary.header);
+
+        let unrated = summaries_of(&games, None);
+        assert_eq!(unrated[0].rows[0].label, StatLabel::BattleImpact, "BI needs no expected-values table");
     }
 
     #[test]

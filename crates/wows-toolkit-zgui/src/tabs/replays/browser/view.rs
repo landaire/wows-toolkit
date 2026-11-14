@@ -469,33 +469,45 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         Some(Thumbnail::Loading) | None => AnyView::new(view! { box(class = "wt-row__thumb") }),
     };
     let division = leaf.in_division.then(|| view! { AppIcon(glyph = Glyph::Users, class = "wt-row__division") });
-    let rating = leaf.personal_rating.map(|rating| match rating {
-        BattleRating::Rated(rating) => {
-            let said = format!("{:.0}", rating.pr);
-            let style = rating_style(rating.category);
-            AnyView::new(view! {
-                box(class = "wt-row__spacer")
-                text(class = format!("wt-row__pr {TABULAR_CLASS}"), style = style, a11y:label = said.clone()) {{said.clone()}}
-            })
-        }
-        BattleRating::Unrated => {
+    let rating_chip = |id: &'static str, name: &str, value: f64| {
+        let said = format!("{name} {value:.0}");
+        let style = rating_style(PersonalRatingCategory::from_pr(value));
+        AnyView::new(view! {
+            text(
+                class = format!("wt-row__pr {TABULAR_CLASS}"),
+                style = style,
+                attr:data-rating = id,
+                a11y:label = said.clone()
+            ) {{said.clone()}}
+        })
+    };
+    let pr_name = t!("ui.replay.column.personal_rating");
+    let mut chips: Vec<AnyView> = Vec::new();
+    match leaf.personal_rating {
+        Some(BattleRating::Rated(rating)) => chips.push(rating_chip("pr", &pr_name, rating.pr)),
+        Some(BattleRating::Unrated) => {
             let hover = t!("ui.personal_rating.unrated_hover").into_owned();
             let said = hover.clone();
-            AnyView::new(view! {
-                box(class = "wt-row__spacer")
+            chips.push(AnyView::new(view! {
                 Tooltip {
                     TooltipTrigger {
                         text(
                             class = format!("wt-row__pr {TABULAR_CLASS}"),
                             attr:data-testid = UNRATED_LEAF_ID,
+                            attr:data-rating = "pr",
                             a11y:label = said
                         ) {"-"}
                     }
                     TooltipContent {{hover.clone()}}
                 }
-            })
+            }));
         }
-    });
+        None => {}
+    }
+    if let Some(value) = leaf.battle_impact {
+        chips.push(rating_chip("bi", &t!("ui.replay.column.battle_impact"), value));
+    }
+    let rating = (!chips.is_empty()).then(|| view! { box(class = "wt-row__spacer") {} {chips} });
     let stats: Vec<AnyView> = leaf
         .stats
         .into_iter()

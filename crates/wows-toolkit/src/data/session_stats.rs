@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rating_scope::RatingScope;
@@ -106,6 +107,10 @@ pub struct PerGameStat {
     pub match_group: String,
     #[serde(default)]
     pub achievements: Vec<SerializableAchievement>,
+    /// The recording player's battle impact, in whole points. `None` when the
+    /// game was not rated, or was rated by an older formula.
+    #[serde(default)]
+    pub battle_impact: Option<i64>,
 }
 
 impl PerGameStat {
@@ -139,6 +144,7 @@ impl PerGameStat {
                     count: achievement.count,
                 })
                 .collect(),
+            battle_impact: self.battle_impact,
         }
     }
 
@@ -171,6 +177,7 @@ impl PerGameStat {
                     count: achievement.count,
                 })
                 .collect(),
+            battle_impact: game.battle_impact,
         }
     }
 
@@ -220,6 +227,7 @@ impl PerGameStat {
             is_div,
             match_group,
             achievements,
+            battle_impact: self_report.battle_impact.as_ref().map(|rating| rating.bi.round() as i64),
         })
     }
 
@@ -429,6 +437,11 @@ impl SessionStats {
             personal_rating: session_personal_rating(&refs, Some(pr_data)),
         }
     }
+
+    /// Battle impact across the filtered games.
+    pub fn battle_impact(&self) -> Option<BiStats> {
+        BiStats::from_ratings(self.filtered_games().into_iter().filter_map(|game| game.battle_impact))
+    }
 }
 
 /// What [`SessionStats::totals`] reads off the filtered games.
@@ -478,6 +491,7 @@ mod tests {
             is_div,
             match_group: match_group.to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 
@@ -798,6 +812,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         });
         ss.sort_games();
         assert_eq!(ss.games[0].sort_key, "2026-02-13 14:00:00");

@@ -31,8 +31,10 @@ use wows_toolkit_viewmodel::personal_rating;
 
 use std::sync::Arc;
 
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
@@ -60,6 +62,8 @@ struct Computed {
     achievements: Vec<SerializableAchievement>,
     /// Absent without an expected-values table, or when no game rated.
     personal_rating: Option<PersonalRatingResult>,
+    /// Absent when no game was rated.
+    battle_impact: Option<BiStats>,
 }
 
 pub struct StatsOverviewPanel {
@@ -128,6 +132,7 @@ impl StatsOverviewPanel {
             ships: per_ship_performance_by_id(games),
             achievements: aggregate_achievements(games),
             personal_rating: session_personal_rating(games, self.personal_rating.as_deref()),
+            battle_impact: BiStats::from_games(games),
         };
         self.load_achievement_icons(&computed.achievements);
         self.computed = computed;
@@ -240,26 +245,15 @@ impl Render for StatsOverviewPanel {
             .border_color(border)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(record))
             .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
-                let dark = crate::theme::is_dark_mode();
-                let hue: Hsla = rgb(personal_rating::chip_hue(rating.category)).into();
-                let text = rgb(personal_rating::chip_text(rating.category, dark));
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(crate::ui::rule_v(cx))
-                        .child(div().text_sm().text_color(dim).child(t!("ui.stats.pr").into_owned()))
-                        .child(
-                            h_flex()
-                                .px_1()
-                                .rounded(px(3.))
-                                .bg(hue.opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
-                                .text_sm()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(text)
-                                .child(format!("{:.0} ({})", rating.pr, rating.category.name())),
-                        ),
-                )
+                this.child(rating_figure(t!("ui.stats.pr").into_owned(), rating.pr, rating.category, cx))
+            })
+            .when_some(self.computed.battle_impact.as_ref(), |this, rating| {
+                this.child(rating_figure(
+                    t!("ui.stats.bi").into_owned(),
+                    rating.average,
+                    BiStats::category(rating.average),
+                    cx,
+                ))
             })
             .child(
                 h_flex().gap_3().items_center().child(crate::ui::rule_v(cx)).child(
@@ -487,6 +481,28 @@ impl Render for StatsOverviewPanel {
             .child(table)
             .into_any_element()
     }
+}
+
+/// A session rating after its name, as a chip in its band's colours.
+fn rating_figure(label: String, value: f64, category: PersonalRatingCategory, cx: &App) -> impl IntoElement {
+    let hue: Hsla = rgb(personal_rating::chip_hue(category)).into();
+    let text = rgb(personal_rating::chip_text(category, crate::theme::is_dark_mode()));
+
+    h_flex()
+        .gap_2()
+        .items_center()
+        .child(crate::ui::rule_v(cx))
+        .child(div().text_sm().text_color(crate::theme::text_dim()).child(label))
+        .child(
+            h_flex()
+                .px_1()
+                .rounded(px(3.))
+                .bg(hue.opacity(personal_rating::CHIP_TINT_ALPHA as f32 / 255.))
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(text)
+                .child(format!("{value:.0} ({})", category.name())),
+        )
 }
 
 /// Uses the shared formatter so this panel follows the selected locale.

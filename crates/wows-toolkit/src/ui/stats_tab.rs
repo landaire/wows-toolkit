@@ -32,6 +32,7 @@ use rust_i18n::t;
 use std::cmp::Reverse;
 use std::sync::Arc;
 use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::PrStats;
 use wows_toolkit_viewmodel::stats::table as stats_table;
@@ -477,6 +478,7 @@ fn get_metadata_provider(tab_state: &TabState) -> Option<Arc<GameMetadataProvide
 /// The overview's pane-wide figures, read in one pass over the filtered games.
 struct OverviewTotals {
     totals: SessionTotals,
+    battle_impact: Option<BiStats>,
     /// Each achievement once, with its count summed across the games.
     achievements: Vec<SerializableAchievement>,
 }
@@ -495,7 +497,7 @@ impl OverviewTotals {
             }
         }
 
-        Self { totals: stats.totals(pr_data), achievements }
+        Self { totals: stats.totals(pr_data), battle_impact: stats.battle_impact(), achievements }
     }
 }
 
@@ -508,8 +510,11 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
     else {
         return;
     };
-    let OverviewTotals { totals: SessionTotals { summary, personal_rating }, achievements: mut all_achievements } =
-        totals;
+    let OverviewTotals {
+        totals: SessionTotals { summary, personal_rating },
+        battle_impact,
+        achievements: mut all_achievements,
+    } = totals;
     let locale = tab_state.persisted.read().settings.app.locale.clone();
     let locale_ref = locale.as_deref();
 
@@ -538,6 +543,14 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
                 &format!("{:.0} ({})", pr_result.pr, pr_result.category.name()),
                 true,
             );
+        }
+
+        if let Some(bi) = battle_impact {
+            let category = BiStats::category(bi.average);
+            ui.separator();
+            ui.label(t!("ui.stats.bi"));
+            crate::ui::widgets::pr_chip(ui, category, &format!("{:.0} ({})", bi.average, category.name()), true)
+                .on_hover_text(t!("ui.rating.battle_impact"));
         }
 
         // Total frags
@@ -641,15 +654,19 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
             let pr_data = pr_data_lock.read();
             let mut aggregates: Vec<(GameParamId, PerformanceInfo)> = Vec::with_capacity(games_by_ship.len());
             let mut ratings: std::collections::HashMap<GameParamId, PrStats> = std::collections::HashMap::new();
+            let mut impacts: std::collections::HashMap<GameParamId, BiStats> = std::collections::HashMap::new();
             for (id, games) in games_by_ship {
                 aggregates.push((id, PerformanceInfo::from_games(&games)));
                 if let Some(rating) = PrStats::from_games(&games, &pr_data) {
                     ratings.insert(id, rating);
                 }
+                if let Some(impact) = BiStats::from_games(&games) {
+                    impacts.insert(id, impact);
+                }
             }
-            (aggregates, ratings)
+            (aggregates, ratings, impacts)
         });
-        let Some((mut battle_results, pr_stats_by_ship)) = grouped else {
+        let Some((mut battle_results, pr_stats_by_ship, bi_stats_by_ship)) = grouped else {
             return;
         };
         // The id breaks a tie so two ships whose newest game shares a
@@ -660,9 +677,13 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
             let locale = tab_state.persisted.read().settings.app.locale.clone();
             let locale_ref2 = locale.as_deref();
             let pr_stats = pr_stats_by_ship.get(ship_id);
-            let header = stats_table::ship_header(&ship_name, perf_info, pr_stats);
+            let bi_stats = bi_stats_by_ship.get(ship_id);
+            let header = stats_table::ship_header(&ship_name, perf_info, pr_stats, bi_stats);
 
-            let table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
+            let mut table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
+            if let Some(bi) = bi_stats {
+                table_rows.insert(usize::from(pr_stats.is_some()), stats_table::battle_impact_row(bi));
+            }
 
             let collapsing_id = ui.make_persistent_id(("ship_stats_collapse", ship_id));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
@@ -737,6 +758,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
         }
     });
 }
+
 fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64, ui: &mut egui::Ui) {
     let provider = get_metadata_provider(tab_state);
     let provider_ref = provider.as_deref();

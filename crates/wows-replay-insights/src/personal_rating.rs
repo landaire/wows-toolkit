@@ -49,12 +49,34 @@ impl ShipExpectedValuesEntry {
 pub struct PersonalRatingResult {
     pub pr: f64,
     pub category: PersonalRatingCategory,
+    /// How the rating was reached. `None` for a rating read back from
+    /// storage, which keeps only the number.
+    pub breakdown: Option<PersonalRatingBreakdown>,
 }
 
 impl PersonalRatingResult {
     pub fn new(pr: f64) -> Self {
-        Self { pr, category: PersonalRatingCategory::from_pr(pr) }
+        Self { pr, category: PersonalRatingCategory::from_pr(pr), breakdown: None }
     }
+}
+
+/// The three terms of the PR formula, each an actual total against the
+/// wows-numbers expectation for the same ships and battles.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct PersonalRatingBreakdown {
+    pub damage: PersonalRatingTerm,
+    pub frags: PersonalRatingTerm,
+    pub wins: PersonalRatingTerm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct PersonalRatingTerm {
+    pub actual: f64,
+    pub expected: f64,
+    /// Points this term added to the rating.
+    pub points: f64,
+    /// Points the term adds when `actual` equals `expected`.
+    pub points_at_expected: f64,
 }
 
 /// Rates one battle: the damage and frags a player recorded in it, and
@@ -180,9 +202,33 @@ impl PersonalRatingData {
         let n_wins = f64::max(0.0, (r_wins - 0.7) / (1.0 - 0.7));
 
         // Step 4: Calculate PR
-        let pr = 700.0 * n_dmg + 300.0 * n_frags + 150.0 * n_wins;
+        let damage_points = 700.0 * n_dmg;
+        let frag_points = 300.0 * n_frags;
+        let win_points = 150.0 * n_wins;
+        let pr = damage_points + frag_points + win_points;
 
-        Some(PersonalRatingResult::new(pr))
+        let breakdown = PersonalRatingBreakdown {
+            damage: PersonalRatingTerm {
+                actual: total_actual_damage,
+                expected: total_expected_damage,
+                points: damage_points,
+                points_at_expected: 700.0,
+            },
+            frags: PersonalRatingTerm {
+                actual: total_actual_frags,
+                expected: total_expected_frags,
+                points: frag_points,
+                points_at_expected: 300.0,
+            },
+            wins: PersonalRatingTerm {
+                actual: total_actual_wins,
+                expected: total_expected_wins,
+                points: win_points,
+                points_at_expected: 150.0,
+            },
+        };
+
+        Some(PersonalRatingResult { breakdown: Some(breakdown), ..PersonalRatingResult::new(pr) })
     }
 }
 
@@ -272,6 +318,31 @@ mod tests {
         let result = pr.calculate_pr(&stats).expect("should calculate PR");
         assert!((result.pr - 1150.0).abs() < 1e-6, "PR at expected values should be 1150, got {}", result.pr);
         assert_eq!(result.category, PersonalRatingCategory::Average);
+    }
+
+    /// The terms a hover lists must add back up to the rating it explains,
+    /// and each must carry the totals it was computed from.
+    #[test]
+    fn the_breakdown_terms_sum_to_the_rating() {
+        let pr = loaded_pr_data();
+        let stats = [ShipBattleStats {
+            ship_id: GameParamId::from(3374266064u64),
+            battles: 2,
+            damage: 160_000,
+            wins: 1,
+            frags: 1,
+        }];
+
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        let breakdown = result.breakdown.expect("a computed rating keeps its terms");
+
+        let sum = breakdown.damage.points + breakdown.frags.points + breakdown.wins.points;
+        assert!((sum - result.pr).abs() < 1e-9, "terms sum to {sum}, rating is {}", result.pr);
+        assert_eq!(breakdown.damage.actual, 160_000.0);
+        assert_eq!(breakdown.damage.expected, 100_000.0);
+        assert_eq!(breakdown.frags.expected, 2.0);
+        assert!((breakdown.frags.points - 300.0 * (0.5 - 0.1) / 0.9).abs() < 1e-9);
+        assert_eq!(breakdown.damage.points_at_expected, 700.0);
     }
 
     #[test]

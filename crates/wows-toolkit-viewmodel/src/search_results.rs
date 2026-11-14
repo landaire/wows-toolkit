@@ -62,6 +62,7 @@ impl ResultColumn {
             Self::Sortable(SortColumn::Damage) => 100.,
             Self::Sortable(SortColumn::Kills) => 70.,
             Self::Sortable(SortColumn::Pr) => 80.,
+            Self::Sortable(SortColumn::Bi) => 80.,
             Self::Ship => 150.,
         }
     }
@@ -89,6 +90,7 @@ pub fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
         SortColumn::Kills => hit.self_kills.map(|k| k.to_string()).unwrap_or_else(|| "-".into()),
         SortColumn::Pr if !hit.rating_scope().is_rated() => "-".into(),
         SortColumn::Pr => hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".into()),
+        SortColumn::Bi => hit.self_bi.map(|bi| format!("{bi:.0}")).unwrap_or_else(|| "-".into()),
     }
 }
 

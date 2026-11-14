@@ -55,6 +55,7 @@ fn sample_games() -> Vec<PerGameStat> {
                 is_div: index % 4 == 0,
                 match_group: if index % 5 == 0 { "ranked" } else { "pvp" }.to_owned(),
                 achievements: Vec::new(),
+                battle_impact: Some(500 + damage as i64 / 120),
             }
         })
         .collect()

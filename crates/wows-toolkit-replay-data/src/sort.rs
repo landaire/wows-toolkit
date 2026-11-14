@@ -69,6 +69,7 @@ pub enum SortColumn {
     ReceivedDamage,
     DistanceTraveled,
     PersonalRating,
+    BattleImpact,
 }
 
 /// Sort order (ascending or descending) with the column being sorted.
@@ -137,6 +138,7 @@ fn sort_key(row: &PlayerRow, column: SortColumn, debug: bool) -> SortKey {
         SortColumn::Hits => SortKey::U64(if hidden { None } else { row.hits }),
         SortColumn::Heals => SortKey::U64(row.heal_count.map(|c| c as u64)),
         SortColumn::PersonalRating => SortKey::F64(row.personal_rating.as_ref().map(|pr| pr.pr)),
+        SortColumn::BattleImpact => SortKey::F64(row.battle_impact.as_ref().map(|bi| bi.bi)),
     }
 }
 

@@ -53,6 +53,8 @@ use zgui_ui_icons::IconProps;
 use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 
 use crate::icons::AppIconProps;
+use crate::tabs::replays::rating_hover::RatedFigure;
+use crate::tabs::replays::rating_hover::with_rating_hover;
 use crate::tabs::replays::table::TableCx;
 use crate::tabs::replays::table::TableRow;
 use crate::tabs::replays::table::TeamHeading;
@@ -69,6 +71,7 @@ pub(super) fn cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
         ReplayColumn::Name => name_cell(row, cx),
         ReplayColumn::Skills => skills_cell(row, cx),
         ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage => damage_cell(col, row, cx),
+        ReplayColumn::PersonalRating | ReplayColumn::BattleImpact => rating_cell(col, row, cx),
         _ => number_cell(col, row, cx),
     }
 }
@@ -307,6 +310,30 @@ fn damage_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
             TooltipContent {{explained()}}
         }
     })
+}
+
+/// A PR or BI figure over its team-share bar, with the rating's parts drawn on hover. The plain
+/// figure and its band's name when the rating kept no parts or the row's stats are hidden, and
+/// a BI dash says why when the recording ended before the battle did.
+fn rating_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
+    // The parts carry the damage and spotting figures a hidden row keeps back.
+    let hidden = row.row.should_hide_stats() && !row.debug;
+    let figure = match col {
+        ReplayColumn::BattleImpact => {
+            row.row.battle_impact.clone().map(|rating| RatedFigure::BattleImpact(Box::new(rating)))
+        }
+        _ => row.row.personal_rating.clone().filter(|rating| rating.breakdown.is_some()).map(RatedFigure::Personal),
+    };
+    let cell = cell_value(&row.row, col, row.debug);
+
+    match figure.filter(|_| !hidden) {
+        Some(figure) => with_rating_hover(figure_cell(col, row, cx, &cell, None), figure, "wt-pt-trigger"),
+        None if col == ReplayColumn::BattleImpact && row.row.battle_impact.is_none() && row.battle_impact_withheld => {
+            let hover = t!("ui.rating.unrated_early_exit").into_owned();
+            with_hover(figure_cell(col, row, cx, &cell, None), Some(hover))
+        }
+        None => number_cell(col, row, cx),
+    }
 }
 
 /// The Skills cell: the captain's points in their tier colour after the Dazzle, Incoming Fire

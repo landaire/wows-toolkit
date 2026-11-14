@@ -157,6 +157,8 @@ const MATCH_HIT_COLUMNS: &str = "m.arena_id, m.timestamp, m.map, m.game_mode, m.
      m.match_group, m.version_build, r.source_id, r.outcome, r.self_account_id, r.self_ship_id, \
      (SELECT v.ship_name FROM indexed_vehicle v \
         WHERE v.arena_id = m.arena_id AND v.ship_id = r.self_ship_id LIMIT 1) AS self_ship_name, \
+     (SELECT v.bi FROM indexed_vehicle v \
+        WHERE v.arena_id = m.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_bi, \
      r.self_survived, r.self_damage, r.self_kills, r.self_pr, r.results_available, r.replay_path, r.file_mtime";
 
 /// The live source's id, or `None` when the indexer has not created it yet.
@@ -942,7 +944,9 @@ pub async fn row_summaries_for_source(
         "SELECT r.replay_path, r.outcome, r.self_damage, r.self_kills, r.self_survived, r.self_pr, \
                 r.results_available, r.file_mtime, m.game_type, m.match_group, \
                 (SELECT v.division_id FROM indexed_vehicle v \
-                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS division_id \
+                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS division_id, \
+                (SELECT v.bi FROM indexed_vehicle v \
+                   WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS self_bi \
          FROM replay_record r JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
     )
     .bind(source.0)
@@ -1002,6 +1006,7 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_pr: row.try_get("self_pr")?,
         rating_scope: row_rating_scope(row)?,
+        self_bi: row.try_get("self_bi")?,
         division_id: row.try_get("division_id")?,
         division_mates: Vec::new(),
         results_available: row.try_get("results_available")?,
@@ -1109,6 +1114,7 @@ fn row_to_match_hit(row: &sqlx::sqlite::SqliteRow) -> Result<MatchHit, IndexErro
         self_damage: self_damage.map(|d| d as u64),
         self_kills: row.try_get("self_kills")?,
         self_pr: row.try_get("self_pr")?,
+        self_bi: row.try_get("self_bi")?,
         results_available: row.try_get("results_available")?,
         replay_path: std::path::PathBuf::from(row.try_get::<String, _>("replay_path")?),
         file_mtime: row.try_get("file_mtime")?,
@@ -1623,11 +1629,13 @@ pub enum SortColumn {
     Damage,
     Kills,
     Pr,
+    /// The perspective player's battle impact, read off their roster row.
+    Bi,
 }
 
 impl SortColumn {
     /// Every column a header may offer.
-    pub const ALL: [SortColumn; 7] = [
+    pub const ALL: [SortColumn; 8] = [
         SortColumn::Date,
         SortColumn::Map,
         SortColumn::Mode,
@@ -1635,6 +1643,7 @@ impl SortColumn {
         SortColumn::Damage,
         SortColumn::Kills,
         SortColumn::Pr,
+        SortColumn::Bi,
     ];
 
     /// The column's header name, so both front ends label it the same.
@@ -1650,6 +1659,7 @@ impl SortColumn {
             SortColumn::Damage => "Damage",
             SortColumn::Kills => "Kills",
             SortColumn::Pr => "PR",
+            SortColumn::Bi => "BI",
         }
     }
 
@@ -1668,6 +1678,10 @@ impl SortColumn {
             SortColumn::Damage => "r.self_damage",
             SortColumn::Kills => "r.self_kills",
             SortColumn::Pr => "r.self_pr",
+            SortColumn::Bi => {
+                "(SELECT v.bi FROM indexed_vehicle v \
+                  WHERE v.arena_id = m.arena_id AND v.account_id = r.self_account_id LIMIT 1)"
+            }
         }
     }
 
@@ -1675,7 +1689,7 @@ impl SortColumn {
     /// where a NULL goes rather than take SQLite's default.
     fn is_nullable(self) -> bool {
         match self {
-            SortColumn::Damage | SortColumn::Kills | SortColumn::Pr => true,
+            SortColumn::Damage | SortColumn::Kills | SortColumn::Pr | SortColumn::Bi => true,
             SortColumn::Date | SortColumn::Map | SortColumn::Mode | SortColumn::Outcome => false,
         }
     }
@@ -1686,9 +1700,12 @@ impl SortColumn {
     pub fn default_direction(self) -> SortDirection {
         match self {
             SortColumn::Map | SortColumn::Mode => SortDirection::Ascending,
-            SortColumn::Date | SortColumn::Outcome | SortColumn::Damage | SortColumn::Kills | SortColumn::Pr => {
-                SortDirection::Descending
-            }
+            SortColumn::Date
+            | SortColumn::Outcome
+            | SortColumn::Damage
+            | SortColumn::Kills
+            | SortColumn::Pr
+            | SortColumn::Bi => SortDirection::Descending,
         }
     }
 }

@@ -82,6 +82,7 @@ mod tests {
             self_damage: None,
             self_kills: None,
             self_pr: None,
+            self_bi: None,
             results_available: false,
             replay_path: std::path::PathBuf::new(),
             file_mtime: None,

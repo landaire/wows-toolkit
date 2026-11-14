@@ -215,6 +215,7 @@ const CSS: &str = css!(
         border-radius: 6px;
         background-color: var(--lui-color-card);
     }
+    .wt-rp-tile-trigger { display: flex; flex: none; }
     .wt-rp-tile__label { font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-rp-tile__value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .wt-rp-split {
@@ -551,6 +552,7 @@ fn edited_model(model: &ReplayReportModel, edit: impl FnOnce(&mut ReplayReportMo
         self_team: model.self_team,
         rows: model.rows.clone(),
         battle_result: model.battle_result,
+        battle_impact_withheld: model.battle_impact_withheld,
         columns: model.columns.clone(),
         map: model.map.clone(),
         chat: model.chat.clone(),
@@ -1057,17 +1059,14 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
         let hidden = self_stats_hidden(&model.rows);
         // A test ship's own figures stay off the tiles while the table hides them.
         let own = loaded.own_figures.filter(|_| !hidden);
-        let rating = model
-            .rows
-            .iter()
-            .find(|row| row.is_self)
-            .and_then(|row| BattleRating::new(row.rating_scope, row.personal_rating.clone()))
-            .filter(|_| !hidden);
+        let own_row = model.rows.iter().find(|row| row.is_self).filter(|_| !hidden);
+        let rating = own_row.and_then(|row| BattleRating::new(row.rating_scope, row.personal_rating.clone()));
+        let battle_impact = own_row.and_then(|row| row.battle_impact.clone());
         let (allies, enemies) = figures::team_damage(&model.rows);
         let counting = count_next.get_value();
         count_next.set_value(false);
         Some(AnyView::new(view! {
-            StatTiles(own = own, rating = rating, counting = counting)
+            StatTiles(own = own, rating = rating, battle_impact = battle_impact, counting = counting)
             DamageSplit(allies = allies, enemies = enemies)
         }))
     };

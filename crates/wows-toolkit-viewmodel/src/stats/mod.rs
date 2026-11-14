@@ -28,10 +28,12 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wowsunpack::rating_scope::RatingScope;
 
+use crate::personal_rating::PersonalRatingCategory;
 use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 use crate::personal_rating::ShipBattleStats;
 use crate::stats::record::RecordBreakdown;
+use wows_replay_insights::battle_impact::BattleImpactVersion;
 use wows_toolkit_config::queries::SessionStatRow;
 
 /// One achievement earned, as the session rows store it.
@@ -121,6 +123,9 @@ pub struct PerGameStat {
     pub is_div: bool,
     pub match_group: String,
     pub achievements: Vec<SerializableAchievement>,
+    /// The recording player's battle impact, in whole points. `None` when the
+    /// game was not rated, or was rated by an older formula.
+    pub battle_impact: Option<i64>,
 }
 
 impl PerGameStat {
@@ -203,6 +208,7 @@ impl PerGameStat {
                     })
                 })
                 .collect(),
+            battle_impact: player.battle_impact.as_ref().map(|rating| rating.bi.round() as i64),
         })
     }
 
@@ -226,6 +232,8 @@ impl PerGameStat {
             is_draw: self.is_draw,
             is_div: self.is_div,
             achievements: serde_json::to_string(&self.achievements).unwrap_or_else(|_| "[]".to_string()),
+            battle_impact: self.battle_impact.map(|bi| bi as f64),
+            battle_impact_version: self.battle_impact.map(|_| i64::from(BattleImpactVersion::CURRENT.0)),
         }
     }
 
@@ -252,6 +260,12 @@ impl PerGameStat {
             is_div: row.is_div,
             match_group: row.match_group,
             achievements: serde_json::from_str(&row.achievements).unwrap_or_default(),
+            // A rating from another formula revision would sit beside current
+            // ones as if comparable; it reads as unrated until re-recorded.
+            battle_impact: row
+                .battle_impact
+                .filter(|_| row.battle_impact_version == Some(i64::from(BattleImpactVersion::CURRENT.0)))
+                .map(|bi| bi.round() as i64),
         }
     }
 }
@@ -698,6 +712,47 @@ impl PrStats {
     }
 }
 
+/// Battle impact across the games in view: the worst, the best and the mean
+/// of the rated games.
+///
+/// Unlike PR, BI is not recomputed from summed totals: it rates one whole
+/// battle, so the mean of the battles is the session's figure. Ships may be
+/// mixed, since every rating is already against its own ship.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BiStats {
+    pub min: f64,
+    pub max: f64,
+    pub average: f64,
+    /// How many of the games carried a rating.
+    pub rated_games: usize,
+}
+
+impl BiStats {
+    /// `None` when no game in `games` was rated.
+    pub fn from_games(games: &[&PerGameStat]) -> Option<Self> {
+        Self::from_ratings(games.iter().filter_map(|game| game.battle_impact))
+    }
+
+    /// `None` when `ratings` is empty.
+    pub fn from_ratings(ratings: impl IntoIterator<Item = i64>) -> Option<Self> {
+        let ratings: Vec<f64> = ratings.into_iter().map(|bi| bi as f64).collect();
+        if ratings.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            min: ratings.iter().copied().fold(f64::INFINITY, f64::min),
+            max: ratings.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            average: ratings.iter().sum::<f64>() / ratings.len() as f64,
+            rated_games: ratings.len(),
+        })
+    }
+
+    pub fn category(value: f64) -> PersonalRatingCategory {
+        PersonalRatingCategory::from_pr(value)
+    }
+}
+
 /// Groups filtered games by ship, newest-played ship first -- the order the
 /// egui table opens in.
 pub fn per_ship_performance(games: &[&PerGameStat]) -> Vec<(String, PerformanceInfo)> {
@@ -758,6 +813,7 @@ mod tests {
             is_div: div,
             match_group: mode.to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 
@@ -1030,6 +1086,7 @@ mod rating_tests {
             is_div: false,
             match_group: "pvp".into(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 
@@ -1148,6 +1205,8 @@ mod scope_tests {
             is_div: false,
             match_group: match_group.into(),
             achievements: Vec::new(),
+
+            battle_impact: None,
         }
     }
 
@@ -1200,7 +1259,7 @@ mod scope_tests {
         assert_eq!(info.rated_win_rate(), Some(50.0));
         assert_eq!(info.records().rated(), Record { wins: 2, losses: 2, draws: 0 });
         assert_eq!(info.records().other, Record { wins: 3, losses: 1, draws: 0 });
-        assert_eq!(ship_header("Yamato", &info, None), "Yamato 2W/2L (50%)");
+        assert_eq!(ship_header("Yamato", &info, None, None), "Yamato 2W/2L (50%)");
     }
 
     /// Each rating aggregate over a mixed set is the one its rated games give
@@ -1270,7 +1329,7 @@ mod scope_tests {
         let info = PerformanceInfo::from_games(&refs);
         assert_eq!(info.rated_win_rate(), None);
         assert_eq!(info.personal_rating(&table), None);
-        assert_eq!(ship_header("Yamato", &info, None), "Yamato", "no record or rate for unrated battles");
+        assert_eq!(ship_header("Yamato", &info, None, None), "Yamato", "no record or rate for unrated battles");
 
         for stat in [ChartableStat::PersonalRating, ChartableStat::WinRate] {
             assert!(line_chart_series(&refs, stat, &ships, Some(&table), true, true).is_empty(), "{stat:?}");

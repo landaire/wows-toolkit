@@ -118,6 +118,12 @@ pub struct SessionStatRow {
     pub is_draw: bool,
     pub is_div: bool,
     pub achievements: String,
+    /// The recording player's battle impact. `None` when the game was not
+    /// rated: no expected values, a recording that ended early, or a row
+    /// written before the column existed.
+    pub battle_impact: Option<f64>,
+    /// The formula revision `battle_impact` was computed with.
+    pub battle_impact_version: Option<i64>,
 }
 
 /// Load all session stats ordered by sort_key.
@@ -139,7 +145,10 @@ pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result
         .execute(&mut *tx)
         .await?;
     sqlx::query(
-        "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group,          damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements)          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
+         damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements, \
+         battle_impact, battle_impact_version) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
     )
     .bind(&row.sort_key)
     .bind(&row.ship_name)
@@ -157,6 +166,8 @@ pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result
     .bind(row.is_draw)
     .bind(row.is_div)
     .bind(&row.achievements)
+    .bind(row.battle_impact)
+    .bind(row.battle_impact_version)
     .execute(&mut *tx)
     .await?;
     tx.commit().await

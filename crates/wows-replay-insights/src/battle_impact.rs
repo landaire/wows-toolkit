@@ -29,11 +29,21 @@ use wowsunpack::game_types::Direction;
 use wowsunpack::game_types::ShotId;
 
 use crate::battle_report::NormalizedPlayer;
+use crate::battle_report::ObjectivePoints;
+use crate::battle_report::PlanesKilled;
 use crate::battle_report::ServerResults;
 use crate::personal_rating::PersonalRatingCategory;
 use crate::personal_rating::PersonalRatingData;
 
 pub use wows_core::game_types::BattleImpactVersion;
+
+/// Points each core part earns for average play, so a front end can show
+/// what pulled a rating up or down.
+const DAMAGE_POINTS: f64 = 550.0;
+const KILL_POINTS: f64 = 150.0;
+const ENEMY_HP_SHARE_POINTS: f64 = 200.0;
+const TANKING_POINTS: f64 = 120.0;
+const SPOTTING_SCALE: f64 = 0.2;
 
 /// One player's battle impact.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -42,6 +52,7 @@ pub struct BattleImpactResult {
     pub category: PersonalRatingCategory,
     pub version: BattleImpactVersion,
     pub components: BattleImpactComponents,
+    pub inputs: BattleImpactInputs,
     /// `None` for players on a team no perspective of the replay belonged to,
     /// whose torpedo detections the replay does not show.
     pub torpedo_detection: Option<TorpedoDetection>,
@@ -66,6 +77,21 @@ pub struct BattleImpactComponents {
 }
 
 impl BattleImpactComponents {
+    /// What each part earns for average play: expected damage and kills, an
+    /// even share of the enemy pool, drawing the team's average fire and
+    /// spotting at the class baseline. Objectives, anti-air and torpedo
+    /// warnings have no average; any of them is a bonus.
+    pub const AVERAGE: BattleImpactComponents = BattleImpactComponents {
+        damage: DAMAGE_POINTS,
+        kills: KILL_POINTS,
+        enemy_hp_share: ENEMY_HP_SHARE_POINTS,
+        tanking: TANKING_POINTS,
+        spotting: Some(SPOTTING_SCALE * 1150.0),
+        objectives: None,
+        anti_air: None,
+        torpedo_warnings: None,
+    };
+
     fn total(&self) -> f64 {
         let core = self.damage + self.kills + self.enemy_hp_share + self.tanking;
         let additions: f64 =
@@ -73,6 +99,34 @@ impl BattleImpactComponents {
 
         core + additions
     }
+}
+
+/// What the rating was computed from, for showing beside each part.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct BattleImpactInputs {
+    /// Damage dealt, with damage to destroyers and submarines weighted up.
+    pub weighted_damage: f64,
+    /// wows-numbers average damage for the ship.
+    pub expected_damage: f64,
+    pub kills: f64,
+    /// wows-numbers average kills for the ship.
+    pub expected_kills: f64,
+    /// `weighted_damage` over the opposing teams' weighted hit points.
+    pub enemy_hp_share: f64,
+    /// One player's share of a team that sank the whole enemy team.
+    pub even_share: f64,
+    pub potential_damage: u64,
+    /// Fire drawn relative to the team average; 1 is average.
+    pub tanking_ratio: f64,
+    pub spotting_damage: Option<u64>,
+    /// Spotting damage at which the ship's class is average.
+    pub spotting_baseline: f64,
+    /// Spotted ships' hit points this player was responsible for, in ships.
+    pub ships_spotted: f64,
+    pub ships_spotted_baseline: f64,
+    pub objective_points: Option<ObjectivePoints>,
+    pub planes_killed: Option<PlanesKilled>,
+    pub anti_air_damage: Option<u64>,
 }
 
 /// Opposing torpedoes a player was the first of their team to see.
@@ -312,15 +366,19 @@ fn rate_player(
 
     let weighted_damage = damage + priority_damage(results, context) * (priority_weight(true) - 1.0);
 
-    let damage_points = 550.0 * normalize(weighted_damage / expected.average_damage_dealt, 0.4);
-    let kill_points = 150.0 * normalize(kills / expected.average_frags, 0.1);
+    let damage_points = DAMAGE_POINTS * normalize(weighted_damage / expected.average_damage_dealt, 0.4);
+    let kill_points = KILL_POINTS * normalize(kills / expected.average_frags, 0.1);
 
-    let enemy_hp_share = 200.0 * weighted_damage / opposing_hp_pool * f64::from(team.players);
+    let enemy_hp_share = weighted_damage / opposing_hp_pool;
+    let even_share = 1.0 / f64::from(team.players);
+    let enemy_hp_share_points = ENEMY_HP_SHARE_POINTS * enemy_hp_share / even_share;
 
-    let tanking = 120.0 * tanking_ratio(results.potential_damage as f64, max_health, team);
+    let tanking_ratio = tanking_ratio(results.potential_damage as f64, max_health, team);
+    let tanking = TANKING_POINTS * tanking_ratio;
 
+    let ships_spotted = ships_spotted(results, context);
     let spotting = results.spotting_damage.map(|spotting_damage| {
-        0.2 * spotting_score(spotting_ratio(spotting_damage as f64, results, context, spotting_baseline))
+        SPOTTING_SCALE * spotting_score(spotting_ratio(spotting_damage as f64, ships_spotted, spotting_baseline))
     });
 
     let objectives = results.objective_points.map(|points| {
@@ -337,7 +395,7 @@ fn rate_player(
     let components = BattleImpactComponents {
         damage: damage_points,
         kills: kill_points,
-        enemy_hp_share,
+        enemy_hp_share: enemy_hp_share_points,
         tanking,
         spotting,
         objectives,
@@ -346,11 +404,30 @@ fn rate_player(
     };
     let bi = components.total();
 
+    let inputs = BattleImpactInputs {
+        weighted_damage,
+        expected_damage: expected.average_damage_dealt,
+        kills,
+        expected_kills: expected.average_frags,
+        enemy_hp_share,
+        even_share,
+        potential_damage: results.potential_damage,
+        tanking_ratio,
+        spotting_damage: results.spotting_damage,
+        spotting_baseline,
+        ships_spotted,
+        ships_spotted_baseline: ships_spotted_baseline(spotting_baseline),
+        objective_points: results.objective_points,
+        planes_killed: results.planes_killed,
+        anti_air_damage: results.anti_air_damage,
+    };
+
     Some(BattleImpactResult {
         bi,
         category: PersonalRatingCategory::from_pr(bi),
         version: BattleImpactVersion::CURRENT,
         components,
+        inputs,
         torpedo_detection,
     })
 }
@@ -383,25 +460,32 @@ fn spotting_baseline(class: Species) -> Option<f64> {
     }
 }
 
-/// Spotting against the class baseline, half by damage and half by the share
-/// of the spotted ships' hit points it amounted to.
-fn spotting_ratio(spotting_damage: f64, results: &ServerResults, context: &BattleContext, baseline: f64) -> f64 {
-    // Typical hit points of a ship being spotted, which turns the damage
-    // baseline into a baseline in ships' worth of hit points.
-    const TYPICAL_VICTIM_HP: f64 = 65_000.0;
-
-    // A victim missing from the results has no hit points to divide by and
-    // adds nothing to the share.
-    let ships_spotted: f64 = results
+/// Hit points' worth of ships spotted: each victim's spotting damage over its
+/// maximum hit points, summed. A victim missing from the results has no hit
+/// points to divide by and adds nothing.
+fn ships_spotted(results: &ServerResults, context: &BattleContext) -> f64 {
+    results
         .damage_interactions
         .iter()
         .filter_map(|(victim, interaction)| {
             let victim = context.victims.get(victim)?;
             Some(interaction.spotting_damage as f64 / victim.max_health as f64)
         })
-        .sum();
+        .sum()
+}
 
-    0.5 * (spotting_damage / baseline) + 0.5 * (ships_spotted / (baseline / TYPICAL_VICTIM_HP))
+/// Spotting against the class baseline, half by damage and half by the share
+/// of the spotted ships' hit points it amounted to.
+fn spotting_ratio(spotting_damage: f64, ships_spotted: f64, baseline: f64) -> f64 {
+    0.5 * (spotting_damage / baseline) + 0.5 * (ships_spotted / ships_spotted_baseline(baseline))
+}
+
+/// The spotting damage baseline as ships' worth of hit points.
+fn ships_spotted_baseline(baseline: f64) -> f64 {
+    // Typical hit points of a ship being spotted.
+    const TYPICAL_VICTIM_HP: f64 = 65_000.0;
+
+    baseline / TYPICAL_VICTIM_HP
 }
 
 /// Maps a spotting ratio onto the rating scale: the baseline is average,

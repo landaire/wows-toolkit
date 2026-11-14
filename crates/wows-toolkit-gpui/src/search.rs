@@ -2152,12 +2152,13 @@ impl Render for SearchView {
                     panel.update(cx, |this, cx| this.hover_row(path, at, cx));
                 })
                 .children(drawn_columns.iter().copied().map(|DrawnColumn { column, width }| {
-                    // The outcome and the rating carry their meaning in
+                    // The outcome and the ratings carry their meaning in
                     // colour, as they do in the replay table and in the egui
                     // results (`ui/search_tab.rs`).
                     let tint = match column {
                         ResultColumn::Sortable(SortColumn::Outcome) => outcome_color(hit.outcome),
                         ResultColumn::Sortable(SortColumn::Pr) => hit.self_pr.map(rating_color),
+                        ResultColumn::Sortable(SortColumn::Bi) => hit.self_bi.map(rating_color),
                         _ => None,
                     };
                     div().w(width).text_sm().truncate().when_some(tint, |el, color| el.text_color(color)).child(
@@ -2471,6 +2472,7 @@ mod tests {
             self_damage: Some(112_345),
             self_kills: Some(2),
             self_pr: Some(1543.0),
+            self_bi: Some(1288.0),
             results_available: true,
             replay_path: PathBuf::from(path),
             file_mtime: None,
@@ -2712,5 +2714,41 @@ mod tests {
         })
         .expect("the window is open");
         assert_eq!(bar(cx), (String::new(), false), "the second clears the text and offers nothing");
+    }
+
+    /// Results with their PR and BI columns, written to `WT_SHOT_DIR`. The
+    /// results are made up: no index is read.
+    #[test]
+    #[ignore = "draws on the graphics device"]
+    fn results_with_ratings_render() {
+        use crate::shot_support;
+
+        let result = |path: &str, map: &str, outcome: MatchOutcome, pr: Option<f64>, bi: Option<f64>| MatchHit {
+            map: map.to_string(),
+            outcome,
+            self_pr: pr,
+            self_bi: bi,
+            ..hit(path)
+        };
+        let hits = vec![
+            result("/replays/0.wowsreplay", "Okinawa", MatchOutcome::Win, Some(1_543.0), Some(1_288.0)),
+            result("/replays/1.wowsreplay", "Two Brothers", MatchOutcome::Loss, Some(1_120.0), Some(870.0)),
+            result("/replays/2.wowsreplay", "Tierra del Fuego", MatchOutcome::Win, Some(2_210.0), Some(2_050.0)),
+            result("/replays/3.wowsreplay", "Prey", MatchOutcome::Draw, Some(760.0), None),
+            result("/replays/4.wowsreplay", "Ice Islands", MatchOutcome::Win, Some(2_650.0), Some(2_480.0)),
+        ];
+
+        let mut cx = shot_support::headless_app();
+        let (window, _view) = shot_support::open(&mut cx, size(px(1200.), px(420.)), |window, cx| {
+            cx.new(|cx| {
+                let mut view = SearchView::new(window, cx);
+                view.on_disk = vec![true; hits.len()];
+                view.list_state.reset(hits.len());
+                view.hits = hits;
+                view.state = SearchState::Done;
+                view
+            })
+        });
+        shot_support::save(&mut cx, window, "search-results-ratings");
     }
 }

@@ -25,6 +25,7 @@ pub mod load;
 mod map_thumbnails;
 pub mod panel;
 pub(crate) mod player_colors;
+pub mod rating_hover;
 pub mod table;
 mod team_bands;
 pub mod view;

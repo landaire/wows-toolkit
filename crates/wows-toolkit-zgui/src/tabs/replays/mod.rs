@@ -11,6 +11,7 @@ mod constants;
 mod layout;
 mod offer;
 pub mod panel;
+mod rating_hover;
 mod session_stats;
 pub mod table;
 #[cfg(test)]

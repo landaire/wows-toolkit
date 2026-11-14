@@ -37,6 +37,8 @@ mod runtime;
 mod search;
 mod search_pills;
 mod settings_store;
+#[cfg(test)]
+mod shot_support;
 mod side_split;
 mod slider_field;
 mod stats;

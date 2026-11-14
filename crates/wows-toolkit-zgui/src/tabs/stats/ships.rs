@@ -28,6 +28,7 @@ use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::table::Column;
 use wows_toolkit_viewmodel::stats::table::ShipSummary;
@@ -596,6 +597,11 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         let text = format!("PR: {:.0}", rating.average.pr);
         AnyView::new(view! { text(style:color = color) {{text}} })
     });
+    let battle_impact = row.battle_impact.map(|bi| {
+        let color = rating::text_color(BiStats::category(bi.average));
+        let text = format!("BI: {:.0}", bi.average);
+        AnyView::new(view! { text(style:color = color, attr:data-testid = format!("ship-bi-{ship}")) {{text}} })
+    });
     let name = row.ship.clone();
     let filter = cx.filter;
     let header = row.header.clone();
@@ -627,6 +633,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
                 row(class = "wt-stats-ship__record", class = TABULAR_CLASS) {
                     {record}
                     {rating}
+                    {battle_impact}
                 }
             }
         }

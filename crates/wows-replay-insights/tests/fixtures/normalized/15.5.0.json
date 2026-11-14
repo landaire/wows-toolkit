@@ -27,17 +27,47 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 845.7266488175056,
+        "bi": 845.7266488175055,
         "category": "BelowAverage",
         "components": {
           "anti_air": 0.0,
           "damage": 275.7963373073383,
-          "enemy_hp_share": 219.92411924119244,
+          "enemy_hp_share": 219.9241192411924,
           "kills": 0.0,
           "objectives": 81.0,
           "spotting": 71.61008800896806,
           "tanking": 197.39610426000672,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.09163504968383017,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 43420.39903846154,
+          "expected_kills": 0.6938521634615059,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 1600.0,
+            "drop": 2800.0,
+            "hold": 14800.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 1035800,
+          "ships_spotted": 0.1511596094065394,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 11969,
+          "tanking_ratio": 1.644967535500056,
+          "weighted_damage": 30432.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -430,6 +460,36 @@
           "tanking": 90.32843658869953,
           "torpedo_warnings": null
         },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.021249623607347185,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 54982.23264781491,
+          "expected_kills": 0.7191316766638081,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 436000,
+          "ships_spotted": 0.0,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 0,
+          "tanking_ratio": 0.7527369715724961,
+          "weighted_damage": 7057.0
+        },
         "torpedo_detection": null,
         "version": 1
       },
@@ -754,12 +814,42 @@
         "components": {
           "anti_air": 0.0,
           "damage": 90.28400288548501,
-          "enemy_hp_share": 145.9512195121951,
+          "enemy_hp_share": 145.95121951219514,
           "kills": 0.0,
           "objectives": 0.0,
           "spotting": 38.841733159188834,
           "tanking": 78.6483289297058,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.0608130081300813,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 40514.220097640355,
+          "expected_kills": 0.6634784377542772,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 404100,
+          "ships_spotted": 0.07939072382228886,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 6661,
+          "tanking_ratio": 0.6554027410808816,
+          "weighted_damage": 20196.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -1074,6 +1164,36 @@
           "spotting": 90.67190360046459,
           "tanking": 68.1919899060732,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.053947606142728095,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 35374.333139727845,
+          "expected_kills": 0.5811765682044547,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 4800.0,
+            "drop": 0.0,
+            "hold": 14800.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 323220,
+          "ships_spotted": 0.19038148843026892,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 15221,
+          "tanking_ratio": 0.56826658255061,
+          "weighted_damage": 17916.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -1424,6 +1544,36 @@
           "tanking": 128.92342673665766,
           "torpedo_warnings": null
         },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.041041854862993075,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 53680.396357491554,
+          "expected_kills": 0.7396551508324403,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 904014,
+          "ships_spotted": 0.30135084427767356,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 24093,
+          "tanking_ratio": 1.0743618894721472,
+          "weighted_damage": 13630.0
+        },
         "torpedo_detection": null,
         "version": 1
       },
@@ -1718,12 +1868,42 @@
         "components": {
           "anti_air": 0.0,
           "damage": 177.11898688248493,
-          "enemy_hp_share": 268.60343270099366,
+          "enemy_hp_share": 268.6034327009937,
           "kills": 195.0747754500452,
           "objectives": 61.0,
           "spotting": 154.77378313510587,
           "tanking": 178.47168013646706,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.11191809695874737,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 62654.58907254362,
+          "expected_kills": 0.7871235078053355,
+          "kills": 1.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 2400.0,
+            "drop": 0.0,
+            "hold": 14800.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 1263900,
+          "ships_spotted": 0.3754009912680542,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 22704,
+          "tanking_ratio": 1.4872640011372256,
+          "weighted_damage": 37168.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -2127,6 +2307,36 @@
           "tanking": 74.29467497886716,
           "torpedo_warnings": null
         },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.11535682023486901,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 57652.6554152824,
+          "expected_kills": 0.7965794019933068,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 1120.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 488700,
+          "ships_spotted": 0.020341934224944087,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 1515,
+          "tanking_ratio": 0.6191222914905596,
+          "weighted_damage": 38310.0
+        },
         "torpedo_detection": null,
         "version": 1
       },
@@ -2442,6 +2652,36 @@
           "spotting": 70.85786119840832,
           "tanking": 159.54992593258496,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.18199638663053297,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 60523.96157073334,
+          "expected_kills": 0.7487053196846152,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 1400.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 1129900,
+          "ships_spotted": 0.1530528617985673,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 11617,
+          "tanking_ratio": 1.3295827161048746,
+          "weighted_damage": 60441.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -2779,12 +3019,42 @@
         "components": {
           "anti_air": 0.0,
           "damage": 0.0,
-          "enemy_hp_share": 139.75067750677505,
+          "enemy_hp_share": 139.75067750677508,
           "kills": 0.0,
           "objectives": 19.6,
           "spotting": 39.51891521486644,
           "tanking": 87.71363453926742,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.058229448961156276,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 66490.14082278482,
+          "expected_kills": 0.8407346292947512,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 1960.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 615050,
+          "ships_spotted": 0.08297686053783615,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 6634,
+          "tanking_ratio": 0.7309469544938951,
+          "weighted_damage": 19338.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -3101,6 +3371,36 @@
           "spotting": 62.44533202796828,
           "tanking": 148.07489911485047,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.052399879554351096,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 67303.07094639311,
+          "expected_kills": 0.8357749834546362,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 2400.0,
+            "drop": 2800.0,
+            "hold": 14800.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 950750,
+          "ships_spotted": 0.1369554007998515,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 10103,
+          "tanking_ratio": 1.233957492623754,
+          "weighted_damage": 17402.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -3442,6 +3742,36 @@
           "tanking": 117.2793096955171,
           "torpedo_warnings": null
         },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.005832580548027703,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 25526.12234348076,
+          "expected_kills": 0.6614727168293802,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 348900,
+          "ships_spotted": 0.01805887032617343,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 1135,
+          "tanking_ratio": 0.9773275807959758,
+          "weighted_damage": 1937.0
+        },
         "torpedo_detection": null,
         "version": 1
       },
@@ -3772,12 +4102,42 @@
         "components": {
           "anti_air": 0.0,
           "damage": 0.0,
-          "enemy_hp_share": 83.11472448057813,
+          "enemy_hp_share": 83.11472448057815,
           "kills": 0.0,
           "objectives": 0.0,
           "spotting": 18.74516335715922,
           "tanking": 67.38034762842787,
           "torpedo_warnings": null
+        },
+        "inputs": {
+          "anti_air_damage": 0,
+          "enemy_hp_share": 0.034631135200240894,
+          "even_share": 0.08333333333333333,
+          "expected_damage": 55626.773858472196,
+          "expected_kills": 0.7324713265527384,
+          "kills": 0.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 414800,
+          "ships_spotted": 0.09094010057350387,
+          "ships_spotted_baseline": 1.1538461538461537,
+          "spotting_baseline": 75000.0,
+          "spotting_damage": 6314,
+          "tanking_ratio": 0.5615028969035656,
+          "weighted_damage": 11501.0
         },
         "torpedo_detection": null,
         "version": 1
@@ -4170,12 +4530,42 @@
         "components": {
           "anti_air": 51.709,
           "damage": 3024.8156645594513,
-          "enemy_hp_share": 477.08333333333337,
+          "enemy_hp_share": 477.0833333333333,
           "kills": 950.8637286566563,
           "objectives": 67.6,
           "spotting": 250.3733556081115,
           "tanking": 190.94995401329618,
           "torpedo_warnings": 0.0
+        },
+        "inputs": {
+          "anti_air_damage": 19418,
+          "enemy_hp_share": 0.47708333333333336,
+          "even_share": 0.2,
+          "expected_damage": 73531.56397245379,
+          "expected_kills": 0.6890395070677695,
+          "kills": 4.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 1960.0,
+            "capture": 0.0,
+            "drop": 4800.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 4,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 10
+          },
+          "potential_damage": 1534582,
+          "ships_spotted": 0.6772378067394622,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 37864,
+          "tanking_ratio": 1.5912496167774681,
+          "weighted_damage": 272052.0
         },
         "torpedo_detection": {
           "detected": 4,
@@ -5011,6 +5401,36 @@
           "tanking": 117.36757950389406,
           "torpedo_warnings": 0.0
         },
+        "inputs": {
+          "anti_air_damage": 14229,
+          "enemy_hp_share": 0.1800178872053872,
+          "even_share": 0.2,
+          "expected_damage": 60028.7355664488,
+          "expected_kills": 0.6434150326797623,
+          "kills": 3.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 1600.0,
+            "drop": 400.0,
+            "hold": 8800.0
+          },
+          "planes_killed": {
+            "bombers": 5,
+            "consumable_fighters": 0,
+            "rocket_planes": 3,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 836300,
+          "ships_spotted": 0.2017496229260935,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 5522,
+          "tanking_ratio": 0.9780631625324505,
+          "weighted_damage": 102653.4
+        },
         "torpedo_detection": {
           "detected": 0,
           "threatening": 0.0
@@ -5815,6 +6235,36 @@
           "tanking": 95.18438669077008,
           "torpedo_warnings": 0.0
         },
+        "inputs": {
+          "anti_air_damage": 13588,
+          "enemy_hp_share": 0.12502630471380471,
+          "even_share": 0.2,
+          "expected_damage": 75909.0,
+          "expected_kills": 0.815,
+          "kills": 1.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 280.0,
+            "capture": 0.0,
+            "drop": 0.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 4,
+            "consumable_fighters": 0,
+            "rocket_planes": 0,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 3
+          },
+          "potential_damage": 712700,
+          "ships_spotted": 0.22549939806550706,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 12029,
+          "tanking_ratio": 0.793203222423084,
+          "weighted_damage": 71295.0
+        },
         "torpedo_detection": {
           "detected": 0,
           "threatening": 0.0
@@ -6538,6 +6988,36 @@
           "spotting": 146.9568783609252,
           "tanking": 74.34548099352135,
           "torpedo_warnings": 0.0
+        },
+        "inputs": {
+          "anti_air_damage": 5506,
+          "enemy_hp_share": 0.23472748316498315,
+          "even_share": 0.2,
+          "expected_damage": 99534.84675324676,
+          "expected_kills": 0.8076935064934776,
+          "kills": 2.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 1400.0,
+            "capture": 3600.0,
+            "drop": 4000.0,
+            "hold": 8800.0
+          },
+          "planes_killed": {
+            "bombers": 0,
+            "consumable_fighters": 1,
+            "rocket_planes": 4,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 634276,
+          "ships_spotted": 0.38669240704112134,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 19591,
+          "tanking_ratio": 0.6195456749460112,
+          "weighted_damage": 133851.0
         },
         "torpedo_detection": {
           "detected": 3,
@@ -7333,9 +7813,39 @@
           "enemy_hp_share": 96.06937429854096,
           "kills": 493.698788896552,
           "objectives": 4.0,
-          "spotting": 181.73332192877155,
+          "spotting": 181.73332192877152,
           "tanking": 111.58646276700567,
           "torpedo_warnings": 0.0
+        },
+        "inputs": {
+          "anti_air_damage": 16417,
+          "enemy_hp_share": 0.09606937429854097,
+          "even_share": 0.2,
+          "expected_damage": 51606.89593077642,
+          "expected_kills": 0.653126753975698,
+          "kills": 2.0,
+          "objective_points": {
+            "battle_end": 0.0,
+            "block": 0.0,
+            "capture": 0.0,
+            "drop": 400.0,
+            "hold": 0.0
+          },
+          "planes_killed": {
+            "bombers": 3,
+            "consumable_fighters": 0,
+            "rocket_planes": 10,
+            "scouts": 0,
+            "skip_bombers": 0,
+            "torpedo_bombers": 0
+          },
+          "potential_damage": 547496,
+          "ships_spotted": 0.5280944839474251,
+          "ships_spotted_baseline": 0.5384615384615384,
+          "spotting_baseline": 35000.0,
+          "spotting_damage": 20984,
+          "tanking_ratio": 0.9298871897250472,
+          "weighted_damage": 54782.6
         },
         "torpedo_detection": {
           "detected": 3,

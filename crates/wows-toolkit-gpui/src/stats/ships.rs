@@ -37,6 +37,7 @@ use rust_i18n::t;
 
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::stats::BiStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::PrStats;
@@ -74,6 +75,7 @@ struct ShipSection {
     header: SharedString,
     performance: PerformanceInfo,
     rating: Option<PrStats>,
+    battle_impact: Option<BiStats>,
     rows: Vec<stats_table::StatRow>,
     horizontal_scroll: ScrollHandle,
     markdown: SharedString,
@@ -209,6 +211,7 @@ impl StatsShipsPanel {
                 horizontal_scroll: ScrollHandle::new(),
                 performance: summary.performance,
                 rating: summary.rating,
+                battle_impact: summary.battle_impact,
             })
             .collect();
     }
@@ -329,6 +332,16 @@ impl Render for StatsShipsPanel {
                                 crate::theme::is_dark_mode(),
                             )))
                             .child(format!("PR: {:.0}", rating.average.pr)),
+                    )
+                })
+                .when_some(section.battle_impact.as_ref(), |row, rating| {
+                    row.child(
+                        div()
+                            .text_color(rgb(personal_rating::chip_text(
+                                BiStats::category(rating.average),
+                                crate::theme::is_dark_mode(),
+                            )))
+                            .child(format!("BI: {:.0}", rating.average)),
                     )
                 });
 
@@ -603,6 +616,7 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
+            battle_impact: None,
         }
     }
 

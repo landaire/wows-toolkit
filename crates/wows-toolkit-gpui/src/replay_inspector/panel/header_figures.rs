@@ -1,6 +1,7 @@
 //! The match header's figures: a faint tint of the result across the band,
 //! the recording player's stat tiles, and the team damage split.
 
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -28,6 +29,7 @@ use gpui_kit::px;
 use gpui_kit::relative;
 use gpui_kit::rgb;
 use rust_i18n::t;
+use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_replay_data::columns::BattleOutcome;
 use wows_toolkit_replay_data::columns::ColorRole;
@@ -35,15 +37,25 @@ use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 
+use crate::replay_inspector::rating_hover;
+use crate::replay_inspector::rating_hover::RatedFigure;
 use crate::replay_inspector::table::resolve_color;
 
 /// The PR tile's element id, so a test can assert on its presence and label.
 pub(super) const PR_TILE_ID: &str = "replay-personal-rating-badge";
 
+/// The BI tile's element id.
+pub(super) const BI_TILE_ID: &str = "replay-battle-impact-badge";
+
 /// The PR tile's spoken text, verbatim the egui `pr_chip` call's format
 /// string.
 pub(super) fn personal_rating_label(rating: &PersonalRatingResult) -> String {
     format!("PR: {:.0} ({})", rating.pr, rating.category.name())
+}
+
+/// The BI tile's spoken text, in the PR tile's form.
+pub(super) fn battle_impact_label(rating: &BattleImpactResult) -> String {
+    format!("BI: {:.0} ({})", rating.bi, rating.category.name())
 }
 
 /// The recording player's own figures, read once from the parsed model.
@@ -91,6 +103,8 @@ struct Tile {
     /// What the tile reads as to assistive technology.
     said: String,
     tone: Option<Hsla>,
+    /// The rating's parts, shown on hover.
+    breakdown: Option<RatedFigure>,
 }
 
 /// The header band's background: the result's tone at the leading edge,
@@ -138,7 +152,7 @@ fn counted(target: i128, progress: f32) -> i128 {
 
 /// One figure as a small card: its name over its value.
 fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
-    let Tile { id, label, value, said, tone } = tile;
+    let Tile { id, label, value, said, tone, breakdown } = tile;
 
     crate::ui::card_surface(v_flex(), cx)
         .id(id)
@@ -153,15 +167,17 @@ fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
         .child(crate::ui::tabular(
             div().text_sm().font_weight(FontWeight::BOLD).when_some(tone, |el, tone| el.text_color(tone)).child(value),
         ))
+        .when_some(breakdown, |tile, breakdown| tile.tooltip(rating_hover::tooltip(Rc::new(breakdown))))
         .into_any_element()
 }
 
-/// The recording player's figures and Personal Rating as tiles, counted up to
+/// The recording player's figures, PR and BI as tiles, counted up to
 /// `progress`. A figure the replay does not carry has no tile; `own` is
 /// `None` when the player's own figures are hidden or absent.
 pub(super) fn stat_tiles(
     own: Option<OwnFigures>,
     rating: Option<&PersonalRatingResult>,
+    battle_impact: Option<&BattleImpactResult>,
     progress: f32,
     cx: &App,
 ) -> Vec<AnyElement> {
@@ -177,17 +193,36 @@ pub(super) fn stat_tiles(
     for (id, label, value) in figures.into_iter().flatten() {
         let Some(value) = value else { continue };
         let shown = separate_number(counted(value, progress));
-        let tile = Tile { id: id.into(), label: label.into_owned(), value: shown.clone(), said: shown, tone: None };
+        let tile = Tile {
+            id: id.into(),
+            label: label.into_owned(),
+            value: shown.clone(),
+            said: shown,
+            tone: None,
+            breakdown: None,
+        };
         tiles.push(stat_tile(tile, cx));
     }
 
+    let progress = f64::from(progress.clamp(0.0, 1.0));
     if let Some(rating) = rating {
         let tone = resolve_color(ColorRole::PrTier(rating.category));
-        let shown = format!("{:.0}", rating.pr * f64::from(progress.clamp(0.0, 1.0)));
+        let shown = format!("{:.0}", rating.pr * progress);
         let label = format!("{} - {}", t!("ui.replay.column.personal_rating"), rating.category.name());
         // Read as the final rating whatever the count has reached.
         let said = personal_rating_label(rating);
-        let tile = Tile { id: PR_TILE_ID.into(), label, value: shown, said, tone: Some(tone) };
+        let breakdown = RatedFigure::personal(rating);
+        let tile = Tile { id: PR_TILE_ID.into(), label, value: shown, said, tone: Some(tone), breakdown };
+        tiles.push(stat_tile(tile, cx));
+    }
+
+    if let Some(rating) = battle_impact {
+        let tone = resolve_color(ColorRole::PrTier(rating.category));
+        let shown = format!("{:.0}", rating.bi * progress);
+        let label = format!("{} - {}", t!("ui.replay.column.battle_impact"), rating.category.name());
+        let said = battle_impact_label(rating);
+        let breakdown = Some(RatedFigure::BattleImpact(Box::new(rating.clone())));
+        let tile = Tile { id: BI_TILE_ID.into(), label, value: shown, said, tone: Some(tone), breakdown };
         tiles.push(stat_tile(tile, cx));
     }
 

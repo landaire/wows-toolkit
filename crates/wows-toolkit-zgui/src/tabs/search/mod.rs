@@ -344,6 +344,7 @@ fn column_id(column: ResultColumn) -> &'static str {
         ResultColumn::Sortable(SortColumn::Damage) => "damage",
         ResultColumn::Sortable(SortColumn::Kills) => "kills",
         ResultColumn::Sortable(SortColumn::Pr) => "pr",
+        ResultColumn::Sortable(SortColumn::Bi) => "bi",
         ResultColumn::Ship => "ship",
     }
 }
@@ -353,6 +354,17 @@ fn sort_column_of(id: &ColumnId) -> Option<SortColumn> {
         ResultColumn::Sortable(sortable) if column_id(column) == id.as_str() => Some(sortable),
         _ => None,
     })
+}
+
+/// The band a rating cell is drawn in, for the PR and BI columns.
+fn rating_band(hit: &MatchHit, column: SortColumn) -> Option<&'static str> {
+    let rating = match column {
+        SortColumn::Pr => hit.self_pr,
+        SortColumn::Bi => hit.self_bi,
+        _ => None,
+    }?;
+
+    Some(rating_band_name(PersonalRatingCategory::from_pr(rating)))
 }
 
 fn grid_sort(sort: SortSpec) -> ColumnSort {
@@ -503,9 +515,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                     ResultColumn::Sortable(sortable) => (
                         cell_text(&row.hit, sortable),
                         (sortable == SortColumn::Outcome).then(|| outcome_tone(row.hit.outcome)).flatten(),
-                        (sortable == SortColumn::Pr)
-                            .then(|| row.hit.self_pr.map(|pr| rating_band_name(PersonalRatingCategory::from_pr(pr))))
-                            .flatten(),
+                        rating_band(&row.hit, sortable),
                         cell_hover(&row.hit, sortable),
                     ),
                     ResultColumn::Ship => (row.ship.clone(), None, None, None),

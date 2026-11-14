@@ -252,6 +252,9 @@ pub struct MatchHit {
     pub self_damage: Option<u64>,
     pub self_kills: Option<i64>,
     pub self_pr: Option<f64>,
+    /// The perspective player's battle impact, from their roster row. `None`
+    /// when the roster carries no rating for them.
+    pub self_bi: Option<f64>,
     pub results_available: bool,
     pub replay_path: PathBuf,
     pub file_mtime: Option<i64>,
@@ -317,6 +320,8 @@ pub struct RowSummary {
     /// Whether a rating applies to the battle. `self_pr` is `None` when it
     /// does not.
     pub rating_scope: RatingScope,
+    /// The perspective player's battle impact, from their roster row.
+    pub self_bi: Option<f64>,
     /// The self player's division, resolved from the roster row belonging to
     /// `replay_record.self_account_id`. `None` when the perspective player had
     /// no account (a spectator recording), had no roster row, or was solo.

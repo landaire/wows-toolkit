@@ -13,10 +13,19 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_replay_insights::battle_impact::BattleImpactComponents;
+use wows_replay_insights::battle_impact::BattleImpactInputs;
+use wows_replay_insights::battle_impact::BattleImpactResult;
+use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
 use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_replay_data::sort::SortColumn;
+use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
+use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -487,6 +496,140 @@ fn a_disconnect_chip_deepens_from_thirty_to_ninety_seconds() {
     assert_eq!(cells::offline_depth(offline(120)), 1.0);
     assert_eq!(cells::offline_label(offline(72)), "1m 12s");
     assert_eq!(cells::offline_label(offline(45)), "45s");
+}
+
+/// A battle impact with every part filled in, adding up to `bi`.
+pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
+    let average = BattleImpactComponents::AVERAGE;
+    let components = BattleImpactComponents {
+        damage: bi * 0.4,
+        kills: bi * 0.2,
+        enemy_hp_share: bi * 0.15,
+        tanking: bi * 0.1,
+        spotting: Some(bi * 0.1),
+        objectives: Some(bi * 0.05),
+        ..average
+    };
+    let inputs = BattleImpactInputs {
+        weighted_damage: 84_000.0,
+        expected_damage: 61_000.0,
+        kills: 2.0,
+        expected_kills: 0.85,
+        enemy_hp_share: 0.18,
+        even_share: 0.083,
+        potential_damage: 1_250_000,
+        tanking_ratio: 1.4,
+        spotting_damage: Some(32_000),
+        spotting_baseline: 21_000.0,
+        ships_spotted: 2.4,
+        ships_spotted_baseline: 1.8,
+        objective_points: None,
+        planes_killed: None,
+        anti_air_damage: None,
+    };
+
+    BattleImpactResult {
+        bi,
+        category: PersonalRatingCategory::from_pr(bi),
+        version: BattleImpactVersion::CURRENT,
+        components,
+        inputs,
+        torpedo_detection: None,
+    }
+}
+
+/// The sample battle with the self row rated on both scales, each keeping its parts.
+fn rated_model() -> ReplayReportModel {
+    let mut model = split_damage(sample_model());
+    let table = fixture_personal_rating_data();
+    let row = model.rows.iter_mut().find(|row| row.is_self).expect("the sample has a self row");
+    row.personal_rating = rate_single_battle(&table, FIXTURE_PR_SHIP_ID.into(), 72_000, 2, true);
+    row.battle_impact = Some(sample_battle_impact(1_480.0));
+
+    model
+}
+
+/// The self row's cell in `column`.
+fn self_cell(window: &HeadlessWindow, column: ReplayColumn) -> Element {
+    let id = sample_model().rows.iter().find(|row| row.is_self).expect("the sample has a self row").db_id.raw();
+    let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
+    let line = window.bounds(name).expect("the name has a box");
+    let middle = line.origin.y.0 + line.size.height.0 / 2.0;
+    window
+        .all_by_attribute("data-column", column.storage_key())
+        .into_iter()
+        .find(|cell| {
+            window
+                .bounds(*cell)
+                .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
+        })
+        .expect("the self row has the cell")
+}
+
+#[test]
+fn a_rating_cell_lists_its_parts_largest_first_on_hover() {
+    let model = rated_model();
+    let row = model.rows.iter().find(|row| row.is_self).cloned().expect("the sample has a self row");
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+
+    let cases = [
+        (
+            ReplayColumn::BattleImpact,
+            "bi",
+            row.battle_impact.as_ref().map(|bi| RatingBreakdown::battle_impact(bi, None)),
+        ),
+        (
+            ReplayColumn::PersonalRating,
+            "pr",
+            row.personal_rating.as_ref().and_then(|pr| RatingBreakdown::personal_rating(pr, None)),
+        ),
+    ];
+    for (column, kind, breakdown) in cases {
+        let breakdown = breakdown.expect("the rating keeps its parts");
+        let cell = self_cell(&window, column);
+        window.hover(cell).expect("the cell has a box");
+        window.advance(Duration::from_millis(800));
+
+        assert!(window.by_test_id(&format!("rating-{kind}-hover")).is_some(), "the {kind} hover opens");
+        let labels: Vec<String> = window.texts_by_class("wt-rh__label");
+        let expected: Vec<String> = breakdown.lines.iter().map(|line| line.label.clone()).collect();
+        assert_eq!(labels, expected, "one line per part, largest first");
+
+        window.hover_at(Point::new(DevicePx(1.0), DevicePx(1.0)));
+        window.advance(Duration::from_millis(400));
+    }
+}
+
+/// The text of the plain hover over `column`'s cell on the self row.
+fn plain_hover(window: &mut HeadlessWindow, column: ReplayColumn) -> Vec<String> {
+    let cell = self_cell(window, column);
+    window.hover(cell).expect("the cell has a box");
+    window.advance(Duration::from_millis(800));
+
+    window.texts_by_class("wt-pt-hover")
+}
+
+#[test]
+fn a_hidden_rows_rating_names_only_its_band() {
+    let mut model = rated_model();
+    let row = model.rows.iter_mut().find(|row| row.is_self).expect("the sample has a self row");
+    row.manual_stat_hide_toggle = true;
+    let band = row.battle_impact.as_ref().expect("the row is rated").category.name().to_owned();
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+
+    let hover = plain_hover(&mut window, ReplayColumn::BattleImpact);
+    assert!(window.by_test_id("rating-bi-hover").is_none(), "the parts would show the hidden inputs");
+    assert_eq!(hover, [band]);
+}
+
+#[test]
+fn a_withheld_battle_impact_says_why_it_is_missing() {
+    let mut model = sample_model();
+    model.battle_impact_withheld = true;
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+
+    let hover = plain_hover(&mut window, ReplayColumn::BattleImpact);
+    assert_eq!(hover, [t!("ui.rating.unrated_early_exit").into_owned()]);
 }
 
 /// Writes the table in both appearances, with one row open, to `target/zgui-shots`.

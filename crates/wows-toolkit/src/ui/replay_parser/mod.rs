@@ -843,6 +843,7 @@ impl UiReport {
                         consumables,
                         heal_count: np.heal_count,
                         personal_rating: None,
+                        battle_impact: None,
                         has_vehicle_entity: vehicle.is_some(),
                         fire_chance: np.is_self.then(|| self_fire_chance.clone()).flatten(),
                     }
@@ -871,6 +872,7 @@ impl UiReport {
                 ReplayColumn::Name,
                 ReplayColumn::ShipName,
                 ReplayColumn::PersonalRating,
+                ReplayColumn::BattleImpact,
                 ReplayColumn::BaseXp,
                 ReplayColumn::RawXp,
                 ReplayColumn::Kills,
@@ -958,6 +960,7 @@ impl UiReport {
                 }
                 SortColumn::Heals => SortKey::U64(report.heal_count.map(|c| c as u64)),
                 SortColumn::PersonalRating => SortKey::F64(report.personal_rating.as_ref().map(|pr| pr.pr)),
+                SortColumn::BattleImpact => SortKey::F64(report.battle_impact.as_ref().map(|bi| bi.bi)),
             };
 
             (team_id, key, db_id)
@@ -1893,8 +1896,26 @@ impl UiReport {
                         if !self.normalized.metadata.rating_scope().is_rated() {
                             ui.label("-").on_hover_text(t!("ui.personal_rating.unrated_hover"));
                         } else if let Some(pr) = report.personal_rating.as_ref() {
-                            crate::ui::widgets::pr_chip(ui, pr.category, &format!("{:.0}", pr.pr), false)
-                                .on_hover_text(pr.category.name());
+                            crate::ui::widgets::personal_rating_chip(
+                                ui,
+                                pr,
+                                &format!("{:.0}", pr.pr),
+                                self.rating_hover(report),
+                            );
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::BattleImpact => {
+                        if let Some(bi) = report.battle_impact.as_ref() {
+                            crate::ui::widgets::battle_impact_chip(
+                                ui,
+                                bi,
+                                &format!("{:.0}", bi.bi),
+                                self.rating_hover(report),
+                            );
+                        } else if self.rated_without_battle_end() {
+                            ui.label("-").on_hover_text(t!("ui.rating.unrated_early_exit"));
                         } else {
                             ui.label("-");
                         }
@@ -2475,7 +2496,7 @@ impl UiReport {
         }
     }
 
-    /// Rates every player's PR and BI, and carries the PR onto the rows the
+    /// Rates every player's PR and BI, and carries both onto the rows the
     /// table draws.
     ///
     /// The report is rated rather than the rows, so the export and the index
@@ -2486,12 +2507,31 @@ impl UiReport {
         // unloaded table rates nobody, and its revision would mark the rows rated.
         if self.normalized.battle_impact_version.is_none() && pr_data.is_loaded() {
             self.normalized.populate_battle_impact(pr_data);
+            for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
+                report.battle_impact = np.battle_impact.clone();
+            }
         }
 
         for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
             if report.personal_rating.is_none() {
                 report.personal_rating = np.personal_rating.clone();
             }
+        }
+    }
+
+    /// BI was rated, and rated nobody because the recording stopped before
+    /// the battle ended.
+    fn rated_without_battle_end(&self) -> bool {
+        self.normalized.battle_impact_version.is_some() && self.normalized.metadata.battle_result.is_none()
+    }
+
+    /// A row that hides its stats shows only the band: a breakdown's inputs
+    /// are the very figures it hides.
+    fn rating_hover(&self, report: &PlayerReport) -> crate::ui::widgets::RatingHover {
+        if report.should_hide_stats() && !self.debug_mode {
+            crate::ui::widgets::RatingHover::BandOnly
+        } else {
+            crate::ui::widgets::RatingHover::Breakdown
         }
     }
 }
@@ -2730,6 +2770,22 @@ impl egui_table::TableDelegate for UiReport {
                         .clicked()
                     {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::PersonalRating);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::BattleImpact => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.battle_impact"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::BattleImpact,
+                        ))
+                        .on_hover_text(t!("ui.rating.battle_impact"))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::BattleImpact);
 
                         self.sort_players(new_sort);
                     };
@@ -3280,6 +3336,24 @@ impl ToolkitTabViewer<'_> {
                     ui.label(text);
                 }
 
+                if let Some(ui_report) = replay_file.ui_report.as_ref() {
+                    for vehicle_report in &ui_report.player_reports {
+                        if vehicle_report.relation().is_self() {
+                            self_report = Some(vehicle_report);
+                            hide_my_stats = vehicle_report.manual_stat_hide_toggle;
+                            break;
+                        }
+                    }
+                }
+
+                let hover = if self_report.is_some_and(|report| report.should_hide_stats())
+                    && !self.tab_state.persisted.read().settings.app.debug_mode
+                {
+                    crate::ui::widgets::RatingHover::BandOnly
+                } else {
+                    crate::ui::widgets::RatingHover::Breakdown
+                };
+
                 let unrated = replay_file
                     .ui_report
                     .as_ref()
@@ -3289,23 +3363,22 @@ impl ToolkitTabViewer<'_> {
                 } else if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
-                        crate::ui::widgets::pr_chip(
+                        crate::ui::widgets::personal_rating_chip(
                             ui,
-                            pr_result.category,
+                            &pr_result,
                             &format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()),
-                            false,
+                            hover,
                         );
                     }
                 }
 
-                if let Some(ui_report) = replay_file.ui_report.as_ref() {
-                    for vehicle_report in &ui_report.player_reports {
-                        if vehicle_report.relation().is_self() {
-                            self_report = Some(vehicle_report);
-                            hide_my_stats = vehicle_report.manual_stat_hide_toggle;
-                            break;
-                        }
-                    }
+                if let Some(bi_result) = self_report.and_then(|report| report.battle_impact.as_ref()) {
+                    crate::ui::widgets::battle_impact_chip(
+                        ui,
+                        bi_result,
+                        &format!("BI: {:.0} ({})", bi_result.bi, bi_result.category.name()),
+                        hover,
+                    );
                 }
 
                 ui.menu_button(t!("ui.replay.actions"), |ui| {

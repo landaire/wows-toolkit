@@ -82,6 +82,7 @@ pub fn sort_from_value(value: &serde_json::Value) -> Option<SortSpec> {
         "Damage" => SortColumn::Damage,
         "Kills" => SortColumn::Kills,
         "Pr" => SortColumn::Pr,
+        "Bi" => SortColumn::Bi,
         _ => return None,
     };
     let direction = match pair.get(1)?.as_str()? {
@@ -101,6 +102,7 @@ pub fn sort_value(sort: SortSpec) -> serde_json::Value {
         SortColumn::Damage => "Damage",
         SortColumn::Kills => "Kills",
         SortColumn::Pr => "Pr",
+        SortColumn::Bi => "Bi",
     };
     let direction = match sort.direction {
         SortDirection::Ascending => "Ascending",
