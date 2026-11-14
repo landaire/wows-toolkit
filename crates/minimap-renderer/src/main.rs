@@ -32,6 +32,7 @@ use wows_minimap_renderer::assets::load_plane_icons;
 use wows_minimap_renderer::assets::load_powerup_icons;
 use wows_minimap_renderer::assets::load_ribbon_icons;
 use wows_minimap_renderer::assets::load_ship_icons;
+use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::config::RendererConfig;
 use wows_minimap_renderer::drawing::ImageTarget;
 use wows_minimap_renderer::encoder::Mode as EncoderMode;
@@ -408,41 +409,10 @@ fn main() -> Result<(), Report> {
         Some(img.into_rgba8())
     });
 
-    // Pre-scan vehicle facts + damage events so roster HP, consumable
-    // inventories, and damage columns render from frame zero (the desktop
-    // renderer does the same in playback.rs). Without this, team-roster mode
-    // ships up with empty inventories and damage stuck at 0 until the live
-    // controller catches up.
-    let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
-    primary_with_alts.extend(merge_replays.iter());
-    let vehicle_facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
-        &game_constants,
-        replay_version,
-        &specs,
-        &primary_with_alts,
-    );
-    let damage_events = wows_battle_world::merged::gather_damage_events(
-        &controller_game_params,
-        &game_constants,
-        replay_version,
-        &specs,
-        &primary_with_alts,
-    );
-
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_params, replay_version, options);
     renderer.set_fonts(game_fonts);
     renderer.set_flag_icons(flag_icons);
     renderer.set_merged_perspectives(!merge_replays.is_empty());
-    renderer.set_vehicle_facts(vehicle_facts.clone());
-    renderer.set_damage_events(damage_events);
-    let salvo_flight_times = wows_battle_world::scan::scan_salvo_flight_times(
-        &replay_file.meta,
-        &controller_game_params,
-        &game_constants,
-        replay_version,
-        &replay_file,
-    );
-    renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
     if let Some(sil) = self_silhouette {
         renderer.set_self_silhouette(sil);
     }
@@ -535,6 +505,9 @@ fn main() -> Result<(), Report> {
         &merge_replays,
     )
     .map_err(|e| report!("{e}"))?;
+    BattleScans::gather(&controller_game_params, &game_constants, replay_version, &replay_file, &merge_replays)
+        .install(&mut renderer, &session);
+    let vehicle_facts = session.vehicle_facts().clone();
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
         session.world_mut(),
         &vehicle_facts,

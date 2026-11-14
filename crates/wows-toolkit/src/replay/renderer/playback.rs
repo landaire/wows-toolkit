@@ -10,6 +10,7 @@ use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::activity_feed::PlaybackRate;
+use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -243,6 +244,8 @@ pub(super) fn playback_thread(
         }
     };
     session.world_mut().set_shot_tracking(ShotTracking::Untracked); // No shot data needed for frame building
+    let scans = BattleScans::gather(&*game_metadata, &game_constants, version, &replay_file, &alt_replay_files);
+    scans.install(&mut renderer, &session);
 
     // Parse all packets, tracking frame boundaries
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
@@ -289,17 +292,6 @@ pub(super) fn playback_thread(
     let mut sink = FirstFrameSink { shared_state: &shared_state, estimated_frames, game_duration };
     let frame_snapshots = build_frame_track(&mut session, &mut renderer, frame_duration, &never_cancelled, &mut sink);
     let vehicle_facts = session.vehicle_facts().clone();
-    let damage_events = {
-        let mut all = vec![&replay_file];
-        all.extend(alt_replay_files.iter());
-        wows_battle_world::merged::gather_damage_events(
-            &*game_metadata,
-            &game_constants,
-            version,
-            game_metadata.entity_specs(),
-            &all,
-        )
-    };
 
     // One-shot build snapshot from the lookahead pass. The merged session
     // here has stepped through every packet in every replay (primary plus
@@ -405,8 +397,6 @@ pub(super) fn playback_thread(
     live_renderer.set_fonts(game_fonts.clone());
     apply_playback_speed(&mut live_renderer, speed);
     live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
-    live_renderer.set_vehicle_facts(vehicle_facts.clone());
-    live_renderer.set_damage_events(damage_events.clone());
     if let Some(ref sil) = self_silhouette {
         live_renderer.set_self_silhouette(sil.clone());
     }
@@ -415,14 +405,6 @@ pub(super) fn playback_thread(
     // to bridges. Reset to 0 whenever the live session is rebuilt.
     let mut hit_cursor: usize = 0;
     let mut live_clock = GameClock(0.0);
-
-    let live_salvo_flight_times = Arc::new(wows_battle_world::scan::scan_salvo_flight_times(
-        &live_replay.meta,
-        &*game_metadata,
-        &game_constants,
-        version,
-        &live_replay,
-    ));
 
     let mut live_session = match MergedReplays::new(
         game_metadata.entity_specs(),
@@ -435,8 +417,7 @@ pub(super) fn playback_thread(
         Ok(s) => s,
         Err(_) => return,
     };
-    live_renderer.set_position_timeline(live_session.position_timeline());
-    live_renderer.set_salvo_flight_times(Arc::clone(&live_salvo_flight_times));
+    scans.install(&mut live_renderer, &live_session);
 
     // Capture the set of teams for which we have a recording-player replay.
     // The build popover gates enemy-team visibility on this: an enemy build
@@ -777,8 +758,6 @@ pub(super) fn playback_thread(
             live_renderer.set_fonts(game_fonts.clone());
             apply_playback_speed(&mut live_renderer, speed);
             live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
-            live_renderer.set_vehicle_facts(vehicle_facts.clone());
-            live_renderer.set_damage_events(damage_events.clone());
             if let Some(ref sil) = self_silhouette {
                 live_renderer.set_self_silhouette(sil.clone());
             }
@@ -795,8 +774,7 @@ pub(super) fn playback_thread(
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            live_renderer.set_position_timeline(live_session.position_timeline());
-            live_renderer.set_salvo_flight_times(Arc::clone(&live_salvo_flight_times));
+            scans.install(&mut live_renderer, &live_session);
             // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
             let mut staging = init_bridge_staging(&armor_bridges);

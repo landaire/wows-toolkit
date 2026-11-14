@@ -6,6 +6,8 @@ pub use wows_core::advantage;
 pub mod activity_feed;
 #[cfg(feature = "rendering")]
 pub mod assets;
+#[cfg(feature = "rendering")]
+pub mod battle_scans;
 pub mod codec;
 pub mod config;
 pub mod draw_command;

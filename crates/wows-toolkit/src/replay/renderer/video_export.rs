@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::Mutex;
 use rootcause::report;
 use wows_minimap_renderer::RenderProgress;
+use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
 
@@ -700,35 +701,15 @@ pub(super) fn render_video_blocking(
         &alt_replay_files,
     )
     .map_err(|e| report!("{e}"))?;
+    BattleScans::gather(&*game_metadata, &game_constants, version, &replay_file, &alt_replay_files)
+        .install(&mut renderer, &session);
     let vehicle_facts = session.vehicle_facts().clone();
-    {
-        let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
-        primary_with_alts.extend(alt_replay_files.iter());
-        let damage_events = wows_battle_world::merged::gather_damage_events(
-            &*game_metadata,
-            &game_constants,
-            version,
-            game_metadata.entity_specs(),
-            &primary_with_alts,
-        );
-        renderer.set_damage_events(damage_events);
-    }
-    renderer.set_vehicle_facts(vehicle_facts.clone());
     wows_replay_insights::build::seed_consumable_inventories_from_facts(
         session.world_mut(),
         &vehicle_facts,
         &*game_metadata,
         version,
     );
-    renderer.set_position_timeline(session.position_timeline());
-    let salvo_flight_times = wows_battle_world::scan::scan_salvo_flight_times(
-        &replay_file.meta,
-        &*game_metadata,
-        &game_constants,
-        version,
-        &replay_file,
-    );
-    renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
 
     // By default the export starts at battle start, skipping the pre-battle
     // spawn and countdown. The battle-start clock comes from the scanned

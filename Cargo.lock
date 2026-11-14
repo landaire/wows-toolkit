@@ -16690,6 +16690,7 @@ dependencies = [
  "futures",
  "gettext",
  "image",
+ "insta",
  "jiff",
  "notify",
  "parking_lot",

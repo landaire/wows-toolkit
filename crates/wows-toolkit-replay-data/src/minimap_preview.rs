@@ -23,6 +23,7 @@ use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::assets;
+use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
@@ -530,16 +531,29 @@ pub fn bake_track(
     renderer.set_fonts(assets::load_game_fonts(vfs));
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
-    let mut session = MergedReplays::new(
-        provider.entity_specs(),
-        provider,
-        loaded.base_constants(),
-        session_version,
-        &replay,
-        &merged,
-    )
-    .map_err(PreviewError::UnwalkableBattle)?;
+    let constants = loaded.base_constants();
+    let mut session =
+        MergedReplays::new(provider.entity_specs(), provider, constants, session_version, &replay, &merged)
+            .map_err(PreviewError::UnwalkableBattle)?;
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
+
+    // The roster's damage column reads only these scans: without them every
+    // player's damage stays at zero for the whole track.
+    let scans = BattleScans::gather(provider, constants, session_version, &replay, &merged);
+    scans.install(&mut renderer, &session);
+    let vehicle_facts = session.vehicle_facts().clone();
+    wows_replay_insights::build::seed_consumable_inventories_from_facts(
+        session.world_mut(),
+        &vehicle_facts,
+        provider,
+        session_version,
+    );
+
+    // The scans are whole-replay passes that do not poll `cancel`, so a bake
+    // superseded during them stops here rather than walking the battle again.
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(PreviewError::Cancelled);
+    }
 
     let mut sink = TrackSink::with_budget(budget);
     build_frame_track(&mut session, &mut renderer, frame_interval, cancel, &mut sink);
@@ -1075,5 +1089,58 @@ mod tests {
         let between = dense.for_track(PREVIEW_MAX_FRAMES / 2).pixels();
         assert!(between > PREVIEW_PX && between < MINIMAP_SIZE, "a middling one takes what fits: {between}px");
         assert!(bytes(PREVIEW_MAX_FRAMES / 2, between) <= scale_one);
+    }
+
+    /// The team rosters show what each player has dealt by the frame's clock,
+    /// teammates and enemies alike. The recording player's figure is the
+    /// server's running total for them.
+    ///
+    /// Reads a fixture replay against the dumped build it was recorded on. Run with:
+    ///
+    /// ```text
+    /// WOWS_GAME_DATA=/path/to/game_data \
+    /// cargo test -p wows-toolkit-replay-data -- --ignored a_baked_roster_shows_each_players_damage
+    /// ```
+    #[test]
+    #[ignore = "needs the dumped game data for build 11965230; see the doc comment for the run command"]
+    fn a_baked_roster_shows_each_players_damage() {
+        use std::fmt::Write;
+        use std::sync::atomic::AtomicBool;
+
+        use wows_minimap_renderer::RenderOptions;
+        use wows_minimap_renderer::draw_command::DrawCommand;
+
+        use crate::load::GameDataCache;
+
+        let replay = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/replays/20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+        let dump = wows_data_mgr::game_dir_for_build(11965230).expect("build 11965230 is dumped under WOWS_GAME_DATA");
+        let dump_base = dump.parent().expect("a dump sits in a dump base");
+        let game_data = GameDataCache::without_install().with_cache_dir(&dump_base.to_string_lossy());
+        let options = RenderOptions { show_team_rosters: true, ..RenderOptions::default() };
+        // Room for one frame per second of a 20 minute battle, so the track
+        // keeps every frame and ends on the battle's last one.
+        let budget = 1200;
+
+        let baked = super::bake_track(&replay, &[], &game_data, &AtomicBool::new(false), budget, 1.0, options)
+            .expect("the replay bakes");
+
+        let last = baked.frames.len() - 1;
+        let mut rosters = format!("clock={:.1}\n", baked.clocks[last].seconds());
+        for command in &baked.frames[last] {
+            let DrawCommand::TeamRoster { side, rows, .. } = command else { continue };
+            for row in rows {
+                writeln!(
+                    rosters,
+                    "{side:?} {} damage={} kills={} dead={}",
+                    row.player_name,
+                    row.damage_dealt.round(),
+                    row.kills,
+                    row.is_dead
+                )
+                .expect("writing to a string");
+            }
+        }
+        insta::assert_snapshot!(rosters);
     }
 }

@@ -72,6 +72,8 @@ wt-collab-client = { workspace = true }
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"
+# Snapshots of what a bake draws from a real replay.
+insta = { workspace = true }
 # A collab session's state, which a test builds a link over.
 parking_lot = "0.12.5"
 wows-toolkit-config = { workspace = true, features = ["test-support"] }

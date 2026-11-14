@@ -93,6 +93,7 @@ workspace_test(
     deps = REPLAY_DATA_TEST_SUPPORT_DEPS,
     test_deps = [
         "//third-party/rust:filetime",
+        "//third-party/rust:insta",
         "//third-party/rust:parking_lot",
     ],
 )
