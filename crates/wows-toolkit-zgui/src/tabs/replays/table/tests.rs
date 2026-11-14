@@ -14,9 +14,11 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_replay_insights::battle_impact::BattleImpactComponents;
+use wows_replay_insights::battle_impact::BattleImpactFactor;
 use wows_replay_insights::battle_impact::BattleImpactInputs;
 use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::battle_impact::BattleImpactVersion;
+use wows_replay_insights::battle_impact::FactorScore;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
@@ -500,15 +502,16 @@ fn a_disconnect_chip_deepens_from_thirty_to_ninety_seconds() {
 
 /// A battle impact with every part filled in, adding up to `bi`.
 pub(crate) fn sample_battle_impact(bi: f64) -> BattleImpactResult {
-    let average = BattleImpactComponents::AVERAGE;
+    let score = |factor: BattleImpactFactor, share: f64| FactorScore { points: bi * share, basis: factor.basis() };
     let components = BattleImpactComponents {
-        damage: bi * 0.4,
-        kills: bi * 0.2,
-        enemy_hp_share: bi * 0.15,
-        tanking: bi * 0.1,
-        spotting: Some(bi * 0.1),
-        objectives: Some(bi * 0.05),
-        ..average
+        damage: score(BattleImpactFactor::Damage, 0.4),
+        kills: score(BattleImpactFactor::Kills, 0.2),
+        enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, 0.15),
+        tanking: score(BattleImpactFactor::Tanking, 0.1),
+        spotting: Some(score(BattleImpactFactor::Spotting, 0.1)),
+        objectives: Some(score(BattleImpactFactor::Objectives, 0.05)),
+        anti_air: None,
+        torpedo_warnings: None,
     };
     let inputs = BattleImpactInputs {
         weighted_damage: 84_000.0,

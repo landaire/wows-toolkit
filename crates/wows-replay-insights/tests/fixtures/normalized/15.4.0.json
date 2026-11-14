@@ -30,13 +30,34 @@
         "bi": 155.26189762638276,
         "category": "Bad",
         "components": {
-          "anti_air": 1.4745,
-          "damage": 0.0,
-          "enemy_hp_share": 13.539728591483385,
-          "kills": 0.0,
-          "objectives": 26.1,
-          "spotting": 24.629683606776048,
-          "tanking": 89.51798542812334,
+          "anti_air": {
+            "basis": "Static",
+            "points": 1.4745
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 13.539728591483385
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 26.1
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 24.629683606776048
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 89.51798542812334
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -751,14 +772,38 @@
         "bi": 1804.570609321466,
         "category": "Great",
         "components": {
-          "anti_air": 0.0,
-          "damage": 1181.9801872995547,
-          "enemy_hp_share": 462.180431118602,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 89.84834351700391,
-          "tanking": 70.56164738630531,
-          "torpedo_warnings": 0.0
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1181.9801872995547
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 462.180431118602
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 89.84834351700391
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 70.56164738630531
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -1481,16 +1526,37 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 348.03295802391233,
+        "bi": 348.0329580239124,
         "category": "Bad",
         "components": {
-          "anti_air": 3.4699999999999998,
-          "damage": 0.0,
-          "enemy_hp_share": 49.74599906410857,
-          "kills": 0.0,
-          "objectives": 70.8,
-          "spotting": 104.2198583055864,
-          "tanking": 119.79710065421736,
+          "anti_air": {
+            "basis": "Static",
+            "points": 3.4699999999999998
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 49.74599906410857
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 70.8
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 104.2198583055864
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 119.79710065421736
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -2269,14 +2335,38 @@
         "bi": 1011.9173954813024,
         "category": "BelowAverage",
         "components": {
-          "anti_air": 0.0,
-          "damage": 314.92888553413394,
-          "enemy_hp_share": 100.35589461545285,
-          "kills": 438.2263499449757,
-          "objectives": 18.9,
-          "spotting": 75.74415885998404,
-          "tanking": 36.142338384055634,
-          "torpedo_warnings": 27.619768142700195
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 314.92888553413394
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 100.35589461545285
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 438.2263499449757
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 18.9
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 75.74415885998404
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 36.142338384055634
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 27.619768142700195
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -2301,7 +2391,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 153050,
-          "ships_spotted": 0.33006714575234813,
+          "ships_spotted": 0.3300671457523482,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 27944,
@@ -3075,14 +3165,38 @@
         "bi": 2252.197802720875,
         "category": "Unicum",
         "components": {
-          "anti_air": 0.0,
-          "damage": 972.160328768678,
-          "enemy_hp_share": 153.5853809988468,
-          "kills": 479.87663681164815,
-          "objectives": 195.3,
-          "spotting": 329.80040561932054,
-          "tanking": 121.47505052238162,
-          "torpedo_warnings": 0.0
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 972.160328768678
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 153.5853809988468
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 479.87663681164815
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 195.3
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 329.80040561932054
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 121.47505052238162
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -3913,14 +4027,38 @@
         "bi": 203.97147714383996,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 0.0,
-          "enemy_hp_share": 21.14929477512641,
-          "kills": 0.0,
-          "objectives": 23.1,
-          "spotting": 25.261242553191494,
-          "tanking": 62.13183396148764,
-          "torpedo_warnings": 72.32910585403442
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 21.14929477512641
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 23.1
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 25.261242553191494
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 62.13183396148764
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 72.32910585403442
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -4575,13 +4713,34 @@
         "bi": 569.7201533995403,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 356.8231977890127,
-          "enemy_hp_share": 131.51296209639682,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 11.71692197003412,
-          "tanking": 69.66707154409663,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 356.8231977890127
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 131.51296209639682
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 11.71692197003412
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 69.66707154409663
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -5321,13 +5480,34 @@
         "bi": 436.0873180034728,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 41.19972426989956,
-          "enemy_hp_share": 94.96228357510527,
-          "kills": 0.0,
-          "objectives": 25.2,
-          "spotting": 201.39318725171358,
-          "tanking": 73.33212290675438,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 41.19972426989956
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 94.96228357510527
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 25.2
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 201.39318725171358
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 73.33212290675438
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -6122,13 +6302,34 @@
         "bi": 2184.3112512158073,
         "category": "Unicum",
         "components": {
-          "anti_air": 0.0,
-          "damage": 1109.379731935165,
-          "enemy_hp_share": 546.8900327562003,
-          "kills": 394.2227463790052,
-          "objectives": 0.0,
-          "spotting": 22.701880284824213,
-          "tanking": 111.1168598606123,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1109.379731935165
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 546.8900327562003
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 394.2227463790052
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 22.701880284824213
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 111.1168598606123
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -6881,13 +7082,34 @@
         "bi": 481.4533072846908,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 153.35063465110792,
-          "enemy_hp_share": 128.2021525503042,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 0.0,
-          "tanking": 199.9005200832787,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 153.35063465110792
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 128.2021525503042
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 199.9005200832787
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -7612,16 +7834,37 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 1548.8448294860566,
+        "bi": 1548.8448294860564,
         "category": "Good",
         "components": {
-          "anti_air": 0.0,
-          "damage": 803.0560020745914,
-          "enemy_hp_share": 218.8802994852597,
-          "kills": 245.56677057048705,
-          "objectives": 161.1,
-          "spotting": 41.95975686274511,
-          "tanking": 78.2820004929733,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 803.0560020745914
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 218.8802994852597
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 245.56677057048705
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 161.1
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 41.95975686274511
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 78.2820004929733
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -8335,14 +8578,38 @@
         "bi": 1458.6938059807883,
         "category": "Good",
         "components": {
-          "anti_air": 0.0,
-          "damage": 652.8365216898591,
-          "enemy_hp_share": 320.26115497205717,
-          "kills": 0.0,
-          "objectives": 119.7,
-          "spotting": 284.01498483634924,
-          "tanking": 50.58889480295736,
-          "torpedo_warnings": 31.29224967956543
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 652.8365216898591
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 320.26115497205717
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 119.7
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 284.01498483634924
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 50.58889480295736
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 31.29224967956543
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -9073,14 +9340,38 @@
         "bi": 1007.9404809735254,
         "category": "BelowAverage",
         "components": {
-          "anti_air": 4.183,
-          "damage": 532.5993400657779,
-          "enemy_hp_share": 140.56169608799792,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 217.33899112618587,
-          "tanking": 113.25745369356365,
-          "torpedo_warnings": 0.0
+          "anti_air": {
+            "basis": "Static",
+            "points": 4.183
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 532.5993400657779
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 140.56169608799792
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 217.33899112618587
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 113.25745369356365
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
         },
         "inputs": {
           "anti_air_damage": 2366,
@@ -9799,14 +10090,38 @@
         "bi": 3629.991932142979,
         "category": "SuperUnicum",
         "components": {
-          "anti_air": 0.0,
-          "damage": 1786.9075352363138,
-          "enemy_hp_share": 676.512019870487,
-          "kills": 704.5277004545641,
-          "objectives": 0.0,
-          "spotting": 293.556382634075,
-          "tanking": 136.48829394753895,
-          "torpedo_warnings": 32.0
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1786.9075352363138
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 676.512019870487
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 704.5277004545641
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 293.556382634075
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 136.48829394753895
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 32.0
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -10552,14 +10867,38 @@
         "bi": 2230.873441456985,
         "category": "Unicum",
         "components": {
-          "anti_air": 0.0,
-          "damage": 846.9711088499729,
-          "enemy_hp_share": 467.5986871285372,
-          "kills": 602.3800335732561,
-          "objectives": 3.0,
-          "spotting": 136.83425798635798,
-          "tanking": 141.16613376123732,
-          "torpedo_warnings": 32.92322015762329
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 846.9711088499729
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 467.5986871285372
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 602.3800335732561
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 3.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 136.83425798635798
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 141.16613376123732
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 32.92322015762329
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -11438,13 +11777,34 @@
         "bi": 1337.8629727946593,
         "category": "Average",
         "components": {
-          "anti_air": 0.133,
-          "damage": 657.5616548078668,
-          "enemy_hp_share": 125.52400561534861,
-          "kills": 231.32437469467968,
-          "objectives": 115.05,
-          "spotting": 117.510663874491,
-          "tanking": 90.7592738022731,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.133
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 657.5616548078668
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 125.52400561534861
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 231.32437469467968
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 115.05
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 117.510663874491
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 90.7592738022731
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -11470,7 +11830,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 446668,
-          "ships_spotted": 0.6621752228209798,
+          "ships_spotted": 0.66217522282098,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 33596,
@@ -12273,14 +12633,38 @@
         "bi": 2523.1279874544102,
         "category": "SuperUnicum",
         "components": {
-          "anti_air": 0.0,
-          "damage": 1342.0847747835896,
-          "enemy_hp_share": 376.9573316774594,
-          "kills": 286.86808167423897,
-          "objectives": 3.0,
-          "spotting": 302.1455138254236,
-          "tanking": 212.0722854936983,
-          "torpedo_warnings": 0.0
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 1342.0847747835896
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 376.9573316774594
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 286.86808167423897
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 3.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 302.1455138254236
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 212.0722854936983
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 0.0
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -13093,13 +13477,34 @@
         "bi": 1338.2880702084965,
         "category": "Average",
         "components": {
-          "anti_air": 0.0,
-          "damage": 572.8044125836195,
-          "enemy_hp_share": 348.08348151614416,
-          "kills": 188.77803985616924,
-          "objectives": 0.0,
-          "spotting": 62.26405209560459,
-          "tanking": 166.3580841569592,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 572.8044125836195
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 348.08348151614416
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 188.77803985616924
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 62.26405209560459
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 166.3580841569592
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -13899,14 +14304,38 @@
         "bi": 137.30752600910608,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 0.0,
-          "enemy_hp_share": 25.29229131553269,
-          "kills": 0.0,
-          "objectives": 55.8,
-          "spotting": 14.361831372549023,
-          "tanking": 39.224629631754375,
-          "torpedo_warnings": 2.6287736892700195
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 25.29229131553269
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 55.8
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 14.361831372549023
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 39.224629631754375
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 2.6287736892700195
+          }
         },
         "inputs": {
           "anti_air_damage": 0,
@@ -14526,13 +14955,34 @@
         "bi": 78.40631314722332,
         "category": "Bad",
         "components": {
-          "anti_air": 0.0,
-          "damage": 0.0,
-          "enemy_hp_share": 0.0,
-          "kills": 0.0,
-          "objectives": 6.3,
-          "spotting": 24.629683606776048,
-          "tanking": 47.47662954044726,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 6.3
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 24.629683606776048
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 47.47662954044726
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -15176,13 +15626,34 @@
         "bi": 864.5493222875511,
         "category": "BelowAverage",
         "components": {
-          "anti_air": 0.0,
-          "damage": 281.7225912597803,
-          "enemy_hp_share": 167.69003275620028,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 307.85597738090564,
-          "tanking": 107.28072089066498,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 281.7225912597803
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 167.69003275620028
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 307.85597738090564
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 107.28072089066498
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -15980,13 +16451,34 @@
         "bi": 1345.0264279425874,
         "category": "Average",
         "components": {
-          "anti_air": 0.0,
-          "damage": 291.0388177092249,
-          "enemy_hp_share": 262.3004211511465,
-          "kills": 401.9135167632844,
-          "objectives": 0.0,
-          "spotting": 175.04956902383594,
-          "tanking": 214.72410329509574,
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 291.0388177092249
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 262.3004211511465
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 401.9135167632844
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 175.04956902383594
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 214.72410329509574
+          },
           "torpedo_warnings": null
         },
         "inputs": {
@@ -16804,14 +17296,38 @@
         "bi": 1246.7555016661552,
         "category": "Average",
         "components": {
-          "anti_air": 2.4945,
-          "damage": 390.20533052787135,
-          "enemy_hp_share": 154.71232147609336,
-          "kills": 195.84304584304581,
-          "objectives": 136.5,
-          "spotting": 180.514914617038,
-          "tanking": 149.03461548613373,
-          "torpedo_warnings": 37.4507737159729
+          "anti_air": {
+            "basis": "Static",
+            "points": 2.4945
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 390.20533052787135
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 154.71232147609336
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 195.84304584304581
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 136.5
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 180.514914617038
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 149.03461548613373
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 37.4507737159729
+          }
         },
         "inputs": {
           "anti_air_damage": 489,
@@ -17675,14 +18191,38 @@
         "bi": 845.857175746676,
         "category": "BelowAverage",
         "components": {
-          "anti_air": 0.0,
-          "damage": 336.95318934959226,
-          "enemy_hp_share": 166.76306218397943,
-          "kills": 0.0,
-          "objectives": 0.0,
-          "spotting": 85.99421258312957,
-          "tanking": 252.19656876956225,
-          "torpedo_warnings": 3.9501428604125977
+          "anti_air": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "damage": {
+            "basis": "Dynamic",
+            "points": 336.95318934959226
+          },
+          "enemy_hp_share": {
+            "basis": "Dynamic",
+            "points": 166.76306218397943
+          },
+          "kills": {
+            "basis": "Dynamic",
+            "points": 0.0
+          },
+          "objectives": {
+            "basis": "Static",
+            "points": 0.0
+          },
+          "spotting": {
+            "basis": "Static",
+            "points": 85.99421258312957
+          },
+          "tanking": {
+            "basis": "Dynamic",
+            "points": 252.19656876956225
+          },
+          "torpedo_warnings": {
+            "basis": "Static",
+            "points": 3.9501428604125977
+          }
         },
         "inputs": {
           "anti_air_damage": 0,

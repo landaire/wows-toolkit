@@ -727,6 +727,12 @@ torpedo_warnings = "%{threatening} threatening of %{detected} torpedoes spotted"
 [ui.personal_rating]
 unrated_hover = "Personal rating applies only to Random and Ranked battles."
 
+[ui.rating.basis]
+static = "Static"
+dynamic = "Dynamic"
+static_explained = "Static: measured against a fixed constant or a class baseline"
+dynamic_explained = "Dynamic: measured against wows-numbers expected values or the other players in this battle"
+
 [ui.replay.filter]
 raw_xp = "Raw XP"
 entity_id = "Entity ID"

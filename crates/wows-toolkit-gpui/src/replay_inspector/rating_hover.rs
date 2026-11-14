@@ -15,6 +15,8 @@ use wows_toolkit_replay_data::columns::ColorRole;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingLine;
+use wows_toolkit_viewmodel::rating_breakdown::basis_badge;
+use wows_toolkit_viewmodel::rating_breakdown::basis_explanation;
 
 use crate::replay_inspector::table::resolve_color;
 
@@ -75,6 +77,7 @@ pub fn listing(breakdown: &RatingBreakdown, cx: &App) -> AnyElement {
     let mut points = column().items_end();
     let mut bars = column();
     let mut deltas = column().items_end();
+    let mut bases = column();
     let mut details = column();
     for (index, line) in breakdown.lines.iter().enumerate() {
         labels = labels.child(cell().child(line.label.clone()));
@@ -85,9 +88,19 @@ pub fn listing(breakdown: &RatingBreakdown, cx: &App) -> AnyElement {
                 .text_color(dim)
                 .children(line.versus_average().map(|delta| format!("{delta:+.0}"))),
         );
+        bases = bases.child(cell().text_color(dim).child(basis_badge(line.basis)));
         details = details.child(cell().text_color(dim).child(line.detail.clone()));
     }
-    let rows = h_flex().gap_2().items_start().child(labels).child(points).child(bars).child(deltas).child(details);
+    let rows = h_flex()
+        .gap_2()
+        .items_start()
+        .child(labels)
+        .child(points)
+        .child(bars)
+        .child(deltas)
+        .child(bases)
+        .child(details);
+    let legend = breakdown.bases().into_iter().map(|basis| div().text_color(dim).child(basis_explanation(basis)));
 
     v_flex()
         .gap_1()
@@ -98,6 +111,7 @@ pub fn listing(breakdown: &RatingBreakdown, cx: &App) -> AnyElement {
             breakdown.total
         )))
         .child(rows)
+        .children(legend)
         .into_any_element()
 }
 
@@ -140,13 +154,14 @@ fn bar(index: usize, line: &RatingLine, scale: f64, band: Hsla, foreground: Hsla
 
 #[cfg(test)]
 mod tests {
+    use wows_replay_insights::battle_impact::FactorBasis;
     use wows_replay_insights::personal_rating::PersonalRatingCategory;
     use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
     use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
     use wows_toolkit_viewmodel::rating_breakdown::RatingLine;
 
     fn line(points: f64, average: Option<f64>) -> RatingLine {
-        RatingLine { label: "part".into(), detail: String::new(), points, average }
+        RatingLine { label: "part".into(), detail: String::new(), points, average, basis: FactorBasis::Static }
     }
 
     /// Every bar and tick is drawn on the one scale of the largest figure, so

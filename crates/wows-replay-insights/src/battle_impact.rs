@@ -45,6 +45,74 @@ const ENEMY_HP_SHARE_POINTS: f64 = 200.0;
 const TANKING_POINTS: f64 = 120.0;
 const SPOTTING_SCALE: f64 = 0.2;
 
+/// One part of the rating.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+pub enum BattleImpactFactor {
+    Damage,
+    Kills,
+    EnemyHpShare,
+    Tanking,
+    Spotting,
+    Objectives,
+    AntiAir,
+    TorpedoWarnings,
+}
+
+impl BattleImpactFactor {
+    /// What the part earns for average play: expected damage and kills, an
+    /// even share of the enemy pool, drawing the team's average fire and
+    /// spotting at the class baseline. `None` for objectives, anti-air and
+    /// torpedo warnings, which have no average; any of them is a bonus.
+    pub fn average_points(self) -> Option<f64> {
+        match self {
+            Self::Damage => Some(DAMAGE_POINTS),
+            Self::Kills => Some(KILL_POINTS),
+            Self::EnemyHpShare => Some(ENEMY_HP_SHARE_POINTS),
+            Self::Tanking => Some(TANKING_POINTS),
+            Self::Spotting => Some(SPOTTING_SCALE * 1150.0),
+            Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => None,
+        }
+    }
+
+    /// What the part measures a player against.
+    pub fn basis(self) -> FactorBasis {
+        match self {
+            // wows-numbers expected values for the ship.
+            Self::Damage | Self::Kills => FactorBasis::Dynamic,
+            // The other players in this battle.
+            Self::EnemyHpShare | Self::Tanking => FactorBasis::Dynamic,
+            // A class baseline.
+            Self::Spotting => FactorBasis::Static,
+            // Fixed points per unit of what the player did.
+            Self::Objectives | Self::AntiAir | Self::TorpedoWarnings => FactorBasis::Static,
+        }
+    }
+}
+
+/// What a factor measures a player against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+pub enum FactorBasis {
+    /// A general expectation: a fixed constant or a class baseline.
+    Static,
+    /// Data: wows-numbers expected values for the ship, or the other players
+    /// in this battle.
+    Dynamic,
+}
+
+/// One part's points and the basis they were measured against for this
+/// player.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct FactorScore {
+    pub points: f64,
+    pub basis: FactorBasis,
+}
+
+impl FactorScore {
+    fn new(factor: BattleImpactFactor, points: f64) -> Self {
+        Self { points, basis: factor.basis() }
+    }
+}
+
 /// One player's battle impact.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BattleImpactResult {
@@ -66,38 +134,35 @@ pub struct BattleImpactResult {
 /// one leaves the rest of the rating meaningful.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct BattleImpactComponents {
-    pub damage: f64,
-    pub kills: f64,
-    pub enemy_hp_share: f64,
-    pub tanking: f64,
-    pub spotting: Option<f64>,
-    pub objectives: Option<f64>,
-    pub anti_air: Option<f64>,
-    pub torpedo_warnings: Option<f64>,
+    pub damage: FactorScore,
+    pub kills: FactorScore,
+    pub enemy_hp_share: FactorScore,
+    pub tanking: FactorScore,
+    pub spotting: Option<FactorScore>,
+    pub objectives: Option<FactorScore>,
+    pub anti_air: Option<FactorScore>,
+    pub torpedo_warnings: Option<FactorScore>,
 }
 
 impl BattleImpactComponents {
-    /// What each part earns for average play: expected damage and kills, an
-    /// even share of the enemy pool, drawing the team's average fire and
-    /// spotting at the class baseline. Objectives, anti-air and torpedo
-    /// warnings have no average; any of them is a bonus.
-    pub const AVERAGE: BattleImpactComponents = BattleImpactComponents {
-        damage: DAMAGE_POINTS,
-        kills: KILL_POINTS,
-        enemy_hp_share: ENEMY_HP_SHARE_POINTS,
-        tanking: TANKING_POINTS,
-        spotting: Some(SPOTTING_SCALE * 1150.0),
-        objectives: None,
-        anti_air: None,
-        torpedo_warnings: None,
-    };
+    /// Every present part with its factor.
+    pub fn scores(&self) -> impl Iterator<Item = (BattleImpactFactor, FactorScore)> {
+        [
+            (BattleImpactFactor::Damage, Some(self.damage)),
+            (BattleImpactFactor::Kills, Some(self.kills)),
+            (BattleImpactFactor::EnemyHpShare, Some(self.enemy_hp_share)),
+            (BattleImpactFactor::Tanking, Some(self.tanking)),
+            (BattleImpactFactor::Spotting, self.spotting),
+            (BattleImpactFactor::Objectives, self.objectives),
+            (BattleImpactFactor::AntiAir, self.anti_air),
+            (BattleImpactFactor::TorpedoWarnings, self.torpedo_warnings),
+        ]
+        .into_iter()
+        .filter_map(|(factor, score)| Some((factor, score?)))
+    }
 
-    fn total(&self) -> f64 {
-        let core = self.damage + self.kills + self.enemy_hp_share + self.tanking;
-        let additions: f64 =
-            [self.spotting, self.objectives, self.anti_air, self.torpedo_warnings].into_iter().flatten().sum();
-
-        core + additions
+    pub fn total(&self) -> f64 {
+        self.scores().map(|(_, score)| score.points).sum()
     }
 }
 
@@ -392,15 +457,16 @@ fn rate_player(
     let torpedo_detection = torpedoes.get(player.entity_id);
     let torpedo_warnings = torpedo_detection.map(|detection| 8.0 * detection.threatening);
 
+    let score = FactorScore::new;
     let components = BattleImpactComponents {
-        damage: damage_points,
-        kills: kill_points,
-        enemy_hp_share: enemy_hp_share_points,
-        tanking,
-        spotting,
-        objectives,
-        anti_air,
-        torpedo_warnings,
+        damage: score(BattleImpactFactor::Damage, damage_points),
+        kills: score(BattleImpactFactor::Kills, kill_points),
+        enemy_hp_share: score(BattleImpactFactor::EnemyHpShare, enemy_hp_share_points),
+        tanking: score(BattleImpactFactor::Tanking, tanking),
+        spotting: spotting.map(|points| score(BattleImpactFactor::Spotting, points)),
+        objectives: objectives.map(|points| score(BattleImpactFactor::Objectives, points)),
+        anti_air: anti_air.map(|points| score(BattleImpactFactor::AntiAir, points)),
+        torpedo_warnings: torpedo_warnings.map(|points| score(BattleImpactFactor::TorpedoWarnings, points)),
     };
     let bi = components.total();
 

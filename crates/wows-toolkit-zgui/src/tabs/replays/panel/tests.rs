@@ -315,7 +315,8 @@ fn an_unrated_battle_shows_a_dash_in_place_of_the_pr_badge() {
     assert_eq!(window.texts_by_class("lui-tooltip"), [hover]);
 }
 
-/// The BI tile reads as the self row's battle impact and lists its parts on hover.
+/// The BI tile reads as the self row's battle impact and lists its parts on hover, each marked
+/// static or dynamic, with the marks explained under them.
 #[test]
 fn the_bi_badge_reports_the_self_rows_battle_impact_and_explains_it() {
     let mut model = rated();
@@ -329,6 +330,12 @@ fn the_bi_badge_reports_the_self_rows_battle_impact_and_explains_it() {
     window.hover(tile).expect("the tile has a box");
     window.advance(Duration::from_millis(800));
     assert!(window.by_test_id("rating-bi-hover").is_some(), "the hover lists the parts");
+
+    let badges = window.texts_by_class("wt-rh__basis");
+    assert_eq!(badges, ["Dynamic", "Dynamic", "Dynamic", "Dynamic", "Static"], "largest part first");
+    let legend = window.texts_by_class("wt-rh__legend");
+    assert_eq!(legend.len(), 2, "one explanation per basis shown: {legend:?}");
+    assert!(legend[0].starts_with("Dynamic:") && legend[1].starts_with("Static:"), "{legend:?}");
 }
 
 /// A rating table that lands after the battle is read still rates it.

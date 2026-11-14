@@ -11,6 +11,8 @@ use rust_i18n::t;
 use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingLine;
+use wows_toolkit_viewmodel::rating_breakdown::basis_badge;
+use wows_toolkit_viewmodel::rating_breakdown::basis_explanation;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 
 use crate::util::personal_rating::PersonalRatingCategory;
@@ -74,7 +76,8 @@ pub fn battle_impact_chip(ui: &mut Ui, result: &BattleImpactResult, value: &str,
 
 /// The parts a rating adds up from, largest first: each part's points, a bar
 /// on one scale shared by every part with a tick at what average play earns
-/// there, the difference from that average, and the part's inputs.
+/// there, the difference from that average, the part's basis and inputs, and
+/// a legend for the bases shown.
 pub fn rating_breakdown(ui: &mut Ui, breakdown: &RatingBreakdown) {
     const POINTS_WIDTH: f32 = 40.0;
 
@@ -114,11 +117,16 @@ pub fn rating_breakdown(ui: &mut Ui, breakdown: &RatingBreakdown) {
             if let Some(delta) = line.versus_average() {
                 ui.label(RichText::new(format!("{delta:+.0} {}", t!("ui.rating.versus_average"))).weak());
             }
+            ui.label(RichText::new(basis_badge(line.basis)).small().weak());
         });
         ui.horizontal(|ui| {
             ui.add_space(label_width + POINTS_WIDTH + item_spacing * 2.0);
             ui.label(RichText::new(&line.detail).small().weak());
         });
+    }
+
+    for basis in breakdown.bases() {
+        ui.label(RichText::new(basis_explanation(basis)).small().weak());
     }
 }
 
@@ -204,6 +212,7 @@ pub fn twitch_chip(ui: &mut Ui, candidates: &[SniperCandidate]) -> Option<String
 
 #[cfg(test)]
 mod tests {
+    use wows_replay_insights::battle_impact::FactorBasis;
     use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
 
     use super::*;
@@ -219,8 +228,20 @@ mod tests {
             total: 500.0,
             category: PersonalRatingCategory::Average,
             lines: vec![
-                RatingLine { label: "Damage".into(), detail: String::new(), points: 300.0, average: Some(550.0) },
-                RatingLine { label: "Objectives".into(), detail: String::new(), points: 200.0, average: None },
+                RatingLine {
+                    label: "Damage".into(),
+                    detail: String::new(),
+                    points: 300.0,
+                    average: Some(550.0),
+                    basis: FactorBasis::Dynamic,
+                },
+                RatingLine {
+                    label: "Objectives".into(),
+                    detail: String::new(),
+                    points: 200.0,
+                    average: None,
+                    basis: FactorBasis::Static,
+                },
             ],
         };
 

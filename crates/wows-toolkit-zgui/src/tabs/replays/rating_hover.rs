@@ -8,6 +8,8 @@ use wows_replay_insights::battle_impact::BattleImpactResult;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingKind;
+use wows_toolkit_viewmodel::rating_breakdown::basis_badge;
+use wows_toolkit_viewmodel::rating_breakdown::basis_explanation;
 use zgui::css;
 use zgui::prelude::AnyView;
 use zgui::reactive::StoredValue;
@@ -54,7 +56,9 @@ const CSS: &str = css!(
         background-color: var(--lui-color-text);
     }
     .wt-rh__versus { width: 44px; flex: none; text-align: right; color: var(--lui-color-text-dim); }
-    .wt-rh__detail { color: var(--lui-color-text-dim); max-width: 360px; white-space: normal; }"
+    .wt-rh__basis { width: 56px; flex: none; color: var(--lui-color-text-dim); }
+    .wt-rh__detail { color: var(--lui-color-text-dim); max-width: 360px; white-space: normal; }
+    .wt-rh__legend { color: var(--lui-color-text-dim); max-width: 360px; white-space: normal; }"
 );
 
 /// The rating a hover explains, kept whole so its breakdown is built only once the hover opens.
@@ -129,17 +133,26 @@ pub fn listing(breakdown: &RatingBreakdown) -> AnyView {
                             {tick}
                         }
                         text(class = "wt-rh__versus") {{versus}}
+                        text(class = "wt-rh__basis", attr:data-testid = format!("rating-{kind}-basis-{index}")) {
+                            {basis_badge(line.basis)}
+                        }
                     }
                     text(class = "wt-rh__detail") {{line.detail.clone()}}
                 }
             })
         })
         .collect();
+    let legend: Vec<AnyView> = breakdown
+        .bases()
+        .into_iter()
+        .map(|basis| AnyView::new(view! { text(class = "wt-rh__legend") {{basis_explanation(basis)}} }))
+        .collect();
 
     AnyView::new(view! {
         box(class = "wt-rh", attr:data-testid = format!("rating-{kind}-hover")) {
             text(class = "wt-rh__title", style:color = ink) {{title}}
             {lines}
+            {legend}
         }
     })
 }
