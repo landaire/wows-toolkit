@@ -205,16 +205,11 @@ impl RatingBreakdown {
         }
 
         if let (Some(score), Some(detection)) = (parts.torpedo_warnings, result.torpedo_detection) {
-            lines.push(bi_line(
-                BattleImpactFactor::TorpedoWarnings,
-                score,
-                t!(
-                    "ui.rating.detail.torpedo_warnings",
-                    threatening = format!("{:.1}", detection.threatening),
-                    detected = detection.detected
-                )
-                .into(),
-            ));
+            let detail = match detection.threatening {
+                1 => t!("ui.rating.detail.torpedo_warnings_one"),
+                count => t!("ui.rating.detail.torpedo_warnings", threatening = count),
+            };
+            lines.push(bi_line(BattleImpactFactor::TorpedoWarnings, score, detail.into()));
         }
 
         // A bonus with nothing earned says nothing; a core part at zero still
@@ -376,7 +371,7 @@ mod tests {
             anti_air: None,
             torpedo_warnings: Some(score(BattleImpactFactor::TorpedoWarnings, 40.0)),
         };
-        let result = rating(components, Some(TorpedoDetection { detected: 7, threatening: 5.0 }));
+        let result = rating(components, Some(TorpedoDetection { detected: 22, threatening: 9, threat_weight: 5.0 }));
 
         let breakdown = RatingBreakdown::battle_impact(&result, None);
 
@@ -384,6 +379,11 @@ mod tests {
         assert_eq!(points, vec![600.0, 260.0, 240.0, 150.0, 90.0, 40.0]);
         assert!((points.iter().sum::<f64>() - result.bi).abs() < 1e-9);
         assert_eq!(breakdown.scale(), 600.0);
+
+        // A whole count of threatening torpedoes and nothing about the rest.
+        let torpedoes = &breakdown.lines.last().expect("the torpedo line is the smallest").detail;
+        assert!(torpedoes.contains('9') && !torpedoes.contains('.'), "{torpedoes}");
+        assert!(!torpedoes.contains("22"), "{torpedoes}");
     }
 
     /// A part the replay could not observe, or a bonus nothing was earned

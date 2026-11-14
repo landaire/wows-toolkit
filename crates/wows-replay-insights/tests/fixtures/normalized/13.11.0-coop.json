@@ -3542,7 +3542,8 @@
         },
         "torpedo_detection": {
           "detected": 4,
-          "threatening": 3.553847014904022
+          "threat_weight": 3.553847014904022,
+          "threatening": 4
         },
         "version": 2
       },
@@ -3825,7 +3826,8 @@
         },
         "torpedo_detection": {
           "detected": 10,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -4241,7 +4243,8 @@
         },
         "torpedo_detection": {
           "detected": 15,
-          "threatening": 10.750087320804596
+          "threat_weight": 10.750087320804596,
+          "threatening": 15
         },
         "version": 2
       },
@@ -4652,7 +4655,8 @@
         },
         "torpedo_detection": {
           "detected": 4,
-          "threatening": 1.3131202459335327
+          "threat_weight": 1.3131202459335327,
+          "threatening": 4
         },
         "version": 2
       },
@@ -4924,7 +4928,8 @@
         },
         "torpedo_detection": {
           "detected": 6,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -5633,7 +5638,8 @@
         },
         "torpedo_detection": {
           "detected": 9,
-          "threatening": 6.56842714548111
+          "threat_weight": 6.56842714548111,
+          "threatening": 9
         },
         "version": 2
       },
@@ -6444,7 +6450,8 @@
         },
         "torpedo_detection": {
           "detected": 4,
-          "threatening": 4.0
+          "threat_weight": 4.0,
+          "threatening": 4
         },
         "version": 2
       },
@@ -6929,7 +6936,8 @@
         },
         "torpedo_detection": {
           "detected": 3,
-          "threatening": 1.111325979232788
+          "threat_weight": 1.111325979232788,
+          "threatening": 3
         },
         "version": 2
       },
@@ -7664,7 +7672,8 @@
         },
         "torpedo_detection": {
           "detected": 4,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },

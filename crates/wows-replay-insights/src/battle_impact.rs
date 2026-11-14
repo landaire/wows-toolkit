@@ -229,9 +229,35 @@ impl TeamDamageShare {
 pub struct TorpedoDetection {
     /// Torpedoes attributed to this player.
     pub detected: u32,
-    /// Those torpedoes weighted by how close they would have passed to a
-    /// teammate: 1 within 1 km, falling to 0 at 3 km.
-    pub threatening: f64,
+    /// Those whose projected track passed within 3 km of a teammate.
+    pub threatening: u32,
+    /// The threatening torpedoes, each weighted by how close it would have
+    /// passed: 1 within 1 km, falling to 0 at 3 km. Scores the part; the
+    /// count above is what is shown.
+    pub threat_weight: f64,
+}
+
+impl TorpedoDetection {
+    /// One more torpedo attributed to this player. `closest_km` is its closest
+    /// projected approach to a teammate, `None` when no teammate could be
+    /// projected.
+    fn record(&mut self, closest_km: Option<f32>) {
+        self.detected += 1;
+
+        let weight = closest_km.map_or(0.0, threat_weight);
+        if weight > 0.0 {
+            self.threatening += 1;
+            self.threat_weight += weight;
+        }
+    }
+
+    /// Never below zero: every recorded weight is.
+    fn points(self) -> f64 {
+        // A torpedo that would have passed within a kilometer of a teammate.
+        const POINTS_PER_TORPEDO: f64 = 8.0;
+
+        POINTS_PER_TORPEDO * self.threat_weight
+    }
 }
 
 /// Torpedo detections keyed by vehicle entity, for every player on a team a
@@ -350,9 +376,7 @@ impl TorpedoDetections {
                     })
                     .min_by(f32::total_cmp);
 
-                let detection = detections.entry(spotter.entity_id).or_default();
-                detection.detected += 1;
-                detection.threatening += closest_km.map_or(0.0, threat_weight);
+                detections.entry(spotter.entity_id).or_default().record(closest_km);
             }
         }
 
@@ -477,7 +501,7 @@ fn rate_player(
     let anti_air = anti_air_points(results);
 
     let torpedo_detection = torpedoes.get(player.entity_id);
-    let torpedo_warnings = torpedo_detection.map(|detection| 8.0 * detection.threatening);
+    let torpedo_warnings = torpedo_detection.map(TorpedoDetection::points);
 
     let score = FactorScore::new;
     let components = BattleImpactComponents {
@@ -677,9 +701,15 @@ fn closest_approach_km(
     torpedo_at.distance_xz(&ship_at).to_km().value()
 }
 
+/// 1 within 1 km, falling to 0 at 3 km. 0 for a distance that is not a
+/// number, which a degenerate projection can produce.
 fn threat_weight(closest_km: f32) -> f64 {
     const FULL_KM: f32 = 1.0;
     const NONE_KM: f32 = 3.0;
+
+    if !closest_km.is_finite() {
+        return 0.0;
+    }
 
     f64::from(((NONE_KM - closest_km) / (NONE_KM - FULL_KM)).clamp(0.0, 1.0))
 }
@@ -758,6 +788,27 @@ mod tests {
         assert_eq!(threat_weight(2.0), 0.5);
         assert_eq!(threat_weight(3.0), 0.0);
         assert_eq!(threat_weight(5.0), 0.0);
+    }
+
+    /// The count is whole torpedoes; the weighting only scales the points,
+    /// which never fall below zero whatever the projection produced.
+    #[test]
+    fn torpedo_warnings_count_whole_torpedoes_and_never_subtract() {
+        let mut detection = TorpedoDetection::default();
+        for closest in [Some(0.4), Some(1.0), Some(2.0), Some(2.9), Some(3.0), Some(8.0), None] {
+            detection.record(closest);
+        }
+        assert_eq!(detection.detected, 7);
+        assert_eq!(detection.threatening, 4, "the four within 3 km");
+        assert!((detection.points() - 8.0 * (1.0 + 1.0 + 0.5 + 0.05)).abs() < 1e-6);
+
+        let mut degenerate = TorpedoDetection::default();
+        for closest in [Some(f32::NAN), Some(f32::INFINITY), Some(f32::NEG_INFINITY), Some(-5.0), Some(-0.0)] {
+            degenerate.record(closest);
+            assert!(degenerate.points() >= 0.0, "{degenerate:?}");
+        }
+        assert_eq!(degenerate.threatening, 2, "only the finite distances, clamped to full weight");
+        assert_eq!(TorpedoDetection::default().points(), 0.0);
     }
 
     #[test]

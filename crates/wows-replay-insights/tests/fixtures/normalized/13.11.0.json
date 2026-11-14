@@ -4680,7 +4680,8 @@
         },
         "torpedo_detection": {
           "detected": 2,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -5589,7 +5590,8 @@
         },
         "torpedo_detection": {
           "detected": 6,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -6360,7 +6362,8 @@
         },
         "torpedo_detection": {
           "detected": 0,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -7117,7 +7120,8 @@
         },
         "torpedo_detection": {
           "detected": 5,
-          "threatening": 0.27163684368133545
+          "threat_weight": 0.27163684368133545,
+          "threatening": 1
         },
         "version": 2
       },
@@ -7975,7 +7979,8 @@
         },
         "torpedo_detection": {
           "detected": 0,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },

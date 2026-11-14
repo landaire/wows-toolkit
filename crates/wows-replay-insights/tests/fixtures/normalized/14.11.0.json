@@ -853,7 +853,8 @@
         },
         "torpedo_detection": {
           "detected": 1,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -2297,7 +2298,8 @@
         },
         "torpedo_detection": {
           "detected": 5,
-          "threatening": 1.5584042072296143
+          "threat_weight": 1.5584042072296143,
+          "threatening": 5
         },
         "version": 2
       },
@@ -3073,7 +3075,7 @@
           "objectives": null,
           "spotting": {
             "basis": "Static",
-            "points": 139.3430751526396
+            "points": 139.34307515263959
           },
           "tanking": {
             "basis": "Dynamic",
@@ -3100,7 +3102,7 @@
             "torpedo_bombers": 2
           },
           "potential_damage": 592000,
-          "ships_spotted": 0.43099633850734254,
+          "ships_spotted": 0.4309963385073425,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 14394,
@@ -3910,7 +3912,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 1028900,
-          "ships_spotted": 0.5069715867029955,
+          "ships_spotted": 0.5069715867029954,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 45012,
@@ -3923,7 +3925,8 @@
         },
         "torpedo_detection": {
           "detected": 0,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -6370,7 +6373,8 @@
         },
         "torpedo_detection": {
           "detected": 15,
-          "threatening": 5.0
+          "threat_weight": 5.0,
+          "threatening": 5
         },
         "version": 2
       },
@@ -7068,7 +7072,8 @@
         },
         "torpedo_detection": {
           "detected": 11,
-          "threatening": 4.933521091938019
+          "threat_weight": 4.933521091938019,
+          "threatening": 9
         },
         "version": 2
       },
@@ -7831,7 +7836,8 @@
         },
         "torpedo_detection": {
           "detected": 13,
-          "threatening": 1.3012187480926514
+          "threat_weight": 1.3012187480926514,
+          "threatening": 5
         },
         "version": 2
       },
@@ -9989,7 +9995,7 @@
     {
       "achievements": [],
       "battle_impact": {
-        "bi": 3251.4696087308976,
+        "bi": 3251.469608730897,
         "category": "SuperUnicum",
         "components": {
           "anti_air": {
@@ -10007,7 +10013,7 @@
           "objectives": null,
           "spotting": {
             "basis": "Static",
-            "points": 596.3482149344225
+            "points": 596.3482149344223
           },
           "tanking": {
             "basis": "Dynamic",
@@ -10037,7 +10043,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 206100,
-          "ships_spotted": 3.1847895258511527,
+          "ships_spotted": 3.1847895258511523,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 224795,
@@ -10050,7 +10056,8 @@
         },
         "torpedo_detection": {
           "detected": 12,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -11752,7 +11759,8 @@
         },
         "torpedo_detection": {
           "detected": 4,
-          "threatening": 1.2805166244506836
+          "threat_weight": 1.2805166244506836,
+          "threatening": 4
         },
         "version": 2
       },
@@ -14024,7 +14032,8 @@
         },
         "torpedo_detection": {
           "detected": 7,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -14729,7 +14738,8 @@
         },
         "torpedo_detection": {
           "detected": 35,
-          "threatening": 0.0
+          "threat_weight": 0.0,
+          "threatening": 0
         },
         "version": 2
       },
@@ -15500,7 +15510,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 154800,
-          "ships_spotted": 0.9345131236643057,
+          "ships_spotted": 0.9345131236643058,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 35823,
@@ -16249,7 +16259,7 @@
             "torpedo_bombers": 2
           },
           "potential_damage": 1286022,
-          "ships_spotted": 0.19553164493519276,
+          "ships_spotted": 0.19553164493519282,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 12516,
@@ -16262,7 +16272,8 @@
         },
         "torpedo_detection": {
           "detected": 61,
-          "threatening": 15.811308443546295
+          "threat_weight": 15.811308443546295,
+          "threatening": 20
         },
         "version": 2
       },
@@ -17049,7 +17060,8 @@
         },
         "torpedo_detection": {
           "detected": 6,
-          "threatening": 6.0
+          "threat_weight": 6.0,
+          "threatening": 6
         },
         "version": 2
       },

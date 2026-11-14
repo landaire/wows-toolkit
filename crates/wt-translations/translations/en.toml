@@ -722,7 +722,8 @@ spotting = "%{damage} spotting damage (class average %{baseline}), %{ships} ship
 objectives = "Score points: %{capture} capturing, %{block} blocking, %{reset} resetting, %{battle_end} held at the end, %{hold} holding (counted at a quarter)"
 anti_air_planes = "%{strike} attack planes, %{support} fighters and scouts"
 anti_air_damage = "%{damage} AA damage"
-torpedo_warnings = "%{threatening} threatening of %{detected} torpedoes spotted"
+torpedo_warnings = "%{threatening} threatening torpedoes spotted"
+torpedo_warnings_one = "1 threatening torpedo spotted"
 
 [ui.personal_rating]
 unrated_hover = "Personal rating applies only to Random and Ranked battles."
