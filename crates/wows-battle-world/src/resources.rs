@@ -18,15 +18,18 @@ use wows_replays::analyzer::battle_controller::state::TeamScore;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::analyzer::decoder::FinishType;
 use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
+use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wows_replays::types::WorldPos2D;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::game_types::Direction;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::ShotId;
@@ -601,6 +604,51 @@ pub struct SalvoEvent {
 /// than adding up rows.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SalvoLog(pub Vec<SalvoEvent>);
+
+/// Where one vehicle was when a torpedo sighting was recorded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VehicleFix {
+    pub entity_id: EntityId,
+    pub position: WorldPos,
+    /// `None` until the vehicle has two recent position fixes.
+    pub velocity: Option<Direction>,
+    /// Clock of the position fix, which can trail the sighting.
+    pub fixed_at: GameClock,
+}
+
+/// Whose client was sent a torpedo sighting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SightingObserver {
+    /// A single replay: the recording player's team.
+    RecordingPlayer,
+    /// One perspective of a merged session, named by its team.
+    Team(TeamId),
+}
+
+/// One `receiveTorpedoes` call and where every vehicle was at that moment.
+///
+/// The client is sent a torpedo when its team first detects it, not when it
+/// is launched, unless the launcher is on its own team. So for an opposing
+/// torpedo `clock` is the moment of detection and `origin` is where it was
+/// then, which is what lets a consumer work out who saw it and whom it was
+/// heading for.
+///
+/// A merged session forwards the call from every perspective, so the same
+/// torpedo can appear once per perspective; `owner_id` and `shot_id` identify
+/// it across them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TorpedoSighting {
+    pub clock: GameClock,
+    pub observer: SightingObserver,
+    pub torpedoes: Vec<TorpedoData>,
+    /// Every vehicle with a world position, sorted by entity id. Dead vehicles
+    /// are included; filter them against the kill log.
+    pub vehicles: Vec<VehicleFix>,
+}
+
+/// Every torpedo sighting, in packet order.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct TorpedoSightingLog(pub Vec<TorpedoSighting>);
 
 /// One observed increment of a self-player ribbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

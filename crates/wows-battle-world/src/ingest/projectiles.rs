@@ -8,6 +8,7 @@
 //! break both salvo matching and the produced shot_hits sequence.
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::query::With;
 use bevy_ecs::world::World;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::VictimPose;
@@ -24,11 +25,14 @@ use wowsunpack::game_types::WorldPos;
 
 use crate::components::GameId;
 use crate::components::MinimapPlacement;
+use crate::components::ObservedVelocity;
 use crate::components::Projectile;
 use crate::components::ProjectileState;
 use crate::components::Transform3d;
+use crate::components::Vehicle;
 use crate::ids::IngestOptions;
 use crate::ids::ShotTracking;
+use crate::ids::SourceTeam;
 use crate::resources::ActiveShotOrder;
 use crate::resources::ActiveTorpedoOrder;
 use crate::resources::HitHistoryLog;
@@ -36,6 +40,10 @@ use crate::resources::PlayerIndex;
 use crate::resources::SalvoEvent;
 use crate::resources::SalvoLog;
 use crate::resources::ShotHitLog;
+use crate::resources::SightingObserver;
+use crate::resources::TorpedoSighting;
+use crate::resources::TorpedoSightingLog;
+use crate::resources::VehicleFix;
 
 /// Spawn one `Projectile` entity per salvo and append to the ordered list.
 ///
@@ -72,7 +80,8 @@ pub fn handle_artillery_shots(
     }
 }
 
-/// Spawn one `Projectile` entity per torpedo and append to the ordered list.
+/// Spawn one `Projectile` entity per torpedo and append to the ordered list,
+/// and log the sighting with every vehicle's position.
 ///
 /// Not gated on shot tracking: BattleController always records torpedoes.
 pub fn handle_torpedoes_received(
@@ -80,7 +89,30 @@ pub fn handle_torpedoes_received(
     torpedoes: Vec<TorpedoData>,
     clock: GameClock,
     world: &mut World,
+    source_team: SourceTeam,
 ) {
+    let mut vehicles: Vec<VehicleFix> = world
+        .query_filtered::<(&GameId, &Transform3d, Option<&ObservedVelocity>), With<Vehicle>>()
+        .iter(world)
+        .map(|(id, transform, velocity)| VehicleFix {
+            entity_id: id.0,
+            position: transform.pos,
+            velocity: velocity.map(|v| v.0),
+            fixed_at: transform.last_updated,
+        })
+        .collect();
+    vehicles.sort_by_key(|fix| fix.entity_id);
+    let observer = match source_team.0 {
+        Some(team) => SightingObserver::Team(team),
+        None => SightingObserver::RecordingPlayer,
+    };
+    world.resource_mut::<TorpedoSightingLog>().0.push(TorpedoSighting {
+        clock,
+        observer,
+        torpedoes: torpedoes.clone(),
+        vehicles,
+    });
+
     for torpedo in torpedoes {
         let entity = world
             .spawn((Projectile, ProjectileState::Torpedo { torpedo, launched_at: clock, updated_at: clock, avatar_id }))

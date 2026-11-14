@@ -47,6 +47,7 @@ use crate::resources::ScoringRules;
 use crate::resources::SelfStats;
 use crate::resources::ShotHitLog;
 use crate::resources::TeamScores;
+use crate::resources::TorpedoSightingLog;
 use crate::resources::WardIndex;
 use crate::resources::WeatherZoneOrder;
 
@@ -304,6 +305,7 @@ fn insert_empty_resources(world: &mut World) {
     world.insert_resource(PresenceLog::default());
     world.insert_resource(HitHistoryLog::default());
     world.insert_resource(SalvoLog::default());
+    world.insert_resource(TorpedoSightingLog::default());
 }
 
 /// Build MetadataPlayers from the replay vehicles list.

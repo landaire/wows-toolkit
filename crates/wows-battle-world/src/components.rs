@@ -24,6 +24,7 @@ use wows_replays::types::TeamId;
 use wows_replays::types::WorldPos;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::game_types::Direction;
 use wowsunpack::game_types::PlaneId;
 use wowsunpack::game_types::WeaponType;
 use wowsunpack::game_types::WorldPos2D;
@@ -98,6 +99,13 @@ pub struct Transform3d {
     pub roll: Radians,
     pub last_updated: GameClock,
 }
+
+/// Velocity between the last two world position fixes of an entity, per
+/// second of game clock and in position units, so it combines directly with
+/// a torpedo's `direction`. Removed when the fixes are too far apart in time
+/// to describe current motion.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ObservedVelocity(pub Direction);
 
 /// Last known minimap position and visibility state.
 #[derive(Component, Debug, Clone)]

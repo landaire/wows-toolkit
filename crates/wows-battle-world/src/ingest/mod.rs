@@ -180,7 +180,7 @@ pub fn dispatch<G: ResourceLoader>(
         // is unused.
         DecodedPacketPayload::WeaponFired { .. } => {}
         DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
-            projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
+            projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world, options.source_team);
         }
         DecodedPacketPayload::TorpedoDirection { owner_id, shot_id, position, target_yaw, speed_coef } => {
             projectiles::handle_torpedo_direction(owner_id, shot_id, position, target_yaw, speed_coef, clock, world);

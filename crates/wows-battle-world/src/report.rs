@@ -58,6 +58,8 @@ use crate::resources::RibbonLog;
 use crate::resources::SalvoEvent;
 use crate::resources::SalvoLog;
 use crate::resources::SelfStats;
+use crate::resources::TorpedoSighting;
+use crate::resources::TorpedoSightingLog;
 use crate::world::BattleWorld;
 
 /// Owned snapshot of the battle at finish time.
@@ -95,6 +97,7 @@ pub struct BattleReport {
     presence: PresenceLog,
     hit_history: Vec<ResolvedShotHit>,
     salvos: Vec<SalvoEvent>,
+    torpedo_sightings: Vec<TorpedoSighting>,
     deaths: HashMap<EntityId, GameClock>,
     max_duration: u32,
     played_duration: Option<f32>,
@@ -289,6 +292,13 @@ impl BattleReport {
     /// `params_id` belongs to the owner ship's ATBA ammo set.
     pub fn salvos(&self) -> &[SalvoEvent] {
         &self.salvos
+    }
+
+    /// Every torpedo the client was sent, grouped by `receiveTorpedoes` call,
+    /// with every vehicle's position at that moment. See `TorpedoSighting`
+    /// for why an opposing torpedo appears at its detection, not its launch.
+    pub fn torpedo_sightings(&self) -> &[TorpedoSighting] {
+        &self.torpedo_sightings
     }
 
     /// When each vehicle died, keyed by victim entity id, from `KillLog`.
@@ -511,6 +521,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         let presence = std::mem::take(&mut *self.world_mut().resource_mut::<PresenceLog>());
         let hit_history = std::mem::take(&mut self.world_mut().resource_mut::<HitHistoryLog>().0);
         let salvos = std::mem::take(&mut self.world_mut().resource_mut::<SalvoLog>().0);
+        let torpedo_sightings = std::mem::take(&mut self.world_mut().resource_mut::<TorpedoSightingLog>().0);
 
         BattleReport {
             arena_id,
@@ -543,6 +554,7 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
             presence,
             hit_history,
             salvos,
+            torpedo_sightings,
             deaths: death_clock_by_victim,
             max_duration,
             played_duration,

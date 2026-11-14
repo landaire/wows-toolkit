@@ -1,11 +1,13 @@
 //! Position and minimap ingestion handlers.
 
+use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use wows_replays::analyzer::decoder::MinimapUpdate;
 use wows_replays::packet2::PlayerOrientationPacket;
 use wows_replays::packet2::PositionPacket;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wowsunpack::game_types::Direction;
 use wowsunpack::game_types::WorldPos;
 
 use crate::components::BuffZone;
@@ -14,6 +16,7 @@ use crate::components::CapturePoint;
 use crate::components::CapturePointData;
 use crate::components::GameId;
 use crate::components::MinimapPlacement;
+use crate::components::ObservedVelocity;
 use crate::components::SmokeScreen;
 use crate::components::SmokeScreenState;
 use crate::components::Transform3d;
@@ -35,9 +38,7 @@ pub fn handle_position(pos: &PositionPacket, world: &mut World, clock: GameClock
         roll: Radians::from(pos.rotation.roll),
         last_updated: clock,
     };
-    if let Ok(mut e) = world.get_entity_mut(entity) {
-        e.insert(t);
-    }
+    apply_transform(world, entity, t);
 }
 
 /// Handle a PlayerOrientation packet: update Transform3d only when parent_id == 0.
@@ -56,9 +57,39 @@ pub fn handle_player_orientation(orient: &PlayerOrientationPacket, world: &mut W
         roll: Radians::from(orient.rotation.roll),
         last_updated: clock,
     };
-    if let Ok(mut e) = world.get_entity_mut(entity) {
-        e.insert(t);
+    apply_transform(world, entity, t);
+}
+
+/// Store a new world fix and the velocity it implies against the previous one.
+fn apply_transform(world: &mut World, entity: Entity, t: Transform3d) {
+    // Fixes arrive under a second apart while an entity is replicated. A longer
+    // gap spans an absence from the AOI, and the average speed across it says
+    // nothing about current motion.
+    const MAX_FIX_INTERVAL_SECS: f32 = 5.0;
+
+    let Ok(mut e) = world.get_entity_mut(entity) else {
+        return;
+    };
+
+    // An entity re-entering the AOI has lost its transform but not its old
+    // velocity, which no longer describes it.
+    let previous = e.get::<Transform3d>().map(|prev| (prev.pos, prev.last_updated));
+    match previous {
+        None => {
+            e.remove::<ObservedVelocity>();
+        }
+        Some((_, prev_clock)) if t.last_updated - prev_clock > MAX_FIX_INTERVAL_SECS => {
+            e.remove::<ObservedVelocity>();
+        }
+        Some((prev_pos, prev_clock)) => {
+            let elapsed = t.last_updated - prev_clock;
+            if elapsed > 0.0 {
+                e.insert(ObservedVelocity(Direction((t.pos.0 - prev_pos.0) / elapsed)));
+            }
+        }
     }
+
+    e.insert(t);
 }
 
 /// Handle MinimapUpdate entries.
