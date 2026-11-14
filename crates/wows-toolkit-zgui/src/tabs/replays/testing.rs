@@ -25,6 +25,6 @@ pub fn allow_fetches() -> FetchesAllowed {
     FetchesAllowed { before: FETCHES_ALLOWED.replace(true) }
 }
 
-pub(super) fn fetches_allowed() -> bool {
+pub(crate) fn fetches_allowed() -> bool {
     FETCHES_ALLOWED.get()
 }

@@ -88,6 +88,8 @@ egui = "0.37"
 # egui 0.37 ports of egui-phosphor and egui_dock are not released upstream.
 egui-phosphor = { git = "https://github.com/landaire-contrib/egui-phosphor", rev = "9b98fa3e49ed6c7d0fd9c3ddde5257065c9ca5e8" }
 egui_dock = { git = "https://github.com/landaire-contrib/egui_dock", rev = "fdb395d4fbe91f39c0166651bc69c31824bc6ffb" }
+# Runs a build's client scripts to generate its constants.json.
+wowsdeob = { git = "https://github.com/landaire/wowsdeob", rev = "82ff05faf3af9cff528d9c8bc7a00f62f539d29d", default-features = false, features = ["constants"] }
 eframe = { version = "0.37", default-features = false }
 # Pin to match eframe's wgpu version so backend features unify correctly.
 # This dependency with `default-features = true` is also needed to ensure

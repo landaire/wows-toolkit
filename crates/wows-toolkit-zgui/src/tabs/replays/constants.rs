@@ -1,13 +1,11 @@
-//! The per-build result mappings battle results are read through: fetched for every listed build
-//! that has none, and fetched again for a build a battle was read through the wrong one of.
+//! The per-build result mappings battle results are read through: brought up to date for every
+//! listed build, and again for a build a battle was read through the wrong one of.
 
 use std::collections::BTreeSet;
 
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
 use rust_i18n::t;
-use wows_toolkit_services::constants::Cached;
-use wows_toolkit_services::constants::Fetched;
 use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
 use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
 use wows_toolkit_viewmodel::settings::keys;
@@ -15,9 +13,13 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::services::constants::Missed;
+use crate::services::constants::Outcome;
+use crate::services::constants::Provenance;
+use crate::services::constants::Unpublished;
+use crate::services::constants::Wanted;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
@@ -40,76 +42,95 @@ impl ResultMappings {
         Self { asked: StoredValue::new_local(BTreeSet::new()), mismatched: StoredValue::new_local(BTreeSet::new()) }
     }
 
-    /// Fetches the mapping for any of `builds` that has none, or for all of them under
-    /// `Cached::Replace`. Small files, so fetched without asking.
-    pub fn fetch_missing(self, workspace: ReplayWorkspace, builds: Vec<(u32, Option<String>)>, cached: Cached) {
+    /// Brings the mapping of each of `builds` up to date: the cached one when it fits the build,
+    /// else GitHub's, else one generated from the installed client. Small files, so fetched
+    /// without asking.
+    pub fn fetch_missing(self, workspace: ReplayWorkspace, builds: Vec<(u32, Option<String>)>) {
         #[cfg(test)]
         if !crate::tabs::replays::testing::fetches_allowed() {
             return;
         }
 
-        let wanted: Vec<(u32, Option<String>)> = self.asked.with_value(|asked| {
+        let wanted: Vec<Wanted> = self.asked.with_value(|asked| {
             builds
                 .into_iter()
                 .filter(|(build, _)| !asked.contains(build))
-                .filter(|(build, _)| cached == Cached::Replace || !wows_toolkit_services::constants::is_cached(*build))
+                .map(|(build, release)| Wanted { build, release })
                 .collect()
         });
         if wanted.is_empty() {
             return;
         }
-        // Reserved while the fetch runs, so a second listing's report does not fetch them again.
-        self.asked.update_value(|asked| asked.extend(wanted.iter().map(|(build, _)| *build)));
+        let reserved: Vec<u32> = wanted.iter().map(|wanted| wanted.build).collect();
+        // Reserved while the update runs, so a second listing's report does not ask again.
+        self.asked.update_value(|asked| asked.extend(reserved.iter().copied()));
 
-        let toasts = workspace.shell.toasts();
+        let shell = workspace.shell;
         workspace.under_tab(|| {
             spawn_local(async move {
-                let outcomes =
-                    blocking(move || wows_toolkit_services::constants::fetch_for_builds(wanted, cached)).await;
+                let outcomes = crate::shell::constants::update(shell, wanted).await;
 
-                let mut written = 0usize;
-                let mut failed = Vec::new();
+                let mut fetched = 0usize;
+                let mut arrived = false;
                 let mut fitted = Vec::new();
-                for (build, outcome) in outcomes {
+                let mut answered = Vec::new();
+                for (build, outcome) in &outcomes {
+                    let build = *build;
+                    record_github(build, outcome);
                     match outcome {
-                        Fetched::Written { build, actual } => {
-                            record_constants_fetch(ConstantsFetchStatus::Succeeded);
-                            tracing::info!(build, actual, "constants: the result mapping was fetched");
-                            written += 1;
+                        Outcome::Current { provenance, .. } => {
                             fitted.push(build);
+                            answered.push(build);
+                            match provenance {
+                                Provenance::GitHub => {
+                                    tracing::info!(build, "constants: the result mapping was fetched");
+                                    fetched += 1;
+                                    arrived = true;
+                                }
+                                Provenance::Generated { .. } => arrived = true,
+                                // Nothing changed on disk.
+                                Provenance::Cached => {}
+                            }
                         }
-                        Fetched::AlreadyOnDisk => {}
-                        // Released: a repository that refused once is asked again on a later scan,
-                        // and a later mismatch on the build tries again.
-                        Fetched::Failed(reason) => {
-                            record_constants_fetch(ConstantsFetchStatus::Failed(format!("build {build}: {reason}")));
-                            tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
-                            failed.push(build);
+                        Outcome::Fallback { missed, .. } => {
+                            if !worth_asking_again(missed) {
+                                answered.push(build);
+                            }
                         }
                     }
                 }
 
-                self.asked.update_value(|asked| asked.retain(|build| !failed.contains(build)));
-                let unfit = self.mismatched.try_update_value(|mismatched| {
-                    mismatched.retain(|build| !failed.contains(build) && !fitted.contains(build));
-                    !mismatched.is_empty()
+                // A build with no answer worth keeping, or one this update did not reach, is asked
+                // again on a later scan, and a later mismatch on it tries again.
+                let released = |build: &u32| reserved.contains(build) && !answered.contains(build);
+                self.asked.update_value(|asked| asked.retain(|build| !released(build)));
+                // A mismatch can be resolved by constants another writer cached since it was
+                // reported, which reads as `Cached` here.
+                let settled = self.mismatched.try_update_value(|mismatched| {
+                    let resolved = mismatched.iter().any(|build| fitted.contains(build));
+                    mismatched.retain(|build| !released(build) && !fitted.contains(build));
+                    (resolved, mismatched.is_empty())
                 });
-                if written == 0 {
+                let resolved = settled.is_some_and(|(resolved, _)| resolved);
+                let unfit = settled.map(|(_, empty)| !empty);
+                if !arrived && !resolved {
                     return;
                 }
                 if unfit == Some(false) {
-                    toasts.withdraw(&ToastKey::new(CONSTANTS_UNFIT));
+                    shell.toasts().withdraw(&ToastKey::new(CONSTANTS_UNFIT));
                 }
-                toasts.info(t!("ui.replay.constants_written", count = written).into_owned());
+                if fetched > 0 {
+                    shell.toasts().info(t!("ui.replay.constants_written", count = fetched).into_owned());
+                }
                 // What is open was read through the mapping that was there before.
                 workspace.reparse_all(ReparseCause::GameDataArrived);
             });
         });
     }
 
-    /// Says that a battle was read through the wrong mapping, and fetches the right one over it.
-    /// What is on disk is kept until a fetch replaces it: a mapping imported by hand is the only
-    /// one some builds have.
+    /// Says that a battle was read through the wrong mapping, and brings the build's mapping up to
+    /// date. What is on disk is kept until one that fits replaces it: a mapping imported by hand is
+    /// the only one some builds have.
     pub fn recover(self, workspace: ReplayWorkspace, build: u32, version: Option<String>) {
         let first = self.mismatched.try_update_value(|mismatched| mismatched.insert(build)).unwrap_or(false);
         if !first {
@@ -130,12 +151,47 @@ impl ResultMappings {
         self.asked.update_value(|asked| {
             asked.remove(&build);
         });
-        self.fetch_missing(workspace, vec![(build, version)], Cached::Replace);
+        self.fetch_missing(workspace, vec![(build, version)]);
     }
 }
 
 impl Default for ResultMappings {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Notes for the bug report how GitHub answered for `build`, when it was asked.
+fn record_github(build: u32, outcome: &Outcome) {
+    let unpublished = match outcome {
+        Outcome::Current { provenance: Provenance::GitHub, .. } => {
+            record_constants_fetch(ConstantsFetchStatus::Succeeded);
+            return;
+        }
+        Outcome::Current { provenance: Provenance::Cached, .. } => return,
+        Outcome::Current { unpublished, .. } => unpublished.as_ref(),
+        Outcome::Fallback { missed: Missed::NoClient { unpublished, .. }, .. }
+        | Outcome::Fallback { missed: Missed::Generation { unpublished, .. }, .. } => Some(unpublished),
+        Outcome::Fallback { .. } => None,
+    };
+
+    match unpublished {
+        Some(Unpublished::Unreachable { reason }) => {
+            tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
+            record_constants_fetch(ConstantsFetchStatus::Failed(format!("build {build}: {reason}")));
+        }
+        Some(Unpublished::Stale { .. }) => record_constants_fetch(ConstantsFetchStatus::Succeeded),
+        None => {}
+    }
+}
+
+/// Whether a build with no mapping that fits is worth asking about again this session. GitHub's
+/// answer and a failed generation stand until the next session; what failed for want of a network
+/// or a disk may not.
+fn worth_asking_again(missed: &Missed) -> bool {
+    match missed {
+        Missed::NoClient { unpublished, .. } => matches!(unpublished, Unpublished::Unreachable { .. }),
+        Missed::Generation { .. } => false,
+        Missed::Store { .. } | Missed::WorkerStopped { .. } => true,
     }
 }

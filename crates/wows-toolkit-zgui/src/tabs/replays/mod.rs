@@ -35,7 +35,6 @@ use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::default_columns;
-use wows_toolkit_services::constants::Cached;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::component;
 use zgui::css;
@@ -295,7 +294,7 @@ fn on_browser_event(workspace: ReplayWorkspace, arrivals: Arrivals, offer: GameD
         // The listing forgets the row itself; an open tab keeps what it read.
         ReplayBrowserEvent::ReplayRemoved(_) => {}
         ReplayBrowserEvent::BuildsMissing(missing) => offer.offer(shell, missing),
-        ReplayBrowserEvent::BuildsListed(builds) => workspace.mappings.fetch_missing(workspace, builds, Cached::Keep),
+        ReplayBrowserEvent::BuildsListed(builds) => workspace.mappings.fetch_missing(workspace, builds),
         ReplayBrowserEvent::CheckGameData(missing) => offer.check(shell, missing),
         ReplayBrowserEvent::ConstantsImported { .. } => workspace.reparse_all(ReparseCause::GameDataArrived),
     }

@@ -47,6 +47,8 @@ resvg = { version = "0.47", default-features = false }
 image = { workspace = true, features = ["png"] }
 # The game-data cache's maintenance.
 wows-data-mgr = { workspace = true, features = ["download"] }
+# Generates a build's constants.json from its client scripts when none can be fetched.
+wowsdeob = { workspace = true }
 # The Unpacker viewer's syntax highlighting.
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
 # The Unpacker viewer's find, which compares case-folded text.

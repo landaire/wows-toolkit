@@ -4,6 +4,7 @@
 //! [`Services`] is provided once, by `shell::AppRoot`, and is a `Copy` handle: read it with
 //! [`Services::current`] in a component's body and move it into closures.
 
+pub mod constants;
 mod error;
 mod game_data;
 mod jobs;
@@ -22,6 +23,7 @@ use zgui::reactive::provide_local_context;
 use zgui::reactive::use_local_context;
 
 use crate::i18n::Locale;
+use crate::services::constants::ConstantsUpdates;
 
 pub use crate::services::error::TokioError;
 pub use crate::services::game_data::GameData;
@@ -48,6 +50,7 @@ pub struct Services {
     pub jobs: Jobs,
     pub locale: Locale,
     pub supervision: Supervision,
+    pub constants: ConstantsUpdates,
 }
 
 impl Services {
@@ -61,6 +64,7 @@ impl Services {
             jobs: Jobs::new(),
             locale: Locale::new(),
             supervision: Supervision::new(),
+            constants: ConstantsUpdates::new(),
         };
         provide_local_context(services);
 

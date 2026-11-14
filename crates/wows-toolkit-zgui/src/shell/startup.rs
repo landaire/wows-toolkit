@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
+use wows_toolkit_replay_data::force_reindex::version_said;
 use wows_toolkit_replay_data::heap_profile;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_services::constants::Checked;
@@ -23,6 +24,8 @@ use crate::i18n::LanguageCode;
 use crate::services::GameDataRequest;
 use crate::services::GameDataState;
 use crate::services::Services;
+use crate::services::constants::Provenance;
+use crate::services::constants::Wanted;
 use crate::shell::ReplayRequest;
 use crate::shell::Shell;
 use crate::shell::crash;
@@ -184,7 +187,9 @@ fn maintain_game_data_cache(services: Services) {
 
 /// Once a session, as soon as the game data and the settings are in: asks whether the published
 /// result mappings have moved since they were last written, and writes the newest over the
-/// installed build's. A mapping a year old reads this year's results wrongly.
+/// installed build's. A mapping a year old reads this year's results wrongly. Then brings the
+/// installed build's mapping up to date, generating it from the client when nothing published
+/// fits it.
 fn check_published_constants(services: Services, shell: Shell) {
     let checking = RenderEffect::new(move |started: Option<bool>| {
         if started == Some(true) {
@@ -193,14 +198,35 @@ fn check_published_constants(services: Services, shell: Shell) {
         let GameDataState::Ready(loaded) = services.game_data.state() else { return false };
         let Some(known) = services.settings.read(|settings| settings.constants_commit.clone()) else { return false };
 
+        let installed =
+            Wanted { build: loaded.build(), release: loaded.version().map(|version| version_said(&version)) };
         let checked = services.on_tokio(wows_toolkit_services::constants::check_latest(loaded.build(), known));
         spawn_local(async move {
             let outcome = checked.await.unwrap_or_else(|err| Checked::Failed(err.to_string()));
             constants_checked(services, shell, outcome);
+            // After the check, which writes the newest published mapping whatever build it is for.
+            update_installed_constants(shell, installed).await;
         });
         true
     });
     on_cleanup_local(move || drop(checking));
+}
+
+/// Brings the installed build's mapping up to date, and has the open replays read again through
+/// one that arrived.
+async fn update_installed_constants(shell: Shell, installed: Wanted) {
+    #[cfg(test)]
+    if !crate::tabs::replays::testing::fetches_allowed() {
+        return;
+    }
+
+    let outcomes = crate::shell::constants::update(shell, vec![installed]).await;
+    let arrived = outcomes
+        .iter()
+        .any(|(_, outcome)| matches!(outcome.provenance(), Some(Provenance::GitHub | Provenance::Generated { .. })));
+    if arrived {
+        shell.request_replay(ReplayRequest::ReparseOpen);
+    }
 }
 
 fn constants_checked(services: Services, shell: Shell, outcome: Checked) {

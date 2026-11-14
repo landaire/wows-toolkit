@@ -20,6 +20,7 @@ use zgui::view::Timers;
 use crate::services::Job;
 use crate::services::JobHandle;
 use crate::services::Services;
+use crate::services::constants::ConstantsWorker;
 
 /// Starts the watchdog's keeper and the status bar's reports, for the life of the caller.
 pub fn begin(services: Services) {
@@ -59,6 +60,7 @@ pub fn worker_title(name: &WorkerName) -> String {
     match name.as_str() {
         ReplayLoader::WORKER => t!("ui.app.worker_replay_loader").into_owned(),
         LivePoll::WORKER => t!("ui.app.worker_live_match").into_owned(),
+        ConstantsWorker::WORKER => t!("ui.app.worker_constants").into_owned(),
         other => other.to_owned(),
     }
 }

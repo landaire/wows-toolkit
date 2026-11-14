@@ -163,7 +163,7 @@ pub fn import(from: &Path, build: u32) -> Result<(), String> {
 }
 
 /// Writes `bytes` as `build`'s cached mapping.
-fn write_cached(build: u32, bytes: &[u8]) -> Result<(), String> {
+pub fn write_cached(build: u32, bytes: &[u8]) -> Result<(), String> {
     let Some(path) = cached_path(build) else {
         return Err("there is no storage directory to cache constants in".to_owned());
     };

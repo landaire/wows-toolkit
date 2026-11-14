@@ -7,6 +7,7 @@
 
 mod about;
 pub mod collab;
+pub mod constants;
 mod crash;
 mod dialogs;
 mod drop;
