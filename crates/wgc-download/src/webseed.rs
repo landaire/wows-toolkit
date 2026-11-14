@@ -18,8 +18,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use futures::stream;
 use futures::stream::StreamExt;
-use futures::stream::{self};
 use sha1::Digest;
 use sha1::Sha1;
 use tokio::io::AsyncReadExt;

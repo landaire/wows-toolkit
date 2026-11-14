@@ -67,7 +67,11 @@ fn received_breakdown_sums_to_damage_dealt_by_others() {
                 .sum();
 
             let listed = sum_values(&server["received_damage_by_type"]);
-            assert_eq!(listed, dealt_by_others, "{name}: {} received breakdown vs damage dealt to them", victim["name"]);
+            assert_eq!(
+                listed, dealt_by_others,
+                "{name}: {} received breakdown vs damage dealt to them",
+                victim["name"]
+            );
         }
     }
 }
