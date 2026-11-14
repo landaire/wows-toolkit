@@ -36351,6 +36351,7 @@ cargo.rust_library(
             deps = [":web-sys-0.3"],
         ),
     },
+    rustc_flags = ["--cfg=leptos_debuginfo"],
     visibility = [],
     deps = [
         ":any_spawner-0.3",
@@ -36397,6 +36398,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = ["default"],
+    rustc_flags = ["--cfg=leptos_debuginfo"],
     visibility = [],
     deps = [
         ":guardian-1",
