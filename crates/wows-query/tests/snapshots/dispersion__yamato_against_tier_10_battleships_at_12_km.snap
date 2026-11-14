@@ -16,7 +16,7 @@ ship:
     - Yamato Kai
 battery: main_battery
 range_km: 12
-conclusion: "At 12 km, a 39.2% longer main battery range (26.63 km to 37.07 km with Spotting Aircraft + Gun Fire Control System Modification 2) shrinks vertical dispersion from 95.5 m to 78.2 m; horizontal is unchanged at 170.4 m. With sigma 2.1, half of the shells land within 31.3% of the ellipse (53.3 m by 29.9 m) and 72.4% within its inner half; a higher sigma packs more shells toward the aim point. Aiming Systems Modification 1 narrows both: horizontal 170.4 m to 158.5 m, vertical 95.5 m to 88.8 m. Among tier 10 battleships at 12 km (41 ranked, 0 out of reach), Yamato on base ranks 19 of 41 on horizontal dispersion, 37 on vertical and 14 on the radius holding half of the shells; the median is 170.4 m horizontal and 88.8 m vertical, the tightest horizontal is Conte Verde (115.8 m)."
+conclusion: "At 12 km, a 39.2% longer main battery range (26.63 km to 37.07 km with Spotting Aircraft + Gun Fire Control System Modification 2) shrinks vertical dispersion from 95.5 m to 78.2 m; horizontal is unchanged at 170.4 m. With sigma 2.1, half of the shells land within 31.3% of the ellipse (53.3 m by 29.9 m) and 72.4% within its inner half; a higher sigma packs more shells toward the aim point. Aiming Systems Modification 1 narrows both: horizontal 170.4 m to 158.5 m, vertical 95.5 m to 88.8 m. Among tier 10 battleships at 12 km (32 ranked, 0 out of reach), Yamato on base ranks 14 of 32 on horizontal dispersion, 30 on vertical and 11 on the radius holding half of the shells; the median is 175.2 m horizontal and 88.1 m vertical, the tightest horizontal is Conte Verde (115.8 m)."
 guns:
   - mount: main battery
     min_radius: 2.8
@@ -197,12 +197,12 @@ group:
   min_tier: 10
   max_tier: 10
   ship_build: base
-  ships_ranked: 41
+  ships_ranked: 32
   ships_out_of_reach: 0
   horizontal:
-    rank: 19
+    rank: 14
     value_m: 170.4
-    median_m: 170.4
+    median_m: 175.2
     tightest:
       ship: Conte Verde
       build: base
@@ -212,9 +212,9 @@ group:
       build: base
       value_m: 183.6
   vertical:
-    rank: 37
+    rank: 30
     value_m: 95.5
-    median_m: 88.8
+    median_m: 88.1
     tightest:
       ship: Slava
       build: base
@@ -223,10 +223,50 @@ group:
       ship: Bungo
       build: base
       value_m: 99.5
+  leaders:
+    - ship: Conte Verde
+      build: base
+      horizontal_m: 115.8
+      vertical_m: 61
+      base:
+        horizontal_m: 115.8
+        vertical_m: 61
+    - ship: Wisconsin
+      replicas:
+        - Wisconsin G
+      build: base
+      horizontal_m: 148.8
+      vertical_m: 74.8
+      base:
+        horizontal_m: 148.8
+        vertical_m: 74.8
+    - ship: Mecklenburg
+      build: base
+      horizontal_m: 148.8
+      vertical_m: 75.8
+      base:
+        horizontal_m: 148.8
+        vertical_m: 75.8
+    - ship: Thunderer
+      build: base
+      horizontal_m: 148.8
+      vertical_m: 76.1
+      base:
+        horizontal_m: 148.8
+        vertical_m: 76.1
+    - ship: Rhode Island
+      replicas:
+        - Rhode Island B
+      build: base
+      horizontal_m: 148.8
+      vertical_m: 76.5
+      base:
+        horizontal_m: 148.8
+        vertical_m: 76.5
   half_of_shells_horizontal:
-    rank: 14
+    rank: 11
     value_m: 53.3
-    median_m: 55.9
+    median_m: 56.8
     tightest:
       ship: Conte Verde
       build: base

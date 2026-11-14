@@ -13,7 +13,7 @@ ship:
   status: released
 battery: main_battery
 range_km: 24
-conclusion: "Without Gun Fire Control System Modification 2, Stalingrad's main battery reaches 20.35 km, short of 24 km. With Gun Fire Control System Modification 2 (23.61 km range), dispersion at 23.61 km is 246.3 m horizontal and 147.8 m vertical. Among tier 10 battleships at 24 km (40 ranked, 2 out of reach), Stalingrad on Gun Fire Control System Modification 2 ranks 8 of 40 on horizontal dispersion, 10 on vertical and 1 on the radius holding half of the shells; the median is 256.8 m horizontal and 175.7 m vertical, the tightest horizontal is Conte Verde (198.6 m)."
+conclusion: "Without Gun Fire Control System Modification 2, Stalingrad's main battery reaches 20.35 km, short of 24 km. With Gun Fire Control System Modification 2 (23.61 km range), dispersion at 23.61 km is 246.3 m horizontal and 147.8 m vertical. Among tier 10 battleships at 24 km (31 ranked, 2 out of reach), Stalingrad on Gun Fire Control System Modification 2 ranks 6 of 31 on horizontal dispersion, 7 on vertical and 1 on the radius holding half of the shells; the median is 256.8 m horizontal and 175.9 m vertical, the tightest horizontal is Conte Verde (198.6 m)."
 guns:
   - mount: main battery
     min_radius: 1.6
@@ -112,13 +112,13 @@ group:
   min_tier: 10
   max_tier: 10
   ship_build: Gun Fire Control System Modification 2
-  ships_ranked: 40
+  ships_ranked: 31
   ships_out_of_reach: 2
   out_of_reach:
     - C. Colombo
     - Kremlin
   horizontal:
-    rank: 8
+    rank: 6
     value_m: 246.3
     median_m: 256.8
     tightest:
@@ -130,9 +130,9 @@ group:
       build: Spotting Aircraft + Gun Fire Control System Modification 2
       value_m: 301.2
   vertical:
-    rank: 10
+    rank: 7
     value_m: 147.8
-    median_m: 175.7
+    median_m: 175.9
     tightest:
       ship: Slava
       build: base
@@ -141,10 +141,44 @@ group:
       ship: Sibir
       build: Gun Fire Control System Modification 2
       value_m: 215
+  leaders:
+    - ship: Conte Verde
+      build: Spotting Aircraft + Gun Fire Control System Modification 2
+      horizontal_m: 198.6
+      vertical_m: 115.7
+    - ship: Slava
+      build: base
+      horizontal_m: 225
+      vertical_m: 99.5
+      base:
+        horizontal_m: 225
+        vertical_m: 99.5
+    - ship: Shikishima
+      build: base
+      horizontal_m: 232.8
+      vertical_m: 177
+      base:
+        horizontal_m: 232.8
+        vertical_m: 177
+    - ship: Aki
+      replicas:
+        - Aki G
+      build: base
+      horizontal_m: 232.8
+      vertical_m: 178.8
+      base:
+        horizontal_m: 232.8
+        vertical_m: 178.8
+    - ship: Schlieffen
+      replicas:
+        - Von Zuckerhoff
+      build: Gun Fire Control System Modification 2
+      horizontal_m: 241
+      vertical_m: 144.6
   half_of_shells_horizontal:
     rank: 1
     value_m: 62.4
-    median_m: 90
+    median_m: 93.9
     tightest:
       ship: Stalingrad
       build: Gun Fire Control System Modification 2

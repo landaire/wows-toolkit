@@ -26,6 +26,7 @@ use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
 use wowsunpack::game_params::ttx::orchestration::ArtilleryDispersion;
 use wowsunpack::game_params::ttx::orchestration::artillery_dispersion;
 use wowsunpack::game_params::ttx::orchestration::artillery_sigma;
+use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::builds::Item;
@@ -39,9 +40,10 @@ use crate::modules::ModuleKind;
 use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipClass;
-use crate::ships::ShipStatus;
+use crate::ships::ShipFilter;
 use crate::ships::ShipSummary;
 use crate::ships::Tier;
+use crate::ships::TierRange;
 
 /// Secondary accuracy against the priority target within secondary range.
 const PRIORITY_TARGET_ACCURACY: &str = "GSPriorityTargetIdealRadius";
@@ -54,6 +56,7 @@ const MAIN_RANGE_NOTE: &str = "max range is the modified main battery range: fir
 const SECONDARY_NOTE: &str = "Secondary max range is the base secondary range times the secondary range modifiers. The accuracy coefficient is the one the game applies in battle: GSIdealRadius times GSIdealRadiusHighLevel on tier 7 and higher ships or GSIdealRadiusLowLevel below, times GSPriorityTargetIdealRadius in rows whose condition names the priority target; the port card applies GSIdealRadius alone. Manual secondary control modes are not modeled.";
 const SIGMA_NOTE: &str = "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread.";
 const TAPER_NOTE: &str = "Below the gun's taperDist, 4 to 5 km for most guns, the game narrows horizontal dispersion further toward the muzzle; values at these distances do not apply it and overstate dispersion.";
+const GROUP_SKILL_NOTE: &str = "In group, every ship is ranked with the selected skill on its stock build, its condition met; a ship whose battery the skill does not change is ranked on its base build, marked build: base.";
 fn default_dispersion_range() -> Km {
     Km::new(12.0)
 }
@@ -352,7 +355,8 @@ pub struct DispersionAtRange {
 /// The ship's standing among a class and tier range at one distance. Each
 /// ship is taken on the build with the shortest range that reaches the
 /// distance, or on its longest range build when the distance is slightly
-/// past it.
+/// past it. With a captain skill selected from another game build, each ship
+/// is taken with that skill on its stock build instead.
 #[derive(Debug, Clone, Serialize)]
 pub struct GroupComparison {
     pub class: ShipClass,
@@ -362,7 +366,8 @@ pub struct GroupComparison {
     /// The ship's own build in the ranking.
     pub ship_build: String,
 
-    /// Ships ranked, the named ship included.
+    /// Ships ranked, the named ship included. Premium replicas are left out;
+    /// a leader names its own.
     pub ships_ranked: usize,
 
     /// Ships whose range falls short of the distance on every build.
@@ -374,6 +379,10 @@ pub struct GroupComparison {
 
     pub horizontal: Standing,
     pub vertical: Standing,
+
+    /// The five ships with the tightest horizontal dispersion, tightest
+    /// first.
+    pub leaders: Vec<GroupLeader>,
 
     /// Horizontal semi-axis of the inner ellipse holding half of the shells.
     /// Absent when the battery has no sigmaCount.
@@ -397,6 +406,33 @@ pub struct GroupShip {
     pub ship: String,
     pub build: String,
     pub value_m: Meters,
+}
+
+/// One of the tightest ships of a group, on the build it is ranked on and on
+/// its stock build.
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupLeader {
+    pub ship: String,
+
+    /// Premium replicas of the ship, left out of the ranking.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replicas: Vec<String>,
+
+    pub build: String,
+    pub horizontal_m: Meters,
+    pub vertical_m: Meters,
+
+    /// Stock build without the ranked build or skill. Absent when the stock
+    /// build does not reach the distance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<EllipseSize>,
+}
+
+/// Semi-axes of a dispersion ellipse.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct EllipseSize {
+    pub horizontal_m: Meters,
+    pub vertical_m: Meters,
 }
 
 /// What lengthens range or tightens accuracy.
@@ -526,11 +562,14 @@ struct GroupEntry {
     horizontal: f32,
     vertical: f32,
     half_of_shells: Option<f32>,
+
+    /// The stock build, `None` when it does not reach the distance.
+    base: Option<EllipseSize>,
 }
 
 impl GroupEntry {
     /// `None` when the row's first mount does not reach the distance.
-    fn from_row(row: &DispersionRow) -> Option<Self> {
+    fn from_rows(row: &DispersionRow, base: &DispersionRow) -> Option<Self> {
         let ellipse = first_ellipse(row)?;
 
         Some(Self {
@@ -538,8 +577,34 @@ impl GroupEntry {
             horizontal: ellipse.horizontal_m.value(),
             vertical: ellipse.vertical_m.value(),
             half_of_shells: ellipse.half_of_shells_within.as_ref().map(|half| half.horizontal_m.value()),
+            base: first_ellipse(base)
+                .map(|base| EllipseSize { horizontal_m: base.horizontal_m, vertical_m: base.vertical_m }),
         })
     }
+}
+
+/// How the other ships of a group are ranked.
+enum GroupRanking<'a> {
+    /// Each on its shortest range build that reaches the distance.
+    RangeBuild,
+
+    /// Each with this skill on its stock build.
+    Skill(&'a SelectedSkill<'a>),
+}
+
+/// A captain skill taken from another game build.
+struct SelectedSkill<'a> {
+    data: &'a GameData,
+    skill: &'a CrewSkill,
+    name: String,
+}
+
+/// One other ship of a group.
+enum GroupMember {
+    /// The ship lacks the battery or its dispersion data.
+    NoBattery,
+    OutOfReach,
+    Ranked(GroupEntry),
 }
 
 /// The fixed inputs of one query.
@@ -632,7 +697,10 @@ impl GameData {
             None => None,
         };
         let group = match &args.compare {
-            Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, headline)?),
+            Some(compare) => {
+                let own = own_group_entry(&computed, headline)?;
+                Some(self.group_comparison(ship, kind, range, compare, own, &GroupRanking::RangeBuild)?)
+            }
             None => None,
         };
 
@@ -684,8 +752,7 @@ impl GameData {
         self.check_hull_fit(ship, &modules)?;
         let kind = args.battery.unwrap_or_default();
         let battery = self.dispersion_battery(ship, kind, &modules.selection)?;
-        let stock_loadout = self.stock_loadout();
-        let stock_effects = self.effective_modifiers(ship, &stock_loadout)?;
+        let stock_effects = self.effective_modifiers(ship, &self.stock_loadout())?;
         let stock = stock_effects.build.modifiers.bundle();
         let Some(base) = battery.profiles(stock, &battery.selection, RangeCoefficient::NONE) else {
             return Err(QueryError::WeaponNotFound { ship: ship.name.clone(), weapon: kind.noun().to_owned() });
@@ -694,27 +761,13 @@ impl GameData {
         let (skill, _) =
             skill_data.resolve_skill_for_class(skill_query, ship.class, &ship.name, &mut interpretations)?;
         let skill_name = skill_data.skill_name(skill);
-        let mut skill_loadout = stock_loadout;
-        skill_loadout.skills.push(skill.clone());
-        skill_loadout.triggers = Triggers::Skills(vec![skill.internal_name().clone()]);
-        let skill_effects = self.effective_modifiers_at_version(ship, &skill_loadout, skill_data.version())?;
-        let skill_build = skill_effects.build.modifiers.bundle();
-        let Some(skill_profiles) = battery.profiles(skill_build, &battery.selection, RangeCoefficient::NONE) else {
-            return Err(QueryError::WeaponNotFound { ship: ship.name.clone(), weapon: kind.noun().to_owned() });
-        };
-        let Some(row_kind) = change_kind(&base[0], &skill_profiles[0]) else {
+        let selected = SelectedSkill { data: skill_data, skill, name: skill_name.clone() };
+        let Some(skill_row) = self.skill_row(&battery, &base, &selected, range)? else {
             return Err(QueryError::InvalidArguments {
                 reason: "the selected skill does not change this battery's range or accuracy",
             });
         };
-
-        let condition = if kind == DispersionBattery::Secondary && skill_build.coef(PRIORITY_TARGET_ACCURACY) != 1.0 {
-            Some(PRIORITY_TARGET_CONDITION.to_owned())
-        } else {
-            skill_data.skill_trigger_sentence(skill)
-        };
-        let mut skill_row = row(skill_name.clone(), row_kind, &skill_profiles, Some(&base), range);
-        skill_row.condition = condition.clone();
+        let condition = skill_row.condition.clone();
         let mut rows = vec![row("base".to_owned(), RowKind::Base, &base, None, range), skill_row];
 
         // The skill on top of each range or accuracy build of this game build,
@@ -751,7 +804,23 @@ impl GameData {
         let computed = ShipRows { rows, sources: Vec::new(), guns };
         let headline = 1;
         let group = match &args.compare {
-            Some(compare) => Some(self.group_comparison(ship, kind, range, compare, &computed, Some(headline))?),
+            Some(compare) => {
+                // The group's tree may name the skill differently or lack it.
+                let member_skill = if compare.class == ship.class {
+                    None
+                } else {
+                    let (skill, _) = skill_data.resolve_skill_for_class(
+                        skill_query,
+                        compare.class,
+                        &ship.name,
+                        &mut Interpretations::default(),
+                    )?;
+                    Some(SelectedSkill { data: skill_data, skill, name: skill_data.skill_name(skill) })
+                };
+                let ranking = GroupRanking::Skill(member_skill.as_ref().unwrap_or(&selected));
+                let own = own_group_entry(&computed, Some(headline))?;
+                Some(self.group_comparison(ship, kind, range, compare, own, &ranking)?)
+            }
             None => None,
         };
         let mut conclusion = build_comparison_sentence(ship, kind, range, &computed.rows[0], &computed.rows[headline]);
@@ -768,7 +837,10 @@ impl GameData {
         if let Some(group) = &group {
             conclusion.push_str(&group_sentence(ship, range, group));
         }
-        let notes = dispersion_notes(kind, range);
+        let mut notes = dispersion_notes(kind, range);
+        if group.is_some() {
+            notes.push(GROUP_SKILL_NOTE);
+        }
 
         Ok(DispersionAtRange {
             interpretations,
@@ -818,48 +890,81 @@ impl GameData {
         Ok(Some(ShipRows { rows, sources, guns }))
     }
 
-    /// `ship`'s standing among the released ships of `compare` at `range`.
+    /// The row of `skill` on the stock build of `battery`, `None` when the
+    /// skill changes neither the battery's range nor its accuracy.
+    fn skill_row(
+        &self,
+        battery: &Battery<'_>,
+        base: &[MountProfile],
+        skill: &SelectedSkill<'_>,
+        range: Km,
+    ) -> Result<Option<DispersionRow>, QueryError> {
+        let mut loadout = self.stock_loadout();
+        loadout.skills.push(skill.skill.clone());
+        loadout.triggers = Triggers::Skills(vec![skill.skill.internal_name().clone()]);
+        let effects = self.effective_modifiers_at_version(battery.ship, &loadout, skill.data.version())?;
+        let bundle = effects.build.modifiers.bundle();
+
+        // Profiles depend on the selection alone, which already gave `base`.
+        let Some(profiles) = battery.profiles(bundle, &battery.selection, RangeCoefficient::NONE) else {
+            return Ok(None);
+        };
+        let Some(kind) = change_kind(&base[0], &profiles[0]) else {
+            return Ok(None);
+        };
+
+        let condition = if battery.kind == DispersionBattery::Secondary && bundle.coef(PRIORITY_TARGET_ACCURACY) != 1.0
+        {
+            Some(PRIORITY_TARGET_CONDITION.to_owned())
+        } else {
+            skill.data.skill_trigger_sentence(skill.skill)
+        };
+        let mut skill_row = row(skill.name.clone(), kind, &profiles, Some(base), range);
+        skill_row.condition = condition;
+
+        Ok(Some(skill_row))
+    }
+
+    /// `ship`'s standing among the released ships of `compare` at `range`,
+    /// `own` its entry.
     fn group_comparison(
         &self,
         ship: &Ship,
         kind: DispersionBattery,
         range: Km,
         compare: &CompareGroup,
-        own: &ShipRows,
-        headline: Option<usize>,
+        own: GroupEntry,
+        ranking: &GroupRanking<'_>,
     ) -> Result<GroupComparison, QueryError> {
         const OUT_OF_REACH_SHOWN: usize = 10;
 
         if compare.min_tier.0 > compare.max_tier.0 {
             return Err(QueryError::InvalidArguments { reason: "compare.min_tier must not exceed compare.max_tier" });
         }
-        let own_row = match headline {
-            Some(index) => Some(&own.rows[index]),
-            None => ranked_row(&own.rows),
-        };
-        let Some(own_entry) = own_row.and_then(GroupEntry::from_row) else {
-            return Err(QueryError::InvalidArguments {
-                reason: "the ship cannot reach range_km on the build compared, so it has no rank",
-            });
-        };
 
-        let members = self.ships.iter().filter(|other| {
-            other.class == compare.class
-                && (compare.min_tier.0..=compare.max_tier.0).contains(&other.tier.0)
-                && other.is_regular()
-                && other.status() == ShipStatus::Released
-                && other.param.index() != ship.param.index()
-        });
-        let mut entries = vec![(ship.name.clone(), own_entry)];
+        let filter = ShipFilter {
+            tiers: Some(TierRange { min: compare.min_tier, max: compare.max_tier }),
+            class: Some(compare.class),
+            nation: None,
+            include_irregular: false,
+            exclude_test: true,
+            include_replicas: false,
+        };
+        // A named replica stands in for its original.
+        let stands_for = |other: &Ship| {
+            other.param.index() == ship.param.index()
+                || ship.replica_of.as_ref().is_some_and(|original| original.index == other.param.index())
+        };
+        let members = self.ships.iter().filter(|other| filter.matches(other) && !stands_for(other));
+        let mut entries = vec![(ship, own)];
         let mut out_of_reach = Vec::new();
         for other in members {
-            let Some(rows) = self.dispersion_rows(other, kind, &ShipUpgradeSelection::stock(&other.param), range)?
-            else {
-                continue;
-            };
-            match ranked_row(&rows.rows).and_then(GroupEntry::from_row) {
-                Some(entry) => entries.push((other.name.clone(), entry)),
-                None => out_of_reach.push(other.name.clone()),
+            match self.group_member(other, kind, range, ranking)? {
+                GroupMember::NoBattery => {
+                    // Nothing to rank.
+                }
+                GroupMember::OutOfReach => out_of_reach.push(other.name.clone()),
+                GroupMember::Ranked(entry) => entries.push((other, entry)),
             }
         }
         out_of_reach.sort();
@@ -875,8 +980,43 @@ impl GameData {
             horizontal: standing(&entries, |entry| Some(entry.horizontal))
                 .expect("the named ship has a horizontal value"),
             vertical: standing(&entries, |entry| Some(entry.vertical)).expect("the named ship has a vertical value"),
+            leaders: leaders(&entries),
             half_of_shells_horizontal: standing(&entries, |entry| entry.half_of_shells),
         })
+    }
+
+    /// `other` as `ranking` takes it, on its stock modules.
+    fn group_member(
+        &self,
+        other: &Ship,
+        kind: DispersionBattery,
+        range: Km,
+        ranking: &GroupRanking<'_>,
+    ) -> Result<GroupMember, QueryError> {
+        let selection = ShipUpgradeSelection::stock(&other.param);
+        let entry = match ranking {
+            GroupRanking::RangeBuild => {
+                let Some(rows) = self.dispersion_rows(other, kind, &selection, range)? else {
+                    return Ok(GroupMember::NoBattery);
+                };
+                ranked_row(&rows.rows).and_then(|ranked| GroupEntry::from_rows(ranked, &rows.rows[0]))
+            }
+            GroupRanking::Skill(skill) => {
+                let battery = self.dispersion_battery(other, kind, &selection)?;
+                let stock_effects = self.effective_modifiers(other, &self.stock_loadout())?;
+                let stock = stock_effects.build.modifiers.bundle();
+                let Some(base) = battery.profiles(stock, &battery.selection, RangeCoefficient::NONE) else {
+                    return Ok(GroupMember::NoBattery);
+                };
+
+                let base_row = row("base".to_owned(), RowKind::Base, &base, None, range);
+                let skill_row = self.skill_row(&battery, &base, skill, range)?;
+                // A skill that leaves the battery unchanged ranks the ship on its base build.
+                GroupEntry::from_rows(skill_row.as_ref().unwrap_or(&base_row), &base_row)
+            }
+        };
+
+        Ok(entry.map_or(GroupMember::OutOfReach, GroupMember::Ranked))
     }
 
     fn dispersion_battery<'a>(
@@ -1525,13 +1665,50 @@ fn ranked_row(rows: &[DispersionRow]) -> Option<&DispersionRow> {
         .or_else(|| usable().filter(|row| first_ellipse(row).is_some()).max_by(by_range))
 }
 
+/// The named ship's group entry: the row `headline` selects, else its
+/// [`ranked_row`].
+fn own_group_entry(own: &ShipRows, headline: Option<usize>) -> Result<GroupEntry, QueryError> {
+    let own_row = match headline {
+        Some(index) => Some(&own.rows[index]),
+        None => ranked_row(&own.rows),
+    };
+
+    own_row.and_then(|row| GroupEntry::from_rows(row, &own.rows[0])).ok_or(QueryError::InvalidArguments {
+        reason: "the ship cannot reach range_km on the build compared, so it has no rank",
+    })
+}
+
+/// The entries with the tightest horizontal dispersion, tightest first,
+/// ties broken by vertical dispersion.
+fn leaders(entries: &[(&Ship, GroupEntry)]) -> Vec<GroupLeader> {
+    const SHOWN: usize = 5;
+
+    let mut sorted: Vec<&(&Ship, GroupEntry)> = entries.iter().collect();
+    sorted.sort_by(|(_, left), (_, right)| {
+        left.horizontal.total_cmp(&right.horizontal).then(left.vertical.total_cmp(&right.vertical))
+    });
+
+    sorted
+        .into_iter()
+        .take(SHOWN)
+        .map(|(ship, entry)| GroupLeader {
+            ship: ship.name.clone(),
+            replicas: ship.replicas.clone(),
+            build: entry.build.clone(),
+            horizontal_m: Meters::new(entry.horizontal),
+            vertical_m: Meters::new(entry.vertical),
+            base: entry.base,
+        })
+        .collect()
+}
+
 /// Rank of the first entry (1 is the smallest value), the median and the
 /// extremes. `None` when the first entry has no value.
-fn standing(entries: &[(String, GroupEntry)], value: impl Fn(&GroupEntry) -> Option<f32>) -> Option<Standing> {
+fn standing(entries: &[(&Ship, GroupEntry)], value: impl Fn(&GroupEntry) -> Option<f32>) -> Option<Standing> {
     let own = value(&entries[0].1)?;
     let mut valued: Vec<(&str, &str, f32)> = entries
         .iter()
-        .filter_map(|(ship, entry)| value(entry).map(|value| (ship.as_str(), entry.build.as_str(), value)))
+        .filter_map(|(ship, entry)| value(entry).map(|value| (ship.name.as_str(), entry.build.as_str(), value)))
         .collect();
     valued.sort_by(|left, right| left.2.total_cmp(&right.2));
 
