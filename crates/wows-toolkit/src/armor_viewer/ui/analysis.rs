@@ -407,7 +407,6 @@ impl AnalysisPaneViewer<'_> {
 
         ui.separator();
 
-        let traj_count = pane.trajectories.len();
         let ifhe_enabled = self.ifhe_enabled;
         let names = self.names;
         let species = pane.loaded_armor.as_ref().and_then(|armor| armor.species);
@@ -762,14 +761,14 @@ impl AnalysisPaneViewer<'_> {
 
         egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                for ti in 0..traj_count {
+                for (ti, trajectory) in pane.trajectories.iter().enumerate() {
                     if ti > 0 {
                         ui.separator();
                     }
-                    ui.push_id(("traj_col", pane.trajectories[ti].meta.id), |ui| {
+                    ui.push_id(("traj_col", trajectory.meta.id), |ui| {
                         ui.vertical(|ui| {
                             ui.set_width(320.0);
-                            render_traj_column(ui, ti, &pane.trajectories[ti], &mut actions);
+                            render_traj_column(ui, ti, trajectory, &mut actions);
                         });
                     });
                 }

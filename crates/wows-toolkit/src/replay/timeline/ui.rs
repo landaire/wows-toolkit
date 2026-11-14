@@ -42,8 +42,8 @@ pub(crate) fn timeline_filter_bar(ui: &mut egui::Ui, filter: &mut TimelineFilter
                 filter.kinds = [false; KIND_COUNT];
             }
             ui.separator();
-            for index in 0..KIND_COUNT {
-                ui.checkbox(&mut filter.kinds[index], t!(kind_label_key(index)));
+            for (index, enabled) in filter.kinds.iter_mut().enumerate() {
+                ui.checkbox(enabled, t!(kind_label_key(index)));
             }
         });
         ui.add(

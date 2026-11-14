@@ -948,8 +948,9 @@ impl<'argtype> Parser<'argtype> {
             // ribbons/buffs and only appears once the first one is earned). Grow
             // the property store with type-default values up to this index so the
             // update below applies, instead of dropping the packet.
-            for missing in entity.properties.len()..=prop_idx as usize {
-                let default = crate::nested_property_path::default_arg_value(&spec.properties[missing].prop_type);
+            let first_missing = entity.properties.len();
+            for missing in &spec.properties[first_missing..=prop_idx as usize] {
+                let default = crate::nested_property_path::default_arg_value(&missing.prop_type);
                 entity.properties.push(default);
             }
         }
