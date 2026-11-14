@@ -7,8 +7,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 use image::EncodableLayout;
-use octocrab::models::repos::Asset;
-use octocrab::models::repos::Release;
 use reqwest::Url;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
@@ -18,6 +16,9 @@ use tower::Layer;
 use tracing::debug;
 use tracing::error;
 use tracing::instrument;
+use wows_toolkit_services::http::UserAgent;
+use wows_toolkit_viewmodel::update::Release;
+use wows_toolkit_viewmodel::update::ReleaseAsset;
 use zip::ZipArchive;
 
 use crate::util::error::ToolkitError;
@@ -336,35 +337,29 @@ impl NetworkingThread {
         }
     }
 
+    /// Checks with the same channel and platform rules as the other front
+    /// ends: a beta build follows betas, a release build only releases, and on
+    /// Windows a release counts once its archive is uploaded.
     #[instrument(skip(self))]
     fn check_for_app_updates(&mut self) {
-        let result = self
-            .runtime
-            .block_on(async { octocrab::instance().repos("landaire", "wows-toolkit").releases().get_latest().await });
+        const AGENT: UserAgent = UserAgent::new(concat!("wows-toolkit/", env!("CARGO_PKG_VERSION")));
+
+        let proxy = self.proxy.as_ref().map_or("", |config| config.url.as_str());
+        let result =
+            self.runtime.block_on(wows_toolkit_services::update::check(AGENT, proxy, env!("CARGO_PKG_VERSION")));
 
         match result {
-            Ok(latest_release) => match semver::Version::parse(&latest_release.tag_name[1..]) {
-                Ok(version) => {
-                    let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-                    if app_version < version {
-                        let _ = self.result_tx.send(NetworkResult::AppUpdateAvailable(Box::new(latest_release)));
-                    } else {
-                        let _ = self.result_tx.send(NetworkResult::AppUpToDate);
-                    }
-                }
-                Err(e) => {
-                    let _ = self.result_tx.send(NetworkResult::AppUpdateCheckFailed(format!(
-                        "failed to parse release version '{}': {e}",
-                        latest_release.tag_name
-                    )));
-                }
-            },
-            Err(e) => {
-                let chain = crate::util::http::error_chain(&e);
-                tracing::warn!("failed to check GitHub releases: {chain}");
+            Ok(Some(release)) => {
+                let _ = self.result_tx.send(NetworkResult::AppUpdateAvailable(Box::new(release)));
+            }
+            Ok(None) => {
+                let _ = self.result_tx.send(NetworkResult::AppUpToDate);
+            }
+            Err(report) => {
+                tracing::warn!("failed to check GitHub releases: {report}");
                 let _ = self
                     .result_tx
-                    .send(NetworkResult::AppUpdateCheckFailed(format!("failed to check GitHub releases: {chain}")));
+                    .send(NetworkResult::AppUpdateCheckFailed(format!("failed to check GitHub releases: {report}")));
             }
         }
     }
@@ -499,9 +494,10 @@ pub(crate) fn load_versioned_constants_from_disk(build: u32) -> Option<serde_jso
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 async fn download_update(
     tx: crate::ui_channel::ThrottledSender<DownloadProgress>,
-    file: Url,
+    file: &str,
     proxy: Option<&crate::util::proxy::ProxyConfig>,
 ) -> Result<PathBuf, Report> {
+    let file = Url::parse(file).context("update asset URL is not a valid URL")?;
     let client = crate::util::http::async_client(proxy, reqwest::redirect::Policy::default())
         .context("failed to build HTTP client for update download")?;
     let mut body = client
@@ -558,7 +554,7 @@ async fn download_update(
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn start_download_update_task(
     runtime: &Runtime,
-    release: &Asset,
+    release: &ReleaseAsset,
     egui_ctx: egui::Context,
     proxy: Option<crate::util::proxy::ProxyConfig>,
 ) -> BackgroundTask {
@@ -571,7 +567,7 @@ pub fn start_download_update_task(
 
     runtime.spawn(async move {
         let result =
-            download_update(progress_tx, url, proxy.as_ref()).await.map(BackgroundTaskCompletion::UpdateDownloaded);
+            download_update(progress_tx, &url, proxy.as_ref()).await.map(BackgroundTaskCompletion::UpdateDownloaded);
 
         if let Err(report) = &result {
             // ASCII formatting keeps the log file, which users paste into bug

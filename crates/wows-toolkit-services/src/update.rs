@@ -60,8 +60,12 @@ async fn check_release(
         .json()
         .await
         .context("Could not read the release information")?;
-    Ok(wows_toolkit_viewmodel::update::select_release(releases, running)
-        .context("The running app version is invalid")?)
+    Ok(wows_toolkit_viewmodel::update::select_release(
+        releases,
+        running,
+        wows_toolkit_viewmodel::update::UpdatePlatform::CURRENT,
+    )
+    .context("The running app version is invalid")?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

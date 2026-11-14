@@ -25,7 +25,6 @@ use egui_dock::DockState;
 use egui_dock::TabStyle;
 use egui_dock::TabViewer;
 
-use octocrab::models::repos::Release;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
@@ -34,6 +33,7 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
+use wows_toolkit_viewmodel::update::Release;
 
 use serde::Deserialize;
 use serde::Serialize;

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Show personal rating only for Random and Ranked battles: other battle types show a dash that explains why, and ratings stored for them are cleared from the replay index
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
 - *(wows-query)* Direct total side armor questions to full citadel plate stacks
+- *(toolkit)* Offer beta updates only to beta builds, and on Windows only once the release's archive is uploaded
 
 ## [1.0.1] - 2026-08-12
 

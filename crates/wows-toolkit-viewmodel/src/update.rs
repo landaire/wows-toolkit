@@ -114,12 +114,34 @@ impl Release {
     }
 }
 
+/// Which builds the running app can install, which decides whether a release
+/// with no Windows archive yet counts as available.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdatePlatform {
+    Windows,
+    Other,
+}
+
+impl UpdatePlatform {
+    pub const CURRENT: UpdatePlatform = if cfg!(target_os = "windows") { Self::Windows } else { Self::Other };
+}
+
 /// Select the newest published version in the running build's update channel.
-pub fn select_release(releases: Vec<Release>, running: &str) -> Result<Option<Release>, semver::Error> {
+///
+/// A pre-release build follows pre-releases and releases; a release build
+/// follows releases only. On Windows a release counts only once its Windows
+/// archive is uploaded: CI publishes the release before its artifacts, and an
+/// alert with nothing to install sends the user to an empty page.
+pub fn select_release(
+    releases: Vec<Release>,
+    running: &str,
+    platform: UpdatePlatform,
+) -> Result<Option<Release>, semver::Error> {
     let running = semver::Version::parse(running)?;
     Ok(releases
         .into_iter()
         .filter(|release| !release.draft)
+        .filter(|release| platform != UpdatePlatform::Windows || release.asset_for_windows().is_some())
         .filter_map(|release| release.version().map(|version| (version, release)))
         .filter(|(version, release)| {
             version > &running && (!running.pre.is_empty() || (version.pre.is_empty() && !release.prerelease))
@@ -187,11 +209,39 @@ mod release_tests {
             marked_prerelease,
             release("v1.2.0-beta1", &[]),
         ];
-        assert_eq!(select_release(releases.clone(), "1.0.0").unwrap().unwrap().tag_name, "v1.0.2");
-        assert_eq!(select_release(releases, "1.1.0-beta1").unwrap().unwrap().tag_name, "v1.3.0");
-        assert_eq!(select_release(vec![release("v1.1.0", &[])], "1.1.0-beta1").unwrap().unwrap().tag_name, "v1.1.0");
-        assert!(select_release(vec![release("v1.1.0-beta1", &[])], "1.1.0-beta1").unwrap().is_none());
-        assert!(select_release(vec![], "invalid").is_err());
+        assert_eq!(
+            select_release(releases.clone(), "1.0.0", UpdatePlatform::Other).unwrap().unwrap().tag_name,
+            "v1.0.2"
+        );
+        assert_eq!(select_release(releases, "1.1.0-beta1", UpdatePlatform::Other).unwrap().unwrap().tag_name, "v1.3.0");
+        assert_eq!(
+            select_release(vec![release("v1.1.0", &[])], "1.1.0-beta1", UpdatePlatform::Other)
+                .unwrap()
+                .unwrap()
+                .tag_name,
+            "v1.1.0"
+        );
+        assert!(
+            select_release(vec![release("v1.1.0-beta1", &[])], "1.1.0-beta1", UpdatePlatform::Other).unwrap().is_none()
+        );
+        assert!(select_release(vec![], "invalid", UpdatePlatform::Other).is_err());
+    }
+
+    /// A release CI has created but not yet uploaded the Windows archive to is
+    /// not offered on Windows, where there would be nothing to install.
+    #[test]
+    fn windows_waits_for_the_windows_archive() {
+        let releases =
+            vec![release("v1.0.2", &["wows_toolkit_v1.0.2_windows.zip"]), release("v1.0.3", &["wows_toolkit.dmg"])];
+
+        let picked = |platform| select_release(releases.clone(), "1.0.1", platform).unwrap().map(|r| r.tag_name);
+
+        assert_eq!(picked(UpdatePlatform::Windows).as_deref(), Some("v1.0.2"));
+        assert_eq!(picked(UpdatePlatform::Other).as_deref(), Some("v1.0.3"));
+        assert!(
+            select_release(vec![release("v1.0.3", &[])], "1.0.2", UpdatePlatform::Windows).unwrap().is_none(),
+            "no archive yet, no update"
+        );
     }
 
     #[test]
