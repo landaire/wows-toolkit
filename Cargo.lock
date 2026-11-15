@@ -14474,7 +14474,7 @@ checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 [[package]]
 name = "unfuck"
 version = "0.6.0"
-source = "git+https://github.com/landaire/unfuck?rev=0178cebce61c906140423c2fc5a00989544edc6c#0178cebce61c906140423c2fc5a00989544edc6c"
+source = "git+https://github.com/landaire/unfuck?rev=d1131672bb329ec5b2291c4f370b7946593644a6#d1131672bb329ec5b2291c4f370b7946593644a6"
 dependencies = [
  "bitflags 1.3.2",
  "flate2",
@@ -17104,7 +17104,7 @@ dependencies = [
 [[package]]
 name = "wowsdeob"
 version = "0.1.0"
-source = "git+https://github.com/landaire/wowsdeob?rev=82ff05faf3af9cff528d9c8bc7a00f62f539d29d#82ff05faf3af9cff528d9c8bc7a00f62f539d29d"
+source = "git+https://github.com/landaire/wowsdeob?rev=8f8dabf1ea85f4c7b814d29f91eebafb85ab756e#8f8dabf1ea85f4c7b814d29f91eebafb85ab756e"
 dependencies = [
  "base64 0.13.1",
  "flate2",

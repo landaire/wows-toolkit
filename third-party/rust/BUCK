@@ -37,16 +37,16 @@ git_fetch(
 )
 
 git_fetch(
-    name = "unfuck-fcdcafd2ee38d44f.git",
+    name = "unfuck-334941d93454d79d.git",
     repo = "https://github.com/landaire/unfuck",
-    rev = "0178cebce61c906140423c2fc5a00989544edc6c",
+    rev = "d1131672bb329ec5b2291c4f370b7946593644a6",
     visibility = [],
 )
 
 git_fetch(
-    name = "wowsdeob-8b724fe568d4e9cc.git",
+    name = "wowsdeob-2a551321f74d41cf.git",
     repo = "https://github.com/landaire/wowsdeob",
-    rev = "82ff05faf3af9cff528d9c8bc7a00f62f539d29d",
+    rev = "8f8dabf1ea85f4c7b814d29f91eebafb85ab756e",
     visibility = [],
 )
 
@@ -48886,13 +48886,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "unfuck-0.6",
-    srcs = [":unfuck-fcdcafd2ee38d44f.git"],
+    srcs = [":unfuck-334941d93454d79d.git"],
     crate = "unfuck",
-    crate_root = "unfuck-fcdcafd2ee38d44f/src/lib.rs",
+    crate_root = "unfuck-334941d93454d79d/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "unfuck",
-        "CARGO_MANIFEST_DIR": "unfuck-fcdcafd2ee38d44f",
+        "CARGO_MANIFEST_DIR": "unfuck-334941d93454d79d",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Python 2.7 bytecode deobfuscator",
         "CARGO_PKG_NAME": "unfuck",
@@ -54831,17 +54831,17 @@ alias(
 
 cargo.rust_library(
     name = "wowsdeob-0.1",
-    srcs = [":wowsdeob-8b724fe568d4e9cc.git"],
+    srcs = [":wowsdeob-2a551321f74d41cf.git"],
     crate = "wowsdeob",
-    crate_root = "wowsdeob-8b724fe568d4e9cc/src/lib.rs",
+    crate_root = "wowsdeob-2a551321f74d41cf/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "wowsdeob",
-        "CARGO_MANIFEST_DIR": "wowsdeob-8b724fe568d4e9cc",
+        "CARGO_MANIFEST_DIR": "wowsdeob-2a551321f74d41cf",
         "CARGO_PKG_AUTHORS": "Lander Brandt <lander@conficker.io>",
         "CARGO_PKG_DESCRIPTION": "",
         "CARGO_PKG_NAME": "wowsdeob",
-        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_REPOSITORY": "https://github.com/landaire/wowsdeob",
         "CARGO_PKG_VERSION": "0.1.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "1",

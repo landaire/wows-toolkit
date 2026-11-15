@@ -33,7 +33,6 @@ def main [--check] {
     }
 
     let config = (open ($CONFIG_DIR | path join "notices.toml"))
-    let first_party = ($config.first_party? | default [])
     let default_targets = (open ($CONFIG_DIR | path join "about.toml") | get targets)
 
     # Roots resolved for the same targets share one cargo-about run.
@@ -57,20 +56,20 @@ def main [--check] {
     let crates = ($reports
         | each {|report| $report.crates }
         | flatten
-        | where {|entry| is-third-party $entry.package $first_party }
+        | where {|entry| is-third-party $entry.package }
         | insert package_id {|entry| $entry.package.id }
         | uniq-by package_id)
 
     let unresolved = ($crates | where {|entry| ($entry.license == "Unknown") or ($entry.license | str contains "NOASSERTION") })
     if not ($unresolved | is-empty) {
         let names = ($unresolved | each {|entry| $"($entry.package.name) ($entry.package.version)" } | str join ", ")
-        error make {msg: $"cargo-about found no license for: ($names). Add a clarification to about.toml, or list a crate by the WoWs Toolkit author under first_party."}
+        error make {msg: $"cargo-about found no license for: ($names). Add a clarification to about.toml."}
     }
 
     let resolved = ($crates | get package)
     let unresolved_crates = (unresolved-crates ($config.unresolved_crate? | default []) $resolved)
     let packages = ($resolved | append ($unresolved_crates | each {|entry| $entry.package }))
-    let license_groups = (crate-license-groups $reports $first_party
+    let license_groups = (crate-license-groups $reports
         | append ($unresolved_crates | each {|entry| $entry.group })
         | with-apache-for-templates ($crates | select package_id license)
         | with-crate-licenses ($config.crate_license? | default []) $packages)
@@ -297,25 +296,20 @@ def run-cargo-about [targets: list] {
     $result.stdout | from json
 }
 
-# Workspace members have no source. A first_party crate is matched by name and
-# the start of its source, so a fork of the same name elsewhere is not.
-def is-third-party [package: record, first_party: list] {
-    if $package.source == null {
-        return false
-    }
-
-    not ($first_party | any {|entry| $entry.name == $package.name and ($package.source | str starts-with $entry.source) })
+# Workspace members have no source.
+def is-third-party [package: record] {
+    $package.source != null
 }
 
 # One group per distinct license text, each with the crates distributed under it.
-def crate-license-groups [reports: list, first_party: list] {
+def crate-license-groups [reports: list] {
     $reports
     | each {|report| $report.licenses }
     | flatten
     | each {|license|
         let text = (normalize $license.text)
         $license.used_by
-        | where {|usage| is-third-party $usage.crate $first_party }
+        | where {|usage| is-third-party $usage.crate }
         | each {|usage| {
             key: ($"($license.id)\n($text)" | hash sha256)
             id: $license.id

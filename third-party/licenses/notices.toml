@@ -33,11 +33,6 @@ targets = ["wasm32-unknown-unknown"]
 manifest = "crates/wt-replay-demo/Cargo.toml"
 targets = ["wasm32-unknown-unknown"]
 
-# Crates by the WoWs Toolkit author, distributed by the copyright holder.
-[[first_party]]
-name = "wowsdeob"
-source = "git+https://github.com/landaire/wowsdeob"
-
 # Components that are not Rust crates, or that a crate bundles under a license
 # its manifest does not declare. `offered` is the license choice the authors
 # give; `license` is the one WoWs Toolkit distributes the component under. A

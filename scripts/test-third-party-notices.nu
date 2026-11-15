@@ -20,7 +20,6 @@ def main [] {
 
     # Each crate of an entry's "Used by:" list is on its own indented line.
     let listed = (open --raw THIRD_PARTY_NOTICES.txt | lines | where {|line| $line starts-with "    " } | str trim | uniq)
-    let first_party = (open third-party/licenses/notices.toml | get first_party.name)
 
     let missing = ($platforms | each {|platform|
         let result = (do { ^buck2 cquery --target-platforms $platform $query --output-attribute "^(env|crate_root)$" --json } | complete)
@@ -33,7 +32,7 @@ def main [] {
         | transpose label attributes
         | where {|target| $target.label | str starts-with "root//third-party/rust:" }
         | each {|target| crate-identity $target }
-        | where {|crate| not ($crate in $listed) and not (($crate | split row " " | first) in $first_party) }
+        | where {|crate| not ($crate in $listed) }
         | each {|crate| {platform: $platform, crate: $crate} }
     } | flatten)
 
