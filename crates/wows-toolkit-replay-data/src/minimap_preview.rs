@@ -532,6 +532,8 @@ pub fn bake_track(
     let space_size = map_info.space_size as f32;
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, options);
     renderer.set_fonts(assets::load_game_fonts(vfs));
+    // With another team's recording merged, an enemy icon no longer implies it was spotted.
+    renderer.set_merged_perspectives(!merged.is_empty());
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
     let constants = decode_constants(&loaded, build.get(), version, game_data);
