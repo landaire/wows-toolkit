@@ -36,7 +36,7 @@ const SIZE: WindowSize = WindowSize { width: 1280.0, height: 720.0 };
 
 thread_local! {
     /// The open rows of the table built last on this thread.
-    pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<AccountId>, LocalStorage>>> = const { Cell::new(None) };
+    pub(crate) static EXPANDED: Cell<Option<RwSignal<HashSet<AccountId>, LocalStorage>>> = const { Cell::new(None) };
 }
 
 /// The table over `model`, as the Replays tab holds it. With `with_detail`, each open row's detail

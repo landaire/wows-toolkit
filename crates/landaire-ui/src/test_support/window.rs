@@ -34,6 +34,7 @@ use zgui::view::AttrName;
 use zgui::view::ClassName;
 use zgui::view::NodeId;
 use zgui::view::OverlayLayer;
+use zgui::view::ScrollPosition;
 use zgui::vocab::KeyCode;
 use zgui::vocab::KeyEvent;
 use zgui::vocab::KeyState;
@@ -304,6 +305,12 @@ impl HeadlessWindow {
     /// produced no box.
     pub fn bounds(&self, element: Element) -> Option<Rect<DevicePx, Device>> {
         self.window().host_handle().window_box(element.0)
+    }
+
+    /// How far `element` is scrolled, how far its content reaches, and the size of the port it
+    /// shows that content through. All zero when it is not a scroll container.
+    pub fn scroll_position(&self, element: Element) -> ScrollPosition {
+        self.window().host_handle().scroll_position(element.0)
     }
 
     /// How many transitions and animations are running on `element`.
