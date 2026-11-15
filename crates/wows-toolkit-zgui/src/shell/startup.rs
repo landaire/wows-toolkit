@@ -12,6 +12,7 @@ use wows_toolkit_services::constants::Checked;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
 use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
+use wows_toolkit_viewmodel::first_run::adopt_system_locale;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::on_cleanup_local;
@@ -45,8 +46,13 @@ pub fn begin(services: Services, shell: Shell) {
     check_published_constants(services, shell);
     rebuild_stale_index(services, shell);
 
+    let system_locale = sys_locale::get_locale();
     let loaded = services.on_tokio(async move {
         let pool = wows_toolkit_config::open_db().await?;
+        // Before the settings are read, so the language question offers what was saved.
+        if let Err(err) = adopt_system_locale(&pool, system_locale.as_deref()).await {
+            tracing::warn!("the machine's language was not saved: {err}");
+        }
         let settings = StartupSettings::load(&pool).await;
         // The pool comes back so settings edits have somewhere to go.
         Ok::<_, sqlx::Error>((settings, pool))

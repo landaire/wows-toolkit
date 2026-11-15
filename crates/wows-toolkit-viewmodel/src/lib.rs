@@ -27,6 +27,7 @@ pub mod bug_report;
 pub mod collab;
 pub mod controls;
 pub mod fire_chance;
+pub mod first_run;
 pub mod formatting;
 pub mod glyphs;
 pub mod index_rows;

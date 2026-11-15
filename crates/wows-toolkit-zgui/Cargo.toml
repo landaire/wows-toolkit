@@ -71,6 +71,8 @@ arboard = "3.6.1"
 # `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
 rust-i18n = { workspace = true }
 wt-translations = { workspace = true }
+# The machine's language, offered on a first run.
+sys-locale = { workspace = true }
 # `--help`, `--version`, and a refusal for an argument this build does not take.
 clap = { workspace = true }
 # Only to install the process-wide crypto provider at startup; see `main`.
