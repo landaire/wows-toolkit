@@ -822,6 +822,35 @@ fn a_lone_rows_menu_renders_it_to_video_or_the_clipboard() {
 }
 
 #[test]
+fn a_groups_menu_renders_and_records_session_stats_for_its_replays() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(1);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let paths = listed(listing(control, &root));
+    sent();
+
+    for key in [
+        "ui.replay.context.render_to_video",
+        "ui.replay.context.render_to_clipboard",
+        "ui.replay.context.add_session_stats_one",
+    ] {
+        let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
+        pick(&mut window, header, &t!(key));
+    }
+
+    assert_eq!(
+        sent(),
+        [
+            super::ReplayBrowserEvent::RenderManyToVideo(paths.clone()),
+            super::ReplayBrowserEvent::RenderManyToClipboard(paths.clone()),
+            super::ReplayBrowserEvent::SessionStats { paths, replace: false },
+        ]
+    );
+}
+
+#[test]
 fn a_group_header_shows_no_replay_preview() {
     let (mut window, control) = open();
     control.adopt_pinned_folders(PinnedFolders::default());

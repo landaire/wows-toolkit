@@ -608,14 +608,50 @@ fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey
 
 fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<PathBuf>) -> impl IntoView {
     let count = paths.len();
-    let (copied, listed, reindexed) = (paths.clone(), paths.clone(), paths);
+    let (copied, listed, reindexed) = (paths.clone(), paths.clone(), paths.clone());
+    let one = count == 1;
+    let label = move |single: &str, many: &str| {
+        if one { t!(single).into_owned() } else { t!(many, count = count).into_owned() }
+    };
+    let send = {
+        let events = events.clone();
+        move |event: ReplayBrowserEvent| {
+            let events = events.clone();
+            UnsyncCallback::new(move |()| events.send(event.clone()))
+        }
+    };
+    let set_session = {
+        let (events, paths) = (events.clone(), paths.clone());
+        UnsyncCallback::new(move |()| {
+            let (events, paths) = (events.clone(), paths.clone());
+            confirm(
+                shell,
+                t!("ui.replay.context.set_session_stats_one").into_owned(),
+                t!("confirm.set_as_session_stats").into_owned(),
+                move || events.send(ReplayBrowserEvent::SessionStats { paths: paths.clone(), replace: true }),
+            );
+        })
+    };
 
     view! {
+        MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToVideo(paths.clone()))) {
+            {label("ui.replay.context.render_to_video", "ui.replay.context.render_to_video_many")}
+        }
+        MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToClipboard(paths.clone()))) {
+            {label("ui.replay.context.render_to_clipboard", "ui.replay.context.render_to_clipboard_many")}
+        }
+        MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
             {t!("ui.replay.context.copy_replays", count = count).into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
             {t!("ui.replay.context.copy_paths", count = count).into_owned()}
+        }
+        MenuItem(on_select = set_session) {
+            {label("ui.replay.context.set_session_stats_one", "ui.replay.context.set_session_stats_many")}
+        }
+        MenuItem(on_select = send(ReplayBrowserEvent::SessionStats { paths, replace: false })) {
+            {label("ui.replay.context.add_session_stats_one", "ui.replay.context.add_session_stats_many")}
         }
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| events.force_reindex(listing, &reindexed, Confirm::Always))) {
