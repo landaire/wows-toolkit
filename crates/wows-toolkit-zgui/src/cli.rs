@@ -56,6 +56,16 @@ impl Cli {
         }
     }
 
+    /// The adapter preference as a crash report names it.
+    pub fn render_mode(&self) -> String {
+        match self.adapter_preference() {
+            AdapterPreference::Software => "software renderer (--cpu-renderer)".to_owned(),
+            AdapterPreference::NameContains(named) => format!("adapter named like {named:?} (--gpu-adapter)"),
+            AdapterPreference::Automatic => "automatic adapter".to_owned(),
+            AdapterPreference::LowPower => "low-power adapter".to_owned(),
+        }
+    }
+
     /// Whether the process mitigations are applied.
     pub fn hardening(&self) -> wows_toolkit_hardening::Hardening {
         if self.no_hardening {

@@ -16877,6 +16877,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "syntect",
+ "sys-locale",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

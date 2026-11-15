@@ -157,6 +157,7 @@ fn main() {
             .unwrap_or(true);
     let _log_guard = wows_toolkit_services::logging::init(to_file, "wows_toolkit_zgui");
     wows_toolkit_services::logging::install_panic_hook();
+    wows_toolkit_services::logging::record_render_mode(asked.render_mode());
 
     // Before any window exists, which is the only moment these are worth applying.
     let report = wows_toolkit_hardening::apply_startup_mitigations(wows_toolkit_hardening::HardeningRequest {
@@ -195,6 +196,9 @@ fn main() {
     // renderer has made its choice and never delays it.
     let mut adapter_check = asked.gpu_adapter.is_some().then_some(asked);
     let ran = app.run(move || {
+        // Overlays hook at swapchain creation, which has happened by now, and the panic hook
+        // must not list modules itself.
+        wows_toolkit_hardening::modules::take_snapshot();
         if let Some(asked) = adapter_check.take() {
             cli::check_unmatched_adapter(asked);
         }

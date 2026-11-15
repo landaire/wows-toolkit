@@ -10,6 +10,12 @@
 use std::io::Write as _;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+use wows_toolkit_hardening::MitigationReport;
+use wows_toolkit_hardening::modules::Inventory;
+
+static RENDER_MODE: OnceLock<String> = OnceLock::new();
 
 /// The crates whose events are kept, at the levels the egui app keeps them.
 /// `front_end` is the crate name of the running front end, whose own events
@@ -119,6 +125,12 @@ pub fn panic_log_path() -> PathBuf {
     }
 }
 
+/// Records the render configuration this run asked for, for a crash report to name. Kept here
+/// rather than only in the log, since a crash is when the log may not have been flushed.
+pub fn record_render_mode(mode: String) {
+    let _ = RENDER_MODE.set(mode);
+}
+
 /// Writes a panic on the main thread to the panic log, then lets the default
 /// hook run.
 ///
@@ -141,9 +153,39 @@ pub fn install_panic_hook() {
         if let Ok(mut file) = std::fs::File::create(panic_log_path()) {
             let _ = writeln!(file, "{info}");
             let _ = writeln!(file, "Backtrace:\n{}", std::backtrace::Backtrace::force_capture());
+            // The startup snapshot rather than a fresh inventory: listing modules takes the loader
+            // lock, which a fault inside a hooked driver can leave held, hanging the exit.
+            let context = crash_context(
+                RENDER_MODE.get().map(String::as_str),
+                wows_toolkit_hardening::report(),
+                wows_toolkit_hardening::modules::snapshot(),
+            );
+            let _ = write!(file, "{context}");
         }
         default_hook(info);
     }));
+}
+
+/// What a crash report adds after the backtrace: the render configuration, the policies in force,
+/// and the foreign modules resident at startup, which name an injected module when one was the
+/// cause. Each part is left out when this run never recorded it.
+fn crash_context(
+    render_mode: Option<&str>,
+    mitigations: Option<&MitigationReport>,
+    modules: Option<&Inventory>,
+) -> String {
+    let mut context = String::new();
+    if let Some(mode) = render_mode {
+        context.push_str(&format!("\nRender mode: {mode}\n"));
+    }
+    if let Some(report) = mitigations {
+        context.push_str(&report.to_string());
+    }
+    if let Some(inventory) = modules {
+        context.push_str(&wows_toolkit_hardening::modules::describe(inventory));
+    }
+
+    context
 }
 
 /// What the last run's crash left, removing it as it is read.
@@ -175,5 +217,20 @@ mod tests {
 
         let newest = super::newest_log_in(dir.path()).expect("a log file is found");
         assert_eq!(newest.file_name().unwrap(), "wows_toolkit.log.2026-09-28-11");
+    }
+
+    #[test]
+    fn a_crash_report_names_the_render_mode_the_policies_and_the_modules() {
+        let report = wows_toolkit_hardening::MitigationReport::default();
+        let modules = wows_toolkit_hardening::modules::Inventory::Taken(Vec::new());
+
+        let context = super::crash_context(Some("software"), Some(&report), Some(&modules));
+
+        assert_eq!(
+            context,
+            "\nRender mode: software\nProcess mitigations: none attempted\n\
+             Loaded modules outside Windows and the application directory: none\n"
+        );
+        assert_eq!(super::crash_context(None, None, None), "", "nothing recorded adds nothing");
     }
 }
