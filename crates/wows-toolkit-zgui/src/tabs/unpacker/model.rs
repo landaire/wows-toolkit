@@ -508,11 +508,12 @@ impl UnpackerModel {
             self.dump_status.set(Some(t!("ui.unpacker.load_a_build").into_owned()));
             return;
         };
-        let asked = wows_toolkit_services::dialog::save_file(Some("Save game parameters"), &request.file_name(), None);
+        let title = t!("ui.unpacker.save_parameters_title");
+        let asked = wows_toolkit_services::dialog::save_file(Some(&title), &request.file_name(), None);
         let services = self.services;
         self.spawn(async move {
             let Some(path) = chosen(self.shell, asked).await else { return };
-            self.dump_status.set(Some("Writing...".to_string()));
+            self.dump_status.set(Some(t!("ui.unpacker.writing").into_owned()));
             let _job =
                 services.jobs.start(Job { name: t!("ui.unpacker.dump_parameters").into_owned(), progress: None });
             let written = long_job(move || {
