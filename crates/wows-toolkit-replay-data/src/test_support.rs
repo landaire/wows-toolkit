@@ -1,0 +1,297 @@
+//! Shared test-only fixtures for `model`, `columns`, and `sort`. Every
+//! `PlayerRow`/`NormalizedPlayer`/`NormalizedBattleReport` here is fabricated
+//! by hand (no parsed replay), matching the brief's "fabricated PlayerRow"
+//! testing strategy.
+
+use std::collections::HashMap;
+
+use wows_replay_insights::battle_report::MatchMetadata;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replay_insights::battle_report::NormalizedPlayer;
+use wows_replay_insights::battle_report::ObservedResults;
+use wows_replay_insights::battle_report::SkillInfo;
+use wows_replays::ReplayMeta;
+use wows_replays::types::AccountId;
+use wows_replays::types::EntityId;
+use wows_replays::types::Relation;
+use wows_replays::types::TeamId;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::types::Species;
+
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+
+use crate::model::PlayerRow;
+
+/// An effective-fire-chance result with enough behind it to state a rate: 3
+/// fires out of 40 eligible hits, against 4.2 expected.
+pub fn fire_chance_result() -> wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
+    use std::collections::BTreeMap;
+
+    wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
+        he_shells_fired: 120,
+        hits: 60,
+        narrowed: BTreeMap::new(),
+        he_hits_on_a_ship: 40,
+        hits_without_a_target_ship: 0,
+        not_applicable: 0,
+        eligible_hits: 40,
+        fires: 3,
+        expected_fires: Some(4.2),
+        per_ship: Vec::new(),
+        exclusions: BTreeMap::new(),
+        section_predictions: Vec::new(),
+        set_fire_ribbons: 3,
+        unattributed_fires: 0,
+        unattributed_reasons: BTreeMap::new(),
+        formula_base: Some(0.12),
+        formula: Vec::new(),
+    }
+}
+
+/// A minimal `PlayerRow` with every field at its "absent/zero" default.
+/// Callers override the handful of fields relevant to what they're testing
+/// via struct-update syntax: `PlayerRow { actual_damage: Some(1), ..base_row(1, Relation::new(2), false) }`.
+pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
+    PlayerRow {
+        db_id: AccountId(db_id),
+        team_id: TeamId::from(0i64),
+        relation,
+        is_self,
+        is_bot: false,
+        is_abuser: false,
+        is_hidden_profile: false,
+        connection: None,
+        twitch_candidates: Vec::new(),
+        fire_chance: None,
+        is_test_ship: false,
+        manual_stat_hide_toggle: false,
+        display_name: format!("Player{db_id}"),
+        clan_tag: None,
+        clan_color_rgb: Some(0),
+        division_label: None,
+        is_self_division_mate: false,
+        ship_name: "Test Ship".to_string(),
+        ship_species_text: "Destroyer".to_string(),
+        ship_class: Species::Destroyer,
+        ship_nation: None,
+        ship_id: None,
+        has_vehicle_entity: true,
+        base_xp: None,
+        base_xp_text: None,
+        raw_xp: None,
+        raw_xp_text: None,
+        observed_damage: 0,
+        observed_damage_text: "0".to_string(),
+        observed_kills: 0,
+        actual_damage: None,
+        actual_damage_report: None,
+        actual_damage_text: None,
+        actual_damage_by_type: None,
+        hits: None,
+        hits_report: None,
+        hits_text: None,
+        hits_breakdown: None,
+        spotting_damage: None,
+        spotting_damage_text: None,
+        spotting_damage_breakdown: None,
+        potential_damage: None,
+        potential_damage_text: None,
+        potential_damage_breakdown: None,
+        potential_damage_report: None,
+        received_damage: None,
+        received_damage_text: None,
+        received_damage_by_type: None,
+        received_damage_report: None,
+        damage_interactions: None,
+        fires: None,
+        floods: None,
+        citadels: None,
+        crits: None,
+        time_lived_secs: None,
+        time_lived_text: None,
+        distance_traveled: None,
+        kills: None,
+        heal_count: None,
+        skill_points: 0,
+        num_skills: 0,
+        highest_tier: 0,
+        num_tier_1_skills: 0,
+        skill_label_text: "0pts (0 skills)".to_string(),
+        skill_hover_text: None,
+        skill_warning: None,
+        has_dazzle: false,
+        has_ifa: false,
+        translated_build: None,
+        achievements: Vec::new(),
+        ribbons: Vec::new(),
+        consumables: Vec::new(),
+        personal_rating: None,
+        ship_config_url: None,
+        short_ship_config_url: None,
+        shiptool_url: None,
+        wows_numbers_url: None,
+        raw_metadata_json: None,
+    }
+}
+
+/// A minimal `NormalizedPlayer` with every field at its "absent/zero"
+/// default, for `ReplayReportModel::build` tests.
+pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> NormalizedPlayer {
+    NormalizedPlayer {
+        entity_id: EntityId::from(db_id as u32),
+        ship_id: 1u64.into(),
+        db_id: AccountId(db_id),
+        name: format!("Player{db_id}"),
+        display_name: format!("Player{db_id}"),
+        clan: String::new(),
+        clan_color_rgb: Some(0),
+        is_hidden_profile: false,
+        connection: None,
+        realm: None,
+        division_id: None,
+        division_label: None,
+        team_id: if is_self { 0 } else { 1 },
+        relation,
+        is_self,
+        is_bot: false,
+        is_abuser: false,
+        ship_index: "TEST01".to_string(),
+        ship_name: Some("Test Ship".to_string()),
+        ship_nation: "USA".to_string(),
+        ship_class: Species::Destroyer,
+        ship_tier: Some(10),
+        is_test_ship: false,
+        server_results: None,
+        controller_spotting_damage: None,
+        controller_potential_damage: None,
+        observed_results: ObservedResults { damage: 0, kills: 0 },
+        skill_info: SkillInfo { skill_points: 0, num_skills: 0, highest_tier: 0, num_tier_1_skills: 0 },
+        build: None,
+        achievements: Vec::new(),
+        ribbons: Vec::new(),
+        consumables: Vec::new(),
+        heal_count: None,
+        personal_rating: None,
+        battle_impact: None,
+        time_lived_secs: None,
+        survived: Some(true),
+    }
+}
+
+/// A fabricated two-player `NormalizedBattleReport`: a self player with
+/// server results (nonzero damage, an interaction breakdown) and an enemy
+/// player with none, matching the brief's request for a fixture that shows
+/// "a breakdown Option populated only when server results exist".
+pub fn fixture_normalized_battle_report() -> NormalizedBattleReport {
+    use std::collections::BTreeMap;
+
+    use wows_replay_insights::battle_report::Damage;
+    use wows_replay_insights::battle_report::Hits;
+    use wows_replay_insights::battle_report::PotentialDamage;
+    use wows_replay_insights::battle_report::ServerResults;
+
+    let self_player = NormalizedPlayer {
+        server_results: Some(ServerResults {
+            xp: Some(1500),
+            raw_xp: Some(1200),
+            damage: Some(50_000),
+            damage_details: Damage { ap: Some(50_000), ..Default::default() },
+            damage_by_type: BTreeMap::from([("damage_main_ap".to_string(), 50_000)]),
+            hits_details: Hits { ap: Some(12), ..Default::default() },
+            hits: Some(12),
+            hits_by_type: BTreeMap::from([("hits_main_ap".to_string(), 12)]),
+            spotting_damage: Some(8_000),
+            potential_damage: 20_000,
+            potential_damage_details: PotentialDamage { artillery: 20_000, torpedoes: 0, planes: 0 },
+            potential_damage_by_type: BTreeMap::from([("agro_art".to_string(), 20_000)]),
+            received_damage: 4_000,
+            received_damage_details: Damage { he: Some(4_000), ..Default::default() },
+            received_damage_by_type: BTreeMap::from([("damage_main_he".to_string(), 4_000)]),
+            fires_dealt: Some(1),
+            floods_dealt: Some(0),
+            citadels_dealt: Some(1),
+            crits_dealt: Some(0),
+            distance_traveled: Some(12.5),
+            kills: Some(1),
+            damage_interactions: HashMap::new(),
+            max_health: Some(20_000),
+            torpedoes_spotted: Some(0),
+            objective_points: None,
+            planes_killed: None,
+            anti_air_damage: None,
+        }),
+        ..base_normalized_player(1, Relation::new(0), true)
+    };
+
+    let enemy_player = base_normalized_player(2, Relation::new(2), false);
+
+    NormalizedBattleReport {
+        metadata: MatchMetadata {
+            map: "Test Map".to_string(),
+            game_mode: "Random Battle".to_string(),
+            game_type: "RandomBattle".to_string(),
+            match_group: "pvp".to_string(),
+            version: Version::default(),
+            max_duration: 1200,
+            played_duration: Some(600.0),
+            extra_duration: None,
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
+            battle_result: None,
+            results_battle_result: None,
+        },
+        players: vec![self_player, enemy_player],
+        torpedo_detections: Default::default(),
+        battle_impact_version: None,
+    }
+}
+
+/// A minimal but valid `ReplayMeta`, for the ignored provider-backed test.
+/// The same report with no roster, for the export tests: `Match::new` zips
+/// the normalized players against the battle report's own, and those tests
+/// have no raw players to zip against.
+pub fn fixture_empty_battle_report() -> NormalizedBattleReport {
+    let mut report = fixture_normalized_battle_report();
+    report.players.clear();
+    report
+}
+
+pub fn fixture_replay_meta() -> ReplayMeta {
+    serde_json::from_value(serde_json::json!({
+        "matchGroup": "pvp",
+        "gameMode": 1,
+        "gameType": "RandomBattle",
+        "clientVersionFromExe": "0, 0, 0, 0",
+        "mapDisplayName": "Test Map",
+        "mapId": 1,
+        "clientVersionFromXml": "0.0.0",
+        "duration": 1200,
+        "gameLogic": "RandomBattle",
+        "name": "test",
+        "scenario": "test",
+        "playerID": 1,
+        "vehicles": [],
+        "playersPerTeam": 1,
+        "dateTime": "01.01.2026 00:00:00",
+        "mapName": "spaces/test",
+        "playerName": "Self",
+        "scenarioConfigId": 1,
+        "teamsCount": 2,
+        "logic": "RandomBattle",
+        "playerVehicle": "TestShip",
+    }))
+    .expect("fixture replay meta should deserialize")
+}
+
+/// A one-ship expected-values table, matching `wows_replay_insights`'s own
+/// fixture: playing exactly at these values scores 1150 (Average).
+pub fn fixture_personal_rating_data() -> PersonalRatingData {
+    let json = format!(
+        r#"{{"time":0,"data":{{"{FIXTURE_PR_SHIP_ID}":{{"average_damage_dealt":50000.0,"average_frags":1.0,"win_rate":50.0}}}}}}"#
+    );
+    let mut table = PersonalRatingData::new();
+    table.load_from_bytes(json.as_bytes()).expect("the fixture is valid JSON");
+    table
+}
+
+/// The only ship `fixture_personal_rating_data` carries expected values for.
+pub const FIXTURE_PR_SHIP_ID: u64 = 3374266064;

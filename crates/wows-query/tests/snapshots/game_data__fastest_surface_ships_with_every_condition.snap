@@ -1,0 +1,57 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3483
+expression: ranking
+---
+stat: "mobility.speed (kn), highest first, on the build that raises it most, the usual build, with every condition that can hold at once"
+rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in. With the condition \"all\": each ship is ranked on its fastest combination of everything that can hold at once on top of that build: its strongest speed boost consumable active, every speed signal mounted, its special ability active when it raises speed, and the conditional skills whose triggers can hold at the same moment (a skill needing the ship undetected never stacks with one needing it detected, such as Swift in Silence with Dazzle), within 21 skill points. Its entry names the combination under condition and every item under build. A ship with nothing to add is ranked on its always-on best build and its entry has no condition. Commander talents are not counted."
+ranked: 851
+ships:
+  - rank: 1
+    ship: "T10 Kléber TE (destroyer, France, test)"
+    value: 63.1 kn
+    base: 44 kn
+    build:
+      - Swift in Silence
+      - Engine Boost
+      - Sierra Mike signal
+    condition: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+  - rank: 2
+    ship: "T9 Paolo Emilio (destroyer, Italy, premium)"
+    value: 60.2 kn
+    base: 43.5 kn
+    build:
+      - Swift in Silence
+      - Engine Boost
+      - Sierra Mike signal
+    condition: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+  - rank: 3
+    ship: "T10 Kléber (destroyer, France) [replicas: Kléber CLR]"
+    value: 58.7 kn
+    base: 44 kn
+    build:
+      - Swift in Silence
+      - Engine Boost
+      - Sierra Mike signal
+    tied: true
+    condition: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+  - rank: 3
+    ship: "T10 Marceau (destroyer, France, premium)"
+    value: 58.7 kn
+    base: 44 kn
+    build:
+      - Swift in Silence
+      - Engine Boost
+      - Sierra Mike signal
+    tied: true
+    condition: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+  - rank: 5
+    ship: "T9 Mogador (destroyer, France) [replicas: Red Hare]"
+    value: 58.03 kn
+    base: 43.5 kn
+    build:
+      - Swift in Silence
+      - Engine Boost
+      - Sierra Mike signal
+    condition: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+omitted: 846

@@ -1,0 +1,25 @@
+//! Derived projections over a parsed WoWs replay.
+//!
+//! Sits above `wows_replays` and `wowsunpack` and below any GUI. Consumers include
+//! the desktop app, the headless minimap renderer, the CLI, and external tools
+//! such as Discord bots.
+
+#[cfg(feature = "battle-report")]
+pub mod battle_impact;
+#[cfg(feature = "battle-report")]
+pub mod battle_report;
+pub mod cap_layout;
+
+pub mod hull_impact;
+
+#[cfg(feature = "battle-report")]
+pub mod personal_rating;
+pub mod timeline;
+
+#[cfg(feature = "build")]
+pub mod build;
+
+#[cfg(feature = "build")]
+pub use build::ResolvedBuild;
+
+pub mod fire_chance;

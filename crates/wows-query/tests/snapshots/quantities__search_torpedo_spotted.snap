@@ -1,0 +1,71 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+query: torpedo spotted
+quantities:
+  - name: torpedo.detectability
+    unit: km
+    applies_to: torpedo_option
+    description: "Torpedo detectability: the distance at which enemy ships spot (see, detect) a torpedo, on the base build and the best-fit build of the launching ship. With spotter_class, the spotting ship's captain has Vigilance, which multiplies that distance. Hydroacoustic Search spots torpedoes within its own torpedo range; radar does not spot torpedoes."
+    parameters:
+      - name: spotter_class
+        type: "ship class: destroyer, cruiser, battleship, aircraft_carrier or submarine"
+        required: false
+        description: "Class of the enemy ship spotting the torpedo, whose captain has Vigilance. Omit for a spotter without Vigilance."
+      - name: option
+        type: "one of: stock, best"
+        required: false
+        default: stock
+        description: "For a group: count each ship's torpedo on stock modules, or its best torpedo option for this quantity."
+    sources:
+      - "GameParams Projectile.visibilityFactor, Crew skill DetectionTorpedoRange (Vigilance) torpedoDetectionCoefficient"
+      - client script Vehicle.py onSonarDistanceChanged (torpedo distance x torpedoDetectionCoefficient)
+  - name: armor.torpedo_protection.max
+    unit: mm
+    applies_to: ship
+    description: "Thickest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment); no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: armor.torpedo_protection.min
+    unit: mm
+    applies_to: ship
+    description: "Thinnest torpedo protection plate above the waterline (nominal plate thickness, not protection; see armor_assessment); no build improves it. A stat_search stat."
+    parameters:
+      - name: qualifier
+        type: text
+        required: false
+        description: "Only the row with this qualifier: ammo type for shells (\"HE\", \"AP\", \"SAP\"), torpedo name, secondary mount or consumable name. Without it, the row the build moves furthest."
+      - name: build
+        type: "one of: base, best, lowest, highest"
+        required: false
+        default: best
+        description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
+    sources:
+      - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
+  - name: comparison.torpedo_detection
+    unit: km
+    applies_to: ship
+    description: "Hydroacoustic Search torpedo range, on the ship's best-fit build. A ship_comparison factor, without the ranking."
+    parameters: []
+    sources:
+      - "computation: ship_comparison per-ship scoring"
+  - name: comparison.torpedo_dpm
+    unit: HP/min
+    applies_to: ship
+    description: "Torpedo damage per minute of the best torpedo against one target at its best bearing, every torpedo hitting, on the ship's best-fit build. A ship_comparison factor, without the ranking."
+    parameters: []
+    sources:
+      - "computation: ship_comparison per-ship scoring"
+omitted: 30
+note: "Call quantity_values with a name and its params: it computes the values from game data. Speeds are game knots: ships and torpedoes move 2.6854 m/s per game knot on the map, not 0.5144 m/s per nautical knot; values already apply this."
