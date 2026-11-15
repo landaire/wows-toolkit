@@ -16874,6 +16874,7 @@ dependencies = [
  "image",
  "jiff",
  "landaire-ui",
+ "replayshark",
  "reqwest 0.12.28",
  "resvg 0.47.0",
  "rootcause",

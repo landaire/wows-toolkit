@@ -131,6 +131,17 @@ fn main() {
             cli::report_startup_message(&title, &cli::adapter_report(&asked), false);
             std::process::exit(0);
         }
+        cli::Invocation::Replayshark(args) => {
+            cli::attach_console_output();
+            let code = match replayshark::cli::run(*args) {
+                Ok(()) => 0,
+                Err(report) => {
+                    eprintln!("{report}");
+                    1
+                }
+            };
+            std::process::exit(code);
+        }
         cli::Invocation::Run(asked) => *asked,
     };
 

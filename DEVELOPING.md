@@ -120,6 +120,8 @@ Aliases: `wows_toolkit_egui`, `wows_toolkit_gpui`, `wows_toolkit_zgui`, `wowsunp
 
 The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). The desktop app aliases name their front end, so `//:wows_toolkit_egui` builds `wows_toolkit`. `build-support/release-tools.json` holds the CLI tool mapping and `scripts/package-tools.*` checks the finished archive against it.
 
+The zgui desktop app also runs every `replayshark` command, so a user with only the app installed can run them as `wows_toolkit replayshark <args>`. From Buck, that is `buck2 run //:wows_toolkit_zgui -- replayshark --help`. On Windows the release app is a GUI program, so `cmd` prints its output but returns to the prompt before the command finishes. Use `start /wait wows_toolkit replayshark <args>` there, or the standalone `replayshark`.
+
 The host platform is selected automatically. Pass `--target-platforms` only to be explicit:
 
 ```bash

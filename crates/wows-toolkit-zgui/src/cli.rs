@@ -5,6 +5,9 @@
 //! versions cannot be changed, so the form is accepted for as long as one of them can still update
 //! into this binary.
 //!
+//! `replayshark <args>` runs a replayshark command, as the `replayshark` tool takes it, and exits
+//! without opening the window.
+//!
 //! `--gpu-adapter`, `--cpu-renderer` and `--list-gpus` steer and report the adapter zgui draws the
 //! window with. `--no-hardening` skips the process mitigations. `--gpu-safe-mode` names a rung of
 //! the egui app's renderer ladder, which has no counterpart here, so it is refused rather than
@@ -83,6 +86,8 @@ pub enum Command {
         #[arg(long)]
         replaced: PathBuf,
     },
+    /// Parse and analyze World of Warships replay files, as the replayshark tool does.
+    Replayshark(replayshark::cli::Args),
 }
 
 /// What this process was asked to do.
@@ -90,6 +95,8 @@ pub enum Command {
 pub enum Invocation {
     /// Delete the named binary, then carry on and open the window.
     FinalizeUpdate(PathBuf),
+    /// Run a replayshark command and exit.
+    Replayshark(Box<replayshark::cli::Args>),
     /// Say which adapters the window can be drawn on, and exit.
     ListGpus(Box<Cli>),
     /// Open the window.
@@ -97,7 +104,7 @@ pub enum Invocation {
 }
 
 /// Subcommand names a bare path must not be mistaken for.
-const SUBCOMMANDS: &[&str] = &["finalize-update", "help"];
+const SUBCOMMANDS: &[&str] = &["finalize-update", "replayshark", "help"];
 
 /// The argument form every released version emits: the app, and the path of the binary it
 /// replaced.
@@ -130,6 +137,7 @@ pub fn parse() -> Invocation {
     match Cli::try_parse_from(&args) {
         Ok(cli) => match cli.command {
             Some(Command::FinalizeUpdate { replaced }) => Invocation::FinalizeUpdate(replaced),
+            Some(Command::Replayshark(args)) => Invocation::Replayshark(Box::new(args)),
             None if cli.list_gpus => Invocation::ListGpus(Box::new(cli)),
             None => Invocation::Run(Box::new(cli)),
         },
@@ -196,53 +204,105 @@ fn format_adapters(adapters: &[AdapterLine]) -> String {
     adapters.iter().map(|adapter| adapter.line.as_str()).collect()
 }
 
-/// A writer onto the console that launched this process, if there was one.
+/// Attaches this process to the console that launched it, if there was one.
 ///
-/// Opens `CONOUT$` rather than using the process's stdout handle, so it bypasses redirection. The
-/// single `AttachConsole` call site, so that call happens at most once per process.
+/// The single `AttachConsole` call site, so that call happens at most once per process.
 #[cfg(windows)]
-fn console_writer() -> Option<std::fs::File> {
+fn attach_parent_console() {
     use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
     use windows_sys::Win32::System::Console::AttachConsole;
 
-    // SAFETY: AttachConsole has no preconditions beyond a valid process context. It either
-    // attaches to the parent's console or fails, and failure shows up as CONOUT$ not opening.
-    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    static ATTACH: std::sync::Once = std::sync::Once::new();
+    ATTACH.call_once(|| {
+        // SAFETY: AttachConsole has no preconditions beyond a valid process context. It either
+        // attaches to the parent's console or fails.
+        unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    });
+}
 
-    std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
+/// Whether the standard handle `which` leads anywhere.
+///
+/// Rust's stdout and stderr report a write to a missing handle as successful, so this is the only
+/// way to tell that output would be lost.
+#[cfg(windows)]
+fn std_handle_is_open(which: windows_sys::Win32::System::Console::STD_HANDLE) -> bool {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::GetStdHandle;
+
+    // SAFETY: GetStdHandle only reads the process's standard handle table.
+    let handle = unsafe { GetStdHandle(which) };
+    !handle.is_null() && handle != INVALID_HANDLE_VALUE
+}
+
+/// Points stdout and stderr at the console that launched this process where they lead nowhere,
+/// so command-line output reaches it.
+///
+/// A release build is a GUI program, which Windows starts with no standard handles even from a
+/// console. A handle redirected to a file or a pipe is left alone. Rust's stdout and stderr look
+/// the handle up on every write, so they follow the change.
+#[cfg(windows)]
+pub fn attach_console_output() {
+    use std::os::windows::io::IntoRawHandle;
+
+    use windows_sys::Win32::System::Console::STD_ERROR_HANDLE;
+    use windows_sys::Win32::System::Console::STD_OUTPUT_HANDLE;
+    use windows_sys::Win32::System::Console::SetStdHandle;
+
+    for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        if std_handle_is_open(which) {
+            continue;
+        }
+
+        // Attaching may itself fill the empty handles.
+        attach_parent_console();
+        if std_handle_is_open(which) {
+            continue;
+        }
+
+        let Ok(console) = std::fs::OpenOptions::new().write(true).open("CONOUT$") else { return };
+        // SAFETY: the handle is an open console handle this process owns. The standard handle
+        // table takes it over for the rest of the process, so it is never closed.
+        unsafe { SetStdHandle(which, console.into_raw_handle()) };
+    }
 }
 
 #[cfg(not(windows))]
-fn console_writer() -> Option<std::fs::File> {
-    None
-}
+pub fn attach_console_output() {}
 
 /// Puts a startup-time message where the launching context can show it.
 ///
 /// A release build has no console, so a launch that fails to parse would otherwise exit silently:
 /// logging only starts once the window is being opened, which a parse error never reaches. Own
-/// handle first, parent's console second, then a message box.
+/// handle or the parent's console first, then a message box. An error goes to stderr and anything
+/// else to stdout, as clap would print them.
 pub fn report_startup_message(title: &str, message: &str, is_error: bool) {
-    use std::io::Write as _;
-
-    let mut out = std::io::stdout();
-    if write!(out, "{message}").is_ok() && out.flush().is_ok() {
-        return;
+    fn write_flushed(mut out: impl std::io::Write, message: &str) -> bool {
+        write!(out, "{message}").is_ok() && out.flush().is_ok()
     }
 
-    if let Some(mut console) = console_writer() {
-        let _ = write!(console, "{message}");
+    attach_console_output();
+
+    #[cfg(windows)]
+    let reachable = std_handle_is_open(if is_error {
+        windows_sys::Win32::System::Console::STD_ERROR_HANDLE
+    } else {
+        windows_sys::Win32::System::Console::STD_OUTPUT_HANDLE
+    });
+    #[cfg(not(windows))]
+    let reachable = true;
+
+    let written = reachable
+        && if is_error { write_flushed(std::io::stderr(), message) } else { write_flushed(std::io::stdout(), message) };
+    if written {
         return;
     }
 
     #[cfg(windows)]
     show_message_box(title, message, is_error);
 
+    // A failed write to a Unix stream has nowhere left to be reported.
     #[cfg(not(windows))]
-    {
-        let _ = (title, is_error);
-        eprint!("{message}");
-    }
+    let _ = title;
 }
 
 /// The fallback for a launch with no console to write to.
@@ -318,7 +378,38 @@ mod tests {
     #[test]
     fn a_subcommand_or_a_flag_is_not_a_legacy_path() {
         assert_eq!(legacy_finalize_target(&["app".into(), "finalize-update".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into(), "replayshark".into()]), None);
         assert_eq!(legacy_finalize_target(&["app".into(), "--help".into()]), None);
         assert_eq!(legacy_finalize_target(&["app".into()]), None);
+    }
+
+    #[test]
+    fn replayshark_takes_the_tools_own_arguments() {
+        let cli = Cli::try_parse_from([
+            "wows-toolkit-zgui",
+            "replayshark",
+            "-e",
+            "/data",
+            "query",
+            "players",
+            "--json",
+            "a.wowsreplay",
+        ])
+        .expect("a replayshark command");
+        let Some(Command::Replayshark(args)) = cli.command else {
+            panic!("expected replayshark, got {:?}", cli.command);
+        };
+        assert_eq!(args.game_data.extracted_dir, Some(PathBuf::from("/data")));
+        assert!(matches!(
+            args.command,
+            replayshark::cli::Command::Query {
+                command: replayshark::cli::QueryCommand::Players { json: true, ref replay, .. }
+            } if replay == &PathBuf::from("a.wowsreplay")
+        ));
+
+        // The window's flags are not replayshark's.
+        assert!(Cli::try_parse_from(["wows-toolkit-zgui", "replayshark", "--cpu-renderer", "chat", "a"]).is_err());
+        assert!(Cli::try_parse_from(["wows-toolkit-zgui", "replayshark", "no-such-command"]).is_err());
+        assert!(Cli::try_parse_from(["wows-toolkit-zgui", "replayshark"]).is_err());
     }
 }

@@ -17,7 +17,7 @@ A monorepo of tools for interacting with World of Warships game data, replays, a
 | [`wowsunpack`](crates/wowsunpack) | Library and CLI for unpacking World of Warships game assets (IDX/PKG files, GameParams) | `wowsunpack` |
 | [`wows-replays`](crates/wows-replays) | Core replay file parser library (`wows_replays`) | - |
 | [`minimap-renderer`](crates/minimap-renderer) | Library and CLI for rendering replay minimaps as images or video (`wows_minimap_renderer`) | `minimap_renderer` |
-| [`replayshark`](crates/replayshark) | CLI tool for dumping and analyzing replay files | `replayshark` |
+| [`replayshark`](crates/replayshark) | CLI tool for dumping and analyzing replay files. The desktop app runs the same commands as `wows_toolkit replayshark <args>` | `replayshark` |
 
 ## Documentation
 

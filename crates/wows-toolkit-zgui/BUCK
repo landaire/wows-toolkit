@@ -11,6 +11,7 @@ buildscript = workspace_buildscript(
 ZGUI_DEPS = [
     "//crates/landaire-ui:landaire_ui",
     "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/replayshark:replayshark",
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
