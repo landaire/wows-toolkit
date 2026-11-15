@@ -835,7 +835,7 @@ fn draw_kill_feed(
     let default_name_scale = fonts.scale(12.0);
     let line_height = 20i32;
     let right_margin = 4i32;
-    let icon_size = crate::assets::ICON_SIZE as i32;
+    let icon_size = crate::ICON_SIZE as i32;
     let cause_icon_size = icon_size;
     let gap = 2i32; // gap between elements
     // `right_edge` is the canvas x at which entries align flush right.

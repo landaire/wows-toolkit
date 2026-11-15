@@ -17,12 +17,9 @@ use wowsunpack::game_assets::ShipIconState;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
+use crate::ICON_SIZE;
 use crate::MINIMAP_SIZE;
 use crate::map_data;
-
-/// Icon size in pixels for rasterized ship icons.
-/// Scales proportionally with minimap size (18px at 768px minimap).
-pub const ICON_SIZE: u32 = MINIMAP_SIZE * 3 / 128;
 
 /// Read a file from the VFS, returning its bytes or None if not found/empty.
 fn read_vfs_file(vfs: &VfsPath, path: &str) -> Option<Vec<u8>> {

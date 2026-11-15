@@ -30,8 +30,8 @@ use wows_minimap_renderer::map_data::WorldPos;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Default icon size in minimap-space pixels (matches `wows_minimap_renderer::assets::ICON_SIZE`).
-pub const ICON_SIZE_F32: f32 = (MINIMAP_SIZE * 3 / 128) as f32;
+/// Default icon size in minimap-space pixels.
+pub const ICON_SIZE_F32: f32 = wows_minimap_renderer::ICON_SIZE as f32;
 
 pub const ROTATION_HANDLE_RADIUS: f32 = 5.0;
 pub const ROTATION_HANDLE_DISTANCE: f32 = 25.0;

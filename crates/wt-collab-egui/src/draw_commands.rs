@@ -100,8 +100,8 @@ impl Default for DrawCommandLabelOptions {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Default icon size in minimap-space pixels (matches `wows_minimap_renderer::assets::ICON_SIZE`).
-const ICON_SIZE: f32 = (wows_minimap_renderer::MINIMAP_SIZE * 3 / 128) as f32;
+/// Default icon size in minimap-space pixels.
+const ICON_SIZE: f32 = wows_minimap_renderer::ICON_SIZE as f32;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

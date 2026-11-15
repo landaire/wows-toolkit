@@ -303,8 +303,8 @@ fn main() -> Result<(), Report> {
     let consumable_icons = load_consumable_icons(vfs, version);
     let ribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
     let subribbon_icons = load_ribbon_icons(vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
-    let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
-    let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
+    let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::ICON_SIZE, version);
+    let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::ICON_SIZE, version);
     let flag_icons = load_flag_icons(vfs, version);
 
     // The wows-constants JSON for the build: --constants, else the dump's own

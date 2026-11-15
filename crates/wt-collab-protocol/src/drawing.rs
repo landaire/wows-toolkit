@@ -410,10 +410,7 @@ pub fn rotate_annotation(annotation: &mut Annotation, angle: f32) {
 }
 
 /// How big a ship annotation's icon is drawn, in minimap space.
-///
-/// The renderer's `assets::ICON_SIZE` is the same figure, but it is behind
-/// that crate's rendering feature and this one does not rasterise anything.
-const SHIP_ICON: f32 = (wows_minimap_renderer::MINIMAP_SIZE * 3 / 128) as f32;
+const SHIP_ICON: f32 = wows_minimap_renderer::ICON_SIZE as f32;
 
 /// The rectangle `annotation` occupies in minimap space, as left, top, right
 /// and bottom.

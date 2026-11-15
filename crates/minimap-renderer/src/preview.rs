@@ -97,8 +97,8 @@ impl PreviewRenderer {
             HashMap::new(),
             // The kill feed draws these, at the same size the CPU renderer's
             // own target uses (`main.rs`). Zero would resize them to nothing.
-            assets::load_death_cause_icons(vfs, assets::ICON_SIZE, version),
-            assets::load_powerup_icons(vfs, assets::ICON_SIZE, version),
+            assets::load_death_cause_icons(vfs, crate::ICON_SIZE, version),
+            assets::load_powerup_icons(vfs, crate::ICON_SIZE, version),
             layout,
         );
 

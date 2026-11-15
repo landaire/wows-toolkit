@@ -35,6 +35,9 @@ pub mod viewport;
 
 /// Minimap image size in pixels (square). Multiple of 16 for H.264 macroblock alignment.
 pub const MINIMAP_SIZE: u32 = 768;
+/// Edge length in minimap pixels of a ship icon, and of the other map icons
+/// drawn at the same size. Scales with the minimap (18px at 768px).
+pub const ICON_SIZE: u32 = MINIMAP_SIZE * 3 / 128;
 /// Top margin for HUD elements (score bar, timer, kill feed).
 pub const HUD_HEIGHT: u32 = 32;
 /// Total canvas height: minimap + HUD.
