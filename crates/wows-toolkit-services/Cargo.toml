@@ -33,7 +33,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # The update is staged beside the running executable.
 tempfile = "3"
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "sync"] }
 tracing = { workspace = true }
 # The rotated log file a bug report is copied from.
 tracing-appender = "0.2"
