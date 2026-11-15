@@ -14,6 +14,7 @@ use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::advantage::AdvantageBreakdown;
 use wows_minimap_renderer::config::should_draw_command;
+use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::ChargeCount;
 use wows_minimap_renderer::draw_command::ConsumableAvailability;
 use wows_minimap_renderer::draw_command::DrawCommand;
@@ -68,11 +69,12 @@ use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
 use crate::replay_render::export::BatchStep;
+use crate::replay_render::export::ExportFrames;
+use crate::replay_render::export::ExportLayers;
 use crate::replay_render::export::ExportProgress;
 use crate::replay_render::export::ExportSettings;
 use crate::replay_render::export::ExportStage;
 use crate::replay_render::export::batch_export;
-use crate::replay_render::export::export_frames;
 use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::hover::advantage_hover;
@@ -367,6 +369,25 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert!(saved.show_stats_panel, "and the panel this viewport holds off is not turned off for the egui renderer");
 }
 
+/// A ship drawn at `x` along the top of the map.
+fn drawn_ship(entity: u32, player: &str, x: f32, is_self: bool) -> DrawCommand {
+    DrawCommand::Ship {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x, y: 0.0 },
+        yaw: 0.0,
+        species: None,
+        color: None,
+        visibility: ShipVisibility::Visible,
+        opacity: 1.0,
+        is_self,
+        player_name: Some(player.to_owned()),
+        ship_name: None,
+        is_detected_teammate: false,
+        is_disconnected: false,
+        name_color: None,
+    }
+}
+
 /// The bracket keys widen and narrow the nib, within the range the egui
 /// board holds it to.
 #[test]
@@ -624,17 +645,53 @@ fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for() {
     // Half-second frames: the battle starts forty seconds in, at frame 80.
     let mut track = track((0..200).map(|frame| frame as f32 * 0.5).collect());
     set_battle_window(&mut track, 40.0, Some(95.0));
-    let options = playback_options_hidden();
-    let choices = ShipChoices::new();
-    let mut settings = ExportSettings::default();
+    let track = Arc::new(track);
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
 
-    assert_eq!(track.frames.len(), 200);
-    assert_eq!(track.frames_to_export(false).len(), 120, "the eighty frames before the battle are cut");
-    assert_eq!(export_frames(&track, &settings, &options, true, &choices).len(), 120);
+    assert_eq!(track.export_start(false), FrameIndex::new(80), "the eighty frames before the battle are cut");
+    let battle = ExportFrames::new(Arc::clone(&track), false, layers()).expect("there are frames");
+    assert_eq!(battle.duration_seconds(), 59.5, "the video covers the battle");
 
-    settings.include_pre_battle = true;
-    assert_eq!(track.frames_to_export(true).len(), 200, "and kept when asked for");
-    assert_eq!(export_frames(&track, &settings, &options, true, &choices).len(), 200);
+    assert_eq!(track.export_start(true), FrameIndex::FIRST, "and kept when asked for");
+    let whole = ExportFrames::new(Arc::clone(&track), true, layers()).expect("there are frames");
+    assert_eq!(whole.duration_seconds(), 99.5, "the video covers the recording");
+}
+
+/// What is on screen is what is written: the trails asked for, and what was drawn over the
+/// battle.
+#[test]
+fn an_export_writes_the_trails_and_what_was_drawn_over_the_battle() {
+    let mut track = track(vec![0.0, 1.0, 2.0]);
+    for (frame, x) in [0.0, 10.0, 20.0].into_iter().enumerate() {
+        track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
+    }
+    let track = Arc::new(track);
+    let annotation = DrawCommand::Annotation {
+        shape: AnnotationShape::Circle { center: MinimapPos { x: 5.0, y: 5.0 }, radius: 3.0, filled: false },
+        color: [255, 0, 0, 255],
+        width: 2.0,
+    };
+    let layers = |show_trails: bool| ExportLayers {
+        options: RenderOptions { show_trails, ..playback_options_hidden() },
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: vec![annotation.clone()],
+    };
+    let last = |show_trails: bool| {
+        ExportFrames::new(Arc::clone(&track), true, layers(show_trails)).and_then(Iterator::last).expect("a last frame")
+    };
+    let has_trail =
+        |frame: &[DrawCommand]| frame.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. }));
+
+    let with_trails = last(true);
+    assert!(has_trail(&with_trails), "the trail is written");
+    assert!(with_trails.iter().any(|command| matches!(command, DrawCommand::Annotation { .. })), "and the drawing");
+    assert!(!has_trail(&last(false)), "no trail while trails are off");
 }
 
 /// A codec the GPU cannot encode falls back to software rather than failing

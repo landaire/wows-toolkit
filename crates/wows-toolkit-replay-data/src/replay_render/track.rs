@@ -136,17 +136,13 @@ impl Track {
             .collect()
     }
 
-    /// The frames an export covers.
+    /// The first frame an export covers.
     ///
     /// A replay records the loading screen and the countdown before the battle
     /// proper; unless the reader asked for them, an export starts where the
     /// battle did.
-    pub fn frames_to_export(&self, include_pre_battle: bool) -> &[Vec<DrawCommand>] {
-        if include_pre_battle {
-            return &self.frames;
-        }
-        let from = self.frame_at(self.battle_start.seconds());
-        self.frames.get(from.0..).unwrap_or(&self.frames)
+    pub fn export_start(&self, include_pre_battle: bool) -> FrameIndex {
+        if include_pre_battle { FrameIndex::FIRST } else { self.frame_at(self.battle_start.seconds()) }
     }
 
     /// The game time of the last frame, in seconds.

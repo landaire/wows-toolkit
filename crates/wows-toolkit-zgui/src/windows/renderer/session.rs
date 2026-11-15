@@ -34,14 +34,14 @@ use wows_toolkit_replay_data::replay_render::collab::CursorReport;
 use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
 use wows_toolkit_replay_data::replay_render::collab::frame_broadcast;
 use wows_toolkit_replay_data::replay_render::collab::shared_replay;
+use wows_toolkit_replay_data::replay_render::export::ExportFrames;
+use wows_toolkit_replay_data::replay_render::export::ExportLayers;
 use wows_toolkit_replay_data::replay_render::export::ExportProgress;
 use wows_toolkit_replay_data::replay_render::export::ExportSettings;
 use wows_toolkit_replay_data::replay_render::export::ExportStage;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_replay_data::replay_render::export::encode_track;
 use wows_toolkit_replay_data::replay_render::export::encoder_status;
-use wows_toolkit_replay_data::replay_render::export::export_duration;
-use wows_toolkit_replay_data::replay_render::export::export_frames;
 use wows_toolkit_replay_data::replay_render::export::export_settings_of;
 use wows_toolkit_replay_data::replay_render::export::must_use_cpu;
 use wows_toolkit_replay_data::replay_render::export::suggested_name;
@@ -1319,11 +1319,22 @@ impl RendererSession {
             return;
         }
         let settings = self.export.with_untracked(|export| export.settings);
-        let frames = self.layers.with_untracked(|layers| {
-            self.choices.with_untracked(|choices| {
-                export_frames(&track, &settings, &layers.options, layers.show_dead_ships, choices)
-            })
+        let link = self.collab.get_untracked();
+        let game_data = self.run.try_with_value(|run| run.game_data.clone()).flatten();
+        let drawn_on = match game_data {
+            Some(game_data) => {
+                self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data))
+            }
+            None => Vec::new(),
+        };
+        let layers = self.layers.with_untracked(|layers| ExportLayers {
+            options: layers.options.clone(),
+            show_dead_ships: layers.show_dead_ships,
+            choices: self.choices.get_untracked(),
+            drawn_on,
         });
+        let suggested = suggested_name(&track.video_stem);
+        let Some(frames) = ExportFrames::new(track, settings.include_pre_battle, layers) else { return };
         // Held for the whole encode, which is why the transport refuses while one runs.
         let Some((renderer, generation)) = self
             .with_run(|run| {
@@ -1343,8 +1354,6 @@ impl RendererSession {
         let Some((services, cancel)) = self.run.try_with_value(|run| (run.services, Arc::clone(&run.cancel))) else {
             return;
         };
-        let duration = export_duration(frames.len());
-        let suggested = suggested_name(&track.video_stem);
         let total = frames.len() as u64;
 
         self.run.update_value(|run| run.ticker = None);
@@ -1393,7 +1402,7 @@ impl RendererSession {
             // Dropping this task leaves the encode running, so closing the session stops it
             // through `cancel`.
             let encode = long_job(move || {
-                let outcome = encode_track(&renderer, &frames, duration, &written, settings, &cancel, |step| {
+                let outcome = encode_track(&renderer, frames, &written, settings, &cancel, |step| {
                     let _ = progress_tx.unbounded_send(step);
                 });
                 (renderer, outcome)

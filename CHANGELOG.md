@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Write trails, annotations and placed ranges into exported videos
 - *(renderer)* Add speed trail, dead ship trail and score timer toggles
 - *(renderer)* Name exported videos by battle start, player, map and ship so they sort chronologically
 - *(zgui)* Flag players seen in the monitored Twitch chat around a battle in the replay panel
