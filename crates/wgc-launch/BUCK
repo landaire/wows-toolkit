@@ -1,10 +1,21 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 WGC_LAUNCH_DEPS = [
     "//crates/wgc-core:wgc-core",
     "//crates/wgc-install:wgc-install",
+    "//third-party/rust:serde",
     "//third-party/rust:thiserror",
     "//third-party/rust:tracing",
+] + os_select(
+    # The cfg(unix) dependency section of Cargo.toml.
+    macos = ["//third-party/rust:rustix"],
+    linux = ["//third-party/rust:rustix"],
+    windows = [],
+)
+
+WGC_LAUNCH_TEST_DEPS = [
+    "//third-party/rust:insta",
+    "//third-party/rust:tempfile",
 ]
 
 workspace_library(
@@ -22,7 +33,7 @@ workspace_test(
     package = "wgc-launch",
     version = "0.1.0",
     deps = WGC_LAUNCH_DEPS,
-    test_deps = ["//third-party/rust:tempfile"],
+    test_deps = WGC_LAUNCH_TEST_DEPS,
 )
 
 workspace_integration_tests(
@@ -30,5 +41,5 @@ workspace_integration_tests(
     version = "0.1.0",
     library = ":wgc-launch",
     deps = WGC_LAUNCH_DEPS,
-    test_deps = ["//third-party/rust:tempfile"],
+    test_deps = WGC_LAUNCH_TEST_DEPS,
 )

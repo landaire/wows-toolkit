@@ -1,0 +1,59 @@
+---
+source: crates/wgc-launch/src/host.rs
+assertion_line: 327
+expression: kinds
+---
+[
+    (
+        "Proton - Experimental",
+        Experimental,
+    ),
+    (
+        "Proton 10.0",
+        Versioned(
+            ProtonVersion {
+                major: 10,
+                minor: Some(
+                    0,
+                ),
+            },
+        ),
+    ),
+    (
+        "Proton 9.0-GE",
+        Versioned(
+            ProtonVersion {
+                major: 9,
+                minor: Some(
+                    0,
+                ),
+            },
+        ),
+    ),
+    (
+        "GE-Proton10-25",
+        Versioned(
+            ProtonVersion {
+                major: 10,
+                minor: Some(
+                    25,
+                ),
+            },
+        ),
+    ),
+    (
+        "UMU-Proton-10.0-4",
+        Versioned(
+            ProtonVersion {
+                major: 10,
+                minor: Some(
+                    0,
+                ),
+            },
+        ),
+    ),
+    (
+        "Proton Hotfix",
+        Other,
+    ),
+]

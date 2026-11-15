@@ -1,0 +1,11 @@
+---
+source: crates/wgc-launch/src/host.rs
+assertion_line: 316
+expression: names
+---
+- Proton - Experimental
+- GE-Proton10-25
+- Proton 10.0
+- Proton 9.0
+- Proton Hotfix
+- Custom

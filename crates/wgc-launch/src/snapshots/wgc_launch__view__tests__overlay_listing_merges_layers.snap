@@ -1,0 +1,11 @@
+---
+source: crates/wgc-launch/src/view.rs
+assertion_line: 439
+expression: listing
+---
+- - c.wowsreplay
+  - upper/replays/c.wowsreplay
+- - tempArenaInfo.json
+  - lower/replays/tempArenaInfo.json
+- - new.log
+  - upper/profile/new.log

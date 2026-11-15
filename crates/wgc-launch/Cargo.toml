@@ -8,8 +8,13 @@ description = "Launch World of Warships natively (Windows) or via Proton (Linux)
 [dependencies]
 wgc-core = { workspace = true }
 wgc-install = { workspace = true }
+serde = { workspace = true }
 thiserror = "2"
 tracing = "0.1"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }
+
 [dev-dependencies]
+insta = { workspace = true }
 tempfile = "3"

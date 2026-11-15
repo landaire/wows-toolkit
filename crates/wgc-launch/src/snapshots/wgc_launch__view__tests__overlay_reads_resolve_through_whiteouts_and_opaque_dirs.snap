@@ -1,0 +1,25 @@
+---
+source: crates/wgc-launch/src/view.rs
+assertion_line: 427
+expression: resolved
+---
+- - preferences.xml
+  - upper/preferences.xml
+- - user_preferences.xml
+  - lower/user_preferences.xml
+- - replays/a.wowsreplay
+  - absent
+- - replays/b.wowsreplay
+  - absent
+- - replays/c.wowsreplay
+  - upper/replays/c.wowsreplay
+- - replays/tempArenaInfo.json
+  - lower/replays/tempArenaInfo.json
+- - crashes/old.dmp
+  - absent
+- - profile/python.log
+  - absent
+- - profile/new.log
+  - upper/profile/new.log
+- - res_mods/engine_config.xml
+  - lower/res_mods/engine_config.xml

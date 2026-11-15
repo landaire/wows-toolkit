@@ -1,0 +1,30 @@
+---
+source: crates/wgc-launch/src/spawn.rs
+assertion_line: 393
+expression: snapshot(&plan)
+---
+argv:
+  - /usr/bin/umu-run
+  - /data/game-runtime/umu/prefix/drive_c/ProgramData/Wargaming.net/GameCenter/wgc-relay.exe
+  - "Z:\\data\\game-runtime\\installs\\wows\\merged\\WorldOfWarships.exe"
+  - "-safe"
+cwd: /games/World_of_Warships
+env:
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+  DISPLAY: ":0"
+  GAMEID: umu-552990
+  HOME: /home/u
+  LC_TIME: en_GB.UTF-8
+  PATH: "/home/u/.local/bin:/usr/bin"
+  PRESSURE_VESSEL_FILESYSTEMS_RW: "/games/World_of_Warships:/data/game-runtime/umu/prefix/drive_c/ProgramData/Wargaming.net/GameCenter:/mnt/replays"
+  PROTON_LOG: "1"
+  STEAM_COMPAT_INSTALL_PATH: /games/World_of_Warships
+  UMU_FOLDERS_PATH: /data/game-runtime/umu/folders
+  USER: u
+  WAYLAND_DISPLAY: wayland-1
+  WGC_RELAY_ADDR: "127.0.0.1:40000"
+  WGC_RELAY_TOKEN: secret
+  WINEPREFIX: /data/game-runtime/umu/prefix
+  WOWS_TOOLKIT_GAME_SESSION: wows
+  XDG_CACHE_HOME: /data/game-runtime/umu/cache
+  XDG_RUNTIME_DIR: /run/user/1000

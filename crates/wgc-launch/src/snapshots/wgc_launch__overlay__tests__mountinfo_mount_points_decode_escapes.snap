@@ -1,0 +1,9 @@
+---
+source: crates/wgc-launch/src/overlay.rs
+assertion_line: 345
+expression: points
+---
+[
+    "/",
+    "/home/u/game data/merged",
+]
