@@ -40,7 +40,7 @@ use crate::app::SettingsSection;
 use wows_toolkit_services::stats::SessionData;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
-/// by index, matching `AppTab::ALL`'s order.
+/// by index, matching `startup_tabs`' order.
 const TAB_BAR: &str = "app-tabs";
 
 /// The gear at the end of the tab strip, and the drawer it opens
@@ -172,8 +172,19 @@ pub(crate) fn open_app_in_root(
     (window, app)
 }
 
+/// The strip as the app opens, left to right. The test settings leave the
+/// launcher off, which keeps the Launcher tab off the strip.
+fn startup_tabs() -> Vec<AppTab> {
+    #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
+    let mut tabs = AppTab::ALL.to_vec();
+    #[cfg(target_os = "linux")]
+    tabs.retain(|tab| *tab != AppTab::Launcher);
+
+    tabs
+}
+
 fn tab_index(tab: AppTab) -> usize {
-    AppTab::ALL.iter().position(|t| *t == tab).expect("AppTab::ALL covers every tab")
+    startup_tabs().iter().position(|t| *t == tab).expect("the tab is on the strip at startup")
 }
 
 #[gpui_kit::test]
@@ -185,7 +196,7 @@ fn the_replay_inspector_tab_is_selected_at_startup(cx: &mut TestAppContext) {
         let tabs = window.within(TAB_BAR);
         // The egui app opens on its replays tab, so this one does too.
         assert_eq!(tabs.find(tab_index(AppTab::ReplayInspector)).selected(), Some(true));
-        for other in AppTab::ALL.iter().copied().filter(|tab| *tab != AppTab::ReplayInspector) {
+        for other in startup_tabs().into_iter().filter(|tab| *tab != AppTab::ReplayInspector) {
             assert_eq!(tabs.find(tab_index(other)).selected(), Some(false), "{other:?} is not selected");
         }
     })
@@ -199,9 +210,9 @@ fn clicking_a_tab_moves_the_selection_to_it(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
 
-        for &tab in AppTab::ALL {
+        for tab in startup_tabs() {
             window.within(TAB_BAR).click(tab_index(tab), cx);
-            for &other in AppTab::ALL {
+            for other in startup_tabs() {
                 let selected = window.within(TAB_BAR).find(tab_index(other)).selected();
                 assert_eq!(
                     selected,
@@ -212,6 +223,56 @@ fn clicking_a_tab_moves_the_selection_to_it(cx: &mut TestAppContext) {
                 );
             }
         }
+    })
+    .expect("the test window stays open");
+}
+
+/// The Launcher is on the strip only while the launcher is enabled, and an
+/// opt-out while it is showing takes it away and returns to the replays.
+#[cfg(target_os = "linux")]
+#[gpui_kit::test]
+fn the_launcher_tab_shows_only_while_the_launcher_is_enabled(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    let strip_len = |window: &mut gpui_kit::Window| {
+        (0..AppTab::ALL.len() + 1).take_while(|ix| window.within(TAB_BAR).try_find(*ix).is_some()).count()
+    };
+    let set_enabled = |enabled: bool, cx: &mut TestAppContext| {
+        window
+            .update(cx, |app, _window, cx| {
+                let mut settings = wows_toolkit_launcher::LauncherSettings::default();
+                if enabled {
+                    settings.enable();
+                }
+                app.launcher().update(cx, |launcher, cx| launcher.set_settings(settings, cx));
+            })
+            .expect("the test window stays open");
+    };
+    let launcher_ix = AppTab::ALL.iter().position(|tab| *tab == AppTab::Launcher).expect("Linux has the Launcher");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(strip_len(window), AppTab::ALL.len() - 1, "no Launcher before the opt-in");
+    })
+    .expect("the test window stays open");
+
+    set_enabled(true, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(strip_len(window), AppTab::ALL.len(), "the opt-in brings the Launcher");
+        window.within(TAB_BAR).click(launcher_ix, cx);
+        assert_eq!(window.within(TAB_BAR).find(launcher_ix).selected(), Some(true));
+    })
+    .expect("the test window stays open");
+
+    set_enabled(false, cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(strip_len(window), AppTab::ALL.len() - 1, "the opt-out takes the Launcher away");
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::ReplayInspector)).selected(),
+            Some(true),
+            "and the replays show in its place"
+        );
     })
     .expect("the test window stays open");
 }
@@ -3200,7 +3261,7 @@ fn a_second_request_for_a_directorys_stats_focuses_its_tab(cx: &mut TestAppConte
         let tabs = window.within(TAB_BAR);
         assert_eq!(tabs.find(directory_tab).selected(), Some(true), "the existing tab is selected again");
         assert!(
-            tabs.try_find(AppTab::ALL.len() + 1).is_none(),
+            tabs.try_find(startup_tabs().len() + 1).is_none(),
             "one tab for the directory, however its path is spelled"
         );
     })

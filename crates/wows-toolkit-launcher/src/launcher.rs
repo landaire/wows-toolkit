@@ -269,13 +269,19 @@ impl Launcher {
         EventSender { sender: self.sender.clone(), wake: Arc::clone(&env.wake) }
     }
 
-    /// Apply one event. Returns whether `settings` changed and need saving.
+    /// Apply one event. Returns whether `settings` changed and need saving. While the launcher is
+    /// off, an event still updates the state but starts no further work.
     #[must_use]
     pub fn apply(&mut self, event: LauncherEvent, settings: &mut LauncherSettings, env: &LauncherEnv) -> bool {
+        let enabled = settings.is_enabled();
         match event.0 {
             Event::Installs(installs) => {
                 self.installs = installs;
                 self.discovering = false;
+                if !enabled {
+                    return false;
+                }
+
                 // Only a delivered discovery round starts checks; the guard in
                 // spawn_catalog_check skips installs already checked.
                 let installs = self.installs.clone();
@@ -300,7 +306,9 @@ impl Launcher {
                 if finished {
                     self.controls.remove(&key);
                 }
-                self.carry_replay_settings_after(&key, &state, env);
+                if enabled {
+                    self.carry_replay_settings_after(&key, &state, env);
+                }
                 self.downloads.insert(key.clone(), state);
                 if !fresh_install_done {
                     return false;
@@ -309,7 +317,9 @@ impl Launcher {
                 if changed {
                     settings.manual_installs.push(key);
                 }
-                self.start_install_discovery(settings, env);
+                if enabled {
+                    self.start_install_discovery(settings, env);
+                }
                 changed
             }
             Event::Login(msg) => self.apply_login(msg, settings),
@@ -540,5 +550,67 @@ impl EventSender {
         // no one left to tell.
         let _ = self.sender.send(LauncherEvent(event));
         (self.wake)();
+    }
+}
+
+/// An environment with no data directory, whose background work runs only when the test drives
+/// `runtime`.
+#[cfg(test)]
+pub(crate) fn test_env(runtime: &tokio::runtime::Runtime) -> LauncherEnv {
+    LauncherEnv {
+        runtime: runtime.handle().clone(),
+        proxy_url: None,
+        wake: Arc::new(|| {}),
+        runtime_dirs: None,
+        credentials: wgc_auth::CredentialStore::new(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(enabled: bool) -> LauncherSettings {
+        let mut settings = LauncherSettings::default();
+        if enabled {
+            settings.enable();
+        }
+
+        settings
+    }
+
+    #[test]
+    fn installs_found_after_opt_out_start_no_catalog_check() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = test_env(&runtime);
+        let path = PathBuf::from("/games/World_of_Warships");
+        let installs = || LauncherEvent(Event::Installs(vec![GameInstall::manual(path.clone())]));
+
+        let (mut off, _events) = Launcher::new();
+        let _ = off.apply(installs(), &mut settings(false), &env);
+        assert_eq!(off.installs().len(), 1);
+        assert!(off.catalog_status(&path).is_none());
+
+        let (mut on, _events) = Launcher::new();
+        let _ = on.apply(installs(), &mut settings(true), &env);
+        assert!(matches!(on.catalog_status(&path), Some(CatalogCheckState::Checking)));
+    }
+
+    #[test]
+    fn a_fresh_install_finished_after_opt_out_is_saved_but_starts_no_discovery() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = test_env(&runtime);
+        let dest = PathBuf::from("/games/World_of_Warships");
+        let mut settings = settings(false);
+        let (mut launcher, _events) = Launcher::new();
+        launcher.installing.insert("WOWS.WW.PRODUCTION", dest.clone());
+
+        let done = LauncherEvent(Event::Download(dest.clone(), DownloadState::Done { skipped_deltas: 0 }));
+        let changed = launcher.apply(done, &mut settings, &env);
+
+        assert!(changed);
+        assert_eq!(settings.manual_installs, vec![dest.clone()]);
+        assert!(matches!(launcher.download_state(&dest), Some(DownloadState::Done { .. })));
+        assert!(!launcher.is_discovering());
     }
 }

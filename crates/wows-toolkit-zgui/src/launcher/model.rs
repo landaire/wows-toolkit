@@ -146,15 +146,39 @@ impl LauncherModel {
         self.start_work();
     }
 
-    /// Turns the launcher off. Work already running finishes; nothing new starts.
+    /// Turns the launcher off. Work already running finishes and its results are kept; nothing
+    /// new starts.
     pub fn disable(self) {
         self.edit_settings(LauncherSettings::disable);
     }
 
     /// Runs `operation` against the launcher and the settings, and saves the settings when it
-    /// reports a change. `None`, and nothing run, before the settings are read or without a
-    /// runtime to run background work on.
+    /// reports a change. `None`, and nothing run, while the launcher is off, before the settings
+    /// are read or without a runtime to run background work on.
     pub fn run<R>(
+        self,
+        operation: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> (R, bool),
+    ) -> Option<R> {
+        if !self.with_untracked(LauncherState::is_enabled) {
+            return None;
+        }
+
+        self.run_ungated(operation)
+    }
+
+    /// [`Self::run`] for an operation that returns only whether the settings changed.
+    pub fn op(self, operation: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> bool) {
+        self.run(|launcher, settings, env| ((), operation(launcher, settings, env)));
+    }
+
+    /// Hands one result of background work to the launcher, which keeps it while the launcher
+    /// is off too.
+    pub fn apply(self, event: LauncherEvent) {
+        self.run_ungated(|launcher, settings, env| ((), launcher.apply(event, settings, env)));
+    }
+
+    /// [`Self::run`] whether or not the launcher is on.
+    fn run_ungated<R>(
         self,
         operation: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> (R, bool),
     ) -> Option<R> {
@@ -175,16 +199,6 @@ impl LauncherModel {
         }
 
         outcome
-    }
-
-    /// [`Self::run`] for an operation that returns only whether the settings changed.
-    pub fn op(self, operation: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> bool) {
-        self.run(|launcher, settings, env| ((), operation(launcher, settings, env)));
-    }
-
-    /// Hands one result of background work to the launcher.
-    pub fn apply(self, event: LauncherEvent) {
-        self.op(|launcher, settings, env| launcher.apply(event, settings, env));
     }
 
     /// Changes the settings and saves them. Nothing happens before they are read.

@@ -51,6 +51,9 @@ const GAME_SLOTS: usize = 1 << 16;
 /// The reader picked an install to drive the rest of the app from.
 pub struct UseForToolkit(pub PathBuf);
 
+/// The opt-in was read or replaced, so whether the Launcher tab shows may have changed.
+pub struct EnabledChanged;
+
 pub struct LauncherView {
     launcher: Launcher,
     /// `None` until the settings row has been read, which needs the database.
@@ -74,6 +77,7 @@ pub struct LauncherView {
 }
 
 impl EventEmitter<UseForToolkit> for LauncherView {}
+impl EventEmitter<EnabledChanged> for LauncherView {}
 
 impl LauncherView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -170,6 +174,7 @@ impl LauncherView {
         self.env_vars.update(cx, |state, cx| state.set_value(env, window, cx));
         let enabled = settings.is_enabled();
         self.settings = Some(settings);
+        cx.emit(EnabledChanged);
         // Nothing starts before the opt-in. Sessions wait for Play or a sign-in, since reading
         // them may prompt to unlock the system keyring.
         if enabled {
@@ -209,9 +214,28 @@ impl LauncherView {
         })
     }
 
+    /// Whether the reader opted in to the launcher. False until the settings are read.
+    pub fn is_enabled(&self) -> bool {
+        self.settings.as_ref().is_some_and(LauncherSettings::is_enabled)
+    }
+
     /// Runs a launcher operation against the settings, saving them when it
-    /// reports a change. A no-op before the settings are read.
+    /// reports a change. A no-op before the settings are read or while the
+    /// launcher is off.
     fn op(
+        &mut self,
+        cx: &mut Context<Self>,
+        op: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> bool,
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+
+        self.op_ungated(cx, op);
+    }
+
+    /// [`Self::op`] for work already running, which still reports after an opt-out.
+    fn op_ungated(
         &mut self,
         cx: &mut Context<Self>,
         op: impl FnOnce(&mut Launcher, &mut LauncherSettings, &LauncherEnv) -> bool,
@@ -225,7 +249,15 @@ impl LauncherView {
     }
 
     fn apply(&mut self, event: wows_toolkit_launcher::LauncherEvent, cx: &mut Context<Self>) {
-        self.op(cx, |launcher, settings, env| launcher.apply(event, settings, env));
+        self.op_ungated(cx, |launcher, settings, env| launcher.apply(event, settings, env));
+    }
+
+    /// Adopts `settings` as if read from the database, starting nothing.
+    #[cfg(test)]
+    pub fn set_settings(&mut self, settings: LauncherSettings, cx: &mut Context<Self>) {
+        self.settings = Some(settings);
+        cx.emit(EnabledChanged);
+        cx.notify();
     }
 
     fn edit_settings(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut LauncherSettings)) {

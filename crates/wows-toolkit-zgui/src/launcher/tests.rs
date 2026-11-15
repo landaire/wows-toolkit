@@ -353,6 +353,20 @@ fn turning_the_launcher_off_drops_the_acceptance() {
 }
 
 #[test]
+fn after_opting_out_operations_are_refused_and_results_land_without_follow_on_work() {
+    let launcher = ready();
+    launcher.model.disable();
+
+    assert_eq!(launcher.model.run(|_, _, _| ((), false)), None);
+
+    let other = PathBuf::from("/games/Other_World_of_Warships");
+    launcher.model.apply(test_support::installs_found(vec![wgc_install(&other)]));
+    let installs = launcher.model.with_untracked(|state| state.launcher.installs().to_vec());
+    assert!(installs.iter().any(|install| install.path == other));
+    assert!(launcher.model.with_untracked(|state| state.launcher.catalog_status(&other).is_none()));
+}
+
+#[test]
 fn play_reads_the_default_account_when_ready() {
     let launcher = ready();
 

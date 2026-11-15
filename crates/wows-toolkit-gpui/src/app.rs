@@ -893,6 +893,10 @@ impl App {
             this.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
             this.apply_wows_dir(path, window, cx);
         });
+        // The strip shows the Launcher only once the opt-in is read and set.
+        #[cfg(target_os = "linux")]
+        let launcher_toggled =
+            cx.subscribe(&launcher, |_this, _launcher, _event: &crate::launcher::EnabledChanged, cx| cx.notify());
         // Held keys are read as `!is_window_active()` once the window loses
         // focus, which nothing retained would otherwise draw again for.
         let activation = cx.observe_window_activation(window, |_this, window, _cx| window.refresh());
@@ -987,6 +991,8 @@ impl App {
         };
         #[cfg(target_os = "linux")]
         app._subscriptions.push(use_for_toolkit);
+        #[cfg(target_os = "linux")]
+        app._subscriptions.push(launcher_toggled);
 
         app
     }
@@ -1097,11 +1103,25 @@ impl App {
         self.directory_stats_view(id).unwrap_or_else(|| self.stats.clone())
     }
 
-    /// The tab strip, left to right: every tab once, with each directory's
-    /// stats beside the session's.
-    fn tab_order(&self) -> Vec<AppTab> {
+    /// Whether `tab` is on the strip and in the palette. The Launcher waits for
+    /// the launcher opt-in, which is made in the zgui app.
+    fn tab_shown(
+        &self,
+        tab: AppTab,
+        #[cfg_attr(not(target_os = "linux"), expect(unused_variables))] cx: &gpui_kit::App,
+    ) -> bool {
+        match tab {
+            #[cfg(target_os = "linux")]
+            AppTab::Launcher => self.launcher.read(cx).is_enabled(),
+            _ => true,
+        }
+    }
+
+    /// The tab strip, left to right: every shown tab once, with each
+    /// directory's stats beside the session's.
+    fn tab_order(&self, cx: &gpui_kit::App) -> Vec<AppTab> {
         let mut tabs = Vec::new();
-        for &tab in AppTab::ALL {
+        for &tab in AppTab::ALL.iter().filter(|tab| self.tab_shown(**tab, cx)) {
             tabs.push(tab);
             if tab == AppTab::Stats {
                 tabs.extend(self.directory_stats_tabs());
@@ -1879,6 +1899,13 @@ impl App {
         &self.replay_inspector
     }
 
+    /// The Launcher tab's view, so its opt-in can be set without the database.
+    /// Test-only.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn launcher(&self) -> &Entity<crate::launcher::LauncherView> {
+        &self.launcher
+    }
+
     /// Test-only: the app itself reaches the field directly.
     #[cfg(test)]
     pub(crate) fn armor_pane(&self) -> &Entity<ArmorViewerPane> {
@@ -2104,7 +2131,14 @@ impl App {
     /// Opens the command palette over the window.
     pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Built per opening so the labels follow the current locale.
-        let root = crate::palette::RootPalette::new(crate::palette::entries());
+        let entries = crate::palette::entries()
+            .into_iter()
+            .filter(|entry| match entry.action {
+                PaletteAction::GoTo(tab) => self.tab_shown(tab, cx),
+                _ => true,
+            })
+            .collect();
+        let root = crate::palette::RootPalette::new(entries);
         self.open_palette_with(Rc::new(std::cell::RefCell::new(root)), window, cx);
     }
 
@@ -3331,6 +3365,11 @@ fn open_directory(dir: &std::path::Path) {
 
 impl Render for App {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A tab taken off the strip, as the Launcher is on an opt-out, gives
+        // way to the one the app opens on.
+        if !self.tab_shown(self.active_tab, cx) {
+            self.active_tab = AppTab::ReplayInspector;
+        }
         // A hidden tab's views stay alive without rendering, so what they
         // reported is dropped; the new tab's views report as they render.
         if self.modes_tab != self.active_tab {
@@ -3350,7 +3389,7 @@ impl Render for App {
         // tracker holds its live stats lookup until its tab is displayed.
         let tracker_shown = self.active_tab == AppTab::PlayerTracker;
         self.player_tracker.update(cx, |tracker, cx| tracker.set_tab_shown(tracker_shown, cx));
-        let tab_order = self.tab_order();
+        let tab_order = self.tab_order(cx);
         let active_ix = tab_order.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
