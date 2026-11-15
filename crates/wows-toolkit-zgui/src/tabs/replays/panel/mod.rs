@@ -37,6 +37,7 @@ use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_config::ReplayExportFormat;
+use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::ParsedReplay;
@@ -50,6 +51,7 @@ use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
+use wows_toolkit_viewmodel::twitch;
 use wowsunpack::game_params::types::Species;
 use zgui::component;
 use zgui::css;
@@ -660,6 +662,10 @@ pub fn ReplayPanel(
             }
         });
     }
+    follow(move |_| {
+        let Some(loaded) = state.with(LoadState::loaded) else { return };
+        load_twitch_candidates(services, owner.get_value(), loaded.model.clone());
+    });
 
     let read = move |cause: Option<ReparseCause>| {
         if parsing.get_untracked() {
@@ -1180,6 +1186,39 @@ fn spawn_in(owner: Option<Owner>, work: impl Future<Output = ()> + 'static) {
         Some(owner) => owner.with(|| spawn_local(work)),
         None => spawn_local(work),
     };
+}
+
+/// Flags the rows whose names plausibly appeared in the monitored Twitch channel's chat around
+/// the battle. A lookup that finds nothing leaves the rows unflagged.
+fn load_twitch_candidates(services: Services, owner: Option<Owner>, model: ArcRwSignal<Rc<ReplayReportModel>>) {
+    let Some(pool) = services.settings.pool() else { return };
+    let battle_at = model.with_untracked(|model| model.timestamp);
+    let start = battle_at.as_second() + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
+    let end = battle_at.as_second() + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
+
+    spawn_in(owner, async move {
+        let found = services.on_tokio(async move { query::observations_in_window(&pool, start, end).await }).await;
+        let rows = match found {
+            Ok(Ok(rows)) => rows,
+            Ok(Err(err)) => {
+                tracing::warn!("replay panel: the chat lookup failed: {err}");
+                return;
+            }
+            Err(err) => {
+                tracing::warn!("replay panel: the chat lookup did not complete: {err}");
+                return;
+            }
+        };
+        let observations: Vec<(String, jiff::Timestamp)> = rows
+            .into_iter()
+            .filter_map(|(login, seen_at)| jiff::Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at)))
+            .collect();
+        if observations.is_empty() {
+            return;
+        }
+
+        model.update(|model| *model = edited_model(model, |model| model.populate_twitch_candidates(&observations)));
+    });
 }
 
 /// Runs `effect` now and whenever what it reads changes, for as long as the calling scope lives.

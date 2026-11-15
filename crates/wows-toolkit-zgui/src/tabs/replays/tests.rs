@@ -14,7 +14,9 @@ use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_replays::types::AccountId;
+use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::sample::sample_model;
+use wows_toolkit_services::settings::StartupSettings;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -549,6 +551,28 @@ fn the_anonymize_box_swaps_the_tables_names_for_pseudonyms() {
     assert_eq!(saved, Some(false), "a second press clears it");
     let names = window.texts_by_class("wt-pt-text");
     assert!(names.iter().any(|text| text == "Ally_Alpha"), "and the real names return: {names:?}");
+}
+
+/// A login seen in the monitored channel's chat around the battle flags the player it names.
+#[test]
+fn a_player_seen_in_twitch_chat_gets_the_chip() {
+    let (mut window, workspace) = open();
+    let services = workspace.services;
+    let runtime = services.runtime().expect("the runtime is up");
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    let settings = runtime.block_on(StartupSettings::load(&pool));
+    services.settings.adopt(settings, pool.clone());
+    let model = sample_model();
+    let seen_at = model.timestamp.as_second() + 60;
+    runtime
+        .block_on(query::record_twitch_observations(&pool, &[("ally_alpha".to_string(), seen_at)]))
+        .expect("the observation is written");
+
+    super::panel::tests::seed_next_panel(model);
+    workspace.open(PathBuf::from("battle.wowsreplay"), OpenTarget::ShowingTab);
+    settle_in_real_time(&mut window);
+
+    assert!(window.by_test_id("player-twitch").is_some(), "the row seen in chat carries the chip");
 }
 
 /// The tab empty, with a replay open, and playing it back, in both themes, for review. Reads the
