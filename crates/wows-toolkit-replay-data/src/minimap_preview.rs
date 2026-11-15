@@ -41,6 +41,7 @@ use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::GameClock;
+use wows_toolkit_viewmodel::video_name::video_file_stem;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
@@ -457,6 +458,8 @@ pub struct BakedTrack {
     /// Where the map's top-left corner sits in these frames. The layout
     /// decides it, and a side panel moves it.
     pub map_origin: (u32, u32),
+    /// What an exported video of this battle is called, without its extension.
+    pub video_stem: String,
 }
 
 /// The events of `path`'s battle, in the order they happened.
@@ -527,11 +530,16 @@ pub fn bake_track(
     let map_name = replay.meta.mapName.clone();
     let map_info =
         assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
-
+    let translated_map = wowsunpack::game_params::translations::translate_map_name(&map_name, provider);
+    let source_stem = path.file_stem().map(|stem| stem.to_string_lossy());
+    let video_stem = video_file_stem(&replay.meta, &translated_map, source_stem.as_deref());
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+
     let space_size = map_info.space_size as f32;
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, options);
     renderer.set_fonts(assets::load_game_fonts(vfs));
+    // With another team's recording merged, an enemy icon no longer implies it was spotted.
+    renderer.set_merged_perspectives(!merged.is_empty());
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
     let constants = decode_constants(&loaded, build.get(), version, game_data);
@@ -585,6 +593,7 @@ pub fn bake_track(
         map_name: map_name.clone(),
         version,
         map_origin,
+        video_stem,
     })
 }
 

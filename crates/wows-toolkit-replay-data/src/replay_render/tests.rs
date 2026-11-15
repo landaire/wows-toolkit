@@ -14,6 +14,7 @@ use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::advantage::AdvantageBreakdown;
 use wows_minimap_renderer::config::should_draw_command;
+use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::ChargeCount;
 use wows_minimap_renderer::draw_command::ConsumableAvailability;
 use wows_minimap_renderer::draw_command::DrawCommand;
@@ -68,16 +69,20 @@ use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
 use crate::replay_render::export::BatchStep;
+use crate::replay_render::export::EXPORT_FRAME_COUNT;
+use crate::replay_render::export::ExportFrames;
+use crate::replay_render::export::ExportLayers;
 use crate::replay_render::export::ExportProgress;
 use crate::replay_render::export::ExportSettings;
 use crate::replay_render::export::ExportStage;
 use crate::replay_render::export::batch_export;
-use crate::replay_render::export::export_frames;
+use crate::replay_render::export::batch_layers;
 use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::hover::advantage_hover;
 use crate::replay_render::hover::consumable_at;
 use crate::replay_render::options::adopt_saved_defaults;
+use crate::replay_render::options::adopt_saved_self_ranges;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::options::defaults_to_save;
 use crate::replay_render::options::playback_options;
@@ -92,6 +97,7 @@ use crate::replay_render::ships::NO_RANGES;
 use crate::replay_render::ships::ShipChoices;
 use crate::replay_render::ships::ShipMenu;
 use crate::replay_render::ships::per_ship_allows;
+use crate::replay_render::ships::self_player;
 use crate::replay_render::ships::ship_at;
 use crate::replay_render::timeline::BattleEvents;
 use crate::replay_render::track::BAKE_INTERVAL;
@@ -119,6 +125,7 @@ fn track(clocks: Vec<f32>) -> Track {
         space_size: 1400.0,
         version: Version::base(99, 0, 0),
         space: String::new(),
+        video_stem: String::new(),
         map_origin: DEFAULT_MAP_ORIGIN,
     }
 }
@@ -357,13 +364,64 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert!(export.prefer_cpu);
 
     options.show_smoke = false;
-    let saved = defaults_to_save(&stored, &options, show_dead_ships, &export);
+    let saved = defaults_to_save(&stored, &options, show_dead_ships, &export, None);
 
     assert!(!saved.show_smoke, "what the viewport shows is what is saved");
     assert!(!saved.show_torpedoes);
     assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
     assert!(saved.include_pre_battle, "as are the export settings it did not change");
     assert!(saved.show_stats_panel, "and the panel this viewport holds off is not turned off for the egui renderer");
+}
+
+/// The self ranges the egui renderer saves go on the recording player's ship when a viewport
+/// opens, and what that ship shows is saved back as them.
+#[test]
+fn the_saved_self_ranges_follow_the_recording_players_ship() {
+    let stored = SavedRenderOptions {
+        show_self_detection_range: true,
+        show_self_main_battery_range: true,
+        ..SavedRenderOptions::default()
+    };
+    let mut track = track(vec![0.0, 0.5]);
+    track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), drawn_ship(2, "me", 20.0, true)];
+    let own = self_player(&track.frames);
+    assert_eq!(own.as_deref(), Some("me"));
+    let mut options = playback_options_hidden();
+    let mut choices = ShipChoices::new();
+
+    adopt_saved_self_ranges(&stored, own.as_deref(), &mut choices, &mut options);
+
+    let mine = choices.ranges_for("me");
+    assert!(mine.detection && mine.main_battery, "the saved ranges are on the recording player's ship");
+    assert!(!mine.secondary_battery && !mine.torpedo, "and only those");
+    assert_eq!(choices.ranges_for("someone"), NO_RANGES, "nobody else's");
+    assert!(options.show_ship_config, "so the range layer is drawn");
+
+    choices.set_ranges_for("me", |filter| filter.torpedo = true, &mut options);
+    let saved =
+        defaults_to_save(&stored, &options, true, &ExportSettings::default(), own.map(|me| choices.ranges_for(&me)));
+    assert!(saved.show_self_torpedo_range, "what the ship shows is saved");
+    assert!(saved.show_self_detection_range);
+    assert!(!saved.show_self_radar_range);
+}
+
+/// A ship drawn at `x` along the top of the map.
+fn drawn_ship(entity: u32, player: &str, x: f32, is_self: bool) -> DrawCommand {
+    DrawCommand::Ship {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x, y: 0.0 },
+        yaw: 0.0,
+        species: None,
+        color: None,
+        visibility: ShipVisibility::Visible,
+        opacity: 1.0,
+        is_self,
+        player_name: Some(player.to_owned()),
+        ship_name: None,
+        is_detected_teammate: false,
+        is_disconnected: false,
+        name_color: None,
+    }
 }
 
 /// The bracket keys widen and narrow the nib, within the range the egui
@@ -436,20 +494,19 @@ fn a_batch_says_which_replay_it_has_reached() {
     assert_eq!(
         reached,
         vec![
-            BatchStep { done: 0, total: 2, replay: "first".to_owned() },
-            BatchStep { done: 1, total: 2, replay: "second".to_owned() },
+            BatchStep { done: 0, total: 2, replay: "first".to_owned(), frames: None },
+            BatchStep { done: 1, total: 2, replay: "second".to_owned(), frames: None },
         ],
         "each replay is named as the batch reaches it"
     );
 }
 
-/// A batch draws the reader's saved layers, less the two that would leave it
-/// worse off than the built-in set did.
+/// A batch draws the reader's saved layers, less the stats panel it cannot fill.
 #[test]
-fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
+fn a_batch_draws_the_saved_layers_without_the_panel_it_cannot_fill() {
     let saved = SavedRenderOptions {
         show_torpedoes: false,
-        // On in the egui renderer, which has what it takes to fill them.
+        // On in the egui renderer, which has what it takes to fill it.
         show_stats_panel: true,
         show_ship_config: true,
         show_dead_ships: false,
@@ -460,11 +517,52 @@ fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
     assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
     assert!(!show_dead_ships);
     assert!(!options.show_stats_panel, "the panel a bake cannot fill is left out");
-    assert!(!options.show_ship_config, "as are range circles nobody asked for per ship");
+    assert!(options.show_ship_config, "the saved range circles are filmed");
     assert!(
         should_draw_command(&DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
         "so the kill feed, which shares the panel's gutter, is still filmed"
     );
+}
+
+/// A batch with range circles saved on films every ship's, as the egui batch does, and one with
+/// them off films none.
+#[test]
+fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
+    let mut track = track(vec![0.0, 0.5]);
+    track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
+    track.frames[1] = vec![drawn_ship(2, "me", 20.0, true), range_circle(2, "me")];
+    let (on, show_dead_ships) = batch_options(&SavedRenderOptions { show_ship_config: true, ..Default::default() });
+
+    let layers = batch_layers(&on, show_dead_ships, &track);
+    assert!(layers.choices.ranges_for("someone").detection && layers.choices.ranges_for("me").detection);
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let circles = |frame: &[DrawCommand]| {
+        frame.iter().filter(|command| matches!(command, DrawCommand::ShipConfigCircle { .. })).count()
+    };
+    assert_eq!(circles(&frames[0]), 1, "the first ship's ranges are filmed");
+    assert_eq!(circles(frames.last().expect("a last frame")), 1, "and the second's");
+
+    let mut off_track = self::track(vec![0.0]);
+    off_track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
+    let (off, show_dead_ships) = batch_options(&SavedRenderOptions::default());
+    let layers = batch_layers(&off, show_dead_ships, &off_track);
+    let first = ExportFrames::new(Arc::new(off_track), true, layers).and_then(|mut frames| frames.next());
+    assert_eq!(first.map(|frame| circles(&frame)), Some(0), "none while they are saved off");
+}
+
+fn range_circle(entity: u32, player: &str) -> DrawCommand {
+    DrawCommand::ShipConfigCircle {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x: 10.0, y: 0.0 },
+        radius_px: 40.0,
+        color: [255, 255, 255],
+        alpha: 0.5,
+        dashed: true,
+        label: None,
+        kind: ShipConfigCircleKind::Detection,
+        player_name: player.to_owned(),
+        is_self: false,
+    }
 }
 
 /// A toggle changes what is drawn without re-baking: the commands are
@@ -623,17 +721,104 @@ fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for() {
     // Half-second frames: the battle starts forty seconds in, at frame 80.
     let mut track = track((0..200).map(|frame| frame as f32 * 0.5).collect());
     set_battle_window(&mut track, 40.0, Some(95.0));
-    let options = playback_options_hidden();
-    let choices = ShipChoices::new();
-    let mut settings = ExportSettings::default();
+    let track = Arc::new(track);
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
 
-    assert_eq!(track.frames.len(), 200);
-    assert_eq!(track.frames_to_export(false).len(), 120, "the eighty frames before the battle are cut");
-    assert_eq!(export_frames(&track, &settings, &options, true, &choices).len(), 120);
+    assert_eq!(track.export_start(false), FrameIndex::new(80), "the eighty frames before the battle are cut");
+    let battle = ExportFrames::new(Arc::clone(&track), false, layers()).expect("there are frames");
+    assert_eq!(battle.duration_seconds(), 59.5, "the video covers the battle");
 
-    settings.include_pre_battle = true;
-    assert_eq!(track.frames_to_export(true).len(), 200, "and kept when asked for");
-    assert_eq!(export_frames(&track, &settings, &options, true, &choices).len(), 200);
+    assert_eq!(track.export_start(true), FrameIndex::FIRST, "and kept when asked for");
+    let whole = ExportFrames::new(Arc::clone(&track), true, layers()).expect("there are frames");
+    assert_eq!(whole.duration_seconds(), 99.5, "the video covers the recording");
+}
+
+/// Every export is the same length at the same rate, however few frames the bake kept: a long
+/// battle's track is sampled more coarsely, and the time it covers is read off its own clocks.
+#[test]
+fn an_export_is_a_fixed_length_whatever_the_track_kept() {
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    // A twenty-minute battle decimated to a frame every two seconds.
+    let coarse = Arc::new(track((0..600).map(|frame| frame as f32 * 2.0).collect()));
+    let short = Arc::new(track((0..120).map(|frame| frame as f32 * 0.5).collect()));
+
+    let coarse = ExportFrames::new(coarse, true, layers()).expect("there are frames");
+    assert_eq!(coarse.duration_seconds(), 1198.0, "the time the track's clocks span");
+    assert_eq!(coarse.len(), EXPORT_FRAME_COUNT);
+    assert_eq!(coarse.count(), EXPORT_FRAME_COUNT, "every frame is written");
+
+    let short = ExportFrames::new(short, true, layers()).expect("there are frames");
+    assert_eq!(short.duration_seconds(), 59.5);
+    assert_eq!(short.count(), EXPORT_FRAME_COUNT, "a short battle is stretched to the same length");
+}
+
+/// A written frame between two baked ones has each ship part of the way along, with what is
+/// drawn at the ship moved with it.
+#[test]
+fn an_export_moves_ships_between_the_frames_the_bake_kept() {
+    let mut track = track(vec![0.0, 10.0]);
+    track.frames[0] = vec![drawn_ship(1, "me", 0.0, true), range_circle(1, "me")];
+    track.frames[1] = vec![drawn_ship(1, "me", 100.0, true), range_circle(1, "me")];
+    let mut choices = ShipChoices::new();
+    let mut options = playback_options_hidden();
+    choices.set_ranges_for("me", |filter| filter.detection = true, &mut options);
+    let layers = ExportLayers { options, show_dead_ships: true, choices, drawn_on: Vec::new() };
+
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let middle = &frames[EXPORT_FRAME_COUNT / 2];
+    let ship_x = middle.iter().find_map(|command| match command {
+        DrawCommand::Ship { pos, .. } => Some(pos.x),
+        _ => None,
+    });
+    let circle_x = middle.iter().find_map(|command| match command {
+        DrawCommand::ShipConfigCircle { pos, .. } => Some(pos.x),
+        _ => None,
+    });
+    let ship_x = ship_x.expect("the ship is drawn");
+    assert!((ship_x - 50.0).abs() < 1.0, "halfway along: {ship_x}");
+    assert!(circle_x.is_some_and(|x| (x - (ship_x + 10.0)).abs() < 1e-3), "its range moved with it: {circle_x:?}");
+}
+
+/// What is on screen is what is written: the trails asked for, and what was drawn over the
+/// battle.
+#[test]
+fn an_export_writes_the_trails_and_what_was_drawn_over_the_battle() {
+    let mut track = track(vec![0.0, 1.0, 2.0]);
+    for (frame, x) in [0.0, 10.0, 20.0].into_iter().enumerate() {
+        track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
+    }
+    let track = Arc::new(track);
+    let annotation = DrawCommand::Annotation {
+        shape: AnnotationShape::Circle { center: MinimapPos { x: 5.0, y: 5.0 }, radius: 3.0, filled: false },
+        color: [255, 0, 0, 255],
+        width: 2.0,
+    };
+    let layers = |show_trails: bool| ExportLayers {
+        options: RenderOptions { show_trails, ..playback_options_hidden() },
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: vec![annotation.clone()],
+    };
+    let last = |show_trails: bool| {
+        ExportFrames::new(Arc::clone(&track), true, layers(show_trails)).and_then(Iterator::last).expect("a last frame")
+    };
+    let has_trail =
+        |frame: &[DrawCommand]| frame.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. }));
+
+    let with_trails = last(true);
+    assert!(has_trail(&with_trails), "the trail is written");
+    assert!(with_trails.iter().any(|command| matches!(command, DrawCommand::Annotation { .. })), "and the drawing");
+    assert!(!has_trail(&last(false)), "no trail while trails are off");
 }
 
 /// A codec the GPU cannot encode falls back to software rather than failing

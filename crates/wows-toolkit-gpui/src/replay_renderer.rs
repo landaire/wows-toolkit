@@ -472,6 +472,7 @@ impl ReplayRendererPanel {
             space_size: 1400.0,
             version: wowsunpack::data::Version::base(99, 0, 0),
             space: String::new(),
+            video_stem: String::new(),
             map_origin: DEFAULT_MAP_ORIGIN,
         };
         Self::build(
@@ -1135,7 +1136,7 @@ impl ReplayRendererPanel {
     /// Writes what this viewport is showing back as what a viewport opens with.
     fn remember_defaults(&self, window: &mut Window, cx: &mut Context<Self>) {
         let stored = crate::render_defaults::defaults(cx);
-        let saved = defaults_to_save(&stored, &self.options, self.show_dead_ships, &self.export_settings);
+        let saved = defaults_to_save(&stored, &self.options, self.show_dead_ships, &self.export_settings, None);
 
         if crate::render_defaults::remember(saved, cx) {
             crate::toast::ok(t!("ui.renderer.settings.save_defaults_done").into_owned(), window, cx);
@@ -1392,11 +1393,18 @@ impl ReplayRendererPanel {
         let Some(renderer) = self.renderer.take() else { return };
 
         let settings = self.export_settings;
-        let frames = export::export_frames(&track, &settings, &self.options, self.show_dead_ships, &self.choices);
-        // What the video covers, which is not the whole track when the
-        // pre-battle phase is left out.
-        let duration = export::export_duration(frames.len());
+        let layers = export::ExportLayers {
+            options: self.options.clone(),
+            show_dead_ships: self.show_dead_ships,
+            choices: self.choices.clone(),
+            drawn_on: Vec::new(),
+        };
         let suggested = export::suggested_name(&self.title);
+        let Some(frames) = export::ExportFrames::new(track, settings.include_pre_battle, layers) else {
+            self.renderer = Some(renderer);
+            return;
+        };
+        let total = frames.len() as u64;
         // The clipboard needs a file, not a place to put one, so it is not
         // asked for.
         let asked: Option<_> = match target {
@@ -1409,7 +1417,7 @@ impl ReplayRendererPanel {
         };
 
         self.export_failure = None;
-        self.export = Some(ExportProgress { done: 0, total: frames.len() as u64, stage: ExportStage::Encoding });
+        self.export = Some(ExportProgress { done: 0, total, stage: ExportStage::Encoding });
         self.playback.stop();
         cx.notify();
 
@@ -1452,10 +1460,9 @@ impl ReplayRendererPanel {
                     // viewport that asked for it closes, since the file was
                     // asked for.
                     let cancel = AtomicBool::new(false);
-                    let outcome =
-                        export::encode_track(&renderer, &frames, duration, &written, settings, &cancel, |step| {
-                            let _ = progress_tx.unbounded_send(step);
-                        });
+                    let outcome = export::encode_track(&renderer, frames, &written, settings, &cancel, |step| {
+                        let _ = progress_tx.unbounded_send(step);
+                    });
                     (renderer, outcome)
                 })
                 .await;

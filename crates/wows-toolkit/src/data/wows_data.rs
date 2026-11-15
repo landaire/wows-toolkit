@@ -917,7 +917,7 @@ impl ReplayBytes {
 pub(crate) struct ReplayFileSnapshot {
     pub(crate) replay_file: ReplayFile,
     pub(crate) bytes: ReplayBytes,
-    pub(crate) identity: Option<crate::data::replay_reconcile::ReplayFileIdentity>,
+    pub(crate) identity: Option<wows_toolkit_config::upload_skips::ReplayFileIdentity>,
 }
 
 impl ReplayFileSnapshot {
@@ -927,7 +927,7 @@ impl ReplayFileSnapshot {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
             .map_err(|error| rootcause::report!(error).attach(format!("path: {}", path.display())))?;
-        let identity = Some(crate::data::replay_reconcile::ReplayFileIdentity::from_bytes(path, &bytes));
+        let identity = Some(wows_toolkit_config::upload_skips::ReplayFileIdentity::from_bytes(path, &bytes));
         let replay_file = ReplayFile::from_bytes(&bytes)
             .map_err(|error| error.into_dynamic().attach(format!("path: {}", path.display())))?;
         Ok(Self { replay_file, bytes: ReplayBytes(bytes), identity })

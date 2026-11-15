@@ -438,3 +438,17 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         DrawCommand::Annotation { .. } => true,
     }
 }
+
+/// Clears what the options in force hide of a drawn command, for the layers
+/// that are fields of another command rather than commands of their own.
+///
+/// Beside [`should_draw_command`] for the same reason: every app that
+/// rasterises a command stream hides the same things.
+pub fn hide_command_parts(cmd: &mut DrawCommand, opts: &RenderOptions) {
+    if !opts.show_score_timer
+        && let DrawCommand::ScoreBar { team0_timer, team1_timer, .. } = cmd
+    {
+        *team0_timer = None;
+        *team1_timer = None;
+    }
+}

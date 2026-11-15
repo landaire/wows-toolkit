@@ -12,6 +12,7 @@ mod layout;
 mod offer;
 pub mod panel;
 mod session_stats;
+mod sharing;
 pub mod table;
 #[cfg(test)]
 pub mod testing;
@@ -180,10 +181,11 @@ pub fn ReplaysTab() -> impl IntoView {
     let offer = GameDataOffer::new();
 
     load_personal_rating(workspace);
+    follow_personal_rating(workspace, control);
     layout::persist(workspace);
     follow_dock(workspace);
     follow_session(workspace);
-    follow_game_data(workspace, control, offer);
+    follow_game_data(workspace, control, offer, arrivals);
 
     let requests = RenderEffect::new(move |_| {
         for request in shell.take_replay_requests() {
@@ -326,6 +328,15 @@ fn load_personal_rating(workspace: ReplayWorkspace) {
     on_cleanup_local(move || drop(loading));
 }
 
+/// Hands the browser the rating table as it arrives, to rate the index rows stored without one.
+fn follow_personal_rating(workspace: ReplayWorkspace, control: BrowserControl) {
+    let handing = RenderEffect::new(move |_| {
+        let Some(table) = workspace.personal_rating.get() else { return };
+        control.adopt_personal_rating(table);
+    });
+    on_cleanup_local(move || drop(handing));
+}
+
 /// Lets go of closed tabs, and of viewports that moved into windows of their own.
 fn follow_dock(workspace: ReplayWorkspace) {
     let closing = RenderEffect::new(move |_| {
@@ -363,8 +374,9 @@ fn follow_session(workspace: ReplayWorkspace) {
 }
 
 /// Reads the open replays again when a build loads or a download the reader accepted lands, and
-/// lists the directories again for the latter.
-fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: GameDataOffer) {
+/// lists the directories again for the latter. Starts the sharing sweep once the settings and game
+/// data are both ready.
+fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: GameDataOffer, arrivals: Arrivals) {
     let services = workspace.services;
     let shell = workspace.shell;
     let arriving = RenderEffect::new(move |was_ready: Option<bool>| {
@@ -373,6 +385,12 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
             workspace.reparse_all(ReparseCause::GameDataArrived);
         }
         ready
+    });
+    let sweeping = RenderEffect::new(move |_| {
+        let settled = services.settings.read(|_| ()).is_some();
+        if settled && matches!(services.game_data.state(), GameDataState::Ready(_)) {
+            arrivals.sweep(workspace);
+        }
     });
     let downloading = RenderEffect::new(move |was_busy: Option<bool>| {
         let busy = shell.cache.busy();
@@ -389,6 +407,7 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
     });
     on_cleanup_local(move || {
         drop(arriving);
+        drop(sweeping);
         drop(downloading);
     });
 }

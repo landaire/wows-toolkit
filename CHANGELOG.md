@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Contribute battles whose results never arrive once the grace window lapses, and replays recorded while the app was closed
+- *(zgui)* Apply the saved self range filter when a renderer opens, and save it with the defaults
+- *(zgui)* Film saved range circles in batch exports and show each replay's encode progress
+- *(zgui)* Export every video at 60 seconds and 30 frames per second, moving ships between the frames the bake kept
+- *(zgui)* Write trails, annotations and placed ranges into exported videos
+- *(renderer)* Add speed trail, dead ship trail and score timer toggles
+- *(renderer)* Name exported videos by battle start, player, map and ship so they sort chronologically
+- *(zgui)* Flag players seen in the monitored Twitch chat around a battle in the replay panel
 - *(renderer)* Draw the camera direction as a translucent wedge that tapers from the ship icon's center to a point one icon length out, beneath every ship icon
 - *(zgui)* Generate a build's game constants from the installed client when GitHub has none for it, with the status bar and a notice saying when it runs and how it went
 - *(toolkit)* Add an "Anonymize player names" listing option that shows generated names and clan tags everywhere the app displays players, while exports keep the real ones
@@ -19,6 +27,9 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Rate replays indexed without a personal rating table once the table arrives
+- *(zgui)* Show a newly landed battle's personal rating and battle impact without a relist
+- *(zgui)* Stop treating every enemy icon as spotted in a playback merged with another team's recording
 - *(toolkit)* Keep replay export ship data attached after roster sorting
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
 - *(wows-query)* Direct total side armor questions to full citadel plate stacks

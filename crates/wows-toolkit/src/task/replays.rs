@@ -670,7 +670,7 @@ fn resolve_raw_upload_anchor(data: &BackgroundParserThread, path: &Path) -> Opti
 
 fn parse_outcome_for_upload(
     outcome: ShipBuildsUploadOutcome,
-    replay_identity: Option<crate::data::replay_reconcile::ReplayFileIdentity>,
+    replay_identity: Option<wows_toolkit_config::upload_skips::ReplayFileIdentity>,
 ) -> ParseOutcome {
     match outcome {
         ShipBuildsUploadOutcome::Skipped(crate::task::replay_upload::ReplayUploadSkipReason::IneligibleGameType) => {
@@ -754,7 +754,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
     crate::util::thread::spawn_logged("background-replay-parser", move || {
         // Built once so its arena cache and rate limiter survive across matches.
         let mut match_stats_client = crate::data::match_stats::MatchStatsClient::new(data.shipbuilds_client.clone());
-        let mut stable_upload_skips = crate::data::replay_reconcile::StableUploadSkips::default();
+        let mut stable_upload_skips = wows_toolkit_config::upload_skips::StableUploadSkips::default();
         // Raw uploads held back until end-of-battle results arrive; the value
         // is the mtime-anchored fallback instant. Rebuilt from file state every
         // launch, so it needs no persistence.
@@ -792,7 +792,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                 };
             if let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref()) {
                 data.unindexable = rt.block_on(crate::data::replay_reconcile::Unindexable::load(pool));
-                stable_upload_skips = rt.block_on(crate::data::replay_reconcile::StableUploadSkips::load(pool));
+                stable_upload_skips = rt.block_on(wows_toolkit_config::upload_skips::StableUploadSkips::load(pool));
             }
 
             // Try to see if we have any historical replays we can send
@@ -969,7 +969,7 @@ fn wait_until(deadline: RawUploadDeadline, now: jiff::Timestamp) -> Duration {
 fn process_replay_file(
     path: &Path,
     data: &mut BackgroundParserThread,
-    stable_upload_skips: &mut crate::data::replay_reconcile::StableUploadSkips,
+    stable_upload_skips: &mut wows_toolkit_config::upload_skips::StableUploadSkips,
     pending_raw_uploads: &mut HashMap<PathBuf, RawUploadDeadline>,
 ) {
     // Cleared before the guards so no early return can leave a lapsed

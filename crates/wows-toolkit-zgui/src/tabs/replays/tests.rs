@@ -14,7 +14,10 @@ use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_replays::types::AccountId;
+use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::sample::sample_model;
+use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -24,6 +27,7 @@ use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 use super::BUILT;
+use super::arrivals::Arrivals;
 use super::layout;
 use super::workspace::Docked;
 use super::workspace::OpenTarget;
@@ -551,6 +555,28 @@ fn the_anonymize_box_swaps_the_tables_names_for_pseudonyms() {
     assert!(names.iter().any(|text| text == "Ally_Alpha"), "and the real names return: {names:?}");
 }
 
+/// A login seen in the monitored channel's chat around the battle flags the player it names.
+#[test]
+fn a_player_seen_in_twitch_chat_gets_the_chip() {
+    let (mut window, workspace) = open();
+    let services = workspace.services;
+    let runtime = services.runtime().expect("the runtime is up");
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    let settings = runtime.block_on(StartupSettings::load(&pool));
+    services.settings.adopt(settings, pool.clone());
+    let model = sample_model();
+    let seen_at = model.timestamp.as_second() + 60;
+    runtime
+        .block_on(query::record_twitch_observations(&pool, &[("ally_alpha".to_string(), seen_at)]))
+        .expect("the observation is written");
+
+    super::panel::tests::seed_next_panel(model);
+    workspace.open(PathBuf::from("battle.wowsreplay"), OpenTarget::ShowingTab);
+    settle_in_real_time(&mut window);
+
+    assert!(window.by_test_id("player-twitch").is_some(), "the row seen in chat carries the chip");
+}
+
 /// The tab empty, with a replay open, and playing it back, in both themes, for review. Reads the
 /// install named by `WT_WOWS_DIR` and the replay named by `WT_REPLAY`.
 #[test]
@@ -594,4 +620,47 @@ fn the_replays_tab_renders_in_dark_and_light() {
         workspace.remove(&Docked::Replay(replay.clone()));
         settle_in_real_time(&mut window);
     }
+}
+
+/// A battle held for its results is read again when its grace lapses, and not before.
+#[test]
+fn a_battle_held_for_its_results_is_read_again_when_its_grace_lapses() {
+    let (mut window, workspace) = open();
+    let arrivals = workspace.under_tab(Arrivals::new);
+    let path = PathBuf::from("held.wowsreplay");
+    let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
+
+    arrivals.hold(workspace, path.clone(), deadline);
+    window.advance(Duration::from_secs(30));
+    assert!(arrivals.holds(&path), "the battle is held until its deadline");
+    window.advance(Duration::from_secs(40));
+    assert!(!arrivals.holds(&path), "the battle is read again once its grace lapses");
+}
+
+/// A newer write of a held battle is read at once, and the hold for the older one is dropped.
+#[test]
+fn a_rewrite_of_a_held_battle_releases_its_hold() {
+    let (mut window, workspace) = open();
+    let arrivals = workspace.under_tab(Arrivals::new);
+    let path = PathBuf::from("rewritten.wowsreplay");
+    let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
+
+    arrivals.hold(workspace, path.clone(), deadline);
+    window.advance(Duration::from_millis(32));
+    assert!(arrivals.holds(&path));
+    arrivals.changed(workspace, path.clone());
+    assert!(!arrivals.holds(&path), "the rewrite is read now rather than at the old deadline");
+}
+
+/// Two reads of one replay never run at once, so both cannot find it unsent and send it twice.
+#[test]
+fn a_replay_being_read_for_sharing_is_not_read_again_until_that_read_ends() {
+    let (_window, workspace) = open();
+    let arrivals = workspace.under_tab(Arrivals::new);
+    let path = PathBuf::from("busy.wowsreplay");
+
+    assert!(arrivals.begin(&path));
+    assert!(!arrivals.begin(&path), "a second read waits for the first");
+    arrivals.finish(workspace, &path);
+    assert!(arrivals.begin(&path), "and may start once the first has ended");
 }
