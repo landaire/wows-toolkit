@@ -132,15 +132,20 @@ fn raw_results(report: &BattleReport) -> Result<Value, BattleResultsError> {
 }
 
 /// Compute and fill in each player's `personal_rating` from a single battle's
-/// worth of `ShipBattleStats`. Skipped for players with no server results (no
-/// `damage` key), matching the toolkit's actual-damage gate. `report`'s
-/// players are positional with `normalized.players` (both built from the same
-/// `report.players()` iteration order).
+/// worth of `ShipBattleStats`. Skipped for an unrated battle, and for players
+/// with no server results (no `damage` key), matching the toolkit's
+/// actual-damage gate. `report`'s players are positional with
+/// `normalized.players` (both built from the same `report.players()`
+/// iteration order).
 fn populate_personal_ratings(
     normalized: &mut NormalizedBattleReport,
     report: &BattleReport,
     pr_data: &PersonalRatingData,
 ) {
+    if !normalized.metadata.rating_scope().is_rated() {
+        return;
+    }
+
     let battle_result = normalized.metadata.battle_result;
     for (player, entity_player) in normalized.players.iter_mut().zip(report.players().iter()) {
         let Some(sr) = player.server_results.as_ref() else {

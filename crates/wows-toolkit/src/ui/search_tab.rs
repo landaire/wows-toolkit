@@ -718,7 +718,9 @@ impl ResultsTable<'_> {
                 ui.label(hit.self_kills.map(|k| k.to_string()).unwrap_or_default());
             }
             ResultColumn::Pr => {
-                if let Some(pr) = hit.self_pr {
+                if !hit.rating_scope().is_rated() {
+                    ui.label("-").on_hover_text(t!("ui.personal_rating.unrated_hover"));
+                } else if let Some(pr) = hit.self_pr {
                     pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
                 }
             }
@@ -1389,7 +1391,7 @@ mod tests {
             map: "spaces/13_OC_new_dawn".into(),
             game_mode: "Domination".into(),
             game_mode_id: None,
-            game_type: "pvp".into(),
+            game_type: "RandomBattle".into(),
             match_group: "pvp".into(),
             version_build: Some(11_189_791),
             source_id: crate::db::index::rows::SourceId(1),
@@ -1570,7 +1572,7 @@ mod tests {
                 map: "spaces/13_OC_new_dawn".into(),
                 game_mode: "Domination".into(),
                 game_mode_id,
-                game_type: "pvp".into(),
+                game_type: "RandomBattle".into(),
                 match_group: "pvp".into(),
                 version_build: Some(1234),
             };

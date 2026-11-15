@@ -508,6 +508,9 @@ distance_traveled = "Distancia recorrida"
 skills = "Habilidades"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "El rating personal solo se aplica a batallas aleatorias y clasificatorias."
+
 [ui.replay.filter]
 raw_xp = "XP bruto"
 entity_id = "ID de entidad"

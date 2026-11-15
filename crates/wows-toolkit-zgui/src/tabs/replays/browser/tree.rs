@@ -7,7 +7,6 @@ use std::path::PathBuf;
 
 use landaire_ui::TreeModel;
 use wows_core::pseudonym::NameDisplay;
-use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -20,6 +19,7 @@ use wows_toolkit_replay_data::replay_dir::UnreadableReplay;
 use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::hover_facts;
+use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 /// A group row, by its place under its parent and its label. A rebuild that keeps a group's label
@@ -64,8 +64,9 @@ pub struct LeafRow {
     pub outcome: MatchOutcome,
     pub in_division: bool,
     pub hover: Vec<HoverFact>,
-    /// The reader's rating in the battle, once the index has scored it.
-    pub personal_rating: Option<PersonalRatingResult>,
+    /// The reader's rating in the battle, once the index has scored it, or
+    /// that the battle is unrated.
+    pub personal_rating: Option<BattleRating>,
 }
 
 /// What a row for a replay that could not be read draws.
@@ -146,8 +147,10 @@ impl BrowserTree {
                     (NodeKey::Group(group), Some((children, id)))
                 }
                 BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division } => {
-                    let personal_rating =
-                        inputs.summaries.get(&path).and_then(|summary| summary.self_pr).map(PersonalRatingResult::new);
+                    let personal_rating = inputs
+                        .summaries
+                        .get(&path)
+                        .and_then(|summary| BattleRating::from_stored(summary.rating_scope, summary.self_pr));
                     let leaf = LeafRow {
                         label,
                         battle,

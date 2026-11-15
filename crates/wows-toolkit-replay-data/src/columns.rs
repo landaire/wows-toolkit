@@ -493,6 +493,9 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 cell
             }
         }
+        ReplayColumn::PersonalRating if !row.rating_scope.is_rated() => {
+            CellValue::plain(DASH).with_hover(t!("ui.personal_rating.unrated_hover").into_owned())
+        }
         ReplayColumn::PersonalRating => match row.personal_rating.as_ref() {
             Some(pr) => CellValue::colored(format!("{:.0}", pr.pr), ColorRole::PrTier(pr.category))
                 .with_hover(pr.category.name()),
@@ -623,6 +626,7 @@ fn markdown_cell(text: &str) -> String {
 mod tests {
     use wows_replay_insights::personal_rating::PersonalRatingResult;
     use wows_replays::types::Relation;
+    use wowsunpack::rating_scope::RatingScope;
 
     use super::*;
     use crate::test_support::base_row;
@@ -802,6 +806,16 @@ mod tests {
         let cell = cell_value(&row, ReplayColumn::PersonalRating, false);
         assert_eq!(cell.text, "-");
         assert_eq!(cell.color, None);
+        assert_eq!(cell.hover, None);
+    }
+
+    #[test]
+    fn cell_value_personal_rating_in_an_unrated_battle_explains_the_dash() {
+        let row = PlayerRow { rating_scope: RatingScope::Unrated, ..base_row(1, Relation::new(0), true) };
+        let cell = cell_value(&row, ReplayColumn::PersonalRating, false);
+        assert_eq!(cell.text, "-");
+        assert_eq!(cell.color, None);
+        assert_eq!(cell.hover.as_deref(), Some("Personal rating applies only to Random and Ranked battles."));
     }
 
     /// A stored arrangement from another version: a column it names that no

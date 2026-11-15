@@ -534,6 +534,9 @@ distance_traveled = "이동 거리"
 skills = "기술"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "개인 평점은 랜덤 전투와 랭크 전투에만 적용됩니다."
+
 [ui.replay.filter]
 raw_xp = "Raw XP"
 entity_id = "Entity ID"

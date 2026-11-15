@@ -2765,7 +2765,7 @@ mod tests {
             map: "Ocean".into(),
             game_mode: "Domination".into(),
             game_mode_id: None,
-            game_type: "pvp".into(),
+            game_type: "RandomBattle".into(),
             match_group: "pvp".into(),
             version_build: Some(100),
         };

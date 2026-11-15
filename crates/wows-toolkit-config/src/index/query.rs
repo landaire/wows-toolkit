@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
+use wows_core::rating_scope::RatingScope;
 
 use super::query_ast::MatchExpr;
 use super::query_sql::CompileCtx;
@@ -42,6 +43,7 @@ use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::VehicleRelation;
+use super::rows::stored_rating_scope;
 
 /// Indexer revision stamped on every replay row a build of the toolkit writes.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -822,10 +824,10 @@ pub async fn row_summaries_for_source(
 ) -> Result<HashMap<PathBuf, RowSummary>, IndexError> {
     let rows = sqlx::query(
         "SELECT r.replay_path, r.outcome, r.self_damage, r.self_kills, r.self_survived, r.self_pr, \
-                r.results_available, r.file_mtime, \
+                r.results_available, r.file_mtime, m.game_type, m.match_group, \
                 (SELECT v.division_id FROM indexed_vehicle v \
                    WHERE v.arena_id = r.arena_id AND v.account_id = r.self_account_id LIMIT 1) AS division_id \
-         FROM replay_record r WHERE r.source_id = ?1",
+         FROM replay_record r JOIN indexed_match m ON m.arena_id = r.arena_id WHERE r.source_id = ?1",
     )
     .bind(source.0)
     .fetch_all(pool)
@@ -883,6 +885,7 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         self_kills: row.try_get("self_kills")?,
         self_survived: row.try_get::<Option<bool>, _>("self_survived")?,
         self_pr: row.try_get("self_pr")?,
+        rating_scope: row_rating_scope(row)?,
         division_id: row.try_get("division_id")?,
         division_mates: Vec::new(),
         results_available: row.try_get("results_available")?,
@@ -1693,6 +1696,7 @@ pub async fn search_by_ast(
 ///
 /// A row with no damage recorded is not a gap: the indexing path skips those
 /// too, and a rating computed from an absent damage figure would be a fiction.
+/// Nor is a row of a battle no rating applies to.
 /// `is_win` comes from the record's own outcome for a record gap. A roster row
 /// is per-arena and has no record of its own, so it takes the outcome of the
 /// arena's record under this query's own picker: `file_mtime IS NOT NULL` then
@@ -1704,13 +1708,16 @@ pub async fn pr_gaps(pool: &SqlitePool) -> Result<Vec<PrGap>, IndexError> {
     let mut gaps = Vec::new();
 
     let record_rows = sqlx::query(
-        "SELECT record_id, self_ship_id, self_damage, self_kills, outcome \
-         FROM replay_record \
-         WHERE self_pr IS NULL AND self_ship_id IS NOT NULL AND self_damage IS NOT NULL",
+        "SELECT r.record_id, r.self_ship_id, r.self_damage, r.self_kills, r.outcome, m.game_type, m.match_group \
+         FROM replay_record r JOIN indexed_match m ON m.arena_id = r.arena_id \
+         WHERE r.self_pr IS NULL AND r.self_ship_id IS NOT NULL AND r.self_damage IS NOT NULL",
     )
     .fetch_all(pool)
     .await?;
     for row in &record_rows {
+        if !row_rating_scope(row)?.is_rated() {
+            continue;
+        }
         let damage: i64 = row.try_get("self_damage")?;
         let Ok(damage) = u64::try_from(damage) else {
             continue;
@@ -1728,15 +1735,18 @@ pub async fn pr_gaps(pool: &SqlitePool) -> Result<Vec<PrGap>, IndexError> {
     }
 
     let vehicle_rows = sqlx::query(
-        "SELECT v.arena_id, v.account_id, v.ship_id, v.damage, v.kills, \
+        "SELECT v.arena_id, v.account_id, v.ship_id, v.damage, v.kills, m.game_type, m.match_group, \
                 (SELECT rr.outcome FROM replay_record rr WHERE rr.arena_id = v.arena_id \
                    ORDER BY (rr.file_mtime IS NOT NULL) DESC, rr.indexed_at DESC LIMIT 1) AS outcome \
-         FROM indexed_vehicle v \
+         FROM indexed_vehicle v JOIN indexed_match m ON m.arena_id = v.arena_id \
          WHERE v.pr IS NULL AND v.damage IS NOT NULL",
     )
     .fetch_all(pool)
     .await?;
     for row in &vehicle_rows {
+        if !row_rating_scope(row)?.is_rated() {
+            continue;
+        }
         let damage: i64 = row.try_get("damage")?;
         let Ok(damage) = u64::try_from(damage) else {
             continue;
@@ -1759,6 +1769,14 @@ pub async fn pr_gaps(pool: &SqlitePool) -> Result<Vec<PrGap>, IndexError> {
     }
 
     Ok(gaps)
+}
+
+/// The rating scope of a row that selects `m.game_type` and `m.match_group`.
+fn row_rating_scope(row: &sqlx::sqlite::SqliteRow) -> Result<RatingScope, IndexError> {
+    let game_type: String = row.try_get("game_type")?;
+    let match_group: String = row.try_get("match_group")?;
+
+    Ok(stored_rating_scope(&game_type, &match_group))
 }
 
 /// Write computed ratings into the rows they were computed for, returning how

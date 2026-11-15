@@ -44,6 +44,7 @@ use wows_toolkit_viewmodel::search::game_mode_gap_applies;
 use wows_toolkit_viewmodel::search::ship_display_name;
 use wows_toolkit_viewmodel::search_results::RESULT_LIMIT;
 use wows_toolkit_viewmodel::search_results::ResultColumn;
+use wows_toolkit_viewmodel::search_results::cell_hover;
 use wows_toolkit_viewmodel::search_results::cell_text;
 use wows_toolkit_viewmodel::search_results::game_mode_gap_hint;
 use zgui::component;
@@ -498,22 +499,32 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
         .into_iter()
         .map(|column| {
             GridColumn::new(column_id(column), column.label(), move |row: &ResultRow| {
-                let (text, outcome, rating) = match column {
+                let (text, outcome, rating, hover) = match column {
                     ResultColumn::Sortable(sortable) => (
                         cell_text(&row.hit, sortable),
                         (sortable == SortColumn::Outcome).then(|| outcome_tone(row.hit.outcome)).flatten(),
                         (sortable == SortColumn::Pr)
                             .then(|| row.hit.self_pr.map(|pr| rating_band_name(PersonalRatingCategory::from_pr(pr))))
                             .flatten(),
+                        cell_hover(&row.hit, sortable),
                     ),
-                    ResultColumn::Ship => (row.ship.clone(), None, None),
+                    ResultColumn::Ship => (row.ship.clone(), None, None, None),
                 };
-                view! {
+                let cell = AnyView::new(view! {
                     text(
                         class = "wt-search-cell",
                         attr:data-outcome = outcome.map(str::to_owned),
                         style:color = rating.map(|band| format!("var(--wt-pr-{band}-text)"))
                     ) {{text}}
+                });
+                match hover {
+                    Some(hover) => AnyView::new(view! {
+                        Tooltip {
+                            TooltipTrigger {{cell}}
+                            TooltipContent {{hover.clone()}}
+                        }
+                    }),
+                    None => cell,
                 }
             })
             .text(move |row: &ResultRow| match column {

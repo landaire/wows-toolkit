@@ -33,7 +33,9 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::ParamData;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::BattleType;
 use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::rating_scope::RatingScope;
 use wowsunpack::recognized::Recognized;
 
 use crate::personal_rating::PersonalRatingResult;
@@ -67,6 +69,11 @@ impl MatchMetadata {
     /// self team.
     pub fn resolved_battle_result(&self) -> Option<BattleResult> {
         self.battle_result.or(self.results_battle_result)
+    }
+
+    /// Whether a performance rating applies to this battle.
+    pub fn rating_scope(&self) -> RatingScope {
+        RatingScope::of_battle(&BattleType::from_value(&self.game_type, self.version), &self.match_group)
     }
 }
 
@@ -265,7 +272,8 @@ impl NormalizedPlayer {
 }
 
 impl NormalizedBattleReport {
-    /// Rates every player against `table`, from this battle alone.
+    /// Rates every player against `table`, from this battle alone. An
+    /// unrated battle is left without ratings.
     ///
     /// Written into the report itself rather than into each front end's rows,
     /// so the table, the badge and the export all read one value. A player
@@ -273,6 +281,10 @@ impl NormalizedBattleReport {
     /// alone: a rating computed from an unknown damage would be a real number
     /// standing for nothing.
     pub fn populate_personal_ratings(&mut self, table: &crate::personal_rating::PersonalRatingData) {
+        if !self.metadata.rating_scope().is_rated() {
+            return;
+        }
+
         let is_win = matches!(self.metadata.resolved_battle_result(), Some(BattleResult::Win(_)));
 
         for player in &mut self.players {

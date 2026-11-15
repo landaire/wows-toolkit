@@ -534,6 +534,9 @@ distance_traveled = "航行距離"
 skills = "技能"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "個人評分僅適用於隨機戰與排位戰。"
+
 [ui.replay.filter]
 raw_xp = "原始 XP"
 entity_id = "實體 ID"

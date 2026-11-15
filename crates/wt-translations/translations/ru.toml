@@ -508,6 +508,9 @@ distance_traveled = "Пройденное расстояние"
 skills = "Навыки"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "Персональный рейтинг учитывается только в случайных и ранговых боях."
+
 [ui.replay.filter]
 raw_xp = "Чистый XP"
 entity_id = "ID сущности"

@@ -693,6 +693,9 @@ distance_traveled = "Distance Traveled"
 skills = "Skills"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "Personal rating applies only to Random and Ranked battles."
+
 [ui.replay.filter]
 raw_xp = "Raw XP"
 entity_id = "Entity ID"

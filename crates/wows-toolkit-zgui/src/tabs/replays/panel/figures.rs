@@ -3,11 +3,15 @@
 
 use landaire_ui::CountFormat;
 use landaire_ui::CountUpProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
+use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use zgui::component;
 use zgui::view;
 use zgui::view::AnyView;
@@ -72,9 +76,10 @@ fn tier_color(category: PersonalRatingCategory) -> String {
 }
 
 /// The recording player's figures and Personal Rating as tiles, counted up from nothing when
-/// `counting`. A figure the replay does not carry has no tile.
+/// `counting`. A figure the replay does not carry has no tile; an unrated battle's rating tile
+/// says so.
 #[component]
-pub fn StatTiles(own: Option<OwnFigures>, rating: Option<PersonalRatingResult>, counting: bool) -> impl IntoView {
+pub fn StatTiles(own: Option<OwnFigures>, rating: Option<BattleRating>, counting: bool) -> impl IntoView {
     let from = counting.then_some(0.0);
     let mut tiles: Vec<AnyView> = Vec::new();
     let figures = own.map(|own| {
@@ -98,22 +103,42 @@ pub fn StatTiles(own: Option<OwnFigures>, rating: Option<PersonalRatingResult>, 
         }));
     }
 
-    if let Some(rating) = rating {
-        let label = format!("{} - {}", t!("ui.replay.column.personal_rating"), rating.category.name());
-        let said = personal_rating_label(&rating);
-        let color = tier_color(rating.category);
-        tiles.push(AnyView::new(view! {
-            column(class = "wt-rp-tile", attr:data-testid = PR_TILE_ID, a11y:label = said) {
-                text(class = "wt-rp-tile__label") {{label}}
-                CountUp(
-                    value = rating.pr,
-                    from = from,
-                    format = CountFormat::decimal(0),
-                    class = "wt-rp-tile__value",
-                    style:color = color
-                )
-            }
-        }));
+    match rating {
+        Some(BattleRating::Rated(rating)) => {
+            let label = format!("{} - {}", t!("ui.replay.column.personal_rating"), rating.category.name());
+            let said = personal_rating_label(&rating);
+            let color = tier_color(rating.category);
+            tiles.push(AnyView::new(view! {
+                column(class = "wt-rp-tile", attr:data-testid = PR_TILE_ID, a11y:label = said) {
+                    text(class = "wt-rp-tile__label") {{label}}
+                    CountUp(
+                        value = rating.pr,
+                        from = from,
+                        format = CountFormat::decimal(0),
+                        class = "wt-rp-tile__value",
+                        style:color = color
+                    )
+                }
+            }));
+        }
+        Some(BattleRating::Unrated) => {
+            let label = t!("ui.replay.column.personal_rating").into_owned();
+            let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+            let said = hover.clone();
+            tiles.push(AnyView::new(view! {
+                Tooltip {
+                    TooltipTrigger {
+                        column(class = "wt-rp-tile", attr:data-testid = PR_TILE_ID, a11y:label = said) {
+                            text(class = "wt-rp-tile__label") {{label}}
+                            text(class = "wt-rp-tile__value") {"-"}
+                        }
+                    }
+                    TooltipContent {{hover.clone()}}
+                }
+            }));
+        }
+        // A rated battle without a rating has no tile, as any absent figure.
+        None => {}
     }
 
     tiles

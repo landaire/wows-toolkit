@@ -17,6 +17,9 @@ use landaire_ui::MenuItems;
 use landaire_ui::MenuSelection;
 use landaire_ui::RowHeight;
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use landaire_ui::TreeDepth;
 use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
@@ -29,6 +32,7 @@ use wows_toolkit_replay_data::force_reindex::Confirm;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::listing_row::LineGlyph;
 use wows_toolkit_viewmodel::listing_row::LinePart;
+use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::chip_hue;
 use wows_toolkit_viewmodel::personal_rating::chip_text;
@@ -90,6 +94,9 @@ use crate::tabs::replays::browser::tree::NodeKey;
 use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-replay-listing";
+
+/// The dash a leaf shows in place of a rating for a battle no rating applies to.
+pub const UNRATED_LEAF_ID: &str = "replay-row-unrated";
 
 // The row is the theme's font size (12.5px) times 2.8, as the other front end draws it: the
 // identity line, the smaller stats line under it, and a little space around both. The
@@ -462,12 +469,31 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         Some(Thumbnail::Loading) | None => AnyView::new(view! { box(class = "wt-row__thumb") }),
     };
     let division = leaf.in_division.then(|| view! { AppIcon(glyph = Glyph::Users, class = "wt-row__division") });
-    let rating = leaf.personal_rating.map(|rating| {
-        let said = format!("{:.0}", rating.pr);
-        let style = rating_style(rating.category);
-        view! {
-            box(class = "wt-row__spacer")
-            text(class = format!("wt-row__pr {TABULAR_CLASS}"), style = style, a11y:label = said.clone()) {{said.clone()}}
+    let rating = leaf.personal_rating.map(|rating| match rating {
+        BattleRating::Rated(rating) => {
+            let said = format!("{:.0}", rating.pr);
+            let style = rating_style(rating.category);
+            AnyView::new(view! {
+                box(class = "wt-row__spacer")
+                text(class = format!("wt-row__pr {TABULAR_CLASS}"), style = style, a11y:label = said.clone()) {{said.clone()}}
+            })
+        }
+        BattleRating::Unrated => {
+            let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+            let said = hover.clone();
+            AnyView::new(view! {
+                box(class = "wt-row__spacer")
+                Tooltip {
+                    TooltipTrigger {
+                        text(
+                            class = format!("wt-row__pr {TABULAR_CLASS}"),
+                            attr:data-testid = UNRATED_LEAF_ID,
+                            a11y:label = said
+                        ) {"-"}
+                    }
+                    TooltipContent {{hover.clone()}}
+                }
+            })
         }
     });
     let stats: Vec<AnyView> = leaf

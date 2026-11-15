@@ -508,6 +508,9 @@ distance_traveled = "Ujetá vzdálenost"
 skills = "Dovednosti"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "Osobní hodnocení se vztahuje pouze na náhodné a hodnocené bitvy."
+
 [ui.replay.filter]
 raw_xp = "Hrubé XP"
 entity_id = "ID entity"

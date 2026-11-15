@@ -534,6 +534,9 @@ distance_traveled = "移動距離"
 skills = "スキル"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "パーソナルレーティングはランダム戦とランク戦にのみ適用されます。"
+
 [ui.replay.filter]
 raw_xp = "生 XP"
 entity_id = "エンティティ ID"

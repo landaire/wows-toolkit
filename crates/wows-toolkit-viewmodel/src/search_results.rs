@@ -87,7 +87,16 @@ pub fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
         // Grouped: a six-figure damage number is unreadable as a bare run of digits.
         SortColumn::Damage => hit.self_damage.map(|d| separate_number(d, None)).unwrap_or_else(|| "-".into()),
         SortColumn::Kills => hit.self_kills.map(|k| k.to_string()).unwrap_or_else(|| "-".into()),
+        SortColumn::Pr if !hit.rating_scope().is_rated() => "-".into(),
         SortColumn::Pr => hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".into()),
+    }
+}
+
+/// The hover a hit's cell carries, where the cell needs explaining.
+pub fn cell_hover(hit: &MatchHit, column: SortColumn) -> Option<String> {
+    match column {
+        SortColumn::Pr if !hit.rating_scope().is_rated() => Some(t!("ui.personal_rating.unrated_hover").into_owned()),
+        _ => None,
     }
 }
 

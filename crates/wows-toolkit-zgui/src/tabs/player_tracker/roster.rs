@@ -14,6 +14,7 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
+use wows_core::rating_scope::RatingScope;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_dir::scan_replay_files;
@@ -135,6 +136,8 @@ struct RosterContext {
     mode: WinRateMode,
     class_icons: HashMap<ClassIconKey, ImageBytes>,
     names: NameDisplay,
+    /// Whether the match is one the ratings are shown for.
+    rating_scope: RatingScope,
 }
 
 impl RosterContext {
@@ -374,6 +377,7 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             mode: model.win_rate_mode.get(),
             class_icons: live.class_icons.get(),
             names: model.names.get(),
+            rating_scope: roster.rating_scope,
         };
         Some(
             view! {
@@ -429,7 +433,12 @@ fn TeamColumn(
     // The averages are the shared ones, over the selected scope that also colours the rows, so the
     // heading and the rows under it cannot disagree. A team nobody has stats for shows no average.
     let win_rate = context.stats.as_ref().and_then(|stats| team_average_win_rate(&rows, stats, context.mode));
-    let rating = context.stats.as_ref().and_then(|stats| team_average_personal_rating(&rows, stats, context.mode));
+    let rating = context
+        .stats
+        .as_ref()
+        .and_then(|stats| team_average_personal_rating(&rows, stats, context.mode, context.rating_scope));
+    let unrated = (!context.rating_scope.is_rated())
+        .then(|| unrated_text(format!("{}: -", t!("stat.avg_pr")), format!("tracker-team-{side}-avg-pr-unrated")));
     let players = t!("ui.player_tracker.team_players", count = rows.len()).into_owned();
 
     let mut headings = vec![
@@ -469,6 +478,7 @@ fn TeamColumn(
                         {format!("{}: {pr:.0}", t!("stat.avg_pr"))}
                     }
                 }.into_view())}
+                {unrated.map(IntoView::into_view)}
             }
             row(class = "wt-tracker-team__header") {
                 box(class = "wt-tracker-roster-col--class")
@@ -507,9 +517,9 @@ fn RosterRow(
     let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
     let both_scopes = win_rate_hover(player, None);
     // The selected scope's band, far fainter than a chip, so a screen of rows reads as bands first.
-    let band = row_stats(player, context.mode).band.map(rating_band_name);
+    let band = row_stats(player, context.mode, context.rating_scope).band.map(rating_band_name);
     let detailed = context.is_detailed();
-    let cells = stat_columns(side, index, player, status, pending, &context.modes(), both_scopes);
+    let cells = stat_columns(side, index, player, status, pending, &context, both_scopes);
 
     // How often this player has been met, counted the way the tables count.
     let tracked = row.tracked.and_then(|account| context.met.get(&account));
@@ -755,21 +765,22 @@ fn ship_cell(side: &'static str, index: usize, row: &LiveRosterRow, detailed: bo
     })
 }
 
-/// The four stat columns, each with one line per scope in `modes`: the selected scope alone in
-/// Compact, Overall over Ship in Detailed.
+/// The four stat columns, each with one line per scope in the context's modes: the selected scope
+/// alone in Compact, Overall over Ship in Detailed.
 fn stat_columns(
     side: &'static str,
     index: usize,
     player: Option<&PlayerStatsOut>,
     status: PlayerStatsStatus,
     pending: bool,
-    modes: &[WinRateMode],
+    context: &RosterContext,
     both_scopes: Option<String>,
 ) -> Vec<AnyView> {
     let mut columns: [Vec<AnyView>; 4] = Default::default();
-    for mode in modes {
-        let id = format!("tracker-roster-{side}-{index}-status-{}", *mode as usize);
-        let lines = scope_lines(id, row_stats(player, *mode), status, pending, *mode, both_scopes.clone());
+    for mode in context.modes() {
+        let id = format!("tracker-roster-{side}-{index}-status-{}", mode as usize);
+        let stats = row_stats(player, mode, context.rating_scope);
+        let lines = scope_lines(id, stats, status, pending, mode, context.rating_scope, both_scopes.clone());
         for (column, line) in columns.iter_mut().zip(lines) {
             column.push(AnyView::new(view! { row(class = "wt-tracker-roster-line") { {line} } }));
         }
@@ -790,6 +801,7 @@ fn scope_lines(
     status: PlayerStatsStatus,
     pending: bool,
     mode: WinRateMode,
+    rating_scope: RatingScope,
     both_scopes: Option<String>,
 ) -> [AnyView; 4] {
     // A hidden profile, a service with nothing, and a service out of reach are three answers.
@@ -809,7 +821,12 @@ fn scope_lines(
                 TooltipContent {{hover.get_value()}}
             }
         });
-        return [icon, stat_line(None, false), stat_line(None, false), stat_line(None, false)];
+        let rating = if rating_scope.is_rated() {
+            stat_line(None, false)
+        } else {
+            unrated_text("-".to_owned(), format!("{id}-pr-unrated"))
+        };
+        return [icon, rating, stat_line(None, false), stat_line(None, false)];
     }
 
     let win_rate = stat_text(stats.win_rate.map(|rate| format!("{rate:.1}%")), pending);
@@ -826,6 +843,8 @@ fn scope_lines(
     };
 
     let rating = match stats.pr {
+        // The ratings are career figures, shown only where the match itself is rated.
+        None if !rating_scope.is_rated() => unrated_text("-".to_owned(), format!("{id}-pr-unrated")),
         Some(pr) => {
             let band = rating_band_name(PersonalRatingCategory::from_pr(pr));
             let id = StoredValue::new(format!("{id}-pr"));
@@ -860,4 +879,19 @@ fn scope_lines(
         stat_line(stats.avg_damage.map(|damage| separate_number(damage, None)), pending),
         stat_line(stats.battles.map(|battles| separate_number(battles, None)), pending),
     ]
+}
+
+/// `text` in place of a rating in a match no rating applies to, with the reason as its hover.
+fn unrated_text(text: String, test_id: String) -> AnyView {
+    let hover = StoredValue::new(t!("ui.personal_rating.unrated_hover").into_owned());
+    let test_id = StoredValue::new(test_id);
+
+    AnyView::new(view! {
+        Tooltip {
+            TooltipTrigger(class = "wt-tracker-small wt-tracker-dim") {
+                text(attr:data-testid = test_id.get_value(), a11y:label = hover.get_value()) {{text}}
+            }
+            TooltipContent {{hover.get_value()}}
+        }
+    })
 }

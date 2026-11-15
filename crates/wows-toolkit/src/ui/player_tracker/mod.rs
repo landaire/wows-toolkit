@@ -570,7 +570,12 @@ mod tests {
     }
 
     fn live_match_at(started_at: Timestamp) -> LiveMatch {
-        LiveMatch { started_at, build: None, players: Vec::new() }
+        LiveMatch {
+            started_at,
+            build: None,
+            players: Vec::new(),
+            rating_scope: wowsunpack::rating_scope::RatingScope::Unrated,
+        }
     }
 
     fn identities() -> LiveIdentities {

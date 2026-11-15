@@ -534,6 +534,9 @@ distance_traveled = "ระยะทางที่เดินทาง"
 skills = "ทักษะ"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "เรตติ้งส่วนบุคคลใช้กับการรบแบบสุ่มและการรบจัดอันดับเท่านั้น"
+
 [ui.replay.filter]
 raw_xp = "Raw XP"
 entity_id = "Entity ID"

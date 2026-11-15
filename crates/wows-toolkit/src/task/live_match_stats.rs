@@ -296,7 +296,12 @@ mod tests {
         let replaced = Timestamp::from_second(1000).unwrap();
         let current = Timestamp::from_second(2000).unwrap();
         let tracker = Arc::new(RwLock::new(PlayerTracker {
-            live_match: Some(LiveMatch { started_at: current, build: None, players: Vec::new() }),
+            live_match: Some(LiveMatch {
+                started_at: current,
+                build: None,
+                players: Vec::new(),
+                rating_scope: wowsunpack::rating_scope::RatingScope::Unrated,
+            }),
             ..Default::default()
         }));
         let mut client = MatchStatsClient::new(

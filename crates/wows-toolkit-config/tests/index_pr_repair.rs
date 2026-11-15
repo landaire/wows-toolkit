@@ -10,7 +10,10 @@ use sqlx::Row;
 use sqlx::sqlite::SqlitePoolOptions;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::BattleType;
 use wows_core::game_types::GameParamId;
+use wows_core::rating_scope::RatingScope;
+use wows_core::version::Version;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchOutcome;
@@ -34,7 +37,7 @@ fn a_match(arena: i64) -> ObjectiveMatch {
         map: "spaces/13_OC_new_dawn".into(),
         game_mode: "Domination".into(),
         game_mode_id: None,
-        game_type: "pvp".into(),
+        game_type: "RandomBattle".into(),
         match_group: "pvp".into(),
         version_build: Some(1234),
     }
@@ -275,4 +278,118 @@ async fn a_reindex_fills_a_row_that_has_no_rating() {
 
     assert_eq!(stored_record_pr(&pool, 1).await, Some(1600.0));
     assert_eq!(stored_vehicle_pr(&pool, 1, 7).await, Some(1300.0));
+}
+
+fn a_match_of(arena: i64, game_type: &str, match_group: &str) -> ObjectiveMatch {
+    ObjectiveMatch { game_type: game_type.into(), match_group: match_group.into(), ..a_match(arena) }
+}
+
+#[tokio::test]
+async fn a_battle_no_rating_applies_to_is_not_a_gap() {
+    let pool = mem_pool().await;
+    let src = source(&pool).await;
+    query::upsert_match(&pool, &a_match_of(1, "CooperativeBattle", "cooperative")).await.unwrap();
+    query::upsert_match(&pool, &a_match_of(2, "", "ranked")).await.unwrap();
+    for arena in [1, 2] {
+        query::upsert_record(&pool, &a_record(arena, src, None)).await.unwrap();
+    }
+    query::upsert_vehicles(&pool, &[a_vehicle(1, 7, None), a_vehicle(2, 8, None)]).await.unwrap();
+
+    let gaps = query::pr_gaps(&pool).await.unwrap();
+    let mut arenas = Vec::new();
+    for gap in &gaps {
+        let arena = match gap.target {
+            PrTarget::Vehicle { arena_id, .. } => arena_id.raw(),
+            PrTarget::Record(record) => sqlx::query("SELECT arena_id FROM replay_record WHERE record_id = ?1")
+                .bind(record.0)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .try_get(0)
+                .unwrap(),
+        };
+        arenas.push(arena);
+    }
+
+    assert_eq!(arenas, vec![2, 2], "only the old ranked battle's two rows are gaps: {gaps:?}");
+}
+
+/// Every variant, so a battle type added later fails to compile here until
+/// the migration's list of rated names is checked against it.
+fn every_battle_type() -> Vec<BattleType> {
+    let all = [
+        BattleType::Standard,
+        BattleType::Single,
+        BattleType::Study,
+        BattleType::Random,
+        BattleType::Training,
+        BattleType::Cooperative,
+        BattleType::Ranked,
+        BattleType::OldRanked,
+        BattleType::IntroMission,
+        BattleType::Club,
+        BattleType::Pve,
+        BattleType::Clan,
+        BattleType::Event,
+        BattleType::Brawl,
+    ];
+    for battle_type in all {
+        match battle_type {
+            BattleType::Standard
+            | BattleType::Single
+            | BattleType::Study
+            | BattleType::Random
+            | BattleType::Training
+            | BattleType::Cooperative
+            | BattleType::Ranked
+            | BattleType::OldRanked
+            | BattleType::IntroMission
+            | BattleType::Club
+            | BattleType::Pve
+            | BattleType::Clan
+            | BattleType::Event
+            | BattleType::Brawl => {}
+        }
+    }
+    all.to_vec()
+}
+
+/// The migration that clears ratings stored for unrated battles has to select
+/// exactly the battles `RatingScope::of_battle` calls unrated: SQL cannot call
+/// the classifier, so the two are kept in step by this test.
+#[tokio::test]
+async fn the_unrated_rating_migration_agrees_with_the_rating_scope() {
+    let mut cases: Vec<(String, String)> = Vec::new();
+    for battle_type in every_battle_type() {
+        for match_group in ["pvp", "ranked", "cooperative"] {
+            cases.push((battle_type.name().to_string(), match_group.to_string()));
+        }
+    }
+    for game_type in ["", "pvp", "FutureBattle"] {
+        for match_group in ["pvp", "ranked", "cooperative", "event", "clan", "pve", ""] {
+            cases.push((game_type.to_string(), match_group.to_string()));
+        }
+    }
+
+    let pool = mem_pool().await;
+    let src = source(&pool).await;
+    for (arena, (game_type, match_group)) in (1..).zip(&cases) {
+        query::upsert_match(&pool, &a_match_of(arena, game_type, match_group)).await.unwrap();
+        query::upsert_record(&pool, &a_record(arena, src, Some(1500.0))).await.unwrap();
+        query::upsert_vehicles(&pool, &[a_vehicle(arena, arena, Some(1200.0))]).await.unwrap();
+    }
+
+    sqlx::raw_sql(include_str!("../migrations/016_unrated_battle_pr.sql")).execute(&pool).await.unwrap();
+
+    for (arena, (game_type, match_group)) in (1..).zip(&cases) {
+        let scope = RatingScope::of_battle(&BattleType::from_value(game_type, Version::default()), match_group);
+        let (expected_record, expected_vehicle) =
+            if scope.is_rated() { (Some(1500.0), Some(1200.0)) } else { (None, None) };
+        assert_eq!(stored_record_pr(&pool, arena).await, expected_record, "record of {game_type:?}/{match_group:?}");
+        assert_eq!(
+            stored_vehicle_pr(&pool, arena, arena).await,
+            expected_vehicle,
+            "roster row of {game_type:?}/{match_group:?}"
+        );
+    }
 }

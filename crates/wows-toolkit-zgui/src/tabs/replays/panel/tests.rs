@@ -29,6 +29,7 @@ use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wowsunpack::rating_scope::RatingScope;
 use zgui::component;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -280,6 +281,31 @@ fn a_replay_with_no_rating_table_shows_no_pr_badge() {
         open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
     assert!(window.by_test_id(PR_TILE_ID).is_none());
     assert!(window.by_test_id("replay-damage-tile").is_some(), "the other figures are shown");
+}
+
+/// A battle no rating applies to stays unrated with a table loaded, and its PR tile shows a dash
+/// that explains why.
+#[test]
+fn an_unrated_battle_shows_a_dash_in_place_of_the_pr_badge() {
+    let mut model = model_at_expected_values();
+    for row in &mut model.rows {
+        row.rating_scope = RatingScope::Unrated;
+    }
+    model.populate_personal_ratings(&fixture_personal_rating_data());
+    assert!(model.rows.iter().all(|row| row.personal_rating.is_none()), "an unrated battle is not rated");
+    let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+    let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
+
+    let tile = window.by_test_id(PR_TILE_ID).expect("the PR tile is shown");
+    assert_eq!(window.a11y(tile).and_then(|state| state.label), Some(hover.clone()));
+    assert!(
+        window.texts_by_class("wt-rp-tile__value").iter().any(|text| text == "-"),
+        "the tile shows a dash rather than a figure"
+    );
+
+    window.hover(tile).expect("the tile takes the pointer");
+    window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
+    assert_eq!(window.texts_by_class("lui-tooltip"), [hover]);
 }
 
 /// A rating table that lands after the battle is read still rates it.

@@ -17,6 +17,8 @@ use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::rating_scope::RatedBattle;
+use wowsunpack::rating_scope::RatingScope;
 
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
@@ -126,6 +128,7 @@ pub fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerRow {
         ribbons: Vec::new(),
         consumables: Vec::new(),
         personal_rating: None,
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
         ship_config_url: None,
         short_ship_config_url: None,
         shiptool_url: None,

@@ -1890,7 +1890,9 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::PersonalRating => {
-                        if let Some(pr) = report.personal_rating.as_ref() {
+                        if !self.normalized.metadata.rating_scope().is_rated() {
+                            ui.label("-").on_hover_text(t!("ui.personal_rating.unrated_hover"));
+                        } else if let Some(pr) = report.personal_rating.as_ref() {
                             crate::ui::widgets::pr_chip(ui, pr.category, &format!("{:.0}", pr.pr), false)
                                 .on_hover_text(pr.category.name());
                         } else {
@@ -3273,7 +3275,13 @@ impl ToolkitTabViewer<'_> {
                     ui.label(text);
                 }
 
-                if let Some(battle_stats) = replay_file.to_battle_stats() {
+                let unrated = replay_file
+                    .ui_report
+                    .as_ref()
+                    .is_some_and(|report| !report.normalized.metadata.rating_scope().is_rated());
+                if unrated {
+                    ui.label("PR: -").on_hover_text(t!("ui.personal_rating.unrated_hover"));
+                } else if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
                         crate::ui::widgets::pr_chip(

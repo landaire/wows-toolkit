@@ -46,6 +46,7 @@ use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::battle_title;
+use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
@@ -1056,8 +1057,12 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
         let hidden = self_stats_hidden(&model.rows);
         // A test ship's own figures stay off the tiles while the table hides them.
         let own = loaded.own_figures.filter(|_| !hidden);
-        let rating =
-            model.rows.iter().find(|row| row.is_self).and_then(|row| row.personal_rating.clone()).filter(|_| !hidden);
+        let rating = model
+            .rows
+            .iter()
+            .find(|row| row.is_self)
+            .and_then(|row| BattleRating::new(row.rating_scope, row.personal_rating.clone()))
+            .filter(|_| !hidden);
         let (allies, enemies) = figures::team_damage(&model.rows);
         let counting = count_next.get_value();
         count_next.set_value(false);

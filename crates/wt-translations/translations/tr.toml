@@ -508,6 +508,9 @@ distance_traveled = "Kat Edilen Mesafe"
 skills = "Beceriler"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "Kişisel derecelendirme yalnızca rastgele ve dereceli savaşlar için geçerlidir."
+
 [ui.replay.filter]
 raw_xp = "Ham XP"
 entity_id = "Varlık ID"

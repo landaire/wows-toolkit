@@ -205,9 +205,10 @@ pub async fn write_index(
 /// and without this the row would be written NULL and wait for a later repair
 /// against a later set of expected values.
 ///
-/// A row that already has a rating is never touched.
+/// A row that already has a rating is never touched, and a battle no rating
+/// applies to gets none.
 fn fill_missing_pr(rows: &mut MappedRows, pr_data: &PersonalRatingData) {
-    if !pr_data.is_loaded() {
+    if !pr_data.is_loaded() || !rows.objective.rating_scope().is_rated() {
         return;
     }
     let is_win = rows.record.outcome == MatchOutcome::Win;
@@ -465,7 +466,7 @@ mod tests {
                 map: "spaces/13_OC_new_dawn".into(),
                 game_mode: "Domination".into(),
                 game_mode_id: None,
-                game_type: "pvp".into(),
+                game_type: "RandomBattle".into(),
                 match_group: "pvp".into(),
                 version_build: Some(1234),
             },
@@ -508,6 +509,16 @@ mod tests {
     fn nothing_is_invented_while_the_expected_values_are_unloaded() {
         let mut rows = mapped_rows(None, None);
         fill_missing_pr(&mut rows, &PersonalRatingData::new());
+        assert_eq!(rows.record.self_pr, None);
+        assert_eq!(rows.vehicles[0].pr, None);
+    }
+
+    #[test]
+    fn a_battle_no_rating_applies_to_is_not_filled() {
+        let mut rows = mapped_rows(None, None);
+        rows.objective.game_type = "CooperativeBattle".into();
+        rows.objective.match_group = "cooperative".into();
+        fill_missing_pr(&mut rows, &loaded_pr_data());
         assert_eq!(rows.record.self_pr, None);
         assert_eq!(rows.vehicles[0].pr, None);
     }
@@ -556,7 +567,7 @@ mod tests {
                 map: "Ocean".into(),
                 game_mode: "Domination".into(),
                 game_mode_id: Some(7),
-                game_type: "pvp".into(),
+                game_type: "RandomBattle".into(),
                 match_group: "pvp".into(),
                 version_build: Some(12116141),
             },

@@ -54,6 +54,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::KnownCrewSkill;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::rating_scope::RatingScope;
 
 use crate::columns::ReplayColumn;
 use crate::damage_mix::DamageLine;
@@ -194,8 +195,12 @@ pub struct PlayerRow {
     /// loaded at report-construction time, so the egui app computes PR in a
     /// separate step (`UiReport::populate_personal_ratings`) once that data
     /// is available. Call `ReplayReportModel::populate_personal_ratings`
-    /// after loading PR data to fill this in.
+    /// after loading PR data to fill this in. Stays `None` in an unrated
+    /// battle.
     pub personal_rating: Option<PersonalRatingResult>,
+    /// Whether a rating applies to this row's battle. The same on every row;
+    /// kept per row so a cell renders from the row alone.
+    pub rating_scope: RatingScope,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
     /// items' target URL, ported from `util::build_ship_config_url`. `None`
@@ -512,6 +517,8 @@ impl ReplayReportModel {
         let self_division_id = self_player.and_then(|p| p.division_id);
         let self_db_id = self_player.map(|p| p.db_id);
 
+        let rating_scope = normalized.metadata.rating_scope();
+
         let rows = normalized
             .players
             .iter()
@@ -522,6 +529,7 @@ impl ReplayReportModel {
                     self_db_id,
                     species_text(np.ship_class),
                     ship_id(&np.ship_index),
+                    rating_scope,
                 )
             })
             .collect();
@@ -545,7 +553,7 @@ impl ReplayReportModel {
         }
     }
 
-    /// Rates any row the parse left unrated.
+    /// Rates any row the parse left unrated, unless the battle is unrated.
     ///
     /// The parse rates the report itself, which is where these rows and the
     /// export both take their ratings from; this covers only the case where
@@ -558,7 +566,7 @@ impl ReplayReportModel {
         let is_win = matches!(self.battle_result, Some(BattleResult::Win(_)));
 
         for row in &mut self.rows {
-            if row.personal_rating.is_some() {
+            if row.personal_rating.is_some() || !row.rating_scope.is_rated() {
                 continue;
             }
             let Some(ship_id) = row.ship_id else {
@@ -734,6 +742,7 @@ impl PlayerRow {
         self_db_id: Option<AccountId>,
         ship_species_text: String,
         ship_id: Option<GameParamId>,
+        rating_scope: RatingScope,
     ) -> Self {
         let is_self_division_mate = match (self_division_id, self_db_id) {
             (Some(self_div), Some(self_id)) => self_id != np.db_id && np.division_id == Some(self_div),
@@ -908,6 +917,7 @@ impl PlayerRow {
             // PR data isn't loaded at report-construction time; see the
             // field doc and `ReplayReportModel::populate_personal_ratings`.
             personal_rating: np.personal_rating.clone(),
+            rating_scope,
             // Needs the raw `Player`, which `NormalizedPlayer` does not
             // carry; see the field docs and `populate_action_links`.
             ship_config_url: None,
@@ -925,6 +935,8 @@ impl PlayerRow {
 
 #[cfg(test)]
 mod tests {
+    use wowsunpack::rating_scope::RatedBattle;
+
     use super::*;
     use crate::test_support;
 
@@ -1141,15 +1153,18 @@ mod tests {
         assert_eq!(model.rows[0].twitch_candidates.len(), 1, "the Twitch match made on the real name stays");
     }
 
-    #[test]
-    fn populate_personal_ratings_computes_pr_from_row_ship_id_damage_and_win() {
+    /// The fixture battle as `game_type`/`match_group`, rated against expected
+    /// values that exactly match the self row's stats (50,000 damage, 1 kill,
+    /// a win), which land PR at the 700+300+150 baseline.
+    fn model_rated_as(game_type: &str, match_group: &str) -> ReplayReportModel {
         use wows_replay_insights::personal_rating::ExpectedValuesData;
-        use wows_replay_insights::personal_rating::PersonalRatingCategory;
         use wows_replay_insights::personal_rating::PersonalRatingData;
         use wows_replay_insights::personal_rating::ShipExpectedValues;
         use wows_replay_insights::personal_rating::ShipExpectedValuesEntry;
 
-        let normalized = test_support::fixture_normalized_battle_report();
+        let mut normalized = test_support::fixture_normalized_battle_report();
+        normalized.metadata.game_type = game_type.to_string();
+        normalized.metadata.match_group = match_group.to_string();
         let self_ship_id = GameParamId::from(3_374_266_064u64);
         let mut model = ReplayReportModel::build(
             &normalized,
@@ -1159,8 +1174,6 @@ mod tests {
         );
         model.battle_result = Some(BattleResult::Win(0));
 
-        // Expected values exactly match the self row's fixture stats (50,000
-        // damage, 1 kill, a win), landing PR at the 700+300+150 baseline.
         let mut expected = HashMap::new();
         expected.insert(
             self_ship_id.raw().to_string(),
@@ -1174,6 +1187,14 @@ mod tests {
         pr_data.load(ExpectedValuesData { time: 0, data: expected });
 
         model.populate_personal_ratings(&pr_data);
+        model
+    }
+
+    #[test]
+    fn populate_personal_ratings_computes_pr_from_row_ship_id_damage_and_win() {
+        use wows_replay_insights::personal_rating::PersonalRatingCategory;
+
+        let model = model_rated_as("RandomBattle", "pvp");
 
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
         let pr = self_row.personal_rating.as_ref().expect("PR should be computed for the self row");
@@ -1184,6 +1205,22 @@ mod tests {
         // fixture), so `populate_personal_ratings` leaves it untouched.
         let enemy_row = model.rows.iter().find(|r| !r.is_self).expect("enemy row present");
         assert!(enemy_row.personal_rating.is_none());
+    }
+
+    #[test]
+    fn only_random_and_ranked_battles_are_rated() {
+        let rated = |game_type: &str, match_group: &str| {
+            let model = model_rated_as(game_type, match_group);
+            let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
+            (self_row.rating_scope, self_row.personal_rating.as_ref().map(|pr| pr.pr.round()))
+        };
+
+        assert_eq!(rated("RandomBattle", "pvp"), (RatingScope::Rated(RatedBattle::Random), Some(1150.0)));
+        assert_eq!(rated("RankedBattle", "ranked"), (RatingScope::Rated(RatedBattle::Ranked), Some(1150.0)));
+        assert_eq!(rated("", "ranked"), (RatingScope::Rated(RatedBattle::Ranked), Some(1150.0)));
+        assert_eq!(rated("CooperativeBattle", "cooperative"), (RatingScope::Unrated, None));
+        assert_eq!(rated("EventBattle", "event"), (RatingScope::Unrated, None));
+        assert_eq!(rated("", "pve"), (RatingScope::Unrated, None));
     }
 
     #[test]

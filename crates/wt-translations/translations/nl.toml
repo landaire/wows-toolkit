@@ -534,6 +534,9 @@ distance_traveled = "Afgelegde afstand"
 skills = "Vaardigheden"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "De persoonlijke beoordeling geldt alleen voor willekeurige en gerangschikte gevechten."
+
 [ui.replay.filter]
 raw_xp = "Ruwe XP"
 entity_id = "Entiteits-ID"

@@ -534,6 +534,9 @@ distance_traveled = "Zurückgelegte Strecke"
 skills = "Fähigkeiten"
 personal_rating = "PR"
 
+[ui.personal_rating]
+unrated_hover = "Die persönliche Bewertung gilt nur für Zufalls- und Rangliste-Gefechte."
+
 [ui.replay.filter]
 raw_xp = "Roh-XP"
 entity_id = "Entity-ID"

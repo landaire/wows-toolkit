@@ -21,6 +21,8 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::BattleType;
+use wowsunpack::rating_scope::RatingScope;
 
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -43,6 +45,9 @@ pub struct LiveMatch {
     /// ships stay unresolved rather than being guessed from another build.
     pub build: Option<u32>,
     pub players: Vec<LiveMatchPlayer>,
+    /// Whether a rating applies to this match. The roster's ratings are the
+    /// players' career figures, shown only where this match's type is rated.
+    pub rating_scope: RatingScope,
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +126,7 @@ impl LiveMatch {
     /// a file the game is still flushing can be; the caller retries rather
     /// than showing a battle that started at an invented time.
     pub fn from_meta(meta: &ReplayMeta) -> Option<Self> {
+        let version = Version::from_client_exe(&meta.clientVersionFromExe);
         let build = Version::try_from_client_exe(&meta.clientVersionFromExe).and_then(|v| v.build_number());
         let players = meta
             .vehicles
@@ -132,7 +138,11 @@ impl LiveMatch {
             })
             .collect();
 
-        Some(Self { started_at: try_replay_timestamp(meta)?, build, players })
+        // An absent field reads as an unknown one, as the battle report reads it.
+        let battle_type = BattleType::from_value(meta.gameType.as_deref().unwrap_or(""), version);
+        let rating_scope = RatingScope::of_battle(&battle_type, meta.matchGroup.as_deref().unwrap_or(""));
+
+        Some(Self { started_at: try_replay_timestamp(meta)?, build, players, rating_scope })
     }
 }
 
@@ -300,12 +310,21 @@ pub struct RowStats {
     pub win_rate: Option<f64>,
     pub battles: Option<i64>,
     pub avg_damage: Option<i64>,
+    /// The player's career rating. `None` when the service has none, and in
+    /// a match no rating applies to.
     pub pr: Option<f64>,
     pub band: Option<PersonalRatingCategory>,
 }
 
-/// One player's figures in `mode`'s scope.
-pub fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats {
+/// One player's figures in `mode`'s scope, in a match of `rating_scope`.
+pub fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode, rating_scope: RatingScope) -> RowStats {
+    let stats = scope_figures(stats, mode);
+
+    RowStats { pr: stats.pr.filter(|_| rating_scope.is_rated()), ..stats }
+}
+
+/// One player's figures in `mode`'s scope, whatever the match.
+fn scope_figures(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats {
     let Some(stats) = stats else {
         return RowStats::default();
     };
@@ -375,20 +394,22 @@ pub fn team_average_win_rate(
     average(
         rows.iter()
             .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
-            .filter_map(|entry| row_stats(Some(entry), mode).win_rate),
+            .filter_map(|entry| scope_figures(Some(entry), mode).win_rate),
     )
 }
 
-/// One team's average personal rating, on the same rule.
+/// One team's average personal rating, on the same rule. `None` in a match
+/// no rating applies to.
 pub fn team_average_personal_rating(
     rows: &[LiveRosterRow],
     stats: &HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
+    rating_scope: RatingScope,
 ) -> Option<f64> {
     average(
         rows.iter()
             .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
-            .filter_map(|entry| row_stats(Some(entry), mode).pr),
+            .filter_map(|entry| row_stats(Some(entry), mode, rating_scope).pr),
     )
 }
 
@@ -433,6 +454,9 @@ pub struct ResolvedRoster {
     pub identity_count: usize,
     pub friendly: Vec<LiveRosterRow>,
     pub enemy: Vec<LiveRosterRow>,
+    /// Whether a rating applies to the match, which decides whether the
+    /// roster's ratings are shown.
+    pub rating_scope: RatingScope,
 }
 
 /// Joins the live roster to game data, tracked history and the identity scan.
@@ -494,6 +518,7 @@ pub fn resolve_roster(
         identity_count: identities.map_or(0, |ids| ids.by_name.len()),
         friendly,
         enemy,
+        rating_scope: live.rating_scope,
     }
 }
 
@@ -715,6 +740,56 @@ mod tests {
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
 
         assert_eq!(LiveMatch::from_meta(&meta).expect("the fixture carries a date").build, None);
+    }
+
+    /// A match's type decides whether the roster shows ratings: the players'
+    /// career figures, gated by the match they are in now.
+    #[test]
+    fn only_a_random_or_ranked_match_shows_the_rosters_ratings() {
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Ally", 100, 1));
+        let stats = PlayerStatsOut {
+            account_id: AccountId(7),
+            region: "eu".to_string(),
+            ship_id: GameParamId::from(100u64),
+            status: crate::match_stats::PlayerStatsStatus::Ok,
+            battles: Some(9000),
+            overall_win_rate: Some(55.0),
+            overall_avg_damage: Some(96_047),
+            ship_win_rate: Some(60.0),
+            ship_battles: Some(120),
+            ship_avg_damage: Some(83_266),
+            ship_pr: Some(2834.0),
+            pr: Some(1800.0),
+        };
+        let shown = |game_type: Option<&str>, match_group: Option<&str>| {
+            let mut meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+            meta.gameType = game_type.map(str::to_string);
+            meta.matchGroup = match_group.map(str::to_string);
+            let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
+            let mut resolved = resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, None, None);
+            resolved.friendly[0].account_id = Some(stats.account_id);
+            let by_account = HashMap::from([(stats.account_id, stats.clone())]);
+            let row = row_stats(Some(&stats), WinRateMode::Overall, resolved.rating_scope);
+            let average = team_average_personal_rating(
+                &resolved.friendly,
+                &by_account,
+                WinRateMode::Overall,
+                resolved.rating_scope,
+            );
+            (resolved.rating_scope, row.pr, average, row.win_rate)
+        };
+
+        let random = RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random);
+        let ranked = RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Ranked);
+        assert_eq!(shown(Some("RandomBattle"), Some("pvp")), (random, Some(1800.0), Some(1800.0), Some(55.0)));
+        assert_eq!(shown(Some("RankedBattle"), Some("ranked")), (ranked, Some(1800.0), Some(1800.0), Some(55.0)));
+        assert_eq!(shown(None, Some("pvp")), (random, Some(1800.0), Some(1800.0), Some(55.0)));
+        assert_eq!(
+            shown(Some("CooperativeBattle"), Some("cooperative")),
+            (RatingScope::Unrated, None, None, Some(55.0)),
+            "a co-op match hides the ratings and keeps the rest"
+        );
+        assert_eq!(shown(None, None), (RatingScope::Unrated, None, None, Some(55.0)));
     }
 
     #[test]

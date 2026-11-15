@@ -57,6 +57,8 @@ use crate::tabs::player_tracker::roster::sniper_hover_text;
 
 const ARENA_INFO: &str = r#"{
     "gameMode": 7,
+    "matchGroup": "pvp",
+    "gameType": "RandomBattle",
     "clientVersionFromExe": "13, 11, 0, 12668706",
     "mapDisplayName": "ocean",
     "mapId": 1,

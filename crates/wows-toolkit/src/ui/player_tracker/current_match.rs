@@ -20,6 +20,7 @@ use wows_replays::ReplayFile;
 use wows_replays::types::AccountId;
 use wows_toolkit_viewmodel::player_tracker::live::debug_replay_choices;
 use wowsunpack::data::Version;
+use wowsunpack::rating_scope::RatingScope;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::PlayerStatsOut;
@@ -192,6 +193,7 @@ impl ToolkitTabViewer<'_> {
                 stats,
                 mode,
                 view_mode,
+                rating_scope: roster.rating_scope,
                 locale: &locale,
             };
 
@@ -287,6 +289,8 @@ struct TeamContext<'a> {
     mode: WinRateMode,
     view_mode: CurrentMatchViewMode,
     locale: &'a str,
+    /// Whether the match is one the ratings are shown for.
+    rating_scope: RatingScope,
 }
 
 /// What a row click asks the caller to do once the player-tracker lock is
@@ -364,8 +368,9 @@ fn team_average_personal_rating(
     rows: &[LiveRosterRow],
     stats: &HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
+    rating_scope: RatingScope,
 ) -> Option<f64> {
-    wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(rows, stats, mode)
+    wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(rows, stats, mode, rating_scope)
 }
 
 /// The clan tag's colour: the server-supplied clan colour when the scan
@@ -432,7 +437,11 @@ fn render_team(
                     .color(swatch.text),
             );
         }
-        if let Some(pr) = team_average_personal_rating(rows, ctx.stats, ctx.mode) {
+        if !ctx.rating_scope.is_rated() {
+            ui.label(RichText::new(format!("{}: -", t!("stat.avg_pr"))).weak())
+                .on_hover_text(t!("ui.personal_rating.unrated_hover"));
+        }
+        if let Some(pr) = team_average_personal_rating(rows, ctx.stats, ctx.mode, ctx.rating_scope) {
             let swatch = PersonalRatingCategory::from_pr(pr).swatch(ui.visuals());
             ui.label(RichText::new(format!("{}: {pr:.0}", t!("stat.avg_pr"))).color(swatch.text));
         }
@@ -444,7 +453,7 @@ fn render_team(
         ui.push_id(id_salt, |ui| {
             for (index, row_data) in rows.iter().enumerate() {
                 let stats_entry = row_data.account_id.and_then(|id| ctx.stats.get(&id));
-                let band = row_stats(stats_entry, ctx.mode).band;
+                let band = row_stats(stats_entry, ctx.mode, ctx.rating_scope).band;
                 let fill = row_fill(band, index, ui.visuals()).unwrap_or(Color32::TRANSPARENT);
 
                 let background = ui.painter().add(egui::Shape::Noop);
@@ -711,7 +720,7 @@ fn render_win_rate_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>,
 }
 
 fn render_win_rate(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
-    let resolved = row_stats(stats_entry, mode);
+    let resolved = row_stats(stats_entry, mode, ctx.rating_scope);
     if let Some(rate) = resolved.win_rate {
         let band = resolved.band.expect("a resolved win rate always has a band");
         let response = ui.label(RichText::new(format!("{rate:.1}%")).color(band.swatch(ui.visuals()).text));
@@ -728,14 +737,24 @@ fn render_win_rate(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx:
 }
 
 fn render_personal_rating_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
-    render_scoped_cell(ui, ctx, |ui, mode| render_personal_rating(ui, stats_entry, mode));
+    render_scoped_cell(ui, ctx, |ui, mode| render_personal_rating(ui, stats_entry, mode, ctx.rating_scope));
 }
 
 /// PR is the one figure here left ungrouped. Every other `pr_chip` in the app
 /// renders the bare rating, and a chip that grouped its digits on only this
 /// surface would read as a different quantity.
-fn render_personal_rating(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, mode: WinRateMode) {
-    let Some(pr) = row_stats(stats_entry, mode).pr else {
+fn render_personal_rating(
+    ui: &mut egui::Ui,
+    stats_entry: Option<&PlayerStatsOut>,
+    mode: WinRateMode,
+    rating_scope: RatingScope,
+) {
+    // The ratings are career figures, shown only where the match itself is rated.
+    if !rating_scope.is_rated() {
+        ui.label(RichText::new("-").weak()).on_hover_text(t!("ui.personal_rating.unrated_hover"));
+        return;
+    }
+    let Some(pr) = row_stats(stats_entry, mode, rating_scope).pr else {
         ui.label(RichText::new("-").weak());
         return;
     };
@@ -752,7 +771,7 @@ fn render_battles_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, 
 }
 
 fn render_battles(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
-    let Some(battles) = row_stats(stats_entry, mode).battles else {
+    let Some(battles) = row_stats(stats_entry, mode, ctx.rating_scope).battles else {
         ui.label(RichText::new("-").weak());
         return;
     };
@@ -765,7 +784,7 @@ fn render_damage_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, c
 }
 
 fn render_damage(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
-    let Some(damage) = row_stats(stats_entry, mode).avg_damage else {
+    let Some(damage) = row_stats(stats_entry, mode, ctx.rating_scope).avg_damage else {
         ui.label(RichText::new("-").weak());
         return;
     };
@@ -897,6 +916,8 @@ mod tests {
 
     use super::*;
 
+    const RANDOM: RatingScope = RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random);
+
     /// Icons are laid out on the harness's first pass, so the font has to be in
     /// place before it.
     fn install_phosphor_fonts(ctx: &egui::Context) {
@@ -950,12 +971,12 @@ mod tests {
     fn the_mode_picks_the_rate_the_battles_and_the_band_together() {
         let stats = stats(PlayerStatsStatus::Ok, Some(48.0), Some(61.0));
 
-        let overall = row_stats(Some(&stats), WinRateMode::Overall);
+        let overall = row_stats(Some(&stats), WinRateMode::Overall, RANDOM);
         assert_eq!(overall.win_rate, Some(48.0));
         assert_eq!(overall.battles, Some(9000));
         assert_eq!(overall.band, Some(PersonalRatingCategory::BelowAverage));
 
-        let ship = row_stats(Some(&stats), WinRateMode::Ship);
+        let ship = row_stats(Some(&stats), WinRateMode::Ship, RANDOM);
         assert_eq!(ship.win_rate, Some(61.0));
         assert_eq!(ship.battles, Some(120));
         assert_eq!(ship.band, Some(PersonalRatingCategory::Unicum));
@@ -968,11 +989,11 @@ mod tests {
     fn pr_and_average_damage_move_with_the_mode() {
         let stats = stats(PlayerStatsStatus::Ok, Some(48.0), Some(61.0));
 
-        let overall = row_stats(Some(&stats), WinRateMode::Overall);
+        let overall = row_stats(Some(&stats), WinRateMode::Overall, RANDOM);
         assert_eq!(overall.pr, Some(1800.0));
         assert_eq!(overall.avg_damage, Some(96_047));
 
-        let ship = row_stats(Some(&stats), WinRateMode::Ship);
+        let ship = row_stats(Some(&stats), WinRateMode::Ship, RANDOM);
         assert_eq!(ship.pr, Some(2834.0));
         assert_eq!(ship.avg_damage, Some(83_266));
     }
@@ -986,20 +1007,24 @@ mod tests {
         stats.overall_avg_damage = None;
         stats.ship_avg_damage = None;
 
-        let ship = row_stats(Some(&stats), WinRateMode::Ship);
+        let ship = row_stats(Some(&stats), WinRateMode::Ship, RANDOM);
         assert_eq!(ship.pr, None);
         assert_eq!(ship.avg_damage, None);
         assert_eq!(ship.win_rate, Some(61.0), "the rest of the scope still resolves");
         assert_eq!(ship.battles, Some(120));
 
-        assert_eq!(row_stats(Some(&stats), WinRateMode::Overall).pr, Some(1800.0), "the account PR is unaffected");
+        assert_eq!(
+            row_stats(Some(&stats), WinRateMode::Overall, RANDOM).pr,
+            Some(1800.0),
+            "the account PR is unaffected"
+        );
     }
 
     #[test]
     fn a_hidden_profile_has_no_rate_and_no_band() {
         let stats = stats(PlayerStatsStatus::Hidden, None, None);
 
-        let resolved = row_stats(Some(&stats), WinRateMode::Overall);
+        let resolved = row_stats(Some(&stats), WinRateMode::Overall, RANDOM);
 
         assert_eq!(resolved.win_rate, None);
         assert_eq!(resolved.band, None);
@@ -1011,7 +1036,7 @@ mod tests {
     fn an_unplayed_ship_has_no_ship_rate() {
         let stats = stats(PlayerStatsStatus::Ok, Some(52.5), None);
 
-        let resolved = row_stats(Some(&stats), WinRateMode::Ship);
+        let resolved = row_stats(Some(&stats), WinRateMode::Ship, RANDOM);
 
         assert_eq!(resolved.win_rate, None);
         assert_eq!(resolved.band, None);
@@ -1020,7 +1045,7 @@ mod tests {
 
     #[test]
     fn a_player_with_no_stats_at_all_has_nothing() {
-        let resolved = row_stats(None, WinRateMode::Overall);
+        let resolved = row_stats(None, WinRateMode::Overall, RANDOM);
 
         assert_eq!(resolved.win_rate, None);
         assert_eq!(resolved.pr, None);
@@ -1192,6 +1217,7 @@ mod tests {
             mode: WinRateMode::Overall,
             view_mode: CurrentMatchViewMode::Compact,
             locale: "en",
+            rating_scope: RANDOM,
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
@@ -1312,6 +1338,7 @@ mod tests {
             mode: WinRateMode::Overall,
             view_mode: CurrentMatchViewMode::Detailed,
             locale: "en",
+            rating_scope: RANDOM,
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
@@ -1408,6 +1435,7 @@ mod tests {
             mode: WinRateMode::Ship,
             view_mode: CurrentMatchViewMode::Detailed,
             locale: "en",
+            rating_scope: RANDOM,
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
@@ -1474,6 +1502,7 @@ mod tests {
             mode: WinRateMode::Overall,
             view_mode: CurrentMatchViewMode::Compact,
             locale: "en",
+            rating_scope: RANDOM,
         };
         let mut actions = TeamActions::default();
         let mut harness =
@@ -1637,14 +1666,14 @@ mod tests {
             roster_row(None),
         ];
 
-        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall), Some(1500.0));
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall, RANDOM), Some(1500.0));
     }
 
     #[test]
     fn team_average_personal_rating_is_none_without_resolved_pr() {
         let rows = vec![roster_row(None), roster_row(Some(AccountId(5)))];
 
-        assert_eq!(team_average_personal_rating(&rows, &HashMap::new(), WinRateMode::Overall), None);
+        assert_eq!(team_average_personal_rating(&rows, &HashMap::new(), WinRateMode::Overall, RANDOM), None);
     }
 
     /// The team average reads the same scoped PR the rows do, so the header
@@ -1657,8 +1686,8 @@ mod tests {
         let by_account = HashMap::from([(AccountId(1), entry)]);
         let rows = vec![roster_row(Some(AccountId(1)))];
 
-        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall), Some(1725.0));
-        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), Some(2400.0));
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall, RANDOM), Some(1725.0));
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship, RANDOM), Some(2400.0));
     }
 
     /// A team where nobody's ship PR came back averages to nothing rather than
@@ -1670,7 +1699,7 @@ mod tests {
         let by_account = HashMap::from([(AccountId(1), entry)]);
         let rows = vec![roster_row(Some(AccountId(1)))];
 
-        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), None);
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship, RANDOM), None);
     }
 
     #[test]

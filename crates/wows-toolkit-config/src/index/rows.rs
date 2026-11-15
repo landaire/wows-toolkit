@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
+use wows_core::game_types::BattleType;
 use wows_core::game_types::GameParamId;
+use wows_core::rating_scope::RatingScope;
+use wows_core::version::Version;
 
 /// Identifies one replay group (the live dir, an imported dir, or an ad-hoc set).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -130,6 +133,12 @@ pub struct ObjectiveMatch {
     pub version_build: Option<u32>,
 }
 
+impl ObjectiveMatch {
+    pub fn rating_scope(&self) -> RatingScope {
+        stored_rating_scope(&self.game_type, &self.match_group)
+    }
+}
+
 /// A specific replay file of a match, within a group, with its perspective.
 #[derive(Debug, Clone)]
 pub struct ReplayRecord {
@@ -239,6 +248,12 @@ pub struct MatchHit {
     pub file_mtime: Option<i64>,
 }
 
+impl MatchHit {
+    pub fn rating_scope(&self) -> RatingScope {
+        stored_rating_scope(&self.game_type, &self.match_group)
+    }
+}
+
 /// Which stored PR column a repair targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrTarget {
@@ -290,6 +305,9 @@ pub struct RowSummary {
     pub self_kills: Option<i64>,
     pub self_survived: Option<bool>,
     pub self_pr: Option<f64>,
+    /// Whether a rating applies to the battle. `self_pr` is `None` when it
+    /// does not.
+    pub rating_scope: RatingScope,
     /// The self player's division, resolved from the roster row belonging to
     /// `replay_record.self_account_id`. `None` when the perspective player had
     /// no account (a spectator recording), had no roster row, or was solo.
@@ -398,4 +416,11 @@ pub enum IndexError {
     /// unique among non-NULL values.
     #[error("cannot relocate to {root_path:?}: already owned by source {owner:?}")]
     RootAlreadyOwned { root_path: PathBuf, owner: SourceId },
+}
+
+/// Whether a rating applies to a stored match, from the `game_type` and
+/// `match_group` the index keeps for it.
+pub fn stored_rating_scope(game_type: &str, match_group: &str) -> RatingScope {
+    // `from_value` reads no version: the battle type names do not vary by build.
+    RatingScope::of_battle(&BattleType::from_value(game_type, Version::default()), match_group)
 }

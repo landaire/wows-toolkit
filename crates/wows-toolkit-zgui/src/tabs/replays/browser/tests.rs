@@ -10,6 +10,8 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
+use wows_core::rating_scope::RatedBattle;
+use wows_core::rating_scope::RatingScope;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -20,6 +22,7 @@ use wows_toolkit_replay_data::replay_dir::read_replay;
 use wows_toolkit_replay_data::simulated_panic;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
@@ -818,13 +821,14 @@ fn a_group_header_shows_no_replay_preview() {
     assert!(window.by_test_id("hover-preview").is_some(), "the next replay row has its card");
 }
 
-fn summary(outcome: MatchOutcome, self_pr: Option<f64>) -> RowSummary {
+fn summary(outcome: MatchOutcome, rating_scope: RatingScope, self_pr: Option<f64>) -> RowSummary {
     RowSummary {
         outcome,
         self_damage: Some(50_000),
         self_kills: Some(1),
         self_survived: Some(true),
         self_pr,
+        rating_scope,
         division_id: None,
         division_mates: Vec::new(),
         results_available: true,
@@ -838,11 +842,13 @@ fn scanned(names: &[&str]) -> Vec<wows_toolkit_replay_data::replay_dir::ScannedR
 
 #[test]
 fn a_rated_row_carries_its_rating_and_outcome() {
-    let files = scanned(&FIXTURES[..2]);
-    let (rated, unrated) = (files[0].path.clone(), files[1].path.clone());
+    let random = RatingScope::Rated(RatedBattle::Random);
+    let files = scanned(&FIXTURES);
+    let (rated, missing, unrated) = (files[0].path.clone(), files[1].path.clone(), files[2].path.clone());
     let summaries = HashMap::from([
-        (rated.clone(), summary(MatchOutcome::Win, Some(1650.4))),
-        (unrated.clone(), summary(MatchOutcome::Unknown, None)),
+        (rated.clone(), summary(MatchOutcome::Win, random, Some(1650.4))),
+        (missing.clone(), summary(MatchOutcome::Unknown, random, None)),
+        (unrated.clone(), summary(MatchOutcome::Loss, RatingScope::Unrated, None)),
     ]);
     let tree = BrowserTree::build(&TreeInputs {
         files: &files,
@@ -856,12 +862,16 @@ fn a_rated_row_carries_its_rating_and_outcome() {
     });
 
     let rated = tree.leaf(&rated).expect("the replay is listed");
-    let rating = rated.personal_rating.as_ref().expect("the index rated the battle");
+    let Some(BattleRating::Rated(rating)) = rated.personal_rating.as_ref() else {
+        panic!("the index rated the battle: {:?}", rated.personal_rating);
+    };
     assert_eq!(format!("{:.0}", rating.pr), "1650");
     assert_eq!(rated.outcome, MatchOutcome::Win);
+    let missing = tree.leaf(&missing).expect("the replay is listed");
+    assert!(missing.personal_rating.is_none(), "a battle the index has not rated has no chip");
+    assert_eq!(missing.outcome, MatchOutcome::Unknown);
     let unrated = tree.leaf(&unrated).expect("the replay is listed");
-    assert!(unrated.personal_rating.is_none(), "an unrated battle has no chip");
-    assert_eq!(unrated.outcome, MatchOutcome::Unknown);
+    assert_eq!(unrated.personal_rating, Some(BattleRating::Unrated), "an unrated battle says so");
 }
 
 #[test]

@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use wowsunpack::rating_scope::RatingScope;
+
 pub use wows_replay_insights::personal_rating::PersonalRatingCategory;
 pub use wows_replay_insights::personal_rating::PersonalRatingData;
 pub use wows_replay_insights::personal_rating::PersonalRatingResult;
@@ -106,6 +108,30 @@ pub fn chip_text(category: PersonalRatingCategory, dark_mode: bool) -> u32 {
             PersonalRatingCategory::Unicum => 0x802b94,
             PersonalRatingCategory::SuperUnicum => 0x7f0c9b,
         }
+    }
+}
+
+/// What a surface that shows one battle's rating shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BattleRating {
+    Rated(PersonalRatingResult),
+    /// The battle is of a type no rating applies to.
+    Unrated,
+}
+
+impl BattleRating {
+    /// `None` when the battle is rated but `rating` is absent, which a
+    /// surface shows as it shows any missing figure.
+    pub fn new(scope: RatingScope, rating: Option<PersonalRatingResult>) -> Option<Self> {
+        match scope {
+            RatingScope::Rated(_) => rating.map(Self::Rated),
+            RatingScope::Unrated => Some(Self::Unrated),
+        }
+    }
+
+    /// [`Self::new`] for a rating the index stored as a bare figure.
+    pub fn from_stored(scope: RatingScope, pr: Option<f64>) -> Option<Self> {
+        Self::new(scope, pr.map(PersonalRatingResult::new))
     }
 }
 

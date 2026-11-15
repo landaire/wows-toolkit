@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 - *(zgui)* Keep folder checks, listings and thumbnails responsive while replay bakes, indexing passes, downloads and other long jobs run
 - *(toolkit)* Keep replay export ship data attached after roster sorting
+- *(toolkit)* Show personal rating only for Random and Ranked battles: other battle types show a dash that explains why, and ratings stored for them are cleared from the replay index
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
 - *(wows-query)* Direct total side armor questions to full citadel plate stacks
 

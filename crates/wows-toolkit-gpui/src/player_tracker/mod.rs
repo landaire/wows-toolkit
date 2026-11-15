@@ -1840,6 +1840,7 @@ impl PlayerTrackerView {
             modes: &modes,
             border,
             tracker: &tracker,
+            rating_scope: roster.rating_scope,
         };
 
         v_flex()
@@ -2310,6 +2311,7 @@ struct RosterLayout<'a> {
     border: Hsla,
     /// The tab itself, which a row's menu asks to look a player up.
     tracker: &'a Entity<PlayerTrackerView>,
+    rating_scope: wowsunpack::rating_scope::RatingScope,
 }
 
 /// One team's heading: its name, how many players are on it, and what they
@@ -2324,7 +2326,12 @@ fn team_heading(title: String, rows: &[LiveRosterRow], layout: RosterLayout) -> 
     let win_rate =
         stats.and_then(|stats| wows_toolkit_viewmodel::player_tracker::live::team_average_win_rate(rows, stats, mode));
     let rating = stats.and_then(|stats| {
-        wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(rows, stats, mode)
+        wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(
+            rows,
+            stats,
+            mode,
+            layout.rating_scope,
+        )
     });
 
     h_flex()
@@ -2752,7 +2759,8 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
         .iter()
         .flat_map(|mode| {
             let id = SharedString::from(format!("tracker-roster-{side}-{index}-status-{}", *mode as usize));
-            scope_cells(id, row_stats(player, *mode), status, pending, *mode, hover_both_scopes.clone())
+            let stats = row_stats(player, *mode, layout.rating_scope);
+            scope_cells(id, stats, status, pending, *mode, hover_both_scopes.clone())
         })
         .collect();
 
@@ -2781,7 +2789,7 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
     // chip's: the egui roster tints its rows the same way, so a screen of them
     // reads as bands before any number is read.
     let lead = layout.modes.first().copied().unwrap_or(WinRateMode::Overall);
-    let tint = row_stats(player, lead).band.map(|band| {
+    let tint = row_stats(player, lead, layout.rating_scope).band.map(|band| {
         let hue: Hsla = rgb(personal_rating::chip_hue(band)).into();
         hue.opacity(ROW_TINT_ALPHA)
     });
@@ -3605,7 +3613,12 @@ mod tests {
 
         window
             .update(cx, |tracker, _window, cx| {
-                tracker.live_match = Some(LiveMatch { started_at, build: None, players: Vec::new() });
+                tracker.live_match = Some(LiveMatch {
+                    started_at,
+                    build: None,
+                    players: Vec::new(),
+                    rating_scope: wowsunpack::rating_scope::RatingScope::Unrated,
+                });
                 let failure = StatsError::Refused(MatchStatsError::Http { status: 500 });
                 tracker.stats_budget.note_failure(arena_id, &failure, Instant::now());
 
