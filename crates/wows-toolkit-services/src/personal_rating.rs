@@ -51,8 +51,12 @@ async fn fetch_and_cache(agent: UserAgent, proxy_url: &str) -> Result<(), Refres
 /// A failed refresh is logged rather than surfaced: a cache from last week
 /// still rates every replay correctly enough to show, and the alternative is
 /// an error banner over a feature the user did not ask to refresh.
+///
+/// With the `test-support` feature nothing is downloaded: the table comes from
+/// a third party, and a stalled answer holds a test for the client's whole
+/// read timeout.
 pub async fn load_refreshed(agent: UserAgent, proxy_url: &str) -> Option<PersonalRatingData> {
-    if personal_rating::needs_update() {
+    if cfg!(all()) && personal_rating::needs_update() {
         match fetch_and_cache(agent, proxy_url).await {
             Ok(()) => tracing::info!("personal rating: refreshed the expected values"),
             Err(err) => tracing::warn!("personal rating: could not refresh the expected values: {err}"),

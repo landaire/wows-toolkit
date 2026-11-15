@@ -102,6 +102,7 @@ use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 
 use crate::frames::FrameSink;
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::Services;
@@ -455,7 +456,7 @@ impl RendererSession {
         self.status.set(Status::Baking);
         self.spawn(async move {
             let options = RenderOptions { player_names: names, ..playback_options() };
-            let baked = blocking(move || bake(&request.path, &request.alts, &game_data, &cancel, options)).await;
+            let baked = long_job(move || bake(&request.path, &request.alts, &game_data, &cancel, options)).await;
             let current = self.run.try_with_value(|run| run.bake_generation == generation);
             if current != Some(true) {
                 return;
@@ -494,7 +495,7 @@ impl RendererSession {
         };
         self.spawn(async move {
             let read =
-                blocking(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
+                long_job(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
             match read {
                 Ok((mut read, shots)) => {
                     if self.run.try_with_value(|run| run.event_generation == generation) != Some(true) {
@@ -1053,7 +1054,7 @@ impl RendererSession {
         };
         let Some(generation) = self.run.try_with_value(|run| run.share_generation) else { return };
         self.spawn(async move {
-            let shared = blocking(move || shared_replay(replay_id, title, &track, &game_data)).await;
+            let shared = long_job(move || shared_replay(replay_id, title, &track, &game_data)).await;
             // The link this was prepared for has been replaced.
             if self.run.try_with_value(|run| run.share_generation) != Some(generation) {
                 return;
@@ -1393,7 +1394,7 @@ impl RendererSession {
             let written = output.clone();
             // Dropping this task leaves the encode running, so closing the session stops it
             // through `cancel`.
-            let encode = blocking(move || {
+            let encode = long_job(move || {
                 let outcome = encode_track(&renderer, &frames, duration, &written, settings, &cancel, |step| {
                     let _ = progress_tx.unbounded_send(step);
                 });

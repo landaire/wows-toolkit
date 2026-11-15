@@ -47,7 +47,6 @@ use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::Task;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -63,6 +62,7 @@ use zgui_ui::SpinnerProps;
 
 use crate::http::USER_AGENT;
 use crate::icons::AppIconProps;
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::Services;
@@ -264,7 +264,7 @@ fn start_read(
     let (tx, rx) = futures::channel::mpsc::unbounded();
     // Detached from the task below on purpose: the reader stops at its next send once `rx` is
     // dropped with that task.
-    let reading = blocking(move || {
+    let reading = long_job(move || {
         read_directory(&root, &game_data, |update| match tx.unbounded_send(update) {
             Ok(()) => ControlFlow::Continue(()),
             Err(_) => ControlFlow::Break(()),

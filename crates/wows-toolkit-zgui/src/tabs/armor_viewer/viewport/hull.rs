@@ -44,7 +44,6 @@ use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
-use zgui::reactive::blocking;
 use zgui::reactive::spawn_detached;
 use zgui::reactive::spawn_local;
 
@@ -57,6 +56,7 @@ use super::state::ArmorViewportState;
 use super::state::ViewCx;
 use super::types::SceneSource;
 use super::types::ViewportChange;
+use crate::long_job::long_job;
 use crate::shell::Shell;
 
 /// Finds the scheme `old_id` named in `old_infos` in `new_infos`, by name. A `CamoSchemeId` is an
@@ -404,7 +404,7 @@ impl ViewportModel {
         let cached = self.camo_texture_cache.get(id);
         cx.defer(move |state| {
             spawn_local(async move {
-                let decode = blocking(move || decode_active_camo(id, cached, &armor)).await;
+                let decode = long_job(move || decode_active_camo(id, cached, &armor)).await;
                 state.update(|this, cx| this.apply_camo_decode(generation, id, decode, cx));
             });
         });
@@ -523,7 +523,7 @@ impl ViewportModel {
         let camo_generation = self.camo_generation;
         cx.defer(move |state| {
             spawn_local(async move {
-                let result = blocking(work).await;
+                let result = long_job(work).await;
                 state.update(|this, cx| this.apply_reload_result(generation, camo_generation, result, cx));
             });
         });
@@ -582,7 +582,7 @@ impl ViewportModel {
             // Detached: a file the reader asked for is written whatever becomes of the viewport.
             spawn_detached(async move {
                 let Some(path) = shell.chosen_path(asked).await else { return };
-                let written = blocking(move || {
+                let written = long_job(move || {
                     let result = load_ship::export_ship_glb(&assets, &param_index, &options, &path);
                     // The size is only knowable once the file is on disk.
                     result.map(|()| {

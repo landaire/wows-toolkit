@@ -23,9 +23,9 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
-use zgui::task::blocking;
 use zgui::task::spawn_detached;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::progress;
@@ -132,7 +132,7 @@ impl Shell {
         let (reports, received) = futures::channel::mpsc::unbounded::<IndexProgress>();
 
         spawn_detached(async move {
-            let working = blocking(move || {
+            let working = long_job(move || {
                 let live =
                     wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
                 let source = runtime.block_on(live)?;

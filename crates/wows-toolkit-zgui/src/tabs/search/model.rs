@@ -59,6 +59,7 @@ use zgui::task::spawn_local;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::services::TokioError;
 
@@ -914,7 +915,7 @@ impl Search {
         }
         let (build, ship_id) = key;
         self.spawn(async move {
-            let named = zgui::task::blocking(move || {
+            let named = long_job(move || {
                 let loaded = cache.get_or_load_build_for(build, None).ok()?;
                 try_resolve_ship_name(ship_id, Some(loaded.provider()))
             })

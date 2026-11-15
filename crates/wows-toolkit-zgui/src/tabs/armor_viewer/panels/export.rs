@@ -56,7 +56,6 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
-use zgui::task::blocking;
 use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
 use zgui::view;
@@ -76,6 +75,7 @@ use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui_primitives::Binding;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Services;
 use crate::shell::DialogHandle;
@@ -365,7 +365,7 @@ impl ExportDialog {
         let model = self.model;
 
         spawn_local(async move {
-            let read = blocking(move || match &target {
+            let read = long_job(move || match &target {
                 ExportTarget::Ship { param_index, .. } => read_ship_meta(&assets, param_index, hull),
                 ExportTarget::Model { request, models } => {
                     read_model_meta(models, assets.metadata(), request).map_err(|error| error.to_string())
@@ -396,7 +396,7 @@ impl ExportDialog {
                 return;
             };
 
-            let priced = blocking(move || {
+            let priced = long_job(move || {
                 context.size_model().map_err(|report| format!("{report:?}")).inspect_err(|why| {
                     tracing::warn!("armor viewer: the export size could not be modelled: {why}");
                 })
@@ -442,7 +442,7 @@ impl ExportDialog {
 
         spawn_local(async move {
             let ids = asking.clone();
-            let read = blocking(move || match context.scheme_ladders_batch(&ids) {
+            let read = long_job(move || match context.scheme_ladders_batch(&ids) {
                 Ok(batch) => batch.into_iter().map(|(id, ladders)| (id, Some(ladders))).collect(),
                 // A read that failed is recorded as failed rather than merged in as a camo that
                 // costs nothing.
@@ -895,7 +895,7 @@ pub fn write_glb(
                 progress: None,
             })
         });
-        let written = blocking(move || {
+        let written = long_job(move || {
             write(path.clone())?;
             // The size is what the toast reports beside the ship, and it is only knowable once the
             // file is on disk.
