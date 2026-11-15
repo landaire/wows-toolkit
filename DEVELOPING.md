@@ -89,6 +89,8 @@ On Windows provisioning needs elevation because the Visual Studio and Windows SD
 
 Provisioning runs the platform toolchain bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local`. Buck fails with a message naming it if `.buckconfig.local` is missing.
 
+On macOS and Linux, `.buckconfig.local` also has a `[nix_system_libs]` section. Its `root` is the `buck-system-libs` flake output, which holds the system shared libraries the Linux binaries link dynamically, such as libdbus. It is kept apart from `[nix_toolchain]` so that adding a library leaves the toolchain path, and every cached action, unchanged. A Linux build that links one of these libraries fails with `Missing [nix_system_libs] root` when the section is absent. Windows needs no such section.
+
 ### Bumping Buck2
 
 1. Replace `toolchains/buck2` with the DotSlash file from the new release:
@@ -238,6 +240,7 @@ A crate needs a fixup in `third-party/rust/fixups/<crate>/fixups.toml` when its 
 - The build script reads host state (probes pkg-config, searches for a library, inspects the compiler). Set `buildscript.run = false` and declare what it would have produced. For generated sources, check in the file and point `OUT_DIR` at a `filegroup`; `x11-dl` and `libsqlite3-sys` are the worked examples.
 - The crate compiles C or C++. Declare it as `[[cxx_library]]` with explicit `srcs`, `headers`, and `include_paths` rather than letting the build script drive `cc`. See `vk-mem`.
 - The build script only emits link flags for code it built. Keep it running and add `rustc_link_lib` / `rustc_link_search`. See `rav1e` and `openh264-sys2`.
+- The crate links a system shared library. Add the library to the `buck-system-libs` flake output, declare it with `nix_system_library` in `toolchains/BUCK`, and add that target to the crate's `extra_deps` with `buildscript.run = false`. See `libdbus-sys`. The Flatpak runtime has to provide the library.
 
 Two things that will bite:
 
@@ -280,7 +283,7 @@ A scanner rather than an ordinary lock is indicated: `DeleteFileW` reports a fil
 
 Repeating the build also succeeds, because everything already built is cached, but a cold build continues to encounter the error.
 
-**`Missing [hermetic_tools] <name>`** or **`Missing [nix_toolchain] root`.** `.buckconfig.local` is absent or stale. Re-run the bootstrap.
+**`Missing [hermetic_tools] <name>`**, **`Missing [nix_toolchain] root`** or **`Missing [nix_system_libs] root`.** `.buckconfig.local` is absent or stale. Re-run the bootstrap.
 
 **`NASM build failed`, or `Unable to run <path>\nasm.exe: The system cannot find the file specified`, from rav1e's build script.** The `[hermetic_tools] nasm` entry names a file that is absent, usually because it referred to a location under `%TEMP%` that Windows has since deleted. Re-running the bootstrap corrects it, or on Windows repair that single entry:
 

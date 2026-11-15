@@ -23020,69 +23020,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "2",
         "CARGO_PKG_VERSION_PATCH": "7",
         "CARGO_PKG_VERSION_PRE": "",
-        "OUT_DIR": "$(location :libdbus-sys-0.2-build-script-run[out_dir])",
     },
     features = [
         "default",
         "pkg-config",
-        "vendored",
-    ],
-    rustc_flags = ["@$(location :libdbus-sys-0.2-build-script-run[rustc_flags])"],
-    visibility = [],
-)
-
-cargo.rust_binary(
-    name = "libdbus-sys-0.2-build-script-build",
-    srcs = [":libdbus-sys-0.2.7.crate"],
-    crate = "build_script_build",
-    crate_root = "libdbus-sys-0.2.7.crate/build.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "libdbus-sys-0.2.7.crate",
-        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
-        "CARGO_PKG_DESCRIPTION": "FFI bindings to libdbus.",
-        "CARGO_PKG_NAME": "libdbus-sys",
-        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
-        "CARGO_PKG_VERSION": "0.2.7",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "7",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "pkg-config",
-        "vendored",
     ],
     visibility = [],
-    deps = [
-        ":pkg-config-0.3",
-        "//third-party/rust:cc-1",
-    ],
-)
-
-buildscript_run(
-    name = "libdbus-sys-0.2-build-script-run",
-    package_name = "libdbus-sys",
-    buildscript_rule = ":libdbus-sys-0.2-build-script-build",
-    env = {
-        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
-        "CARGO_PKG_DESCRIPTION": "FFI bindings to libdbus.",
-        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "7",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "pkg-config",
-        "vendored",
-    ],
-    rustc_link_lib = True,
-    rustc_link_search = True,
-    version = "0.2.7",
+    deps = ["toolchains//:dbus-1"],
 )
 
 http_archive(

@@ -1,5 +1,12 @@
-load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_wasm_tools", "selected_toolchain")
+load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_system_library", "nix_wasm_tools", "selected_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
+
+# libdbus-sys links it on Linux. The Flatpak runtime provides libdbus-1.so.3.
+nix_system_library(
+    name = "dbus-1",
+    lib = "dbus-1",
+    visibility = ["PUBLIC"],
+)
 
 nix_cxx_toolchain(
     name = "nix_cxx_macos",

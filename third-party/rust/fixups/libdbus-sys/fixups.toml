@@ -1,13 +1,4 @@
-# libdbus-sys's build.rs, by default, probes pkg-config for the system libdbus-1
-# dev headers, which depends on host state unavailable in the sandboxed buck
-# build. Force the "vendored" feature so build_vendored.rs statically compiles
-# the bundled libdbus C sources (via the `cc` crate) instead of linking a system
-# lib.
-features = ["vendored"]
-
-[buildscript.build]
-extra_deps = ["//third-party/rust:cc-1"]
-
-[buildscript.run]
-rustc_link_lib = true
-rustc_link_search = true
+# The build script probes pkg-config, which the sandboxed build cannot reach.
+# The system libdbus-1 comes from the Nix toolchain instead, linked dynamically.
+buildscript.run = false
+extra_deps = ["toolchains//:dbus-1"]

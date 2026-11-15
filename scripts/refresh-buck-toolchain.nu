@@ -42,6 +42,8 @@ for tool in $required {
     }
 }
 
+let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-out-paths .#buck-system-libs | str trim)
+
 # Buck reads these instead of resolving any tool through PATH.
 [
     "[nix_toolchain]"
@@ -56,6 +58,9 @@ for tool in $required {
     # The prelude has no rustfmt support, so toolchains//:rustfmt carries it
     # and scripts/lint.nu runs the path bxl/lint.bxl reports.
     $"rustfmt = ($toolchain_root)/bin/rustfmt"
+    ""
+    "[nix_system_libs]"
+    $"root = ($system_libs_root)"
     ""
     # Nothing reads debug info out of a CI artifact, and carrying all of it is
     # what makes linking the GUI binary expensive. Line tables are kept so a

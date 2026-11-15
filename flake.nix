@@ -81,8 +81,7 @@
           ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.vulkan-loader
             # keyring's Linux Secret Service backend (dbus-secret-service ->
-            # libdbus-sys) pkg-config-probes dbus-1 at build. Buck vendors
-            # libdbus's C sources; the cargo/crane path needs the dev package.
+            # libdbus-sys) pkg-config-probes dbus-1 at build.
             pkgs.dbus
           ];
       };
@@ -190,6 +189,14 @@
             postBuild = ''
               ln -s ${llvmPackages.clang-unwrapped}/bin/clang $out/bin/wasm32-unknown-unknown-clang
             '';
+          };
+
+          # Shared libraries Buck links dynamically (toolchains//:dbus-1). Kept
+          # apart from buck-toolchain so adding one leaves the toolchain path,
+          # and with it every cached action, unchanged.
+          buck-system-libs = symlinkJoin {
+            name = "wows-toolkit-buck-system-libs";
+            paths = lib.optionals stdenv.hostPlatform.isLinux [dbus.lib];
           };
 
           wowsunpack = craneLib.buildPackage (commonArgs

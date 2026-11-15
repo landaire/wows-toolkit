@@ -45,15 +45,6 @@ source = "git+https://github.com/landaire/wowsdeob"
 # repository. A crate named here must be in the dependency graph.
 
 [[component]]
-name = "D-Bus"
-version = "1.14.4"
-license = "AFL-2.1"
-offered = "AFL-2.1 OR GPL-2.0-or-later"
-url = "https://gitlab.freedesktop.org/dbus/dbus"
-contained_in = "libdbus-sys"
-files = [{ crate = "libdbus-sys", path = "vendor/dbus/COPYING" }]
-
-[[component]]
 name = "Zstandard"
 version = "1.5.7"
 license = "BSD-3-Clause"

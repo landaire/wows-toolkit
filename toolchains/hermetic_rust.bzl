@@ -415,3 +415,34 @@ def selected_toolchain(name, actual, visibility):
         }),
         visibility = visibility,
     )
+
+def _missing_system_library_impl(ctx):
+    fail("Missing [nix_system_libs] root, which {} needs to link lib{}. Run `nu scripts/refresh-buck-toolchain.nu` before invoking Buck2.".format(ctx.label.raw_target(), ctx.attrs.lib))
+
+_missing_system_library = rule(
+    impl = _missing_system_library_impl,
+    attrs = {"lib": attrs.string()},
+)
+
+# A shared library from the Nix system libraries (flake output
+# buck-system-libs), linked dynamically. The target system provides it at run
+# time. Only Linux links one.
+def nix_system_library(name, lib, visibility):
+    root = read_root_config("nix_system_libs", "root")
+    if root:
+        native.prebuilt_cxx_library(
+            name = name,
+            header_only = True,
+            exported_linker_flags = ["-L" + root + "/lib", "-l" + lib],
+            target_compatible_with = ["prelude//os:linux"],
+            visibility = visibility,
+        )
+    else:
+        # Fails only the builds that link the library, so a host that never
+        # links one needs no section.
+        _missing_system_library(
+            name = name,
+            lib = lib,
+            target_compatible_with = ["prelude//os:linux"],
+            visibility = visibility,
+        )
