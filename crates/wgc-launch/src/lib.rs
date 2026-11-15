@@ -52,6 +52,7 @@ pub use crate::session::ProcessId;
 pub use crate::session::SESSION_ENV;
 pub use crate::session::SESSION_INSTALL_ENV;
 pub use crate::session::SessionId;
+pub use crate::session::SessionMember;
 pub use crate::spawn::LaunchSpec;
 pub use crate::spawn::WindowsProgram;
 pub use crate::spawn::dos_path;

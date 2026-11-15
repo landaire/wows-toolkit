@@ -43,6 +43,14 @@ impl SessionId {
     }
 }
 
+/// One process of a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionMember {
+    pub pid: ProcessId,
+    /// Final component of argv[0] in either path style.
+    pub exe_name: Option<String>,
+}
+
 /// What every process of a session carries in its environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionMarker {
@@ -148,6 +156,16 @@ impl GameHandle {
 
     pub fn is_running(&self) -> std::io::Result<bool> {
         Ok(!scan::session_processes(Some(&self.session))?.is_empty())
+    }
+
+    /// Every process of the session, the runner, Wine's and the game's.
+    pub fn members(&self) -> std::io::Result<Vec<SessionMember>> {
+        let processes = scan::session_processes(Some(&self.session))?;
+
+        Ok(processes
+            .into_iter()
+            .map(|process| SessionMember { pid: process.pid, exe_name: process.exe_name })
+            .collect())
     }
 
     /// Blocks until no session process remains. A failed scan is retried,

@@ -8,6 +8,8 @@
 //! when an operation reports a change.
 
 mod accounts;
+#[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+mod diagnostics;
 mod display;
 mod download;
 mod error;

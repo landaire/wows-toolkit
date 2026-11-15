@@ -115,3 +115,55 @@ pub enum ReplayCarryError {
     #[error(transparent)]
     GameRunning(#[from] wows_game_settings::GameRunning),
 }
+
+/// Why part of a dev build's launch diagnostics capture failed.
+#[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug, Error)]
+pub(crate) enum CaptureError {
+    #[error("the system clock is before 1970: {source}")]
+    Clock {
+        #[source]
+        source: std::time::SystemTimeError,
+    },
+    #[error("could not create {path}: {source}")]
+    CreateFolder {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not create {path}: {source}")]
+    CreateFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not write {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not read {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the install has no {path}")]
+    NoLog { path: PathBuf },
+    #[error("could not list the game session's processes: {source}")]
+    Members {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the game session has no {exe} process")]
+    NoProcess { exe: &'static str },
+    #[error("could not start thread {name}: {source}")]
+    Thread {
+        name: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("a capture thread panicked")]
+    WorkerPanicked,
+}

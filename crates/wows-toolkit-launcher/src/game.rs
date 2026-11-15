@@ -151,6 +151,13 @@ pub struct GameExit {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct LaunchId(u64);
 
+#[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+impl LaunchId {
+    pub(crate) fn number(self) -> u64 {
+        self.0
+    }
+}
+
 pub(crate) enum GameEvent {
     /// The launch failed before the game started.
     Failed {

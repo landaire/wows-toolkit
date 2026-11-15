@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use wgc_ipc::AccountEvent;
+use wgc_ipc::AccountObserver;
 use wgc_ipc::AccountResponder;
 use wgc_ipc::GameLanguage;
 use wgc_ipc::RelayBinaries;
@@ -127,10 +128,14 @@ async fn start(
     sender: &EventSender,
 ) -> Result<(GameProcess, Option<tokio::task::JoinHandle<()>>), LaunchFailure> {
     let LaunchPlan { launch, runner, dirs, install, args, program } = plan;
+    #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+    let capture_dirs = dirs.clone();
 
     let signs_in = matches!(program, Program::SignIn(_));
     let Prepared { lock, runner, view, relay_exe } =
         tokio::task::spawn_blocking(move || prepare_launch(&runner, &dirs, &install, signs_in)).await??;
+    #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+    let (sign_in_trigger, capture) = crate::diagnostics::prepare(launch, &capture_dirs, view.files());
 
     let (program, serving) = match program {
         Program::Replay(replay) => (WindowsProgram::replay(&view, &replay), None),
@@ -141,7 +146,10 @@ async fn start(
             let language = game_language(&view, sign_in.key.realm);
             let listener = RelayListener::bind().await?;
             let env = listener.relay_env();
-            let responder = account_responder(launch, sign_in, language, sender);
+            let observer = account_observer(launch, sign_in.key, sender);
+            #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+            let observer = sign_in_trigger.observe(observer);
+            let responder = account_responder(sign_in, language, observer);
             let serving = tokio::spawn(async move {
                 if let Err(err) = listener.serve(Arc::new(responder)).await {
                     tracing::warn!("the Game Center relay listener stopped: {err}");
@@ -167,7 +175,13 @@ async fn start(
         Err(err) => Err(LaunchFailure::from(err)),
     };
     match spawned {
-        Ok(process) => Ok((process, serving)),
+        Ok(process) => {
+            #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
+            if signs_in {
+                crate::diagnostics::spawn(capture, process.handle());
+            }
+            Ok((process, serving))
+        }
         Err(failure) => {
             if let Some(serving) = serving {
                 serving.abort();
@@ -203,22 +217,21 @@ fn prepare_launch(
     Ok(Prepared { lock, runner, view, relay_exe })
 }
 
-fn account_responder(
-    launch: LaunchId,
-    sign_in: SignIn,
-    language: GameLanguage,
-    sender: &EventSender,
-) -> AccountResponder {
-    let SignIn { key, session, tracking_id, credentials } = sign_in;
-
+/// Reports the account's sign-in and a rejected session as game events.
+fn account_observer(launch: LaunchId, key: AccountKey, sender: &EventSender) -> AccountObserver {
     let sender = sender.clone();
-    let observer: wgc_ipc::AccountObserver = Arc::new(move |event| {
+
+    Arc::new(move |event| {
         let event = match event {
             AccountEvent::Token2Saved => GameEvent::SignedIn { launch },
             AccountEvent::SessionRejected => GameEvent::SessionRejected { key },
         };
         sender.send(Event::Game(event));
-    });
+    })
+}
+
+fn account_responder(sign_in: SignIn, language: GameLanguage, observer: AccountObserver) -> AccountResponder {
+    let SignIn { key, session, tracking_id, credentials } = sign_in;
     let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
 
     AccountResponder::new(session, client, credentials, language, observer)
