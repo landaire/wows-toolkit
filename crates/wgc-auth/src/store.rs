@@ -140,7 +140,6 @@ fn realm_key(realm: AccountRealm) -> &'static str {
         AccountRealm::Eu => "eu",
         AccountRealm::Na => "na",
         AccountRealm::Asia => "asia",
-        AccountRealm::Ru => "ru",
     }
 }
 

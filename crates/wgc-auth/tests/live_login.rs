@@ -6,7 +6,7 @@
 //!   WGC_TEST_USERNAME=... WGC_TEST_PASSWORD=... WGC_TEST_REALM=eu \
 //!     cargo test -p wgc-auth --test live_login -- --ignored --nocapture
 //!
-//! `WGC_TEST_REALM` is one of: eu, na, asia, ru. The test skips cleanly
+//! `WGC_TEST_REALM` is one of: eu, na, asia. The test skips cleanly
 //! (prints a message and returns without failing) if any of the three env
 //! vars is unset.
 
@@ -35,8 +35,7 @@ async fn live_login_returns_nickname_and_account_id() {
         "eu" => AccountRealm::Eu,
         "na" => AccountRealm::Na,
         "asia" => AccountRealm::Asia,
-        "ru" => AccountRealm::Ru,
-        other => panic!("unknown WGC_TEST_REALM {other:?}, expected eu/na/asia/ru"),
+        other => panic!("unknown WGC_TEST_REALM {other:?}, expected eu/na/asia"),
     };
     // WGNI requires a numeric tid (WGC uses a nanosecond unix timestamp);
     // override with WGC_TEST_TID to reuse a specific device id.

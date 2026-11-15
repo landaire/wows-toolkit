@@ -5,17 +5,15 @@ use wgc_catalog::update::LatestBuild;
 use wgc_catalog::update::PartStatus;
 
 /// Every realm the sign-in form offers, in display order.
-pub const REALMS: [wgc_auth::AccountRealm; 4] =
-    [wgc_auth::AccountRealm::Eu, wgc_auth::AccountRealm::Na, wgc_auth::AccountRealm::Asia, wgc_auth::AccountRealm::Ru];
+pub const REALMS: [wgc_auth::AccountRealm; 3] =
+    [wgc_auth::AccountRealm::Eu, wgc_auth::AccountRealm::Na, wgc_auth::AccountRealm::Asia];
 
-/// Display label for a WGNI account realm. Ru is flagged experimental
-/// everywhere it appears; see `wgc_auth::AccountRealm::Ru`.
+/// Display label for a WGNI account realm.
 pub fn realm_label(realm: wgc_auth::AccountRealm) -> &'static str {
     match realm {
         wgc_auth::AccountRealm::Eu => "EU",
         wgc_auth::AccountRealm::Na => "NA",
         wgc_auth::AccountRealm::Asia => "Asia",
-        wgc_auth::AccountRealm::Ru => "RU (experimental)",
     }
 }
 

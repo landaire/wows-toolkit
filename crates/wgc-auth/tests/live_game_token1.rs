@@ -38,7 +38,7 @@ async fn live_game_token1_mints_for_the_stored_session() {
     let tid = std::env::var("WGC_TEST_TID").unwrap_or_else(|_| "1700000000000000000".to_string());
     let tracking_id = TrackingId::parse(&tid).expect("tracking id is non-empty");
     let client = AuthClient::new(realm, tracking_id);
-    let title = GameTitle::wows(realm).expect("WoWs serves this realm");
+    let title = GameTitle::wows(realm);
 
     let token = client.create_game_token1(&session, &title).await.expect("token1 minted");
 

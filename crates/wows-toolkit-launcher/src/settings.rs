@@ -41,8 +41,9 @@ pub struct LauncherSettings {
     pub tracking_id: Option<String>,
     /// Which signed-in account (if any) to load a session for from the OS
     /// keyring at startup. No secret material lives here; the token pair is
-    /// only ever in the keyring.
-    #[serde(default)]
+    /// only ever in the keyring. An account of a realm the toolkit no longer
+    /// supports loads as `None` so the rest of the row survives.
+    #[serde(default, deserialize_with = "supported_account")]
     pub active_account: Option<PersistedAccount>,
 }
 
@@ -134,6 +135,36 @@ fn generate_tracking_id() -> String {
     }
 }
 
+/// Deserializes an optional account, dropping one whose realm is no longer
+/// supported (RU) instead of failing the whole settings row.
+fn supported_account<'de, D>(deserializer: D) -> Result<Option<PersistedAccount>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StoredAccount {
+        Supported(PersistedAccount),
+        Removed { realm: RemovedRealm },
+    }
+
+    #[derive(Deserialize)]
+    enum RemovedRealm {
+        Ru,
+    }
+
+    let account = match Option::<StoredAccount>::deserialize(deserializer)? {
+        Some(StoredAccount::Supported(account)) => Some(account),
+        Some(StoredAccount::Removed { realm: RemovedRealm::Ru }) => {
+            tracing::info!("dropping a saved RU account; the RU realm is no longer supported");
+            None
+        }
+        None => None,
+    };
+
+    Ok(account)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +199,14 @@ mod tests {
     #[test]
     fn a_row_written_before_a_field_existed_still_loads() {
         let loaded: LauncherSettings = serde_json::from_str(r#"{"manual_installs":["/a"]}"#).unwrap();
+        assert_eq!(loaded.manual_installs, vec![PathBuf::from("/a")]);
+        assert!(loaded.active_account.is_none());
+    }
+
+    #[test]
+    fn an_account_of_a_removed_realm_loads_as_signed_out() {
+        let row = r#"{"manual_installs":["/a"],"active_account":{"realm":"Ru","account_id":1,"nickname":"x"}}"#;
+        let loaded: LauncherSettings = serde_json::from_str(row).unwrap();
         assert_eq!(loaded.manual_installs, vec![PathBuf::from("/a")]);
         assert!(loaded.active_account.is_none());
     }

@@ -915,7 +915,7 @@ mod tests {
         }
 
         fn wows_na() -> GameTitle {
-            GameTitle::wows(AccountRealm::Na).expect("WoWs serves NA")
+            GameTitle::wows(AccountRealm::Na)
         }
 
         #[tokio::test]
@@ -999,7 +999,7 @@ mod tests {
         async fn foreign_realm_is_refused_before_any_request() {
             let server = ScriptedServer::start(vec![Reply::Hang]).await;
             let client = client(&server, fast_timing());
-            let wows_eu = GameTitle::wows(AccountRealm::Eu).expect("WoWs serves EU");
+            let wows_eu = GameTitle::wows(AccountRealm::Eu);
 
             let from_session =
                 client.create_game_token1(&session(AccountRealm::Eu), &wows_na()).await.expect_err("session realm");

@@ -61,17 +61,15 @@ impl GameTitle {
     }
 
     /// World of Warships for an account realm, per the `realms_settings`
-    /// instances of the WoWs `metadata.xml`. `None` for realms the WoWs
-    /// client does not serve.
-    pub fn wows(realm: AccountRealm) -> Option<GameTitle> {
+    /// instances of the WoWs `metadata.xml`.
+    pub fn wows(realm: AccountRealm) -> GameTitle {
         let title_code = match realm {
             AccountRealm::Eu => "eu.wows",
             AccountRealm::Na => "us.wows",
             AccountRealm::Asia => "sg.wows",
-            AccountRealm::Ru => return None,
         };
 
-        Some(GameTitle { realm, name: GameName::WOWS, title_code: TitleCode(Cow::Borrowed(title_code)) })
+        GameTitle { realm, name: GameName::WOWS, title_code: TitleCode(Cow::Borrowed(title_code)) }
     }
 
     pub fn realm(&self) -> AccountRealm {
