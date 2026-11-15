@@ -16576,6 +16576,7 @@ dependencies = [
  "thiserror 2.0.20",
  "toml 1.1.6+spec-1.1.0",
  "tracing",
+ "windows-sys 0.61.2",
  "wows-core",
  "wows-data-mgr",
  "wows-ship-stats",

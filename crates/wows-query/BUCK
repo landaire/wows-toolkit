@@ -38,7 +38,8 @@ WOWS_QUERY_DEPS = [
     macos = ["//third-party/rust:rustix"],
     # The cfg(unix) and cfg(target_os = "linux") dependency sections.
     linux = ["//third-party/rust:landlock", "//third-party/rust:rustix"],
-    windows = [],
+    # The cfg(windows) dependency section.
+    windows = ["//third-party/rust:windows-sys"],
 )
 
 WOWS_QUERY_TEST_DEPS = [

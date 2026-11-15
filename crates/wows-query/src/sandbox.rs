@@ -59,10 +59,99 @@ pub(crate) fn limit_memory(bytes: u64) {
     let _ = rustix::process::setrlimit(rustix::process::Resource::As, limit);
 }
 
-/// Other systems have no enforced address-space limit; the deadline ends a
-/// runaway worker.
+/// Other systems have no enforced address-space limit; the parent's memory
+/// watch and deadline end a runaway worker.
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn limit_memory(_bytes: u64) {}
+
+/// Memory process `pid` holds that the system must back: its resident set.
+/// `None` once it has exited.
+#[cfg(target_os = "linux")]
+pub(crate) fn process_memory(pid: u32) -> Option<u64> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let kib = status.lines().find_map(|line| line.strip_prefix("VmRSS:"))?.trim().strip_suffix("kB")?;
+
+    kib.trim().parse::<u64>().ok()?.checked_mul(1024)
+}
+
+/// Memory process `pid` holds that the system must back: its physical
+/// footprint, compressed pages included. `None` once it has exited.
+#[cfg(target_os = "macos")]
+pub(crate) fn process_memory(pid: u32) -> Option<u64> {
+    /// `struct rusage_info_v2` of `<sys/resource.h>`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct RusageInfoV2 {
+        uuid: [u8; 16],
+        user_time: u64,
+        system_time: u64,
+        pkg_idle_wkups: u64,
+        interrupt_wkups: u64,
+        pageins: u64,
+        wired_size: u64,
+        resident_size: u64,
+        phys_footprint: u64,
+        proc_start_abstime: u64,
+        proc_exit_abstime: u64,
+        child_user_time: u64,
+        child_system_time: u64,
+        child_pkg_idle_wkups: u64,
+        child_interrupt_wkups: u64,
+        child_pageins: u64,
+        child_elapsed_abstime: u64,
+        diskio_bytesread: u64,
+        diskio_byteswritten: u64,
+    }
+    const RUSAGE_INFO_V2: i32 = 2;
+    // libproc, part of libSystem.
+    unsafe extern "C" {
+        fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut *mut std::ffi::c_void) -> i32;
+    }
+
+    let pid = i32::try_from(pid).ok()?;
+    let mut info = RusageInfoV2::default();
+    // SAFETY: `info` is a `rusage_info_v2`, which the V2 flavor fills, and lives across the call.
+    let result = unsafe { proc_pid_rusage(pid, RUSAGE_INFO_V2, (&raw mut info).cast()) };
+
+    (result == 0).then_some(info.phys_footprint)
+}
+
+/// Memory process `pid` holds that the system must back: its committed
+/// private memory, which counts against the commit limit whether or not it
+/// is resident. `None` once it cannot be opened.
+#[cfg(windows)]
+pub(crate) fn process_memory(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::GetProcessMemoryInfo;
+    use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS_EX;
+    use windows_sys::Win32::System::Threading::OpenProcess;
+    use windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+
+    // SAFETY: OpenProcess takes no pointers; a null handle is checked below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    // SAFETY: an all-zero PROCESS_MEMORY_COUNTERS_EX is a valid value of the plain-data struct.
+    let mut counters: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
+    let size = u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>()).expect("the counters are small");
+    counters.cb = size;
+    // SAFETY: `process` is an open handle and `counters` is as large as `size` says.
+    let read = unsafe { GetProcessMemoryInfo(process, (&raw mut counters).cast(), size) };
+    // SAFETY: `process` is open and closed once.
+    unsafe { CloseHandle(process) };
+
+    if read == 0 {
+        return None;
+    }
+
+    u64::try_from(counters.PrivateUsage).ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn process_memory(_pid: u32) -> Option<u64> {
+    None
+}
 
 /// Why a worker could not place a limit on itself.
 #[derive(Debug, thiserror::Error)]

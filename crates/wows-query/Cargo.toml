@@ -41,6 +41,14 @@ rustix = { version = "1", features = ["process"] }
 # Denies jq and replay workers filesystem access.
 landlock = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+# Reads the committed memory of jq workers.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
 [features]
 default = []
 # Downloads the newest published game data build. The caller installs a rustls

@@ -276,8 +276,13 @@ impl GameData {
     pub fn gameparams_query(&self, args: &GameParamsQueryArgs) -> Result<GameParamsQueryOutput, QueryError> {
         const DEFAULT_PARAM_LIMIT: u32 = 20;
         const MAX_PARAM_LIMIT: u32 = 200;
-        const LIMITS: Limits =
-            Limits { steps_per_input: 1_000_000, time: Duration::from_secs(5), output_bytes: 1024 * 1024 };
+        // Two workers run at once, so together they hold at most 4 GiB.
+        const LIMITS: Limits = Limits {
+            steps_per_input: 1_000_000,
+            time: Duration::from_secs(5),
+            output_bytes: 1024 * 1024,
+            memory_bytes: 2 * 1024 * 1024 * 1024,
+        };
 
         let store = self.raw_params()?;
         let mut interpretations = Interpretations::default();

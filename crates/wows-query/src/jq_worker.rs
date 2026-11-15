@@ -2,11 +2,12 @@
 //!
 //! jaq cannot be interrupted, and a filter can recurse until the stack
 //! overflows, which aborts the process, or allocate without bound. The
-//! filter therefore runs in a worker process that is killed at a deadline
-//! and, on Linux, limited in address space and denied filesystem access
-//! with Landlock. The worker is the host program itself, started again with
-//! [`WORKER_ENV`] set: call [`init`] first in `main` of every program that
-//! serves `gameparams_query`.
+//! filter therefore runs in a worker process that is killed at a deadline or
+//! when it holds more memory than [`Limits::memory_bytes`], and, on Linux,
+//! limited in address space and denied filesystem access with Landlock. The
+//! worker is the host program itself, started again with [`WORKER_ENV`] set:
+//! call [`init`] first in `main` of every program that serves
+//! `gameparams_query`.
 //!
 //! The worker maps the raw GameParams store named by [`STORE_ENV`] before it
 //! denies itself filesystem access, so filters read entries in place from
@@ -135,6 +136,15 @@ enum Progress {
     Started,
 }
 
+/// What the parent hears about a running worker.
+enum Event {
+    Reply(Result<Reply, serde_json::Error>),
+    /// The worker's output ended.
+    Ended,
+    /// The worker holds more memory than its limit.
+    OverMemory,
+}
+
 /// In a worker process, evaluates the request on standard input and exits.
 /// Otherwise registers this program as the jq worker. Call it first in
 /// `main`, before anything that reads standard input.
@@ -213,13 +223,18 @@ pub fn evaluate(
 
     let deadline = Instant::now() + limits.time + GRACE;
     let mut evaluation = Evaluation { inputs: Vec::new(), output_bytes: 0, stopped: None };
+    let pid = child.id();
     let outcome = std::thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
+        let (watching, stop_watching) = mpsc::channel::<()>();
+        let watch_sender = sender.clone();
         scope.spawn(move || write_request(stdin, &request));
         scope.spawn(move || read_replies(stdout, &sender));
+        scope.spawn(move || watch_memory(pid, limits.memory_bytes, &stop_watching, &watch_sender));
 
         let outcome = collect_replies(&receiver, deadline, &mut evaluation);
-        // Ends a worker past its deadline, and with it both pipe threads.
+        drop(watching);
+        // Ends a worker past its deadline or its memory limit, and with it both pipe threads.
         let _ = child.kill();
 
         outcome
@@ -238,7 +253,7 @@ pub fn evaluate(
 }
 
 fn collect_replies(
-    receiver: &mpsc::Receiver<Result<Reply, serde_json::Error>>,
+    receiver: &mpsc::Receiver<Event>,
     deadline: Instant,
     evaluation: &mut Evaluation,
 ) -> Result<Progress, JqError> {
@@ -246,12 +261,13 @@ fn collect_replies(
 
     loop {
         let reply = match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(reply) => reply.map_err(JqError::Reply)?,
+            Ok(Event::Reply(reply)) => reply.map_err(JqError::Reply)?,
             Err(RecvTimeoutError::Timeout) => {
                 evaluation.stopped = Some(Stop::TimeLimit);
                 return Ok(progress);
             }
-            Err(RecvTimeoutError::Disconnected) => {
+            // The memory limit kills the worker as an address-space limit would have crashed it.
+            Ok(Event::Ended | Event::OverMemory) | Err(RecvTimeoutError::Disconnected) => {
                 evaluation.stopped = Some(Stop::Crashed);
                 return Ok(progress);
             }
@@ -298,16 +314,38 @@ fn write_request(mut stdin: ChildStdin, request: &Request) {
     let _ = stdin.write_all(&header);
 }
 
-fn read_replies(stdout: ChildStdout, sender: &mpsc::Sender<Result<Reply, serde_json::Error>>) {
+fn read_replies(stdout: ChildStdout, sender: &mpsc::Sender<Event>) {
     // Replies stay near the output limit; this bounds a misbehaving worker.
     const MAX_REPLY_BYTES: u64 = 16 * 1024 * 1024;
 
     for line in BufReader::new(stdout.take(MAX_REPLY_BYTES)).lines() {
         let Ok(line) = line else {
-            return;
+            break;
         };
-        if sender.send(serde_json::from_str(&line)).is_err() {
+        if sender.send(Event::Reply(serde_json::from_str(&line))).is_err() {
             return;
+        }
+    }
+    // The parent has stopped listening when this fails.
+    let _ = sender.send(Event::Ended);
+}
+
+/// Reports when worker `pid` holds more than `limit` bytes, until `stop` ends.
+/// The address-space limit covers this on Linux, but not on Windows, where
+/// a worker's commit can starve every process, or on macOS.
+fn watch_memory(pid: u32, limit: u64, stop: &mpsc::Receiver<()>, sender: &mpsc::Sender<Event>) {
+    // A worker writing gigabytes a second is stopped near the limit.
+    const POLL: Duration = Duration::from_millis(20);
+
+    loop {
+        if crate::sandbox::process_memory(pid).is_some_and(|held| held > limit) {
+            // The parent has stopped listening when this fails.
+            let _ = sender.send(Event::OverMemory);
+            return;
+        }
+        match stop.recv_timeout(POLL) {
+            Err(RecvTimeoutError::Timeout) => {}
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
         }
     }
 }

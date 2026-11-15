@@ -45,6 +45,10 @@ pub struct Limits {
     pub time: Duration,
     /// Output, as compact JSON, after which evaluation stops.
     pub output_bytes: usize,
+    /// Memory the worker may hold, as the system backs it: resident on
+    /// Linux, the physical footprint on macOS, committed on Windows. The
+    /// parent kills a worker that holds more.
+    pub memory_bytes: u64,
 }
 
 /// Outputs of the filter for one input.

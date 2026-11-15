@@ -87,8 +87,17 @@ fn store(name: &str, values: Vec<serde_json::Value>) -> (Arc<RawParams>, Vec<Ent
     (store, positions)
 }
 
+fn limits() -> Limits {
+    Limits {
+        steps_per_input: 10_000,
+        time: std::time::Duration::from_secs(5),
+        output_bytes: 1 << 16,
+        memory_bytes: 1 << 30,
+    }
+}
+
 fn probe(filter: &'static str, store: &RawParams, positions: &[EntryPosition]) -> Probe {
-    let limits = Limits { steps_per_input: 10_000, time: std::time::Duration::from_secs(5), output_bytes: 1 << 16 };
+    let limits = limits();
     let outcome = match wows_query::jq_worker::evaluate(filter, store, positions, limits) {
         Ok(evaluation) => {
             assert_eq!(evaluation.stopped, None, "{filter} stopped early");
@@ -121,12 +130,30 @@ fn host() {
 #[test]
 fn unbounded_recursion_ends_only_the_worker() {
     wows_query::jq_worker::set_worker_program(worker());
-    let limits = Limits { steps_per_input: 10_000, time: std::time::Duration::from_secs(5), output_bytes: 1 << 16 };
     let (store, positions) = store("recursion", vec![json!(null)]);
     let evaluation =
-        wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits).expect("the worker starts");
+        wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits()).expect("the worker starts");
 
     assert_eq!(evaluation.stopped, Some(wows_query::jq_worker::Stop::Crashed));
+}
+
+/// The parent ends a worker over its memory limit, on systems where nothing
+/// in the worker caps it. The string fits the worker's address space.
+#[test]
+fn a_worker_over_its_memory_limit_is_ended() {
+    wows_query::jq_worker::set_worker_program(worker());
+    let (store, positions) = store("memory", vec![json!(null)]);
+    let filter = r#""x" * 1000000000 | length"#;
+
+    let unlimited =
+        wows_query::jq_worker::evaluate(filter, &store, &positions, Limits { memory_bytes: 4 << 30, ..limits() })
+            .expect("the worker starts");
+    assert_eq!(unlimited.stopped, None, "the string is built under a larger limit");
+
+    let limited =
+        wows_query::jq_worker::evaluate(filter, &store, &positions, Limits { memory_bytes: 256 << 20, ..limits() })
+            .expect("the worker starts");
+    assert_eq!(limited.stopped, Some(wows_query::jq_worker::Stop::Crashed));
 }
 
 #[test]
