@@ -1119,10 +1119,19 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
             index_one(&runtime, &pool, &path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental)
         })
         .await;
-        if let Err(err) = indexed {
-            tracing::warn!("replay index: the battle that just landed was not indexed: {err}");
+        match indexed {
+            Ok(()) => landed_indexed(control, id),
+            Err(err) => tracing::warn!("replay index: the battle that just landed was not indexed: {err}"),
         }
     });
+}
+
+/// Shows what the index learned of a battle that landed in tab `id`, whose row is listed already
+/// but reads its chips from the summaries.
+fn landed_indexed(control: BrowserControl, id: FolderId) {
+    if let Some(listing) = control.listing(id) {
+        listing.load_summaries();
+    }
 }
 
 /// Takes a result mapping the reader points at as the loaded build's own.
