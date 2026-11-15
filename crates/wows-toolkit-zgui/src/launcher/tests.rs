@@ -375,6 +375,8 @@ fn the_play_control_follows_the_launcher_through_its_states() {
     launcher.found(up_to_date());
     launcher.runner_missing();
     assert_eq!(launcher.play_state(), "set-up-runner", "no Proton on Linux");
+    // Looking again after the user installed one.
+    launcher.model.update_launcher(|launcher| test_support::set_runner(launcher, RunnerState::Unknown));
 
     let settings = launcher.enabled_settings(&[]);
     launcher.adopt(LauncherSettings { accounts: Vec::new(), default_account: None, ..settings });
