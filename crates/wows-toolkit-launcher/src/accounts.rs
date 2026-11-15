@@ -89,7 +89,7 @@ pub enum AccountSession {
         session: Arc<wgc_auth::StoredSession>,
         storage: SessionStorage,
     },
-    /// WGNI rejected the stored token, or its known expiry passed. Signing in again replaces it.
+    /// WGNI rejected the stored token. Signing in again replaces it.
     Expired,
     SignedOut,
     /// The keyring stayed locked or its unlock prompt was dismissed, so the session could not
@@ -676,25 +676,47 @@ async fn restore_session(
         }
     };
 
-    if let wgc_auth::TokenExpiry::KnownAt(expires_at) = session.expiry
-        && expires_at <= SystemTime::now()
-    {
-        return RestoreOutcome::Expired;
-    }
-
     let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
-    match client.verify(&session.tokens).await {
+    let verified = client.verify(&session.tokens).await;
+    let verified = match &verified {
+        Ok((account_id, nickname)) => Ok((*account_id, nickname.clone())),
+        Err(report) => {
+            if !matches!(report.current_context(), wgc_auth::AuthError::SessionExpired) {
+                warn!("could not verify a stored session; keeping it: {}", ascii(report));
+            }
+            Err(report.current_context())
+        }
+    };
+
+    checked(session, backend, verified, SystemTime::now())
+}
+
+/// What WGNI's answer `verified` makes of a stored session. WGNI decides, not the stored expiry:
+/// sessions saved before the expiry came from the exchanged token carry the short-lived
+/// password grant's, so one already past is dropped. A session WGNI places under another account
+/// than it is stored for is invalid.
+fn checked(
+    session: wgc_auth::StoredSession,
+    backend: wgc_auth::StorageBackend,
+    verified: Result<(wgc_auth::AccountId, wgc_auth::Nickname), &wgc_auth::AuthError>,
+    now: SystemTime,
+) -> RestoreOutcome {
+    let expiry = match session.expiry {
+        wgc_auth::TokenExpiry::KnownAt(expires_at) if expires_at <= now => wgc_auth::TokenExpiry::Unknown,
+        expiry => expiry,
+    };
+    let session = wgc_auth::StoredSession { expiry, ..session };
+    match verified {
+        Ok((account_id, _)) if account_id != session.account_id => {
+            warn!("a stored session belongs to account {account_id:?}, not {:?}; not using it", session.account_id);
+            RestoreOutcome::Expired
+        }
         Ok((_, nickname)) => {
             RestoreOutcome::Valid { session: wgc_auth::StoredSession { nickname, ..session }, backend }
         }
-        Err(report) => match report.current_context() {
-            wgc_auth::AuthError::SessionExpired => RestoreOutcome::Expired,
-            // Offline or WGNI unreachable: the session may well hold, and Play finds out.
-            _ => {
-                warn!("could not verify a stored session; keeping it: {}", ascii(&report));
-                RestoreOutcome::Valid { session, backend }
-            }
-        },
+        Err(wgc_auth::AuthError::SessionExpired) => RestoreOutcome::Expired,
+        // Offline or WGNI unreachable: the session may well hold, and Play finds out.
+        Err(_) => RestoreOutcome::Valid { session, backend },
     }
 }
 
@@ -1014,6 +1036,53 @@ mod tests {
         let probed = LauncherEvent(Event::KeyringProbed(KeyringState::Available));
         let _ = launcher.apply(probed, &mut settings, &env);
         assert!(!launcher.keyring_prompt_ahead(&settings));
+    }
+
+    fn expiring_at(key: AccountKey, expires_at: SystemTime) -> wgc_auth::StoredSession {
+        wgc_auth::StoredSession { expiry: wgc_auth::TokenExpiry::KnownAt(expires_at), ..session(key, "saved") }
+    }
+
+    fn restored_expiry(outcome: RestoreOutcome) -> Option<wgc_auth::TokenExpiry> {
+        match outcome {
+            RestoreOutcome::Valid { session, .. } => Some(session.expiry),
+            RestoreOutcome::Expired
+            | RestoreOutcome::Missing
+            | RestoreOutcome::KeyringLocked
+            | RestoreOutcome::Unreadable => None,
+        }
+    }
+
+    #[test]
+    fn a_stored_expiry_already_past_is_dropped_when_wgni_accepts_the_session() {
+        let eu = key(wgc_auth::AccountRealm::Eu, 697_769_785);
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        let past = now - std::time::Duration::from_secs(60);
+        let ahead = now + std::time::Duration::from_secs(60);
+        let backend = wgc_auth::StorageBackend::Keyring;
+        let accepted = || Ok((eu.account_id, wgc_auth::Nickname::new("saved")));
+        let unreachable = wgc_auth::AuthError::RateLimited;
+
+        let stale = checked(expiring_at(eu, past), backend, accepted(), now);
+        let offline = checked(expiring_at(eu, past), backend, Err(&unreachable), now);
+        let current = checked(expiring_at(eu, ahead), backend, accepted(), now);
+        let rejected = checked(expiring_at(eu, ahead), backend, Err(&wgc_auth::AuthError::SessionExpired), now);
+
+        assert_eq!(restored_expiry(stale), Some(wgc_auth::TokenExpiry::Unknown));
+        assert_eq!(restored_expiry(offline), Some(wgc_auth::TokenExpiry::Unknown));
+        assert_eq!(restored_expiry(current), Some(wgc_auth::TokenExpiry::KnownAt(ahead)));
+        assert!(matches!(rejected, RestoreOutcome::Expired));
+    }
+
+    #[test]
+    fn a_session_wgni_places_under_another_account_is_not_used() {
+        let eu = key(wgc_auth::AccountRealm::Eu, 697_769_785);
+        let other = wgc_auth::AccountId::new(1_034_874_630);
+        let backend = wgc_auth::StorageBackend::Keyring;
+
+        let outcome =
+            checked(session(eu, "saved"), backend, Ok((other, wgc_auth::Nickname::new("other"))), SystemTime::now());
+
+        assert!(matches!(outcome, RestoreOutcome::Expired));
     }
 
     #[test]
