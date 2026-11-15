@@ -13,10 +13,13 @@ use landaire_ui::test_support::HeadlessWindow;
 use sqlx::sqlite::SqlitePool;
 use tokio::runtime::Runtime;
 use wows_replays::ReplayFile;
+use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::rows::PlayerFacet;
 use wows_toolkit_config::queries;
+use wows_toolkit_replay_data::live_match::ARENA_INFO_FILE;
+use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::match_stats::Region;
@@ -24,6 +27,7 @@ use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
+use wows_toolkit_viewmodel::player_tracker::live::StatsState;
 use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
@@ -39,10 +43,13 @@ use crate::interaction_tests::returning_reader;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::interaction_tests::shell;
+use crate::services::GameDataRequest;
 use crate::tabs::player_tracker::built_dock;
 use crate::tabs::player_tracker::built_model;
 use crate::tabs::player_tracker::layout::DOCK_LAYOUT_KEY;
 use crate::tabs::player_tracker::layout::allow_persistence;
+use crate::tabs::player_tracker::live::take_stats_lookups;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::sniper_hover_text;
 
@@ -490,6 +497,76 @@ fn a_chat_login_that_names_a_player_puts_a_chip_on_their_row() {
         "the picker lists the candidates alphabetically"
     );
     assert_eq!(tracker.label("tracker-twitch-pick-ally-0-1"), "harvey_635");
+}
+
+/// Takes a game directory whose replays directory holds `files` as the settings' own, without
+/// saving it, and reloads the game data from it. Nothing is installed there, so no build loads.
+fn adopt_install(files: &[(&str, &[u8])]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let wows = std::fs::canonicalize(dir.path()).expect("the directory resolves").join("wows");
+    let replays = wows.join("replays");
+    std::fs::create_dir_all(&replays).expect("the replays directory is made");
+    for (name, bytes) in files {
+        std::fs::write(replays.join(name), bytes).expect("the file is written");
+    }
+
+    let services = shell().services();
+    let pool = services.settings.pool().expect("the settings database is open");
+    let runtime = services.runtime().expect("the runtime is up");
+    let mut settings = runtime.block_on(StartupSettings::load(&pool));
+    settings.wows_dir = wows.display().to_string();
+    services.settings.adopt_unsaved(settings);
+    services.game_data.adopt(GameDataRequest {
+        wows_dir: Some(wows),
+        cache_dir: String::new(),
+        locale: None,
+        auto_dump: false,
+    });
+
+    dir
+}
+
+/// Runs frames in real time until the shell's live watch reports a battle.
+fn wait_for_battle(window: &mut HeadlessWindow) -> LiveMatch {
+    for _ in 0..10 {
+        if let Some(live) = shell().live.live_match.get_untracked() {
+            return live;
+        }
+        settle_in_real_time(window);
+    }
+    panic!("the live watch did not report the battle");
+}
+
+/// The shell watches for a battle from startup: one under way is found and its roster offered for
+/// a lookup without the Player Tracker being opened, and the lookup is sent only once the Current
+/// Match section is shown.
+#[test]
+fn the_live_watch_runs_without_the_tab_and_looks_up_stats_once_shown() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    take_stats_lookups();
+    let _install = adopt_install(&[(ARENA_INFO_FILE, ARENA_INFO.as_bytes())]);
+
+    let live = wait_for_battle(&mut window);
+    let names: Vec<&str> = live.players.iter().map(|player| player.name.as_str()).collect();
+    assert_eq!(names, ["Harvey635", "Stranger99"], "the battle's roster is read");
+    assert!(window.by_test_id("player-tracker-tab").is_none(), "the tab was never built");
+
+    let arena = ArenaId::new(4242);
+    shell().live.seed_scan(shell().services(), ArenaState { arena_id: arena, players: Vec::new() });
+    settle_in_real_time(&mut window);
+    assert!(take_stats_lookups().is_empty(), "no lookup while the section has never been shown");
+    assert!(matches!(shell().live.stats.get_untracked(), StatsState::Held), "the lookup is held");
+
+    let tab = window.by_test_id("player-tracker").expect("the strip has a Player Tracker tab");
+    window.click(tab).expect("the tab can be pressed");
+    settle_in_real_time(&mut window);
+    assert!(take_stats_lookups().is_empty(), "the tab opens on the players, which leaves the lookup held");
+
+    let mut tracker = TrackerWindow { window, model: built_model().expect("the Player Tracker tab was built") };
+    tracker.show_current_match();
+    settle_in_real_time(&mut tracker.window);
+    assert_eq!(take_stats_lookups(), [arena], "showing the section sends the held lookup once");
+    assert!(matches!(tracker.model.live.stats.get_untracked(), StatsState::Ready(_)), "and its answer is shown");
 }
 
 #[test]

@@ -1,6 +1,10 @@
 //! The battle in progress: the poll of the replays directory, the roster scan, the stats lookup
 //! and the Twitch chat observations around the battle.
 //!
+//! The shell owns the model and starts the poll with the app, so battles are detected and their
+//! rosters read whether or not the Player Tracker tab has been opened. The stats lookup still
+//! waits until the Current Match section is shown.
+//!
 //! Every write a task makes is keyed on the battle's start time, so a task that outlives its
 //! battle is dropped rather than landing on the next one.
 
@@ -17,6 +21,8 @@ use futures::StreamExt;
 use jiff::Timestamp;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
+#[cfg(test)]
+use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::live_match::LiveSource;
@@ -25,7 +31,9 @@ use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_services::match_stats::StatsBudget;
 use wows_toolkit_services::match_stats::StatsError;
+#[cfg(not(test))]
 use wows_toolkit_services::match_stats::fetch_stats;
+use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
@@ -36,11 +44,15 @@ use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::Owner;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::Task;
 use zgui::reactive::blocking;
+use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
@@ -55,13 +67,21 @@ use zgui_image::ImageBytes;
 
 use crate::game_art;
 use crate::game_art::ClassIconKey;
+#[cfg(not(test))]
 use crate::http::USER_AGENT;
 use crate::long_job::long_job;
 use crate::services::Services;
+use crate::services::TokioError;
 
 /// How often the chat observations are re-read while a battle is under way. The egui app's chat
 /// poll writes them every two minutes, so reading faster only repeats the same rows.
 const CHAT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+thread_local! {
+    /// The arenas a stats lookup was sent for on this thread.
+    static STATS_LOOKUPS: std::cell::RefCell<Vec<ArenaId>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 
 /// A battle's stats lookup, held until the Current Match section is shown.
 pub struct HeldLookup {
@@ -119,7 +139,7 @@ pub struct LiveModel {
     pub class_icons: RwSignal<HashMap<ClassIconKey, ImageBytes>, LocalStorage>,
     class_icons_asked: StoredValue<HashSet<ClassIconKey>>,
     metadata_build: StoredValue<Option<u32>>,
-    /// The tab's scope, which the model's work is spawned into so it ends with the tab.
+    /// The shell's scope, which the model's work is spawned into so it ends with the shell.
     owner: StoredValue<Owner, LocalStorage>,
     /// Account ids, realms and clans the packet scan recovered.
     pub identities: RwSignal<Option<LiveIdentities>, LocalStorage>,
@@ -139,7 +159,7 @@ pub struct LiveModel {
 }
 
 impl LiveModel {
-    /// Called from the tab's component body.
+    /// Called from the shell's component body.
     pub fn new() -> Self {
         Self {
             source: RwSignal::new_local(None),
@@ -220,10 +240,28 @@ impl LiveModel {
         self.spawn(work);
     }
 
-    /// Spawns `work` into the tab's task set. Battle work is started from inside the watch task,
-    /// where no owner is current, so a plain spawn would outlive the tab and read freed signals.
+    /// Spawns `work` into the shell's task set. Battle work is started from inside the watch task,
+    /// where no owner is current, so a plain spawn would outlive the shell and read freed signals.
     fn spawn(self, work: impl Future<Output = ()> + 'static) -> Task {
         self.owner.with_value(|owner| owner.with(|| spawn_local(work)))
+    }
+
+    /// Watches the replays directory of the install the settings name, for as long as the calling
+    /// scope lasts, restarting the watch whenever the directory or its game data changes.
+    pub fn follow_install(self, services: Services) {
+        // The directory alone, so an edit to any other setting does not restart the watch and
+        // drop the battle in progress.
+        let wows_dir = Memo::new(move |_| {
+            services.settings.read(|settings| settings.wows_dir.clone()).filter(|dir| !dir.is_empty())
+        });
+        let following = RenderEffect::new(move |_| {
+            let config = wows_dir
+                .get()
+                .zip(services.game_data.cache())
+                .map(|(dir, game_data)| LiveSourceConfig { replay_dir: PathBuf::from(dir).join("replays"), game_data });
+            self.watch(services, config);
+        });
+        on_cleanup_local(move || drop(following));
     }
 
     /// Starts watching `config`'s replays directory, replacing any watch already running.
@@ -502,7 +540,7 @@ impl LiveModel {
         // The proxy as the settings hold it; `http::client` decides what an unset one means.
         let proxy_url = services.settings.read_untracked(|settings| settings.proxy_url.clone()).unwrap_or_default();
         let task = self.spawn(async move {
-            let fetched = services.on_tokio(async move { fetch_stats(USER_AGENT, &state, &proxy_url).await }).await;
+            let fetched = request_stats(services, state, proxy_url).await;
             if self.started_at() != Some(started_at) {
                 return;
             }
@@ -569,4 +607,43 @@ impl LiveModel {
         self.chat.set_value(observations);
         self.recompute_twitch();
     }
+
+    /// Offers the battle in progress the lookup a roster scan of `state` would have offered. The
+    /// battle's own tasks are stopped first, so its scan cannot offer over the seed.
+    #[cfg(test)]
+    pub fn seed_scan(self, services: Services, state: ArenaState) {
+        let started_at = self.started_at().expect("a battle is in progress");
+        self.tasks.update_value(BattleTasks::cancel);
+        self.identities.set(Some(LiveIdentities::from_player_states(&state.players)));
+        self.offer_lookup(services, HeldLookup { started_at, state });
+    }
+}
+
+/// Asks the stats service about `state`'s roster.
+#[cfg(not(test))]
+async fn request_stats(
+    services: Services,
+    state: ArenaState,
+    proxy_url: String,
+) -> Result<Result<MatchStatsResponse, StatsError>, TokioError> {
+    services.on_tokio(async move { fetch_stats(USER_AGENT, &state, &proxy_url).await }).await
+}
+
+/// Notes the lookup and answers it with no players, so a test stays off the network.
+#[cfg(test)]
+async fn request_stats(
+    _services: Services,
+    state: ArenaState,
+    _proxy_url: String,
+) -> Result<Result<MatchStatsResponse, StatsError>, TokioError> {
+    STATS_LOOKUPS.with_borrow_mut(|lookups| lookups.push(state.arena_id));
+
+    Ok(Ok(MatchStatsResponse { arena_id: state.arena_id, players: Vec::new() }))
+}
+
+/// Takes the arenas a stats lookup was sent for on this thread since the last take, oldest first.
+/// A test takes them first, since the harness can run another test on the same thread before it.
+#[cfg(test)]
+pub fn take_stats_lookups() -> Vec<ArenaId> {
+    STATS_LOOKUPS.take()
 }

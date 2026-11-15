@@ -141,8 +141,9 @@ pub struct TrackerModel {
 }
 
 impl TrackerModel {
-    /// Called from the tab's component body: the model's work lives as long as the tab.
-    pub fn new(services: Services) -> Self {
+    /// Called from the tab's component body: the model's work lives as long as the tab. `live` is
+    /// the shell's, which runs before the tab is built.
+    pub fn new(services: Services, live: LiveModel) -> Self {
         let owner = Owner::current().expect("the tracker model is made inside a component");
         let period = RwSignal::new_local(TimePeriod::default());
         let sort = RwSignal::new_local(Sort::default());
@@ -231,7 +232,7 @@ impl TrackerModel {
             rows,
             clans,
             names,
-            live: LiveModel::new(),
+            live,
         }
     }
 

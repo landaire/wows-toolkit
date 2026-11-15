@@ -115,6 +115,7 @@ use crate::shell::twitch::TwitchLink;
 use crate::shell::update::UpdateFlow;
 use crate::tabs::TabBodyProps;
 use crate::tabs::armor_viewer::library::ArmorLibrary;
+use crate::tabs::player_tracker::live::LiveModel;
 use crate::tabs::tab_menu_strings;
 use crate::theme::SemanticTokensProps;
 use crate::theme::palette_choice;
@@ -295,6 +296,8 @@ pub struct Shell {
     pub collab: CollabHost,
     /// The Armor Viewer's ship data, which the palette lists from any tab.
     pub armor: ArmorLibrary,
+    /// The battle in progress, watched from startup whether or not the Player Tracker is open.
+    pub live: LiveModel,
     drop_scrim: DropScrimState,
     toasts: Toasts,
     services: Services,
@@ -327,6 +330,7 @@ impl Shell {
             tactics: TacticsHost::new(),
             collab: CollabHost::new(),
             armor: ArmorLibrary::new(),
+            live: LiveModel::new(),
             drop_scrim: DropScrimState::new(),
             toasts,
             services,
@@ -684,6 +688,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     shell.tactics.begin(services);
     shell.collab.begin(shell);
     shell.armor.begin(services);
+    shell.live.follow_install(services);
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);

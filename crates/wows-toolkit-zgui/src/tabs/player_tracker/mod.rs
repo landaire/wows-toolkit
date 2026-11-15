@@ -5,14 +5,12 @@
 //! shows and hides the dock's side regions once a section has been moved into one.
 
 mod layout;
-mod live;
+pub(crate) mod live;
 mod model;
 mod roster;
 mod tables;
 #[cfg(test)]
 mod tests;
-
-use std::path::PathBuf;
 
 use landaire_ui::DockProps;
 use landaire_ui::DockRegion;
@@ -79,7 +77,6 @@ use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::TabKey;
 use crate::shell::tabs::panel_side_name;
 use crate::tabs::dock_menu_strings;
-use crate::tabs::player_tracker::live::LiveSourceConfig;
 use crate::tabs::player_tracker::model::LoadState;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::CurrentMatchSectionProps;
@@ -282,7 +279,7 @@ pub fn PlayerTrackerTab() -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
     let shell = Shell::current();
-    let model = TrackerModel::new(services);
+    let model = TrackerModel::new(services, shell.live);
     #[cfg(test)]
     BUILT.with(|built| built.set(Some(model)));
 
@@ -299,15 +296,6 @@ pub fn PlayerTrackerTab() -> impl IntoView {
             started.set(true);
             model.start(pool);
         }
-    }));
-
-    // The live watch follows the install and its game data.
-    keep(RenderEffect::new(move |_| {
-        let wows_dir = services.settings.read(|settings| settings.wows_dir.clone()).filter(|dir| !dir.is_empty());
-        let config = wows_dir
-            .zip(services.game_data.cache())
-            .map(|(dir, game_data)| LiveSourceConfig { replay_dir: PathBuf::from(dir).join("replays"), game_data });
-        model.live.watch(services, config);
     }));
 
     let dock = tracker_dock(model);
