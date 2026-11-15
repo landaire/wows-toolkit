@@ -1,0 +1,81 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+group:
+  group: tier 8-10 cruisers
+  ships: 161
+  test_ships: 12
+  quantities:
+    - quantity: shell.flight_time
+      unit: s
+      counts: "the largest-caliber main battery HE shell of each ship (as ship_comparison does), with no value past the battery's firing range on its best-fit build"
+      counted: 138
+      counted_test: 9
+      mean: 5.48
+      median: 5.45
+      lowest:
+        ship: "T10 Petropavlovsk (cruiser, Russia)"
+        value: 4.23
+      highest:
+        ship: "T10 Unie (cruiser, Netherlands, test)"
+        value: 7.33
+      without_value:
+        - Gibraltar
+        - Minotaur
+        - Monmouth
+        - Plymouth
+        - San Martín
+        - Venezia
+        - Aberdeen
+        - Brindisi
+        - La Spezia
+        - Messina
+        - Michelangelo
+        - Neptune
+        - Santander
+        - Amalfi
+        - D. Pozharsky
+        - Edinburgh
+        - Hampshire
+        - I. Allende
+        - San Diego
+        - "Tiger '59"
+        - Fearmaw
+        - Ravenna
+        - Mirage
+      by_tier:
+        - tier: 8
+          counted: 48
+          counted_test: 3
+          mean: 5.64
+          median: 5.71
+          lowest:
+            ship: "T8 Regele Carol I (cruiser, Europe, premium)"
+            value: 4.58
+          highest:
+            ship: "T8 Statenland (cruiser, Netherlands, test)"
+            value: 7.14
+        - tier: 9
+          counted: 42
+          counted_test: 1
+          mean: 5.37
+          median: 5.25
+          lowest:
+            ship: "T9 Baotou (cruiser, Pan_Asia, premium)"
+            value: 4.44
+          highest:
+            ship: "T9 Hector (cruiser, Commonwealth, premium)"
+            value: 6.84
+        - tier: 10
+          counted: 48
+          counted_test: 5
+          mean: 5.41
+          median: 5.36
+          lowest:
+            ship: "T10 Petropavlovsk (cruiser, Russia)"
+            value: 4.23
+          highest:
+            ship: "T10 Unie (cruiser, Netherlands, test)"
+            value: 7.33
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."
