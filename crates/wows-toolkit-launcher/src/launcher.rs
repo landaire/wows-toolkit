@@ -13,6 +13,7 @@ use wgc_catalog::update::LatestBuild;
 use wgc_install::GameInstall;
 
 use crate::accounts::AccountSession;
+use crate::accounts::CredentialWrites;
 use crate::accounts::KeyringState;
 use crate::accounts::LoginMsg;
 use crate::accounts::LoginState;
@@ -156,6 +157,7 @@ pub struct Launcher {
     /// The newest keyring restore per account; see [`RestoreId`].
     pub(crate) restores: HashMap<AccountKey, RestoreId>,
     pub(crate) next_restore: u64,
+    pub(crate) credential_writes: CredentialWrites,
     pub(crate) login: LoginState,
     pub(crate) keyring: KeyringState,
     /// Whether the credential store has answered this run. Its unlock prompt, if any, comes
@@ -193,6 +195,7 @@ impl Launcher {
             sessions: HashMap::new(),
             restores: HashMap::new(),
             next_restore: 0,
+            credential_writes: CredentialWrites::default(),
             login: LoginState::new(LoginTarget::NewAccount),
             keyring: KeyringState::Unknown,
             store_answered: false,

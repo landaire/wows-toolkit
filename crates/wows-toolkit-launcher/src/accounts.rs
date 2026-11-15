@@ -1,7 +1,10 @@
 //! Saved accounts: restoring and verifying their sessions, signing in (with two-factor), signing
 //! out and forgetting.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::time::SystemTime;
 
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
@@ -129,6 +132,42 @@ pub enum LoginTarget {
 /// moves its id on, so a restore that a later change has overtaken is ignored.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct RestoreId(u64);
+
+/// Runs each account's session writes one at a time, in the order they were queued: a
+/// sign-out's delete never lands after the save of a sign-in queued behind it. A cheap `Clone`.
+#[derive(Clone, Default)]
+pub(crate) struct CredentialWrites(Arc<Mutex<HashMap<AccountKey, tokio::sync::oneshot::Receiver<()>>>>);
+
+impl CredentialWrites {
+    /// Takes `key`'s next turn at once. It starts once every turn queued before it has ended.
+    pub(crate) fn queue(&self, key: AccountKey) -> CredentialTurn {
+        let (done, next) = tokio::sync::oneshot::channel();
+        let previous = {
+            let mut last = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            last.insert(key, next)
+        };
+
+        CredentialTurn { previous, _done: done }
+    }
+}
+
+/// A queued session write. Dropping it ends the turn.
+pub(crate) struct CredentialTurn {
+    previous: Option<tokio::sync::oneshot::Receiver<()>>,
+    _done: tokio::sync::oneshot::Sender<()>,
+}
+
+impl CredentialTurn {
+    /// Waits until the turn before this one has ended.
+    pub(crate) async fn start(&mut self) {
+        let Some(previous) = self.previous.take() else {
+            return;
+        };
+
+        // Nothing is ever sent: the earlier turn ends by dropping its sender.
+        let _ = previous.await;
+    }
+}
 
 pub(crate) enum RestoreOutcome {
     Valid {
@@ -496,10 +535,11 @@ impl Launcher {
             return changed;
         }
         let store = env.credentials.clone();
+        let writes = self.credential_writes.clone();
         env.runtime.spawn(async move {
             let client = wgc_auth::AuthClient::new(realm, tracking_id);
             let result = client.login(wgc_auth::AccountCredentials { username, password }).await;
-            sender.send(Event::Login(login_result(result, store).await));
+            sender.send(Event::Login(login_result(result, store, writes).await));
         });
 
         changed
@@ -540,18 +580,19 @@ impl Launcher {
             }
         }
         let store = env.credentials.clone();
+        let writes = self.credential_writes.clone();
         env.runtime.spawn(async move {
             let client = wgc_auth::AuthClient::new(realm, tracking_id);
             let result = client.login_with_two_factor(credentials, twofactor_token, code).await;
-            sender.send(Event::Login(login_result(result, store).await));
+            sender.send(Event::Login(login_result(result, store, writes).await));
         });
 
         changed
     }
 
-    /// Ends the account's session: locally at once, then a server-side revoke (best effort) and
-    /// the removal of its session and game token from whichever store holds them. The account
-    /// stays listed.
+    /// Ends the account's session: locally at once, then the removal of its session and game
+    /// token from whichever store holds them, then a server-side revoke (best effort). The
+    /// account stays listed.
     pub fn sign_out(&mut self, key: AccountKey, settings: &mut LauncherSettings, env: &LauncherEnv) {
         let _ = self.bump_restore(key);
         let previous = self.sessions.insert(key, AccountSession::SignedOut);
@@ -561,21 +602,25 @@ impl Launcher {
         };
         let (tracking_id, _) = settings.ensure_tracking_id();
         let credentials = env.credentials.clone();
+        // Queued now, so a sign-in that saves after this returns waits for the delete.
+        let mut turn = self.credential_writes.queue(key);
         env.runtime.spawn(async move {
-            if let Some(session) = session {
-                let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
-                if let Err(report) = client.logout(&session.tokens).await {
-                    warn!("server-side session revoke failed (signing out locally anyway): {}", ascii(&report));
-                }
-            }
+            turn.start().await;
             let deleted = tokio::task::spawn_blocking(move || {
                 let session = credentials.delete_session(key.realm, key.account_id);
                 let token2 = credentials.delete_token2(key.realm, key.account_id);
+                drop(turn);
                 session.and(token2)
             })
             .await;
             if let Ok(Err(e)) = deleted {
                 warn!("could not delete the stored session: {e}");
+            }
+            if let Some(session) = session {
+                let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
+                if let Err(report) = client.logout(&session.tokens).await {
+                    warn!("server-side session revoke failed (signed out locally anyway): {}", ascii(&report));
+                }
             }
         });
     }
@@ -658,11 +703,15 @@ async fn restore_session(
 async fn login_result(
     result: rootcause::Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
     credentials: wgc_auth::CredentialStore,
+    writes: CredentialWrites,
 ) -> LoginMsg {
     let report = match result {
         Ok(session) => {
+            let mut turn = writes.queue(AccountKey::of(&session));
+            turn.start().await;
             let saved = tokio::task::spawn_blocking(move || {
                 let persisted = credentials.save_session(&session);
+                drop(turn);
                 (session, persisted)
             })
             .await;
@@ -854,6 +903,60 @@ mod tests {
             &env
         ));
         assert_eq!(settings.account(eu).unwrap().nickname.as_str(), "renamed");
+    }
+
+    /// A secret store whose deletes wait until the test lets them through.
+    struct GatedKeyring {
+        entries: Mutex<HashMap<String, String>>,
+        gate: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl wgc_auth::SecretStore for GatedKeyring {
+        fn get(&self, entry: &wgc_auth::KeyringEntry) -> Result<Option<String>, wgc_auth::AuthError> {
+            Ok(self.entries.lock().unwrap().get(&entry.user).cloned())
+        }
+
+        fn set(&self, entry: &wgc_auth::KeyringEntry, secret: &str) -> Result<(), wgc_auth::AuthError> {
+            self.entries.lock().unwrap().insert(entry.user.clone(), secret.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, entry: &wgc_auth::KeyringEntry) -> Result<(), wgc_auth::AuthError> {
+            let _ = self.gate.lock().unwrap().recv();
+            self.entries.lock().unwrap().remove(&entry.user);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_sign_in_after_a_sign_out_keeps_its_saved_session() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let (release, gate) = std::sync::mpsc::channel();
+        let keyring = GatedKeyring { entries: Mutex::new(HashMap::new()), gate: Mutex::new(gate) };
+        let credentials = wgc_auth::CredentialStore::with_backends(Arc::new(keyring), None);
+        let env = LauncherEnv { credentials: credentials.clone(), ..env(&runtime) };
+        let mut settings = LauncherSettings::default();
+        let (mut launcher, _events) = Launcher::new();
+        let eu = key(wgc_auth::AccountRealm::Eu, 697_769_785);
+
+        launcher.sign_out(eu, &mut settings, &env);
+        // The session and the token2 delete each pass the gate once, after the sign-in below
+        // has had time to save.
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            for _ in 0..2 {
+                release.send(()).unwrap();
+            }
+        });
+        let msg = runtime.block_on(login_result(
+            Ok(session(eu, "again")),
+            credentials.clone(),
+            launcher.credential_writes.clone(),
+        ));
+        releaser.join().unwrap();
+
+        assert!(matches!(msg, LoginMsg::Success { storage: SessionStorage::Keyring, .. }));
+        assert!(credentials.load_session(eu.realm, eu.account_id).unwrap().is_some());
     }
 
     #[test]
