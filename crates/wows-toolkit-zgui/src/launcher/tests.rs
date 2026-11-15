@@ -591,7 +591,7 @@ fn without_a_secret_store_the_dialog_and_the_row_say_the_session_is_not_kept() {
     launcher.model.apply(test_support::keyring_probed(KeyringState::Unavailable));
     // The probe above was taken by `ready`; the store's answer now comes from a sign-in.
     let asia = AccountKey { realm: wgc_auth::AccountRealm::Asia, account_id: wgc_auth::AccountId::new(2_051_681_179) };
-    launcher.model.apply(test_support::signed_in_without_store(test_support::session(asia, "Starbuck")));
+    launcher.model.apply(test_support::signed_in_unencrypted(test_support::session(asia, "Starbuck")));
     launcher.settle();
 
     launcher.press("launcher-play-menu");

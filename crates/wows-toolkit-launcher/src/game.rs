@@ -250,7 +250,7 @@ impl Launcher {
             dirs,
             install: path,
             args: settings.launch_args(safe_mode),
-            program: Program::SignIn(SignIn { key, session, tracking_id }),
+            program: Program::SignIn(SignIn { key, session, tracking_id, credentials: env.credentials.clone() }),
         };
         self.spawn_launch(plan, prepare, env);
 

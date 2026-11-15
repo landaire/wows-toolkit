@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use tokio::sync::Mutex;
 use tracing::info;
 use tracing::warn;
@@ -7,9 +8,10 @@ use wgc_auth::AccountId;
 use wgc_auth::AccountRealm;
 use wgc_auth::AuthClient;
 use wgc_auth::AuthError;
+use wgc_auth::CredentialStore;
 use wgc_auth::GameTitle;
 use wgc_auth::GameToken2;
-use wgc_auth::GameTokenStore;
+use wgc_auth::StorageBackend;
 use wgc_auth::StoredSession;
 
 use crate::responder::BoxFuture;
@@ -33,10 +35,11 @@ pub enum AccountEvent {
 pub type AccountObserver = Arc<dyn Fn(AccountEvent) + Send + Sync>;
 
 /// Answers for one signed-in account: its realm and identity from the stored
-/// session, token1 minted through `client`, and token2 kept in the OS keyring.
+/// session, token1 minted through `client`, and token2 kept in `credentials`.
 pub struct AccountResponder {
     session: Arc<StoredSession>,
     client: AuthClient,
+    credentials: CredentialStore,
     title: GameTitle,
     language: GameLanguage,
     observer: AccountObserver,
@@ -61,12 +64,13 @@ impl AccountResponder {
     pub fn new(
         session: Arc<StoredSession>,
         client: AuthClient,
+        credentials: CredentialStore,
         language: GameLanguage,
         observer: AccountObserver,
     ) -> Self {
         let title = GameTitle::wows(session.realm);
 
-        Self { session, client, title, language, observer, token2: Mutex::new(Token2Cache::Unloaded) }
+        Self { session, client, credentials, title, language, observer, token2: Mutex::new(Token2Cache::Unloaded) }
     }
 
     fn realm(&self) -> AccountRealm {
@@ -99,7 +103,7 @@ impl IpcResponder for AccountResponder {
                     Ok(Token1Grant { spa_id: self.account_id(), token1 })
                 }
                 Err(report) => {
-                    warn!(error = %report, "token1 mint failed");
+                    warn!("token1 mint failed: {}", report.format_with(&DefaultReportFormatter::ASCII));
                     match report.current_context() {
                         AuthError::SessionExpired => {
                             (self.observer)(AccountEvent::SessionRejected);
@@ -125,11 +129,12 @@ impl IpcResponder for AccountResponder {
             }
 
             // The keyring client blocks on D-Bus.
-            let loaded = tokio::task::spawn_blocking(move || GameTokenStore::new().load(realm, account_id)).await;
+            let credentials = self.credentials.clone();
+            let loaded = tokio::task::spawn_blocking(move || credentials.load_token2(realm, account_id)).await;
             match loaded {
-                Ok(Ok(Some(token2))) => {
-                    *cache = Token2Cache::Present(token2.clone());
-                    Some(Token2Grant { spa_id: account_id, token2 })
+                Ok(Ok(Some(stored))) => {
+                    *cache = Token2Cache::Present(stored.value.clone());
+                    Some(Token2Grant { spa_id: account_id, token2: stored.value })
                 }
                 Ok(Ok(None)) => {
                     *cache = Token2Cache::Absent;
@@ -162,7 +167,8 @@ impl IpcResponder for AccountResponder {
             // token2 for account 0, discarding the one it had.
             if token2.expose_secret().is_empty() {
                 *cache = Token2Cache::Absent;
-                let deleted = tokio::task::spawn_blocking(move || GameTokenStore::new().delete(realm, expected)).await;
+                let credentials = self.credentials.clone();
+                let deleted = tokio::task::spawn_blocking(move || credentials.delete_token2(realm, expected)).await;
                 match deleted {
                     Ok(Ok(())) => info!(account = expected.get(), "discarded the stored token2"),
                     Ok(Err(err)) => warn!(%err, "cannot discard the stored token2"),
@@ -173,9 +179,15 @@ impl IpcResponder for AccountResponder {
 
             *cache = Token2Cache::Present(token2.clone());
             (self.observer)(AccountEvent::Token2Saved);
-            let saved = tokio::task::spawn_blocking(move || GameTokenStore::new().save(realm, spa_id, &token2)).await;
+            let credentials = self.credentials.clone();
+            let nickname = self.session.nickname.clone();
+            let saved =
+                tokio::task::spawn_blocking(move || credentials.save_token2(realm, spa_id, &nickname, &token2)).await;
             match saved {
-                Ok(Ok(())) => info!(account = spa_id.get(), "stored the game's token2"),
+                Ok(Ok(StorageBackend::Keyring)) => info!(account = spa_id.get(), "stored the game's token2"),
+                Ok(Ok(StorageBackend::PlaintextFile)) => {
+                    info!(account = spa_id.get(), "stored the game's token2 unencrypted: no OS secret store")
+                }
                 Ok(Err(err)) => warn!(%err, "cannot store the game's token2, keeping it for this launch only"),
                 Err(err) => warn!(%err, "token2 save task failed"),
             }

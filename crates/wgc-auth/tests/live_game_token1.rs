@@ -14,8 +14,8 @@
 use wgc_auth::AccountId;
 use wgc_auth::AccountRealm;
 use wgc_auth::AuthClient;
+use wgc_auth::CredentialStore;
 use wgc_auth::GameTitle;
-use wgc_auth::SessionStore;
 use wgc_core::TrackingId;
 
 #[tokio::test]
@@ -33,7 +33,11 @@ async fn live_game_token1_mints_for_the_stored_session() {
     };
     let account_id = AccountId::new(account_id.parse().expect("WGC_TEST_ACCOUNT_ID is a decimal SPA id"));
 
-    let session = SessionStore::new().load(realm, account_id).expect("a stored session for this account");
+    let session = CredentialStore::new(None)
+        .load_session(realm, account_id)
+        .expect("the OS keyring answers")
+        .expect("a stored session for this account")
+        .value;
     // WGNI requires a numeric tid; WGC uses a nanosecond unix timestamp.
     let tid = std::env::var("WGC_TEST_TID").unwrap_or_else(|_| "1700000000000000000".to_string());
     let tracking_id = TrackingId::parse(&tid).expect("tracking id is non-empty");

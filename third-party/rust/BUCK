@@ -8932,6 +8932,12 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "dbus",
+    actual = ":dbus-0.9",
+    visibility = ["PUBLIC"],
+)
+
 http_archive(
     name = "dbus-0.9.12.crate",
     sha256 = "3ab69f03cc8c4340c9c8e315114e1658e6775a9b16a04357973aa21cec22b32e",
@@ -8965,6 +8971,12 @@ cargo.rust_library(
         ":libc-0.2",
         ":libdbus-sys-0.2",
     ],
+)
+
+alias(
+    name = "dbus-secret-service",
+    actual = ":dbus-secret-service-4",
+    visibility = ["PUBLIC"],
 )
 
 http_archive(

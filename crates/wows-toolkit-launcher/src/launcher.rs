@@ -43,6 +43,9 @@ pub struct LauncherEnv {
     /// Where the game runner keeps its prefixes and overlays, under the app's data directory.
     /// `None` when the app has none, which leaves the game unlaunchable.
     pub runtime_dirs: Option<wgc_launch::RuntimeDirs>,
+    /// Where sessions and game tokens are kept: the OS secret store, or an unencrypted file in
+    /// the app's data directory when there is none.
+    pub credentials: wgc_auth::CredentialStore,
 }
 
 /// Result of a catalog update check, for an install or a known game.

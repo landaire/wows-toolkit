@@ -586,7 +586,7 @@ impl ToolkitTabViewer<'_> {
                                 actions.push(AccountAction::SignOut(key));
                             }
                         }
-                        AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::StoreUnavailable => {
+                        AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::KeyringLocked => {
                             if ui.small_button("Sign in").clicked() {
                                 actions.push(AccountAction::SignIn(key));
                             }
@@ -825,7 +825,7 @@ fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, 
         AccountStatus::SignedOut => {
             ui.weak("Signed out");
         }
-        AccountStatus::StoreUnavailable => {
+        AccountStatus::KeyringLocked => {
             ui.colored_label(WARN_COLOR, "Keyring unavailable");
         }
     }

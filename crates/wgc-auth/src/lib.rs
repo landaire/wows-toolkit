@@ -1,8 +1,8 @@
 //! WGNI account authentication: secret-bearing newtypes, the account-realm
 //! map, the Keccak-512 hashcash proof-of-work solver, the async WGNI HTTP
-//! client, game token minting, and the keyring-backed session and token2
-//! stores. The protocol is reverse-engineered from the WGC client and its
-//! live endpoints.
+//! client, game token minting, and the session and token2 store (the OS
+//! secret store, or an unencrypted file when there is none). The protocol is
+//! reverse-engineered from the WGC client and its live endpoints.
 
 pub mod client;
 pub mod error;
@@ -34,8 +34,13 @@ pub use realm::AccountRealm;
 pub use realm::ClientId;
 pub use realm::RealmConfig;
 pub use session::StoredSession;
-pub use store::GameTokenStore;
-pub use store::SessionStore;
+pub use store::CredentialStore;
+pub use store::KeyringEntry;
+pub use store::OsKeyring;
+pub use store::PlaintextFile;
+pub use store::SecretStore;
+pub use store::StorageBackend;
+pub use store::Stored;
 pub use token::AccessToken;
 pub use token::ExchangeCode;
 pub use token::SecretPassword;

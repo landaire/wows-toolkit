@@ -26,7 +26,14 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 # and Windows Credential Manager.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
+# Typed access to the Secret Service errors keyring wraps, to tell a missing provider from a
+# failing one.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+dbus = "0.9"
+dbus-secret-service = "4"
+
 [dev-dependencies]
 insta.workspace = true
 # "net" and "io-util" run the loopback HTTP server in the token1 polling tests.
 tokio = { version = "1", features = ["rt", "macros", "time", "net", "io-util"] }
+tempfile = "3"

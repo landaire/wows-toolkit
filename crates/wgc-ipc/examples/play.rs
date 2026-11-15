@@ -23,8 +23,9 @@ use tracing::warn;
 use wgc_auth::AccountId;
 use wgc_auth::AccountRealm;
 use wgc_auth::AuthClient;
+use wgc_auth::CredentialStore;
 use wgc_auth::GameToken2;
-use wgc_auth::SessionStore;
+use wgc_auth::Stored;
 use wgc_core::TrackingId;
 use wgc_ipc::AccountObserver;
 use wgc_ipc::AccountResponder;
@@ -215,16 +216,23 @@ async fn responder(
     tracking_id: TrackingId,
     language: GameLanguage,
 ) -> Arc<dyn IpcResponder> {
-    let loaded = tokio::task::spawn_blocking(move || SessionStore::new().load(realm, account_id)).await;
+    // Keyring only: the example has no app data folder to find an unencrypted fallback in.
+    let credentials = CredentialStore::new(None);
+    let store = credentials.clone();
+    let loaded = tokio::task::spawn_blocking(move || store.load_session(realm, account_id)).await;
     match loaded {
-        Ok(Ok(session)) => {
+        Ok(Ok(Some(Stored { value: session, .. }))) => {
             info!(nickname = session.nickname.as_str(), "session loaded");
             let client = AuthClient::new(session.realm, tracking_id);
             let observer: AccountObserver = Arc::new(|event| info!(?event, "account event"));
-            Arc::new(AccountResponder::new(Arc::new(session), client, language, observer))
+            Arc::new(AccountResponder::new(Arc::new(session), client, credentials, language, observer))
+        }
+        Ok(Ok(None)) => {
+            warn!("no stored session, answering as signed out");
+            Arc::new(SignedOut { realm, language })
         }
         Ok(Err(err)) => {
-            warn!(%err, "no stored session, answering as signed out");
+            warn!(%err, "could not read the stored session, answering as signed out");
             Arc::new(SignedOut { realm, language })
         }
         Err(err) => {

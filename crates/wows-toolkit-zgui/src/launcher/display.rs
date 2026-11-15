@@ -156,7 +156,7 @@ impl PlayState {
         match launcher.account_status(account.key) {
             AccountStatus::Ready(_) => Self::Play(label),
             AccountStatus::Restoring => Self::Restoring(label),
-            AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::StoreUnavailable => {
+            AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::KeyringLocked => {
                 Self::SignInAgain(label)
             }
         }

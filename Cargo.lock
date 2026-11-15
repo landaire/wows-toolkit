@@ -15301,6 +15301,8 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "wgc-auth"
 version = "0.1.0"
 dependencies = [
+ "dbus",
+ "dbus-secret-service",
  "insta",
  "keyring",
  "rand 0.10.3",
@@ -15309,6 +15311,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha3",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "url",
@@ -15379,6 +15382,7 @@ dependencies = [
  "clap",
  "insta",
  "rand 0.10.3",
+ "rootcause",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",

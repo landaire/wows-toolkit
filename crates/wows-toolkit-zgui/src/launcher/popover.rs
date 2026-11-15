@@ -298,10 +298,13 @@ fn AccountRowView(
                 }
             }
         }),
+        AccountStatus::Ready(SessionStorage::PlaintextFile) => AnyView::new(view! {
+            text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.unencrypted")}}
+        }),
         AccountStatus::Restoring => AnyView::new(view! {
             text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.restoring")}}
         }),
-        AccountStatus::StoreUnavailable => AnyView::new(view! {
+        AccountStatus::KeyringLocked => AnyView::new(view! {
             text(class = "wt-launcher__warn", attr:data-testid = "launcher-keyring-locked") {{locale.text("ui.launcher.popover.keyring_locked")}}
         }),
         AccountStatus::Expired | AccountStatus::SignedOut => AnyView::new(view! {

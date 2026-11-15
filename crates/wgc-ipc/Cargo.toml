@@ -9,6 +9,7 @@ description = "WGC Game Center IPC server that signs World of Warships in for th
 wgc-auth = { workspace = true }
 wgc-relay-protocol = { workspace = true }
 rand = "0.10"
+rootcause = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 thiserror = "2"

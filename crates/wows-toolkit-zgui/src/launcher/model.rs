@@ -213,12 +213,14 @@ impl LauncherModel {
             return None;
         };
 
+        let storage_dir = wows_toolkit_config::storage_dir();
         Some(LauncherEnv {
             runtime: runtime.handle().clone(),
             proxy_url: self.proxy.get_value(),
             // The shell's event task awaits the channel, and its wake-up is the channel's own.
             wake: Arc::new(|| {}),
-            runtime_dirs: wows_toolkit_config::storage_dir().map(|dir| wgc_launch::RuntimeDirs::new(&dir)),
+            runtime_dirs: storage_dir.as_deref().map(wgc_launch::RuntimeDirs::new),
+            credentials: wgc_auth::CredentialStore::new(storage_dir.as_deref()),
         })
     }
 

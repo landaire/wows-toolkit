@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use tracing::warn;
 
 use crate::launcher::Event;
@@ -26,8 +27,19 @@ pub fn is_plausible_email(text: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionStorage {
     Keyring,
-    /// The OS had no usable secret store; the session lasts this run only.
+    /// No OS secret store exists, so the session is saved unencrypted in the app's data folder.
+    PlaintextFile,
+    /// Saving failed; the session lasts this run only.
     MemoryOnly,
+}
+
+impl From<wgc_auth::StorageBackend> for SessionStorage {
+    fn from(backend: wgc_auth::StorageBackend) -> SessionStorage {
+        match backend {
+            wgc_auth::StorageBackend::Keyring => SessionStorage::Keyring,
+            wgc_auth::StorageBackend::PlaintextFile => SessionStorage::PlaintextFile,
+        }
+    }
 }
 
 /// Whether the OS offers a secret store to keep sessions in.
@@ -36,8 +48,30 @@ pub enum KeyringState {
     /// Not probed yet.
     Unknown,
     Available,
-    /// No Secret Service (or other OS store) answered; sessions last this run only.
+    /// No Secret Service (or other OS store) answered; sessions are saved unencrypted.
     Unavailable,
+    /// The store stayed locked, or its unlock prompt was dismissed.
+    Locked,
+}
+
+impl KeyringState {
+    /// What a store operation that failed with `error` found out, if anything.
+    fn of_error(error: &wgc_auth::AuthError) -> KeyringState {
+        match error {
+            wgc_auth::AuthError::NoSecretStore => KeyringState::Unavailable,
+            wgc_auth::AuthError::KeyringLocked => KeyringState::Locked,
+            _ => KeyringState::Unknown,
+        }
+    }
+}
+
+impl From<wgc_auth::StorageBackend> for KeyringState {
+    fn from(backend: wgc_auth::StorageBackend) -> KeyringState {
+        match backend {
+            wgc_auth::StorageBackend::Keyring => KeyringState::Available,
+            wgc_auth::StorageBackend::PlaintextFile => KeyringState::Unavailable,
+        }
+    }
 }
 
 /// A saved account's session as this run knows it.
@@ -52,8 +86,9 @@ pub enum AccountSession {
     /// WGNI rejected the stored token, or its known expiry passed. Signing in again replaces it.
     Expired,
     SignedOut,
-    /// `NoSecretStore`: absent or locked; the keyring does not say which.
-    StoreUnavailable,
+    /// The keyring stayed locked or its unlock prompt was dismissed, so the session could not
+    /// be read.
+    KeyringLocked,
 }
 
 /// [`AccountSession`] without the session, for display and errors.
@@ -63,7 +98,7 @@ pub enum AccountStatus {
     Ready(SessionStorage),
     Expired,
     SignedOut,
-    StoreUnavailable,
+    KeyringLocked,
 }
 
 impl AccountSession {
@@ -73,7 +108,7 @@ impl AccountSession {
             AccountSession::SignedIn { storage, .. } => AccountStatus::Ready(*storage),
             AccountSession::Expired => AccountStatus::Expired,
             AccountSession::SignedOut => AccountStatus::SignedOut,
-            AccountSession::StoreUnavailable => AccountStatus::StoreUnavailable,
+            AccountSession::KeyringLocked => AccountStatus::KeyringLocked,
         }
     }
 }
@@ -91,18 +126,23 @@ pub enum LoginTarget {
 pub(crate) struct RestoreId(u64);
 
 pub(crate) enum RestoreOutcome {
-    Valid(wgc_auth::StoredSession),
+    Valid {
+        session: wgc_auth::StoredSession,
+        backend: wgc_auth::StorageBackend,
+    },
     Expired,
     Missing,
-    StoreUnavailable,
+    KeyringLocked,
+    /// The store answered with an error, or what it holds does not parse.
+    Unreadable,
 }
 
 pub(crate) enum LoginMsg {
     Success {
         session: Box<wgc_auth::StoredSession>,
         storage: SessionStorage,
-        /// The save found no OS secret store at all.
-        no_store: bool,
+        /// What saving the session found out about the keyring.
+        keyring: KeyringState,
     },
     TwoFactorRequired {
         twofactor_token: String,
@@ -165,14 +205,15 @@ impl Launcher {
     }
 
     /// Asks the OS secret store whether it is there, off the calling thread, so the sign-in form
-    /// can say before a sign-in that the session will not be kept.
+    /// can say before a sign-in where the session will be kept.
     pub fn start_keyring_probe(&mut self, env: &LauncherEnv) {
         if self.keyring != KeyringState::Unknown {
             return;
         }
         let sender = self.sender(env);
+        let credentials = env.credentials.clone();
         env.runtime.spawn_blocking(move || {
-            sender.send(Event::KeyringProbed(probe_keyring()));
+            sender.send(Event::KeyringProbed(probe_keyring(&credentials)));
         });
     }
 
@@ -241,8 +282,9 @@ impl Launcher {
             self.sessions.insert(key, AccountSession::Restoring);
             let sender = self.sender(env);
             let tracking_id = tracking_id.clone();
+            let credentials = env.credentials.clone();
             env.runtime.spawn(async move {
-                let outcome = restore_session(key, tracking_id).await;
+                let outcome = restore_session(key, tracking_id, credentials).await;
                 sender.send(Event::SessionRestored { key, restore, outcome });
             });
         }
@@ -262,18 +304,22 @@ impl Launcher {
         }
 
         let (session, changed) = match outcome {
-            RestoreOutcome::Valid(session) => {
+            RestoreOutcome::Valid { session, backend } => {
+                self.keyring = KeyringState::from(backend);
                 // The nickname may have changed since the row was saved.
                 let changed = settings.account(key).is_some_and(|account| account.nickname != session.nickname)
                     && settings.upsert_account(key, session.nickname.clone());
-                let session = AccountSession::SignedIn { session: Arc::new(session), storage: SessionStorage::Keyring };
+                let session =
+                    AccountSession::SignedIn { session: Arc::new(session), storage: SessionStorage::from(backend) };
                 (session, changed)
             }
             RestoreOutcome::Expired => (AccountSession::Expired, false),
+            // Shown as needing a sign-in, which saves over the unreadable session.
+            RestoreOutcome::Unreadable => (AccountSession::Expired, false),
             RestoreOutcome::Missing => (AccountSession::SignedOut, false),
-            RestoreOutcome::StoreUnavailable => {
-                self.keyring = KeyringState::Unavailable;
-                (AccountSession::StoreUnavailable, false)
+            RestoreOutcome::KeyringLocked => {
+                self.keyring = KeyringState::Locked;
+                (AccountSession::KeyringLocked, false)
             }
         };
         self.sessions.insert(key, session);
@@ -284,11 +330,9 @@ impl Launcher {
     pub(crate) fn apply_login(&mut self, msg: LoginMsg, settings: &mut LauncherSettings) -> bool {
         self.login.in_progress = false;
         match msg {
-            LoginMsg::Success { session, storage, no_store } => {
-                if no_store {
-                    self.keyring = KeyringState::Unavailable;
-                } else if storage == SessionStorage::Keyring {
-                    self.keyring = KeyringState::Available;
+            LoginMsg::Success { session, storage, keyring } => {
+                if keyring != KeyringState::Unknown {
+                    self.keyring = keyring;
                 }
                 let key = AccountKey::of(&session);
                 let changed = settings.upsert_account(key, session.nickname.clone());
@@ -348,10 +392,11 @@ impl Launcher {
             sender.send(Event::Login(answer));
             return changed;
         }
+        let store = env.credentials.clone();
         env.runtime.spawn(async move {
             let client = wgc_auth::AuthClient::new(realm, tracking_id);
             let result = client.login(wgc_auth::AccountCredentials { username, password }).await;
-            sender.send(Event::Login(login_result(result).await));
+            sender.send(Event::Login(login_result(result, store).await));
         });
 
         changed
@@ -391,17 +436,19 @@ impl Launcher {
                 return changed;
             }
         }
+        let store = env.credentials.clone();
         env.runtime.spawn(async move {
             let client = wgc_auth::AuthClient::new(realm, tracking_id);
             let result = client.login_with_two_factor(credentials, twofactor_token, code).await;
-            sender.send(Event::Login(login_result(result).await));
+            sender.send(Event::Login(login_result(result, store).await));
         });
 
         changed
     }
 
     /// Ends the account's session: locally at once, then a server-side revoke (best effort) and
-    /// the keyring entry's removal. The account stays listed.
+    /// the removal of its session and game token from whichever store holds them. The account
+    /// stays listed.
     pub fn sign_out(&mut self, key: AccountKey, settings: &mut LauncherSettings, env: &LauncherEnv) {
         let _ = self.bump_restore(key);
         let previous = self.sessions.insert(key, AccountSession::SignedOut);
@@ -410,18 +457,22 @@ impl Launcher {
             _ => None,
         };
         let (tracking_id, _) = settings.ensure_tracking_id();
+        let credentials = env.credentials.clone();
         env.runtime.spawn(async move {
             if let Some(session) = session {
                 let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
-                if let Err(e) = client.logout(&session.tokens).await {
-                    warn!("server-side session revoke failed (signing out locally anyway): {e}");
+                if let Err(report) = client.logout(&session.tokens).await {
+                    warn!("server-side session revoke failed (signing out locally anyway): {}", ascii(&report));
                 }
             }
-            let deleted =
-                tokio::task::spawn_blocking(move || wgc_auth::SessionStore::new().delete(key.realm, key.account_id))
-                    .await;
+            let deleted = tokio::task::spawn_blocking(move || {
+                let session = credentials.delete_session(key.realm, key.account_id);
+                let token2 = credentials.delete_token2(key.realm, key.account_id);
+                session.and(token2)
+            })
+            .await;
             if let Ok(Err(e)) = deleted {
-                warn!("could not delete the stored session from the keyring: {e}");
+                warn!("could not delete the stored session: {e}");
             }
         });
     }
@@ -449,29 +500,31 @@ impl Launcher {
 }
 
 /// Looks up an entry no account has: a store that answers at all is there.
-fn probe_keyring() -> KeyringState {
-    let probe = wgc_auth::SessionStore::new().load(wgc_auth::AccountRealm::Eu, wgc_auth::AccountId::new(0));
-    match probe {
-        Err(wgc_auth::AuthError::NoSecretStore) => KeyringState::Unavailable,
-        Ok(_) | Err(_) => KeyringState::Available,
+fn probe_keyring(credentials: &wgc_auth::CredentialStore) -> KeyringState {
+    match credentials.probe() {
+        Ok(backend) => KeyringState::from(backend),
+        Err(error) => KeyringState::of_error(&error),
     }
 }
 
-/// Loads `key`'s session from the keyring and asks WGNI whether it still holds.
-async fn restore_session(key: AccountKey, tracking_id: wgc_core::TrackingId) -> RestoreOutcome {
-    let loaded =
-        tokio::task::spawn_blocking(move || wgc_auth::SessionStore::new().load(key.realm, key.account_id)).await;
-    let session = match loaded {
-        Ok(Ok(session)) => session,
-        Ok(Err(wgc_auth::AuthError::NoStoredSession)) => return RestoreOutcome::Missing,
-        Ok(Err(wgc_auth::AuthError::NoSecretStore)) => return RestoreOutcome::StoreUnavailable,
+/// Loads `key`'s session from whichever store holds it and asks WGNI whether it still holds.
+async fn restore_session(
+    key: AccountKey,
+    tracking_id: wgc_core::TrackingId,
+    credentials: wgc_auth::CredentialStore,
+) -> RestoreOutcome {
+    let loaded = tokio::task::spawn_blocking(move || credentials.load_session(key.realm, key.account_id)).await;
+    let wgc_auth::Stored { value: session, backend } = match loaded {
+        Ok(Ok(Some(stored))) => stored,
+        Ok(Ok(None)) => return RestoreOutcome::Missing,
+        Ok(Err(wgc_auth::AuthError::KeyringLocked)) => return RestoreOutcome::KeyringLocked,
         Ok(Err(e)) => {
-            warn!("could not load a stored session from the keyring: {e}");
-            return RestoreOutcome::Missing;
+            warn!("could not load a stored session: {e}");
+            return RestoreOutcome::Unreadable;
         }
         Err(e) => {
-            warn!("keyring load task did not complete: {e}");
-            return RestoreOutcome::Missing;
+            warn!("session load task did not complete: {e}");
+            return RestoreOutcome::Unreadable;
         }
     };
 
@@ -483,47 +536,49 @@ async fn restore_session(key: AccountKey, tracking_id: wgc_core::TrackingId) -> 
 
     let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
     match client.verify(&session.tokens).await {
-        Ok((_, nickname)) => RestoreOutcome::Valid(wgc_auth::StoredSession { nickname, ..session }),
+        Ok((_, nickname)) => {
+            RestoreOutcome::Valid { session: wgc_auth::StoredSession { nickname, ..session }, backend }
+        }
         Err(report) => match report.current_context() {
             wgc_auth::AuthError::SessionExpired => RestoreOutcome::Expired,
             // Offline or WGNI unreachable: the session may well hold, and Play finds out.
             _ => {
-                warn!("could not verify a stored session; keeping it: {report}");
-                RestoreOutcome::Valid(session)
+                warn!("could not verify a stored session; keeping it: {}", ascii(&report));
+                RestoreOutcome::Valid { session, backend }
             }
         },
     }
 }
 
-/// Turns a login result into the message for it. On success the session is first saved to the
-/// OS keyring (sync, so on a blocking-pool thread).
-async fn login_result(result: rootcause::Result<wgc_auth::StoredSession, wgc_auth::AuthError>) -> LoginMsg {
+/// Turns a login result into the message for it. On success the session is first saved
+/// (sync, so on a blocking-pool thread).
+async fn login_result(
+    result: rootcause::Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
+    credentials: wgc_auth::CredentialStore,
+) -> LoginMsg {
     let report = match result {
         Ok(session) => {
             let saved = tokio::task::spawn_blocking(move || {
-                let persisted = wgc_auth::SessionStore::new().save(&session);
+                let persisted = credentials.save_session(&session);
                 (session, persisted)
             })
             .await;
             return match saved {
-                Ok((session, Ok(()))) => {
-                    LoginMsg::Success { session: Box::new(session), storage: SessionStorage::Keyring, no_store: false }
-                }
-                Ok((session, Err(wgc_auth::AuthError::NoSecretStore))) => LoginMsg::Success {
+                Ok((session, Ok(backend))) => LoginMsg::Success {
                     session: Box::new(session),
-                    storage: SessionStorage::MemoryOnly,
-                    no_store: true,
+                    storage: SessionStorage::from(backend),
+                    keyring: KeyringState::from(backend),
                 },
                 Ok((session, Err(e))) => {
-                    warn!("could not save session to keyring: {e}");
+                    warn!("could not save the session: {e}");
                     LoginMsg::Success {
                         session: Box::new(session),
                         storage: SessionStorage::MemoryOnly,
-                        no_store: false,
+                        keyring: KeyringState::of_error(&e),
                     }
                 }
                 Err(join_err) => {
-                    warn!("keyring save task did not complete: {join_err}");
+                    warn!("session save task did not complete: {join_err}");
                     LoginMsg::Failed("signed in, but could not save the session; sign in again next launch".to_string())
                 }
             };
@@ -541,6 +596,11 @@ async fn login_result(result: rootcause::Result<wgc_auth::StoredSession, wgc_aut
         // paths carry a password or token.
         _ => LoginMsg::Failed(report.to_string()),
     }
+}
+
+/// A report in the log's ASCII layout.
+fn ascii(report: &rootcause::Report<wgc_auth::AuthError>) -> String {
+    report.format_with(&DefaultReportFormatter::ASCII).to_string()
 }
 
 #[cfg(test)]
@@ -574,15 +634,38 @@ mod tests {
         }
     }
 
+    /// No secret store and no data directory, so tests never touch the user's keyring.
+    struct NoSecretStore;
+
+    impl wgc_auth::SecretStore for NoSecretStore {
+        fn get(&self, _: &wgc_auth::KeyringEntry) -> Result<Option<String>, wgc_auth::AuthError> {
+            Err(wgc_auth::AuthError::NoSecretStore)
+        }
+
+        fn set(&self, _: &wgc_auth::KeyringEntry, _: &str) -> Result<(), wgc_auth::AuthError> {
+            Err(wgc_auth::AuthError::NoSecretStore)
+        }
+
+        fn delete(&self, _: &wgc_auth::KeyringEntry) -> Result<(), wgc_auth::AuthError> {
+            Err(wgc_auth::AuthError::NoSecretStore)
+        }
+    }
+
     fn env(runtime: &tokio::runtime::Runtime) -> LauncherEnv {
-        LauncherEnv { runtime: runtime.handle().clone(), proxy_url: None, wake: Arc::new(|| {}), runtime_dirs: None }
+        LauncherEnv {
+            runtime: runtime.handle().clone(),
+            proxy_url: None,
+            wake: Arc::new(|| {}),
+            runtime_dirs: None,
+            credentials: wgc_auth::CredentialStore::with_backends(Arc::new(NoSecretStore), None),
+        }
     }
 
     fn signed_in(session: wgc_auth::StoredSession) -> LauncherEvent {
         LauncherEvent(Event::Login(LoginMsg::Success {
             session: Box::new(session),
             storage: SessionStorage::Keyring,
-            no_store: false,
+            keyring: KeyringState::Available,
         }))
     }
 
@@ -656,7 +739,8 @@ mod tests {
         let (mut launcher, _events) = Launcher::new();
         let restore = launcher.bump_restore(eu);
 
-        let valid = RestoreOutcome::Valid(session(eu, "renamed"));
+        let valid =
+            RestoreOutcome::Valid { session: session(eu, "renamed"), backend: wgc_auth::StorageBackend::Keyring };
         assert!(launcher.apply(
             LauncherEvent(Event::SessionRestored { key: eu, restore, outcome: valid }),
             &mut settings,
@@ -679,5 +763,22 @@ mod tests {
         assert!(settings.accounts.is_empty());
         assert_eq!(settings.default_account, None);
         assert_eq!(launcher.account_status(eu), AccountStatus::SignedOut);
+    }
+
+    #[test]
+    fn an_unreadable_session_file_needs_a_new_sign_in() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let plaintext = wgc_auth::PlaintextFile::in_dir(dir.path());
+        std::fs::create_dir_all(plaintext.path().parent().unwrap()).unwrap();
+        std::fs::write(plaintext.path(), b"{not json").unwrap();
+        let credentials = wgc_auth::CredentialStore::with_backends(Arc::new(NoSecretStore), Some(plaintext));
+        let eu = key(wgc_auth::AccountRealm::Eu, 697_769_785);
+        let mut settings = LauncherSettings::default();
+        let (tracking_id, _) = settings.ensure_tracking_id();
+
+        let outcome = runtime.block_on(restore_session(eu, tracking_id, credentials));
+
+        assert!(matches!(outcome, RestoreOutcome::Unreadable));
     }
 }

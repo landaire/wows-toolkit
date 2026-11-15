@@ -55,9 +55,13 @@ pub fn set_session(launcher: &mut Launcher, key: AccountKey, state: TestSession)
         TestSession::SignedIn(nickname) => {
             AccountSession::SignedIn { session: Arc::new(session(key, &nickname)), storage: SessionStorage::Keyring }
         }
+        TestSession::SignedInUnencrypted(nickname) => AccountSession::SignedIn {
+            session: Arc::new(session(key, &nickname)),
+            storage: SessionStorage::PlaintextFile,
+        },
         TestSession::Expired => AccountSession::Expired,
         TestSession::SignedOut => AccountSession::SignedOut,
-        TestSession::StoreUnavailable => AccountSession::StoreUnavailable,
+        TestSession::KeyringLocked => AccountSession::KeyringLocked,
     };
     launcher.sessions.insert(key, session);
 }
@@ -66,9 +70,11 @@ pub fn set_session(launcher: &mut Launcher, key: AccountKey, state: TestSession)
 pub enum TestSession {
     Restoring,
     SignedIn(String),
+    /// Signed in, with the session saved unencrypted because there is no secret store.
+    SignedInUnencrypted(String),
     Expired,
     SignedOut,
-    StoreUnavailable,
+    KeyringLocked,
 }
 
 /// Sets the game state as a launch and the client's progress would.
@@ -103,15 +109,22 @@ pub fn download_reported(key: PathBuf, state: DownloadState) -> LauncherEvent {
 
 /// A sign-in that succeeded with `session`, kept in `storage`.
 pub fn signed_in(session: wgc_auth::StoredSession, storage: SessionStorage) -> LauncherEvent {
-    LauncherEvent(Event::Login(LoginMsg::Success { session: Box::new(session), storage, no_store: false }))
+    let keyring = match storage {
+        SessionStorage::Keyring => KeyringState::Available,
+        SessionStorage::PlaintextFile => KeyringState::Unavailable,
+        SessionStorage::MemoryOnly => KeyringState::Unknown,
+    };
+
+    LauncherEvent(Event::Login(LoginMsg::Success { session: Box::new(session), storage, keyring }))
 }
 
-/// A sign-in that succeeded while the OS had no secret store, so the session lives in memory.
-pub fn signed_in_without_store(session: wgc_auth::StoredSession) -> LauncherEvent {
+/// A sign-in that succeeded while the OS had no secret store, so the session was saved
+/// unencrypted.
+pub fn signed_in_unencrypted(session: wgc_auth::StoredSession) -> LauncherEvent {
     LauncherEvent(Event::Login(LoginMsg::Success {
         session: Box::new(session),
-        storage: SessionStorage::MemoryOnly,
-        no_store: true,
+        storage: SessionStorage::PlaintextFile,
+        keyring: KeyringState::Unavailable,
     }))
 }
 
@@ -143,8 +156,8 @@ pub fn sign_in_failed(error: String) -> LauncherEvent {
 /// What a scripted sign-in answers, in place of WGNI.
 pub enum ScriptedSignIn {
     Succeed(wgc_auth::StoredSession),
-    /// Succeed with no OS secret store, so the session lives in memory.
-    SucceedWithoutStore(wgc_auth::StoredSession),
+    /// Succeed with no OS secret store, so the session is saved unencrypted.
+    SucceedUnencrypted(wgc_auth::StoredSession),
     TwoFactor,
     WrongCode,
     Fail(String),
@@ -178,12 +191,16 @@ impl SignInScript {
         let answer = self.answers.pop_front()?;
 
         Some(match answer {
-            ScriptedSignIn::Succeed(session) => {
-                LoginMsg::Success { session: Box::new(session), storage: SessionStorage::Keyring, no_store: false }
-            }
-            ScriptedSignIn::SucceedWithoutStore(session) => {
-                LoginMsg::Success { session: Box::new(session), storage: SessionStorage::MemoryOnly, no_store: true }
-            }
+            ScriptedSignIn::Succeed(session) => LoginMsg::Success {
+                session: Box::new(session),
+                storage: SessionStorage::Keyring,
+                keyring: KeyringState::Available,
+            },
+            ScriptedSignIn::SucceedUnencrypted(session) => LoginMsg::Success {
+                session: Box::new(session),
+                storage: SessionStorage::PlaintextFile,
+                keyring: KeyringState::Unavailable,
+            },
             ScriptedSignIn::TwoFactor => LoginMsg::TwoFactorRequired { twofactor_token: "challenge".into() },
             ScriptedSignIn::WrongCode => LoginMsg::TwoFactorRetry("two-factor code was invalid".into()),
             ScriptedSignIn::Fail(error) => LoginMsg::Failed(error),

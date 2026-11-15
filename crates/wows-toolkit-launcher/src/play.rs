@@ -54,6 +54,7 @@ pub(crate) struct SignIn {
     pub(crate) key: AccountKey,
     pub(crate) session: Arc<wgc_auth::StoredSession>,
     pub(crate) tracking_id: wgc_core::TrackingId,
+    pub(crate) credentials: wgc_auth::CredentialStore,
 }
 
 /// The runner, view and prefix work, which blocks for seconds on a first launch.
@@ -203,7 +204,7 @@ fn account_responder(
     language: GameLanguage,
     sender: &EventSender,
 ) -> AccountResponder {
-    let SignIn { key, session, tracking_id } = sign_in;
+    let SignIn { key, session, tracking_id, credentials } = sign_in;
 
     let sender = sender.clone();
     let observer: wgc_ipc::AccountObserver = Arc::new(move |event| {
@@ -215,7 +216,7 @@ fn account_responder(
     });
     let client = wgc_auth::AuthClient::new(key.realm, tracking_id);
 
-    AccountResponder::new(session, client, language, observer)
+    AccountResponder::new(session, client, credentials, language, observer)
 }
 
 /// Reports the client once the stub has started it, which means WGC checks passed.

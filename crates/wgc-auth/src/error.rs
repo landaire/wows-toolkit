@@ -5,13 +5,14 @@
 //! `current_context()`), and diagnostic detail -- what the client was doing,
 //! or the raw [`TokenRejection`] a classification was made from -- is
 //! attached to the `rootcause::Report` rather than folded into a string
-//! field. `store.rs`'s keyring-facing functions are synchronous and return
-//! plain `Result<T, AuthError>`.
+//! field. `store`'s functions are synchronous and return plain
+//! `Result<T, AuthError>`.
 //!
 //! `Rejected` is the catch-all for a WGNI token-endpoint error this crate
 //! does not recognize; it always carries the full [`TokenRejection`] so no
 //! upstream detail is lost, unlike a stringly-matched description.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use thiserror::Error;
@@ -99,9 +100,6 @@ pub enum AuthError {
         source: tokio::task::JoinError,
     },
 
-    #[error("no session found for this account/realm")]
-    NoStoredSession,
-
     #[error("stored session token was rejected by the server; re-authentication required")]
     SessionExpired,
 
@@ -111,8 +109,25 @@ pub enum AuthError {
         source: keyring::Error,
     },
 
-    #[error("no OS secret store is available; session will not persist across restarts")]
+    #[error("no OS secret store is available")]
     NoSecretStore,
+
+    #[error("the OS secret store is locked, or its unlock prompt was dismissed")]
+    KeyringLocked,
+
+    #[error("cannot access the unencrypted session file {path}: {source}")]
+    PlaintextStore {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("cannot read or write the unencrypted session file {path}: {source}")]
+    PlaintextStoreFormat {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
 
     #[error("could not serialize session for storage: {source}")]
     SerializeSession {

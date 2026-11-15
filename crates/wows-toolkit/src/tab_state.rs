@@ -1793,11 +1793,13 @@ impl TabState {
             return None;
         };
         let ctx = self.egui_ctx.clone();
+        let storage_dir = crate::storage_dir();
         Some(wows_toolkit_launcher::LauncherEnv {
             runtime: runtime.handle().clone(),
             proxy_url: self.proxy.as_ref().map(|p| p.url.clone()),
             wake: Arc::new(move || ctx.request_repaint()),
-            runtime_dirs: crate::storage_dir().map(|dir| wgc_launch::RuntimeDirs::new(&dir)),
+            runtime_dirs: storage_dir.as_deref().map(wgc_launch::RuntimeDirs::new),
+            credentials: wgc_auth::CredentialStore::new(storage_dir.as_deref()),
         })
     }
 
