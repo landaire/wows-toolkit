@@ -25,6 +25,9 @@ use crate::view::InstallView;
 /// WoWs on Steam. Proton and umu select per-game fixes by this id.
 const WOWS_APP_ID: &str = "552990";
 
+/// Where DXVK keeps its pipeline cache, as a path inside Wine.
+const SHADER_CACHE_ENV: &str = "DXVK_SHADER_CACHE_PATH";
+
 /// The Windows program the runner starts: the WGC relay, or the game itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsProgram {
@@ -91,6 +94,18 @@ pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result
         std::fs::create_dir_all(&dir).map_err(|source| SpawnError::CreateDir { path: dir, source })?;
     }
 
+    let mut program = spec.program;
+    if !matches!(spec.runner.runner(), Runner::Native) {
+        let install_root = match spec.view {
+            InstallView::Direct { root } => root,
+            InstallView::Overlay(overlay) => &overlay.layers().lower,
+        };
+        let cache = spec.runner.dirs().install_state(install_root).shader_cache();
+        std::fs::create_dir_all(&cache).map_err(|source| SpawnError::CreateDir { path: cache.clone(), source })?;
+        program.env.push((SHADER_CACHE_ENV.into(), dos_path(&cache)));
+        program.shared_dirs.push(cache);
+    }
+
     let (session, plan_view, mount) = match spec.view {
         InstallView::Direct { root } => {
             let session = SessionId::new(InstallKey::from_canonical_root(root).as_str());
@@ -111,14 +126,8 @@ pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result
         }
     };
 
-    let plan = CommandPlan::for_runner(
-        spec.runner,
-        &plan_view,
-        &spec.program,
-        spec.args,
-        &HostEnv::from_env(),
-        Some(&session),
-    );
+    let plan =
+        CommandPlan::for_runner(spec.runner, &plan_view, &program, spec.args, &HostEnv::from_env(), Some(&session));
     tracing::info!("launching {:?} {:?}", plan.program, plan.args);
 
     let mut command = plan.command();

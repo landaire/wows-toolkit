@@ -118,6 +118,12 @@ impl InstallStateDir {
     pub fn backend_record(&self) -> PathBuf {
         self.dir.join("overlay-backend")
     }
+
+    /// `DXVK_SHADER_CACHE_PATH` for the install. Outside the prefix, so the
+    /// cache survives a new prefix and a switch between Proton and umu.
+    pub fn shader_cache(&self) -> PathBuf {
+        self.dir.join("shader-cache")
+    }
 }
 
 fn sanitize(name: &str) -> String {
