@@ -12,6 +12,7 @@ use wows_toolkit_services::constants::Checked;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
 use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
+use wows_toolkit_viewmodel::first_run::adopt_found_install;
 use wows_toolkit_viewmodel::first_run::adopt_system_locale;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::RenderEffect;
@@ -49,9 +50,14 @@ pub fn begin(services: Services, shell: Shell) {
     let system_locale = sys_locale::get_locale();
     let loaded = services.on_tokio(async move {
         let pool = wows_toolkit_config::open_db().await?;
-        // Before the settings are read, so the language question offers what was saved.
+        // Before the settings are read, so the language question offers what was saved and the
+        // game data loads from the install found.
         if let Err(err) = adopt_system_locale(&pool, system_locale.as_deref()).await {
             tracing::warn!("the machine's language was not saved: {err}");
+        }
+        let found = async { tokio::task::spawn_blocking(find_install).await.ok().flatten() };
+        if let Err(err) = adopt_found_install(&pool, found).await {
+            tracing::warn!("the install found was not saved: {err}");
         }
         let settings = StartupSettings::load(&pool).await;
         // The pool comes back so settings edits have somewhere to go.
@@ -91,6 +97,16 @@ pub fn game_data_request(settings: &StartupSettings) -> GameDataRequest {
 /// Whether `wows_dir` could hold an install: set, and with the `bin` directory every install has.
 pub fn is_wows_dir_invalid(wows_dir: &str) -> bool {
     !wows_dir.is_empty() && !std::path::Path::new(wows_dir).join("bin").is_dir()
+}
+
+/// The first install the launcher's discovery or the installer's default path holds.
+fn find_install() -> Option<PathBuf> {
+    let standard = PathBuf::from(r"C:\Games\World_of_Warships");
+
+    wgc_install::discover_all(None, &[standard])
+        .into_iter()
+        .map(|install| install.path)
+        .find(|path| path.join("bin").is_dir())
 }
 
 /// Applies the settings read at startup.

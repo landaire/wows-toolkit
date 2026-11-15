@@ -445,11 +445,12 @@ fn use_for_toolkit_sets_the_game_directory() {
     );
 
     // The tests share one settings database, and the directory is removed with `install`: a
-    // later shell would read it back and fail to load its game data.
+    // later shell would read it back and fail to load its game data. Emptied rather than deleted,
+    // so a later shell does not look for an install on the machine.
     crate::interaction_tests::settle_in_real_time(&mut launcher.window);
     launcher.runtime.block_on(async {
         let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
-        wows_toolkit_config::queries::delete_setting(&pool, keys::WOWS_DIR).await.expect("the setting is removed");
+        wows_toolkit_config::queries::set_setting(&pool, keys::WOWS_DIR, &"").await.expect("the setting is emptied");
     });
 }
 

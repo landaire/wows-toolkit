@@ -1,5 +1,7 @@
 //! What a first run takes from the machine when nothing is saved for it yet.
 
+use std::path::PathBuf;
+
 use sqlx::SqlitePool;
 use wows_toolkit_config::queries;
 
@@ -47,12 +49,72 @@ pub async fn adopt_system_locale(
     Ok(Some(code))
 }
 
+/// Saves the install `find_install` finds as the game directory, when none was ever saved.
+///
+/// `find_install` is awaited only then, since looking for installs reads the disk. A saved empty
+/// directory counts as saved: the reader cleared it. Returns the directory saved.
+pub async fn adopt_found_install(
+    pool: &SqlitePool,
+    find_install: impl Future<Output = Option<PathBuf>>,
+) -> Result<Option<String>, FirstRunError> {
+    let saved = queries::try_get_setting::<String>(pool, keys::WOWS_DIR)
+        .await
+        .map_err(|source| FirstRunError::Read { key: keys::WOWS_DIR, source })?;
+    if saved.is_some() {
+        return Ok(None);
+    }
+
+    // The setting is a string; a path that is not one cannot be saved in it.
+    let Some(dir) = find_install.await.and_then(|path| path.to_str().map(str::to_owned)) else { return Ok(None) };
+    queries::set_setting(pool, keys::WOWS_DIR, &dir)
+        .await
+        .map_err(|source| FirstRunError::Write { key: keys::WOWS_DIR, source })?;
+
+    Ok(Some(dir))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     async fn saved_locale(pool: &SqlitePool) -> Option<String> {
         queries::try_get_setting::<Option<String>>(pool, keys::LOCALE).await.unwrap().flatten()
+    }
+
+    async fn saved_wows_dir(pool: &SqlitePool) -> Option<String> {
+        queries::try_get_setting::<String>(pool, keys::WOWS_DIR).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_first_run_saves_the_install_found() {
+        let pool = wows_toolkit_config::test_pool().await;
+        let found = async { Some(PathBuf::from("/games/World_of_Warships")) };
+
+        assert_eq!(adopt_found_install(&pool, found).await.unwrap().as_deref(), Some("/games/World_of_Warships"));
+        assert_eq!(saved_wows_dir(&pool).await.as_deref(), Some("/games/World_of_Warships"));
+    }
+
+    #[tokio::test]
+    async fn a_saved_game_directory_is_kept_and_no_install_is_looked_for() {
+        let pool = wows_toolkit_config::test_pool().await;
+        queries::set_setting(&pool, keys::WOWS_DIR, &"").await.unwrap();
+        let looked = std::cell::Cell::new(false);
+        let found = async {
+            looked.set(true);
+            Some(PathBuf::from("/games/World_of_Warships"))
+        };
+
+        assert_eq!(adopt_found_install(&pool, found).await.unwrap(), None);
+        assert!(!looked.get(), "no install is looked for once a directory is saved");
+        assert_eq!(saved_wows_dir(&pool).await.as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn no_install_found_saves_nothing() {
+        let pool = wows_toolkit_config::test_pool().await;
+
+        assert_eq!(adopt_found_install(&pool, async { None }).await.unwrap(), None);
+        assert_eq!(saved_wows_dir(&pool).await, None);
     }
 
     #[tokio::test]

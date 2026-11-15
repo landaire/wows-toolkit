@@ -46,7 +46,8 @@ pub(crate) fn shell() -> Shell {
 }
 
 /// Points `storage_dir` at a temporary directory for the whole process, with every first-run
-/// question answered and the update check off, so the shell opens as a returning reader sees it.
+/// question answered, no game directory, and the update check off, so the shell opens as a
+/// returning reader sees it and never adopts an install found on the machine.
 /// The directory is leaked: it has to outlive every test in the process.
 pub(crate) fn returning_reader(runtime: &Runtime) {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -63,6 +64,7 @@ pub(crate) fn returning_reader(runtime: &Runtime) {
             wows_toolkit_config::queries::set_setting(&pool, keys::CHECK_FOR_UPDATES, &false)
                 .await
                 .expect("a setting is written");
+            wows_toolkit_config::queries::set_setting(&pool, keys::WOWS_DIR, &"").await.expect("a setting is written");
         });
     });
 }
