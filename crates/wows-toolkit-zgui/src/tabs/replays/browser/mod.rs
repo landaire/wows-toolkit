@@ -49,12 +49,13 @@ pub enum ReplayBrowserEvent {
         paths: Vec<PathBuf>,
         replace: bool,
     },
-    /// A watched directory gained a replay. `battle` is its "Ship - Map"; `install` says whether
-    /// it landed in the install's directory, which is what autoloading follows.
+    /// A watched directory gained a replay. `battle` is its "Ship - Map"; `followed` says whether
+    /// it landed in the install's directory or in the folder on screen, which is what autoloading
+    /// and the announcement follow.
     ReplayAppeared {
         path: PathBuf,
         battle: String,
-        install: bool,
+        followed: bool,
     },
     /// A listed replay was written again.
     ReplayChanged(PathBuf),

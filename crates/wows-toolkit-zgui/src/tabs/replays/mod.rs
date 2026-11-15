@@ -290,8 +290,8 @@ fn on_browser_event(workspace: ReplayWorkspace, arrivals: Arrivals, offer: GameD
             batch::render_many(workspace, paths, BatchTarget::Clipboard);
         }
         ReplayBrowserEvent::SessionStats { paths, replace } => session_stats::record(workspace, paths, replace),
-        ReplayBrowserEvent::ReplayAppeared { path, battle, install } => {
-            arrivals.appeared(workspace, path, &battle, install);
+        ReplayBrowserEvent::ReplayAppeared { path, battle, followed } => {
+            arrivals.appeared(workspace, path, &battle, followed);
         }
         ReplayBrowserEvent::ReplayChanged(path) => arrivals.changed(workspace, path),
         // The listing forgets the row itself; an open tab keeps what it read.

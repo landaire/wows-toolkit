@@ -953,16 +953,18 @@ impl BrowserControl {
 
     /// Carries out what folder `id`'s listing reports.
     fn on_listing_event(self, id: FolderId, event: ListingEvent, events: &BrowserEvents, motion: MotionPreference) {
-        let install = id == FolderId::INSTALL;
         match event {
             ListingEvent::Appeared(path) => {
                 let battle = self
                     .listing(id)
                     .and_then(|listing| listing.battle_label(&path))
                     .unwrap_or_else(|| path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned());
+                // A folder not on screen counts the battle on its tab rather than taking the
+                // reader away from the one they are looking at.
+                let followed = id == FolderId::INSTALL || self.selected.get_untracked() == id;
                 self.note_unseen(id, path.clone(), true, motion);
                 actions::replay_landed(self, id, &path);
-                events.send(ReplayBrowserEvent::ReplayAppeared { path, battle, install });
+                events.send(ReplayBrowserEvent::ReplayAppeared { path, battle, followed });
             }
             ListingEvent::Changed(path) => {
                 self.note_unseen(id, path.clone(), false, motion);

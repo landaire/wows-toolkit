@@ -851,6 +851,41 @@ fn a_groups_menu_renders_and_records_session_stats_for_its_replays() {
 }
 
 #[test]
+fn a_battle_landing_in_the_folder_on_screen_is_announced_and_one_elsewhere_is_only_counted() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let (_behind_dir, behind) = replay_dir(0);
+    let (_shown_dir, shown) = replay_dir(0);
+    control.open_folder(behind.clone());
+    control.open_folder(shown.clone());
+    settle_in_real_time(&mut window);
+    // Pinned folders are the ones watched.
+    control.pin_folder(folder_id(control, &behind), true);
+    control.pin_folder(folder_id(control, &shown), true);
+    settle_in_real_time(&mut window);
+    sent();
+
+    let landed = land(&shown, FIXTURES[0], &mut window);
+    let elsewhere = land(&behind, FIXTURES[1], &mut window);
+
+    let appeared: Vec<(PathBuf, String, bool)> = sent()
+        .into_iter()
+        .filter_map(|event| match event {
+            super::ReplayBrowserEvent::ReplayAppeared { path, battle, followed } => Some((path, battle, followed)),
+            _ => None,
+        })
+        .collect();
+    let followed: Vec<(&Path, bool)> = appeared.iter().map(|(path, _, followed)| (path.as_path(), *followed)).collect();
+    assert_eq!(followed, [(landed.as_path(), true), (elsewhere.as_path(), false)]);
+    let toasts = window.texts_by_class("lui-toasts").concat();
+    assert!(toasts.contains(&appeared[0].1), "the battle on screen is announced: {toasts:?}");
+    assert!(!toasts.contains(&appeared[1].1), "the one behind is not: {toasts:?}");
+    window.advance(LANDING_PULSE);
+    assert_eq!(control.unseen(folder_id(control, &behind)), 1, "the one behind is counted on its tab");
+}
+
+#[test]
 fn a_group_header_shows_no_replay_preview() {
     let (mut window, control) = open();
     control.adopt_pinned_folders(PinnedFolders::default());

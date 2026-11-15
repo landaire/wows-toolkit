@@ -99,14 +99,15 @@ impl Arrivals {
         arrivals
     }
 
-    /// A watched directory gained `path`. `battle` is its "Ship - Map"; `install` says whether it
-    /// landed in the install's directory, which is what autoloading follows.
-    pub fn appeared(self, workspace: ReplayWorkspace, path: PathBuf, battle: &str, install: bool) {
+    /// A watched directory gained `path`. `battle` is its "Ship - Map"; `followed` says whether it
+    /// landed in the install's directory or in the folder on screen, which is what autoloading and
+    /// the announcement follow.
+    pub fn appeared(self, workspace: ReplayWorkspace, path: PathBuf, battle: &str, followed: bool) {
         // Written and contributed whether or not it is opened, as the egui app does from its
         // background parser.
         self.export(workspace, &path);
         self.contribute(workspace, &path);
-        if !install {
+        if !followed {
             return;
         }
         let autoload =
