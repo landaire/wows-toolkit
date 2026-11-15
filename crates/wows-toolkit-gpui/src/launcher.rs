@@ -37,8 +37,6 @@ use wows_toolkit_launcher::LauncherError;
 use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::SessionStorage;
-use wows_toolkit_launcher::proton::ProtonSetup;
-use wows_toolkit_launcher::proton::Severity;
 
 use crate::runtime;
 
@@ -187,6 +185,7 @@ impl LauncherView {
             proxy_url: self.proxy_url.clone(),
             // Events are awaited by `_events`, which needs no other wake-up.
             wake: Arc::new(|| {}),
+            runtime_dirs: wows_toolkit_config::storage_dir().map(|dir| wgc_launch::RuntimeDirs::new(&dir)),
         })
     }
 
@@ -228,24 +227,6 @@ impl LauncherView {
         }
     }
 
-    fn report_proton(result: ProtonSetup, window: &mut Window, cx: &mut App) {
-        match result.severity() {
-            Severity::Success => crate::toast::ok(result.to_string(), window, cx),
-            Severity::Warning => crate::toast::warn(result.to_string(), window, cx),
-            Severity::Error => crate::toast::failed(result.to_string(), window, cx),
-        }
-    }
-
-    fn autodetect_proton(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(settings) = self.settings.as_mut() else { return };
-        let result = wows_toolkit_launcher::proton::autodetect(settings, wows_toolkit_config::storage_dir().as_deref());
-        if result.changed() {
-            self.save(cx);
-        }
-        Self::report_proton(result, window, cx);
-        cx.notify();
-    }
-
     fn add_install(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
         cx.spawn_in(window, async move |this, cx| {
@@ -257,24 +238,6 @@ impl LauncherView {
                     true
                 })
             });
-        })
-        .detach();
-    }
-
-    fn browse_proton_binary(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = wows_toolkit_services::dialog::pick_file(Some(&t!("ui.launcher.proton.binary")), None);
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
-            let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_binary = Some(path)));
-        })
-        .detach();
-    }
-
-    fn browse_proton_prefix(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.proton.prefix"));
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(path) = crate::dialog::chosen(asked, &this, cx).await else { return };
-            let _ = this.update(cx, |this, cx| this.edit_settings(cx, |settings| settings.proton_prefix = Some(path)));
         })
         .detach();
     }
@@ -516,61 +479,17 @@ impl LauncherView {
         section(t!("ui.launcher.account.heading"), body, cx)
     }
 
-    fn render_options(&self, settings: &LauncherSettings, cx: &mut Context<Self>) -> AnyElement {
-        let path_row = |id: &'static str, label: String, path: Option<&Path>, cx: &mut Context<Self>| {
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(div().w(px(60.)).child(label))
-                .child(match path {
-                    Some(path) => div().text_sm().child(path.display().to_string()),
-                    None => dim(t!("ui.launcher.not_set")),
-                })
-                .child(Button::new(id).label(t!("ui.launcher.browse").to_string()).compact().on_click(cx.listener(
-                    move |this, _, window, cx| match id {
-                        "launcher-proton-binary" => this.browse_proton_binary(window, cx),
-                        _ => this.browse_proton_prefix(window, cx),
-                    },
-                )))
-        };
+    fn render_options(&self, cx: &mut Context<Self>) -> AnyElement {
         let body = v_flex()
             .gap_2()
             .child(t!("ui.launcher.options.extra_args").to_string())
             .child(Textarea::new(&self.extra_args).w_full())
             .child(t!("ui.launcher.options.env_vars").to_string())
-            .child(Textarea::new(&self.env_vars).w_full())
-            .child(div().font_weight(FontWeight::BOLD).child(t!("ui.launcher.proton.heading").to_string()))
-            .child(dim(t!("ui.launcher.proton.description")))
-            .child(path_row(
-                "launcher-proton-binary",
-                t!("ui.launcher.proton.binary").into_owned(),
-                settings.proton_binary.as_deref(),
-                cx,
-            ))
-            .child(path_row(
-                "launcher-proton-prefix",
-                t!("ui.launcher.proton.prefix").into_owned(),
-                settings.proton_prefix.as_deref(),
-                cx,
-            ))
-            .child(
-                h_flex().child(
-                    Button::new("launcher-proton-detect")
-                        .label(t!("ui.launcher.proton.detect").to_string())
-                        .compact()
-                        .on_click(cx.listener(|this, _, window, cx| this.autodetect_proton(window, cx))),
-                ),
-            );
+            .child(Textarea::new(&self.env_vars).w_full());
         section(t!("ui.launcher.options.heading"), body, cx)
     }
 
-    fn render_install(
-        &self,
-        index: usize,
-        install: &GameInstall,
-        settings: &LauncherSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_install(&self, index: usize, install: &GameInstall, cx: &mut Context<Self>) -> AnyElement {
         let launcher = &self.launcher;
         let version = match &install.version {
             Some(v) => Some(format!("{}.{}.{}", v.major, v.minor, v.patch)),
@@ -629,20 +548,6 @@ impl LauncherView {
                         .child(dim(t!("ui.launcher.download_hint"))),
                 );
             }
-        }
-        if wows_toolkit_launcher::proton::needs_setup(install, settings) {
-            body = body.child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(colored(t!("ui.launcher.proton.needed"), cx.theme().warning))
-                    .child(
-                        Button::new(("launcher-set-up-proton", index))
-                            .label(t!("ui.launcher.proton.set_up").to_string())
-                            .compact()
-                            .on_click(cx.listener(|this, _, window, cx| this.autodetect_proton(window, cx))),
-                    ),
-            );
         }
         let for_launch = install.clone();
         let for_toolkit = install.path.clone();
@@ -742,11 +647,11 @@ impl LauncherView {
 
 impl Render for LauncherView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(settings) = self.settings.clone() else {
+        if self.settings.is_none() {
             return crate::loading::Loading::new("launcher-loading", t!("ui.launcher.loading").into_owned())
                 .top()
                 .into_any_element();
-        };
+        }
         let account = self.render_account(cx);
         let toolbar = h_flex()
             .gap_2()
@@ -776,12 +681,12 @@ impl Render for LauncherView {
                         cx.notify();
                     })),
             );
-        let options = self.render_options(&settings, cx);
+        let options = self.render_options(cx);
         let installs = self.launcher.installs().to_vec();
         let rows: Vec<AnyElement> = if installs.is_empty() && !self.launcher.is_discovering() {
             vec![dim(t!("ui.launcher.no_installs")).into_any_element()]
         } else {
-            installs.iter().enumerate().map(|(i, install)| self.render_install(i, install, &settings, cx)).collect()
+            installs.iter().enumerate().map(|(i, install)| self.render_install(i, install, cx)).collect()
         };
         let installs = section(t!("ui.launcher.installs_heading"), v_flex().gap_2().child(toolbar).children(rows), cx);
         let install_game = self.render_install_game(cx);

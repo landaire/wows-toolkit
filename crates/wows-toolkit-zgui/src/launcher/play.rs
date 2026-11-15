@@ -9,6 +9,7 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_launcher::AccountKey;
+use wows_toolkit_launcher::LaunchFailure;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::PlayError;
 use wows_toolkit_viewmodel::settings_drawer::Setting;
@@ -287,21 +288,26 @@ pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: 
 
     match &err {
         PlayError::NotSignedIn { key, .. } => open_sign_in(shell, model, LoginTarget::Reauthenticate(*key)),
-        PlayError::NoInstall { .. } | PlayError::Launch(wgc_launch::LaunchError::ExeNotFound { .. }) => {
+        PlayError::NoInstall { .. } => {
             shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
             shell.settings_drawer.open_at(Setting::GameInstalls);
-        }
-        PlayError::Launch(
-            wgc_launch::LaunchError::ProtonNotFound
-            | wgc_launch::LaunchError::ProtonPrefixNotConfigured
-            | wgc_launch::LaunchError::ProtonPrefixCreateFailed { .. },
-        ) => {
-            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
-            shell.settings_drawer.open_at(Setting::GameRunner);
         }
         _ => {
             shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
         }
+    }
+}
+
+/// Says why a launch failed after Play returned, and opens the setting that can fix it.
+pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
+    shell.toasts().failed(t!("ui.launcher.launch_failed", error = failure.to_string()).into_owned());
+    match failure {
+        LaunchFailure::Runner(_) | LaunchFailure::Prefix(_) | LaunchFailure::NoWinePrefix => {
+            shell.settings_drawer.open_at(Setting::GameRunner);
+        }
+        LaunchFailure::View(_) => shell.settings_drawer.open_at(Setting::GameInstalls),
+        // Nothing in the settings changes these.
+        LaunchFailure::RelayPrefix(_) | LaunchFailure::Relay(_) | LaunchFailure::Spawn(_) | LaunchFailure::Task(_) => {}
     }
 }
 

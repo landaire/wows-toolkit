@@ -3,11 +3,13 @@
 //! directory.
 
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::dirs::InstallKey;
+use crate::dirs::InstallStateDir;
 use crate::dirs::RuntimeDirs;
 use crate::error::RelativePathError;
 use crate::error::ViewError;
@@ -38,21 +40,13 @@ impl InstallView {
     }
 
     pub fn prepare_with(install_root: &Path, dirs: &RuntimeDirs, search: &HostSearch) -> Result<Self, ViewError> {
-        let root = std::fs::canonicalize(install_root)
-            .map_err(|source| ViewError::InstallMissing { path: install_root.to_path_buf(), source })?;
+        let root = canonical_root(install_root)?;
         let state = dirs.install_state(&root);
         let record_path = state.backend_record();
 
         // An install that has an upper directory keeps using it even if it
         // became writable, so its preferences and replays do not vanish.
-        let recorded = match std::fs::read_to_string(&record_path) {
-            Ok(text) => Some(
-                OverlayBackend::from_record(&text)
-                    .ok_or_else(|| ViewError::UnknownBackendRecord { path: record_path.clone(), content: text })?,
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(source) => return Err(ViewError::StateDir { path: record_path, source }),
-        };
+        let recorded = read_backend_record(&record_path)?;
 
         if recorded.is_none() && probe_writable(&root)? == Writability::Writable {
             return Ok(Self::Direct { root });
@@ -61,10 +55,13 @@ impl InstallView {
             return Err(ViewError::ReadOnlyUnsupported { path: root });
         }
 
-        let layers = OverlayLayers { lower: root, upper: state.upper(), work: state.work(), merged: state.merged() };
-        for dir in [&layers.upper, &layers.work, &layers.merged] {
-            std::fs::create_dir_all(dir).map_err(|source| ViewError::StateDir { path: dir.clone(), source })?;
+        for dir in [state.upper(), state.work(), state.merged()] {
+            std::fs::create_dir_all(&dir).map_err(|source| ViewError::StateDir { path: dir, source })?;
         }
+        // The stale mount check compares the merged directory with the mount table's resolved paths.
+        let state =
+            state.canonicalize().map_err(|source| ViewError::StateDir { path: state.dir().to_path_buf(), source })?;
+        let layers = OverlayLayers { lower: root, upper: state.upper(), work: state.work(), merged: state.merged() };
 
         // Probe only when choosing: prepare also runs while a game runs, and
         // overlayfs does not support two mounts sharing one upper directory.
@@ -77,7 +74,7 @@ impl InstallView {
                     .filter_map(|backend| OverlayTools::find(backend, search))
                     .find(|tools| tools.probe(&layers))
                     .ok_or(ViewError::NoOverlayBackend)?;
-                std::fs::write(&record_path, tools.backend().record())
+                write_backend_record(&state, tools.backend())
                     .map_err(|source| ViewError::StateDir { path: record_path.clone(), source })?;
                 tools
             }
@@ -143,6 +140,19 @@ pub enum InstallFiles {
 }
 
 impl InstallFiles {
+    /// The files of the install at `install_root` as its last prepared view
+    /// left them, without probing or creating overlay state. An install
+    /// never run from an overlay is read in place.
+    pub fn existing(install_root: &Path, dirs: &RuntimeDirs) -> Result<Self, ViewError> {
+        let root = canonical_root(install_root)?;
+        let state = dirs.install_state(&root);
+
+        Ok(match read_backend_record(&state.backend_record())? {
+            Some(backend) => Self::Overlay { lower: root, upper: state.upper(), backend },
+            None => Self::Direct { root },
+        })
+    }
+
     /// The file a reader should open, or `None` if it does not exist in the
     /// merged view.
     pub fn resolve_read(&self, rel: &Path) -> std::io::Result<Option<PathBuf>> {
@@ -346,6 +356,33 @@ fn check_relative(rel: &Path) -> std::io::Result<()> {
     }
 
     Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, RelativePathError { path: rel.to_path_buf() }))
+}
+
+fn canonical_root(install_root: &Path) -> Result<PathBuf, ViewError> {
+    std::fs::canonicalize(install_root)
+        .map_err(|source| ViewError::InstallMissing { path: install_root.to_path_buf(), source })
+}
+
+fn read_backend_record(record_path: &Path) -> Result<Option<OverlayBackend>, ViewError> {
+    match std::fs::read_to_string(record_path) {
+        Ok(text) => OverlayBackend::from_record(&text)
+            .map(Some)
+            .ok_or_else(|| ViewError::UnknownBackendRecord { path: record_path.to_path_buf(), content: text }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(ViewError::StateDir { path: record_path.to_path_buf(), source }),
+    }
+}
+
+/// Replaces the record through a synced temporary file, so a crash leaves the old record or the
+/// new one and never a partial one that would orphan the upper directory.
+fn write_backend_record(state: &InstallStateDir, backend: OverlayBackend) -> std::io::Result<()> {
+    let mut temporary = tempfile::Builder::new().prefix(".overlay-backend-").tempfile_in(state.dir())?;
+    temporary.write_all(backend.record().as_bytes())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(state.backend_record()).map_err(|err| err.error)?;
+
+    // The rename is durable once the directory is synced.
+    std::fs::File::open(state.dir())?.sync_all()
 }
 
 #[cfg(all(test, target_os = "linux"))]

@@ -7,14 +7,16 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 
-use wgc_install::GameInstall;
-
 use crate::accounts::AccountSession;
+use crate::error::LaunchFailure;
+use crate::error::NativeReplayError;
 use crate::error::PlayError;
 use crate::error::ReplayLaunchError;
-use crate::launcher::Event;
 use crate::launcher::Launcher;
 use crate::launcher::LauncherEnv;
+use crate::play::LaunchPlan;
+use crate::play::Program;
+use crate::play::SignIn;
 use crate::settings::AccountKey;
 use crate::settings::LauncherSettings;
 
@@ -140,7 +142,27 @@ pub struct GameExit {
 pub(crate) struct LaunchId(u64);
 
 pub(crate) enum GameEvent {
-    Exited { launch: LaunchId, exit: GameExit },
+    /// The launch failed before the game started.
+    Failed {
+        launch: LaunchId,
+        failure: LaunchFailure,
+    },
+    /// The stub started `WorldOfWarships64.exe`.
+    ClientStarted {
+        launch: LaunchId,
+    },
+    /// The client signed in and saved its token2.
+    SignedIn {
+        launch: LaunchId,
+    },
+    /// WGNI refused the account's session when the client asked for a token1.
+    SessionRejected {
+        key: AccountKey,
+    },
+    Exited {
+        launch: LaunchId,
+        exit: GameExit,
+    },
 }
 
 impl Launcher {
@@ -158,6 +180,17 @@ impl Launcher {
         self.last_exit.as_ref()
     }
 
+    /// Why the last launch failed after Play or a replay returned, once. A front end takes it
+    /// after applying events to tell the user.
+    pub fn take_launch_failure(&mut self) -> Option<LaunchFailure> {
+        self.launch_failure.take()
+    }
+
+    /// Why the last launch failed after Play or a replay returned, until it is taken.
+    pub fn launch_failure(&self) -> Option<&LaunchFailure> {
+        self.launch_failure.as_ref()
+    }
+
     /// The install `key` plays, given the app's game directory.
     pub fn play_target(
         &self,
@@ -168,8 +201,10 @@ impl Launcher {
         settings.account(key)?.install.resolve(wows_dir)
     }
 
-    /// Starts the game for `key` from the install it plays, signed in as that account.
-    /// `prepare` decorates the command before it spawns.
+    /// Starts the game for `key` from the install it plays, signed in as that account through
+    /// the WGC relay. Returns once the launch is under way; a later failure is reported through
+    /// [`Launcher::take_launch_failure`]. `prepare` decorates the runner command before it
+    /// spawns.
     pub fn play(
         &mut self,
         key: AccountKey,
@@ -177,7 +212,7 @@ impl Launcher {
         safe_mode: bool,
         settings: &LauncherSettings,
         env: &LauncherEnv,
-        prepare: impl FnOnce(&mut std::process::Command),
+        prepare: impl FnOnce(&mut std::process::Command) + Send + 'static,
     ) -> Result<(), PlayError> {
         if !self.game.is_idle() {
             return Err(PlayError::GameRunning);
@@ -188,37 +223,44 @@ impl Launcher {
         let AccountSession::SignedIn { session, .. } = self.account_session(key) else {
             return Err(PlayError::NotSignedIn { key, status: self.account_status(key) });
         };
+        // Every sign-in and restore mints the tracking id first, so a signed-in account has one.
+        let Some(tracking_id) = settings.tracking_id() else {
+            return Err(PlayError::NotSignedIn { key, status: self.account_status(key) });
+        };
         let Some(path) = account.install.resolve(wows_dir) else {
             return Err(PlayError::NoInstall { key });
         };
         if self.download_state(&path).is_some_and(|state| state.is_active()) {
             return Err(PlayError::InstallBusy { path });
         }
+        let Some(dirs) = env.runtime_dirs.clone() else {
+            return Err(PlayError::NoDataDir);
+        };
 
-        let install = self.install_at(&path);
-        let args = settings.launch_args(safe_mode);
-        let resolved = wgc_launch::resolve(&install, wgc_launch::LaunchMode::Online, &args)?;
-        let status = wgc_auth::launch_token_status(Some(session), std::time::SystemTime::now());
+        let session = Arc::clone(session);
         if !self.gate.try_activate() {
             return Err(PlayError::SavingGameSettings);
         }
-        let child = match resolved.spawn(settings.proton_config().as_ref(), status, prepare) {
-            Ok(child) => child,
-            Err(err) => {
-                self.gate.stop();
-                return Err(err.into());
-            }
-        };
 
         let launch = self.next_launch();
         self.game = GameState::Starting { account: Some(key), install: path.clone() };
-        self.watch_exit(launch, path, child, env);
+        let plan = LaunchPlan {
+            launch,
+            runner: settings.runner.clone(),
+            dirs,
+            install: path,
+            args: settings.launch_args(safe_mode),
+            program: Program::SignIn(SignIn { key, session, tracking_id }),
+        };
+        self.spawn_launch(plan, prepare, env);
 
         Ok(())
     }
 
-    /// Opens `replay` in the game, from an install that has `build` when it is known, else from
-    /// the app's game directory. Replay playback is offline and needs no account.
+    /// Opens `replay` in the game through the runner, from an install that has `build` when it
+    /// is known, else from the app's game directory. Replay playback is offline and needs no
+    /// account. A failure after this returns is reported through
+    /// [`Launcher::take_launch_failure`].
     pub fn open_replay(
         &mut self,
         replay: PathBuf,
@@ -226,7 +268,7 @@ impl Launcher {
         wows_dir: Option<&Path>,
         settings: &LauncherSettings,
         env: &LauncherEnv,
-        prepare: impl FnOnce(&mut std::process::Command),
+        prepare: impl FnOnce(&mut std::process::Command) + Send + 'static,
     ) -> Result<(), ReplayLaunchError> {
         if !self.game.is_idle() {
             return Err(ReplayLaunchError::GameRunning);
@@ -237,26 +279,25 @@ impl Launcher {
             }
             None => wows_dir.map(Path::to_path_buf).ok_or(ReplayLaunchError::NoInstall)?,
         };
+        let Some(dirs) = env.runtime_dirs.clone() else {
+            return Err(ReplayLaunchError::NoDataDir);
+        };
 
-        let install = self.install_at(&path);
-        let mode = wgc_launch::LaunchMode::Replay { path: replay };
-        let resolved = wgc_launch::resolve(&install, mode, &settings.launch_args(false))?;
         if !self.gate.try_activate() {
             return Err(ReplayLaunchError::SavingGameSettings);
         }
-        let spawned =
-            resolved.spawn(settings.proton_config().as_ref(), wgc_launch::TokenStatus::NotConfigured, prepare);
-        let child = match spawned {
-            Ok(child) => child,
-            Err(err) => {
-                self.gate.stop();
-                return Err(err.into());
-            }
-        };
 
         let launch = self.next_launch();
         self.game = GameState::Running { account: None, install: path.clone() };
-        self.watch_exit(launch, path, child, env);
+        let plan = LaunchPlan {
+            launch,
+            runner: settings.runner.clone(),
+            dirs,
+            install: path,
+            args: settings.launch_args(false),
+            program: Program::Replay(replay),
+        };
+        self.spawn_launch(plan, prepare, env);
 
         Ok(())
     }
@@ -281,6 +322,23 @@ impl Launcher {
 
     pub(crate) fn apply_game(&mut self, event: GameEvent) {
         match event {
+            GameEvent::Failed { launch, failure } => {
+                if launch != self.launch {
+                    return;
+                }
+                self.game = GameState::Idle;
+                self.gate.stop();
+                self.launch_failure = Some(failure);
+            }
+            GameEvent::ClientStarted { launch } | GameEvent::SignedIn { launch } => {
+                if launch != self.launch {
+                    return;
+                }
+                if let GameState::Starting { account, install } = &self.game {
+                    self.game = GameState::Running { account: *account, install: install.clone() };
+                }
+            }
+            GameEvent::SessionRejected { key } => self.expire_session(key),
             GameEvent::Exited { launch, exit } => {
                 if launch != self.launch {
                     return;
@@ -298,31 +356,41 @@ impl Launcher {
     fn next_launch(&mut self) -> LaunchId {
         self.launch = LaunchId(self.launch.0 + 1);
         self.last_exit = None;
+        self.launch_failure = None;
 
         self.launch
     }
 
-    fn install_at(&self, path: &Path) -> GameInstall {
-        self.installs()
-            .iter()
-            .find(|install| install.path == path)
-            .cloned()
-            .unwrap_or_else(|| GameInstall::manual(path.to_path_buf()))
+    fn spawn_launch(
+        &self,
+        plan: LaunchPlan,
+        prepare: impl FnOnce(&mut std::process::Command) + Send + 'static,
+        env: &LauncherEnv,
+    ) {
+        let sender = self.sender(env);
+        env.runtime.spawn(crate::play::run(plan, Box::new(prepare), sender));
+    }
+}
+
+/// Opens `replay` in the game installed at `wows_dir` by starting its executable directly,
+/// for when the launcher is off. Replay playback is offline and never gated. `prepare`
+/// decorates the command before it spawns.
+pub fn open_replay_natively(
+    wows_dir: &Path,
+    replay: &Path,
+    prepare: impl FnOnce(&mut std::process::Command),
+) -> Result<(), NativeReplayError> {
+    let exe = wows_dir.join("WorldOfWarships.exe");
+    if !exe.is_file() {
+        return Err(NativeReplayError::ExeMissing { path: exe });
     }
 
-    fn watch_exit(&self, launch: LaunchId, install: PathBuf, mut child: std::process::Child, env: &LauncherEnv) {
-        let sender = self.sender(env);
-        env.runtime.spawn_blocking(move || {
-            let status = match child.wait() {
-                Ok(status) => Some(status),
-                Err(e) => {
-                    tracing::warn!("could not wait for the game process: {e}");
-                    None
-                }
-            };
-            sender.send(Event::Game(GameEvent::Exited { launch, exit: GameExit { install, status } }));
-        });
-    }
+    let mut command = std::process::Command::new(&exe);
+    command.arg(replay).current_dir(wows_dir);
+    prepare(&mut command);
+    command.spawn().map_err(|source| NativeReplayError::Spawn { path: exe, source })?;
+
+    Ok(())
 }
 
 /// Whether the install at `path` keeps `bin/<build>`.

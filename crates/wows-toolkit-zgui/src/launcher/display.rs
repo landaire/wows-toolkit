@@ -131,13 +131,7 @@ impl PlayState {
         let Some(install) = install.filter(|install| install.join("WorldOfWarships.exe").is_file()) else {
             return Self::SetUpGame;
         };
-        let found = launcher
-            .installs()
-            .iter()
-            .find(|found| found.path == install)
-            .cloned()
-            .unwrap_or_else(|| GameInstall::manual(install.clone()));
-        if wows_toolkit_launcher::proton::needs_setup(&found, settings) {
+        if launcher.needs_runner_setup() {
             return Self::SetUpRunner;
         }
 

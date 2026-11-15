@@ -1797,6 +1797,7 @@ impl TabState {
             runtime: runtime.handle().clone(),
             proxy_url: self.proxy.as_ref().map(|p| p.url.clone()),
             wake: Arc::new(move || ctx.request_repaint()),
+            runtime_dirs: crate::storage_dir().map(|dir| wgc_launch::RuntimeDirs::new(&dir)),
         })
     }
 
@@ -1832,6 +1833,7 @@ impl TabState {
             self.launcher_op(|launcher, settings, env| {
                 let changed = launcher.start_session_restore(settings, env);
                 launcher.start_install_discovery(settings, env);
+                launcher.start_runner_probe(settings, env);
                 changed
             });
         }
@@ -1839,6 +1841,9 @@ impl TabState {
         // Work started before the launcher was turned off still reports back.
         while let Some(event) = self.launcher_events.try_next() {
             self.launcher_op(|launcher, settings, env| launcher.apply(event, settings, env));
+            if let Some(failure) = self.launcher.take_launch_failure() {
+                self.toasts.lock().error(format!("Launch failed: {failure}"));
+            }
         }
     }
 }

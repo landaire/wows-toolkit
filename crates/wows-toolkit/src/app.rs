@@ -4135,7 +4135,7 @@ impl WowsToolkitApp {
             crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
         };
         if !self.tab_state.persisted.read().settings.launcher.is_enabled() {
-            if let Err(e) = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), replay_path, prepare) {
+            if let Err(e) = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), &replay_path, prepare) {
                 self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
             }
             return;
@@ -4156,7 +4156,7 @@ impl WowsToolkitApp {
     #[cfg(all(feature = "launcher", not(target_os = "linux")))]
     fn open_replay_in_game(&mut self, replay_path: PathBuf) {
         let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-        let opened = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), replay_path, |command| {
+        let opened = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), &replay_path, |command| {
             crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
         });
         if let Err(e) = opened {

@@ -107,6 +107,7 @@ TOOLKIT_LAUNCHER_DEPS = [
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
+    "//crates/wgc-launch:wgc-launch",
     "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
 ]
 

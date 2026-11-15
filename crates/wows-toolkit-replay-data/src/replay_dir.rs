@@ -22,6 +22,11 @@ use wowsunpack::data::Version;
 
 use crate::force_reindex::ReindexCandidate;
 use crate::load::GameDataCache;
+use crate::replay_folder::MergedView;
+use crate::replay_folder::ReplayFolder;
+use crate::replay_folder::Seen;
+use crate::replay_folder::WatchPlan;
+use crate::replay_folder::WatchTargets;
 use crate::replay_index::SourceScope;
 
 /// One replay's header-only read, before ship and map names are translated.
@@ -83,27 +88,29 @@ pub struct ScannedDir {
 }
 
 /// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
-/// reads each one's header-only metadata. Ports
-/// `task/replays.rs::replay_filepaths`'s filter (minus the creation-time
-/// sort, which `build_browser_tree` redoes by path anyway) plus a per-file
-/// `ReplayFile::meta_from_file` read. A file that fails to parse (corrupt,
-/// mid-write, or from a format this parser does not understand) is logged
-/// and skipped rather than aborting the whole scan.
+/// reads each one's header-only metadata. See [`scan_folder`].
 pub fn scan_replay_files(
     replays_dir: &Path,
     reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
 ) -> ScannedDir {
+    scan_folder(&ReplayFolder::from_dir(replays_dir.to_path_buf()), reports)
+}
+
+/// Lists every non-temp `*.wowsreplay` file in `folder` and reads each one's
+/// header-only metadata. Ports `task/replays.rs::replay_filepaths`'s filter
+/// (minus the creation-time sort, which `build_browser_tree` redoes by path
+/// anyway) plus a per-file `ReplayFile::meta_from_file` read. A file that
+/// fails to parse (corrupt, mid-write, or from a format this parser does not
+/// understand) is logged and skipped rather than aborting the whole scan.
+pub fn scan_folder(
+    folder: &ReplayFolder,
+    reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
+) -> ScannedDir {
     let began = std::time::SystemTime::now();
-    let Ok(entries) = std::fs::read_dir(replays_dir) else {
-        return ScannedDir { files: Vec::new(), walked: HashSet::new() };
-    };
 
     // The walk is separated from the meta reads so the listing can say how
     // many files there are to read before it starts reading them.
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        candidates.extend(listed_replay(&entry));
-    }
+    let candidates = folder.replay_files();
     let total = candidates.len();
     let mut walked = HashSet::with_capacity(total);
     let _ = reports.unbounded_send(ScanProgress { done: 0, total });
@@ -241,7 +248,11 @@ pub enum WatchMessage {
 /// being removed, and on a panic, whether in this code or in the watcher's,
 /// which drops this as it unwinds the thread.
 pub struct WatchSink {
-    dir: PathBuf,
+    targets: WatchTargets,
+    /// The watch covers one directory, so every entry it reports is the folder's.
+    single_dir: bool,
+    /// `Some` for a folder spread over overlay layers.
+    merged: Option<MergedView>,
     messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
     stopped: bool,
     /// Cleared when this is dropped, which the watcher's thread does as it
@@ -251,7 +262,19 @@ pub struct WatchSink {
 
 impl WatchSink {
     pub fn new(dir: PathBuf, messages: futures::channel::mpsc::UnboundedSender<WatchMessage>) -> Self {
-        Self { dir, messages, stopped: false, thread_alive: Arc::new(AtomicBool::new(true)) }
+        let targets = WatchTargets { contents: vec![dir], ..WatchTargets::default() };
+
+        Self::with_targets(targets, None, messages)
+    }
+
+    fn with_targets(
+        targets: WatchTargets,
+        merged: Option<MergedView>,
+        messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
+    ) -> Self {
+        let single_dir = targets.watched().len() == 1;
+
+        Self { targets, single_dir, merged, messages, stopped: false, thread_alive: Arc::new(AtomicBool::new(true)) }
     }
 
     pub fn handle(&mut self, event: notify::Result<notify::Event>) {
@@ -270,7 +293,7 @@ impl WatchSink {
 
     /// Passes on what happened to a finished replay, or says why the watch
     /// has stopped.
-    fn forward(&self, event: notify::Result<notify::Event>) -> Option<WatchStopCause> {
+    fn forward(&mut self, event: notify::Result<notify::Event>) -> Option<WatchStopCause> {
         let event = match event {
             Ok(event) => event,
             Err(err) => return Some(WatchStopCause::Backend { error: err.to_string() }),
@@ -281,7 +304,7 @@ impl WatchSink {
             event.kind,
             notify::EventKind::Remove(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
         );
-        if gone && event.paths.contains(&self.dir) {
+        if gone && event.paths.iter().any(|path| self.targets.contents.contains(path)) {
             return Some(WatchStopCause::DirectoryGone);
         }
         if event.need_rescan() {
@@ -289,24 +312,45 @@ impl WatchSink {
             return None;
         }
 
-        let make = match event.kind {
+        let seen = match event.kind {
             notify::EventKind::Create(_)
             | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
-                DirChange::Appeared
+                Seen::Created
             }
             // A replay written to again: a re-save, a copy that landed
             // before the writer had finished with it, or battle results
             // added to a battle the client left early. Windows reports a
             // content change as `Any`.
             notify::EventKind::Modify(notify::event::ModifyKind::Data(_) | notify::event::ModifyKind::Any) => {
-                DirChange::Changed
+                Seen::Written
             }
-            notify::EventKind::Remove(_) => DirChange::Removed,
+            notify::EventKind::Remove(_) => Seen::Removed,
             _ => return None,
         };
+
+        // The folder moved, so the listing resolves and reads it again.
+        if seen == Seen::Created && event.paths.iter().any(|path| self.targets.moved_by(path)) {
+            let _ = self.messages.unbounded_send(WatchMessage::Rescan);
+            return None;
+        }
+
+        // A watch of one directory reports only its entries, under whatever
+        // spelling of the path the platform uses.
         for path in event.paths {
-            if is_finished_replay(&path) {
-                self.change(make(path));
+            if !self.single_dir && !self.targets.holds(&path) {
+                continue;
+            }
+            let changes = match &mut self.merged {
+                Some(merged) => merged.apply(&path, seen),
+                None if is_finished_replay(&path) => vec![match seen {
+                    Seen::Created => DirChange::Appeared(path),
+                    Seen::Written => DirChange::Changed(path),
+                    Seen::Removed => DirChange::Removed(path),
+                }],
+                None => Vec::new(),
+            };
+            for change in changes {
+                self.change(change);
             }
         }
 
@@ -369,7 +413,7 @@ enum WatchHandle {
     },
 }
 
-fn is_finished_replay(path: &Path) -> bool {
+pub(crate) fn is_finished_replay(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
         && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
 }
@@ -380,7 +424,7 @@ fn is_finished_replay(path: &Path) -> bool {
 ///
 /// A symlink counts when it leads to a file: a replays directory of links
 /// into another install is a reader's own arrangement.
-fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
+pub(crate) fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
     let path = entry.path();
     if !is_finished_replay(&path) {
         return None;
@@ -392,29 +436,51 @@ fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
 
 /// Starts watching `dir`, sending what happens in it to `sink`.
 pub fn start_watch(dir: &Path, sink: WatchSink) -> Result<DirWatch, WatchStopCause> {
+    start(&[dir.to_path_buf()], sink)
+}
+
+/// Starts the watch `plan` prepared, sending what happens in its folder to
+/// `messages`.
+pub fn start_planned_watch(
+    plan: WatchPlan,
+    messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
+) -> Result<DirWatch, WatchStopCause> {
+    let WatchPlan { targets, merged } = plan;
+    let watched = targets.watched();
+
+    start(&watched, WatchSink::with_targets(targets, merged, messages))
+}
+
+/// Watches `watched`, the first of which names the watch to a test.
+fn start(watched: &[PathBuf], sink: WatchSink) -> Result<DirWatch, WatchStopCause> {
     // The test scheduler refuses wakeups from notify's own thread, so a test
     // reports changes itself.
     #[cfg(any(test, feature = "test-support"))]
     if crate::simulated_watch::is_installed() {
+        let Some(dir) = watched.first() else {
+            return Err(WatchStopCause::NotWatchable { error: "nothing to watch".to_owned() });
+        };
         return crate::simulated_watch::register(dir, sink)
             .map(|registration| DirWatch { _handle: WatchHandle::Simulated { _registration: registration } });
     }
 
-    filesystem_watch(dir, sink).map(|watch| DirWatch { _handle: WatchHandle::Filesystem { _watch: watch } })
+    filesystem_watch(watched, sink).map(|watch| DirWatch { _handle: WatchHandle::Filesystem { _watch: watch } })
 }
 
-/// Watches `dir` on notify's own thread.
-fn filesystem_watch(dir: &Path, mut sink: WatchSink) -> Result<FilesystemWatch, WatchStopCause> {
+/// Watches each of `watched` on notify's own thread.
+fn filesystem_watch(watched: &[PathBuf], mut sink: WatchSink) -> Result<FilesystemWatch, WatchStopCause> {
     use notify::Watcher as _;
 
     let thread_alive = Arc::clone(&sink.thread_alive);
     let watcher = notify::recommended_watcher(move |event| sink.handle(event))
         .map_err(|err| WatchStopCause::NoWatcher { error: err.to_string() })?;
     let mut watch = FilesystemWatch { watcher: ManuallyDrop::new(watcher), thread_alive };
-    watch
-        .watcher
-        .watch(dir, notify::RecursiveMode::NonRecursive)
-        .map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
+    for dir in watched {
+        watch
+            .watcher
+            .watch(dir, notify::RecursiveMode::NonRecursive)
+            .map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
+    }
 
     Ok(watch)
 }
@@ -500,19 +566,26 @@ pub fn read_replay_files(
     read
 }
 
-/// Sends the replays in `dir` the scan did not walk to `messages`, as
-/// [`WatchMessage::Missed`]. They reached the directory before the watch
-/// started and after the scan read it, so neither saw them.
+/// Sends the replays in `dir` the scan did not walk to `messages`. See
+/// [`report_missed_in`].
 pub fn report_missed(
     dir: &Path,
     walked: &HashSet<PathBuf>,
     messages: &futures::channel::mpsc::UnboundedSender<WatchMessage>,
 ) {
-    // A directory that cannot be read cannot be watched either, which the
-    // watch reports.
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let Some(path) = listed_replay(&entry) else { continue };
+    report_missed_in(&ReplayFolder::from_dir(dir.to_path_buf()), walked, messages);
+}
+
+/// Sends the replays in `folder` the scan did not walk to `messages`, as
+/// [`WatchMessage::Missed`]. They reached the folder before the watch
+/// started and after the scan read it, so neither saw them. A folder that
+/// cannot be read cannot be watched either, which the watch reports.
+pub fn report_missed_in(
+    folder: &ReplayFolder,
+    walked: &HashSet<PathBuf>,
+    messages: &futures::channel::mpsc::UnboundedSender<WatchMessage>,
+) {
+    for path in folder.replay_files() {
         if !walked.contains(&path) {
             let _ = messages.unbounded_send(WatchMessage::Missed(path));
         }
@@ -636,7 +709,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp directory");
         let (sender, mut messages) = futures::channel::mpsc::unbounded();
         let sink = WatchSink::new(dir.path().to_path_buf(), sender);
-        let watcher = super::filesystem_watch(dir.path(), sink).expect("the directory is watchable");
+        let watcher = super::filesystem_watch(&[dir.path().to_path_buf()], sink).expect("the directory is watchable");
 
         let landed = dir.path().join("landed.wowsreplay");
         std::fs::write(&landed, b"not yet a replay").expect("the file is written");
@@ -671,8 +744,8 @@ mod tests {
         let dir = parent.path().join("replays");
         std::fs::create_dir(&dir).expect("the directory is made");
         let (sender, mut messages) = futures::channel::mpsc::unbounded();
-        let _watcher =
-            super::filesystem_watch(&dir, WatchSink::new(dir.clone(), sender)).expect("the directory is watchable");
+        let _watcher = super::filesystem_watch(std::slice::from_ref(&dir), WatchSink::new(dir.clone(), sender))
+            .expect("the directory is watchable");
 
         std::fs::remove_dir(&dir).expect("the directory is removed");
 

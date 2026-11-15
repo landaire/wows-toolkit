@@ -69,8 +69,8 @@ pub struct LauncherConsent {
 pub struct LauncherSettings {
     pub manual_installs: Vec<PathBuf>,
     pub wgc_data_dir_override: Option<PathBuf>,
-    pub proton_prefix: Option<PathBuf>,
-    pub proton_binary: Option<PathBuf>,
+    /// Which Proton or umu build runs the game on Linux.
+    pub runner: wgc_launch::RunnerChoice,
     /// User-supplied extra command-line args applied to every launch.
     pub extra_args: Vec<String>,
     /// User-supplied environment variables applied to every launch.
@@ -131,9 +131,7 @@ struct StoredLauncherSettings {
     #[serde(default)]
     wgc_data_dir_override: Option<PathBuf>,
     #[serde(default)]
-    proton_prefix: Option<PathBuf>,
-    #[serde(default)]
-    proton_binary: Option<PathBuf>,
+    runner: wgc_launch::RunnerChoice,
     #[serde(default)]
     extra_args: Vec<String>,
     #[serde(default)]
@@ -167,8 +165,7 @@ impl From<StoredLauncherSettings> for LauncherSettings {
         let StoredLauncherSettings {
             manual_installs,
             wgc_data_dir_override,
-            proton_prefix,
-            proton_binary,
+            runner,
             extra_args,
             env_vars,
             safe_mode_args,
@@ -202,8 +199,7 @@ impl From<StoredLauncherSettings> for LauncherSettings {
         LauncherSettings {
             manual_installs,
             wgc_data_dir_override,
-            proton_prefix,
-            proton_binary,
+            runner,
             extra_args,
             env_vars,
             safe_mode_args,
@@ -230,16 +226,6 @@ impl LauncherSettings {
     /// Turns the launcher off and drops the acceptance.
     pub fn disable(&mut self) {
         self.consent = None;
-    }
-
-    /// The Proton binary and prefix, when both are configured.
-    pub fn proton_config(&self) -> Option<wgc_launch::proton::ProtonConfig> {
-        match (&self.proton_binary, &self.proton_prefix) {
-            (Some(binary), Some(prefix)) => {
-                Some(wgc_launch::proton::ProtonConfig { proton_binary: binary.clone(), compat_prefix: prefix.clone() })
-            }
-            _ => None,
-        }
     }
 
     /// The user's args and env for a launch, with the safe-mode args appended when `safe_mode`
@@ -366,17 +352,23 @@ impl LauncherSettings {
         true
     }
 
+    /// The stored WGNI tracking id, when one was minted and is still valid.
+    pub(crate) fn tracking_id(&self) -> Option<wgc_core::TrackingId> {
+        let raw = self.tracking_id.as_deref()?;
+        if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+
+        wgc_core::TrackingId::parse(raw).ok()
+    }
+
     /// The persisted WGNI tracking id (`tid`), minting one the first time. Returns whether the
     /// settings changed and need saving.
     ///
     /// WGNI only accepts a numeric tid, so an empty or non-numeric stored value (a legacy or
     /// hand-edited config) is replaced rather than reported: the user cannot act on that error.
     pub fn ensure_tracking_id(&mut self) -> (wgc_core::TrackingId, bool) {
-        if let Some(raw) = &self.tracking_id
-            && !raw.is_empty()
-            && raw.bytes().all(|b| b.is_ascii_digit())
-            && let Ok(id) = wgc_core::TrackingId::parse(raw)
-        {
+        if let Some(id) = self.tracking_id() {
             return (id, false);
         }
         let generated = generate_tracking_id();

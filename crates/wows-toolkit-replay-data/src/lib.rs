@@ -31,6 +31,7 @@ pub mod model;
 pub mod paths;
 pub mod render_defaults;
 pub mod replay_dir;
+pub mod replay_folder;
 pub mod replay_index;
 pub mod replay_render;
 #[cfg(any(test, feature = "test-support"))]

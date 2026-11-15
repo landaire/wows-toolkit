@@ -53,7 +53,7 @@ pub fn open_replay_in_game(shell: Shell, wows_dir: &Path, replay: &Path) {
     }
 
     let toasts = shell.toasts();
-    let opened = wows_toolkit_launcher::open_replay_natively(wows_dir, replay.to_path_buf(), |command| {
+    let opened = wows_toolkit_launcher::open_replay_natively(wows_dir, replay, |command| {
         wows_toolkit_services::child_process::prepare(command);
     });
     if let Err(err) = opened {

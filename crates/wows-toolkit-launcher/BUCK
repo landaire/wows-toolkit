@@ -6,6 +6,7 @@ LAUNCHER_DEPS = [
     "//crates/wgc-core:wgc-core",
     "//crates/wgc-download:wgc-download",
     "//crates/wgc-install:wgc-install",
+    "//crates/wgc-ipc:wgc-ipc",
     "//crates/wgc-launch:wgc-launch",
     "//crates/wows-game-settings:wows-game-settings",
     "//third-party/rust:rand",
@@ -46,5 +47,6 @@ workspace_test(
     test_deps = [
         "//third-party/rust:insta",
         "//third-party/rust:serde_json",
+        "//third-party/rust:tempfile",
     ],
 )

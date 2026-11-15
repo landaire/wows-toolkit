@@ -154,16 +154,20 @@ const CSS: &str = css!(
 /// bar job per running download. The work itself waits for the opt-in.
 pub fn begin(shell: Shell, model: LauncherModel, events: LauncherEvents) {
     let services = shell.services();
-    listen(model, events);
+    listen(shell, model, events);
     start(model, services);
     report_downloads(model, services.jobs);
 }
 
-/// Applies each result of the launcher's background work as it arrives.
-fn listen(model: LauncherModel, mut events: LauncherEvents) {
+/// Applies each result of the launcher's background work as it arrives, and says why a launch
+/// failed once its background work gives up.
+fn listen(shell: Shell, model: LauncherModel, mut events: LauncherEvents) {
     spawn_local(async move {
         while let Some(event) = events.next().await {
             model.apply(event);
+            if let Some(failure) = model.take_launch_failure() {
+                play::report_launch_failure(shell, &failure);
+            }
         }
     });
 }

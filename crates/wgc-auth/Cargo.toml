@@ -3,11 +3,10 @@ name = "wgc-auth"
 version = "0.1.0"
 edition.workspace = true
 publish = false
-description = "WGNI account authentication: async client, keyring session store, and launch-gate adapter"
+description = "WGNI account authentication: async client, game tokens and keyring stores"
 
 [dependencies]
 wgc-core = { workspace = true }
-wgc-launch = { workspace = true }
 rootcause = { workspace = true }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

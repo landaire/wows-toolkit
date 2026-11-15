@@ -16,6 +16,8 @@ use crate::overlay::FuseMount;
 pub const SESSION_ENV: &str = "WOWS_TOOLKIT_GAME_SESSION";
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+const CLIENT_EXE: &str = "WorldOfWarships64.exe";
+const STUB_EXE: &str = "WorldOfWarships.exe";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProcessId(pub u32);
@@ -102,13 +104,16 @@ impl GameHandle {
     /// The game client's PID: `WorldOfWarships64.exe`, else the launcher stub.
     pub fn game_pid(&self) -> std::io::Result<Option<ProcessId>> {
         let processes = scan::session_processes(Some(&self.session))?;
-        let pid_named = |exe: &str| {
-            processes
-                .iter()
-                .find(|process| process.exe_name.as_deref().is_some_and(|name| name.eq_ignore_ascii_case(exe)))
-        };
 
-        Ok(pid_named("WorldOfWarships64.exe").or_else(|| pid_named("WorldOfWarships.exe")).map(|process| process.pid))
+        Ok(pid_named(&processes, CLIENT_EXE).or_else(|| pid_named(&processes, STUB_EXE)))
+    }
+
+    /// The PID of `WorldOfWarships64.exe`, which the stub starts once the
+    /// client is cleared to run.
+    pub fn client_pid(&self) -> std::io::Result<Option<ProcessId>> {
+        let processes = scan::session_processes(Some(&self.session))?;
+
+        Ok(pid_named(&processes, CLIENT_EXE))
     }
 
     pub fn is_running(&self) -> std::io::Result<bool> {
@@ -166,6 +171,14 @@ struct SessionProcess {
 fn exe_name(argv0: &[u8]) -> Option<String> {
     let name = argv0.rsplit(|byte| *byte == b'/' || *byte == b'\\').next()?;
     (!name.is_empty()).then(|| String::from_utf8_lossy(name).into_owned())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn pid_named(processes: &[SessionProcess], exe: &str) -> Option<ProcessId> {
+    processes
+        .iter()
+        .find(|process| process.exe_name.as_deref().is_some_and(|name| name.eq_ignore_ascii_case(exe)))
+        .map(|process| process.pid)
 }
 
 #[cfg(target_os = "linux")]

@@ -401,7 +401,7 @@ fn graphics(document: &PrefsDocument) -> GraphicsSettings {
     }
 }
 
-fn replays(documents: &SourceDocuments<'_>) -> Section<ReplaySettings> {
+pub(crate) fn replays(documents: &SourceDocuments<'_>) -> Section<ReplaySettings> {
     let Some(build) = documents.build else {
         return Section::Unavailable(Unavailable::BuildUnknown);
     };

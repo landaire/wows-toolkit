@@ -6,27 +6,13 @@ use std::path::PathBuf;
 
 use wowsunpack::data::Version;
 
-/// Resolves the replays directory for `wows_dir`: `{wows_dir}/replays`,
-/// overridden by a build-specific subdirectory when `preferences.xml` names
-/// one and it exists on disk. Ports the relevant slice of
-/// `task/replays.rs::load_wows_files` (`mod.rs:342-375`); the
-/// `available_builds` gate and the (functionally redundant -- both loop
-/// entries were the identical path) double directory-existence check in the
-/// original are both dropped as out of scope for a directory-only lookup.
+use crate::replay_folder::ReplayFolder;
+
+/// The replays directory of the install at `wows_dir`, as the reader names it:
+/// `{wows_dir}/replays`, or the version folder the game writes to. See
+/// [`ReplayFolder::from_app_install`].
 pub fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
-    let default_dir = wows_dir.join("replays");
-
-    let Some(version_str) =
-        std::fs::read_to_string(wows_dir.join("preferences.xml")).ok().and_then(|data| last_server_version(&data))
-    else {
-        return default_dir;
-    };
-    let Some(version) = Version::try_from_client_exe(&version_str) else {
-        return default_dir;
-    };
-
-    let versioned_dir = default_dir.join(format!("{}.{}.{}.0", version.major, version.minor, version.patch));
-    if versioned_dir.exists() { versioned_dir } else { default_dir }
+    ReplayFolder::from_app_install(wows_dir).path().to_path_buf()
 }
 
 /// Reads the `<last_server_version>...</last_server_version>` node out of a

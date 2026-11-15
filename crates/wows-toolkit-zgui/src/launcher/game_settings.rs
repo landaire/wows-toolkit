@@ -7,8 +7,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use rust_i18n::t;
+use wgc_launch::InstallFiles;
+use wgc_launch::InstallView;
+use wgc_launch::RuntimeDirs;
 use wows_game_settings::BuildNumber;
-use wows_game_settings::DirectFiles;
 use wows_game_settings::Field;
 use wows_game_settings::FrameRateLimit;
 use wows_game_settings::GameSettings;
@@ -24,6 +26,8 @@ use wows_game_settings::Snapshot;
 use wows_game_settings::UiScale;
 use wows_game_settings::Volume;
 use wows_game_settings::WindowMode;
+use wows_toolkit_launcher::InstallSettingsFiles;
+use wows_toolkit_launcher::installed_builds;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -35,7 +39,6 @@ use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::With;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -176,12 +179,16 @@ impl Group {
 struct SettingsTarget {
     root: PathBuf,
     build: Option<BuildNumber>,
+    /// Where the launcher keeps overlay state. `None` without an app data directory, in which
+    /// case no overlay can exist.
+    dirs: Option<RuntimeDirs>,
 }
 
 impl SettingsTarget {
     /// The default account's install, else the app's game directory.
     fn of(model: LauncherModel) -> Option<Self> {
         let wows_dir = model.wows_dir_untracked();
+        let dirs = wows_toolkit_config::storage_dir().map(|dir| RuntimeDirs::new(&dir));
         model.with_untracked(|state| {
             let settings = state.settings.as_ref()?;
             let account = settings.default_account().or_else(|| settings.accounts.first());
@@ -192,25 +199,43 @@ impl SettingsTarget {
             let found = state.launcher.installs().iter().find(|install| install.path == root);
             let build = found
                 .and_then(|install| install.build.or_else(|| install.version.as_ref()?.build.map(NonZeroU32::get)))
-                .or_else(|| newest_build(&root))
-                .map(BuildNumber);
-            Some(Self { root, build })
+                .map(BuildNumber)
+                .or_else(|| newest_build(&root, dirs.as_ref()));
+            Some(Self { root, build, dirs: dirs.clone() })
         })
     }
 
-    fn store(&self) -> GameSettingsStore<DirectFiles> {
-        GameSettingsStore::new(DirectFiles::new(self.root.clone()), self.build)
+    /// The install as its last launch left it, for reading. Creates no overlay state, so an install
+    /// the launcher never ran is read in place. Blocks.
+    fn read_store(&self) -> Result<GameSettingsStore<InstallSettingsFiles>, String> {
+        let files = match &self.dirs {
+            Some(dirs) => InstallFiles::existing(&self.root, dirs).map_err(|err| err.to_string())?,
+            None => InstallFiles::Direct { root: self.root.clone() },
+        };
+
+        Ok(GameSettingsStore::new(InstallSettingsFiles(files), self.build))
+    }
+
+    /// The install as the game will run it, for writing: a read-only install gets the overlay its
+    /// game writes to. Blocks, and may probe the overlay backends.
+    fn write_store(&self) -> Result<GameSettingsStore<InstallSettingsFiles>, String> {
+        let files = match &self.dirs {
+            Some(dirs) => InstallView::prepare(&self.root, dirs).map_err(|err| err.to_string())?.files(),
+            None => InstallFiles::Direct { root: self.root.clone() },
+        };
+
+        Ok(GameSettingsStore::new(InstallSettingsFiles(files), self.build))
     }
 }
 
-/// The highest `bin/<build>` directory of the install.
-fn newest_build(root: &Path) -> Option<u32> {
-    std::fs::read_dir(root.join("bin"))
-        .ok()?
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
-        .max()
+/// The highest `bin/<build>` directory of the install, as its view shows it.
+fn newest_build(root: &Path, dirs: Option<&RuntimeDirs>) -> Option<BuildNumber> {
+    let files = match dirs {
+        Some(dirs) => InstallFiles::existing(root, dirs).ok()?,
+        None => InstallFiles::Direct { root: root.to_path_buf() },
+    };
+
+    installed_builds(&files).ok()?.last().copied()
 }
 
 /// What reading the files gave.
@@ -435,11 +460,11 @@ pub fn open(shell: Shell, model: LauncherModel) {
             error.set(None);
             saving.set(true);
             let gate = model.with_untracked(|state| state.launcher.game_gate());
-            let store = save_target.get_value().store();
+            let target = save_target.get_value();
             spawn_local(async move {
                 let saved = long_job(move || {
                     let stopped = GameStopped::check(&gate).map_err(|running| running.to_string())?;
-                    store.save(&snapshot, &changes, stopped).map_err(|err| err.to_string())
+                    target.write_store()?.save(&snapshot, &changes, stopped).map_err(|err| err.to_string())
                 })
                 .await;
                 saving.set(false);
@@ -522,7 +547,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
 fn read(target: SettingsTarget, loaded: RwSignal<Loaded, LocalStorage>, form: Form) {
     loaded.set(Loaded::Reading);
     spawn_local(async move {
-        let read = long_job(move || target.store().read().map_err(|err| err.to_string())).await;
+        let read = long_job(move || target.read_store()?.read().map_err(|err| err.to_string())).await;
         match read {
             Ok(snapshot) => {
                 form.load(snapshot.settings());
@@ -750,11 +775,11 @@ pub fn ReplayRetention(shell: Shell, model: LauncherModel) -> impl IntoView {
         error.set(None);
         saving.set(true);
         let gate = model.with_untracked(|state| state.launcher.game_gate());
-        let store = target.store();
+        let target = target.clone();
         spawn_local(async move {
             let saved = long_job(move || {
                 let stopped = GameStopped::check(&gate).map_err(|running| running.to_string())?;
-                store.save(&snapshot, &changes, stopped).map_err(|err| err.to_string())
+                target.write_store()?.save(&snapshot, &changes, stopped).map_err(|err| err.to_string())
             })
             .await;
             saving.set(false);

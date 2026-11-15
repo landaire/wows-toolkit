@@ -2,7 +2,6 @@ load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", 
 
 WGC_AUTH_DEPS = [
     "//crates/wgc-core:wgc-core",
-    "//crates/wgc-launch:wgc-launch",
     "//third-party/rust:rootcause",
     "//third-party/rust:thiserror",
     "//third-party/rust:serde",

@@ -313,14 +313,12 @@ fn InstallChoiceButton(shell: Shell, model: LauncherModel, install: InstallView)
 /// Proton: what was found, and the controls to change it.
 #[component]
 fn ProtonStep(shell: Shell, model: LauncherModel) -> impl IntoView {
-    let needed = Memo::new(move |_| {
-        model.with(|state| state.settings.as_ref().is_some_and(|settings| settings.proton_config().is_none()))
-    });
+    let needed = Memo::new(move |_| model.with(|state| state.launcher.needs_runner_setup()));
 
     view! {
         text {{t!("ui.launcher.setup.proton_explain").into_owned()}}
         if move || needed.get() {
-            text(class = "wt-launcher__warn", attr:data-testid = "launcher-setup-proton-needed") {{t!("ui.launcher.proton.needed").into_owned()}}
+            text(class = "wt-launcher__warn", attr:data-testid = "launcher-setup-proton-needed") {{t!("ui.launcher.runner.needed").into_owned()}}
         } else {
             text(class = "wt-launcher__ok", attr:data-testid = "launcher-setup-proton-ready") {{t!("ui.launcher.setup.proton_ready").into_owned()}}
         }

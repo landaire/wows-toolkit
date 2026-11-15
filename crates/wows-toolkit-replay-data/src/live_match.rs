@@ -45,6 +45,7 @@ use wowsunpack::data::Version;
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
 use crate::load::decode_constants;
+use crate::replay_folder::ReplayFolder;
 
 /// How often the replays directory is checked for a battle in progress.
 ///
@@ -122,12 +123,16 @@ enum Observed {
     Changed(Option<LiveMatch>),
 }
 
-/// Polls one replays directory, reporting each change of battle once.
+/// Polls one replays folder, reporting each change of battle once.
 ///
 /// The caller drives it: one [`step`](Self::step) per [`POLL_INTERVAL`], on a
 /// thread that may block.
 #[derive(Debug)]
 struct LiveWatch {
+    /// Resolved again each step, so the poll follows a new version's folder and
+    /// an install's move to an overlay.
+    folder: ReplayFolder,
+    /// Where the last step looked.
     source: LiveSource,
     current: Option<ArenaInfoStamp>,
     /// Nothing has been reported yet, so the first step reports even when it
@@ -140,8 +145,10 @@ struct LiveWatch {
 }
 
 impl LiveWatch {
-    fn new(replay_dir: &Path) -> Self {
-        Self { source: LiveSource::in_dir(replay_dir), current: None, reported: false, attempts: 0 }
+    fn new(folder: ReplayFolder) -> Self {
+        let source = LiveSource::in_dir(folder.path());
+
+        Self { folder, source, current: None, reported: false, attempts: 0 }
     }
 
     /// Polls once, reading the arena info when it changed.
@@ -152,6 +159,8 @@ impl LiveWatch {
         // file is malformed rather than incomplete.
         const READ_ATTEMPTS: usize = 3;
 
+        self.folder.refresh();
+        self.source = self.folder.live_source();
         let stamp = poll(&self.source);
         if stamp == self.current && self.reported {
             return Observed::Unchanged;
@@ -188,12 +197,20 @@ impl LivePoll {
     /// The poll's name under the watchdog and on its thread.
     pub const WORKER: &str = "live-match-poll";
 
-    /// Starts polling `replay_dir` under `watchdog`. Each change of battle arrives on the
-    /// returned receiver, the first poll's included: `None` is no battle, or one whose arena info
-    /// never parsed.
+    /// Starts polling `replay_dir` under `watchdog`. See [`Self::start_folder`].
     pub fn start(
         watchdog: &Watchdog,
         replay_dir: &Path,
+    ) -> Result<(Self, UnboundedReceiver<Option<LiveMatch>>), WatchdogError> {
+        Self::start_folder(watchdog, ReplayFolder::from_dir(replay_dir.to_path_buf()))
+    }
+
+    /// Starts polling `folder` under `watchdog`. Each change of battle arrives on the returned
+    /// receiver, the first poll's included: `None` is no battle, or one whose arena info never
+    /// parsed.
+    pub fn start_folder(
+        watchdog: &Watchdog,
+        folder: ReplayFolder,
     ) -> Result<(Self, UnboundedReceiver<Option<LiveMatch>>), WatchdogError> {
         // A poll is a `stat` every two seconds; half a minute without one is a directory that
         // does not answer, such as a network share that has gone away.
@@ -202,8 +219,9 @@ impl LivePoll {
         let (changes, received) = futures::channel::mpsc::unbounded();
         let shared = Arc::new(PollShared {
             #[cfg(any(test, feature = "test-support"))]
-            replay_dir: replay_dir.to_path_buf(),
-            watch: Mutex::new(LiveWatch::new(replay_dir)),
+            replay_dir: folder.path().to_path_buf(),
+            source: Mutex::new(LiveSource::in_dir(folder.path())),
+            watch: Mutex::new(LiveWatch::new(folder)),
             changes,
             closed: Mutex::new(false),
             closing: Condvar::new(),
@@ -212,6 +230,12 @@ impl LivePoll {
         let registration = watchdog.register(spec, Arc::new(PollSupervisor { shared: Arc::clone(&shared) }))?;
 
         Ok((Self { registration: Some(registration), shared }, received))
+    }
+
+    /// Where the last poll found the battle in progress, or would have: the pair a roster scan
+    /// reads. Set before the poll's change is sent.
+    pub fn live_source(&self) -> LiveSource {
+        lock(&self.shared.source).clone()
     }
 }
 
@@ -248,6 +272,8 @@ struct PollShared {
     /// Kept here rather than on the thread, so a restarted thread does not report the battle
     /// again.
     watch: Mutex<LiveWatch>,
+    /// The watch's last source, apart from it so a reader does not wait out a poll's reads.
+    source: Mutex<LiveSource>,
     changes: UnboundedSender<Option<LiveMatch>>,
     /// Set when the [`LivePoll`] is dropped.
     closed: Mutex<bool>,
@@ -336,7 +362,12 @@ fn poll_live(shared: &PollShared, heartbeat: &Heartbeat) {
 
         #[cfg(any(test, feature = "test-support"))]
         crate::simulated_panic::stop_live_poll_if_asked(&shared.replay_dir);
-        let observed = lock(&shared.watch).step();
+        let (observed, source) = {
+            let mut watch = lock(&shared.watch);
+            let observed = watch.step();
+            (observed, watch.source.clone())
+        };
+        *lock(&shared.source) = source;
         if let Observed::Changed(live) = observed {
             // The receiver goes with its owner, which closes the poll as it goes.
             let _ = shared.changes.unbounded_send(live);
@@ -438,7 +469,7 @@ mod tests {
     #[test]
     fn a_watch_reports_each_change_once() {
         let dir = temp_dir("watch");
-        let mut watch = LiveWatch::new(&dir);
+        let mut watch = LiveWatch::new(ReplayFolder::from_dir(dir.clone()));
 
         assert!(matches!(watch.step(), Observed::Changed(None)), "the first step reports");
         assert!(matches!(watch.step(), Observed::Unchanged));

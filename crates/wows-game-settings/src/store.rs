@@ -23,7 +23,10 @@ use crate::files::write_atomic;
 use crate::guard::GameStopped;
 use crate::settings::GameSettings;
 use crate::settings::ReplayConfigSource;
+use crate::settings::ReplaySettings;
+use crate::settings::Section;
 use crate::settings::SourceDocuments;
+use crate::settings::replays;
 
 /// Reads and saves the settings of one install.
 #[derive(Clone, Debug)]
@@ -93,6 +96,18 @@ where
         };
 
         Ok(Snapshot { settings: GameSettings::from_documents(&files.sources(self.build)), files })
+    }
+
+    /// The replay settings alone. Reads only the build's engine config, so a damaged
+    /// preferences file does not hide them.
+    pub fn read_replays(&self) -> Result<Section<ReplaySettings>, ReadError> {
+        let engine_config = match self.build {
+            Some(build) => self.read_engine_config(build)?,
+            None => None,
+        };
+        let files = LoadedFiles { preferences: None, user_preferences: None, engine_config, game_info: None };
+
+        Ok(replays(&files.sources(self.build)))
     }
 
     /// Writes `changes` and returns the settings read back.

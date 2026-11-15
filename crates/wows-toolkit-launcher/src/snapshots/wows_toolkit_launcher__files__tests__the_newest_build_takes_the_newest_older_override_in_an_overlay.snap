@@ -1,0 +1,11 @@
+---
+source: crates/wows-toolkit-launcher/src/files.rs
+expression: "fs::read_to_string(upper.join(override_path(101))).unwrap()"
+---
+<engine_config.xml>
+  <replays>
+    <dirPath>replays</dirPath>
+    <versioned>true</versioned>
+    <maxReplaysToSave>200</maxReplaysToSave>
+  </replays>
+</engine_config.xml>

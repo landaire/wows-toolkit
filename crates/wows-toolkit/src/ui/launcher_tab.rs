@@ -15,9 +15,8 @@ use wows_toolkit_launcher::Launcher;
 use wows_toolkit_launcher::LauncherError;
 use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::LoginTarget;
+use wows_toolkit_launcher::RunnerState;
 use wows_toolkit_launcher::SessionStorage;
-use wows_toolkit_launcher::proton::ProtonSetup;
-use wows_toolkit_launcher::proton::Severity;
 
 use crate::app::ToolkitTabViewer;
 use crate::update_background_task;
@@ -56,8 +55,7 @@ enum AccountAction {
 #[derive(Default)]
 pub struct LauncherDialogs {
     folder: FileDialogSlot<FolderRequest>,
-    proton_binary: FileDialogSlot,
-    proton_prefix: FileDialogSlot,
+    proton_dir: FileDialogSlot,
 }
 
 /// What a chosen folder from [`LauncherDialogs::folder`] is used for.
@@ -80,7 +78,7 @@ enum Intent {
     InstallGame { game: KnownGame, dest_dir: PathBuf },
     Row(DownloadRowAction),
     RetryAvailableGames,
-    SetUpProton,
+    DetectRunner,
 }
 
 fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
@@ -202,15 +200,6 @@ fn show_available_game_status(ui: &mut egui::Ui, state: Option<&CatalogCheckStat
 }
 
 impl ToolkitTabViewer<'_> {
-    fn toast_proton_setup(&self, result: ProtonSetup) {
-        let mut toasts = self.tab_state.toasts.lock();
-        match result.severity() {
-            Severity::Success => toasts.success(result.to_string()),
-            Severity::Warning => toasts.warning(result.to_string()),
-            Severity::Error => toasts.error(result.to_string()),
-        };
-    }
-
     fn toast_launcher_error(&self, result: Result<(), LauncherError>) {
         if let Err(e) = result {
             self.tab_state.toasts.lock().error(e.to_string());
@@ -227,23 +216,14 @@ impl ToolkitTabViewer<'_> {
             });
         }
 
-        let proton_binary = self.tab_state.launcher_dialogs.proton_binary.poll_path();
-        let proton_prefix = self.tab_state.launcher_dialogs.proton_prefix.poll_path();
-        if proton_binary.is_none() && proton_prefix.is_none() {
+        let Some(proton_dir) = self.tab_state.launcher_dialogs.proton_dir.poll_path() else {
             return;
-        }
-
-        {
-            let mut persisted = self.tab_state.persisted.write();
-            let launcher = &mut persisted.settings.launcher;
-            if let Some(path) = proton_binary {
-                launcher.proton_binary = Some(path);
-            }
-            if let Some(path) = proton_prefix {
-                launcher.proton_prefix = Some(path);
-            }
-        }
-        self.tab_state.request_save();
+        };
+        self.tab_state.launcher_op(|launcher, settings, env| {
+            settings.runner = wgc_launch::RunnerChoice::SteamProton { proton_dir };
+            launcher.start_runner_probe(settings, env);
+            true
+        });
     }
 
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
@@ -278,7 +258,6 @@ impl ToolkitTabViewer<'_> {
         ui.separator();
 
         let launcher = &self.tab_state.launcher;
-        let settings = self.tab_state.persisted.read().settings.launcher.clone();
         for install in launcher.installs() {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
@@ -323,11 +302,11 @@ impl ToolkitTabViewer<'_> {
                         });
                     }
                 }
-                if wows_toolkit_launcher::proton::needs_setup(install, &settings) {
+                if self.tab_state.launcher.needs_runner_setup() {
                     ui.horizontal(|ui| {
                         ui.colored_label(ui.visuals().warn_fg_color, "Needs Proton to launch on Linux.");
-                        if ui.button("Set up Proton").clicked() {
-                            intents.push(Intent::SetUpProton);
+                        if ui.button("Look again").clicked() {
+                            intents.push(Intent::DetectRunner);
                         }
                     });
                 }
@@ -348,6 +327,7 @@ impl ToolkitTabViewer<'_> {
     fn build_launch_options(&mut self, ui: &mut egui::Ui) {
         let mut launcher = self.tab_state.persisted.read().settings.launcher.clone();
         let mut changed = false;
+        let mut detect = false;
 
         ui.label("Extra launch args (one per line):");
         let mut args_text = launcher.extra_args_text();
@@ -366,48 +346,55 @@ impl ToolkitTabViewer<'_> {
         ui.separator();
         ui.strong("Proton (Linux)");
         ui.weak(
-            "A non-Steam install launches through this Proton binary and prefix. Steam installs launch through Steam and ignore these. Auto-detect fills both in; the prefix is a toolkit-managed one Proton sets up on first launch unless you already have WoWs on Steam.",
+            "The game runs through Steam's Proton Experimental or newest Proton when Steam is installed, else umu-run.",
         );
-
-        ui.horizontal(|ui| {
-            ui.label("Binary:");
-            match &launcher.proton_binary {
-                Some(path) => {
-                    ui.add(egui::Label::new(path.display().to_string()).truncate());
-                }
-                None => {
-                    ui.weak("not set");
-                }
+        match self.tab_state.launcher.runner() {
+            RunnerState::Unknown => {
+                ui.weak("Looking for Proton.");
             }
-            let binary_dialog = &mut self.tab_state.launcher_dialogs.proton_binary;
-            if ui.add_enabled(!binary_dialog.is_pending(), egui::Button::new("Browse...").small()).clicked() {
-                binary_dialog.open(ui.ctx(), DialogKind::PickFile, rfd::AsyncFileDialog::new(), ());
+            RunnerState::Found(runner) => {
+                ui.label(match runner.runner() {
+                    wgc_launch::Runner::Native => "The game runs natively.".to_owned(),
+                    wgc_launch::Runner::SteamProton { proton, .. } => format!("Steam's {}", proton.name()),
+                    wgc_launch::Runner::Umu { proton: Some(proton), .. } => format!("umu-run with {}", proton.name()),
+                    wgc_launch::Runner::Umu { proton: None, .. } => "umu-run with UMU-Proton".to_owned(),
+                });
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Prefix:");
-            match &launcher.proton_prefix {
-                Some(path) => {
-                    ui.add(egui::Label::new(path.display().to_string()).truncate());
-                }
-                None => {
-                    ui.weak("not set");
-                }
+            RunnerState::Missing(err) => {
+                ui.colored_label(ui.visuals().warn_fg_color, err.to_string());
             }
-            let prefix_dialog = &mut self.tab_state.launcher_dialogs.proton_prefix;
-            if ui.add_enabled(!prefix_dialog.is_pending(), egui::Button::new("Browse...").small()).clicked() {
-                prefix_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
-            }
-        });
-        if ui.button("Auto-detect").clicked() {
-            let result = wows_toolkit_launcher::proton::autodetect(&mut launcher, crate::storage_dir().as_deref());
-            changed |= result.changed();
-            self.toast_proton_setup(result);
         }
+        ui.horizontal(|ui| {
+            let proton_dialog = &mut self.tab_state.launcher_dialogs.proton_dir;
+            if ui
+                .add_enabled(!proton_dialog.is_pending(), egui::Button::new("Choose Proton folder...").small())
+                .clicked()
+            {
+                proton_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+            }
+            if ui
+                .add_enabled(
+                    launcher.runner != wgc_launch::RunnerChoice::Auto,
+                    egui::Button::new("Find automatically").small(),
+                )
+                .clicked()
+            {
+                launcher.runner = wgc_launch::RunnerChoice::Auto;
+                changed = true;
+                detect = true;
+            }
+            if ui.small_button("Look again").clicked() {
+                detect = true;
+            }
+        });
 
         if changed {
             self.tab_state.persisted.write().settings.launcher = launcher;
             self.tab_state.request_save();
+        }
+        // After the save, so the probe looks for the runner now chosen.
+        if detect {
+            self.apply_intent(Intent::DetectRunner);
         }
     }
 
@@ -524,15 +511,10 @@ impl ToolkitTabViewer<'_> {
                 launcher.start_available_games_check(env);
                 false
             }),
-            Intent::SetUpProton => {
-                let mut settings = self.tab_state.persisted.read().settings.launcher.clone();
-                let result = wows_toolkit_launcher::proton::autodetect(&mut settings, crate::storage_dir().as_deref());
-                if result.changed() {
-                    self.tab_state.persisted.write().settings.launcher = settings;
-                    self.tab_state.request_save();
-                }
-                self.toast_proton_setup(result);
-            }
+            Intent::DetectRunner => self.tab_state.launcher_op(|launcher, settings, env| {
+                launcher.start_runner_probe(settings, env);
+                false
+            }),
         }
     }
 

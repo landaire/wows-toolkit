@@ -13,6 +13,7 @@ GPUI_DEPS = [
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
     "//crates/wgc-install:wgc-install",
+    "//crates/wgc-launch:wgc-launch",
     "//crates/minimap-renderer:wows_minimap_renderer",
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",

@@ -22,7 +22,6 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
-use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_ATTEMPTS;
 use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_RETRY;
 use wows_toolkit_replay_data::replay_dir::DirChange;
@@ -32,15 +31,16 @@ use wows_toolkit_replay_data::replay_dir::ScanProgress;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
 use wows_toolkit_replay_data::replay_dir::UnreadableReplay;
 use wows_toolkit_replay_data::replay_dir::WatchMessage;
-use wows_toolkit_replay_data::replay_dir::WatchSink;
 use wows_toolkit_replay_data::replay_dir::WatchState;
 use wows_toolkit_replay_data::replay_dir::WatchStopCause;
 use wows_toolkit_replay_data::replay_dir::missing_builds;
 use wows_toolkit_replay_data::replay_dir::read_replay;
 use wows_toolkit_replay_data::replay_dir::read_replay_files;
-use wows_toolkit_replay_data::replay_dir::report_missed;
-use wows_toolkit_replay_data::replay_dir::scan_replay_files;
-use wows_toolkit_replay_data::replay_dir::start_watch;
+use wows_toolkit_replay_data::replay_dir::report_missed_in;
+use wows_toolkit_replay_data::replay_dir::scan_folder;
+use wows_toolkit_replay_data::replay_dir::start_planned_watch;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
+use wows_toolkit_replay_data::replay_folder::WatchPlan;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::RestartPolicy;
@@ -421,14 +421,15 @@ impl Listing {
         self.status.set(ScanStatus::Loading);
         self.progress.set(Some(ScanProgress::default()));
         let task = self.spawn(async move {
-            let dir = match source {
+            let folder = match source {
                 ListingSource::Install => {
                     let wows = PathBuf::from(wows_dir.unwrap_or_default());
-                    blocking(move || resolve_replays_dir(&wows)).await
+                    blocking(move || ReplayFolder::from_app_install(&wows)).await
                 }
-                ListingSource::Chosen(root) => root,
+                ListingSource::Chosen(root) => ReplayFolder::from_dir(root),
                 ListingSource::Dropped(paths) => return self.read_dropped(generation, paths, wows_dir).await,
             };
+            let dir = folder.path().to_path_buf();
             let directory_changed = self.directory.get_untracked().as_ref() != Some(&dir);
             if directory_changed {
                 self.directory.set(Some(dir.clone()));
@@ -437,14 +438,17 @@ impl Listing {
             }
 
             let (reports, mut progress) = mpsc::unbounded();
-            let scanned_dir = dir.clone();
-            let scan = long_job(move || scan_replay_files(&scanned_dir, &reports));
+            let scanned_folder = folder.clone();
+            let scan = long_job(move || {
+                let scanned = scan_folder(&scanned_folder, &reports);
+                (scanned, scanned_folder.watch_plan())
+            });
             let shown = self.spawn(async move {
                 while let Some(report) = progress.next().await {
                     self.show_scan_progress(generation, report);
                 }
             });
-            let scanned = scan.await;
+            let (scanned, plan) = scan.await;
             shown.cancel();
             if !self.is_current_scan(generation) {
                 return;
@@ -454,7 +458,7 @@ impl Listing {
             let status = if scanned.files.is_empty() { ScanStatus::Empty(dir.clone()) } else { ScanStatus::Loaded };
             self.files.set(scanned.files);
             self.status.set(status);
-            self.watch_dir(dir, generation, scanned.walked);
+            self.watch_dir(folder, plan, generation, scanned.walked);
             self.report_missing_builds();
         });
         self.work.update_value(|work| work.scan = Some(task));
@@ -465,16 +469,22 @@ impl Listing {
     async fn read_dropped(self, generation: u64, paths: Vec<PathBuf>, wows_dir: Option<String>) {
         let (reports, mut progress) = mpsc::unbounded();
         let read = long_job(move || {
-            let install = wows_dir.filter(|dir| !dir.is_empty()).map(|dir| {
-                let replays = resolve_replays_dir(Path::new(&dir));
-                // A directory that does not resolve is compared by the path it was named by.
-                std::fs::canonicalize(&replays).unwrap_or(replays)
-            });
+            // Every real directory the install's replays live in, as a dropped replay's parent
+            // is compared after canonicalizing.
+            let install: Vec<PathBuf> = match wows_dir.filter(|dir| !dir.is_empty()) {
+                Some(dir) => ReplayFolder::from_app_install(Path::new(&dir))
+                    .content_dirs()
+                    .into_iter()
+                    // A directory that does not resolve is compared by the path it was named by.
+                    .map(|replays| std::fs::canonicalize(&replays).unwrap_or(replays))
+                    .collect(),
+                None => Vec::new(),
+            };
             let read = read_replay_files(&paths, &reports);
             let scopes: HashMap<PathBuf, SourceScope> = read
                 .files
                 .iter()
-                .filter_map(|file| Some((file.path.clone(), dropped_scope(&file.path, install.as_deref())?)))
+                .filter_map(|file| Some((file.path.clone(), dropped_scope(&file.path, &install)?)))
                 .collect();
             (read, scopes)
         });
@@ -680,15 +690,16 @@ impl Listing {
         });
     }
 
-    /// Follows `dir` from the end of scan `scan`, which read the files in `walked`.
-    fn watch_dir(self, dir: PathBuf, scan: u64, walked: HashSet<PathBuf>) {
+    /// Follows `folder` from the end of scan `scan`, which read the files in `walked`, through
+    /// the watch `plan` prepared alongside the scan.
+    fn watch_dir(self, folder: ReplayFolder, plan: WatchPlan, scan: u64, walked: HashSet<PathBuf>) {
         self.stop_watching();
         if self.watch() == ListingWatch::Unwatched {
             return;
         }
 
         let (messages, mut received) = mpsc::unbounded();
-        let started = start_watch(&dir, WatchSink::new(dir.clone(), messages.clone()));
+        let started = start_planned_watch(plan, messages.clone());
         let watcher = match started {
             Ok(watcher) => watcher,
             Err(cause) => {
@@ -707,8 +718,7 @@ impl Listing {
             self.say(ListingEvent::WatchResumed);
         }
 
-        let missed_dir = dir.clone();
-        let missed = long_job(move || report_missed(&missed_dir, &walked, &messages));
+        let missed = long_job(move || report_missed_in(&folder, &walked, &messages));
         let task = self.spawn(async move {
             missed.await;
             let cause = loop {
@@ -803,14 +813,14 @@ impl Listing {
     }
 }
 
-/// The index scope a dropped replay is written under: the Live source's when it is in the
-/// install's replays directory `install`, otherwise its own directory's, as a tab listing that
-/// directory would write it. `None` for a path with no directory.
-fn dropped_scope(path: &Path, install: Option<&Path>) -> Option<SourceScope> {
+/// The index scope a dropped replay is written under: the Live source's when it is in one of the
+/// directories `install` holds the install's replays in, otherwise its own directory's, as a tab
+/// listing that directory would write it. `None` for a path with no directory.
+fn dropped_scope(path: &Path, install: &[PathBuf]) -> Option<SourceScope> {
     let dir = path.parent()?;
     // A directory that does not resolve is named as it was dropped.
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if install == Some(dir.as_path()) {
+    if install.contains(&dir) {
         return Some(SourceScope::Live);
     }
 

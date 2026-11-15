@@ -26,11 +26,11 @@ use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::live_match::LivePoll;
-use wows_toolkit_replay_data::live_match::LiveSource;
 use wows_toolkit_replay_data::live_match::RosterSource;
 use wows_toolkit_replay_data::live_match::scan_arena_retrying;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_services::match_stats::StatsBudget;
 use wows_toolkit_services::match_stats::StatsError;
 #[cfg(not(test))]
@@ -101,10 +101,10 @@ impl Drop for ScanCancel {
     }
 }
 
-/// Where the live watch looks, and what it resolves the roster against.
+/// Which install the live watch follows, and what it resolves the roster against.
 #[derive(Clone)]
 pub struct LiveSourceConfig {
-    pub replay_dir: PathBuf,
+    pub install_dir: PathBuf,
     pub game_data: GameDataCache,
 }
 
@@ -248,7 +248,7 @@ impl LiveModel {
         self.owner.with_value(|owner| owner.with(|| spawn_local(work)))
     }
 
-    /// Watches the replays directory of the install the settings name, for as long as the calling
+    /// Watches the replays folder of the install the settings name, for as long as the calling
     /// scope lasts, restarting the watch whenever the directory or its game data changes.
     pub fn follow_install(self, services: Services) {
         // The directory alone, so an edit to any other setting does not restart the watch and
@@ -260,13 +260,13 @@ impl LiveModel {
             let config = wows_dir
                 .get()
                 .zip(services.game_data.cache())
-                .map(|(dir, game_data)| LiveSourceConfig { replay_dir: PathBuf::from(dir).join("replays"), game_data });
+                .map(|(dir, game_data)| LiveSourceConfig { install_dir: PathBuf::from(dir), game_data });
             self.watch(services, config);
         });
         on_cleanup_local(move || drop(following));
     }
 
-    /// Starts watching `config`'s replays directory, replacing any watch already running.
+    /// Starts watching `config`'s replays folder, replacing any watch already running.
     pub fn watch(self, services: Services, config: Option<LiveSourceConfig>) {
         #[cfg(test)]
         if self.seeded.get_value() {
@@ -289,20 +289,21 @@ impl LiveModel {
             self.watch.set_value(None);
             return;
         };
-        let (poll, mut changes) = match LivePoll::start(&watchdog, &config.replay_dir) {
-            Ok(started) => started,
-            Err(err) => {
-                tracing::error!(%err, "live match: the poll did not start");
-                self.watch.set_value(None);
-                return;
-            }
-        };
 
         let task = spawn_local(async move {
+            // Resolving the folder reads the install's files.
+            let install_dir = config.install_dir.clone();
+            let folder = blocking(move || ReplayFolder::from_app_install(&install_dir)).await;
             // Held by the task, so cancelling it ends the poll.
-            let _poll = poll;
+            let (poll, mut changes) = match LivePoll::start_folder(&watchdog, folder) {
+                Ok(started) => started,
+                Err(err) => {
+                    tracing::error!(%err, "live match: the poll did not start");
+                    return;
+                }
+            };
             while let Some(live) = changes.next().await {
-                let roster = RosterSource::InProgress(LiveSource::in_dir(&config.replay_dir));
+                let roster = RosterSource::InProgress(poll.live_source());
                 self.adopt(services, &config, live, roster);
             }
         });
@@ -590,7 +591,7 @@ impl LiveModel {
     pub fn seed(self, live: LiveMatch) {
         // A source with no install behind it: the roster is seeded rather than polled.
         self.source.set(Some(LiveSourceConfig {
-            replay_dir: std::env::temp_dir(),
+            install_dir: std::env::temp_dir(),
             game_data: GameDataCache::without_install(),
         }));
         self.checked.set(true);
@@ -613,7 +614,7 @@ impl LiveModel {
         let data = game_data.get_or_load_build(build).expect("the battle's build loads");
         self.metadata_build.set_value(Some(build));
         self.metadata.set(Some(data));
-        self.source.set(Some(LiveSourceConfig { replay_dir: std::env::temp_dir(), game_data }));
+        self.source.set(Some(LiveSourceConfig { install_dir: std::env::temp_dir(), game_data }));
         self.checked.set(true);
         self.live_match.set(Some(live));
     }

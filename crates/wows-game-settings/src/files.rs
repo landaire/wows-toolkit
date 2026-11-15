@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -42,6 +43,18 @@ pub enum SettingsFile {
         build: BuildNumber,
     },
     GameInfo,
+}
+
+impl BuildNumber {
+    /// The build a `bin/<build>` directory name holds, or `None` for any other name.
+    pub fn parse(dir_name: &OsStr) -> Option<BuildNumber> {
+        let name = dir_name.to_str()?;
+        if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+
+        name.parse().ok().map(BuildNumber)
+    }
 }
 
 impl fmt::Display for BuildNumber {

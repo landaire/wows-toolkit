@@ -1,0 +1,12 @@
+---
+source: crates/wows-toolkit-replay-data/src/replay_folder.rs
+expression: install.describe(&folder)
+---
+path: install/replays/13.12.0.0
+replay: upper/replays/13.12.0.0/c.wowsreplay
+arena info: upper/replays/13.12.0.0/tempArenaInfo.json
+stream: upper/replays/13.12.0.0/temp.wowsreplay
+contents: upper/replays/13.12.0.0
+awaited: install/replays/13.12.0.0
+version parent: upper/replays
+version parent: install/replays

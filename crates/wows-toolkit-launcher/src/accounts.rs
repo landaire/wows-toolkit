@@ -435,6 +435,17 @@ impl Launcher {
 
         settings.remove_account(key)
     }
+
+    /// Marks a signed-in account's session expired after WGNI refused it, so the front ends
+    /// offer to sign in again.
+    pub(crate) fn expire_session(&mut self, key: AccountKey) {
+        if !matches!(self.sessions.get(&key), Some(AccountSession::SignedIn { .. })) {
+            return;
+        }
+
+        let _ = self.bump_restore(key);
+        self.sessions.insert(key, AccountSession::Expired);
+    }
 }
 
 /// Looks up an entry no account has: a store that answers at all is there.
@@ -564,7 +575,7 @@ mod tests {
     }
 
     fn env(runtime: &tokio::runtime::Runtime) -> LauncherEnv {
-        LauncherEnv { runtime: runtime.handle().clone(), proxy_url: None, wake: Arc::new(|| {}) }
+        LauncherEnv { runtime: runtime.handle().clone(), proxy_url: None, wake: Arc::new(|| {}), runtime_dirs: None }
     }
 
     fn signed_in(session: wgc_auth::StoredSession) -> LauncherEvent {

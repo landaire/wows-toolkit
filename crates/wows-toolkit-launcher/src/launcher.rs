@@ -21,12 +21,14 @@ use crate::accounts::RestoreId;
 use crate::accounts::RestoreOutcome;
 use crate::download;
 use crate::download::DownloadPhase;
+use crate::error::LaunchFailure;
 use crate::error::LauncherError;
 use crate::game::GameEvent;
 use crate::game::GameExit;
 use crate::game::GameGate;
 use crate::game::GameState;
 use crate::game::LaunchId;
+use crate::runner::RunnerState;
 use crate::settings::AccountKey;
 use crate::settings::LauncherSettings;
 
@@ -38,6 +40,9 @@ pub struct LauncherEnv {
     pub proxy_url: Option<String>,
     /// Called after every event is sent, so a front end that polls can redraw.
     pub wake: Arc<dyn Fn() + Send + Sync>,
+    /// Where the game runner keeps its prefixes and overlays, under the app's data directory.
+    /// `None` when the app has none, which leaves the game unlaunchable.
+    pub runtime_dirs: Option<wgc_launch::RuntimeDirs>,
 }
 
 /// Result of a catalog update check, for an install or a known game.
@@ -102,9 +107,17 @@ pub(crate) enum Event {
     AvailableGame(&'static str, CatalogCheckState),
     Download(PathBuf, DownloadState),
     Login(LoginMsg),
-    SessionRestored { key: AccountKey, restore: RestoreId, outcome: RestoreOutcome },
+    SessionRestored {
+        key: AccountKey,
+        restore: RestoreId,
+        outcome: RestoreOutcome,
+    },
     Game(GameEvent),
     KeyringProbed(KeyringState),
+    RunnerProbed {
+        choice: wgc_launch::RunnerChoice,
+        result: Result<wgc_launch::ResolvedRunner, wgc_launch::RunnerError>,
+    },
 }
 
 /// The receiving end of a [`Launcher`]'s events.
@@ -147,6 +160,8 @@ pub struct Launcher {
     pub(crate) gate: GameGate,
     pub(crate) launch: LaunchId,
     pub(crate) last_exit: Option<GameExit>,
+    pub(crate) launch_failure: Option<LaunchFailure>,
+    pub(crate) runner: RunnerState,
 
     sender: tokio::sync::mpsc::UnboundedSender<LauncherEvent>,
 
@@ -176,6 +191,8 @@ impl Launcher {
             gate: GameGate::new(),
             launch: LaunchId::default(),
             last_exit: None,
+            launch_failure: None,
+            runner: RunnerState::Unknown,
             sender,
             #[cfg(feature = "test-support")]
             script: crate::test_support::SignInScript::default(),
@@ -252,6 +269,7 @@ impl Launcher {
                 for install in &installs {
                     self.spawn_catalog_check(install, false, env);
                 }
+                self.carry_all_replay_settings(env);
                 false
             }
             Event::Catalog(path, state) => {
@@ -269,6 +287,7 @@ impl Launcher {
                 if finished {
                     self.controls.remove(&key);
                 }
+                self.carry_replay_settings_after(&key, &state, env);
                 self.downloads.insert(key.clone(), state);
                 if !fresh_install_done {
                     return false;
@@ -288,6 +307,10 @@ impl Launcher {
             }
             Event::KeyringProbed(state) => {
                 self.apply_keyring_probe(state);
+                false
+            }
+            Event::RunnerProbed { choice, result } => {
+                self.apply_runner_probe(choice, result, settings);
                 false
             }
         }

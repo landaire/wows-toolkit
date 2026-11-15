@@ -64,6 +64,7 @@ wgc-auth = { workspace = true }
 wgc-catalog = { workspace = true }
 wgc-download = { workspace = true }
 wgc-install = { workspace = true }
+wgc-launch = { workspace = true }
 # `i18n!` generates its lookup per crate, so this front end's own chrome needs
 # its own invocation; the catalog behind it is parsed once per process
 # (`wt_translations::backend`). `wt-translations` also carries the language

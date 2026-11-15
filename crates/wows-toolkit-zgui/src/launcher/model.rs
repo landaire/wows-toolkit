@@ -124,6 +124,7 @@ impl LauncherModel {
         self.op(|launcher, settings, env| {
             let minted = launcher.start_session_restore(settings, env);
             launcher.start_install_discovery(settings, env);
+            launcher.start_runner_probe(settings, env);
             launcher.start_available_games_check(env);
             launcher.start_keyring_probe(env);
             minted
@@ -217,7 +218,38 @@ impl LauncherModel {
             proxy_url: self.proxy.get_value(),
             // The shell's event task awaits the channel, and its wake-up is the channel's own.
             wake: Arc::new(|| {}),
+            runtime_dirs: wows_toolkit_config::storage_dir().map(|dir| wgc_launch::RuntimeDirs::new(&dir)),
         })
+    }
+
+    /// Changes which runner plays the game, and looks for the one now chosen.
+    pub fn set_runner(self, choice: wgc_launch::RunnerChoice) {
+        self.run(|launcher, settings, env| {
+            let changed = settings.runner != choice;
+            settings.runner = choice;
+            launcher.start_runner_probe(settings, env);
+            ((), changed)
+        });
+    }
+
+    /// Looks for the chosen runner again, after the user installed or removed one.
+    pub fn probe_runner(self) {
+        self.op(|launcher, settings, env| {
+            launcher.start_runner_probe(settings, env);
+            false
+        });
+    }
+
+    /// Why the last launch failed, once.
+    pub fn take_launch_failure(self) -> Option<wows_toolkit_launcher::LaunchFailure> {
+        if self.with_untracked(|state| state.launcher.launch_failure().is_none()) {
+            return None;
+        }
+
+        let mut failure = None;
+        self.update_launcher(|launcher| failure = launcher.take_launch_failure());
+
+        failure
     }
 
     fn save(self, settings: &LauncherSettings) {

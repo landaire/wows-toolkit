@@ -5,8 +5,7 @@ expression: loaded
 manual_installs:
   - /games/WoWs
 wgc_data_dir_override: ~
-proton_prefix: ~
-proton_binary: ~
+runner: Auto
 extra_args: []
 env_vars: []
 safe_mode_args: []

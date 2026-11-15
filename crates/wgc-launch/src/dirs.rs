@@ -95,6 +95,11 @@ impl InstallStateDir {
         &self.dir
     }
 
+    /// The same directory by its resolved path, which the mount table uses. It must exist.
+    pub fn canonicalize(&self) -> std::io::Result<InstallStateDir> {
+        Ok(InstallStateDir { key: self.key.clone(), dir: self.dir.canonicalize()? })
+    }
+
     /// Everything the game writes: preferences, `profile/`, replays.
     pub fn upper(&self) -> PathBuf {
         self.dir.join("upper")

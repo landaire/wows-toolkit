@@ -17,7 +17,8 @@ use wows_core::pseudonym::NameDisplay;
 use wows_core::rating_scope::RatingScope;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
-use wows_toolkit_replay_data::replay_dir::scan_replay_files;
+use wows_toolkit_replay_data::replay_dir::scan_folder;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
@@ -196,8 +197,8 @@ pub fn CurrentMatchSection(model: TrackerModel) -> impl IntoView {
 }
 
 /// Debug mode's picker of a finished replay to take as the battle in progress, so the roster scan
-/// and the stats lookup can be exercised outside a battle. Lists the watched replays directory,
-/// read again whenever the watch moves to another one.
+/// and the stats lookup can be exercised outside a battle. Lists the watched install's replays
+/// folder, read again whenever the watch moves to another install.
 #[component]
 fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
     let services = Services::current();
@@ -209,8 +210,8 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
         if let Some(previous) = listing.get_value() {
             previous.cancel();
         }
-        let dir = live.source.with(|source| source.as_ref().map(|config| config.replay_dir.clone()));
-        let Some(dir) = dir else {
+        let install_dir = live.source.with(|source| source.as_ref().map(|config| config.install_dir.clone()));
+        let Some(install_dir) = install_dir else {
             choices.set(Vec::new());
             listing.set_value(None);
             return;
@@ -219,7 +220,7 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
             let scanned = blocking(move || {
                 // Nothing shows the scan's progress.
                 let (reports, _) = futures::channel::mpsc::unbounded();
-                scan_replay_files(&dir, &reports)
+                scan_folder(&ReplayFolder::from_app_install(&install_dir), &reports)
             })
             .await;
             choices.set(debug_replay_choices(scanned.files.iter().map(|file| (file.path.as_path(), &file.listed))));

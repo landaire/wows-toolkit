@@ -129,6 +129,7 @@ mimalloc = { version = "0.1.52", optional = true }
 wgc-auth = { workspace = true, optional = true }
 wgc-catalog = { workspace = true, optional = true }
 wgc-download = { workspace = true, optional = true }
+wgc-launch = { workspace = true, optional = true }
 wows-toolkit-launcher = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -208,4 +209,4 @@ av1-asm = ["wows_minimap_renderer/cpu-av1-asm"]
 # shows up heavily in profiles of the replay load; this measures what a
 # different allocator is worth before committing the app to one.
 mimalloc = ["dep:mimalloc"]
-launcher = ["dep:wgc-auth", "dep:wgc-catalog", "dep:wgc-download", "dep:wows-toolkit-launcher"]
+launcher = ["dep:wgc-auth", "dep:wgc-catalog", "dep:wgc-download", "dep:wgc-launch", "dep:wows-toolkit-launcher"]

@@ -15,6 +15,7 @@ use crate::KeyringState;
 use crate::Launcher;
 use crate::LauncherEvent;
 use crate::LoginTarget;
+use crate::RunnerState;
 use crate::SessionStorage;
 use crate::accounts::LoginMsg;
 use crate::accounts::LoginState;
@@ -73,6 +74,11 @@ pub enum TestSession {
 /// Sets the game state as a launch and the client's progress would.
 pub fn set_game_state(launcher: &mut Launcher, state: GameState) {
     launcher.game = state;
+}
+
+/// Sets what the runner search found, as [`Launcher::start_runner_probe`] would.
+pub fn set_runner(launcher: &mut Launcher, state: RunnerState) {
+    launcher.runner = state;
 }
 
 /// A finished install discovery that found `installs`.

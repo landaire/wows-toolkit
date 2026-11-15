@@ -28,6 +28,7 @@ use wows_toolkit_launcher::GameState;
 use wows_toolkit_launcher::InstallChoice;
 use wows_toolkit_launcher::KeyringState;
 use wows_toolkit_launcher::LauncherSettings;
+use wows_toolkit_launcher::RunnerState;
 use wows_toolkit_launcher::SavedAccount;
 use wows_toolkit_launcher::test_support;
 use wows_toolkit_launcher::test_support::ScriptedSignIn;
@@ -141,13 +142,9 @@ impl LauncherWindow {
         self.window.texts_by_class(class).join(" ")
     }
 
-    /// Settings with the launcher on, Proton set up, and `accounts` playing the fake install.
+    /// Settings with the launcher on and `accounts` playing the fake install.
     pub(crate) fn enabled_settings(&self, accounts: &[(AccountKey, &str)]) -> LauncherSettings {
-        let mut settings = LauncherSettings {
-            proton_binary: Some(PathBuf::from("/opt/proton/proton")),
-            proton_prefix: Some(PathBuf::from("/var/lib/wows-prefix")),
-            ..LauncherSettings::default()
-        };
+        let mut settings = LauncherSettings::default();
         settings.enable();
         for (key, nickname) in accounts {
             settings.accounts.push(SavedAccount {
@@ -159,6 +156,13 @@ impl LauncherWindow {
         settings.default_account = accounts.first().map(|(key, _)| *key);
 
         settings
+    }
+
+    /// The runner search found neither Steam's Proton nor umu-run.
+    pub(crate) fn runner_missing(&mut self) {
+        let missing = RunnerState::Missing(Arc::new(wgc_launch::RunnerError::NoRunner));
+        self.model.update_launcher(|launcher| test_support::set_runner(launcher, missing));
+        self.settle();
     }
 
     /// Finds the fake install with its catalog check answered.
@@ -367,9 +371,9 @@ fn the_play_control_follows_the_launcher_through_its_states() {
     assert_eq!(launcher.play_state(), "set-up-game", "no install");
 
     settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
-    settings.proton_binary = None;
     launcher.adopt(settings);
     launcher.found(up_to_date());
+    launcher.runner_missing();
     assert_eq!(launcher.play_state(), "set-up-runner", "no Proton on Linux");
 
     let settings = launcher.enabled_settings(&[]);
@@ -652,7 +656,7 @@ fn the_drawer_lists_the_launcher_rows_once_enabled() {
         "launcher-enabled",
         "launcher-installs",
         "launcher-install-0",
-        "launcher-proton-detect",
+        "launcher-runner-detect",
         "launcher-extra-args",
         "launcher-env-vars",
         "launcher-safe-mode-args",
@@ -678,14 +682,15 @@ fn launch_arguments_are_saved_when_the_field_is_left() {
 #[test]
 fn set_up_proton_opens_the_drawer_at_its_row() {
     let mut launcher = LauncherWindow::open();
-    let mut settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
-    settings.proton_binary = None;
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
     launcher.adopt(settings);
+    launcher.runner_missing();
 
     launcher.press("launcher-play");
 
     assert!(launcher.shell.settings_drawer.is_open());
-    assert!(launcher.has("launcher-proton-detect"));
+    assert!(launcher.has("launcher-runner-missing"));
+    assert!(launcher.has("launcher-runner-detect"));
 }
 
 /// Lays out the game settings fixtures as the fake install.
