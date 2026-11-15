@@ -70,6 +70,8 @@ pub mod keys {
     /// `wows_toolkit_hardening::CodeIntegrityPreference`. The one process
     /// mitigation with a real compatibility cost, so the one the reader chooses.
     pub const CODE_INTEGRITY: &str = "code_integrity";
+    /// The MCP server's settings: a [`crate::mcp::McpSettings`].
+    pub const MCP_SERVER: &str = "mcp_server";
 }
 
 /// A proxy setting as a URL a client can take.

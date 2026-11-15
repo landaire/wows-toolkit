@@ -1452,6 +1452,81 @@ pub async fn ship_name(pool: &SqlitePool, ship: GameParamId) -> Result<Option<St
     Ok(row.map(|(name,)| name))
 }
 
+/// Every roster row of `arena`, allies before enemies and each side by ship index.
+pub async fn roster(pool: &SqlitePool, arena: ArenaId) -> Result<Vec<IndexedVehicleRow>, IndexError> {
+    let rows = sqlx::query(
+        "SELECT arena_id, account_id, player_name, clan, realm, ship_id, ship_index, ship_name, nation, species, \
+         tier, relation, division_id, survived, damage, kills, spotting, potential, received, pr, mc, mc_version, \
+         mc_torpedoes_observed, is_test_ship, disconnected, is_stream_sniper, sniper_twitch_login \
+         FROM indexed_vehicle WHERE arena_id = ?1 \
+         ORDER BY relation = 'enemy', ship_index, player_name",
+    )
+    .bind(arena.raw())
+    .fetch_all(pool)
+    .await?;
+
+    rows.iter().map(row_to_vehicle).collect()
+}
+
+/// The replay file of `arena`'s record, chosen as the searches choose it: a record whose file was
+/// seen on disk first, then the most recently indexed.
+pub async fn replay_path_for_arena(pool: &SqlitePool, arena: ArenaId) -> Result<Option<PathBuf>, IndexError> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT replay_path FROM replay_record WHERE arena_id = ?1 \
+         ORDER BY (file_mtime IS NOT NULL) DESC, indexed_at DESC LIMIT 1",
+    )
+    .bind(arena.raw())
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|(path,)| PathBuf::from(path)))
+}
+
+fn row_to_vehicle(row: &sqlx::sqlite::SqliteRow) -> Result<IndexedVehicleRow, IndexError> {
+    let relation: String = row.try_get("relation")?;
+    let Some(relation) = VehicleRelation::from_db_str(&relation) else {
+        return Err(IndexError::UnknownRelation { value: relation });
+    };
+    // Stored from u64 and u32 values, so a negative or oversized value is a corrupt row; read as
+    // absent rather than wrapped.
+    let unsigned = |column: &str| -> Result<Option<u64>, IndexError> {
+        Ok(row.try_get::<Option<i64>, _>(column)?.and_then(|value| u64::try_from(value).ok()))
+    };
+
+    Ok(IndexedVehicleRow {
+        arena_id: ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+        account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+        player_name: row.try_get("player_name")?,
+        clan: row.try_get("clan")?,
+        realm: row.try_get("realm")?,
+        ship_id: GameParamId::from(row.try_get::<i64, _>("ship_id")? as u64),
+        ship_index: row.try_get("ship_index")?,
+        ship_name: row.try_get("ship_name")?,
+        nation: row.try_get("nation")?,
+        species: row.try_get("species")?,
+        tier: row.try_get::<i64, _>("tier")? as u32,
+        relation,
+        division_id: row.try_get("division_id")?,
+        survived: row.try_get("survived")?,
+        damage: unsigned("damage")?,
+        kills: row.try_get("kills")?,
+        spotting: unsigned("spotting")?,
+        potential: unsigned("potential")?,
+        received: unsigned("received")?,
+        pr: row.try_get("pr")?,
+        mc: row.try_get("mc")?,
+        mc_version: row
+            .try_get::<Option<i64>, _>("mc_version")?
+            .and_then(|value| u32::try_from(value).ok())
+            .map(MatchContributionVersion),
+        mc_torpedoes_observed: row.try_get("mc_torpedoes_observed")?,
+        is_test_ship: row.try_get("is_test_ship")?,
+        disconnected: row.try_get("disconnected")?,
+        is_stream_sniper: row.try_get("is_stream_sniper")?,
+        sniper_twitch_login: row.try_get("sniper_twitch_login")?,
+    })
+}
+
 /// Bounded, case-insensitive player search for the cascading palette: non-bot accounts
 /// whose latest name contains `needle`, ranked by match count, capped at `limit`.
 /// An empty `needle` matches everything, so this also serves as "top players by count".

@@ -33,6 +33,7 @@ pub mod glyphs;
 pub mod index_rows;
 pub mod listing_row;
 pub mod match_stats;
+pub mod mcp;
 pub mod name_lookup;
 pub mod notices;
 pub mod palette;

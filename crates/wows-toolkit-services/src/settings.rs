@@ -9,6 +9,7 @@ use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::queries;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+use wows_toolkit_viewmodel::mcp::McpSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
@@ -97,6 +98,8 @@ pub struct StartupSettings {
     /// exists; a front end's settings control writes it for the next launch, as
     /// the egui settings tab's own does.
     pub code_integrity: wows_toolkit_hardening::CodeIntegrityPreference,
+    /// Whether the MCP server runs and where it listens.
+    pub mcp: McpSettings,
 }
 
 impl StartupSettings {
@@ -181,6 +184,8 @@ impl StartupSettings {
             queries::get_setting::<wows_toolkit_hardening::CodeIntegrityPreference>(pool, keys::CODE_INTEGRITY)
                 .await
                 .unwrap_or_default();
+        // Never enabled, on loopback, until the reader turns the server on.
+        let mcp = queries::get_setting::<McpSettings>(pool, keys::MCP_SERVER).await.unwrap_or_default();
 
         Self {
             zoom,
@@ -213,6 +218,7 @@ impl StartupSettings {
             suppress_gpu_encoder_warning,
             constants_commit,
             code_integrity,
+            mcp,
         }
     }
 }

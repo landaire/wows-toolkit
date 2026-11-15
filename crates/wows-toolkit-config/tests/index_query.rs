@@ -934,3 +934,37 @@ async fn rows_tied_on_the_sorted_column_fall_back_to_newest_first() {
     let hits = search_sorted(&db, SortColumn::Damage, SortDirection::Descending).await;
     assert_eq!(hits.iter().map(|h| h.arena).collect::<Vec<_>>(), vec![3, 2, 1], "seeded timestamps ascend with arena");
 }
+
+#[tokio::test]
+async fn roster_reads_one_arena_with_allies_first() {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+    seed_rosters(&pool).await;
+
+    let roster = query::roster(&pool, ArenaId::new(100)).await.unwrap();
+    let names: Vec<&str> = roster.iter().map(|row| row.player_name.as_str()).collect();
+    assert_eq!(names, ["p7", "p0", "p501"], "the recording player, then enemies by ship index");
+
+    let yamato = &roster[2];
+    assert_eq!(yamato.relation, VehicleRelation::Enemy);
+    assert_eq!(yamato.ship_id, GameParamId::from(111u64));
+    assert_eq!(yamato.damage, Some(90_000));
+    assert_eq!(yamato.pr, Some(1000.0));
+    assert_eq!(yamato.disconnected, Some(true));
+
+    assert!(query::roster(&pool, ArenaId::new(300)).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn replay_path_for_arena_prefers_a_record_seen_on_disk() {
+    let pool = mem_pool().await;
+    let src = seed_two_matches(&pool).await;
+    let mut unseen = sample_record(100, src, "newer-but-missing.wowsreplay");
+    unseen.file_mtime = None;
+    unseen.indexed_at = Timestamp::from_second(1_800_000_000).unwrap();
+    query::upsert_record(&pool, &unseen).await.unwrap();
+
+    let path = query::replay_path_for_arena(&pool, ArenaId::new(100)).await.unwrap();
+    assert_eq!(path, Some(PathBuf::from("a.wowsreplay")));
+    assert_eq!(query::replay_path_for_arena(&pool, ArenaId::new(300)).await.unwrap(), None);
+}

@@ -470,6 +470,7 @@ pub(crate) fn test_settings() -> StartupSettings {
         suppress_gpu_encoder_warning: false,
         constants_commit: None,
         code_integrity: Default::default(),
+        mcp: Default::default(),
     }
 }
 

@@ -430,6 +430,9 @@ pub enum IndexError {
     /// unique among non-NULL values.
     #[error("cannot relocate to {root_path:?}: already owned by source {owner:?}")]
     RootAlreadyOwned { root_path: PathBuf, owner: SourceId },
+    /// `indexed_vehicle.relation` holds a value this build does not know.
+    #[error("indexed_vehicle.relation holds {value:?}, which is not a known relation")]
+    UnknownRelation { value: String },
 }
 
 /// Whether a rating applies to a stored match, from the `game_type` and
