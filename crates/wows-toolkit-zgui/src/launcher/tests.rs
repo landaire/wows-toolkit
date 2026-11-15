@@ -199,6 +199,10 @@ pub(crate) fn na() -> AccountKey {
     AccountKey { realm: wgc_auth::AccountRealm::Na, account_id: wgc_auth::AccountId::new(1_034_874_630) }
 }
 
+fn asia() -> AccountKey {
+    AccountKey { realm: wgc_auth::AccountRealm::Asia, account_id: wgc_auth::AccountId::new(2_011_532_779) }
+}
+
 pub(crate) fn wgc_install(path: &Path) -> GameInstall {
     GameInstall {
         path: path.to_path_buf(),
@@ -640,6 +644,25 @@ fn without_an_install_the_popover_adds_a_folder() {
 }
 
 #[test]
+fn each_account_row_marks_its_realm_with_a_regional_globe() {
+    let mut launcher = LauncherWindow::open();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab"), (na(), "Queequeg"), (asia(), "Starbuck")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+    launcher.press("launcher-play-menu");
+
+    for (id, icon, name) in [
+        ("launcher-account-eu-697769785-realm", "earth-europe", "Europe"),
+        ("launcher-account-na-1034874630-realm", "earth-americas", "North America"),
+        ("launcher-account-asia-2011532779-realm", "earth-asia", "Asia"),
+    ] {
+        let globe = launcher.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        assert_eq!(launcher.window.attribute(globe, "data-icon").as_deref(), Some(icon), "{id}");
+        assert_eq!(launcher.window.a11y(globe).and_then(|state| state.label).as_deref(), Some(name), "{id}");
+    }
+}
+
+#[test]
 fn the_realm_picker_offers_eu_na_and_asia_only() {
     let mut launcher = ready();
     launcher.press("launcher-play-menu");
@@ -975,7 +998,7 @@ fn the_launcher_surfaces_render() {
     };
     for (appearance, suffix) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
         let mut launcher = LauncherWindow::open_drawn(appearance);
-        let settings = launcher.enabled_settings(&[(na(), "Captain_Ahab"), (eu(), "Queequeg")]);
+        let settings = launcher.enabled_settings(&[(na(), "Captain_Ahab"), (eu(), "Queequeg"), (asia(), "Starbuck")]);
         launcher.adopt(settings);
         launcher.found(up_to_date());
         launcher.set_session(na(), TestSession::SignedIn("Captain_Ahab".into()));

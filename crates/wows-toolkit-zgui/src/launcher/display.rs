@@ -95,13 +95,13 @@ pub enum PlayState {
     },
     Play(AccountLabel),
     Starting {
-        realm: Option<&'static str>,
+        realm: Option<wgc_auth::AccountRealm>,
     },
     Running {
-        realm: Option<&'static str>,
+        realm: Option<wgc_auth::AccountRealm>,
     },
     InBattle {
-        realm: Option<&'static str>,
+        realm: Option<wgc_auth::AccountRealm>,
     },
 }
 
@@ -113,9 +113,8 @@ impl PlayState {
         };
         let launcher = &state.launcher;
 
-        let realm = |game: &GameState| {
-            game.account().and_then(|key| settings.account(key)).map(|account| realm_badge(account.key.realm))
-        };
+        let realm =
+            |game: &GameState| game.account().and_then(|key| settings.account(key)).map(|account| account.key.realm);
         match launcher.game_state() {
             GameState::Idle => {}
             game @ GameState::Starting { .. } => return Self::Starting { realm: realm(game) },
@@ -168,11 +167,11 @@ impl PlayState {
         matches!(self, Self::Play(_) | Self::Update { .. } | Self::AddAccount)
     }
 
-    /// The realm badge the collapsed button keeps.
-    pub fn realm(&self) -> Option<&'static str> {
+    /// The realm whose badge the collapsed button keeps.
+    pub fn realm(&self) -> Option<wgc_auth::AccountRealm> {
         match self {
-            Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(account.realm),
-            Self::Update { account, .. } => Some(account.realm),
+            Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(account.key.realm),
+            Self::Update { account, .. } => Some(account.key.realm),
             Self::Starting { realm } | Self::Running { realm } | Self::InBattle { realm } => *realm,
             _ => None,
         }

@@ -52,6 +52,7 @@ use crate::launcher::SHEET;
 use crate::launcher::display::SignInStep;
 use crate::launcher::display::realm_badge;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::realm::RealmGlyphProps;
 use crate::services::Services;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
@@ -222,7 +223,8 @@ fn Credentials(model: LauncherModel, form: SignInForm, target: LoginTarget) -> i
         .map(|realm| {
             AnyView::new(view! {
                 ToggleGroupItem(value = realm_value(realm), attr:data-testid = format!("launcher-realm-{}", realm_value(realm))) {
-                    {wows_toolkit_launcher::realm_label(realm)}
+                    RealmGlyph(realm = realm, attr:data-testid = format!("launcher-realm-{}-glyph", realm_value(realm)))
+                    text {{wows_toolkit_launcher::realm_label(realm)}}
                 }
             })
         })

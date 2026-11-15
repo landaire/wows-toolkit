@@ -131,6 +131,14 @@ used_in = "crates/wows-toolkit-icons"
 files = [{ path = "crates/wows-toolkit-icons/icons/LICENSE-SIMPLE-ICONS" }]
 
 [[component]]
+name = "Font Awesome Free icons"
+version = "6.7.2"
+license = "CC-BY-4.0"
+url = "https://fontawesome.com"
+used_in = "crates/wows-toolkit-icons"
+files = [{ path = "crates/wows-toolkit-icons/icons/LICENSE-FONT-AWESOME" }]
+
+[[component]]
 name = "three.js"
 license = "MIT"
 url = "https://threejs.org"

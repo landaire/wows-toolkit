@@ -37,6 +37,7 @@ use crate::launcher::games::GamesListProps;
 use crate::launcher::installs::add_install;
 use crate::launcher::model::LauncherModel;
 use crate::launcher::options::RunnerControlProps;
+use crate::launcher::realm::RealmGlyphProps;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
 
@@ -338,6 +339,7 @@ fn AccountsStep(model: LauncherModel) -> impl IntoView {
         text {{t!("ui.launcher.setup.accounts_explain").into_owned()}}
         for row in move || rows.get(), key = |row: &AccountRow| row.label.clone() {
             row(class = "wt-launcher__row", attr:data-testid = format!("launcher-setup-account-{}", row.label.key.account_id.get())) {
+                RealmGlyph(realm = row.label.key.realm)
                 text(class = "wt-launcher__badge") {{row.label.realm}}
                 text {{row.label.nickname.clone()}}
             }

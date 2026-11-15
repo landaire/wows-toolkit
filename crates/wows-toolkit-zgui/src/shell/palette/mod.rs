@@ -434,11 +434,19 @@ struct Offered<K, V> {
     value: V,
 }
 
-/// A command's run, and the label its offer gives it in place of the command's own.
+/// An icon an offer draws before its label, and what a screen reader calls it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct OfferGlyph {
+    pub glyph: Glyph,
+    pub label: String,
+}
+
+/// A command's run, and the label and icon its offer gives it in place of the command's own.
 #[derive(Clone)]
 struct CommandOffer {
     run: PaletteRun,
     label: Option<String>,
+    glyph: Option<OfferGlyph>,
 }
 
 /// One root entry as the list shows it.
@@ -446,6 +454,7 @@ struct CommandOffer {
 struct RootRow {
     item: RootItem,
     label: String,
+    glyph: Option<OfferGlyph>,
     marks: Marks,
 }
 
@@ -531,18 +540,18 @@ impl PaletteControl {
     /// Lists `command` on the root list until the calling scope is cleaned up. A later offer of
     /// the same command is the one run while both stand.
     pub fn offer(self, command: RootCommand, run: PaletteRun) {
-        self.offer_with_label(command, None, run);
+        self.push_offer(command, CommandOffer { run, label: None, glyph: None });
     }
 
-    /// [`Self::offer`], with the entry saying `label` in place of the command's own words.
-    pub fn offer_labelled(self, command: RootCommand, label: String, run: PaletteRun) {
-        self.offer_with_label(command, Some(label), run);
+    /// [`Self::offer`], with the entry saying `label` in place of the command's own words, after
+    /// `glyph`.
+    pub fn offer_labelled(self, command: RootCommand, label: String, glyph: Option<OfferGlyph>, run: PaletteRun) {
+        self.push_offer(command, CommandOffer { run, label: Some(label), glyph });
     }
 
-    fn offer_with_label(self, command: RootCommand, label: Option<String>, run: PaletteRun) {
+    fn push_offer(self, command: RootCommand, offer: CommandOffer) {
         let id = OfferId(self.next());
-        self.commands
-            .update(|commands| commands.push(Offered { id, key: command, value: CommandOffer { run, label } }));
+        self.commands.update(|commands| commands.push(Offered { id, key: command, value: offer }));
         on_cleanup_local(move || {
             self.commands.try_update(|commands| commands.retain(|offered| offered.id != id));
         });
@@ -595,6 +604,14 @@ impl PaletteControl {
         })
     }
 
+    /// The icon the latest offer of `item` gives it, if it gives one.
+    fn offered_glyph(self, item: RootItem) -> Option<OfferGlyph> {
+        let RootItem::Command(command) = item else { return None };
+        self.commands.with(|commands| {
+            commands.iter().rev().find(|offered| offered.key == command).and_then(|offered| offered.value.glyph.clone())
+        })
+    }
+
     fn command_run(self, command: RootCommand) -> Option<PaletteRun> {
         self.commands.with_untracked(|commands| {
             commands.iter().rev().find(|offered| offered.key == command).map(|offered| offered.value.run.clone())
@@ -619,7 +636,8 @@ impl PaletteControl {
         let query = FilterQuery::new(query);
         let keyed = items.into_iter().map(|item| {
             let label = self.offered_label(item).unwrap_or_else(|| item.label());
-            (FilterKey::new(&label), RootRow { item, label, marks: Marks::default() })
+            let glyph = self.offered_glyph(item);
+            (FilterKey::new(&label), RootRow { item, label, glyph, marks: Marks::default() })
         });
         query
             .rank(keyed, |(key, _)| key)

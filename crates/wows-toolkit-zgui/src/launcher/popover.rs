@@ -52,6 +52,7 @@ use crate::launcher::download::DownloadStatusProps;
 use crate::launcher::installs::add_install;
 use crate::launcher::model::LauncherModel;
 use crate::launcher::play::play;
+use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::replay;
 use crate::launcher::setup;
 use crate::shell::Shell;
@@ -407,6 +408,7 @@ fn AccountRowView(
             attr:data-testid = id.clone(),
             attr:data-default = is_default.then(String::new)
         ) {
+            RealmGlyph(realm = key.realm, attr:data-testid = format!("{id}-realm"))
             text(class = "wt-launcher__badge") {{label.realm}}
             column(class = "wt-account-row__name") {
                 Button(

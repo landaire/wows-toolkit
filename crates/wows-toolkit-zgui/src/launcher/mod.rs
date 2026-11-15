@@ -17,6 +17,7 @@ mod options;
 mod palette;
 mod play;
 mod popover;
+mod realm;
 pub mod replay;
 mod setup;
 #[cfg(test)]

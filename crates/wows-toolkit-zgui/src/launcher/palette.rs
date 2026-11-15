@@ -17,9 +17,12 @@ use crate::launcher::display::PlayState;
 use crate::launcher::model::LauncherModel;
 use crate::launcher::play::play;
 use crate::launcher::play::start_update;
+use crate::launcher::realm::realm_glyph;
+use crate::launcher::realm::realm_name;
 use crate::launcher::replay;
 use crate::shell::Shell;
 use crate::shell::palette::LauncherCommand;
+use crate::shell::palette::OfferGlyph;
 use crate::shell::palette::PaletteRun;
 use crate::shell::palette::RootCommand;
 
@@ -72,9 +75,11 @@ pub fn LauncherOffers(shell: Shell, model: LauncherModel) -> impl IntoView {
 fn PlayAsOffer(shell: Shell, model: LauncherModel, account: AccountLabel) -> impl IntoView {
     let key = account.key;
     let label = t!("ui.launcher.palette.play_as", nickname = account.nickname, realm = account.realm).into_owned();
+    let glyph = OfferGlyph { glyph: realm_glyph(key.realm), label: realm_name(key.realm) };
     shell.palette.offer_labelled(
         RootCommand::Launcher(LauncherCommand::PlayAs(key)),
         label,
+        Some(glyph),
         PaletteRun::action(move || play(shell, model, key, false)),
     );
 }

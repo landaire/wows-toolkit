@@ -2034,6 +2034,11 @@ keyring_locked = "Your system keyring is locked. Unlock it, then sign in again."
 not_saved = "Signed in, but the sign-in could not be saved. You will sign in again after a restart."
 unexpected = "Sign-in failed. The log has the details."
 
+[ui.launcher.realm]
+eu = "Europe"
+na = "North America"
+asia = "Asia"
+
 [ui.launcher.options]
 heading = "Launch options"
 extra_args = "Extra launch args (one per line)"

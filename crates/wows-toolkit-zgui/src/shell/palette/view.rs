@@ -80,6 +80,7 @@ use crate::shell::palette::ModeRow;
 use crate::shell::palette::ModeRows;
 use crate::shell::palette::ModeSource;
 use crate::shell::palette::ModeSpec;
+use crate::shell::palette::OfferGlyph;
 use crate::shell::palette::Opening;
 use crate::shell::palette::RootRow;
 use crate::shell::palette::builtin;
@@ -263,13 +264,29 @@ fn RootList(shell: Shell, query: RwSignal<String, LocalStorage>) -> impl IntoVie
                         a11y:label = row.label.clone(),
                         attr:data-testid = format!("palette-item-{}", row.item.value())
                     ) {
-                        MarkedText(text = row.label.clone(), ranges = row.marks.clone())
+                        {root_label(&row)}
                     }
                 }
                 CommandEmpty {{locale.text("ui.search.no_matches")}}
             }
         }
     }
+}
+
+/// A root entry's label, after the icon its offer gives it.
+fn root_label(row: &RootRow) -> AnyView {
+    let name = AnyView::new(view! { MarkedText(text = row.label.clone(), ranges = row.marks.clone()) });
+    let Some(OfferGlyph { glyph, label }) = row.glyph.clone() else {
+        return name;
+    };
+    let icon = AnyView::new(view! { AppIcon(glyph = glyph, label = label) });
+
+    AnyView::new(view! {
+        row(class = "wt-palette__row") {
+            {icon}
+            {name}
+        }
+    })
 }
 
 /// One mode's list, under a header leading back to the root list.

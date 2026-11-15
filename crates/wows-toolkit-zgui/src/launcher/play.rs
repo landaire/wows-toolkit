@@ -45,9 +45,11 @@ use crate::launcher::CSS;
 use crate::launcher::SHEET;
 use crate::launcher::account::open_sign_in;
 use crate::launcher::display::PlayState;
+use crate::launcher::display::realm_badge;
 use crate::launcher::model::LauncherModel;
 use crate::launcher::palette::LauncherOffersProps;
 use crate::launcher::popover::AccountPopoverProps;
+use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::setup;
 use crate::shell::Shell;
 use crate::shell::tabs::AppTab;
@@ -209,7 +211,8 @@ fn content(state: PlayState, collapsed: bool) -> AnyView {
         } else {}
         {optional(glyph.map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph) })))}
         {optional(words.map(|words| AnyView::new(view! { text(class = "wt-play__label", attr:data-testid = "launcher-play-label") {{words}} })))}
-        {optional(realm.map(|realm| AnyView::new(view! { text(class = "wt-play__realm", attr:data-testid = "launcher-play-realm") {{realm}} })))}
+        {optional(realm.map(|realm| AnyView::new(view! { RealmGlyph(realm = realm, attr:data-testid = "launcher-play-realm-glyph") })))}
+        {optional(realm.map(|realm| AnyView::new(view! { text(class = "wt-play__realm", attr:data-testid = "launcher-play-realm") {{realm_badge(realm)}} })))}
         {optional(nickname.map(|nickname| AnyView::new(view! { text(class = "wt-play__nickname") {{nickname}} })))}
     })
 }

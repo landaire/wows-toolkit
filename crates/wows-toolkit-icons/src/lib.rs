@@ -1,5 +1,6 @@
-//! The icons the desktop front ends draw: Lucide's (ISC, `icons/LICENSE-LUCIDE`), and brand logos
-//! from Simple Icons (CC0, `icons/LICENSE-SIMPLE-ICONS`), which Lucide does not draw.
+//! The icons the desktop front ends draw: Lucide's (ISC, `icons/LICENSE-LUCIDE`), brand logos
+//! from Simple Icons (CC0, `icons/LICENSE-SIMPLE-ICONS`), and regional globes from Font Awesome
+//! Free (CC BY 4.0, `icons/LICENSE-FONT-AWESOME`), which Lucide does not draw.
 //!
 //! Every document paints in `currentColor`, so an icon takes the colour of the text around it.
 
@@ -29,6 +30,9 @@ macro_rules! glyph_list {
             Crosshair => "crosshair",
             Database => "database",
             Download => "download",
+            EarthAmericas => "earth-americas",
+            EarthAsia => "earth-asia",
+            EarthEurope => "earth-europe",
             Equal => "equal",
             Eraser => "eraser",
             Eye => "eye",
