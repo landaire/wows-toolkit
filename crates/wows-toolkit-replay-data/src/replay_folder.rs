@@ -122,7 +122,7 @@ impl ReplayFolder {
 
     /// [`Self::from_install`] with the overlay state under the app's data directory.
     pub fn from_app_install(install_dir: &Path) -> ReplayFolder {
-        let runtime_dirs = wows_toolkit_config::storage_dir().map(|dir| RuntimeDirs::new(&dir));
+        let runtime_dirs = app_runtime_dirs();
 
         Self::from_install(install_dir, runtime_dirs.as_ref())
     }
@@ -165,6 +165,29 @@ impl ReplayFolder {
             Some(install) => install.files.layer_dirs(&install.relative).unwrap_or_else(|_| vec![self.path.clone()]),
             None => vec![self.path.clone()],
         }
+    }
+
+    /// Whether the folder spans the layers of an overlay.
+    pub fn is_overlaid(&self) -> bool {
+        self.overlay().is_some()
+    }
+
+    /// The paths of `path`'s name in the folder's other layers: the copies the game replaced when
+    /// it rewrote the file under an overlay. Empty for a folder that is not overlaid, or a path
+    /// outside the folder.
+    pub fn layer_copies(&self, path: &Path) -> Vec<PathBuf> {
+        let (Some(name), Some(parent)) = (path.file_name(), path.parent()) else {
+            return Vec::new();
+        };
+        if !self.is_overlaid() {
+            return Vec::new();
+        }
+        let dirs = self.content_dirs();
+        if !dirs.iter().any(|dir| dir == parent) {
+            return Vec::new();
+        }
+
+        dirs.into_iter().map(|dir| dir.join(name)).filter(|copy| copy != path).collect()
     }
 
     /// Where a battle in progress keeps its two halves. A half that does not exist yet is named
@@ -399,6 +422,12 @@ impl SettingsFiles for ViewFiles<'_> {
     fn write_path(&self, relative: &Path) -> io::Result<PathBuf> {
         self.0.resolve_write(relative)
     }
+}
+
+/// Where the launcher keeps the game runtime and install overlays: under the app's data directory.
+/// `None` when the app has no data directory, in which case no overlay can exist.
+pub fn app_runtime_dirs() -> Option<RuntimeDirs> {
+    wows_toolkit_config::storage_dir().map(|dir| RuntimeDirs::new(&dir))
 }
 
 /// The install's files as the game sees them. An install the launcher ran from an overlay is read

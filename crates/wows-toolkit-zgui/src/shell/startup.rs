@@ -1,12 +1,12 @@
 //! What happens once the window is open: the settings read, and everything that waits on it.
 
-use std::path::Path;
 use std::path::PathBuf;
 
 use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_replay_data::force_reindex::version_said;
 use wows_toolkit_replay_data::heap_profile;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_services::constants::Checked;
 use wows_toolkit_services::settings::StartupSettings;
@@ -296,13 +296,16 @@ fn rebuild_stale_index(services: Services, shell: Shell) {
             return true;
         }
 
-        let root = Path::new(&wows_dir).join("replays");
-        let stale = services.on_tokio(async move {
-            let rateable_mc = crate::shell::replay_index::cached_rateable_mc();
-            wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root, rateable_mc).await
-        });
+        let wows_dir = PathBuf::from(wows_dir);
         spawn_local(async move {
-            match stale.await {
+            let dirs = blocking(move || ReplayFolder::from_app_install(&wows_dir).content_dirs()).await;
+            let stale = services
+                .on_tokio(async move {
+                    let rateable_mc = crate::shell::replay_index::cached_rateable_mc();
+                    wows_toolkit_replay_data::replay_index::has_stale_records_in(&pool, &dirs, rateable_mc).await
+                })
+                .await;
+            match stale {
                 Ok(Ok(true)) => shell.build_replay_index(IndexMode::FillGaps),
                 Ok(Ok(false)) => {}
                 Ok(Err(err)) => tracing::warn!(%err, "replay index revision could not be checked"),

@@ -14,6 +14,7 @@ use std::sync::atomic::Ordering;
 
 use jiff::Timestamp;
 use sqlx::SqlitePool;
+use wows_core::game_types::MatchContributionVersion;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::IndexWriteMode;
@@ -31,6 +32,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use crate::load::GameDataCache;
 use crate::load::IndexableBattle;
 use crate::load::parse_replay;
+use crate::replay_folder::ReplayFolder;
 
 /// The extension the game records replays under.
 const REPLAY_EXTENSION: &str = "wowsreplay";
@@ -325,8 +327,29 @@ pub async fn repair_missing_pr(pool: &SqlitePool, personal_rating: &PersonalRati
     query::apply_pr_repairs(pool, &repairs).await
 }
 
-/// Walks `root` and indexes every replay under it into `source_id`,
-/// reporting as it goes.
+/// Walks `root` and indexes every replay under it into `source_id`. See
+/// [`build_folder_index`].
+#[allow(clippy::too_many_arguments)]
+pub fn build_index(
+    runtime: &tokio::runtime::Runtime,
+    pool: &SqlitePool,
+    source_id: SourceId,
+    root: &Path,
+    game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
+    cancel: &AtomicBool,
+    mode: IndexMode,
+    report: impl Fn(IndexProgress),
+) -> Result<IndexProgress, IndexError> {
+    let folder = ReplayFolder::from_dir(root.to_path_buf());
+
+    build_folder_index(runtime, pool, source_id, &folder, game_data, personal_rating, cancel, mode, report)
+}
+
+/// Walks `folder` and indexes every replay in it into `source_id`,
+/// reporting as it goes. A replay is recorded under the real path it is read
+/// from; when an overlaid install's game rewrites one, the record of the copy
+/// it replaced is dropped, so the battle is held once.
 ///
 /// One replay's failure does not stop the pass: a directory of a few hundred
 /// replays reliably holds one the parser cannot read, and stopping there
@@ -335,11 +358,11 @@ pub async fn repair_missing_pr(pool: &SqlitePool, personal_rating: &PersonalRati
 /// `cancel` is checked between replays, so a build stops within one parse of
 /// being asked to.
 #[allow(clippy::too_many_arguments)]
-pub fn build_index(
+pub fn build_folder_index(
     runtime: &tokio::runtime::Runtime,
     pool: &SqlitePool,
     source_id: SourceId,
-    root: &Path,
+    folder: &ReplayFolder,
     game_data: &GameDataCache,
     personal_rating: Option<&PersonalRatingData>,
     cancel: &AtomicBool,
@@ -361,8 +384,10 @@ pub fn build_index(
     // tried again.
     let mut unindexable = runtime.block_on(Unindexable::load(pool));
     let mut ledger_grew = false;
+    // Records of copies a replay that is now indexed replaced in another layer.
+    let mut superseded: Vec<PathBuf> = Vec::new();
 
-    let replays = replays_under(root);
+    let replays = folder_replays(folder);
     let mut progress = IndexProgress { total: replays.len() as u64, ..IndexProgress::default() };
     report(progress);
 
@@ -371,6 +396,9 @@ pub fn build_index(
             break;
         }
         let known = indexed.contains(path.to_string_lossy().as_ref());
+        if known {
+            superseded.extend(folder.layer_copies(&path));
+        }
         if known || unindexable.contains(&path) {
             progress.skipped += 1;
             progress.done += 1;
@@ -380,7 +408,10 @@ pub fn build_index(
 
         let indexed_at = Timestamp::now();
         match index_one(runtime, pool, &path, game_data, personal_rating, source_id, indexed_at, mode.write_mode()) {
-            Ok(()) => progress.indexed += 1,
+            Ok(()) => {
+                progress.indexed += 1;
+                superseded.extend(folder.layer_copies(&path));
+            }
             Err(err) => {
                 tracing::warn!("replay index: {} contributed nothing: {err}", path.display());
                 progress.failed += 1;
@@ -396,11 +427,53 @@ pub fn build_index(
     if ledger_grew && let Err(err) = runtime.block_on(unindexable.save(pool)) {
         tracing::warn!("replay index: the unreadable-file ledger was not written: {err}");
     }
+    if !superseded.is_empty() {
+        runtime.block_on(query::forget_records(pool, source_id, &superseded))?;
+    }
     if !cancel.load(Ordering::Relaxed) {
-        runtime.block_on(query::mark_replay_records_current(pool, source_id, root, rateable_mc))?;
+        for dir in folder.content_dirs() {
+            runtime.block_on(query::mark_replay_records_current(pool, source_id, &dir, rateable_mc))?;
+        }
     }
 
     Ok(progress)
+}
+
+/// Whether a replay directly in any of `dirs`, the directories a live folder spans, needs the
+/// current parser to refresh it.
+pub async fn has_stale_records_in(
+    pool: &SqlitePool,
+    dirs: &[PathBuf],
+    rateable_mc: Option<MatchContributionVersion>,
+) -> Result<bool, IndexError> {
+    for dir in dirs {
+        if query::has_stale_replay_records(pool, dir, rateable_mc).await? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+/// The replays of `folder`, newest first. A plain directory is walked as [`replays_under`] walks
+/// it.
+fn folder_replays(folder: &ReplayFolder) -> Vec<PathBuf> {
+    if !folder.is_overlaid() {
+        return replays_under(folder.path());
+    }
+
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = folder
+        .replay_files()
+        .into_iter()
+        .map(|path| {
+            // As in `replays_under`: a time that cannot be read sorts as the oldest.
+            let modified = std::fs::metadata(&path).and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            (modified, path)
+        })
+        .collect();
+    found.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+
+    found.into_iter().map(|(_, path)| path).collect()
 }
 
 /// Reads each of `replays` and writes everything the index holds for it
@@ -726,5 +799,47 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert!(found[0].ends_with("newer.wowsreplay"), "a build stopped part-way covers the newest first");
         assert!(found[1].ends_with("older.wowsreplay"));
+    }
+
+    /// A replay the game rewrote under an overlay is held once: the record of the copy it replaced
+    /// in the install is dropped once the rewritten one is indexed.
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_up_replaces_the_record_of_the_install_copy() {
+        let tmp = tempfile::tempdir().expect("a temporary directory");
+        let base = std::fs::canonicalize(tmp.path()).expect("the directory resolves");
+        let install = base.join("install");
+        let dirs = wgc_launch::RuntimeDirs::new(&base.join("app"));
+        let state = dirs.install_state(&install);
+        std::fs::create_dir_all(state.upper().join("replays")).expect("the upper directory is made");
+        std::fs::write(state.backend_record(), "fuse-overlayfs").expect("the backend is recorded");
+        std::fs::create_dir_all(install.join("replays")).expect("the replays directory is made");
+        let lower = touch(&install.join("replays"), "battle.wowsreplay");
+        let upper = touch(&state.upper().join("replays"), "battle.wowsreplay");
+        let folder = ReplayFolder::from_install(&install, Some(&dirs));
+
+        let rt = runtime();
+        let pool = rt.block_on(wows_toolkit_config::test_pool());
+        rt.block_on(store_rated_battle(&pool, &lower, None));
+        let source = rt.block_on(store_rated_battle(&pool, &upper, None));
+
+        let cancel = AtomicBool::new(false);
+        let built = build_folder_index(
+            &rt,
+            &pool,
+            source,
+            &folder,
+            &GameDataCache::without_install(),
+            None,
+            &cancel,
+            IndexMode::FillGaps,
+            |_| {},
+        )
+        .expect("the pass runs");
+
+        assert_eq!(built.skipped, 1, "the rewritten copy is already indexed");
+        let summaries = rt.block_on(query::row_summaries_for_source(&pool, source)).expect("the summaries read");
+        let held: Vec<&PathBuf> = summaries.keys().collect();
+        assert_eq!(held, vec![&upper], "only the copy the game sees is held");
     }
 }

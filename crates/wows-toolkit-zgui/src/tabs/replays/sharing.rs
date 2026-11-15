@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -15,6 +16,7 @@ use wows_toolkit_config::upload_skips::StableUploadSkips;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::parse_replay;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_services::upload;
 use wows_toolkit_services::upload::Candidate;
 use wows_toolkit_services::upload::LedgerUse;
@@ -92,6 +94,10 @@ impl Contributor {
 
     /// Reads `path` and sends what the setting asks for, if anything.
     pub async fn contribute(&self, path: PathBuf, ledger: LedgerUse) -> Result<Outcome, ContributeError> {
+        // The ledger names a battle the game rewrote under an overlay by the copy it replaced.
+        if ledger == LedgerUse::Consult && self.layer_copy_contributed(&path).await {
+            return Ok(Outcome::AlreadySent);
+        }
         let (reading, cache) = (path.clone(), self.game_data.clone());
         let parsed = long_job(move || parse_replay(&reading, &cache, None)).await.map_err(ContributeError::Unparsed)?;
 
@@ -110,11 +116,40 @@ impl Contributor {
             .map_err(ContributeError::Tokio)
     }
 
-    /// Whether the ledger already has `path`. A ledger that cannot be read answers `false`, and
-    /// the send asks again.
+    /// Whether the ledger already has `path`, or its copy in another layer of the install's
+    /// overlay. A ledger that cannot be read answers `false`, and the send asks again.
     pub async fn already_contributed(&self, path: &Path) -> bool {
-        let (pool, named) = (self.pool.clone(), path.to_path_buf());
-        self.services.on_tokio(async move { upload::already_contributed(&pool, &named).await }).await.unwrap_or(false)
+        self.ledger_has(vec![path.to_path_buf()]).await || self.layer_copy_contributed(path).await
+    }
+
+    async fn layer_copy_contributed(&self, path: &Path) -> bool {
+        let Some(wows_dir) = self.services.settings.read_untracked(|settings| settings.wows_dir.clone()) else {
+            return false;
+        };
+        if wows_dir.is_empty() {
+            return false;
+        }
+        let named = path.to_path_buf();
+        let copies = long_job(move || ReplayFolder::from_app_install(Path::new(&wows_dir)).layer_copies(&named)).await;
+        self.ledger_has(copies).await
+    }
+
+    async fn ledger_has(&self, paths: Vec<PathBuf>) -> bool {
+        if paths.is_empty() {
+            return false;
+        }
+        let pool = self.pool.clone();
+        self.services
+            .on_tokio(async move {
+                for path in &paths {
+                    if upload::already_contributed(&pool, path).await {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await
+            .unwrap_or(false)
     }
 
     /// Records that `paths`, as they are now, will never be taken, so the startup sweep does not
@@ -145,9 +180,9 @@ impl Contributor {
         }
     }
 
-    /// The replays in `dir` the startup sweep reads: every battle the game wrote that is neither
+    /// The replays in `folder` the startup sweep reads: every battle the game wrote that is neither
     /// in the ledger, nor unreadable, nor known never to be taken.
-    pub async fn unsent_in(&self, dir: PathBuf) -> Vec<PathBuf> {
+    pub async fn unsent_in(&self, folder: ReplayFolder) -> Vec<PathBuf> {
         let pool = self.pool.clone();
         let ledgers = self
             .services
@@ -169,7 +204,16 @@ impl Contributor {
             }
         };
         let sent: HashSet<String> = sent.into_iter().collect();
-        long_job(move || unsent(battles_in(&dir), &sent, &unindexable, &skips)).await
+        long_job(move || {
+            unsent(battles_of(&folder), &sent, &unindexable, &skips)
+                .into_iter()
+                // A battle the game rewrote under an overlay was sent as the copy it replaced.
+                .filter(|path| {
+                    !folder.layer_copies(path).iter().any(|copy| sent.contains(copy.to_string_lossy().as_ref()))
+                })
+                .collect()
+        })
+        .await
     }
 
     async fn first_seen(&self, path: &Path) -> Result<jiff::Timestamp, AnchorError> {
@@ -196,21 +240,22 @@ impl Contributor {
 }
 
 /// The replays being read for sharing now, by any of the paths that contribute. A second read of
-/// one waits for the first, so two cannot both find the ledger empty and send it twice.
+/// one waits for the first, so two cannot both find the ledger empty and send it twice. Keyed by
+/// file name: under an install overlay one battle has a path in each layer.
 #[derive(Clone, Copy)]
 pub struct SharingReads {
-    reading: StoredValue<HashMap<PathBuf, Reading>, LocalStorage>,
+    reading: StoredValue<HashMap<OsString, Reading>, LocalStorage>,
     /// Reads a replay again that was asked for while another read held it.
     again: StoredValue<Option<ReadAgain>, LocalStorage>,
 }
 
 type ReadAgain = Rc<dyn Fn(PathBuf)>;
 
-/// Whether the replay was asked for again while it was being read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Whether the replay was asked for again while it was being read, and at which path.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Reading {
     Once,
-    Again,
+    Again(PathBuf),
 }
 
 impl SharingReads {
@@ -223,17 +268,19 @@ impl SharingReads {
         self.again.set_value(Some(Rc::new(read)));
     }
 
-    /// Marks `path` as being read. `false` when it already is, which asks for it to be read again
-    /// once that read ends, since the file may have changed after it was read.
+    /// Marks `path` as being read. `false` when it, or its copy in another overlay layer, already
+    /// is, which asks for it to be read again once that read ends, since the file may have
+    /// changed after it was read.
     pub fn begin(self, path: &Path) -> bool {
+        let key = reading_key(path);
         self.reading
-            .try_update_value(|reading| match reading.get_mut(path) {
+            .try_update_value(|reading| match reading.get_mut(&key) {
                 Some(state) => {
-                    *state = Reading::Again;
+                    *state = Reading::Again(path.to_path_buf());
                     false
                 }
                 None => {
-                    reading.insert(path.to_path_buf(), Reading::Once);
+                    reading.insert(key, Reading::Once);
                     true
                 }
             })
@@ -242,15 +289,18 @@ impl SharingReads {
 
     /// Ends the read of `path`, and reads it again if that was asked for meanwhile.
     pub fn finish(self, path: &Path) {
-        let state = self.reading.try_update_value(|reading| reading.remove(path)).flatten();
-        if state != Some(Reading::Again) {
-            return;
-        }
+        let key = reading_key(path);
+        let state = self.reading.try_update_value(|reading| reading.remove(&key)).flatten();
+        let Some(Reading::Again(asked)) = state else { return };
         // Taken out first: the read starts with `begin`, which updates `reading`.
         if let Some(read) = self.again.try_get_value().flatten() {
-            read(path.to_path_buf());
+            read(asked);
         }
     }
+}
+
+fn reading_key(path: &Path) -> OsString {
+    path.file_name().map_or_else(|| path.as_os_str().to_owned(), ToOwned::to_owned)
 }
 
 impl Default for SharingReads {
@@ -293,6 +343,19 @@ pub fn battles_in(dir: &Path) -> Vec<PathBuf> {
         })
         .collect();
     battles.sort();
+    battles
+}
+
+/// The finished battles of `folder`, at the real paths they are read from. A plain directory is
+/// read as [`battles_in`] reads it.
+pub fn battles_of(folder: &ReplayFolder) -> Vec<PathBuf> {
+    if !folder.is_overlaid() {
+        return battles_in(folder.path());
+    }
+
+    let mut battles = folder.replay_files();
+    battles.sort();
+
     battles
 }
 

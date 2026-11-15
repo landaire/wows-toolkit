@@ -28,6 +28,7 @@ use wows_game_settings::Volume;
 use wows_game_settings::WindowMode;
 use wows_toolkit_launcher::InstallSettingsFiles;
 use wows_toolkit_launcher::installed_builds;
+use wows_toolkit_replay_data::replay_folder::app_runtime_dirs;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -188,7 +189,7 @@ impl SettingsTarget {
     /// The default account's install, else the app's game directory.
     fn of(model: LauncherModel) -> Option<Self> {
         let wows_dir = model.wows_dir_untracked();
-        let dirs = wows_toolkit_config::storage_dir().map(|dir| RuntimeDirs::new(&dir));
+        let dirs = app_runtime_dirs();
         model.with_untracked(|state| {
             let settings = state.settings.as_ref()?;
             let account = settings.default_account().or_else(|| settings.accounts.first());

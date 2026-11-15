@@ -1,10 +1,10 @@
-//! Building the replay index over the install's replays directory, as the settings drawer and the
+//! Building the replay index over the install's replays folder, as the settings drawer and the
 //! palette start it.
 //!
 //! The build outlives the drawer, which is rebuilt each time it opens, so its state is the shell's
 //! and its task is detached.
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
@@ -20,6 +21,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::blocking;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
@@ -113,11 +115,11 @@ impl Default for ReplayIndexJobs {
 }
 
 impl Shell {
-    /// Walks the install's replays directory and indexes what is in it.
+    /// Walks the install's replays folder and indexes what is in it.
     ///
-    /// The whole directory rather than what changed: this is the control for building an index
-    /// that is not there, or rebuilding one whose rows an older parse got wrong. Refused without a
-    /// game directory, since the replays are under it, and while another build runs.
+    /// The whole folder rather than what changed: this is the control for building an index that
+    /// is not there, or rebuilding one whose rows an older parse got wrong. Refused without a game
+    /// directory, since the replays are under it, and while another build runs.
     pub fn build_replay_index(self, mode: IndexMode) {
         let index = self.replay_index;
         // Two passes at once would each load and save the unreadable-file ledger over the other's.
@@ -136,7 +138,9 @@ impl Shell {
         let Some(game_data) = services.game_data.cache_untracked() else { return };
         let Some(proxy) = services.settings.read_untracked(|settings| settings.proxy_url.clone()) else { return };
 
-        let root = Path::new(&wows_dir).join("replays");
+        let wows_dir = PathBuf::from(wows_dir);
+        // Roots the Live source when this pass creates it; the replays are read from the folder.
+        let root = wows_dir.join("replays");
         let cancel = Arc::new(AtomicBool::new(false));
         index.cancel.set_value(Some(Arc::clone(&cancel)));
         index.outcome.set(None);
@@ -148,15 +152,16 @@ impl Shell {
 
         spawn_detached(async move {
             let working = long_job(move || {
+                let folder = ReplayFolder::from_app_install(&wows_dir);
                 let live =
                     wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
                 let source = runtime.block_on(live)?;
                 let rating = owner_rating(&runtime, &proxy);
-                let outcome = wows_toolkit_replay_data::replay_index::build_index(
+                let outcome = wows_toolkit_replay_data::replay_index::build_folder_index(
                     &runtime,
                     &pool,
                     source,
-                    &root,
+                    &folder,
                     &game_data,
                     rating.as_ref(),
                     &cancel,
@@ -238,12 +243,15 @@ impl Shell {
         }
         let Some(pool) = services.settings.pool() else { return };
 
-        let root = Path::new(&wows_dir).join("replays");
-        let stale = services.on_tokio(async move {
-            wows_toolkit_config::index::query::has_stale_replay_records(&pool, &root, Some(rateable_mc)).await
-        });
+        let wows_dir = PathBuf::from(wows_dir);
         spawn_local(async move {
-            match stale.await {
+            let dirs = blocking(move || ReplayFolder::from_app_install(&wows_dir).content_dirs()).await;
+            let stale = services
+                .on_tokio(async move {
+                    wows_toolkit_replay_data::replay_index::has_stale_records_in(&pool, &dirs, Some(rateable_mc)).await
+                })
+                .await;
+            match stale {
                 Ok(Ok(true)) if !busy() => self.build_replay_index(IndexMode::FillGaps),
                 Ok(Ok(_)) => {}
                 Ok(Err(err)) => tracing::warn!(%err, "replay index MC revision could not be checked"),

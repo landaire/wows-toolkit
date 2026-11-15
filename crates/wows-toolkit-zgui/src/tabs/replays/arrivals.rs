@@ -13,8 +13,8 @@ use landaire_ui::ToastKey;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
-use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::load::parse_replay;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
@@ -225,8 +225,8 @@ impl Arrivals {
 
         workspace.under_tab(|| {
             spawn_local(async move {
-                let dir = blocking(move || resolve_replays_dir(Path::new(&wows_dir))).await;
-                let unsent = contributor.unsent_in(dir).await;
+                let folder = blocking(move || ReplayFolder::from_app_install(Path::new(&wows_dir))).await;
+                let unsent = contributor.unsent_in(folder).await;
                 tracing::info!(count = unsent.len(), "sharing: contributing the replays not yet sent");
                 let mut ineligible = Vec::new();
                 for path in unsent {

@@ -421,6 +421,24 @@ pub async fn forget_source(pool: &SqlitePool, source: SourceId) -> Result<(), In
     Ok(())
 }
 
+/// Delete the records of `paths` in `source`, returning how many there were. As with
+/// [`forget_source`], the shared match and roster rows are not touched.
+pub async fn forget_records(pool: &SqlitePool, source: SourceId, paths: &[PathBuf]) -> Result<u64, IndexError> {
+    let mut tx = pool.begin().await?;
+    let mut forgotten = 0;
+    for path in paths {
+        let deleted = sqlx::query("DELETE FROM replay_record WHERE source_id = ?1 AND replay_path = ?2")
+            .bind(source.0)
+            .bind(path.to_string_lossy().to_string())
+            .execute(&mut *tx)
+            .await?;
+        forgotten += deleted.rows_affected();
+    }
+    tx.commit().await?;
+
+    Ok(forgotten)
+}
+
 /// Incremental write; see [`upsert_match_with_mode`].
 pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), IndexError> {
     upsert_match_with_mode(pool, m, IndexWriteMode::Incremental).await
