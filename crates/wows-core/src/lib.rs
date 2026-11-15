@@ -8,6 +8,7 @@ pub mod advantage;
 pub mod game_constants;
 pub mod game_types;
 pub mod pseudonym;
+pub mod rating_scope;
 pub mod recognized;
 pub mod units;
 pub mod version;

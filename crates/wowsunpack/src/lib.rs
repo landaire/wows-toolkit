@@ -40,6 +40,8 @@ pub use wows_core::game_types;
 /// 3D model formats (geometry, visual, etc.)
 #[cfg(feature = "parsing")]
 pub mod models;
+/// Which battle types a performance rating applies to. Lives in `wows-core`.
+pub use wows_core::rating_scope;
 /// Generic wrapper for values that may or may not match a known variant.
 /// Lives in `wows-core`; re-exported here so existing `wowsunpack::recognized`
 /// paths keep working.
