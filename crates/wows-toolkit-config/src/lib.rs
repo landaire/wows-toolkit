@@ -9,6 +9,7 @@ pub mod index;
 pub mod queries;
 mod settings;
 pub mod tracker;
+pub mod upload_skips;
 mod window;
 
 use std::path::PathBuf;

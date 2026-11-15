@@ -83,7 +83,6 @@ TOOLKIT_COMMON_DEPS = [
     "//third-party/rust:semver",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
-    "//third-party/rust:sha2",
     "//third-party/rust:sqlx",
     "//third-party/rust:sys-locale",
     "//third-party/rust:tempfile",

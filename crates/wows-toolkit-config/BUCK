@@ -6,6 +6,7 @@ CONFIG_DEPS = [
     "//third-party/rust:jiff",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
+    "//third-party/rust:sha2",
     "//third-party/rust:sqlx",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",

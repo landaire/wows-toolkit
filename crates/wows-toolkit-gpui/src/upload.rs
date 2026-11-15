@@ -20,7 +20,10 @@ pub fn first_seen(path: PathBuf, pool: sqlx::sqlite::SqlitePool, cx: &App) -> Ta
         // rather than sending a battle that may still be in progress.
         let Some(runtime) = runtime else { return jiff::Timestamp::now() };
 
-        runtime.block_on(wows_toolkit_services::upload::first_seen(&pool, &path))
+        runtime.block_on(wows_toolkit_services::upload::first_seen(&pool, &path)).unwrap_or_else(|err| {
+            tracing::warn!(%err, "sharing: the first-seen anchor could not be read");
+            jiff::Timestamp::now()
+        })
     })
 }
 

@@ -1,15 +1,13 @@
 //! Panic-isolated, two-ledger reconciliation primitives shared by the startup
 //! pass and the on-demand "Index all replays" command.
 
-use std::collections::HashSet;
 use std::panic::UnwindSafe;
 use std::panic::catch_unwind;
 use std::path::Path;
 
-use serde::Deserialize;
-use serde::Serialize;
-use sha2::Digest;
 use tracing::warn;
+use wows_toolkit_config::upload_skips::ReplayFileIdentity;
+use wows_toolkit_config::upload_skips::StableUploadSkips;
 
 use crate::data::settings::DataSharingMode;
 
@@ -118,69 +116,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ReplayContentDigest([u8; 32]);
-
-impl ReplayContentDigest {
-    fn from_bytes(bytes: &[u8]) -> Self {
-        Self(sha2::Sha256::digest(bytes).into())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ReplayFileIdentity {
-    path: String,
-    content_digest: ReplayContentDigest,
-}
-
-impl ReplayFileIdentity {
-    pub(crate) fn from_path(path: &Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        Some(Self::from_bytes(path, &bytes))
-    }
-
-    pub(crate) fn from_bytes(path: &Path, bytes: &[u8]) -> Self {
-        Self { path: path.to_string_lossy().into_owned(), content_digest: ReplayContentDigest::from_bytes(bytes) }
-    }
-}
-
-/// Persisted identities whose replay contents make ShipBuilds upload
-/// ineligible regardless of the user's sharing mode.
-#[derive(Default, Serialize, Deserialize)]
-pub struct StableUploadSkips {
-    entries: HashSet<ReplayFileIdentity>,
-}
-
-impl StableUploadSkips {
-    const SETTING_KEY: &'static str = "replay_stable_upload_skips";
-
-    pub fn contains(&self, path: &Path) -> bool {
-        let path_text = path.to_string_lossy();
-        if !self.entries.iter().any(|identity| identity.path == path_text) {
-            return false;
-        }
-        ReplayFileIdentity::from_path(path).is_some_and(|identity| self.entries.contains(&identity))
-    }
-
-    pub(crate) fn insert(&mut self, identity: ReplayFileIdentity) -> bool {
-        if self.entries.contains(&identity) {
-            return false;
-        }
-        self.entries.retain(|existing| existing.path != identity.path);
-        self.entries.insert(identity)
-    }
-
-    pub async fn load(pool: &sqlx::SqlitePool) -> Self {
-        // Missing state is expected before the first stable skip. Malformed
-        // state is already logged and safely causes the replay to be retried.
-        crate::db::queries::get_setting(pool, Self::SETTING_KEY).await.unwrap_or_default()
-    }
-
-    pub async fn save(&self, pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
-        crate::db::queries::set_setting(pool, Self::SETTING_KEY, self).await
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartupFileOutcome {
     pub file: FileOutcome,
@@ -237,6 +172,7 @@ pub use wows_toolkit_config::index::unindexable::Unindexable;
 mod tests {
     use super::*;
     use crate::data::settings::DataSharingMode;
+    use std::collections::HashSet;
     use std::io::Write;
     use std::panic::AssertUnwindSafe;
     use std::path::Path;

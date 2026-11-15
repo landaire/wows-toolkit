@@ -1,5 +1,6 @@
 //! What happens when the game writes a replay: it is exported where the reader asked, contributed
 //! as the data-sharing setting asks, opened when "Autoload Latest Replay" is on, and announced.
+//! Replays written while the app was closed are contributed by a sweep once game data is ready.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,26 +13,30 @@ use landaire_ui::ToastKey;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::install::resolve_replays_dir;
 use wows_toolkit_replay_data::load::parse_replay;
-use wows_toolkit_services::upload;
-use wows_toolkit_services::upload::Candidate;
 use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
-use wows_toolkit_services::upload::Sender;
-use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::Task;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::WithValue;
+use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view::Timers;
 
 use crate::long_job::long_job;
-use crate::tabs::replays::browser::proxy_url;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::export_extension;
 use crate::tabs::replays::panel::write_export;
+use crate::tabs::replays::sharing::ContributeError;
+use crate::tabs::replays::sharing::Contributor;
+use crate::tabs::replays::sharing::SharingReads;
 use crate::tabs::replays::workspace::OpenTarget;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
@@ -72,11 +77,26 @@ impl AutoExport {
 #[derive(Clone, Copy)]
 pub struct Arrivals {
     exports: StoredValue<HashMap<PathBuf, Task>, LocalStorage>,
+    /// Battles held for their results, each read again when its grace lapses. Any newer read of
+    /// the replay replaces the hold.
+    held: StoredValue<HashMap<PathBuf, Task>, LocalStorage>,
+    /// The replays being read for sharing, by these arrivals, the sweep or the bulk send.
+    reads: SharingReads,
+    /// Whether this session's sweep of the install's replays has started.
+    swept: StoredValue<bool, LocalStorage>,
 }
 
 impl Arrivals {
-    pub fn new() -> Self {
-        Self { exports: StoredValue::new_local(HashMap::new()) }
+    /// A replay asked for while `reads` held it is read again here once that read ends.
+    pub fn new(workspace: ReplayWorkspace, reads: SharingReads) -> Self {
+        let arrivals = Self {
+            exports: StoredValue::new_local(HashMap::new()),
+            held: StoredValue::new_local(HashMap::new()),
+            reads,
+            swept: StoredValue::new_local(false),
+        };
+        reads.on_again(move |path| arrivals.contribute(workspace, &path));
+        arrivals
     }
 
     /// A watched directory gained `path`. `battle` is its "Ship - Map"; `install` says whether it
@@ -85,7 +105,7 @@ impl Arrivals {
         // Written and contributed whether or not it is opened, as the egui app does from its
         // background parser.
         self.export(workspace, &path);
-        contribute(workspace, &path);
+        self.contribute(workspace, &path);
         if !install {
             return;
         }
@@ -105,7 +125,7 @@ impl Arrivals {
     pub fn changed(self, workspace: ReplayWorkspace, path: PathBuf) {
         self.export(workspace, &path);
         // A battle held back for its results is sent once they are in the file.
-        contribute(workspace, &path);
+        self.contribute(workspace, &path);
         workspace.reparse(&path, ReparseCause::FileRewritten);
     }
 
@@ -183,9 +203,127 @@ impl Arrivals {
     }
 }
 
-impl Default for Arrivals {
-    fn default() -> Self {
-        Self::new()
+impl Arrivals {
+    /// Contributes the replays the install's directory holds that were never contributed, once a
+    /// session, as the egui app does when its background parser starts. Waits for the settings
+    /// and game data; sharing that is off when they are ready skips this session's sweep.
+    pub fn sweep(self, workspace: ReplayWorkspace) {
+        if self.swept.get_value() {
+            return;
+        }
+        let services = workspace.services;
+        let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else { return };
+        if services.game_data.cache_untracked().is_none() {
+            return;
+        }
+        self.swept.set_value(true);
+        if wows_dir.is_empty() {
+            return;
+        }
+        let Some(contributor) = Contributor::new(services) else { return };
+
+        workspace.under_tab(|| {
+            spawn_local(async move {
+                let dir = blocking(move || resolve_replays_dir(Path::new(&wows_dir))).await;
+                let unsent = contributor.unsent_in(dir).await;
+                tracing::info!(count = unsent.len(), "sharing: contributing the replays not yet sent");
+                let mut ineligible = Vec::new();
+                for path in unsent {
+                    if contributor.mode().is_none() {
+                        tracing::info!("sharing: turned off, so the sweep stops");
+                        break;
+                    }
+                    // Another read has it, or a landing holds it for its results.
+                    if self.held.with_value(|held| held.contains_key(&path)) || !self.reads.begin(&path) {
+                        continue;
+                    }
+                    match contributor.contribute(path.clone(), LedgerUse::Consult).await {
+                        Ok(Outcome::Ineligible) => ineligible.push(path.clone()),
+                        outcome => self.settle(workspace, &contributor, &path, outcome).await,
+                    }
+                    self.reads.finish(&path);
+                }
+                contributor.remember_ineligible(ineligible).await;
+            });
+        });
+    }
+
+    /// Contributes `path` as the data-sharing setting asks. The ledger is shared with the egui app,
+    /// so a battle is contributed once however it was read.
+    fn contribute(self, workspace: ReplayWorkspace, path: &Path) {
+        // Released first, so only a battle that is still waiting is held again.
+        if let Some(held) = self.held.try_update_value(|held| held.remove(path)).flatten() {
+            held.cancel();
+        }
+        self.start(workspace, path.to_path_buf());
+    }
+
+    fn start(self, workspace: ReplayWorkspace, path: PathBuf) {
+        let Some(contributor) = Contributor::new(workspace.services) else { return };
+        if !self.reads.begin(&path) {
+            return;
+        }
+        workspace.under_tab(|| {
+            spawn_local(async move {
+                let outcome = contributor.contribute(path.clone(), LedgerUse::Consult).await;
+                self.settle(workspace, &contributor, &path, outcome).await;
+                self.reads.finish(&path);
+            });
+        });
+    }
+
+    async fn settle(
+        self,
+        workspace: ReplayWorkspace,
+        contributor: &Contributor,
+        path: &Path,
+        outcome: Result<Outcome, ContributeError>,
+    ) {
+        match outcome {
+            Ok(Outcome::Sent) => tracing::info!(path = %path.display(), "sharing: the battle was contributed"),
+            Ok(Outcome::Waiting { deadline }) => self.hold(workspace, path.to_path_buf(), deadline),
+            Ok(Outcome::Ineligible) => contributor.remember_ineligible(vec![path.to_path_buf()]).await,
+            Ok(Outcome::Failed(reason)) => {
+                tracing::warn!(path = %path.display(), %reason, "sharing: the battle was not contributed")
+            }
+            Ok(other @ (Outcome::Skipped | Outcome::AlreadySent)) => {
+                tracing::debug!(path = %path.display(), ?other, "sharing: nothing sent")
+            }
+            Err(err) => tracing::warn!(path = %path.display(), %err, "sharing: the battle was not contributed"),
+        }
+    }
+
+    /// Reads `path` again at `deadline`, when its raw upload goes whether or not the results have
+    /// arrived.
+    pub(super) fn hold(self, workspace: ReplayWorkspace, path: PathBuf, deadline: RawUploadDeadline) {
+        let Some(timers) = workspace.under_tab(Timers::current) else { return };
+        // A deadline already past is due now.
+        let wait = Duration::try_from(deadline.0.duration_since(jiff::Timestamp::now())).unwrap_or(Duration::ZERO);
+        let due = path.clone();
+        let task = workspace.under_tab(|| {
+            spawn_local(async move {
+                let (done, waited) = oneshot::channel();
+                let _timer = timers.set_timeout(wait, move || {
+                    let _ = done.send(());
+                });
+                if waited.await.is_err() {
+                    return;
+                }
+                tracing::debug!(path = %due.display(), "sharing: the grace for the battle's results lapsed");
+                self.start(workspace, due);
+            })
+        });
+        self.held.update_value(|held| {
+            held.retain(|_, task| !task.is_finished());
+            if let Some(older) = held.insert(path, task) {
+                older.cancel();
+            }
+        });
+    }
+
+    #[cfg(test)]
+    pub fn holds(self, path: &Path) -> bool {
+        self.held.with_value(|held| held.get(path).is_some_and(|task| !task.is_finished()))
     }
 }
 
@@ -194,51 +332,4 @@ impl Default for Arrivals {
 enum ExportFailure {
     Parse(String),
     Write(String),
-}
-
-/// Contributes a battle that has just landed, as the data-sharing setting asks. The ledger is
-/// shared with the egui app, so a battle is contributed once however it was read.
-fn contribute(workspace: ReplayWorkspace, path: &Path) {
-    let services = workspace.services;
-    let Some(mode) = services.settings.read_untracked(|settings| settings.data_sharing) else { return };
-    if mode == DataSharingMode::Off {
-        return;
-    }
-    let Some(game_data) = services.game_data.cache_untracked() else { return };
-    let Some(pool) = services.settings.pool() else { return };
-    let proxy = proxy_url(services);
-    let named = path.to_path_buf();
-
-    workspace.under_tab(|| {
-        spawn_local(async move {
-            let reading = named.clone();
-            let parsed = match long_job(move || parse_replay(&reading, &game_data, None)).await {
-                Ok(parsed) => parsed,
-                Err(err) => {
-                    tracing::warn!(path = %named.display(), %err, "sharing: the replay did not parse");
-                    return;
-                }
-            };
-            // The anchor both apps keep, recorded on the first sight of this replay: the grace
-            // window for its results runs from there.
-            let (asked, seen) = (pool.clone(), named.clone());
-            let first_seen = services.on_tokio(async move { upload::first_seen(&asked, &seen).await }).await;
-            let first_seen = first_seen.unwrap_or_else(|_| jiff::Timestamp::now());
-            let candidate = Candidate { path: named.clone(), shareable: parsed.shareable, first_seen };
-            let outcome = services
-                .on_tokio(async move {
-                    let sender = Sender { pool: &pool, agent: crate::http::USER_AGENT, proxy: &proxy };
-                    upload::send(candidate, mode, LedgerUse::Consult, sender).await
-                })
-                .await;
-            match outcome {
-                Ok(Outcome::Sent) => tracing::info!(path = %named.display(), "sharing: the battle was contributed"),
-                Ok(Outcome::Failed(reason)) => {
-                    tracing::warn!(path = %named.display(), %reason, "sharing: the battle was not contributed")
-                }
-                Ok(other) => tracing::debug!(path = %named.display(), ?other, "sharing: nothing sent"),
-                Err(err) => tracing::warn!(path = %named.display(), %err, "sharing: the send did not complete"),
-            }
-        });
-    });
 }

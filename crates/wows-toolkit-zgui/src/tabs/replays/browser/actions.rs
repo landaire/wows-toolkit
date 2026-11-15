@@ -38,7 +38,6 @@ use wows_toolkit_replay_data::force_reindex::ReindexScope;
 use wows_toolkit_replay_data::force_reindex::ReindexSummary;
 use wows_toolkit_replay_data::force_reindex::Release;
 use wows_toolkit_replay_data::load::GameDataCache;
-use wows_toolkit_replay_data::load::parse_replay;
 use wows_toolkit_replay_data::paths::folder_name;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexOneError;
@@ -52,11 +51,8 @@ use wows_toolkit_replay_data::replay_index::reindex_replays;
 use wows_toolkit_replay_data::replay_index::repair_missing_pr;
 use wows_toolkit_services::game_data_cache;
 use wows_toolkit_services::game_data_cache::CacheOutcome;
-use wows_toolkit_services::upload;
-use wows_toolkit_services::upload::Candidate;
 use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
-use wows_toolkit_services::upload::Sender;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::query_bar::seed;
@@ -117,6 +113,8 @@ use crate::tabs::replays::browser::folders::BrowserControl;
 use crate::tabs::replays::browser::folders::FolderId;
 use crate::tabs::replays::browser::folders::FolderSource;
 use crate::tabs::replays::browser::folders::FolderState;
+use crate::tabs::replays::sharing::Contributor;
+use crate::tabs::replays::sharing::SharingReads;
 
 const SHEET: &str = "wt-replay-reindex";
 
@@ -220,6 +218,8 @@ pub struct BrowserWork {
     rating_repair: StoredValue<RatingRepair, LocalStorage>,
     /// The shell's own build over the install's directory, which no pass here runs beside.
     shell_index: ReplayIndexJobs,
+    /// The replays being read for sharing now, by any of the paths that contribute.
+    sharing_reads: SharingReads,
 }
 
 impl BrowserWork {
@@ -236,6 +236,7 @@ impl BrowserWork {
             rating_repair: StoredValue::new_local(RatingRepair::Idle),
             owner: StoredValue::new_local(Owner::current().expect("the browser's work is made inside a component")),
             shell_index,
+            sharing_reads: SharingReads::new(),
         }
     }
 
@@ -880,6 +881,12 @@ impl BrowserControl {
         self.work.personal_rating.set_value(Some(table));
         repair_personal_ratings(self);
     }
+
+    /// The replays being read for sharing, which the tab's arrivals and this browser's bulk send
+    /// both go through.
+    pub fn sharing_reads(self) -> SharingReads {
+        self.work.sharing_reads
+    }
 }
 
 /// Reads `replays` again through the status bar's progress line. `skipped` is what the run left
@@ -1279,8 +1286,7 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
         toasts.warn(t!("ui.replay.contribute_nothing_shared").into_owned());
         return;
     }
-    let Some(game_data) = services.game_data.cache_untracked() else { return };
-    let Some(pool) = services.settings.pool() else { return };
+    let Some(contributor) = Contributor::new(services) else { return };
     let Some(listing) = control.selected_listing() else { return };
     let paths = listing.listed_paths();
     if paths.is_empty() {
@@ -1293,7 +1299,6 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
         toasts.warn(t!("ui.replay.contribute_already_running").into_owned());
         return;
     }
-    let proxy = proxy_url(services);
     let total = paths.len();
     work.contributing.set(true);
 
@@ -1310,40 +1315,22 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
 
             // The ledger before the read: a replay already contributed is seconds of parsing for a
             // request that would be refused.
-            if ledger == LedgerUse::Consult {
-                let (asked, named) = (pool.clone(), path.clone());
-                let already = services.on_tokio(async move { upload::already_contributed(&asked, &named).await }).await;
-                if matches!(already, Ok(true)) {
-                    continue;
-                }
+            if ledger == LedgerUse::Consult && contributor.already_contributed(&path).await {
+                continue;
             }
 
-            let (reading, cache) = (path.clone(), game_data.clone());
-            let parsed = long_job(move || parse_replay(&reading, &cache, None)).await;
-            let parsed = match parsed {
-                Ok(parsed) => parsed,
-                Err(err) => {
-                    tracing::warn!(path = %path.display(), %err, "sharing: the replay did not parse");
-                    continue;
-                }
-            };
-
-            // The anchor both apps keep, recorded on the first sight of this replay: a battle
-            // still being played is held for its results rather than sent half-finished.
-            let (asked, named) = (pool.clone(), path.clone());
-            let first_seen = services.on_tokio(async move { upload::first_seen(&asked, &named).await }).await;
-            // Without a runtime the window starts now, which holds the upload.
-            let first_seen = first_seen.unwrap_or_else(|_| jiff::Timestamp::now());
-            let candidate = Candidate { path, shareable: parsed.shareable, first_seen };
-            let (sending, proxy) = (pool.clone(), proxy.clone());
-            let outcome = services
-                .on_tokio(async move {
-                    let sender = Sender { pool: &sending, agent: crate::http::USER_AGENT, proxy: &proxy };
-                    upload::send(candidate, mode, ledger, sender).await
-                })
-                .await;
-            if matches!(outcome, Ok(Outcome::Sent)) {
-                sent += 1;
+            // A landing or the startup sweep is reading it, and sends it if it should go.
+            if !work.sharing_reads.begin(&path) {
+                continue;
+            }
+            let outcome = contributor.contribute(path.clone(), ledger).await;
+            work.sharing_reads.finish(&path);
+            match outcome {
+                Ok(Outcome::Sent) => sent += 1,
+                // A battle awaiting its results stays unsent: a pass runs no timer, and the install's
+                // arrivals hold it until its grace lapses.
+                Ok(_) => {}
+                Err(err) => tracing::warn!(path = %path.display(), %err, "sharing: the battle was not contributed"),
             }
         }
         drop(job);

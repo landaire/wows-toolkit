@@ -17,7 +17,9 @@ use std::path::PathBuf;
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::upload::RAW_REPLAYS_URL;
+use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use wows_toolkit_viewmodel::upload::ReplayUploadAction;
+use wows_toolkit_viewmodel::upload::ReplayUploadSkipReason;
 use wows_toolkit_viewmodel::upload::SHIP_BUILDS_URL;
 use wows_toolkit_viewmodel::upload::Shareable;
 use wows_toolkit_viewmodel::upload::decide_upload_action;
@@ -33,11 +35,15 @@ pub enum Outcome {
     Sent,
     /// Nothing to send, for a reason that will not change.
     Skipped,
+    /// Nothing to send, because of what the replay holds: ShipBuilds does not
+    /// take its game type, or Replays mode cannot rule out a test ship. The same
+    /// bytes always decide the same, so a sweep need not read them again.
+    Ineligible,
     /// Already in the ledger.
     AlreadySent,
     /// Nothing sent yet: the battle has no results and the grace has not lapsed.
-    /// The next read of this replay decides again.
-    Waiting,
+    /// A read at `deadline` sends it whether or not the results have arrived.
+    Waiting { deadline: RawUploadDeadline },
     /// The service could not be reached. Not recorded, so it is tried again.
     Failed(String),
 }
@@ -77,16 +83,10 @@ pub struct Sender<'a> {
 ///
 /// Recorded on the first sight, in the row the egui app's own uploader keeps, so
 /// the two apps agree about how long a battle has been waiting for its results.
-pub async fn first_seen(pool: &SqlitePool, path: &Path) -> jiff::Timestamp {
-    let now = jiff::Timestamp::now();
-    let recorded = path.to_string_lossy();
-
-    wows_toolkit_config::queries::raw_upload_first_seen(pool, &recorded, now).await.unwrap_or_else(|err| {
-        // A window that starts now holds the upload rather than sending a
-        // battle that may still be in progress.
-        tracing::warn!(%err, "sharing: the first-seen anchor could not be read");
-        now
-    })
+/// Without the anchor the window cannot be measured, so a caller tries again
+/// rather than sending.
+pub async fn first_seen(pool: &SqlitePool, path: &Path) -> Result<jiff::Timestamp, sqlx::Error> {
+    wows_toolkit_config::queries::raw_upload_first_seen(pool, &path.to_string_lossy(), jiff::Timestamp::now()).await
 }
 
 /// Whether this replay is already in the ledger.
@@ -130,11 +130,16 @@ pub async fn send(candidate: Candidate, mode: DataSharingMode, ledger: LedgerUse
     match action {
         ReplayUploadAction::Skip(reason) => {
             tracing::debug!(path = %path.display(), ?reason, "sharing: nothing to send");
-            Outcome::Skipped
+            match reason {
+                ReplayUploadSkipReason::IneligibleGameType | ReplayUploadSkipReason::PossibleTestShip => {
+                    Outcome::Ineligible
+                }
+                ReplayUploadSkipReason::SharingDisabled => Outcome::Skipped,
+            }
         }
         ReplayUploadAction::AwaitResults { deadline } => {
             tracing::debug!(path = %path.display(), until = %deadline.0, "sharing: waiting for the battle's results");
-            Outcome::Waiting
+            Outcome::Waiting { deadline }
         }
         ReplayUploadAction::BuildData => {
             if shareable.builds.is_empty() {

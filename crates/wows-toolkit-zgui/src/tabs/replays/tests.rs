@@ -1,5 +1,7 @@
+use std::cell::Cell;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
@@ -17,6 +19,7 @@ use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -26,7 +29,9 @@ use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 use super::BUILT;
+use super::arrivals::Arrivals;
 use super::layout;
+use super::sharing::SharingReads;
 use super::workspace::Docked;
 use super::workspace::OpenTarget;
 use super::workspace::ReplayWorkspace;
@@ -618,4 +623,55 @@ fn the_replays_tab_renders_in_dark_and_light() {
         workspace.remove(&Docked::Replay(replay.clone()));
         settle_in_real_time(&mut window);
     }
+}
+
+/// A battle held for its results is read again when its grace lapses, and not before.
+#[test]
+fn a_battle_held_for_its_results_is_read_again_when_its_grace_lapses() {
+    let (mut window, workspace) = open();
+    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let path = PathBuf::from("held.wowsreplay");
+    let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
+
+    arrivals.hold(workspace, path.clone(), deadline);
+    window.advance(Duration::from_secs(30));
+    assert!(arrivals.holds(&path), "the battle is held until its deadline");
+    window.advance(Duration::from_secs(40));
+    assert!(!arrivals.holds(&path), "the battle is read again once its grace lapses");
+}
+
+/// A newer write of a held battle is read at once, and the hold for the older one is dropped.
+#[test]
+fn a_rewrite_of_a_held_battle_releases_its_hold() {
+    let (mut window, workspace) = open();
+    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let path = PathBuf::from("rewritten.wowsreplay");
+    let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
+
+    arrivals.hold(workspace, path.clone(), deadline);
+    window.advance(Duration::from_millis(32));
+    assert!(arrivals.holds(&path));
+    arrivals.changed(workspace, path.clone());
+    assert!(!arrivals.holds(&path), "the rewrite is read now rather than at the old deadline");
+}
+
+/// Two reads of one replay never run at once, so both cannot find it unsent and send it twice.
+/// One asked for meanwhile runs once the first ends.
+#[test]
+fn a_replay_being_read_for_sharing_is_not_read_again_until_that_read_ends() {
+    let (_window, workspace) = open();
+    let reads = workspace.under_tab(SharingReads::new);
+    let asked_again = Rc::new(Cell::new(0));
+    let counted = Rc::clone(&asked_again);
+    reads.on_again(move |_| counted.set(counted.get() + 1));
+    let path = PathBuf::from("busy.wowsreplay");
+
+    assert!(reads.begin(&path));
+    assert!(!reads.begin(&path), "a second read waits for the first");
+    assert_eq!(asked_again.get(), 0);
+    reads.finish(&path);
+    assert_eq!(asked_again.get(), 1, "the waiting read runs once the first has ended");
+    assert!(reads.begin(&path), "and may start then");
+    reads.finish(&path);
+    assert_eq!(asked_again.get(), 1, "a read nothing waited on runs nothing after it");
 }

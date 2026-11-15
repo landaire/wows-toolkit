@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Contribute battles whose results never arrive once the grace window lapses, and replays recorded while the app was closed
 - *(zgui)* Apply the saved self range filter when a renderer opens, and save it with the defaults
 - *(zgui)* Film saved range circles in batch exports and show each replay's encode progress
 - *(zgui)* Export every video at 60 seconds and 30 frames per second, moving ships between the frames the bake kept
