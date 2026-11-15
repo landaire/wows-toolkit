@@ -113,7 +113,8 @@ fn find_install() -> Option<PathBuf> {
 pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: SqlitePool) {
     shell.appearance.zoom.set(settings.zoom);
     shell.appearance.theme.set(settings.theme);
-    shell.debug_mode.set(settings.debug_mode);
+    let debug_mode_chosen = shell.take_debug_mode_before_load();
+    shell.debug_mode.set(debug_mode_chosen.unwrap_or(settings.debug_mode));
     if let Some(code) = settings.locale.clone() {
         services.locale.choose(LanguageCode::new(code));
     }
@@ -124,6 +125,9 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
     let check_for_updates = settings.check_for_updates;
     let answered = first_run::Answered::of(&settings);
     services.settings.adopt(settings, pool);
+    if let Some(on) = debug_mode_chosen {
+        shell.save_debug_mode(on);
+    }
 
     // Before anything else the app does with the settings: what may be shared is the reader's to
     // answer.
@@ -305,4 +309,47 @@ fn rebuild_stale_index(services: Services, shell: Shell) {
         true
     });
     on_cleanup_local(move || drop(checking));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use wows_toolkit_services::settings::StartupSettings;
+    use wows_toolkit_viewmodel::settings::keys;
+    use zgui::reactive::prelude::GetUntracked;
+    use zgui::vocab::Modifiers;
+
+    use crate::interaction_tests::open_bare_shell;
+    use crate::interaction_tests::shell;
+    use crate::services::saved_for_test;
+
+    fn debug_mode_saves() -> Vec<String> {
+        saved_for_test().into_iter().filter(|(key, _)| *key == keys::DEBUG_MODE).map(|(_, json)| json).collect()
+    }
+
+    /// The bare shell has no runtime, so the read is done here and the save is asked for but never
+    /// written to the database the tests share.
+    #[test]
+    fn the_debug_shortcut_pressed_while_the_settings_load_is_saved_once_they_do() {
+        let mut window = open_bare_shell();
+        let earlier = debug_mode_saves().len();
+        window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+        window.advance(Duration::from_millis(400));
+        assert!(shell().debug_mode.get_untracked(), "the shortcut turns debug mode on");
+        assert_eq!(debug_mode_saves().len(), earlier, "nothing is saved before the settings load");
+
+        let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+        let (mut settings, pool) = runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+            (StartupSettings::load(&pool).await, pool)
+        });
+        settings.debug_mode = false;
+        super::apply(shell().services(), shell(), settings, pool);
+        window.advance(Duration::from_millis(400));
+
+        assert!(shell().debug_mode.get_untracked(), "the loaded settings do not undo the shortcut");
+        assert_eq!(debug_mode_saves()[earlier..], ["true"], "the choice is saved over the loaded value");
+        assert_eq!(shell().services().settings.read_untracked(|settings| settings.debug_mode), Some(true));
+    }
 }

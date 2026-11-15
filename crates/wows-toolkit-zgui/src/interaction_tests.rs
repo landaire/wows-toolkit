@@ -227,6 +227,34 @@ fn the_debug_shortcut_toggles_the_debug_strip() {
     assert!(window.by_test_id(DEBUG_NOTICE).is_none(), "the shortcut toggles rather than latching");
 }
 
+/// Turned off again at the end: the tests share one settings database.
+#[test]
+fn the_debug_shortcut_saves_the_setting() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    let pool = runtime.block_on(wows_toolkit_config::open_db()).expect("the settings database opens");
+    let saved = || {
+        let read = wows_toolkit_config::queries::try_get_setting::<bool>(&pool, keys::DEBUG_MODE);
+        runtime.block_on(read).expect("the setting reads")
+    };
+    let wait_for = |window: &mut HeadlessWindow, on: bool| {
+        for _ in 0..100 {
+            if saved() == Some(on) {
+                return;
+            }
+            window.advance(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("debug mode was not saved as {on}");
+    };
+
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    wait_for(&mut window, true);
+
+    window.press_character('d', Modifiers::PRIMARY | Modifiers::SHIFT);
+    wait_for(&mut window, false);
+}
+
 #[test]
 fn an_unmodified_d_does_not_toggle_the_debug_strip() {
     let mut window = open_bare_shell();

@@ -275,9 +275,11 @@ pub struct Shell {
     /// The tabs shown at least once, which stay built while hidden.
     visited: RwSignal<Vec<TabKey>, LocalStorage>,
     held: RwSignal<Modifiers, LocalStorage>,
-    /// Unhides NDA-hidden stats and the raw viewers. Seeded from the settings and flipped for the
-    /// session by Ctrl+Shift+D; never written back.
+    /// Unhides NDA-hidden stats and the raw viewers. Seeded from the settings and flipped by
+    /// Ctrl+Shift+D, which saves it as the egui app does.
     pub debug_mode: RwSignal<bool, LocalStorage>,
+    /// What Ctrl+Shift+D chose before the settings loaded, which wins over the saved value.
+    debug_mode_before_load: StoredValue<Option<bool>>,
     replay_requests: RwSignal<Vec<ReplayRequest>, LocalStorage>,
     pub appearance: Appearance,
     pub settings_drawer: SettingsDrawerControl,
@@ -313,6 +315,7 @@ impl Shell {
             visited: RwSignal::new_local(vec![first]),
             held: RwSignal::new_local(Modifiers::NONE),
             debug_mode: RwSignal::new_local(false),
+            debug_mode_before_load: StoredValue::new(None),
             replay_requests: RwSignal::new_local(Vec::new()),
             appearance,
             settings_drawer: SettingsDrawerControl::new(),
@@ -393,6 +396,32 @@ impl Shell {
         self.services.settings.edit(keys::LOCALE, |settings| {
             settings.locale = Some(code.as_str().to_owned());
             code.as_str().to_owned()
+        });
+    }
+
+    /// Flips debug mode, and saves it. Before the settings load, the choice is held for
+    /// [`startup::apply`] to save over the loaded value.
+    pub fn toggle_debug_mode(self) {
+        let on = !self.debug_mode.get_untracked();
+        self.debug_mode.set(on);
+        if self.services.settings.read_untracked(|_| ()).is_none() {
+            self.debug_mode_before_load.set_value(Some(on));
+            return;
+        }
+        self.save_debug_mode(on);
+    }
+
+    /// Takes what Ctrl+Shift+D chose before the settings loaded.
+    fn take_debug_mode_before_load(self) -> Option<bool> {
+        let chosen = self.debug_mode_before_load.get_value();
+        self.debug_mode_before_load.set_value(None);
+        chosen
+    }
+
+    fn save_debug_mode(self, on: bool) {
+        self.services.settings.edit(keys::DEBUG_MODE, |settings| {
+            settings.debug_mode = on;
+            on
         });
     }
 
@@ -892,7 +921,7 @@ fn shell_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifier
     };
     match (modifiers.shift(), text.to_lowercase().as_str()) {
         (true, "d") => {
-            shell.debug_mode.update(|debug| *debug = !*debug);
+            shell.toggle_debug_mode();
             true
         }
         // In the Armor Viewer, ctrl+p goes straight to the ship list.
