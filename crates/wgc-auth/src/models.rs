@@ -99,6 +99,33 @@ pub(crate) struct AccountInfoResponse {
     pub nickname: String,
 }
 
+/// `.../create/token1/` request: a form body, as `Auth::QuerySPAToken1`
+/// builds it in WGC's game_center.dll.
+pub(crate) struct Token1Request<'a> {
+    /// WGC's `WebEndpointData::gameName`; `wows` for WoWs.
+    pub requested_for: &'a str,
+    /// WGC's `WebEndpointData::titleId`. WGC omits the field when it is
+    /// empty; this crate always has one.
+    pub title_code: &'a str,
+}
+
+impl Token1Request<'_> {
+    pub fn form_body(&self) -> String {
+        url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("requested_for", self.requested_for)
+            .append_pair("title_code", self.title_code)
+            .finish()
+    }
+}
+
+/// `.../create/token1/<id>/` settled response. WGC reads `token` as a JSON
+/// integer and formats it in decimal; a string is accepted too.
+#[derive(Debug, Deserialize)]
+pub(crate) struct Token1Response {
+    #[serde(deserialize_with = "de_stringish")]
+    pub token: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +211,27 @@ mod tests {
         let parsed: AccountInfoResponse = serde_json::from_str(json).expect("parses");
         assert_eq!(parsed.sub, 697769785);
         assert_eq!(parsed.nickname, "TestPlayer");
+    }
+
+    #[test]
+    fn token1_request_form_body() {
+        let request = Token1Request { requested_for: "wows", title_code: "us.wows" };
+        insta::assert_snapshot!(request.form_body(), @"requested_for=wows&title_code=us.wows");
+    }
+
+    #[test]
+    fn token1_response_parses_integer_and_string_tokens() {
+        let integer: Token1Response = serde_json::from_str(r#"{"token": 48213907}"#).expect("parses");
+        let string: Token1Response = serde_json::from_str(r#"{"token": "48213907"}"#).expect("parses");
+        insta::assert_debug_snapshot!((integer, string), @r#"
+        (
+            Token1Response {
+                token: "48213907",
+            },
+            Token1Response {
+                token: "48213907",
+            },
+        )
+        "#);
     }
 }

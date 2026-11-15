@@ -12,7 +12,11 @@
 //! does not recognize; it always carries the full [`TokenRejection`] so no
 //! upstream detail is lost, unlike a stringly-matched description.
 
+use std::time::Duration;
+
 use thiserror::Error;
+
+use crate::realm::AccountRealm;
 
 /// A WGNI OAuth token-endpoint error body, verbatim.
 ///
@@ -125,4 +129,10 @@ pub enum AuthError {
 
     #[error("unexpected response from WGNI: {detail}")]
     BadResponse { detail: String },
+
+    #[error("WGNI did not issue a game token within {limit:?}")]
+    GameTokenTimeout { limit: Duration },
+
+    #[error("request is for realm {requested:?} but the client targets realm {client:?}")]
+    RealmMismatch { client: AccountRealm, requested: AccountRealm },
 }

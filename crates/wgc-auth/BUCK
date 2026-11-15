@@ -31,6 +31,7 @@ workspace_test(
     package = "wgc-auth",
     version = "0.1.0",
     deps = WGC_AUTH_DEPS,
+    test_deps = ["//third-party/rust:insta"],
 )
 
 workspace_integration_tests(
