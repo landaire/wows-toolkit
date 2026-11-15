@@ -56,6 +56,8 @@ use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::sample;
 use wows_toolkit_viewmodel::stats::sample::SampleCatalog;
+use wows_toolkit_viewmodel::stats::saved_charts;
+use wows_toolkit_viewmodel::stats::saved_charts::CHARTS_SETTINGS_KEY;
 use wows_toolkit_viewmodel::stats::setting_keys;
 use zgui::component;
 use zgui::css;
@@ -136,8 +138,6 @@ const MAX_GAME_LIMIT: usize = 999;
 const SAMPLE_GAMES: usize = 800;
 const SAMPLE_SEED: u64 = 0x5EED;
 
-/// The settings row the session's charts are kept in, shared with the GPUI front end.
-const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 /// The session's dock layout. Not the GPUI row `stats_charts_dock_layout`: that holds the GPUI
 /// dock's own tree, which this dock cannot read and must not overwrite.
 const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout_zgui";
@@ -837,7 +837,7 @@ fn load_charts(
         spawn_local(async move {
             let stored = services
                 .on_tokio(async move {
-                    let charts = queries::try_get_setting::<Vec<ChartSettings>>(&pool, CHARTS_SETTINGS_KEY).await;
+                    let charts = saved_charts::load(&pool).await;
                     let layout = queries::try_get_setting::<SavedLayout>(&pool, CHARTS_DOCK_LAYOUT_KEY).await;
                     (charts, layout)
                 })

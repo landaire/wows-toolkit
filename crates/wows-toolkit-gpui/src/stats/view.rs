@@ -64,6 +64,8 @@ use super::ships::ShipsPanelEvent;
 use super::ships::StatsShipsPanel;
 use wows_toolkit_viewmodel::stats::chart::ChartId;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
+use wows_toolkit_viewmodel::stats::saved_charts;
+use wows_toolkit_viewmodel::stats::saved_charts::CHARTS_SETTINGS_KEY;
 
 /// Games shown when the limit is switched on without a saved count. The egui
 /// drag value opens at this and clamps to 1..=999.
@@ -126,8 +128,6 @@ pub struct StatsView {
     _subscriptions: Vec<Subscription>,
 }
 
-/// The settings row the Stats tab keeps its charts in.
-const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout";
 
 impl StatsView {
@@ -399,9 +399,7 @@ impl StatsView {
         self.charts_load_finished = false;
         cx.spawn_in(window, async move |this, cx| {
             let stored = crate::runtime::spawn(cx, async move {
-                let charts =
-                    wows_toolkit_config::queries::try_get_setting::<Vec<ChartSettings>>(&pool, CHARTS_SETTINGS_KEY)
-                        .await;
+                let charts = saved_charts::load(&pool).await;
                 let dock =
                     wows_toolkit_config::queries::try_get_setting::<DockAreaState>(&pool, CHARTS_DOCK_LAYOUT_KEY).await;
                 (charts, dock)
