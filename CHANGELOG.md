@@ -42,6 +42,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Show MC beside PR in the replay table, search results and stats, and break either rating into its parts on hover, each part marked static (a fixed expectation) or dynamic (expected values or this battle's players)
 - *(zgui)* Show a ship's value when the pointer rests on a point or bar in a stats chart, with the game for a point, and mark it on the plot
 - *(wows-query)* List the F key special ability in ship_overview
+- *(wows-query)* Resolve ship names written with a leading "the", and September as Sete de Setembro
 
 ### Bug Fixes
 

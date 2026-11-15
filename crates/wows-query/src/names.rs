@@ -266,9 +266,33 @@ struct Entry<T> {
     initialisms: Vec<String>,
     source: Source,
 
-    /// An alias written in capitals, such as "DM" or "BoS", which ordinary
-    /// words such as "dm" do not spell.
-    abbreviation: bool,
+    /// When free text spells this entry.
+    in_text: TextMatch,
+}
+
+/// Which spans of free text [`NameIndex::recognize`] reads as an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextMatch {
+    /// Any spelling of its keys.
+    Any,
+
+    /// Only a span with capitals: an alias such as "DM" or "BoS", which
+    /// ordinary words such as "dm" do not spell.
+    Capitals,
+
+    /// Never: an alias that is also an ordinary word, such as the month
+    /// "September", resolves only when passed as a name.
+    Never,
+}
+
+impl TextMatch {
+    fn reads(self, phrase: &Phrase) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Capitals => phrase.capitals,
+            Self::Never => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +394,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             keys,
             initialisms,
             source: Source::Name { secondary },
-            abbreviation: false,
+            in_text: TextMatch::Any,
         });
     }
 
@@ -382,13 +406,26 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             keys: vec![id.trim().to_lowercase()],
             initialisms: Vec::new(),
             source: Source::Id,
-            abbreviation: false,
+            in_text: TextMatch::Any,
         });
     }
 
     /// Registers `alias` for every target named `target`, an English name,
     /// identifier or search key. False when nothing has that name.
     pub(crate) fn add_alias(&mut self, alias: &str, target: &str, method: ResolutionMethod) -> bool {
+        let in_text =
+            if !alias.contains(' ') && capital_count(alias) >= 2 { TextMatch::Capitals } else { TextMatch::Any };
+
+        self.push_alias(alias, target, method, in_text)
+    }
+
+    /// Registers `alias` as [`NameIndex::add_alias`] does, for lookups only:
+    /// free text never names its target by it.
+    pub(crate) fn add_lookup_alias(&mut self, alias: &str, target: &str, method: ResolutionMethod) -> bool {
+        self.push_alias(alias, target, method, TextMatch::Never)
+    }
+
+    fn push_alias(&mut self, alias: &str, target: &str, method: ResolutionMethod, in_text: TextMatch) -> bool {
         let id = target.trim().to_lowercase();
         let key = search_key(target);
         let mut named: Vec<(String, T, bool)> = Vec::new();
@@ -413,7 +450,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
 
         let keys = key_variants(alias);
         let initialisms: Vec<String> = keys.iter().flat_map(|key| initialisms(key)).collect();
-        let abbreviation = !alias.contains(' ') && capital_count(alias) >= 2;
+
         for (name, target, _) in named {
             self.entries.push(Entry {
                 name,
@@ -421,7 +458,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
                 keys: keys.clone(),
                 initialisms: initialisms.clone(),
                 source: Source::Alias(method),
-                abbreviation,
+                in_text,
             });
         }
         true
@@ -465,7 +502,7 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             .entries
             .iter()
             .filter_map(|entry| match entry.source {
-                Source::Alias(method) if entry.keys.contains(key) && (phrase.capitals || !entry.abbreviation) => {
+                Source::Alias(method) if entry.keys.contains(key) && entry.in_text.reads(phrase) => {
                     Some((entry, method))
                 }
                 _ => None,
@@ -480,8 +517,13 @@ impl<T: Clone + PartialEq> NameIndex<T> {
             return None;
         }
 
-        let initialism: Vec<&Entry<T>> =
-            self.entries.iter().filter(|entry| entry.source != Source::Id && entry.initialisms.contains(key)).collect();
+        let initialism: Vec<&Entry<T>> = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.source != Source::Id && entry.in_text != TextMatch::Never && entry.initialisms.contains(key)
+            })
+            .collect();
         let first = initialism.first()?;
         let method = match first.source {
             Source::Alias(ResolutionMethod::Historical) => ResolutionMethod::Historical,
@@ -496,10 +538,28 @@ impl<T: Clone + PartialEq> NameIndex<T> {
         self.entries.iter().flat_map(|entry| entry.keys.iter()).map(|key| key.split(' ').count()).max().unwrap_or(0)
     }
 
+    /// Resolves `query` as [`NameIndex::lookup_name`] does, then without a
+    /// leading "the" when that finds nothing: "the September" reads as
+    /// "September", while "The Sullivans" matches with its article first.
+    pub(crate) fn lookup(&self, query: &str) -> Lookup<'_, T> {
+        let found = self.lookup_name(query);
+        let Lookup::NotFound(suggestions) = found else {
+            return found;
+        };
+        let Some(rest) = without_article(query) else {
+            return Lookup::NotFound(suggestions);
+        };
+
+        match self.lookup_name(rest) {
+            Lookup::NotFound(rest_suggestions) if rest_suggestions.is_empty() => Lookup::NotFound(suggestions),
+            other => other,
+        }
+    }
+
     /// Resolves `query`: exact English name, identifier, alias, initialism,
     /// start or part of a name, then the nearest misspelling. An initialism
     /// shared by several names gives way only to a partial match among them.
-    pub(crate) fn lookup(&self, query: &str) -> Lookup<'_, T> {
+    fn lookup_name(&self, query: &str) -> Lookup<'_, T> {
         let key = search_key(query);
         if key.is_empty() {
             return Lookup::NotFound(Vec::new());
@@ -688,6 +748,15 @@ fn is_initialism_query(key: &str) -> bool {
     (2..=5).contains(&key.len()) && !key.contains(' ')
 }
 
+/// `query` after a leading "the", `None` without one.
+fn without_article(query: &str) -> Option<&str> {
+    let trimmed = query.trim_start();
+    let (article, rest) = trimmed.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start();
+
+    (article.eq_ignore_ascii_case("the") && !rest.is_empty()).then_some(rest)
+}
+
 /// Lowercase ASCII with punctuation folded to single spaces, so names with
 /// diacritics match their plain spelling.
 pub(crate) fn search_key(name: &str) -> String {
@@ -804,6 +873,24 @@ mod tests {
         assert!(!names.add_alias("XX", "Nothing", ResolutionMethod::ExactAlias));
 
         assert_eq!(found(names.lookup("ce")), ("Concealment Expert", Some(ResolutionMethod::ExactAlias)));
+    }
+
+    #[test]
+    fn a_leading_article_is_dropped_only_when_the_name_lacks_it() {
+        let mut names = index(&["The Sullivans", "Sullivan", "Sete de Setembro"]);
+        assert!(names.add_lookup_alias("September", "Sete de Setembro", ResolutionMethod::ExactAlias));
+
+        assert_eq!(found(names.lookup("the september")), ("Sete de Setembro", Some(ResolutionMethod::ExactAlias)));
+        assert_eq!(found(names.lookup("the sullivans")), ("The Sullivans", None));
+    }
+
+    #[test]
+    fn lookup_aliases_resolve_names_but_not_free_text() {
+        let mut names = index(&["Sete de Setembro"]);
+        assert!(names.add_lookup_alias("September", "Sete de Setembro", ResolutionMethod::ExactAlias));
+
+        assert_eq!(found(names.lookup("September")), ("Sete de Setembro", Some(ResolutionMethod::ExactAlias)));
+        assert_eq!(recognized(&names, "September"), None);
     }
 
     #[test]

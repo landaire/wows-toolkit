@@ -59,7 +59,13 @@ pub(crate) const SHIP_ALIASES: &[(&str, &str)] = &[
     ("Francesco Ferruccio", "F. Ferruccio"),
     ("Forrest Sherman", "F. Sherman"),
     ("Prinz Eitel Friedrich", "P. E. Friedrich"),
+    ("7 de Setembro", "Sete de Setembro"),
 ];
+
+/// Aliases that are also ordinary words, such as the month "September":
+/// resolved when passed as a ship name, never read from free text. Checked
+/// like [`SHIP_ALIASES`].
+pub(crate) const SHIP_LOOKUP_ALIASES: &[(&str, &str)] = &[("September", "Sete de Setembro")];
 
 /// A ship tier, 1 to 11. Arguments also accept "supership" for tier 11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
@@ -1093,7 +1099,8 @@ fn acquisition_note(group: &str) -> Option<&'static str> {
     }
 }
 
-/// Ship names, GameParams indexes and names, and [`SHIP_ALIASES`].
+/// Ship names, GameParams indexes and names, [`SHIP_ALIASES`] and
+/// [`SHIP_LOOKUP_ALIASES`].
 pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
     let mut names = NameIndex::default();
     for (index, ship) in ships.iter().enumerate() {
@@ -1103,6 +1110,9 @@ pub(crate) fn ship_names(ships: &[Ship]) -> NameIndex<usize> {
     }
     for (alias, name) in SHIP_ALIASES {
         names.add_alias(alias, name, ResolutionMethod::ExactAlias);
+    }
+    for (alias, name) in SHIP_LOOKUP_ALIASES {
+        names.add_lookup_alias(alias, name, ResolutionMethod::ExactAlias);
     }
     names
 }

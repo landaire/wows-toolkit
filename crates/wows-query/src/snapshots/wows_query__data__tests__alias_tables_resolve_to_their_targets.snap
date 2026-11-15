@@ -56,6 +56,12 @@ expression: resolutions
 - name: Prinz Eitel Friedrich
   resolved: P. E. Friedrich
   method: exact-alias
+- name: 7 de Setembro
+  resolved: Sete de Setembro
+  method: exact-alias
+- name: September
+  resolved: Sete de Setembro
+  method: exact-alias
 - name: IFHE
   resolved: Inertia Fuse for HE Shells
   method: exact-alias

@@ -468,6 +468,7 @@ mod tests {
     use crate::names::Lookup;
     use crate::names::ResolutionMethod;
     use crate::ships::SHIP_ALIASES;
+    use crate::ships::SHIP_LOOKUP_ALIASES;
     use crate::skills::SKILL_ALIASES;
     use crate::upgrades::UPGRADE_ALIASES;
 
@@ -510,7 +511,7 @@ mod tests {
 
         let alias = Some(ResolutionMethod::ExactAlias);
         let mut resolutions = Vec::new();
-        for (name, ship) in SHIP_ALIASES {
+        for (name, ship) in SHIP_ALIASES.iter().chain(SHIP_LOOKUP_ALIASES) {
             resolutions.push(resolve_name(&game.ship_names, name, alias, |index| game.ships[*index].name == *ship));
         }
         for (name, internal_name, method) in SKILL_ALIASES {
