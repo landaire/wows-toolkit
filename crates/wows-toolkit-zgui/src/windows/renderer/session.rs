@@ -13,6 +13,7 @@ use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::drawing::DrawnRegion;
 use wows_minimap_renderer::drawing::SidePanelLayout;
+use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::format_timeline_event;
 use wows_replays::types::EntityId;
@@ -32,8 +33,12 @@ use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_replay_data::replay_render::collab::COLLAB_TICK;
 use wows_toolkit_replay_data::replay_render::collab::CursorReport;
 use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
-use wows_toolkit_replay_data::replay_render::collab::frame_broadcast;
+use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
+use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
+use wows_toolkit_replay_data::replay_render::collab::frame_broadcast_with_trails;
+use wows_toolkit_replay_data::replay_render::collab::range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::shared_replay;
+use wows_toolkit_replay_data::replay_render::collab::track_silhouette;
 use wows_toolkit_replay_data::replay_render::export::ExportFrames;
 use wows_toolkit_replay_data::replay_render::export::ExportLayers;
 use wows_toolkit_replay_data::replay_render::export::ExportProgress;
@@ -66,6 +71,7 @@ use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
 use wows_toolkit_replay_data::replay_render::ships::drawn_ships;
 use wows_toolkit_replay_data::replay_render::ships::self_player;
 use wows_toolkit_replay_data::replay_render::ships::ship_at;
+use wows_toolkit_replay_data::replay_render::ships::ship_names;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
 use wows_toolkit_replay_data::replay_render::track::Track;
@@ -78,8 +84,11 @@ use wows_toolkit_replay_data::replay_render::view::Placement;
 use wows_toolkit_replay_data::replay_render::view::Wheel;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::DisplayVersions;
 use wows_toolkit_services::collab::ReplayId;
+use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::protocol::CollabRenderOptions;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
@@ -145,6 +154,13 @@ pub struct Layers {
     /// Whether ships that have sunk are still drawn. Not one of [`RenderOptions`]: it gates a
     /// command rather than a layer.
     pub show_dead_ships: bool,
+}
+
+impl Layers {
+    /// What these layers come to as a collab session's display settings.
+    pub fn collab_display(&self) -> CollabRenderOptions {
+        CollabRenderOptions::from_render_options(&self.options, self.show_dead_ships)
+    }
 }
 
 /// The export under way, what it is encoded with, and why the last one stopped.
@@ -249,6 +265,8 @@ struct Run {
     /// Moved on when the link changes, so an announcement prepared for the old link is not made.
     share_generation: Generation,
     cursor: CursorReport,
+    /// The versions of the session's display settings this viewport has taken up.
+    display_seen: DisplayVersions,
     armor: Option<ArmorFollow>,
     on_armor: Option<UnsyncCallback<ArmorRequest>>,
     /// Where a renderer's window was last, read as the session opens so a pop-out opens there.
@@ -316,6 +334,7 @@ impl RendererSession {
                 shared: false,
                 share_generation: Generation::default(),
                 cursor: CursorReport::new(),
+                display_seen: DisplayVersions::NONE,
                 armor: None,
                 on_armor: None,
                 remembered: None,
@@ -544,7 +563,10 @@ impl RendererSession {
             }
         });
         let own = self.track_untracked().and_then(|track| self_player(&track.frames));
-        self.choose(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
+        self.change_choices(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
+        // The session's layers stand over the reader's own defaults, as they do in egui.
+        self.with_run(|run| run.display_seen.settings = SyncVersion::NONE);
+        self.follow_session_display();
     }
 
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it
@@ -590,8 +612,29 @@ impl RendererSession {
         let mut layers = self.layers.get_untracked();
         apply(&mut layers);
         self.follow_layout(&mut layers.options);
-        self.layers.set(layers);
+        self.store_layers(layers);
         self.draw();
+    }
+
+    /// Turns one of the display toggles on or off, and tells a session which layers changed. A
+    /// peer the host has locked out of the settings keeps what the host shows, since the host
+    /// drops the change.
+    pub fn toggle_layer(self, toggle: &'static Toggle, on: bool) {
+        if self.collab.with_untracked(CollabLink::settings_locked) {
+            return;
+        }
+        let was = self.layers.with_untracked(Layers::collab_display);
+        self.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
+        let now = self.layers.with_untracked(Layers::collab_display);
+        self.collab.with_untracked(|link| link.send_display_toggles(&was, &now));
+    }
+
+    /// Puts `layers` up as what is drawn. A host holds them as the session's, so a peer's toggle
+    /// lands on what it shows.
+    fn store_layers(self, layers: Layers) {
+        let shown = layers.collab_display();
+        self.layers.set(layers);
+        self.collab.with_untracked(|link| link.hold_display(&shown));
     }
 
     /// Moves onto the canvas the layers now need: the rosters are a wider canvas, not a layer.
@@ -938,14 +981,41 @@ impl RendererSession {
         self.collab.with_untracked(|link| link.send_ping([x, y]));
     }
 
-    /// Changes whose trails and ranges are drawn, and redraws.
+    /// Changes whose trails and ranges are drawn, and redraws. A session is told whichever
+    /// changed. Refused, as a toggle is, while the host has locked the settings.
     pub fn choose(self, apply: impl FnOnce(&mut ShipChoices, &[String], &mut RenderOptions)) {
+        if self.collab.with_untracked(CollabLink::settings_locked) {
+            return;
+        }
+        let was = self.choices.get_untracked();
+        self.change_choices(apply);
+        self.send_choices(&was);
+    }
+
+    /// Changes whose trails and ranges are drawn, and redraws, without telling a session.
+    fn change_choices(self, apply: impl FnOnce(&mut ShipChoices, &[String], &mut RenderOptions)) {
         let drawn = self.drawn_ships();
         let mut layers = self.layers.get_untracked();
         self.choices.update(|choices| apply(choices, &drawn, &mut layers.options));
         self.follow_layout(&mut layers.options);
-        self.layers.set(layers);
+        self.store_layers(layers);
         self.draw();
+    }
+
+    /// Tells a session the per-ship choices that differ from `was`.
+    fn send_choices(self, was: &ShipChoices) {
+        let link = self.collab.get_untracked();
+        if !link.is_active() {
+            return;
+        }
+        let now = self.choices.get_untracked();
+        if now.trail_hidden() != was.trail_hidden() {
+            link.send_trail_overrides(now.trail_hidden().iter().cloned().collect());
+        }
+        if now.ship_ranges() != was.ship_ranges() {
+            let Some(track) = self.track_untracked() else { return };
+            link.send_range_overrides(range_overrides(&now, &ship_names(&track.frames)));
+        }
     }
 
     /// The players whose ships are on the frame on screen.
@@ -978,6 +1048,8 @@ impl RendererSession {
             .with_run(|run| {
                 run.share_generation.next();
                 run.cursor = CursorReport::new();
+                // A new session counts its versions afresh.
+                run.display_seen = DisplayVersions::NONE;
                 std::mem::take(&mut run.shared).then_some(run.replay_id)
             })
             .flatten();
@@ -993,11 +1065,15 @@ impl RendererSession {
     }
 
     /// Starts or stops the redraw a running session needs: a peer's pointer and pings move without
-    /// anything here touching them.
+    /// anything here touching them, and the session's display settings change under it.
     fn follow_collab(self) {
-        let active = self.collab.with_untracked(CollabLink::is_active);
+        let link = self.collab.get_untracked();
+        if link.is_active() {
+            link.hold_display(&self.layers.with_untracked(Layers::collab_display));
+            self.follow_session_display();
+        }
         self.run.update_value(|run| {
-            if !active {
+            if !link.is_active() {
                 run.collab_ticker = None;
                 return;
             }
@@ -1011,6 +1087,7 @@ impl RendererSession {
                         link.is_active()
                     });
                     if active {
+                        self.follow_session_display();
                         self.collab_frame.update(|frame| *frame = frame.wrapping_add(1));
                     } else {
                         self.run.update_value(|run| run.collab_ticker = None);
@@ -1018,6 +1095,53 @@ impl RendererSession {
                 })
             });
         });
+    }
+
+    /// Takes up the display settings the session holds where they have changed since last
+    /// looked at, over whatever the reader had chosen, as the egui renderer does.
+    ///
+    /// The per-ship ranges name ships by entity, so they wait for the track that says whose ship
+    /// each entity is.
+    fn follow_session_display(self) {
+        let link = self.collab.get_untracked();
+        let Some(seen) = self.run.try_with_value(|run| run.display_seen) else { return };
+        let versions = link.display_versions();
+        if versions == seen {
+            return;
+        }
+        let track = self.track_untracked();
+        let mut layers = self.layers.get_untracked();
+        let mut choices = self.choices.get_untracked();
+        let mut taken = seen;
+
+        if versions.settings > seen.settings
+            && let Some(settings) = link.display_settings()
+        {
+            settings.value.apply_to(&mut layers.options, &mut layers.show_dead_ships);
+            taken.settings = settings.version;
+        }
+        if versions.ranges > seen.ranges
+            && let Some(track) = &track
+            && let Some(ranges) = link.range_overrides()
+        {
+            adopt_range_overrides(&ranges.value, &ship_names(&track.frames), &mut choices, &mut layers.options);
+            taken.ranges = ranges.version;
+        }
+        if versions.trails > seen.trails
+            && let Some(trails) = link.trail_overrides()
+        {
+            adopt_trail_overrides(&trails.value, &mut choices, &mut layers.options);
+            taken.trails = trails.version;
+        }
+        if taken == seen {
+            return;
+        }
+
+        self.with_run(|run| run.display_seen = taken);
+        self.choices.set(choices);
+        self.follow_layout(&mut layers.options);
+        self.store_layers(layers);
+        self.draw();
     }
 
     /// Bakes and reads the battle again when player names are anonymized or shown again, since
@@ -1048,7 +1172,8 @@ impl RendererSession {
     }
 
     /// Tells the session this playback is open. The map art travels with it, since a peer may not
-    /// have the build the replay was recorded on.
+    /// have the build the replay was recorded on, and so does the recording player's silhouette,
+    /// which a web client draws its stats panel with.
     fn share_playback(self) {
         let link = self.collab.get_untracked();
         if !link.broadcasts_frames() {
@@ -1070,13 +1195,17 @@ impl RendererSession {
         };
         let Some(generation) = self.run.try_with_value(|run| run.share_generation) else { return };
         self.spawn(async move {
-            let shared = long_job(move || shared_replay(replay_id, title, &track, &game_data)).await;
+            let (shared, silhouette) =
+                long_job(move || (shared_replay(replay_id, title, &track, &game_data), track_silhouette(&track))).await;
             // The link this was prepared for has been replaced.
             if self.run.try_with_value(|run| run.share_generation) != Some(generation) {
                 return;
             }
             if let Some(shared) = shared {
                 link.announce_replay(shared);
+            }
+            if let Some(silhouette) = silhouette {
+                link.send_silhouette(silhouette);
             }
         });
     }
@@ -1264,7 +1393,9 @@ impl RendererSession {
             return;
         }
         let Some(commands) = track.commands(at) else { return };
-        let broadcast = frame_broadcast(replay_id, track, at, commands);
+        let broadcast = self
+            .layers
+            .with_untracked(|layers| frame_broadcast_with_trails(replay_id, track, at, commands, &layers.options));
         self.collab.with_untracked(|link| link.broadcast_frame(broadcast));
     }
 

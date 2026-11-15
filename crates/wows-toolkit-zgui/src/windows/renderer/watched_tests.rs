@@ -18,6 +18,9 @@ use wows_replays::types::GameClock;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
 use wt_collab_client::PlaybackFrame;
+use wt_collab_client::peer::LocalEvent;
+use wt_collab_client::protocol::CollabRenderOptions;
+use wt_collab_client::protocol::DisplayOptionField;
 use zgui::view;
 
 use crate::services::Services;
@@ -110,4 +113,60 @@ fn a_layer_turned_off_in_the_watched_window_is_not_drawn() {
     state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
     take_in(&mut window);
     assert!(!shows_timer(watch), "nor is it on the host's next frame");
+}
+
+/// A layer changed here is told to the session, and the host's layers, when they change, are
+/// drawn over what was chosen here, as an egui peer's are.
+#[test]
+fn the_hosts_layers_are_drawn_over_the_watched_windows_own() {
+    let state = Arc::new(Default::default());
+    let (link, sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+
+    click(&mut window, "watched-playback-layers-toggle");
+    click(&mut window, "renderer-opt-torpedoes");
+    assert!(!shows_torpedo(watch), "the torpedoes are turned off here");
+    let said: Vec<_> = sent
+        .try_iter()
+        .filter_map(|event| match event {
+            LocalEvent::DisplayToggle(field, value) => Some((field, value)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said, vec![(DisplayOptionField::ShowTorpedoes, false)], "and the session is told");
+
+    let hosts = CollabRenderOptions { show_timer: false, show_torpedoes: true, ..CollabRenderOptions::default() };
+    {
+        let mut held = state.lock();
+        held.current_render_options = Some(hosts);
+        held.render_options_version = 1;
+    }
+    take_in(&mut window);
+
+    assert!(!shows_timer(watch), "the host's timer is off");
+    assert!(shows_torpedo(watch), "and its torpedoes are on, over the choice made here");
+}
+
+/// A peer the host has locked out of the settings keeps drawing what the host shows, and tells
+/// the session nothing, since the host would drop it.
+#[test]
+fn a_locked_peers_toggle_is_refused() {
+    let state = Arc::new(Default::default());
+    let (link, sent) = CollabLink::for_test(Arc::clone(&state));
+    {
+        let mut held = state.lock();
+        held.role = wt_collab_client::PeerRole::Peer;
+        held.permissions.settings_locked = true;
+    }
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+
+    click(&mut window, "watched-playback-layers-toggle");
+    click(&mut window, "renderer-opt-torpedoes");
+
+    assert!(shows_torpedo(watch), "the torpedoes are still drawn");
+    assert!(!sent.try_iter().any(|event| matches!(event, LocalEvent::DisplayToggle(..))), "and nothing is sent");
 }

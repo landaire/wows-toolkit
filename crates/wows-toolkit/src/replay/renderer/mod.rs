@@ -1460,1432 +1460,1434 @@ impl ReplayRendererViewer {
             .map(|s| s.apply_to_builder(builder.clone(), [800.0, 900.0]))
             .unwrap_or_else(|| builder.with_inner_size([800.0, 900.0]));
 
-        ctx.show_viewport_deferred(
-            viewport_id,
-            builder,
-            move |viewport_ui, _class| {
-                let ctx = viewport_ui.ctx().clone();
-                if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(&ctx) {
+        ctx.show_viewport_deferred(viewport_id, builder, move |viewport_ui, _class| {
+            let ctx = viewport_ui.ctx().clone();
+            if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(&ctx) {
+                return;
+            }
+
+            // The controls sit on the game's own dark minimap, so they stay
+            // dark whatever the app theme is.
+            let _dark_pass = crate::ui::theme::DarkPass::force(viewport_ui);
+
+            let mut repaint = false;
+
+            let mut state = shared_state.lock();
+
+            // Pull latest frame from collab channel before any status checks
+            // so the Loading->Ready transition sees the first frame immediately.
+            if let Some(rx) = state.collab_frame_rx.take() {
+                while let Ok(frame) = rx.try_recv() {
+                    state.frame = Some(frame);
+                    repaint = true;
+                }
+                state.collab_frame_rx = Some(rx);
+            }
+
+            // Register game fonts with egui on the first frame.
+            // set_fonts() doesn't take effect until the next frame, so we
+            // track whether we just registered to avoid using them too early.
+            let mut fonts_just_registered = false;
+            if !state.game_fonts_registered {
+                let mut font_defs = ctx.fonts(|r| r.definitions().clone());
+                register_game_fonts(&mut font_defs, state.game_fonts.as_ref());
+                ctx.set_fonts(font_defs);
+                state.game_fonts_registered = true;
+                fonts_just_registered = true;
+            }
+
+            // For client renderers: transition Loading->Ready once fonts are
+            // effective (registered on a prior frame) and a frame has arrived.
+            if matches!(state.status, RendererStatus::Loading) && state.frame.is_some() && !fonts_just_registered {
+                tracing::debug!("Renderer: Loading->Ready (fonts effective, frame available)");
+                state.status = RendererStatus::Ready;
+            }
+
+            let status_is_loading = matches!(state.status, RendererStatus::Loading);
+            let status_error = match &state.status {
+                RendererStatus::Error(e) => Some(e.clone()),
+                _ => None,
+            };
+            let has_assets = state.assets.is_some();
+            let playing = state.playing;
+            let speed = state.speed;
+            let options = state.options.clone();
+            let show_dead_ships = state.show_dead_ships;
+            let battle_start = state.battle_start;
+            let battle_end = state.battle_end;
+            let actual_game_duration = state.actual_game_duration;
+            let frame_data = state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock, f.game_duration));
+            // Resolve self entity ID from draw commands (once)
+            let self_entity_id = if state.self_entity_id.is_some() {
+                state.self_entity_id
+            } else if let Some(ref frame) = state.frame {
+                let eid = frame.commands.iter().find_map(|cmd| {
+                    if let DrawCommand::Ship { entity_id, is_self: true, .. } = cmd { Some(*entity_id) } else { None }
+                });
+                if eid.is_some() {
+                    state.self_entity_id = eid;
+                }
+                eid
+            } else {
+                None
+            };
+
+            drop(state);
+
+            // Apply pending render options / annotation sync from collab session (version-based).
+            // Session lifecycle events (Started, Ended, etc.) are polled by app.rs.
+            {
+                let mut state = shared_state.lock();
+                if let Some(ref session_state_arc) = state.collab_session_state.clone() {
+                    let s = session_state_arc.lock();
+                    if s.render_options_version > state.applied_render_options_version {
+                        if let Some(opts) = &s.current_render_options {
+                            let state = &mut *state;
+                            opts.apply_to(&mut state.options, &mut state.show_dead_ships);
+                        }
+                        state.applied_render_options_version = s.render_options_version;
+                    }
+                    if s.annotation_sync_version > state.applied_annotation_sync_version {
+                        if let Some(ref sync) = s.current_annotation_sync {
+                            let mut ann = annotation_arc.lock();
+                            ann.annotations =
+                                sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
+                            ann.annotation_owners = sync.owners.clone();
+                            ann.annotation_ids = sync.ids.clone();
+                        }
+                        state.applied_annotation_sync_version = s.annotation_sync_version;
+                    }
+                    if s.range_override_version > state.applied_range_override_version {
+                        if let Some(ref overrides) = s.current_range_overrides {
+                            let mut ann = annotation_arc.lock();
+                            ann.ship_range_overrides.clear();
+                            for &(eid, filter) in overrides {
+                                ann.ship_range_overrides.insert(eid, filter);
+                            }
+                            // Enable show_ship_config if any overrides are present
+                            if !ann.ship_range_overrides.is_empty() && !state.options.show_ship_config {
+                                state.options.show_ship_config = true;
+                            }
+                        }
+                        state.applied_range_override_version = s.range_override_version;
+                    }
+                    if s.trail_override_version > state.applied_trail_override_version {
+                        if let Some(ref hidden) = s.current_trail_hidden {
+                            let mut ann = annotation_arc.lock();
+                            ann.trail_hidden_ships.clear();
+                            for name in hidden {
+                                ann.trail_hidden_ships.insert(name.clone());
+                            }
+                            // Enable show_trails if there are still some visible trails
+                            if !ann.trail_hidden_ships.is_empty() && !state.options.show_trails {
+                                state.options.show_trails = true;
+                            }
+                        }
+                        state.applied_trail_override_version = s.trail_override_version;
+                    }
+                }
+            }
+
+            // Apply pending self range filter once self entity ID is known
+            if let Some(self_eid) = self_entity_id {
+                let mut ann = annotation_arc.lock();
+                if let Some(filter) = ann.pending_self_range_filter.take() {
+                    ann.ship_range_overrides.insert(self_eid, filter);
+                    // Ensure show_ship_config is enabled
+                    let mut state = shared_state.lock();
+                    if !state.options.show_ship_config {
+                        state.options.show_ship_config = true;
+                    }
+                }
+            }
+
+            // Upload textures on first ready frame
+            {
+                let mut tex_guard = textures_arc.lock();
+                if tex_guard.is_none() && has_assets {
+                    let state = shared_state.lock();
+                    if let Some(assets) = &state.assets {
+                        // Send silhouette to collab peers if available at initial upload time.
+                        if let Some((w, h, data)) = state.self_silhouette_raw.as_ref()
+                            && let Some(ref tx) = state.collab_local_tx
+                        {
+                            let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
+                                data: data.clone(),
+                                width: *w,
+                                height: *h,
+                            });
+                        }
+                        *tex_guard = Some(upload_textures(&ctx, assets, state.self_silhouette_raw.as_ref()));
+                    }
+                }
+                // Lazy silhouette upload: raw data may arrive after initial texture upload
+                if let Some(textures) = tex_guard.as_mut()
+                    && textures.silhouette_texture.is_none()
+                {
+                    let state = shared_state.lock();
+                    if let Some((w, h, data)) = state.self_silhouette_raw.as_ref() {
+                        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+                        textures.silhouette_texture =
+                            Some(ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR));
+                        // Send to collab peers so web clients can render the stats panel silhouette.
+                        if let Some(ref tx) = state.collab_local_tx {
+                            let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
+                                data: data.clone(),
+                                width: *w,
+                                height: *h,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // ── Annotation toolbar ──
+            if !status_is_loading {
+                egui::Panel::top("replay_annotation_toolbar").show(viewport_ui, |ui| {
+                    let locked = shared_state
+                        .lock()
+                        .collab_session_state
+                        .as_ref()
+                        .map(|ss| ss.lock().permissions.annotations_locked)
+                        .unwrap_or(false);
+                    let mut ann = annotation_arc.lock();
+                    let tex_guard = textures_arc.lock();
+                    let ship_icons = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
+                    let result = wt_collab_egui::toolbar::draw_annotation_toolbar(ui, &mut ann, ship_icons, locked);
+                    drop(tex_guard);
+                    if result.did_clear {
+                        send_annotation_clear(&shared_state.lock().collab_local_tx, None);
+                    }
+                    if result.did_undo {
+                        send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
+                    }
+                });
+            }
+
+            egui::CentralPanel::default().show(viewport_ui, |ui| {
+                if status_is_loading {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                        ui.label(t!("ui.renderer.loading"));
+                    });
+                    ctx.request_repaint();
                     return;
                 }
 
-                // The controls sit on the game's own dark minimap, so they stay
-                // dark whatever the app theme is.
-                let _dark_pass = crate::ui::theme::DarkPass::force(viewport_ui);
+                if let Some(err) = status_error {
+                    ui.colored_label(Color32::RED, format!("Error: {}", err));
+                    return;
+                }
 
-                let mut repaint = false;
+                // Canvas layout: team rosters reserve a left+right gutter and
+                // replace the self-perspective stats panel. When rosters are
+                // off, the stats panel takes its own right-side strip.
+                let available = ui.available_size();
+                let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
+                let geom = wt_collab_egui::player::canvas_geometry(&options);
+                let logical_canvas = Vec2::new(geom.canvas_width, CANVAS_HEIGHT as f32);
+                let layout = compute_canvas_layout(available, logical_canvas, 1.0, response.rect.min, geom.map_width);
+                let map_x_offset = geom.map_x_offset;
+                let map_w = geom.map_width;
 
-                let mut state = shared_state.lock();
+                // Zoom/pan input handling runs against this frame's freshly allocated
+                // `response`/`layout`, before painting, so a scroll or drag this frame is
+                // reflected in this frame's paint rather than the next one.
+                let zoom_changed = {
+                    let mut zp = zoom_pan_arc.lock();
+                    handle_viewport_zoom_pan(
+                        &ctx,
+                        &response,
+                        &mut zp,
+                        &layout,
+                        logical_canvas,
+                        &ZoomPanConfig {
+                            allow_left_drag_pan: true,
+                            hud_height: HUD_HEIGHT as f32,
+                            handle_tool_yaw: true,
+                            map_width: map_w,
+                            map_x_offset,
+                        },
+                        Some(&mut annotation_arc.lock()),
+                        false,
+                    )
+                };
 
-                // Pull latest frame from collab channel before any status checks
-                // so the Loading->Ready transition sees the first frame immediately.
-                if let Some(rx) = state.collab_frame_rx.take() {
-                    while let Ok(frame) = rx.try_recv() {
-                        state.frame = Some(frame);
+                let zp = zoom_pan_arc.lock();
+                let (zoom, pan) = (zp.zoom, zp.pan);
+                let current_zoom = zp.zoom;
+                drop(zp);
+
+                let (trail_hidden_ships, ship_range_overrides) = {
+                    let ann = annotation_arc.lock();
+                    (ann.trail_hidden_ships.clone(), ann.ship_range_overrides.clone())
+                };
+                let filter = WindowCommandFilter { trail_hidden_ships, ship_range_overrides };
+
+                // Painting needs the uploaded textures; the input handling below does
+                // not, and must stay live on a frame whose upload has not landed yet.
+                // The transform is the one the frame would be painted through, so both
+                // paths map the pointer the same way.
+                let transform = wt_collab_egui::player::frame_transform(&options, &layout, zoom, pan);
+
+                let tex_guard = textures_arc.lock();
+                if let Some(textures) = tex_guard.as_ref() {
+                    let shared_tex = make_shared_textures(textures);
+
+                    // The guard is held through the paint call below, the roster hover
+                    // interactions, and the TeamAdvantage tooltip, all of which read
+                    // `frame_commands` or other `state` fields, and is dropped once none of
+                    // them need it any more. Do not relock `shared_state` inside any of the
+                    // closures between here and the `drop(state)` below - the lock is not
+                    // reentrant. Cloning the frame's commands instead of borrowing them would
+                    // allocate hundreds of `DrawCommand`s on every repaint.
+                    let state = shared_state.lock();
+                    let frame_commands: &[DrawCommand] = state.frame.as_ref().map_or(&[], |f| &f.commands);
+
+                    let out = wt_collab_egui::player::MinimapView {
+                        commands: frame_commands,
+                        textures: &shared_tex,
+                        map_texture: textures.map_texture.as_ref().map(|t| t.id()),
+                        options: &options,
+                        show_dead_ships,
+                        zoom,
+                        pan,
+                        filter: &filter,
+                        text_resolver: &LocalizedTextResolver,
+                        grid: Some(&|ws| GridStyle {
+                            grid_color: Color32::from_rgba_unmultiplied(255, 255, 255, 64),
+                            label_color: Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                            line_width: 1.0,
+                            label_font: game_font(11.0 * ws),
+                        }),
+                        background: MINIMAP_BACKGROUND,
+                    }
+                    .show_in(&ctx, &response, &painter, &layout);
+
+                    // Cursor icon based on tool / zoom state
+                    if response.hovered() {
+                        let cursor = {
+                            let ann = annotation_arc.lock();
+                            let base = annotation_cursor_icon(&ann, &response, &transform);
+                            if base.is_some() {
+                                base
+                            } else {
+                                // No annotation cursor — check if hovering over a ship
+                                let near_ship = response.hover_pos().is_some_and(|hp| {
+                                    frame_commands.iter().any(|cmd| {
+                                        if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
+                                            let sp = transform.minimap_to_screen(pos);
+                                            hp.distance(sp) < 30.0
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                });
+                                if near_ship { Some(egui::CursorIcon::PointingHand) } else { None }
+                            }
+                        };
+                        if let Some(c) = cursor {
+                            if response.dragged() && c == egui::CursorIcon::Grab {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else {
+                                ctx.set_cursor_icon(c);
+                            }
+                        } else if current_zoom > 1.01 {
+                            if response.dragged() {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                            }
+                        }
+                    }
+
+                    // Request repaint if zoom/pan changed while paused
+                    if zoom_changed && !playing {
                         repaint = true;
                     }
-                    state.collab_frame_rx = Some(rx);
-                }
 
-                // Register game fonts with egui on the first frame.
-                // set_fonts() doesn't take effect until the next frame, so we
-                // track whether we just registered to avoid using them too early.
-                let mut fonts_just_registered = false;
-                if !state.game_fonts_registered {
-                    let mut font_defs = ctx.fonts(|r| r.definitions().clone());
-                    register_game_fonts(&mut font_defs, state.game_fonts.as_ref());
-                    ctx.set_fonts(font_defs);
-                    state.game_fonts_registered = true;
-                    fonts_just_registered = true;
-                }
+                    let build_snapshots: Vec<Option<Arc<PlayerBuildDisplay>>> = out
+                        .player_build_regions
+                        .iter()
+                        .map(|r| state.player_builds.get(&r.entity_id).cloned())
+                        .collect();
+                    let teams_with_replays = state.teams_with_replays.clone();
+                    let debug_mode = state.is_debug_mode;
 
-                // For client renderers: transition Loading->Ready once fonts are
-                // effective (registered on a prior frame) and a frame has arrived.
-                if matches!(state.status, RendererStatus::Loading)
-                    && state.frame.is_some()
-                    && !fonts_just_registered
-                {
-                    tracing::debug!("Renderer: Loading->Ready (fonts effective, frame available)");
-                    state.status = RendererStatus::Ready;
-                }
+                    for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
+                        let id = egui::Id::unique(("roster_consumable_hover", idx));
+                        let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
+                        let tex = textures.icons.consumable_icons.get(&region.consumable.icon_key);
+                        hover_resp.on_hover_ui(|ui| {
+                            roster_consumable_tooltip(ui, region, tex);
+                        });
+                    }
 
-                let status_is_loading = matches!(state.status, RendererStatus::Loading);
-                let status_error = match &state.status {
-                    RendererStatus::Error(e) => Some(e.clone()),
-                    _ => None,
-                };
-                let has_assets = state.assets.is_some();
-                let playing = state.playing;
-                let speed = state.speed;
-                let options = state.options.clone();
-                let show_dead_ships = state.show_dead_ships;
-                let battle_start = state.battle_start;
-                let battle_end = state.battle_end;
-                let actual_game_duration = state.actual_game_duration;
-                let frame_data =
-                    state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock, f.game_duration));
-                // Resolve self entity ID from draw commands (once)
-                let self_entity_id = if state.self_entity_id.is_some() {
-                    state.self_entity_id
-                } else if let Some(ref frame) = state.frame {
-                    let eid = frame.commands.iter().find_map(|cmd| {
-                        if let DrawCommand::Ship { entity_id, is_self: true, .. } = cmd {
-                            Some(*entity_id)
+                    for (idx, region) in out.player_build_regions.iter().enumerate() {
+                        // The build popover is gated on having packet-level data from that team:
+                        // own team always, enemy team only via a merged alt replay. Debug mode
+                        // unmasks everything, matching the inspector.
+                        if !debug_mode && !teams_with_replays.contains(&region.team_id) {
+                            continue;
+                        }
+                        let id = egui::Id::unique(("roster_player_build", region.entity_id));
+                        let resp = ui.interact(region.rect, id, egui::Sense::click());
+                        let snapshot = build_snapshots[idx].clone();
+                        egui::Popup::from_toggle_button_response(&resp)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                            });
+                        if !egui::Popup::is_id_open(&ctx, id) {
+                            let snapshot = snapshot.clone();
+                            resp.on_hover_ui(|ui| {
+                                roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                            });
+                        }
+                    }
+
+                    // Hover tooltip for TeamAdvantage
+                    let ws = transform.window_scale;
+                    // Find ScoreBar to compute advantage label position
+                    let score_bar_info: Option<ScoreBarInfo> = frame_commands.iter().find_map(|cmd| {
+                        if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
+                            let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
+                            Some(ScoreBarInfo {
+                                team0_score: *team0,
+                                team1_score: *team1,
+                                team0_timer: team0_timer.clone(),
+                                team1_timer: team1_timer.clone(),
+                                adv_team,
+                            })
                         } else {
                             None
                         }
                     });
-                    if eid.is_some() {
-                        state.self_entity_id = eid;
-                    }
-                    eid
-                } else {
-                    None
-                };
-
-                drop(state);
-
-                // Apply pending render options / annotation sync from collab session (version-based).
-                // Session lifecycle events (Started, Ended, etc.) are polled by app.rs.
-                {
-                    let mut state = shared_state.lock();
-                    if let Some(ref session_state_arc) = state.collab_session_state.clone() {
-                        let s = session_state_arc.lock();
-                            if s.render_options_version > state.applied_render_options_version {
-                                if let Some(ref opts) = s.current_render_options {
-                                    state.options.show_hp_bars = opts.show_hp_bars;
-                                    state.options.show_tracers = opts.show_tracers;
-                                    state.options.show_torpedoes = opts.show_torpedoes;
-                                    state.options.show_planes = opts.show_planes;
-                                    state.options.show_smoke = opts.show_smoke;
-                                    state.options.show_score = opts.show_score;
-                                    state.options.show_timer = opts.show_timer;
-                                    state.options.show_kill_feed = opts.show_kill_feed;
-                                    state.options.show_player_names = opts.show_player_names;
-                                    state.options.show_ship_names = opts.show_ship_names;
-                                    state.options.show_capture_points = opts.show_capture_points;
-                                    state.options.show_buildings = opts.show_buildings;
-                                    state.options.show_camera_direction = opts.show_camera_direction;
-                                    state.options.show_consumables = opts.show_consumables;
-                                    state.options.show_armament = opts.show_armament;
-                                    state.options.show_trails = opts.show_trails;
-                                    state.options.show_dead_trails = opts.show_dead_trails;
-                                    state.options.show_speed_trails = opts.show_speed_trails;
-                                    state.options.show_ship_config = opts.show_ship_config;
-                                    state.options.show_dead_ship_names = opts.show_dead_ship_names;
-                                    state.options.show_battle_result = opts.show_battle_result;
-                                    state.options.show_buffs = opts.show_buffs;
-                                    state.options.show_chat = opts.show_chat;
-                                    state.options.show_advantage = opts.show_advantage;
-                                    state.options.show_score_timer = opts.show_score_timer;
-                                    state.show_dead_ships = opts.show_dead_ships;
-                                }
-                                state.applied_render_options_version = s.render_options_version;
-                            }
-                            if s.annotation_sync_version > state.applied_annotation_sync_version {
-                                if let Some(ref sync) = s.current_annotation_sync {
-                                    let mut ann = annotation_arc.lock();
-                                    ann.annotations = sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
-                                    ann.annotation_owners = sync.owners.clone();
-                                    ann.annotation_ids = sync.ids.clone();
-                                }
-                                state.applied_annotation_sync_version = s.annotation_sync_version;
-                            }
-                            if s.range_override_version > state.applied_range_override_version {
-                                if let Some(ref overrides) = s.current_range_overrides {
-                                    let mut ann = annotation_arc.lock();
-                                    ann.ship_range_overrides.clear();
-                                    for &(eid, filter) in overrides {
-                                        ann.ship_range_overrides.insert(eid, filter);
-                                    }
-                                    // Enable show_ship_config if any overrides are present
-                                    if !ann.ship_range_overrides.is_empty() && !state.options.show_ship_config {
-                                        state.options.show_ship_config = true;
-                                    }
-                                }
-                                state.applied_range_override_version = s.range_override_version;
-                            }
-                            if s.trail_override_version > state.applied_trail_override_version {
-                                if let Some(ref hidden) = s.current_trail_hidden {
-                                    let mut ann = annotation_arc.lock();
-                                    ann.trail_hidden_ships.clear();
-                                    for name in hidden {
-                                        ann.trail_hidden_ships.insert(name.clone());
-                                    }
-                                    // Enable show_trails if there are still some visible trails
-                                    if !ann.trail_hidden_ships.is_empty() && !state.options.show_trails {
-                                        state.options.show_trails = true;
-                                    }
-                                }
-                                state.applied_trail_override_version = s.trail_override_version;
-                            }
-                        }
-                }
-
-                // Apply pending self range filter once self entity ID is known
-                if let Some(self_eid) = self_entity_id {
-                    let mut ann = annotation_arc.lock();
-                    if let Some(filter) = ann.pending_self_range_filter.take() {
-                        ann.ship_range_overrides.insert(self_eid, filter);
-                        // Ensure show_ship_config is enabled
-                        let mut state = shared_state.lock();
-                        if !state.options.show_ship_config {
-                            state.options.show_ship_config = true;
-                        }
-                    }
-                }
-
-                // Upload textures on first ready frame
-                {
-                    let mut tex_guard = textures_arc.lock();
-                    if tex_guard.is_none() && has_assets {
-                        let state = shared_state.lock();
-                        if let Some(assets) = &state.assets {
-                            // Send silhouette to collab peers if available at initial upload time.
-                            if let Some((w, h, data)) = state.self_silhouette_raw.as_ref()
-                                && let Some(ref tx) = state.collab_local_tx {
-                                    let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
-                                        data: data.clone(),
-                                        width: *w,
-                                        height: *h,
-                                    });
-                                }
-                            *tex_guard = Some(upload_textures(&ctx, assets, state.self_silhouette_raw.as_ref()));
-                        }
-                    }
-                    // Lazy silhouette upload: raw data may arrive after initial texture upload
-                    if let Some(textures) = tex_guard.as_mut()
-                        && textures.silhouette_texture.is_none() {
-                            let state = shared_state.lock();
-                            if let Some((w, h, data)) = state.self_silhouette_raw.as_ref() {
-                                let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
-                                textures.silhouette_texture = Some(ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR));
-                                // Send to collab peers so web clients can render the stats panel silhouette.
-                                if let Some(ref tx) = state.collab_local_tx {
-                                    let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
-                                        data: data.clone(),
-                                        width: *w,
-                                        height: *h,
-                                    });
-                                }
-                            }
-                        }
-                }
-
-                // ── Annotation toolbar ──
-                if !status_is_loading {
-                    egui::Panel::top("replay_annotation_toolbar").show(viewport_ui, |ui| {
-                        let locked = shared_state
-                            .lock()
-                            .collab_session_state
-                            .as_ref()
-                            .map(|ss| ss.lock().permissions.annotations_locked)
-                            .unwrap_or(false);
-                        let mut ann = annotation_arc.lock();
-                        let tex_guard = textures_arc.lock();
-                        let ship_icons = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
-                        let result = wt_collab_egui::toolbar::draw_annotation_toolbar(
-                            ui,
-                            &mut ann,
-                            ship_icons,
-                            locked,
-                        );
-                        drop(tex_guard);
-                        if result.did_clear {
-                            send_annotation_clear(&shared_state.lock().collab_local_tx, None);
-                        }
-                        if result.did_undo {
-                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
-                        }
-                    });
-                }
-
-                egui::CentralPanel::default().show(viewport_ui, |ui| {
-                    if status_is_loading {
-                        ui.centered_and_justified(|ui| {
-                            ui.spinner();
-                            ui.label(t!("ui.renderer.loading"));
-                        });
-                        ctx.request_repaint();
-                        return;
-                    }
-
-                    if let Some(err) = status_error {
-                        ui.colored_label(Color32::RED, format!("Error: {}", err));
-                        return;
-                    }
-
-                    // Canvas layout: team rosters reserve a left+right gutter and
-                    // replace the self-perspective stats panel. When rosters are
-                    // off, the stats panel takes its own right-side strip.
-                    let available = ui.available_size();
-                    let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    let geom = wt_collab_egui::player::canvas_geometry(&options);
-                    let logical_canvas = Vec2::new(geom.canvas_width, CANVAS_HEIGHT as f32);
-                    let layout = compute_canvas_layout(available, logical_canvas, 1.0, response.rect.min, geom.map_width);
-                    let map_x_offset = geom.map_x_offset;
-                    let map_w = geom.map_width;
-
-                    // Zoom/pan input handling runs against this frame's freshly allocated
-                    // `response`/`layout`, before painting, so a scroll or drag this frame is
-                    // reflected in this frame's paint rather than the next one.
-                    let zoom_changed = {
-                        let mut zp = zoom_pan_arc.lock();
-                        handle_viewport_zoom_pan(
-                            &ctx,
-                            &response,
-                            &mut zp,
-                            &layout,
-                            logical_canvas,
-                            &ZoomPanConfig {
-                                allow_left_drag_pan: true,
-                                hud_height: HUD_HEIGHT as f32,
-                                handle_tool_yaw: true,
-                                map_width: map_w,
-                                map_x_offset,
-                            },
-                            Some(&mut annotation_arc.lock()),
-                            false,
-                        )
-                    };
-
-                    let zp = zoom_pan_arc.lock();
-                    let (zoom, pan) = (zp.zoom, zp.pan);
-                    let current_zoom = zp.zoom;
-                    drop(zp);
-
-                    let (trail_hidden_ships, ship_range_overrides) = {
-                        let ann = annotation_arc.lock();
-                        (ann.trail_hidden_ships.clone(), ann.ship_range_overrides.clone())
-                    };
-                    let filter = WindowCommandFilter { trail_hidden_ships, ship_range_overrides };
-
-                    // Painting needs the uploaded textures; the input handling below does
-                    // not, and must stay live on a frame whose upload has not landed yet.
-                    // The transform is the one the frame would be painted through, so both
-                    // paths map the pointer the same way.
-                    let transform = wt_collab_egui::player::frame_transform(&options, &layout, zoom, pan);
-
-                    let tex_guard = textures_arc.lock();
-                    if let Some(textures) = tex_guard.as_ref() {
-                        let shared_tex = make_shared_textures(textures);
-
-                        // The guard is held through the paint call below, the roster hover
-                        // interactions, and the TeamAdvantage tooltip, all of which read
-                        // `frame_commands` or other `state` fields, and is dropped once none of
-                        // them need it any more. Do not relock `shared_state` inside any of the
-                        // closures between here and the `drop(state)` below - the lock is not
-                        // reentrant. Cloning the frame's commands instead of borrowing them would
-                        // allocate hundreds of `DrawCommand`s on every repaint.
-                        let state = shared_state.lock();
-                        let frame_commands: &[DrawCommand] = state.frame.as_ref().map_or(&[], |f| &f.commands);
-
-                        let out = wt_collab_egui::player::MinimapView {
-                            commands: frame_commands,
-                            textures: &shared_tex,
-                            map_texture: textures.map_texture.as_ref().map(|t| t.id()),
-                            options: &options,
-                            show_dead_ships,
-                            zoom,
-                            pan,
-                            filter: &filter,
-                            text_resolver: &LocalizedTextResolver,
-                            grid: Some(&|ws| GridStyle {
-                                grid_color: Color32::from_rgba_unmultiplied(255, 255, 255, 64),
-                                label_color: Color32::from_rgba_unmultiplied(255, 255, 255, 180),
-                                line_width: 1.0,
-                                label_font: game_font(11.0 * ws),
-                            }),
-                            background: MINIMAP_BACKGROUND,
-                        }
-                        .show_in(&ctx, &response, &painter, &layout);
-
-
-                        // Cursor icon based on tool / zoom state
-                        if response.hovered() {
-                            let cursor = {
-                                let ann = annotation_arc.lock();
-                                let base = annotation_cursor_icon(&ann, &response, &transform);
-                                if base.is_some() {
-                                    base
-                                } else {
-                                    // No annotation cursor — check if hovering over a ship
-                                    let near_ship = response.hover_pos().is_some_and(|hp| {
-                                        frame_commands.iter().any(|cmd| {
-                                            if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
-                                                let sp = transform.minimap_to_screen(pos);
-                                                hp.distance(sp) < 30.0
-                                            } else {
-                                                false
-                                            }
-                                        })
-                                    });
-                                    if near_ship {
-                                        Some(egui::CursorIcon::PointingHand)
-                                    } else {
-                                        None
-                                    }
-                                }
-                            };
-                            if let Some(c) = cursor {
-                                if response.dragged() && c == egui::CursorIcon::Grab {
-                                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                                } else {
-                                    ctx.set_cursor_icon(c);
-                                }
-                            } else if current_zoom > 1.01 {
-                                if response.dragged() {
-                                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                                } else {
-                                    ctx.set_cursor_icon(egui::CursorIcon::Grab);
-                                }
-                            }
-                        }
-
-                        // Request repaint if zoom/pan changed while paused
-                        if zoom_changed && !playing {
-                            repaint = true;
-                        }
-
-                        let build_snapshots: Vec<Option<Arc<PlayerBuildDisplay>>> =
-                            out.player_build_regions.iter().map(|r| state.player_builds.get(&r.entity_id).cloned()).collect();
-                        let teams_with_replays = state.teams_with_replays.clone();
-                        let debug_mode = state.is_debug_mode;
-
-                        for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
-                            let id = egui::Id::unique(("roster_consumable_hover", idx));
-                            let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
-                            let tex = textures.icons.consumable_icons.get(&region.consumable.icon_key);
-                            hover_resp.on_hover_ui(|ui| {
-                                roster_consumable_tooltip(ui, region, tex);
-                            });
-                        }
-
-                        for (idx, region) in out.player_build_regions.iter().enumerate() {
-                            // The build popover is gated on having packet-level data from that team:
-                            // own team always, enemy team only via a merged alt replay. Debug mode
-                            // unmasks everything, matching the inspector.
-                            if !debug_mode && !teams_with_replays.contains(&region.team_id) {
-                                continue;
-                            }
-                            let id = egui::Id::unique(("roster_player_build", region.entity_id));
-                            let resp = ui.interact(region.rect, id, egui::Sense::click());
-                            let snapshot = build_snapshots[idx].clone();
-                            egui::Popup::from_toggle_button_response(&resp)
-                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .show(|ui| {
-                                    roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
-                                });
-                            if !egui::Popup::is_id_open(&ctx, id) {
-                                let snapshot = snapshot.clone();
-                                resp.on_hover_ui(|ui| {
-                                    roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
-                                });
-                            }
-                        }
-
-                        // Hover tooltip for TeamAdvantage
-                        let ws = transform.window_scale;
-                        // Find ScoreBar to compute advantage label position
-                        let score_bar_info: Option<ScoreBarInfo> = frame_commands.iter().find_map(|cmd| {
-                            if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
-                                let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
-                                Some(ScoreBarInfo {
-                                    team0_score: *team0,
-                                    team1_score: *team1,
-                                    team0_timer: team0_timer.clone(),
-                                    team1_timer: team1_timer.clone(),
-                                    adv_team,
-                                })
-                            } else {
-                                None
-                            }
-                        });
-                        for cmd in frame_commands {
-                            if let DrawCommand::TeamAdvantage { level, color, breakdown } = cmd {
-                                let Some(adv_level) = level else {
-                                    break;
-                                };
-                                let label = adv_level.label().to_string();
-                                let canvas_w = transform.screen_hud_width();
-                                let bar_height = HUD_HEIGHT as f32 * ws;
-                                let bar_origin = transform.hud_pos(0.0, 0.0);
-
-                                // Recompute cursor positions matching ScoreBar rendering
-                                let score_font = game_font(14.0 * ws);
-                                let timer_font = game_font(12.0 * ws);
-                                let adv_font = game_font(11.0 * ws);
-                                let adv_color = color_from_rgb(*color);
-                                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
-                                let text_w = galley.size().x;
-                                let text_h = galley.size().y;
-
-                                let (t0_end_x, t1_start_x) = if let Some(ScoreBarInfo { team0_score: t0_score, team1_score: t1_score, team0_timer: ref t0_timer, team1_timer: ref t1_timer, .. }) = score_bar_info {
-                                    let t0_text = format!("{}", t0_score);
-                                    let t0g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
-                                    let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
-                                    if let Some(timer) = t0_timer {
-                                        let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::WHITE));
-                                        t0_end = t0_end + 4.0 * ws + tg.size().x;
-                                    }
-                                    let t1_text = format!("{}", t1_score);
-                                    let t1g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
-                                    let mut t1_start = bar_origin.x + canvas_w - t1g.size().x - 8.0 * ws;
-                                    if let Some(timer) = t1_timer {
-                                        let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, Color32::WHITE));
-                                        t1_start = t1_start - tg.size().x - 4.0 * ws;
-                                    }
-                                    (t0_end, t1_start)
-                                } else {
-                                    let half = canvas_w / 2.0;
-                                    (bar_origin.x + half, bar_origin.x + half)
-                                };
-
-                                let adv_team = score_bar_info.as_ref().map(|s| s.adv_team).unwrap_or(-1);
-                                let x = if adv_team == 0 {
-                                    t0_end_x + 6.0 * ws
-                                } else {
-                                    t1_start_x - text_w - 6.0 * ws
-                                };
-                                let y = bar_origin.y + (bar_height - text_h) / 2.0;
-                                let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
-                                let resp = ui.interact(
-                                    label_rect,
-                                    egui::Id::unique("advantage_tooltip"),
-                                    egui::Sense::hover(),
-                                );
-                                resp.on_hover_ui(|ui| {
-                                    ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
-                                    ui.separator();
-                                    match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
-                                        None => {
-                                            ui.label(t!("ui.renderer.advantage.team_eliminated"));
-                                        }
-                                        Some(rows) => {
-                                            egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
-                                                let last = rows.len().saturating_sub(1);
-                                                for (index, row) in rows.iter().enumerate() {
-                                                    // The total is the last row, and is set apart.
-                                                    if index == last {
-                                                        ui.separator();
-                                                        ui.separator();
-                                                        ui.end_row();
-                                                        ui.label(egui::RichText::new(t!(row.label_key).as_ref()).strong());
-                                                        ui.label(egui::RichText::new(&row.contribution).strong());
-                                                    } else {
-                                                        ui.label(t!(row.label_key));
-                                                        ui.label(&row.contribution);
-                                                    }
-                                                    ui.end_row();
-                                                }
-                                            });
-                                            if !breakdown.hp_data_reliable {
-                                                ui.small(t!("ui.renderer.advantage.hp_incomplete"));
-                                            }
-                                        }
-                                    }
-                                });
+                    for cmd in frame_commands {
+                        if let DrawCommand::TeamAdvantage { level, color, breakdown } = cmd {
+                            let Some(adv_level) = level else {
                                 break;
-                            }
-                        }
-                        drop(state);
+                            };
+                            let label = adv_level.label().to_string();
+                            let canvas_w = transform.screen_hud_width();
+                            let bar_height = HUD_HEIGHT as f32 * ws;
+                            let bar_origin = transform.hud_pos(0.0, 0.0);
 
-                        // Annotations, remote cursors, and pings paint through the same
-                        // clipped map region the widget painted the frame into.
-                        let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_w, map_x_offset);
-                        let map_painter = painter.with_clip_rect(map_clip);
+                            // Recompute cursor positions matching ScoreBar rendering
+                            let score_font = game_font(14.0 * ws);
+                            let timer_font = game_font(12.0 * ws);
+                            let adv_font = game_font(11.0 * ws);
+                            let adv_color = color_from_rgb(*color);
+                            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
+                            let text_w = galley.size().x;
+                            let text_h = galley.size().y;
 
-                        {
-                            let ann_state = annotation_arc.lock();
-                            let map_space = shared_state.lock().map_space_size;
-                            for ann in &ann_state.annotations {
-                                render_annotation(ann, &transform, textures, &map_painter, map_space);
-                            }
-                            // Draw selection highlight
-                            for &sel in &ann_state.selected_indices {
-                                if sel < ann_state.annotations.len() {
-                                    render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+                            let (t0_end_x, t1_start_x) = if let Some(ScoreBarInfo {
+                                team0_score: t0_score,
+                                team1_score: t1_score,
+                                team0_timer: ref t0_timer,
+                                team1_timer: ref t1_timer,
+                                ..
+                            }) = score_bar_info
+                            {
+                                let t0_text = format!("{}", t0_score);
+                                let t0g =
+                                    ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
+                                let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
+                                if let Some(timer) = t0_timer {
+                                    let tg = ctx.fonts_mut(|f| {
+                                        f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::WHITE)
+                                    });
+                                    t0_end = t0_end + 4.0 * ws + tg.size().x;
                                 }
-                            }
-                            // Render tool preview (ghost shape at cursor)
-                            if let Some(cursor_pos) = response.hover_pos() {
-                                let minimap_pos = transform.screen_to_minimap(cursor_pos);
-                                render_tool_preview(
-                                    &ann_state.active_tool,
-                                    minimap_pos,
-                                    ann_state.paint_color,
-                                    ann_state.stroke_width,
-                                    &transform,
-                                    textures,
-                                    &map_painter,
-                                    map_space,
-                                );
-                            }
-                        }
-
-                        // ─── Render remote cursors (collab session) ──────────
-                        let collab_ss = shared_state.lock().collab_session_state.clone();
-                        if let Some(ref ss_arc) = collab_ss {
-                            let s = ss_arc.lock();
-                            draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
-
-                            // ─── Render map pings (ripple effects) ──────────────
-                            let ping_views: Vec<MapPing> = s.pings.iter().map(|p| MapPing {
-                                pos: p.pos,
-                                color: p.color,
-                                time: p.time,
-                            }).collect();
-                            drop(s);
-                            if draw_pings(&ping_views, &map_painter, &transform) {
-                                repaint = true;
-                                let mut s = ss_arc.lock();
-                                s.pings.retain(|p| p.time.elapsed().as_secs_f32() < PING_DURATION);
-                            }
-                        }
-
-                        // ─── Render local pings (when not in a collab session) ───
-                        {
-                            let mut lp = local_pings_arc.lock();
-                            if !lp.is_empty()
-                                && draw_pings(&lp, &map_painter, &transform) {
-                                    repaint = true;
-                                    let now = web_time::Instant::now();
-                                    lp.retain(|p| now.duration_since(p.time).as_secs_f32() < PING_DURATION);
+                                let t1_text = format!("{}", t1_score);
+                                let t1g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
+                                let mut t1_start = bar_origin.x + canvas_w - t1g.size().x - 8.0 * ws;
+                                if let Some(timer) = t1_timer {
+                                    let tg =
+                                        ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, Color32::WHITE));
+                                    t1_start = t1_start - tg.size().x - 4.0 * ws;
                                 }
-                        }
+                                (t0_end, t1_start)
+                            } else {
+                                let half = canvas_w / 2.0;
+                                (bar_origin.x + half, bar_origin.x + half)
+                            };
 
-                        // ─── Send local cursor to collab session ────────────────
-                        {
-                            let cursor_pos = response.hover_pos().map(|p| {
-                                let mp = transform.screen_to_minimap(p);
-                                [mp.x, mp.y]
+                            let adv_team = score_bar_info.as_ref().map(|s| s.adv_team).unwrap_or(-1);
+                            let x = if adv_team == 0 { t0_end_x + 6.0 * ws } else { t1_start_x - text_w - 6.0 * ws };
+                            let y = bar_origin.y + (bar_height - text_h) / 2.0;
+                            let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
+                            let resp =
+                                ui.interact(label_rect, egui::Id::unique("advantage_tooltip"), egui::Sense::hover());
+                            resp.on_hover_ui(|ui| {
+                                ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
+                                ui.separator();
+                                match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
+                                    None => {
+                                        ui.label(t!("ui.renderer.advantage.team_eliminated"));
+                                    }
+                                    Some(rows) => {
+                                        egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
+                                            let last = rows.len().saturating_sub(1);
+                                            for (index, row) in rows.iter().enumerate() {
+                                                // The total is the last row, and is set apart.
+                                                if index == last {
+                                                    ui.separator();
+                                                    ui.separator();
+                                                    ui.end_row();
+                                                    ui.label(egui::RichText::new(t!(row.label_key).as_ref()).strong());
+                                                    ui.label(egui::RichText::new(&row.contribution).strong());
+                                                } else {
+                                                    ui.label(t!(row.label_key));
+                                                    ui.label(&row.contribution);
+                                                }
+                                                ui.end_row();
+                                            }
+                                        });
+                                        if !breakdown.hp_data_reliable {
+                                            ui.small(t!("ui.renderer.advantage.hp_incomplete"));
+                                        }
+                                    }
+                                }
                             });
-                            if let Some(ref tx) = shared_state.lock().collab_local_tx {
-                                let _ = tx.send(crate::collab::peer::LocalEvent::CursorPosition(cursor_pos));
+                            break;
+                        }
+                    }
+                    drop(state);
+
+                    // Annotations, remote cursors, and pings paint through the same
+                    // clipped map region the widget painted the frame into.
+                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_w, map_x_offset);
+                    let map_painter = painter.with_clip_rect(map_clip);
+
+                    {
+                        let ann_state = annotation_arc.lock();
+                        let map_space = shared_state.lock().map_space_size;
+                        for ann in &ann_state.annotations {
+                            render_annotation(ann, &transform, textures, &map_painter, map_space);
+                        }
+                        // Draw selection highlight
+                        for &sel in &ann_state.selected_indices {
+                            if sel < ann_state.annotations.len() {
+                                render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
                             }
                         }
-
-                    }
-                    drop(tex_guard);
-
-                    // ─── Active tool indicator ───────────────────────────────────
-                    {
-                        let ann = annotation_arc.lock();
-                        if let Some(label) = tool_label(&ann.active_tool) {
-                            let text_pos = Pos2::new(response.rect.left() + 8.0, response.rect.top() + 8.0);
-                            painter.text(
-                                text_pos,
-                                egui::Align2::LEFT_TOP,
-                                format!("{} (right-click to cancel)", label),
-                                FontId::proportional(13.0),
-                                Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+                        // Render tool preview (ghost shape at cursor)
+                        if let Some(cursor_pos) = response.hover_pos() {
+                            let minimap_pos = transform.screen_to_minimap(cursor_pos);
+                            render_tool_preview(
+                                &ann_state.active_tool,
+                                minimap_pos,
+                                ann_state.paint_color,
+                                ann_state.stroke_width,
+                                &transform,
+                                textures,
+                                &map_painter,
+                                map_space,
                             );
                         }
                     }
 
-                    // ─── Annotation input handling ────────────────────────────────
-                    {
-                        let mut ann = annotation_arc.lock();
-                        let tool_active = !matches!(ann.active_tool, PaintTool::None);
+                    // ─── Render remote cursors (collab session) ──────────
+                    let collab_ss = shared_state.lock().collab_session_state.clone();
+                    if let Some(ref ss_arc) = collab_ss {
+                        let s = ss_arc.lock();
+                        draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
 
-                        // When a tool is active, clear any selection
-                        if tool_active {
-                            ann.clear_selection();
+                        // ─── Render map pings (ripple effects) ──────────────
+                        let ping_views: Vec<MapPing> =
+                            s.pings.iter().map(|p| MapPing { pos: p.pos, color: p.color, time: p.time }).collect();
+                        drop(s);
+                        if draw_pings(&ping_views, &map_painter, &transform) {
+                            repaint = true;
+                            let mut s = ss_arc.lock();
+                            s.pings.retain(|p| p.time.elapsed().as_secs_f32() < PING_DURATION);
                         }
+                    }
 
-                        // Right-click: open context menu or cancel tool
-                        if response.secondary_clicked() {
-                            if tool_active {
-                                ann.active_tool = PaintTool::None;
-                            } else {
-                                let click_pos = response.interact_pointer_pos().unwrap_or(response.rect.center());
-                                ann.context_menu_pos = click_pos;
+                    // ─── Render local pings (when not in a collab session) ───
+                    {
+                        let mut lp = local_pings_arc.lock();
+                        if !lp.is_empty() && draw_pings(&lp, &map_painter, &transform) {
+                            repaint = true;
+                            let now = web_time::Instant::now();
+                            lp.retain(|p| now.duration_since(p.time).as_secs_f32() < PING_DURATION);
+                        }
+                    }
 
-                                // Detect nearest ship to right-click position. Hit-test on
-                                // entity_id alone: player_name is absent when names are hidden
-                                // or the ship is undetected, but the ship is still selectable.
-                                ann.context_menu_ship = None;
-                                let state = shared_state.lock();
-                                if let Some(ref frame) = state.frame {
-                                    let mut best_dist = 30.0_f32; // max click distance in screen px
-                                    let mut best: Option<(EntityId, Option<String>)> = None;
-                                    for cmd in &frame.commands {
-                                        if let DrawCommand::Ship { pos, entity_id, player_name, ship_name, .. } = cmd {
-                                            let screen_pos = transform.minimap_to_screen(pos);
-                                            let dist = click_pos.distance(screen_pos);
-                                            if dist < best_dist {
-                                                best_dist = dist;
-                                                best = Some((*entity_id, player_name.clone().or_else(|| ship_name.clone())));
-                                            }
+                    // ─── Send local cursor to collab session ────────────────
+                    {
+                        let cursor_pos = response.hover_pos().map(|p| {
+                            let mp = transform.screen_to_minimap(p);
+                            [mp.x, mp.y]
+                        });
+                        if let Some(ref tx) = shared_state.lock().collab_local_tx {
+                            let _ = tx.send(crate::collab::peer::LocalEvent::CursorPosition(cursor_pos));
+                        }
+                    }
+                }
+                drop(tex_guard);
+
+                // ─── Active tool indicator ───────────────────────────────────
+                {
+                    let ann = annotation_arc.lock();
+                    if let Some(label) = tool_label(&ann.active_tool) {
+                        let text_pos = Pos2::new(response.rect.left() + 8.0, response.rect.top() + 8.0);
+                        painter.text(
+                            text_pos,
+                            egui::Align2::LEFT_TOP,
+                            format!("{} (right-click to cancel)", label),
+                            FontId::proportional(13.0),
+                            Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+                        );
+                    }
+                }
+
+                // ─── Annotation input handling ────────────────────────────────
+                {
+                    let mut ann = annotation_arc.lock();
+                    let tool_active = !matches!(ann.active_tool, PaintTool::None);
+
+                    // When a tool is active, clear any selection
+                    if tool_active {
+                        ann.clear_selection();
+                    }
+
+                    // Right-click: open context menu or cancel tool
+                    if response.secondary_clicked() {
+                        if tool_active {
+                            ann.active_tool = PaintTool::None;
+                        } else {
+                            let click_pos = response.interact_pointer_pos().unwrap_or(response.rect.center());
+                            ann.context_menu_pos = click_pos;
+
+                            // Detect nearest ship to right-click position. Hit-test on
+                            // entity_id alone: player_name is absent when names are hidden
+                            // or the ship is undetected, but the ship is still selectable.
+                            ann.context_menu_ship = None;
+                            let state = shared_state.lock();
+                            if let Some(ref frame) = state.frame {
+                                let mut best_dist = 30.0_f32; // max click distance in screen px
+                                let mut best: Option<(EntityId, Option<String>)> = None;
+                                for cmd in &frame.commands {
+                                    if let DrawCommand::Ship { pos, entity_id, player_name, ship_name, .. } = cmd {
+                                        let screen_pos = transform.minimap_to_screen(pos);
+                                        let dist = click_pos.distance(screen_pos);
+                                        if dist < best_dist {
+                                            best_dist = dist;
+                                            best =
+                                                Some((*entity_id, player_name.clone().or_else(|| ship_name.clone())));
                                         }
                                     }
-                                    if let Some((eid, name)) = best {
-                                        let label = name.unwrap_or_else(|| format!("Ship {eid}"));
-                                        ann.context_menu_ship = Some((eid, label));
-                                    }
                                 }
-                                ann.show_context_menu = true;
-                            }
-                        }
-
-                        // Tool shortcuts (Ctrl+1..7, Ctrl+M)
-                        handle_tool_shortcuts(&ctx, &mut ann);
-
-                        // Show shortcut overlay while Ctrl is held
-                        draw_shortcut_overlay(&ctx, egui::Id::unique("replay_shortcut_overlay"));
-
-                        // Escape key: cancel tool or deselect
-                        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            if tool_active {
-                                ann.active_tool = PaintTool::None;
-                            } else {
-                                ann.clear_selection();
-                            }
-                        }
-
-                        // Delete/Backspace to delete selected annotations
-                        if !tool_active
-                            && ann.has_selection()
-                            && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
-                        {
-                            ann.save_undo();
-                            let mut indices: Vec<usize> = ann.selected_indices.iter().copied().collect();
-                            indices.sort_unstable_by(|a, b| b.cmp(a)); // remove from end first
-                            let state = shared_state.lock();
-                            for idx in indices {
-                                if idx < ann.annotations.len() {
-                                    let id = ann.annotation_ids[idx];
-                                    ann.annotations.remove(idx);
-                                    ann.annotation_ids.remove(idx);
-                                    ann.annotation_owners.remove(idx);
-                                    send_annotation_remove(&state.collab_local_tx, id, None);
+                                if let Some((eid, name)) = best {
+                                    let label = name.unwrap_or_else(|| format!("Ship {eid}"));
+                                    ann.context_menu_ship = Some((eid, label));
                                 }
                             }
-                            drop(state);
+                            ann.show_context_menu = true;
+                        }
+                    }
+
+                    // Tool shortcuts (Ctrl+1..7, Ctrl+M)
+                    handle_tool_shortcuts(&ctx, &mut ann);
+
+                    // Show shortcut overlay while Ctrl is held
+                    draw_shortcut_overlay(&ctx, egui::Id::unique("replay_shortcut_overlay"));
+
+                    // Escape key: cancel tool or deselect
+                    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if tool_active {
+                            ann.active_tool = PaintTool::None;
+                        } else {
                             ann.clear_selection();
                         }
+                    }
 
-                        // [ and ] to adjust stroke width when a tool is active
-                        if tool_active {
-                            if ctx.input(|i| i.key_pressed(egui::Key::OpenBracket)) {
-                                ann.stroke_width = (ann.stroke_width - 1.0).clamp(1.0, 8.0);
-                            }
-                            if ctx.input(|i| i.key_pressed(egui::Key::CloseBracket)) {
-                                ann.stroke_width = (ann.stroke_width + 1.0).clamp(1.0, 8.0);
-                            }
-                        }
-
-                        // Left-click/drag tool actions
-                        if tool_active {
-                            // Drawing tools: PlacingShip, Freehand, Eraser, Line, Circle, Rect, Triangle
-                            let result = handle_tool_interaction(&mut ann, &response, &transform);
-
-                            if result.new_annotation.is_some() || result.erase_index.is_some() {
-                                ann.save_undo();
-                            }
-                            if let Some(a) = result.new_annotation {
-                                let id: u64 = rand::random();
-                                let state = shared_state.lock();
-                                let my_user_id = get_my_user_id(&state.collab_session_state);
-                                ann.annotations.push(a);
-                                ann.annotation_ids.push(id);
-                                ann.annotation_owners.push(my_user_id);
-                                send_annotation_update(&state.collab_local_tx, &ann, ann.annotations.len() - 1, None);
-                            }
-                            if let Some(idx) = result.erase_index {
+                    // Delete/Backspace to delete selected annotations
+                    if !tool_active
+                        && ann.has_selection()
+                        && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+                    {
+                        ann.save_undo();
+                        let mut indices: Vec<usize> = ann.selected_indices.iter().copied().collect();
+                        indices.sort_unstable_by(|a, b| b.cmp(a)); // remove from end first
+                        let state = shared_state.lock();
+                        for idx in indices {
+                            if idx < ann.annotations.len() {
                                 let id = ann.annotation_ids[idx];
                                 ann.annotations.remove(idx);
                                 ann.annotation_ids.remove(idx);
                                 ann.annotation_owners.remove(idx);
-                                send_annotation_remove(&shared_state.lock().collab_local_tx, id, None);
+                                send_annotation_remove(&state.collab_local_tx, id, None);
                             }
-                        } else {
-                            // No tool active: select/move/rotate annotations
-                            let sm = handle_annotation_select_move(&mut ann, &response, &transform);
-
-                            // Sync to collab after rotation stopped or annotation moved
-                            if let Some(idx) = sm.rotation_stopped_index {
-                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
-                            }
-                            for &idx in &sm.moved_indices {
-                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
-                            }
-
-                            // Click on empty space -> ping
-                            if sm.selected_by_click && !ann.has_selection()
-                                && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p)) {
-                                    let state = shared_state.lock();
-                                    handle_map_click_ping(
-                                        click_pos,
-                                        &mut local_pings_arc.lock(),
-                                        &state.collab_session_state,
-                                        &state.collab_local_tx,
-                                    );
-                                }
                         }
+                        drop(state);
+                        ann.clear_selection();
+                    }
 
-                        // Ctrl+Z to undo
-                        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
-                            ann.undo();
-                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
+                    // [ and ] to adjust stroke width when a tool is active
+                    if tool_active {
+                        if ctx.input(|i| i.key_pressed(egui::Key::OpenBracket)) {
+                            ann.stroke_width = (ann.stroke_width - 1.0).clamp(1.0, 8.0);
                         }
-
-                        if response.clicked() {
-                            repaint = true;
+                        if ctx.input(|i| i.key_pressed(egui::Key::CloseBracket)) {
+                            ann.stroke_width = (ann.stroke_width + 1.0).clamp(1.0, 8.0);
                         }
                     }
 
-                    // ─── Playback keyboard shortcuts ──────────────────────────────
-                    {
-                        // Space: toggle play/pause
-                        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
-                            if playing {
-                                let _ = command_tx.send(PlaybackCommand::Pause);
-                                shared_state.lock().playing = false;
-                            } else {
-                                let _ = command_tx.send(PlaybackCommand::Play);
-                                shared_state.lock().playing = true;
-                            }
+                    // Left-click/drag tool actions
+                    if tool_active {
+                        // Drawing tools: PlacingShip, Freehand, Eraser, Line, Circle, Rect, Triangle
+                        let result = handle_tool_interaction(&mut ann, &response, &transform);
+
+                        if result.new_annotation.is_some() || result.erase_index.is_some() {
+                            ann.save_undo();
+                        }
+                        if let Some(a) = result.new_annotation {
+                            let id: u64 = rand::random();
+                            let state = shared_state.lock();
+                            let my_user_id = get_my_user_id(&state.collab_session_state);
+                            ann.annotations.push(a);
+                            ann.annotation_ids.push(id);
+                            ann.annotation_owners.push(my_user_id);
+                            send_annotation_update(&state.collab_local_tx, &ann, ann.annotations.len() - 1, None);
+                        }
+                        if let Some(idx) = result.erase_index {
+                            let id = ann.annotation_ids[idx];
+                            ann.annotations.remove(idx);
+                            ann.annotation_ids.remove(idx);
+                            ann.annotation_owners.remove(idx);
+                            send_annotation_remove(&shared_state.lock().collab_local_tx, id, None);
+                        }
+                    } else {
+                        // No tool active: select/move/rotate annotations
+                        let sm = handle_annotation_select_move(&mut ann, &response, &transform);
+
+                        // Sync to collab after rotation stopped or annotation moved
+                        if let Some(idx) = sm.rotation_stopped_index {
+                            send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
+                        }
+                        for &idx in &sm.moved_indices {
+                            send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
                         }
 
-                        // Up/Down arrows: change playback speed
+                        // Click on empty space -> ping
+                        if sm.selected_by_click
+                            && !ann.has_selection()
+                            && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p))
                         {
-                            if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                                let current = shared_state.lock().speed;
-                                if let Some(&next) = PLAYBACK_SPEEDS.iter().find(|&&s| s > current + 0.1) {
-                                    let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
-                                    shared_state.lock().speed = next;
-                                    toasts.lock().info(format!("{:.0}x", next));
-                                }
-                            }
-                            if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                                let current = shared_state.lock().speed;
-                                if let Some(&next) = PLAYBACK_SPEEDS.iter().rev().find(|&&s| s < current - 0.1) {
-                                    let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
-                                    shared_state.lock().speed = next;
-                                    toasts.lock().info(format!("{:.0}x", next));
-                                }
-                            }
-                        }
-
-                        if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data {
-                            // Left/Right arrows: seek +/-10 seconds
-                            let shift = ctx.input(|i| i.modifiers.shift);
-                            if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-                                let target = (clock_secs - 10.0).max(GameClock(0.0));
-                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                let _ = command_tx.send(PlaybackCommand::Seek(target));
-                            }
-                            if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-                                let target = (clock_secs + 10.0).min(GameClock(game_dur));
-                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                let _ = command_tx.send(PlaybackCommand::Seek(target));
-                            }
-
-                            // Shift+Left/Right: skip to prev/next timeline event
-                            let elapsed = clock_secs.to_elapsed(battle_start);
-                            if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-                                let state = shared_state.lock();
-                                if let Some(ref events) = state.timeline_events
-                                    && let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5) {
-                                        let seek_clock = event.clock.to_absolute(battle_start);
-                                        let desc = format_timeline_event(event);
-                                        drop(state);
-                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                        let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
-                                        toasts.lock().info(desc);
-                                    }
-                            }
-                            if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-                                let state = shared_state.lock();
-                                if let Some(ref events) = state.timeline_events
-                                    && let Some(event) = events.iter().find(|e| e.clock > elapsed) {
-                                        let seek_clock = event.clock.to_absolute(battle_start);
-                                        let desc = format_timeline_event(event);
-                                        drop(state);
-                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                        let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
-                                        toasts.lock().info(desc);
-                                    }
-                            }
-                        }
-                    }
-
-                    // ─── Context menu (egui::Area at cursor) ─────────────────────
-                    {
-                        let show_menu = annotation_arc.lock().show_context_menu;
-                        if show_menu {
-                            let menu_pos = annotation_arc.lock().context_menu_pos;
-                            let menu_resp = egui::Area::new(ui.scope_id().with("paint_context_menu"))
-                                .order(egui::Order::Foreground)
-                                .fixed_pos(menu_pos)
-                                .interactable(true)
-                                .show(&ctx, |ui| {
-                                    let frame = egui::Frame::NONE
-                                        .fill(Color32::from_gray(30))
-                                        .corner_radius(CornerRadius::same(6))
-                                        .inner_margin(egui::Margin::same(8))
-                                        .stroke(Stroke::new(1.0, Color32::from_gray(80)));
-                                    frame.show(ui, |ui| {
-                                        ui.set_min_width(160.0);
-                                        let mut ann = annotation_arc.lock();
-
-                                        // ── Annotation tools ──
-                                        let tex_guard = textures_arc.lock();
-                                        let ship_icons_ref = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
-                                        let menu_result = wt_collab_egui::toolbar::draw_annotation_menu_common(
-                                            ui,
-                                            &mut ann,
-                                            ship_icons_ref,
-                                        );
-                                        drop(tex_guard);
-                                        if menu_result.did_clear {
-                                            send_annotation_clear(&shared_state.lock().collab_local_tx, None);
-                                        }
-                                        if menu_result.did_undo {
-                                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
-                                        }
-
-                                        // ── Ship-specific options (shown when right-clicking a ship) ──
-                                        if let Some((ship_eid, ref ship_name)) = ann.context_menu_ship.clone() {
-                                            ui.separator();
-                                            ui.label(egui::RichText::new(ship_name.as_str()).small());
-
-                                            // Per-ship trail toggle
-                                            let mut show_trail = !ann.trail_hidden_ships.contains(ship_name);
-                                            if ui.checkbox(&mut show_trail, t!("ui.renderer.context.show_trail")).changed() {
-                                                if show_trail {
-                                                    ann.trail_hidden_ships.remove(ship_name);
-                                                    // If global trails are off, turn them on
-                                                    if !shared_state.lock().options.show_trails {
-                                                        shared_state.lock().options.show_trails = true;
-                                                    }
-                                                } else {
-                                                    ann.trail_hidden_ships.insert(ship_name.clone());
-                                                    // If all trails are now hidden, turn off global
-                                                    let state = shared_state.lock();
-                                                    if let Some(ref frame) = state.frame {
-                                                        let all_hidden = frame.commands.iter().all(|cmd| {
-                                                            if let DrawCommand::PositionTrail {
-                                                                player_name: Some(name),
-                                                                ..
-                                                            } = cmd
-                                                            {
-                                                                ann.trail_hidden_ships.contains(name)
-                                                            } else {
-                                                                true
-                                                            }
-                                                        });
-                                                        if all_hidden && state.options.show_trails {
-                                                            drop(state);
-                                                            shared_state.lock().options.show_trails = false;
-                                                        }
-                                                    }
-                                                }
-                                                broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
-                                                repaint = true;
-                                            }
-
-                                            // Disable all other trails
-                                            if ui.button(t!("ui.renderer.context.disable_other_trails")).clicked() {
-                                                let state = shared_state.lock();
-                                                if let Some(ref frame) = state.frame {
-                                                    for cmd in &frame.commands {
-                                                        if let DrawCommand::PositionTrail {
-                                                            player_name: Some(name),
-                                                            ..
-                                                        } = cmd
-                                                            && name != ship_name {
-                                                                ann.trail_hidden_ships.insert(name.clone());
-                                                            }
-                                                    }
-                                                }
-                                                ann.trail_hidden_ships.remove(ship_name);
-                                                if !state.options.show_trails {
-                                                    drop(state);
-                                                    shared_state.lock().options.show_trails = true;
-                                                }
-                                                broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
-                                                ann.show_context_menu = false;
-                                                repaint = true;
-                                            }
-
-                                            // Per-type range toggles for this ship
-                                            let mut filter =
-                                                ann.ship_range_overrides.get(&ship_eid).copied().unwrap_or_default();
-                                            ui.label(egui::RichText::new(t!("ui.renderer.context.ranges").as_ref()).small());
-                                            let mut range_changed = false;
-                                            range_changed |= ui.checkbox(&mut filter.detection, t!("ui.renderer.context.detection")).changed();
-                                            range_changed |= ui.checkbox(&mut filter.main_battery, t!("ui.renderer.context.main_battery")).changed();
-                                            range_changed |= ui.checkbox(&mut filter.secondary_battery, t!("ui.renderer.context.secondary")).changed();
-                                            range_changed |= ui.checkbox(&mut filter.torpedo, t!("ui.renderer.context.torpedo")).changed();
-                                            range_changed |= ui.checkbox(&mut filter.radar, t!("ui.renderer.context.radar")).changed();
-                                            range_changed |= ui.checkbox(&mut filter.hydro, t!("ui.renderer.context.hydro")).changed();
-                                            let all_on = filter == ShipConfigFilter::all_enabled();
-                                            if !all_on && ui.button(t!("ui.renderer.context.enable_all")).clicked() {
-                                                filter = ShipConfigFilter::all_enabled();
-                                                range_changed = true;
-                                            } else if all_on && ui.button(t!("ui.renderer.context.disable_all")).clicked() {
-                                                filter = ShipConfigFilter::default();
-                                                range_changed = true;
-                                            }
-                                            if range_changed {
-                                                if !filter.any_enabled() {
-                                                    ann.ship_range_overrides.remove(&ship_eid);
-                                                } else {
-                                                    ann.ship_range_overrides.insert(ship_eid, filter);
-                                                }
-                                                // Auto-enable global when turning on any range
-                                                if filter.any_enabled() {
-                                                    let mut state = shared_state.lock();
-                                                    if !state.options.show_ship_config {
-                                                        state.options.show_ship_config = true;
-                                                    }
-                                                }
-                                                // Auto-disable global when no ship has any range enabled
-                                                if ann.ship_range_overrides.is_empty() {
-                                                    let mut state = shared_state.lock();
-                                                    if state.options.show_ship_config {
-                                                        state.options.show_ship_config = false;
-                                                    }
-                                                }
-                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
-                                                repaint = true;
-                                            }
-
-                                            // Disable all other ships' ranges
-                                            if ui.button(t!("ui.renderer.context.disable_other_ranges")).clicked() {
-                                                let keys: Vec<EntityId> = ann
-                                                    .ship_range_overrides
-                                                    .keys()
-                                                    .filter(|k| **k != ship_eid)
-                                                    .copied()
-                                                    .collect();
-                                                for k in keys {
-                                                    ann.ship_range_overrides.remove(&k);
-                                                }
-                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
-                                                ann.show_context_menu = false;
-                                                repaint = true;
-                                            }
-
-                                            // Enable ranges for all alive ships
-                                            if ui.button(t!("ui.renderer.context.enable_all_ranges")).clicked() {
-                                                let state = shared_state.lock();
-                                                if let Some(ref frame) = state.frame {
-                                                    for cmd in &frame.commands {
-                                                        if let DrawCommand::Ship { entity_id, .. } = cmd {
-                                                            ann.ship_range_overrides
-                                                                .insert(*entity_id, ShipConfigFilter::all_enabled());
-                                                        }
-                                                    }
-                                                }
-                                                if !state.options.show_ship_config {
-                                                    drop(state);
-                                                    shared_state.lock().options.show_ship_config = true;
-                                                }
-                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
-                                                ann.show_context_menu = false;
-                                                repaint = true;
-                                            }
-
-                                            // ── Realtime Armor Viewer ──
-                                            ui.separator();
-                                            if ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.renderer.context.show_armor"))).clicked() {
-                                                let mut new_bridge = RealtimeArmorBridge::new(ship_eid);
-                                                let mut state = shared_state.lock();
-                                                // Attach pre-computed shot timeline if available
-                                                if let Some(ref timelines) = state.shot_timelines {
-                                                    new_bridge.shot_timeline = timelines.get(&ship_eid).cloned();
-                                                }
-                                                let bridge = Arc::new(Mutex::new(new_bridge));
-                                                state.armor_bridges.push(bridge.clone());
-                                                state.pending_armor_viewers.push(ArmorViewerRequest {
-                                                    target_entity_id: ship_eid,
-                                                    bridge,
-                                                    command_tx: command_tx.clone(),
-                                                });
-                                                // Seek to current position to populate the new bridge
-                                                let current_clock = state
-                                                    .frame
-                                                    .as_ref()
-                                                    .map(|f| f.clock)
-                                                    .unwrap_or(GameClock(0.0));
-                                                drop(state);
-                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
-                                                ann.show_context_menu = false;
-                                                repaint = true;
-                                            }
-                                        }
-                                    });
-                                });
-
-                            // Close menu on click outside (but not if a sub-popup like the
-                            // color picker is open, whose clicks land outside the menu rect).
-                            if menu_resp.response.clicked_elsewhere() && !ctx.any_popup_open() {
-                                annotation_arc.lock().show_context_menu = false;
-                            }
-                        }
-                    }
-
-                    // ─── Selection edit popup ─────────────────────────────────────
-                    {
-                        let ann = annotation_arc.lock();
-                        let sel_info = ann.single_selected().and_then(|idx| {
-                            if idx < ann.annotations.len() {
-                                let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
-                                Some((idx, bounds))
-                            } else {
-                                None
-                            }
-                        });
-                        drop(ann);
-
-                        if let Some((sel_idx, bounds)) = sel_info {
-                            let collab_tx = shared_state.lock().collab_local_tx.clone();
-                            let map_space = shared_state.lock().map_space_size;
-                            draw_annotation_edit_popup(
-                                &ctx,
-                                ui.scope_id().with("annotation_edit_popup"),
-                                &annotation_arc,
-                                sel_idx,
-                                bounds,
-                                map_space,
-                                &collab_tx,
-                                None,
+                            let state = shared_state.lock();
+                            handle_map_click_ping(
+                                click_pos,
+                                &mut local_pings_arc.lock(),
+                                &state.collab_session_state,
+                                &state.collab_local_tx,
                             );
                         }
                     }
 
-                    // ─── Overlay controls (video-player style) ───────────────────
-
-                    // Video export progress bar overlay
-                    if video_exporting.load(Ordering::Relaxed) {
-                        let progress_text = if let Some(p) = video_export_progress.lock().clone() {
-                            let pct = if p.total > 0 { p.current as f32 / p.total as f32 } else { 0.0 };
-                            let label = match p.stage {
-                                RenderStage::Encoding => t!("ui.renderer.encoding"),
-                                RenderStage::Muxing => t!("ui.renderer.muxing"),
-                            };
-                            Some((pct, format!("{} ({}/{})", label, p.current, p.total)))
-                        } else {
-                            None
-                        };
-
-                        egui::Area::new(ui.scope_id().with("video_export_progress"))
-                            .order(egui::Order::Foreground)
-                            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
-                            .interactable(false)
-                            .show(&ctx, |ui| {
-                                egui::Frame::new()
-                                    .fill(Color32::from_rgba_unmultiplied(30, 30, 30, 200))
-                                    .corner_radius(CornerRadius::same(4))
-                                    .inner_margin(egui::Margin::symmetric(12, 6))
-                                    .show(ui, |ui| {
-                                        ui.set_width(300.0);
-                                        if let Some((pct, label)) = progress_text {
-                                            ui.add(egui::ProgressBar::new(pct).text(label));
-                                        } else {
-                                            ui.horizontal(|ui| {
-                                                ui.spinner();
-                                                ui.label(t!("ui.renderer.preparing_export"));
-                                            });
-                                        }
-                                    });
-                            });
-                        repaint = true;
+                    // Ctrl+Z to undo
+                    if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
+                        ann.undo();
+                        send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
                     }
 
-                    // Track mouse activity for fade
-                    let now = ctx.input(|i| i.time);
-                    let any_mouse_activity =
-                        ctx.input(|i| i.pointer.velocity().length() > 0.5 || i.pointer.any_click());
-                    {
-                        let mut ov = overlay_state_arc.lock();
-                        if any_mouse_activity {
-                            ov.last_activity = now;
+                    if response.clicked() {
+                        repaint = true;
+                    }
+                }
+
+                // ─── Playback keyboard shortcuts ──────────────────────────────
+                {
+                    // Space: toggle play/pause
+                    if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+                        if playing {
+                            let _ = command_tx.send(PlaybackCommand::Pause);
+                            shared_state.lock().playing = false;
+                        } else {
+                            let _ = command_tx.send(PlaybackCommand::Play);
+                            shared_state.lock().playing = true;
                         }
                     }
 
-                    // Check if any popup is open (keeps overlay visible, e.g. settings or speed)
-                    let any_popup_open = egui::Popup::is_any_open(&ctx);
-
-                    // Compute overlay opacity
-                    let elapsed = now - overlay_state_arc.lock().last_activity;
-                    let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.scope_id().with("controls_overlay")));
-                    let hover_pos = ctx.input(|i| i.pointer.hover_pos());
-                    let overlay_hovered = overlay_rect.is_some_and(|r| hover_pos.is_some_and(|p| r.contains(p)));
-                    let opacity = if overlay_hovered || any_popup_open || elapsed < 2.0 {
-                        1.0_f32
-                    } else if elapsed < 2.5 {
-                        (1.0 - ((elapsed - 2.0) / 0.5) as f32).max(0.0)
-                    } else {
-                        0.0
-                    };
-
-                    // Request repaint during fade animation
-                    if opacity > 0.0 && opacity < 1.0 {
-                        repaint = true;
+                    // Up/Down arrows: change playback speed
+                    {
+                        if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                            let current = shared_state.lock().speed;
+                            if let Some(&next) = PLAYBACK_SPEEDS.iter().find(|&&s| s > current + 0.1) {
+                                let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
+                                shared_state.lock().speed = next;
+                                toasts.lock().info(format!("{:.0}x", next));
+                            }
+                        }
+                        if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                            let current = shared_state.lock().speed;
+                            if let Some(&next) = PLAYBACK_SPEEDS.iter().rev().find(|&&s| s < current - 0.1) {
+                                let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
+                                shared_state.lock().speed = next;
+                                toasts.lock().info(format!("{:.0}x", next));
+                            }
+                        }
                     }
 
-                    // Only render overlay when visible (so it doesn't block canvas input when hidden)
-                    if opacity > 0.0 {
-                        let bg_alpha = (180.0 * opacity) as u8;
-                        let text_alpha = (255.0 * opacity) as u8;
+                    if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data {
+                        // Left/Right arrows: seek +/-10 seconds
+                        let shift = ctx.input(|i| i.modifiers.shift);
+                        if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                            let target = (clock_secs - 10.0).max(GameClock(0.0));
+                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                            let _ = command_tx.send(PlaybackCommand::Seek(target));
+                        }
+                        if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                            let target = (clock_secs + 10.0).min(GameClock(game_dur));
+                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                            let _ = command_tx.send(PlaybackCommand::Seek(target));
+                        }
 
-                        egui::Area::new(ui.scope_id().with("controls_overlay"))
+                        // Shift+Left/Right: skip to prev/next timeline event
+                        let elapsed = clock_secs.to_elapsed(battle_start);
+                        if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                            let state = shared_state.lock();
+                            if let Some(ref events) = state.timeline_events
+                                && let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5)
+                            {
+                                let seek_clock = event.clock.to_absolute(battle_start);
+                                let desc = format_timeline_event(event);
+                                drop(state);
+                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                toasts.lock().info(desc);
+                            }
+                        }
+                        if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                            let state = shared_state.lock();
+                            if let Some(ref events) = state.timeline_events
+                                && let Some(event) = events.iter().find(|e| e.clock > elapsed)
+                            {
+                                let seek_clock = event.clock.to_absolute(battle_start);
+                                let desc = format_timeline_event(event);
+                                drop(state);
+                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                toasts.lock().info(desc);
+                            }
+                        }
+                    }
+                }
+
+                // ─── Context menu (egui::Area at cursor) ─────────────────────
+                {
+                    let show_menu = annotation_arc.lock().show_context_menu;
+                    if show_menu {
+                        let menu_pos = annotation_arc.lock().context_menu_pos;
+                        let menu_resp = egui::Area::new(ui.scope_id().with("paint_context_menu"))
                             .order(egui::Order::Foreground)
-                            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+                            .fixed_pos(menu_pos)
                             .interactable(true)
                             .show(&ctx, |ui| {
-                                // Apply faded text color
-                                ui.visuals_mut().override_text_color =
-                                    Some(Color32::from_rgba_unmultiplied(255, 255, 255, text_alpha));
-                                ui.visuals_mut().widgets.inactive.bg_fill =
-                                    Color32::from_rgba_unmultiplied(60, 60, 60, bg_alpha);
-                                ui.visuals_mut().widgets.hovered.bg_fill =
-                                    Color32::from_rgba_unmultiplied(80, 80, 80, bg_alpha);
-
                                 let frame = egui::Frame::NONE
-                                    .fill(Color32::from_black_alpha(bg_alpha))
+                                    .fill(Color32::from_gray(30))
                                     .corner_radius(CornerRadius::same(6))
-                                    .inner_margin(egui::Margin::same(8));
+                                    .inner_margin(egui::Margin::same(8))
+                                    .stroke(Stroke::new(1.0, Color32::from_gray(80)));
                                 frame.show(ui, |ui| {
-                                    let overlay_width = (response.rect.width() - 32.0).max(200.0);
-                                    ui.set_width(overlay_width);
+                                    ui.set_min_width(160.0);
+                                    let mut ann = annotation_arc.lock();
 
-                                    // Prevent egui text layout from wrapping to minimal width
-                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                    // ── Annotation tools ──
+                                    let tex_guard = textures_arc.lock();
+                                    let ship_icons_ref = tex_guard.as_ref().map(|t| &t.icons.ship_icons);
+                                    let menu_result = wt_collab_egui::toolbar::draw_annotation_menu_common(
+                                        ui,
+                                        &mut ann,
+                                        ship_icons_ref,
+                                    );
+                                    drop(tex_guard);
+                                    if menu_result.did_clear {
+                                        send_annotation_clear(&shared_state.lock().collab_local_tx, None);
+                                    }
+                                    if menu_result.did_undo {
+                                        send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
+                                    }
 
-                                    let row_style = taffy::Style {
-                                        display: taffy::Display::Flex,
-                                        flex_direction: taffy::FlexDirection::Row,
-                                        align_items: taffy::AlignItems::CENTER,
-                                        gap: length(4.0_f32),
-                                        size: taffy::Size { width: taffy::prelude::percent(1.0_f32), height: auto() },
-                                        ..Default::default()
-                                    };
-                                    let grow_style = taffy::Style {
-                                        flex_grow: 1.0,
-                                        flex_shrink: 1.0,
-                                        min_size: taffy::Size { width: length(60.0_f32), height: auto() },
-                                        ..Default::default()
-                                    };
-                                    let fixed_style = taffy::Style { flex_shrink: 0.0, ..Default::default() };
+                                    // ── Ship-specific options (shown when right-clicking a ship) ──
+                                    if let Some((ship_eid, ref ship_name)) = ann.context_menu_ship.clone() {
+                                        ui.separator();
+                                        ui.label(egui::RichText::new(ship_name.as_str()).small());
 
-                                    let mut settings_btn_opt: Option<egui::Response> = None;
-                                    let mut timeline_btn_opt: Option<egui::Response> = None;
-
-                                    egui_taffy::tui(ui, ui.scope_id().with("overlay_tui"))
-                                        .reserve_available_width()
-                                        .style(row_style)
-                                        .show(|tui| {
-                                            // Jump to start
-                                            {
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::SKIP_BACK));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.jump_to_start")).clicked() {
-                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(0.0)));
+                                        // Per-ship trail toggle
+                                        let mut show_trail = !ann.trail_hidden_ships.contains(ship_name);
+                                        if ui.checkbox(&mut show_trail, t!("ui.renderer.context.show_trail")).changed()
+                                        {
+                                            if show_trail {
+                                                ann.trail_hidden_ships.remove(ship_name);
+                                                // If global trails are off, turn them on
+                                                if !shared_state.lock().options.show_trails {
+                                                    shared_state.lock().options.show_trails = true;
                                                 }
-                                            }
-
-                                            // Skip to previous event
-                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
-                                                let elapsed = clock_secs.to_elapsed(battle_start);
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::REWIND));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.previous_event")).clicked() {
-                                                    let state = shared_state.lock();
-                                                    if let Some(ref events) = state.timeline_events
-                                                        && let Some(event) =
-                                                            events.iter().rev().find(|e| e.clock < elapsed - 0.5)
+                                            } else {
+                                                ann.trail_hidden_ships.insert(ship_name.clone());
+                                                // If all trails are now hidden, turn off global
+                                                let state = shared_state.lock();
+                                                if let Some(ref frame) = state.frame {
+                                                    let all_hidden = frame.commands.iter().all(|cmd| {
+                                                        if let DrawCommand::PositionTrail {
+                                                            player_name: Some(name),
+                                                            ..
+                                                        } = cmd
                                                         {
-                                                            let seek_clock = event.clock.to_absolute(battle_start);
-                                                            let desc = format_timeline_event(event);
-                                                            drop(state);
-                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                            let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
-                                                            toasts.lock().info(desc);
-                                                        }
-                                                }
-                                            }
-
-                                            // Back 10 seconds
-                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.back_10s")).clicked() {
-                                                    let target = (clock_secs - 10.0).max(GameClock(0.0));
-                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(target));
-                                                }
-                                            }
-
-                                            // Play/Pause
-                                            if playing {
-                                                if tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::PAUSE))
-                                                    .on_hover_text(t!("ui.renderer.controls.pause"))
-                                                    .clicked()
-                                                {
-                                                    let _ = command_tx.send(PlaybackCommand::Pause);
-                                                    shared_state.lock().playing = false;
-                                                }
-                                            } else if tui
-                                                .tui()
-                                                .style(fixed_style.clone())
-                                                .ui_add(egui::Button::new(icons::PLAY))
-                                                .on_hover_text(t!("ui.renderer.controls.play"))
-                                                .clicked()
-                                            {
-                                                let _ = command_tx.send(PlaybackCommand::Play);
-                                                shared_state.lock().playing = true;
-                                            }
-
-                                            // Forward 10 seconds
-                                            if let Some((_fi, _tf, clock_secs, game_dur)) = frame_data {
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.forward_10s")).clicked() {
-                                                    let target = (clock_secs + 10.0).min(GameClock(game_dur));
-                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(target));
-                                                }
-                                            }
-
-                                            // Skip to next event
-                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::FAST_FORWARD));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.next_event")).clicked() {
-                                                    let elapsed = clock_secs.to_elapsed(battle_start);
-                                                    let state = shared_state.lock();
-                                                    if let Some(ref events) = state.timeline_events
-                                                        && let Some(event) =
-                                                            events.iter().find(|e| e.clock > elapsed)
-                                                        {
-                                                            let seek_clock = event.clock.to_absolute(battle_start);
-                                                            let desc = format_timeline_event(event);
-                                                            drop(state);
-                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                            let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
-                                                            toasts.lock().info(desc);
-                                                        }
-                                                }
-                                            }
-
-                                            // Jump to end
-                                            if let Some((_fi, _tf, _clock_secs, game_dur)) = frame_data {
-                                                let btn = tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::SKIP_FORWARD));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.jump_to_end")).clicked() {
-                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(game_dur)));
-                                                }
-                                            }
-
-                                            // Seek slider (flex_grow: 1.0 — fills remaining space)
-                                            if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data
-                                            {
-                                                let mut seek_time = clock_secs.seconds();
-                                                let mut seek_changed = false;
-                                                tui.tui().style(grow_style.clone()).ui(|ui| {
-                                                    ui.spacing_mut().slider_width = ui.available_width();
-                                                    let slider = egui::Slider::new(&mut seek_time, 0.0..=game_dur)
-                                                        .show_value(false);
-                                                    let resp = ui.add(slider);
-                                                    seek_changed = resp.changed();
-
-                                                    let rect = resp.rect;
-                                                    // egui insets the slider thumb travel by its handle radius
-                                                    // (default Rect handle: height/2.5 scaled by the 0.75 aspect).
-                                                    let handle_r = rect.height() / 2.5 * 0.75;
-                                                    // Fade the ticks with the rest of the controls.
-                                                    let tick_color =
-                                                        egui::Color32::from_rgba_unmultiplied(225, 225, 225, (255.0 * opacity) as u8);
-                                                    let painter = ui.painter();
-                                                    let start_x =
-                                                        clock_tick_x(battle_start.seconds(), game_dur, rect, handle_r);
-                                                    painter.vline(start_x, rect.y_range(), egui::Stroke::new(1.5, tick_color));
-                                                    if let Some(end) = battle_end {
-                                                        let end_x = clock_tick_x(end.seconds(), game_dur, rect, handle_r);
-                                                        painter.vline(end_x, rect.y_range(), egui::Stroke::new(1.5, tick_color));
-                                                    }
-                                                });
-                                                if seek_changed {
-                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(seek_time)));
-                                                }
-
-                                                let elapsed_secs = clock_secs.to_elapsed(battle_start).seconds().max(0.0) as u32;
-                                                let mins = elapsed_secs / 60;
-                                                let secs = elapsed_secs % 60;
-                                                tui.tui()
-                                                    .style(fixed_style.clone())
-                                                    .label(format!("{:02}:{:02}", mins, secs));
-                                            }
-
-                                            // Speed selector
-                                            let mut current_speed = speed;
-                                            tui.tui().style(fixed_style.clone()).ui(|ui| {
-                                                egui::ComboBox::from_id_salt("overlay_speed")
-                                                    .selected_text(format!("{:.0}x", current_speed))
-                                                    .width(60.0)
-                                                    .show_ui(ui, |ui| {
-                                                        for s in PLAYBACK_SPEEDS {
-                                                            if ui
-                                                                .selectable_value(
-                                                                    &mut current_speed,
-                                                                    s,
-                                                                    format!("{:.0}x", s),
-                                                                )
-                                                                .changed()
-                                                            {
-                                                                let _ = command_tx.send(PlaybackCommand::SetSpeed(s));
-                                                                shared_state.lock().speed = s;
-                                                            }
+                                                            ann.trail_hidden_ships.contains(name)
+                                                        } else {
+                                                            true
                                                         }
                                                     });
-                                            });
+                                                    if all_hidden && state.options.show_trails {
+                                                        drop(state);
+                                                        shared_state.lock().options.show_trails = false;
+                                                    }
+                                                }
+                                            }
+                                            broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
+                                            repaint = true;
+                                        }
 
+                                        // Disable all other trails
+                                        if ui.button(t!("ui.renderer.context.disable_other_trails")).clicked() {
+                                            let state = shared_state.lock();
+                                            if let Some(ref frame) = state.frame {
+                                                for cmd in &frame.commands {
+                                                    if let DrawCommand::PositionTrail {
+                                                        player_name: Some(name), ..
+                                                    } = cmd
+                                                        && name != ship_name
+                                                    {
+                                                        ann.trail_hidden_ships.insert(name.clone());
+                                                    }
+                                                }
+                                            }
+                                            ann.trail_hidden_ships.remove(ship_name);
+                                            if !state.options.show_trails {
+                                                drop(state);
+                                                shared_state.lock().options.show_trails = true;
+                                            }
+                                            broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
+                                            ann.show_context_menu = false;
+                                            repaint = true;
+                                        }
+
+                                        // Per-type range toggles for this ship
+                                        let mut filter =
+                                            ann.ship_range_overrides.get(&ship_eid).copied().unwrap_or_default();
+                                        ui.label(
+                                            egui::RichText::new(t!("ui.renderer.context.ranges").as_ref()).small(),
+                                        );
+                                        let mut range_changed = false;
+                                        range_changed |= ui
+                                            .checkbox(&mut filter.detection, t!("ui.renderer.context.detection"))
+                                            .changed();
+                                        range_changed |= ui
+                                            .checkbox(&mut filter.main_battery, t!("ui.renderer.context.main_battery"))
+                                            .changed();
+                                        range_changed |= ui
+                                            .checkbox(
+                                                &mut filter.secondary_battery,
+                                                t!("ui.renderer.context.secondary"),
+                                            )
+                                            .changed();
+                                        range_changed |= ui
+                                            .checkbox(&mut filter.torpedo, t!("ui.renderer.context.torpedo"))
+                                            .changed();
+                                        range_changed |=
+                                            ui.checkbox(&mut filter.radar, t!("ui.renderer.context.radar")).changed();
+                                        range_changed |=
+                                            ui.checkbox(&mut filter.hydro, t!("ui.renderer.context.hydro")).changed();
+                                        let all_on = filter == ShipConfigFilter::all_enabled();
+                                        if !all_on && ui.button(t!("ui.renderer.context.enable_all")).clicked() {
+                                            filter = ShipConfigFilter::all_enabled();
+                                            range_changed = true;
+                                        } else if all_on && ui.button(t!("ui.renderer.context.disable_all")).clicked() {
+                                            filter = ShipConfigFilter::default();
+                                            range_changed = true;
+                                        }
+                                        if range_changed {
+                                            if !filter.any_enabled() {
+                                                ann.ship_range_overrides.remove(&ship_eid);
+                                            } else {
+                                                ann.ship_range_overrides.insert(ship_eid, filter);
+                                            }
+                                            // Auto-enable global when turning on any range
+                                            if filter.any_enabled() {
+                                                let mut state = shared_state.lock();
+                                                if !state.options.show_ship_config {
+                                                    state.options.show_ship_config = true;
+                                                }
+                                            }
+                                            // Auto-disable global when no ship has any range enabled
+                                            if ann.ship_range_overrides.is_empty() {
+                                                let mut state = shared_state.lock();
+                                                if state.options.show_ship_config {
+                                                    state.options.show_ship_config = false;
+                                                }
+                                            }
+                                            broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
+                                            repaint = true;
+                                        }
+
+                                        // Disable all other ships' ranges
+                                        if ui.button(t!("ui.renderer.context.disable_other_ranges")).clicked() {
+                                            let keys: Vec<EntityId> = ann
+                                                .ship_range_overrides
+                                                .keys()
+                                                .filter(|k| **k != ship_eid)
+                                                .copied()
+                                                .collect();
+                                            for k in keys {
+                                                ann.ship_range_overrides.remove(&k);
+                                            }
+                                            broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
+                                            ann.show_context_menu = false;
+                                            repaint = true;
+                                        }
+
+                                        // Enable ranges for all alive ships
+                                        if ui.button(t!("ui.renderer.context.enable_all_ranges")).clicked() {
+                                            let state = shared_state.lock();
+                                            if let Some(ref frame) = state.frame {
+                                                for cmd in &frame.commands {
+                                                    if let DrawCommand::Ship { entity_id, .. } = cmd {
+                                                        ann.ship_range_overrides
+                                                            .insert(*entity_id, ShipConfigFilter::all_enabled());
+                                                    }
+                                                }
+                                            }
+                                            if !state.options.show_ship_config {
+                                                drop(state);
+                                                shared_state.lock().options.show_ship_config = true;
+                                            }
+                                            broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
+                                            ann.show_context_menu = false;
+                                            repaint = true;
+                                        }
+
+                                        // ── Realtime Armor Viewer ──
+                                        ui.separator();
+                                        if ui
+                                            .button(wt_translations::icon_t(
+                                                icons::SHIELD,
+                                                &t!("ui.renderer.context.show_armor"),
+                                            ))
+                                            .clicked()
+                                        {
+                                            let mut new_bridge = RealtimeArmorBridge::new(ship_eid);
+                                            let mut state = shared_state.lock();
+                                            // Attach pre-computed shot timeline if available
+                                            if let Some(ref timelines) = state.shot_timelines {
+                                                new_bridge.shot_timeline = timelines.get(&ship_eid).cloned();
+                                            }
+                                            let bridge = Arc::new(Mutex::new(new_bridge));
+                                            state.armor_bridges.push(bridge.clone());
+                                            state.pending_armor_viewers.push(ArmorViewerRequest {
+                                                target_entity_id: ship_eid,
+                                                bridge,
+                                                command_tx: command_tx.clone(),
+                                            });
+                                            // Seek to current position to populate the new bridge
+                                            let current_clock =
+                                                state.frame.as_ref().map(|f| f.clock).unwrap_or(GameClock(0.0));
+                                            drop(state);
+                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                            let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
+                                            ann.show_context_menu = false;
+                                            repaint = true;
+                                        }
+                                    }
+                                });
+                            });
+
+                        // Close menu on click outside (but not if a sub-popup like the
+                        // color picker is open, whose clicks land outside the menu rect).
+                        if menu_resp.response.clicked_elsewhere() && !ctx.any_popup_open() {
+                            annotation_arc.lock().show_context_menu = false;
+                        }
+                    }
+                }
+
+                // ─── Selection edit popup ─────────────────────────────────────
+                {
+                    let ann = annotation_arc.lock();
+                    let sel_info = ann.single_selected().and_then(|idx| {
+                        if idx < ann.annotations.len() {
+                            let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
+                            Some((idx, bounds))
+                        } else {
+                            None
+                        }
+                    });
+                    drop(ann);
+
+                    if let Some((sel_idx, bounds)) = sel_info {
+                        let collab_tx = shared_state.lock().collab_local_tx.clone();
+                        let map_space = shared_state.lock().map_space_size;
+                        draw_annotation_edit_popup(
+                            &ctx,
+                            ui.scope_id().with("annotation_edit_popup"),
+                            &annotation_arc,
+                            sel_idx,
+                            bounds,
+                            map_space,
+                            &collab_tx,
+                            None,
+                        );
+                    }
+                }
+
+                // ─── Overlay controls (video-player style) ───────────────────
+
+                // Video export progress bar overlay
+                if video_exporting.load(Ordering::Relaxed) {
+                    let progress_text = if let Some(p) = video_export_progress.lock().clone() {
+                        let pct = if p.total > 0 { p.current as f32 / p.total as f32 } else { 0.0 };
+                        let label = match p.stage {
+                            RenderStage::Encoding => t!("ui.renderer.encoding"),
+                            RenderStage::Muxing => t!("ui.renderer.muxing"),
+                        };
+                        Some((pct, format!("{} ({}/{})", label, p.current, p.total)))
+                    } else {
+                        None
+                    };
+
+                    egui::Area::new(ui.scope_id().with("video_export_progress"))
+                        .order(egui::Order::Foreground)
+                        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
+                        .interactable(false)
+                        .show(&ctx, |ui| {
+                            egui::Frame::new()
+                                .fill(Color32::from_rgba_unmultiplied(30, 30, 30, 200))
+                                .corner_radius(CornerRadius::same(4))
+                                .inner_margin(egui::Margin::symmetric(12, 6))
+                                .show(ui, |ui| {
+                                    ui.set_width(300.0);
+                                    if let Some((pct, label)) = progress_text {
+                                        ui.add(egui::ProgressBar::new(pct).text(label));
+                                    } else {
+                                        ui.horizontal(|ui| {
+                                            ui.spinner();
+                                            ui.label(t!("ui.renderer.preparing_export"));
+                                        });
+                                    }
+                                });
+                        });
+                    repaint = true;
+                }
+
+                // Track mouse activity for fade
+                let now = ctx.input(|i| i.time);
+                let any_mouse_activity = ctx.input(|i| i.pointer.velocity().length() > 0.5 || i.pointer.any_click());
+                {
+                    let mut ov = overlay_state_arc.lock();
+                    if any_mouse_activity {
+                        ov.last_activity = now;
+                    }
+                }
+
+                // Check if any popup is open (keeps overlay visible, e.g. settings or speed)
+                let any_popup_open = egui::Popup::is_any_open(&ctx);
+
+                // Compute overlay opacity
+                let elapsed = now - overlay_state_arc.lock().last_activity;
+                let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.scope_id().with("controls_overlay")));
+                let hover_pos = ctx.input(|i| i.pointer.hover_pos());
+                let overlay_hovered = overlay_rect.is_some_and(|r| hover_pos.is_some_and(|p| r.contains(p)));
+                let opacity = if overlay_hovered || any_popup_open || elapsed < 2.0 {
+                    1.0_f32
+                } else if elapsed < 2.5 {
+                    (1.0 - ((elapsed - 2.0) / 0.5) as f32).max(0.0)
+                } else {
+                    0.0
+                };
+
+                // Request repaint during fade animation
+                if opacity > 0.0 && opacity < 1.0 {
+                    repaint = true;
+                }
+
+                // Only render overlay when visible (so it doesn't block canvas input when hidden)
+                if opacity > 0.0 {
+                    let bg_alpha = (180.0 * opacity) as u8;
+                    let text_alpha = (255.0 * opacity) as u8;
+
+                    egui::Area::new(ui.scope_id().with("controls_overlay"))
+                        .order(egui::Order::Foreground)
+                        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+                        .interactable(true)
+                        .show(&ctx, |ui| {
+                            // Apply faded text color
+                            ui.visuals_mut().override_text_color =
+                                Some(Color32::from_rgba_unmultiplied(255, 255, 255, text_alpha));
+                            ui.visuals_mut().widgets.inactive.bg_fill =
+                                Color32::from_rgba_unmultiplied(60, 60, 60, bg_alpha);
+                            ui.visuals_mut().widgets.hovered.bg_fill =
+                                Color32::from_rgba_unmultiplied(80, 80, 80, bg_alpha);
+
+                            let frame = egui::Frame::NONE
+                                .fill(Color32::from_black_alpha(bg_alpha))
+                                .corner_radius(CornerRadius::same(6))
+                                .inner_margin(egui::Margin::same(8));
+                            frame.show(ui, |ui| {
+                                let overlay_width = (response.rect.width() - 32.0).max(200.0);
+                                ui.set_width(overlay_width);
+
+                                // Prevent egui text layout from wrapping to minimal width
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                                let row_style = taffy::Style {
+                                    display: taffy::Display::Flex,
+                                    flex_direction: taffy::FlexDirection::Row,
+                                    align_items: taffy::AlignItems::CENTER,
+                                    gap: length(4.0_f32),
+                                    size: taffy::Size { width: taffy::prelude::percent(1.0_f32), height: auto() },
+                                    ..Default::default()
+                                };
+                                let grow_style = taffy::Style {
+                                    flex_grow: 1.0,
+                                    flex_shrink: 1.0,
+                                    min_size: taffy::Size { width: length(60.0_f32), height: auto() },
+                                    ..Default::default()
+                                };
+                                let fixed_style = taffy::Style { flex_shrink: 0.0, ..Default::default() };
+
+                                let mut settings_btn_opt: Option<egui::Response> = None;
+                                let mut timeline_btn_opt: Option<egui::Response> = None;
+
+                                egui_taffy::tui(ui, ui.scope_id().with("overlay_tui"))
+                                    .reserve_available_width()
+                                    .style(row_style)
+                                    .show(|tui| {
+                                        // Jump to start
+                                        {
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::SKIP_BACK));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.jump_to_start")).clicked() {
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(GameClock(0.0)));
+                                            }
+                                        }
+
+                                        // Skip to previous event
+                                        if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                            let elapsed = clock_secs.to_elapsed(battle_start);
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::REWIND));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.previous_event")).clicked() {
+                                                let state = shared_state.lock();
+                                                if let Some(ref events) = state.timeline_events
+                                                    && let Some(event) =
+                                                        events.iter().rev().find(|e| e.clock < elapsed - 0.5)
+                                                {
+                                                    let seek_clock = event.clock.to_absolute(battle_start);
+                                                    let desc = format_timeline_event(event);
+                                                    drop(state);
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                                    toasts.lock().info(desc);
+                                                }
+                                            }
+                                        }
+
+                                        // Back 10 seconds
+                                        if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.back_10s")).clicked() {
+                                                let target = (clock_secs - 10.0).max(GameClock(0.0));
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(target));
+                                            }
+                                        }
+
+                                        // Play/Pause
+                                        if playing {
+                                            if tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::PAUSE))
+                                                .on_hover_text(t!("ui.renderer.controls.pause"))
+                                                .clicked()
+                                            {
+                                                let _ = command_tx.send(PlaybackCommand::Pause);
+                                                shared_state.lock().playing = false;
+                                            }
+                                        } else if tui
+                                            .tui()
+                                            .style(fixed_style.clone())
+                                            .ui_add(egui::Button::new(icons::PLAY))
+                                            .on_hover_text(t!("ui.renderer.controls.play"))
+                                            .clicked()
+                                        {
+                                            let _ = command_tx.send(PlaybackCommand::Play);
+                                            shared_state.lock().playing = true;
+                                        }
+
+                                        // Forward 10 seconds
+                                        if let Some((_fi, _tf, clock_secs, game_dur)) = frame_data {
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.forward_10s")).clicked() {
+                                                let target = (clock_secs + 10.0).min(GameClock(game_dur));
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(target));
+                                            }
+                                        }
+
+                                        // Skip to next event
+                                        if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::FAST_FORWARD));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.next_event")).clicked() {
+                                                let elapsed = clock_secs.to_elapsed(battle_start);
+                                                let state = shared_state.lock();
+                                                if let Some(ref events) = state.timeline_events
+                                                    && let Some(event) = events.iter().find(|e| e.clock > elapsed)
+                                                {
+                                                    let seek_clock = event.clock.to_absolute(battle_start);
+                                                    let desc = format_timeline_event(event);
+                                                    drop(state);
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                                    toasts.lock().info(desc);
+                                                }
+                                            }
+                                        }
+
+                                        // Jump to end
+                                        if let Some((_fi, _tf, _clock_secs, game_dur)) = frame_data {
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(icons::SKIP_FORWARD));
+                                            if btn.on_hover_text(t!("ui.renderer.controls.jump_to_end")).clicked() {
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(GameClock(game_dur)));
+                                            }
+                                        }
+
+                                        // Seek slider (flex_grow: 1.0 — fills remaining space)
+                                        if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data {
+                                            let mut seek_time = clock_secs.seconds();
+                                            let mut seek_changed = false;
+                                            tui.tui().style(grow_style.clone()).ui(|ui| {
+                                                ui.spacing_mut().slider_width = ui.available_width();
+                                                let slider =
+                                                    egui::Slider::new(&mut seek_time, 0.0..=game_dur).show_value(false);
+                                                let resp = ui.add(slider);
+                                                seek_changed = resp.changed();
+
+                                                let rect = resp.rect;
+                                                // egui insets the slider thumb travel by its handle radius
+                                                // (default Rect handle: height/2.5 scaled by the 0.75 aspect).
+                                                let handle_r = rect.height() / 2.5 * 0.75;
+                                                // Fade the ticks with the rest of the controls.
+                                                let tick_color = egui::Color32::from_rgba_unmultiplied(
+                                                    225,
+                                                    225,
+                                                    225,
+                                                    (255.0 * opacity) as u8,
+                                                );
+                                                let painter = ui.painter();
+                                                let start_x =
+                                                    clock_tick_x(battle_start.seconds(), game_dur, rect, handle_r);
+                                                painter.vline(
+                                                    start_x,
+                                                    rect.y_range(),
+                                                    egui::Stroke::new(1.5, tick_color),
+                                                );
+                                                if let Some(end) = battle_end {
+                                                    let end_x = clock_tick_x(end.seconds(), game_dur, rect, handle_r);
+                                                    painter.vline(
+                                                        end_x,
+                                                        rect.y_range(),
+                                                        egui::Stroke::new(1.5, tick_color),
+                                                    );
+                                                }
+                                            });
+                                            if seek_changed {
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(GameClock(seek_time)));
+                                            }
+
+                                            let elapsed_secs =
+                                                clock_secs.to_elapsed(battle_start).seconds().max(0.0) as u32;
+                                            let mins = elapsed_secs / 60;
+                                            let secs = elapsed_secs % 60;
                                             tui.tui()
                                                 .style(fixed_style.clone())
-                                                .ui_add(egui_taffy::widgets::TaffySeparator::default());
+                                                .label(format!("{:02}:{:02}", mins, secs));
+                                        }
 
-                                            // Settings button
-                                            let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
-                                                egui::RichText::new(icons::GEAR_FINE).size(18.0),
-                                            ));
-                                            settings_btn_opt = Some(btn);
+                                        // Speed selector
+                                        let mut current_speed = speed;
+                                        tui.tui().style(fixed_style.clone()).ui(|ui| {
+                                            egui::ComboBox::from_id_salt("overlay_speed")
+                                                .selected_text(format!("{:.0}x", current_speed))
+                                                .width(60.0)
+                                                .show_ui(ui, |ui| {
+                                                    for s in PLAYBACK_SPEEDS {
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut current_speed,
+                                                                s,
+                                                                format!("{:.0}x", s),
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            let _ = command_tx.send(PlaybackCommand::SetSpeed(s));
+                                                            shared_state.lock().speed = s;
+                                                        }
+                                                    }
+                                                });
+                                        });
 
-                                            // Timeline button
-                                            let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
-                                                egui::RichText::new(icons::LIST_BULLETS).size(18.0),
-                                            ));
-                                            timeline_btn_opt = Some(btn);
-                                            // Save as Video / Clipboard buttons — hidden for client
-                                            // viewers and while a collab session is active.
-                                            let session_is_active = shared_state.lock().collab_session_state.as_ref()
-                                                .map(|ss| matches!(ss.lock().status, SessionStatus::Active | SessionStatus::Starting))
-                                                .unwrap_or(false);
-                                            if !session_is_active
-                                            && let Some(ref video_export_data) = video_export_data {
+                                        tui.tui()
+                                            .style(fixed_style.clone())
+                                            .ui_add(egui_taffy::widgets::TaffySeparator::default());
+
+                                        // Settings button
+                                        let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
+                                            egui::RichText::new(icons::GEAR_FINE).size(18.0),
+                                        ));
+                                        settings_btn_opt = Some(btn);
+
+                                        // Timeline button
+                                        let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
+                                            egui::RichText::new(icons::LIST_BULLETS).size(18.0),
+                                        ));
+                                        timeline_btn_opt = Some(btn);
+                                        // Save as Video / Clipboard buttons — hidden for client
+                                        // viewers and while a collab session is active.
+                                        let session_is_active = shared_state
+                                            .lock()
+                                            .collab_session_state
+                                            .as_ref()
+                                            .map(|ss| {
+                                                matches!(
+                                                    ss.lock().status,
+                                                    SessionStatus::Active | SessionStatus::Starting
+                                                )
+                                            })
+                                            .unwrap_or(false);
+                                        if !session_is_active && let Some(ref video_export_data) = video_export_data {
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
                                                 let has_warning = gpu_encoder_warning.lock().is_some();
@@ -2897,7 +2899,8 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
                                                     ));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.save_as_video")).clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.save_as_video")).clicked()
+                                                {
                                                     let mut opts = options.clone();
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
@@ -2906,15 +2909,22 @@ impl ReplayRendererViewer {
                                                         // overrides drive visibility directly and the config gate must
                                                         // be open for any circles to render.
                                                         opts.show_ship_config = true;
-                                                        opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
-                                                            overrides.get(&eid).copied()
-                                                        }));
+                                                        opts.ship_config_visibility =
+                                                            ShipConfigVisibility::Filtered(Arc::new(move |eid| {
+                                                                overrides.get(&eid).copied()
+                                                            }));
                                                     }
-                                                    let default_name = format!("{}.mp4", video_export_data.video_file_stem);
+                                                    let default_name =
+                                                        format!("{}.mp4", video_export_data.video_file_stem);
                                                     let dialog = rfd::AsyncFileDialog::new()
                                                         .set_file_name(&default_name)
                                                         .add_filter("MP4 Video", &["mp4"]);
-                                                    video_save_dialog.lock().open(&ctx, DialogKind::SaveFile, dialog, opts);
+                                                    video_save_dialog.lock().open(
+                                                        &ctx,
+                                                        DialogKind::SaveFile,
+                                                        dialog,
+                                                        opts,
+                                                    );
                                                 }
                                             }
 
@@ -2930,7 +2940,10 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::CLIPBOARD).size(18.0),
                                                     ));
-                                                if btn.on_hover_text(t!("ui.renderer.controls.copy_to_clipboard")).clicked() {
+                                                if btn
+                                                    .on_hover_text(t!("ui.renderer.controls.copy_to_clipboard"))
+                                                    .clicked()
+                                                {
                                                     let mut opts = options.clone();
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
@@ -2939,13 +2952,18 @@ impl ReplayRendererViewer {
                                                         // overrides drive visibility directly and the config gate must
                                                         // be open for any circles to render.
                                                         opts.show_ship_config = true;
-                                                        opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
-                                                            overrides.get(&eid).copied()
-                                                        }));
+                                                        opts.ship_config_visibility =
+                                                            ShipConfigVisibility::Filtered(Arc::new(move |eid| {
+                                                                overrides.get(&eid).copied()
+                                                            }));
                                                     }
                                                     let status = wows_minimap_renderer::check_encoder();
                                                     let codec_pref = *video_codec.lock();
-                                                    let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
+                                                    let prefer_cpu = resolve_prefer_cpu(
+                                                        prefer_cpu_encoder.load(Ordering::Relaxed),
+                                                        codec_pref,
+                                                        &status,
+                                                    );
                                                     let action = PendingVideoExport::CopyToClipboard {
                                                         options: opts,
                                                         prefer_cpu,
@@ -2954,8 +2972,17 @@ impl ReplayRendererViewer {
                                                         encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                                                         include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
                                                     };
-                                                    if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                        execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
+                                                    if prefer_cpu
+                                                        || status.gpu_available()
+                                                        || suppress_gpu_warning.load(Ordering::Relaxed)
+                                                    {
+                                                        execute_video_export(
+                                                            action,
+                                                            video_export_data,
+                                                            &toasts,
+                                                            &video_exporting,
+                                                            &video_export_progress,
+                                                        );
                                                     } else {
                                                         *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
                                                             pending_action: action,
@@ -2964,449 +2991,678 @@ impl ReplayRendererViewer {
                                                     }
                                                 }
                                             }
-                                            } // end if video_export_data
-                                             // end if !session_is_active
+                                        } // end if video_export_data
+                                        // end if !session_is_active
 
-                                            tui.tui()
-                                                .style(fixed_style.clone())
-                                                .ui_add(egui_taffy::widgets::TaffySeparator::default());
+                                        tui.tui()
+                                            .style(fixed_style.clone())
+                                            .ui_add(egui_taffy::widgets::TaffySeparator::default());
 
-                                            // Zoom slider
-                                            {
-                                                tui.tui().style(fixed_style.clone()).label(icons::MAGNIFYING_GLASS);
+                                        // Zoom slider
+                                        {
+                                            tui.tui().style(fixed_style.clone()).label(icons::MAGNIFYING_GLASS);
 
-                                                let mut zp = zoom_pan_arc.lock();
-                                                let mut zoom_val = zp.zoom;
-                                                let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
-                                                    .logarithmic(true)
-                                                    .max_decimals(1)
-                                                    .suffix("x");
-                                                if tui.tui().style(fixed_style.clone()).ui_add(slider).changed() {
-                                                    let old_zoom = zp.zoom;
-                                                    let center_x = zp.pan.x + MINIMAP_SIZE as f32 / 2.0;
-                                                    let center_y = zp.pan.y + MINIMAP_SIZE as f32 / 2.0;
-                                                    let minimap_cx = center_x / old_zoom;
-                                                    let minimap_cy = center_y / old_zoom;
-                                                    zp.pan.x = minimap_cx * zoom_val - MINIMAP_SIZE as f32 / 2.0;
-                                                    zp.pan.y = minimap_cy * zoom_val - MINIMAP_SIZE as f32 / 2.0;
-                                                    zp.zoom = zoom_val;
-                                                    zp.pan.x = zp.pan.x.max(0.0);
-                                                    zp.pan.y = zp.pan.y.max(0.0);
-                                                }
-                                                if tui
-                                                    .tui()
-                                                    .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(t!("ui.buttons.reset")))
-                                                    .clicked()
-                                                {
-                                                    zp.zoom = 1.0;
-                                                    zp.pan = Vec2::ZERO;
-                                                }
+                                            let mut zp = zoom_pan_arc.lock();
+                                            let mut zoom_val = zp.zoom;
+                                            let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
+                                                .logarithmic(true)
+                                                .max_decimals(1)
+                                                .suffix("x");
+                                            if tui.tui().style(fixed_style.clone()).ui_add(slider).changed() {
+                                                let old_zoom = zp.zoom;
+                                                let center_x = zp.pan.x + MINIMAP_SIZE as f32 / 2.0;
+                                                let center_y = zp.pan.y + MINIMAP_SIZE as f32 / 2.0;
+                                                let minimap_cx = center_x / old_zoom;
+                                                let minimap_cy = center_y / old_zoom;
+                                                zp.pan.x = minimap_cx * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                                zp.pan.y = minimap_cy * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                                zp.zoom = zoom_val;
+                                                zp.pan.x = zp.pan.x.max(0.0);
+                                                zp.pan.y = zp.pan.y.max(0.0);
                                             }
+                                            if tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new(t!("ui.buttons.reset")))
+                                                .clicked()
+                                            {
+                                                zp.zoom = 1.0;
+                                                zp.pan = Vec2::ZERO;
+                                            }
+                                        }
+                                    });
 
-                                        });
+                                let settings_btn = settings_btn_opt.unwrap();
 
-                                    let settings_btn = settings_btn_opt.unwrap();
+                                // Settings popup (inside frame, outside horizontal)
+                                egui::Popup::from_toggle_button_response(&settings_btn)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .show(|ui| {
+                                        ui.set_min_width(180.0);
+                                        let scroll_out = egui::ScrollArea::vertical()
+                                            .max_height(ui.ctx().content_rect().height() * 0.6)
+                                            .show(ui, |ui| {
+                                                let mut opts = options.clone();
+                                                let mut show_dead = show_dead_ships;
+                                                let mut changed = false;
 
-                                    // Settings popup (inside frame, outside horizontal)
-                                    egui::Popup::from_toggle_button_response(&settings_btn)
-                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                        .show(|ui| {
-                                            ui.set_min_width(180.0);
-                                            let scroll_out = egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
-                                            let mut opts = options.clone();
-                                            let mut show_dead = show_dead_ships;
-                                            let mut changed = false;
+                                                // ── Ship Settings ──
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        t!("ui.renderer.settings.ship_settings").as_ref(),
+                                                    )
+                                                    .small()
+                                                    .strong(),
+                                                );
+                                                ui.indent("ship_settings", |ui| {
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_armament,
+                                                            t!("ui.renderer.settings.armament"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(&mut show_dead, t!("ui.renderer.settings.dead_ships"))
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_dead_ship_names,
+                                                            t!("ui.renderer.settings.dead_ship_names"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_player_names,
+                                                            t!("ui.renderer.settings.player_names"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_ship_config,
+                                                            t!("ui.renderer.settings.ship_ranges"),
+                                                        )
+                                                        .changed();
 
-                                            // ── Ship Settings ──
-                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.ship_settings").as_ref()).small().strong());
-                                            ui.indent("ship_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_armament, t!("ui.renderer.settings.armament")).changed();
-                                                changed |= ui.checkbox(&mut show_dead, t!("ui.renderer.settings.dead_ships")).changed();
-                                                changed |= ui
-                                                    .checkbox(&mut opts.show_dead_ship_names, t!("ui.renderer.settings.dead_ship_names"))
-                                                    .changed();
-                                                changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_player_names, t!("ui.renderer.settings.player_names")).changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_ship_config, t!("ui.renderer.settings.ship_ranges")).changed();
+                                                    // Self ship range toggles
+                                                    if let Some(self_eid) = self_entity_id {
+                                                        let mut filter = annotation_arc
+                                                            .lock()
+                                                            .ship_range_overrides
+                                                            .get(&self_eid)
+                                                            .copied()
+                                                            .unwrap_or_default();
+                                                        let mut self_changed = false;
+                                                        ui.indent("self_ranges", |ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(
+                                                                    t!("ui.renderer.settings.self_ship_ranges")
+                                                                        .as_ref(),
+                                                                )
+                                                                .small(),
+                                                            );
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.detection,
+                                                                    t!("ui.renderer.context.detection"),
+                                                                )
+                                                                .changed();
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.main_battery,
+                                                                    t!("ui.renderer.context.main_battery"),
+                                                                )
+                                                                .changed();
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.secondary_battery,
+                                                                    t!("ui.renderer.context.secondary"),
+                                                                )
+                                                                .changed();
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.torpedo,
+                                                                    t!("ui.renderer.context.torpedo"),
+                                                                )
+                                                                .changed();
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.radar,
+                                                                    t!("ui.renderer.context.radar"),
+                                                                )
+                                                                .changed();
+                                                            self_changed |= ui
+                                                                .checkbox(
+                                                                    &mut filter.hydro,
+                                                                    t!("ui.renderer.context.hydro"),
+                                                                )
+                                                                .changed();
+                                                        });
+                                                        if self_changed {
+                                                            let mut ann = annotation_arc.lock();
+                                                            if !filter.any_enabled() {
+                                                                ann.ship_range_overrides.remove(&self_eid);
+                                                            } else {
+                                                                ann.ship_range_overrides.insert(self_eid, filter);
+                                                            }
+                                                            // Auto-enable global show_ship_config when any range is on
+                                                            if filter.any_enabled() && !opts.show_ship_config {
+                                                                opts.show_ship_config = true;
+                                                                changed = true;
+                                                            }
+                                                            // Auto-disable global when no ship has any range enabled
+                                                            if ann.ship_range_overrides.is_empty()
+                                                                && opts.show_ship_config
+                                                            {
+                                                                opts.show_ship_config = false;
+                                                                changed = true;
+                                                            }
+                                                            broadcast_range_overrides(
+                                                                &ann.ship_range_overrides,
+                                                                &shared_state,
+                                                            );
 
-                                                // Self ship range toggles
-                                                if let Some(self_eid) = self_entity_id {
-                                                    let mut filter = annotation_arc.lock().ship_range_overrides
-                                                        .get(&self_eid).copied().unwrap_or_default();
-                                                    let mut self_changed = false;
-                                                    ui.indent("self_ranges", |ui| {
-                                                        ui.label(egui::RichText::new(t!("ui.renderer.settings.self_ship_ranges").as_ref()).small());
-                                                        self_changed |= ui.checkbox(&mut filter.detection, t!("ui.renderer.context.detection")).changed();
-                                                        self_changed |= ui.checkbox(&mut filter.main_battery, t!("ui.renderer.context.main_battery")).changed();
-                                                        self_changed |= ui.checkbox(&mut filter.secondary_battery, t!("ui.renderer.context.secondary")).changed();
-                                                        self_changed |= ui.checkbox(&mut filter.torpedo, t!("ui.renderer.context.torpedo")).changed();
-                                                        self_changed |= ui.checkbox(&mut filter.radar, t!("ui.renderer.context.radar")).changed();
-                                                        self_changed |= ui.checkbox(&mut filter.hydro, t!("ui.renderer.context.hydro")).changed();
-                                                    });
-                                                    if self_changed {
-                                                        let mut ann = annotation_arc.lock();
-                                                        if !filter.any_enabled() {
-                                                            ann.ship_range_overrides.remove(&self_eid);
-                                                        } else {
-                                                            ann.ship_range_overrides.insert(self_eid, filter);
+                                                            repaint = true;
                                                         }
-                                                        // Auto-enable global show_ship_config when any range is on
-                                                        if filter.any_enabled() && !opts.show_ship_config {
-                                                            opts.show_ship_config = true;
-                                                            changed = true;
-                                                        }
-                                                        // Auto-disable global when no ship has any range enabled
-                                                        if ann.ship_range_overrides.is_empty() && opts.show_ship_config {
-                                                            opts.show_ship_config = false;
-                                                            changed = true;
-                                                        }
-                                                        broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
-
-                                                        repaint = true;
                                                     }
-                                                }
 
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_ship_names, t!("ui.renderer.settings.ship_names")).changed();
-                                                changed |= ui
-                                                    .checkbox(&mut opts.show_camera_direction, t!("ui.renderer.settings.camera_direction"))
-                                                    .changed();
-                                            });
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_ship_names,
+                                                            t!("ui.renderer.settings.ship_names"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_camera_direction,
+                                                            t!("ui.renderer.settings.camera_direction"),
+                                                        )
+                                                        .changed();
+                                                });
 
-                                            // ── Trail Settings ──
-                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.trail_settings").as_ref()).small().strong());
-                                            ui.indent("trail_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_trails, t!("ui.renderer.settings.heat_trail")).changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_speed_trails, t!("ui.renderer.settings.speed_trails")).changed();
-                                                changed |= ui
-                                                    .checkbox(&mut opts.show_dead_trails, t!("ui.renderer.settings.dead_ship_trails"))
-                                                    .changed();
-                                            });
+                                                // ── Trail Settings ──
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        t!("ui.renderer.settings.trail_settings").as_ref(),
+                                                    )
+                                                    .small()
+                                                    .strong(),
+                                                );
+                                                ui.indent("trail_settings", |ui| {
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_trails,
+                                                            t!("ui.renderer.settings.heat_trail"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_speed_trails,
+                                                            t!("ui.renderer.settings.speed_trails"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_dead_trails,
+                                                            t!("ui.renderer.settings.dead_ship_trails"),
+                                                        )
+                                                        .changed();
+                                                });
 
-                                            // ── Map Settings ──
-                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.map_settings").as_ref()).small().strong());
-                                            ui.indent("map_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_buildings, t!("ui.renderer.settings.buildings")).changed();
-                                                changed |= ui
-                                                    .checkbox(&mut opts.show_capture_points, t!("ui.renderer.settings.capture_points"))
-                                                    .changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_consumables, t!("ui.renderer.settings.consumables")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_planes, t!("ui.renderer.settings.planes")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_smoke, t!("ui.renderer.settings.smoke")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_torpedoes, t!("ui.renderer.settings.torpedoes")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_tracers, t!("ui.renderer.settings.tracers")).changed();
-                                            });
+                                                // ── Map Settings ──
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        t!("ui.renderer.settings.map_settings").as_ref(),
+                                                    )
+                                                    .small()
+                                                    .strong(),
+                                                );
+                                                ui.indent("map_settings", |ui| {
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_buildings,
+                                                            t!("ui.renderer.settings.buildings"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_capture_points,
+                                                            t!("ui.renderer.settings.capture_points"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_consumables,
+                                                            t!("ui.renderer.settings.consumables"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_planes,
+                                                            t!("ui.renderer.settings.planes"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_smoke,
+                                                            t!("ui.renderer.settings.smoke"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_torpedoes,
+                                                            t!("ui.renderer.settings.torpedoes"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_tracers,
+                                                            t!("ui.renderer.settings.tracers"),
+                                                        )
+                                                        .changed();
+                                                });
 
-                                            // ── HUD Settings ──
-                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.hud_settings").as_ref()).small().strong());
-                                            ui.indent("hud_settings", |ui| {
-                                                changed |= ui
-                                                    .checkbox(&mut opts.show_battle_result, t!("ui.renderer.settings.battle_result"))
-                                                    .changed();
-                                                changed |= ui.checkbox(&mut opts.show_buffs, t!("ui.renderer.settings.buff_counters")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_chat, t!("ui.renderer.settings.chat_label")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_kill_feed, t!("ui.renderer.settings.kill_feed")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_score, t!("ui.renderer.settings.score_label")).changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_score_timer, t!("ui.renderer.settings.score_timers")).changed();
-                                                changed |=
-                                                    ui.checkbox(&mut opts.show_advantage, t!("ui.renderer.settings.team_advantage")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_timer, t!("ui.renderer.settings.timer")).changed();
-                                                // Stats panel and team rosters compete for the same gutter
-                                                // real estate, so they're mutually exclusive: toggling either
-                                                // on clears the other.
-                                                if ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed() {
-                                                    if opts.show_stats_panel {
-                                                        opts.show_team_rosters = false;
-                                                    }
-                                                    changed = true;
-                                                }
-                                                if ui.checkbox(&mut opts.show_team_rosters, "Team Rosters").changed() {
-                                                    if opts.show_team_rosters {
-                                                        opts.show_stats_panel = false;
-                                                    }
-                                                    changed = true;
-                                                }
-                                            });
-
-                                            // ── Export Settings ──
-                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.export_settings").as_ref()).small().strong());
-                                            ui.indent("export_settings", |ui| {
-                                                let mut cpu = prefer_cpu_encoder.load(Ordering::Relaxed);
-                                                if ui.checkbox(&mut cpu, t!("ui.renderer.settings.prefer_cpu")).on_hover_text(t!("ui.renderer.settings.prefer_cpu_tooltip")).changed() {
-                                                    prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
-                                                }
-                                                let mut pre_battle = include_pre_battle.load(Ordering::Relaxed);
-                                                if ui.checkbox(&mut pre_battle, t!("ui.renderer.settings.include_pre_battle")).on_hover_text(t!("ui.renderer.settings.include_pre_battle_tooltip")).changed() {
-                                                    include_pre_battle.store(pre_battle, Ordering::Relaxed);
-                                                }
-                                                let status = cached_encoder_status(ui.ctx());
-                                                let default_codec = status.best_codec(cpu);
-                                                let mut current = *video_codec.lock();
-                                                ui.label(t!("ui.renderer.settings.codec"));
-                                                ui.indent("codec_choice", |ui| {
-                                                    let auto_label = format!(
-                                                        "{} ({})",
-                                                        t!("ui.renderer.settings.codec_auto"),
-                                                        default_codec.display_name(),
-                                                    );
-                                                    if ui.selectable_label(current.is_none(), auto_label).clicked() {
-                                                        current = None;
-                                                    }
-                                                    for codec in wows_minimap_renderer::VideoCodec::ALL {
-                                                        if !status.supported_codecs().any(|c| c == codec) {
-                                                            continue;
+                                                // ── HUD Settings ──
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        t!("ui.renderer.settings.hud_settings").as_ref(),
+                                                    )
+                                                    .small()
+                                                    .strong(),
+                                                );
+                                                ui.indent("hud_settings", |ui| {
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_battle_result,
+                                                            t!("ui.renderer.settings.battle_result"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_buffs,
+                                                            t!("ui.renderer.settings.buff_counters"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_chat,
+                                                            t!("ui.renderer.settings.chat_label"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_kill_feed,
+                                                            t!("ui.renderer.settings.kill_feed"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_score,
+                                                            t!("ui.renderer.settings.score_label"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_score_timer,
+                                                            t!("ui.renderer.settings.score_timers"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_advantage,
+                                                            t!("ui.renderer.settings.team_advantage"),
+                                                        )
+                                                        .changed();
+                                                    changed |= ui
+                                                        .checkbox(
+                                                            &mut opts.show_timer,
+                                                            t!("ui.renderer.settings.timer"),
+                                                        )
+                                                        .changed();
+                                                    // Stats panel and team rosters compete for the same gutter
+                                                    // real estate, so they're mutually exclusive: toggling either
+                                                    // on clears the other.
+                                                    if ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed()
+                                                    {
+                                                        if opts.show_stats_panel {
+                                                            opts.show_team_rosters = false;
                                                         }
-                                                        if ui.selectable_label(current == Some(codec), codec.display_name()).clicked() {
-                                                            current = Some(codec);
+                                                        changed = true;
+                                                    }
+                                                    if ui
+                                                        .checkbox(&mut opts.show_team_rosters, "Team Rosters")
+                                                        .changed()
+                                                    {
+                                                        if opts.show_team_rosters {
+                                                            opts.show_stats_panel = false;
                                                         }
+                                                        changed = true;
                                                     }
                                                 });
-                                                *video_codec.lock() = current;
-                                            });
 
-                                            if changed {
-                                                let mut state = shared_state.lock();
-                                                // Broadcast diffs to collab peers if connected.
-                                                if let Some(ref tx) = state.collab_local_tx {
-                                                    use crate::collab::protocol::collab_render_options_from_render_options;
-                                                    let old = collab_render_options_from_render_options(&state.options, state.show_dead_ships);
-                                                    let new = collab_render_options_from_render_options(&opts, show_dead);
-                                                    for (field, value) in old.diff(&new) {
-                                                        let _ = tx.send(crate::collab::peer::LocalEvent::DisplayToggle(field, value));
+                                                // ── Export Settings ──
+                                                ui.label(
+                                                    egui::RichText::new(
+                                                        t!("ui.renderer.settings.export_settings").as_ref(),
+                                                    )
+                                                    .small()
+                                                    .strong(),
+                                                );
+                                                ui.indent("export_settings", |ui| {
+                                                    let mut cpu = prefer_cpu_encoder.load(Ordering::Relaxed);
+                                                    if ui
+                                                        .checkbox(&mut cpu, t!("ui.renderer.settings.prefer_cpu"))
+                                                        .on_hover_text(t!("ui.renderer.settings.prefer_cpu_tooltip"))
+                                                        .changed()
+                                                    {
+                                                        prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
                                                     }
-                                                }
-                                                state.options = opts.clone();
-                                                state.show_dead_ships = show_dead;
-                                            }
-                                            (opts, show_dead)
-                                            });
-
-                                            let (opts, show_dead) = scroll_out.inner;
-                                            ui.separator();
-                                            if ui.button(t!("ui.renderer.settings.save_defaults")).clicked() {
-                                                let mut saved = saved_from_render_options(&saved_defaults, &opts, show_dead);
-                                                saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
-                                                saved.video_codec = *video_codec.lock();
-                                                saved.include_pre_battle = include_pre_battle.load(Ordering::Relaxed);
-                                                // Persist self range flags from annotation overrides
-                                                if let Some(self_eid) = self_entity_id {
-                                                    let ann = annotation_arc.lock();
-                                                    let filter = ann.ship_range_overrides
-                                                        .get(&self_eid).copied().unwrap_or_default();
-                                                    saved.set_self_range_filter(&filter);
-                                                }
-                                                *pending_save.lock() = Some(saved);
-                                            }
-                                        });
-
-                                    // Timeline popup
-                                    let timeline_btn = timeline_btn_opt.unwrap();
-                                    egui::Popup::from_toggle_button_response(&timeline_btn)
-                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                        .frame(
-                                            egui::Frame::popup(ui.style())
-                                                .fill(ui.style().visuals.window_fill.gamma_multiply(0.5)),
-                                        )
-                                        .show(|ui| {
-                                            ui.set_width(340.0);
-
-                                            let mut filter = ui.ctx().data_mut(|d| {
-                                                d.get_temp_mut_or_default::<TimelineFilter>(
-                                                    egui::Id::unique("renderer_timeline_filter"),
-                                                )
-                                                .clone()
-                                            });
-
-                                            ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref()).strong());
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                    |ui| {
-                                                        let state = shared_state.lock();
-                                                        if let Some(events) = &state.timeline_events {
-                                                            let visible_count = events.iter().filter(|e| filter.matches(e)).count();
+                                                    let mut pre_battle = include_pre_battle.load(Ordering::Relaxed);
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut pre_battle,
+                                                            t!("ui.renderer.settings.include_pre_battle"),
+                                                        )
+                                                        .on_hover_text(t!(
+                                                            "ui.renderer.settings.include_pre_battle_tooltip"
+                                                        ))
+                                                        .changed()
+                                                    {
+                                                        include_pre_battle.store(pre_battle, Ordering::Relaxed);
+                                                    }
+                                                    let status = cached_encoder_status(ui.ctx());
+                                                    let default_codec = status.best_codec(cpu);
+                                                    let mut current = *video_codec.lock();
+                                                    ui.label(t!("ui.renderer.settings.codec"));
+                                                    ui.indent("codec_choice", |ui| {
+                                                        let auto_label = format!(
+                                                            "{} ({})",
+                                                            t!("ui.renderer.settings.codec_auto"),
+                                                            default_codec.display_name(),
+                                                        );
+                                                        if ui.selectable_label(current.is_none(), auto_label).clicked()
+                                                        {
+                                                            current = None;
+                                                        }
+                                                        for codec in wows_minimap_renderer::VideoCodec::ALL {
+                                                            if !status.supported_codecs().any(|c| c == codec) {
+                                                                continue;
+                                                            }
                                                             if ui
-                                                                .add_enabled(visible_count > 0, egui::Button::new(t!("ui.buttons.copy")).small())
-                                                                .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                                                .selectable_label(
+                                                                    current == Some(codec),
+                                                                    codec.display_name(),
+                                                                )
                                                                 .clicked()
                                                             {
-                                                                let text: String = events
-                                                                    .iter()
-                                                                    .filter(|e| filter.matches(e))
-                                                                    .map(format_timeline_event)
-                                                                    .collect::<Vec<_>>()
-                                                                    .join("\n");
-                                                                ui.ctx().copy_text(text);
+                                                                current = Some(codec);
                                                             }
                                                         }
-                                                    },
-                                                );
-                                            });
-                                            ui.separator();
+                                                    });
+                                                    *video_codec.lock() = current;
+                                                });
 
-                                            timeline_filter_bar(ui, &mut filter);
-                                            ui.ctx().data_mut(|d| {
-                                                d.insert_temp(egui::Id::unique("renderer_timeline_filter"), filter.clone());
-                                            });
-                                            ui.separator();
-
-                                            let state = shared_state.lock();
-                                            match &state.timeline_events {
-                                                Some(events) => {
-                                                    let visible_count = events.iter().filter(|e| filter.matches(e)).count();
-                                                    if !events.is_empty() && visible_count == 0 {
-                                                        ui.label(t!("ui.replay.timeline_no_matches"));
-                                                    } else {
-                                                        let viewer_team = state.viewer_team;
-                                                        let mut seek_to = None;
-                                                        egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                                                            ui.set_width(ui.available_width());
-                                                            timeline_list(ui, events, &filter, viewer_team, |event| {
-                                                                seek_to = Some(event.clock.to_absolute(battle_start));
-                                                            });
-                                                        });
-                                                        drop(state);
-                                                        if let Some(clock) = seek_to {
-                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
-                                                            let _ = command_tx.send(PlaybackCommand::Seek(clock));
+                                                if changed {
+                                                    let mut state = shared_state.lock();
+                                                    // Broadcast diffs to collab peers if connected.
+                                                    if let Some(ref tx) = state.collab_local_tx {
+                                                        use crate::collab::protocol::CollabRenderOptions;
+                                                        let old = CollabRenderOptions::from_render_options(
+                                                            &state.options,
+                                                            state.show_dead_ships,
+                                                        );
+                                                        let new =
+                                                            CollabRenderOptions::from_render_options(&opts, show_dead);
+                                                        for (field, value) in old.diff(&new) {
+                                                            let _ = tx.send(
+                                                                crate::collab::peer::LocalEvent::DisplayToggle(
+                                                                    field, value,
+                                                                ),
+                                                            );
                                                         }
                                                     }
+                                                    state.options = opts.clone();
+                                                    state.show_dead_ships = show_dead;
                                                 }
-                                                None => {
-                                                    ui.spinner();
-                                                    ui.label(t!("ui.replay.timeline_parsing"));
-                                                }
+                                                (opts, show_dead)
+                                            });
+
+                                        let (opts, show_dead) = scroll_out.inner;
+                                        ui.separator();
+                                        if ui.button(t!("ui.renderer.settings.save_defaults")).clicked() {
+                                            let mut saved =
+                                                saved_from_render_options(&saved_defaults, &opts, show_dead);
+                                            saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
+                                            saved.video_codec = *video_codec.lock();
+                                            saved.include_pre_battle = include_pre_battle.load(Ordering::Relaxed);
+                                            // Persist self range flags from annotation overrides
+                                            if let Some(self_eid) = self_entity_id {
+                                                let ann = annotation_arc.lock();
+                                                let filter = ann
+                                                    .ship_range_overrides
+                                                    .get(&self_eid)
+                                                    .copied()
+                                                    .unwrap_or_default();
+                                                saved.set_self_range_filter(&filter);
                                             }
+                                            *pending_save.lock() = Some(saved);
+                                        }
+                                    });
+
+                                // Timeline popup
+                                let timeline_btn = timeline_btn_opt.unwrap();
+                                egui::Popup::from_toggle_button_response(&timeline_btn)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .frame(
+                                        egui::Frame::popup(ui.style())
+                                            .fill(ui.style().visuals.window_fill.gamma_multiply(0.5)),
+                                    )
+                                    .show(|ui| {
+                                        ui.set_width(340.0);
+
+                                        let mut filter = ui.ctx().data_mut(|d| {
+                                            d.get_temp_mut_or_default::<TimelineFilter>(egui::Id::unique(
+                                                "renderer_timeline_filter",
+                                            ))
+                                            .clone()
                                         });
 
-                                });
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref())
+                                                    .strong(),
+                                            );
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                let state = shared_state.lock();
+                                                if let Some(events) = &state.timeline_events {
+                                                    let visible_count =
+                                                        events.iter().filter(|e| filter.matches(e)).count();
+                                                    if ui
+                                                        .add_enabled(
+                                                            visible_count > 0,
+                                                            egui::Button::new(t!("ui.buttons.copy")).small(),
+                                                        )
+                                                        .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                                        .clicked()
+                                                    {
+                                                        let text: String = events
+                                                            .iter()
+                                                            .filter(|e| filter.matches(e))
+                                                            .map(format_timeline_event)
+                                                            .collect::<Vec<_>>()
+                                                            .join("\n");
+                                                        ui.ctx().copy_text(text);
+                                                    }
+                                                }
+                                            });
+                                        });
+                                        ui.separator();
+
+                                        timeline_filter_bar(ui, &mut filter);
+                                        ui.ctx().data_mut(|d| {
+                                            d.insert_temp(egui::Id::unique("renderer_timeline_filter"), filter.clone());
+                                        });
+                                        ui.separator();
+
+                                        let state = shared_state.lock();
+                                        match &state.timeline_events {
+                                            Some(events) => {
+                                                let visible_count = events.iter().filter(|e| filter.matches(e)).count();
+                                                if !events.is_empty() && visible_count == 0 {
+                                                    ui.label(t!("ui.replay.timeline_no_matches"));
+                                                } else {
+                                                    let viewer_team = state.viewer_team;
+                                                    let mut seek_to = None;
+                                                    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                                                        ui.set_width(ui.available_width());
+                                                        timeline_list(ui, events, &filter, viewer_team, |event| {
+                                                            seek_to = Some(event.clock.to_absolute(battle_start));
+                                                        });
+                                                    });
+                                                    drop(state);
+                                                    if let Some(clock) = seek_to {
+                                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
+                                                        let _ = command_tx.send(PlaybackCommand::Seek(clock));
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                ui.spinner();
+                                                ui.label(t!("ui.replay.timeline_parsing"));
+                                            }
+                                        }
+                                    });
                             });
+                        });
+                }
+
+                // Polled outside the overlay so the result applies while the overlay is hidden.
+                let picked_video_path = video_save_dialog.lock().poll();
+                // The clipboard export or the encoder warning can still be active from
+                // before the dialog opened; both share the export state.
+                let export_busy = video_exporting.load(Ordering::Relaxed) || gpu_encoder_warning.lock().is_some();
+                if let Some((_, path)) = &picked_video_path
+                    && export_busy
+                {
+                    tracing::warn!(path = %path.display(), "video export already active; dropping picked save path");
+                    toasts.lock().warning("Another video export is already running");
+                } else if let Some((opts, path)) = picked_video_path
+                    && let Some(video_export_data) = &video_export_data
+                {
+                    let status = cached_encoder_status(&ctx);
+                    let codec_pref = *video_codec.lock();
+                    let prefer_cpu =
+                        resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
+                    let action = PendingVideoExport::SaveToFile {
+                        output_path: path.to_string_lossy().to_string(),
+                        options: opts,
+                        prefer_cpu,
+                        codec: codec_pref,
+                        actual_game_duration,
+                        encoder_config: wows_minimap_renderer::EncoderConfig::default(),
+                        include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                    };
+                    if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
+                        execute_video_export(
+                            action,
+                            video_export_data,
+                            &toasts,
+                            &video_exporting,
+                            &video_export_progress,
+                        );
+                    } else {
+                        *gpu_encoder_warning.lock() =
+                            Some(GpuEncoderWarning { pending_action: action, dont_show_again: false });
                     }
+                }
 
-                    // Polled outside the overlay so the result applies while the overlay is hidden.
-                    let picked_video_path = video_save_dialog.lock().poll();
-                    // The clipboard export or the encoder warning can still be active from
-                    // before the dialog opened; both share the export state.
-                    let export_busy = video_exporting.load(Ordering::Relaxed) || gpu_encoder_warning.lock().is_some();
-                    if let Some((_, path)) = &picked_video_path
-                        && export_busy
-                    {
-                        tracing::warn!(path = %path.display(), "video export already active; dropping picked save path");
-                        toasts.lock().warning("Another video export is already running");
-                    } else if let Some((opts, path)) = picked_video_path
-                        && let Some(video_export_data) = &video_export_data
-                    {
-                        let status = cached_encoder_status(&ctx);
-                        let codec_pref = *video_codec.lock();
-                        let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
-                        let action = PendingVideoExport::SaveToFile {
-                            output_path: path.to_string_lossy().to_string(),
-                            options: opts,
-                            prefer_cpu,
-                            codec: codec_pref,
-                            actual_game_duration,
-                            encoder_config: wows_minimap_renderer::EncoderConfig::default(),
-                            include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
-                        };
-                        if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
-                            execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
-                        } else {
-                            *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
-                                pending_action: action,
-                                dont_show_again: false,
-                            });
-                        }
-                    }
+                // GPU encoder warning dialog
+                if gpu_encoder_warning.lock().is_some() {
+                    let mut close_dialog = false;
+                    let mut proceed = false;
 
-                    // GPU encoder warning dialog
-                    if gpu_encoder_warning.lock().is_some() {
-                        let mut close_dialog = false;
-                        let mut proceed = false;
-
-                        egui::Window::new("GPU Video Encoder Unavailable")
-                            .collapsible(false)
-                            .resizable(false)
-                            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                            .show(&ctx, |ui| {
-                                ui.label(
-                                    "Could not find a supported GPU video encoder. \
+                    egui::Window::new("GPU Video Encoder Unavailable")
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .show(&ctx, |ui| {
+                            ui.label(
+                                "Could not find a supported GPU video encoder. \
                                      Video export will fall back to CPU encoding, \
-                                     which will be significantly slower."
-                                );
-                                ui.add_space(8.0);
-                                let mut warning = gpu_encoder_warning.lock();
-                                if let Some(w) = warning.as_mut() {
-                                    ui.checkbox(&mut w.dont_show_again, "Don't show this again");
+                                     which will be significantly slower.",
+                            );
+                            ui.add_space(8.0);
+                            let mut warning = gpu_encoder_warning.lock();
+                            if let Some(w) = warning.as_mut() {
+                                ui.checkbox(&mut w.dont_show_again, "Don't show this again");
+                            }
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Ok").clicked() {
+                                    proceed = true;
+                                    close_dialog = true;
                                 }
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    if ui.button("Ok").clicked() {
-                                        proceed = true;
-                                        close_dialog = true;
-                                    }
-                                    if ui.button("Cancel").clicked() {
-                                        close_dialog = true;
-                                    }
-                                });
+                                if ui.button("Cancel").clicked() {
+                                    close_dialog = true;
+                                }
                             });
+                        });
 
-                        if close_dialog {
-                            let warning = gpu_encoder_warning.lock().take();
-                            if let Some(w) = warning {
-                                if w.dont_show_again {
-                                    suppress_gpu_warning.store(true, Ordering::Relaxed);
-                                }
-                                if proceed
-                                    && let Some(ref video_export_data) = video_export_data {
-                                        execute_video_export(w.pending_action, video_export_data, &toasts, &video_exporting, &video_export_progress);
-                                    }
+                    if close_dialog {
+                        let warning = gpu_encoder_warning.lock().take();
+                        if let Some(w) = warning {
+                            if w.dont_show_again {
+                                suppress_gpu_warning.store(true, Ordering::Relaxed);
+                            }
+                            if proceed && let Some(ref video_export_data) = video_export_data {
+                                execute_video_export(
+                                    w.pending_action,
+                                    video_export_data,
+                                    &toasts,
+                                    &video_exporting,
+                                    &video_export_progress,
+                                );
                             }
                         }
                     }
-
-                    toasts.lock().show(&ctx);
-                });
-
-
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    // Capture window geometry before closing.
-                    {
-                        let info = ctx.input(|i| i.viewport().clone());
-                        window_settings.lock().settings.insert(
-                            crate::tab_state::WindowKind::ReplayRenderer,
-                            crate::tab_state::WindowSettings::from_viewport_info(&info, None),
-                        );
-                        save_notify.notify_one();
-                    }
-                    window_open.store(false, Ordering::Relaxed);
-                    let _ = command_tx.send(PlaybackCommand::Stop);
-                    // Unregister viewport sink.
-                    let state = shared_state.lock();
-                    if let Some(ref session_state) = state.collab_session_state
-                        && let Some(replay_id) = state.collab_replay_id {
-                            session_state.lock().viewport_sinks.remove(&replay_id);
-                        }
-                    drop(state);
-                    ctx.request_repaint();
-                } else if status_is_loading {
-                    // Keep the viewport alive while loading so it notices the
-                    // Loading->Ready transition. Only repaint this viewport —
-                    // do NOT wake the parent, which causes event-loop starvation.
-                    ctx.request_repaint();
-                } else if playing || repaint {
-                    // Repaint both this viewport AND the parent so sibling
-                    // viewports (e.g. armor viewer) also update in realtime.
-                    ctx.request_repaint();
-                    parent_ctx.request_repaint_of(parent_viewport);
                 }
-            },
-        );
+
+                toasts.lock().show(&ctx);
+            });
+
+            if ctx.input(|i| i.viewport().close_requested()) {
+                // Capture window geometry before closing.
+                {
+                    let info = ctx.input(|i| i.viewport().clone());
+                    window_settings.lock().settings.insert(
+                        crate::tab_state::WindowKind::ReplayRenderer,
+                        crate::tab_state::WindowSettings::from_viewport_info(&info, None),
+                    );
+                    save_notify.notify_one();
+                }
+                window_open.store(false, Ordering::Relaxed);
+                let _ = command_tx.send(PlaybackCommand::Stop);
+                // Unregister viewport sink.
+                let state = shared_state.lock();
+                if let Some(ref session_state) = state.collab_session_state
+                    && let Some(replay_id) = state.collab_replay_id
+                {
+                    session_state.lock().viewport_sinks.remove(&replay_id);
+                }
+                drop(state);
+                ctx.request_repaint();
+            } else if status_is_loading {
+                // Keep the viewport alive while loading so it notices the
+                // Loading->Ready transition. Only repaint this viewport —
+                // do NOT wake the parent, which causes event-loop starvation.
+                ctx.request_repaint();
+            } else if playing || repaint {
+                // Repaint both this viewport AND the parent so sibling
+                // viewports (e.g. armor viewer) also update in realtime.
+                ctx.request_repaint();
+                parent_ctx.request_repaint_of(parent_viewport);
+            }
+        });
     }
 }
 

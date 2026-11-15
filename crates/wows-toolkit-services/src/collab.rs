@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use tokio::runtime::Runtime;
+use wows_minimap_renderer::SavedRenderOptions;
 use wows_toolkit_viewmodel::collab::SessionFailure;
 use wows_toolkit_viewmodel::collab::SessionNotice;
 use wows_toolkit_viewmodel::collab::TOKEN_PREFIX;
@@ -28,6 +29,9 @@ use wt_collab_client::peer::JoinParams;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::peer::PeerMode;
 use wt_collab_client::peer::PeerSessionHandle;
+use wt_collab_client::protocol::CollabRenderOptions;
+use wt_collab_client::protocol::EntityId;
+use wt_collab_client::protocol::ShipConfigFilter;
 
 /// Where the web client is served. The session token rides in the fragment.
 const WEB_CLIENT_URL: &str = wt_collab_client::WEB_CLIENT_URL;
@@ -216,7 +220,8 @@ impl CollabState {
         let params = HostParams {
             toolkit_version,
             display_name: self.display_name.trim().to_string(),
-            initial_render_options: Default::default(),
+            // What the egui host starts a session with, so a peer joining either draws the same.
+            initial_render_options: CollabRenderOptions::from_saved(&SavedRenderOptions::default()),
             web_asset_bundle: Arc::clone(&self.bundle),
         };
         self.start(PeerMode::Host(params), true, runtime);
@@ -545,6 +550,15 @@ impl CollabLink {
     /// Whether this end is prevented from changing annotations in the session.
     pub fn annotations_locked(&self) -> bool {
         self.state.as_ref().is_some_and(|state| state.lock().permissions.annotations_locked)
+    }
+
+    /// Whether the host refuses this end's display changes: a peer while settings are locked. A
+    /// host or co-host is never refused.
+    pub fn settings_locked(&self) -> bool {
+        self.state.as_ref().is_some_and(|state| {
+            let held = state.lock();
+            held.permissions.settings_locked && !(held.role.is_host() || held.role.is_co_host())
+        })
     }
 
     /// The same link, speaking for one tactics board.
@@ -1124,6 +1138,92 @@ impl CollabLink {
         state.lock().pings.retain(|ping| ping.time.elapsed() < life);
     }
 
+    /// Which version of each display setting the session holds, so a viewport can tell that
+    /// nothing has changed without copying the settings.
+    pub fn display_versions(&self) -> DisplayVersions {
+        let Some(state) = self.state.as_ref().filter(|_| self.is_active()) else { return DisplayVersions::NONE };
+        let held = state.lock();
+        DisplayVersions {
+            settings: SyncVersion(held.render_options_version),
+            ranges: SyncVersion(held.range_override_version),
+            trails: SyncVersion(held.trail_override_version),
+        }
+    }
+
+    /// The layers the session draws, as the host or a peer it lets change them last set them.
+    /// `None` outside a session, or before any have arrived.
+    pub fn display_settings(&self) -> Option<Synced<CollabRenderOptions>> {
+        let state = self.state.as_ref().filter(|_| self.is_active())?;
+        let held = state.lock();
+        let value = held.current_render_options.clone()?;
+        Some(Synced { version: SyncVersion(held.render_options_version), value })
+    }
+
+    /// Which ranges each ship shows in the session. A ship that is not listed shows none.
+    pub fn range_overrides(&self) -> Option<Synced<Vec<(EntityId, ShipConfigFilter)>>> {
+        let state = self.state.as_ref().filter(|_| self.is_active())?;
+        let held = state.lock();
+        let value = held.current_range_overrides.clone()?;
+        Some(Synced { version: SyncVersion(held.range_override_version), value })
+    }
+
+    /// The players whose trails the session hides.
+    pub fn trail_overrides(&self) -> Option<Synced<Vec<String>>> {
+        let state = self.state.as_ref().filter(|_| self.is_active())?;
+        let held = state.lock();
+        let value = held.current_trail_hidden.clone()?;
+        Some(Synced { version: SyncVersion(held.trail_override_version), value })
+    }
+
+    /// Tells the session which layers changed between `was` and `now`. The host drops a peer's
+    /// change while settings are locked.
+    pub fn send_display_toggles(&self, was: &CollabRenderOptions, now: &CollabRenderOptions) {
+        let Some(tx) = &self.local_tx else { return };
+        for (field, value) in was.diff(now) {
+            let _ = tx.send(LocalEvent::DisplayToggle(field, value));
+        }
+    }
+
+    /// Holds `shown` as the layers the session draws, where this end hosts it, without telling
+    /// anyone.
+    ///
+    /// A peer's toggle lands on what the session holds and the host takes the result up, so what
+    /// is held has to be what the host shows: held from nothing, one peer's toggle would turn
+    /// every other layer off.
+    pub fn hold_display(&self, shown: &CollabRenderOptions) {
+        let Some(state) = self.state.as_ref().filter(|_| self.is_active()) else { return };
+        let mut held = state.lock();
+        if held.role.is_host() {
+            held.current_render_options = Some(shown.clone());
+        }
+    }
+
+    /// Tells the session which ranges each ship shows. A ship left out shows none.
+    pub fn send_range_overrides(&self, overrides: Vec<(EntityId, ShipConfigFilter)>) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::RangeOverrides(overrides));
+        }
+    }
+
+    /// Tells the session whose trails are hidden.
+    pub fn send_trail_overrides(&self, hidden: Vec<String>) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::TrailOverrides(hidden));
+        }
+    }
+
+    /// Sends the recording player's ship silhouette, which a web client draws its stats panel
+    /// with: it has no game files to read it from.
+    pub fn send_silhouette(&self, silhouette: Silhouette) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::SelfSilhouette {
+                data: silhouette.rgba,
+                width: silhouette.width,
+                height: silhouette.height,
+            });
+        }
+    }
+
     /// A link onto `state` that reports as active with no peer task behind
     /// it. The receiver is what the viewport's own messages arrive on.
     #[cfg(any(test, feature = "test-support"))]
@@ -1212,6 +1312,46 @@ pub struct SharedReplay {
     /// The drawn map as a PNG, for a peer whose build ships none. `None` where
     /// there was no art to send, which the wire states as an empty one.
     pub art_png: Option<Vec<u8>>,
+}
+
+/// Which change to one of the session's display settings is held. Moves on with each change the
+/// session accepts, and starts again with each session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SyncVersion(u64);
+
+impl SyncVersion {
+    /// Before any change has arrived.
+    pub const NONE: Self = Self(0);
+}
+
+/// One of the session's display settings, at the version it is held at.
+#[derive(Clone, Debug)]
+pub struct Synced<T> {
+    pub version: SyncVersion,
+    pub value: T,
+}
+
+/// The version of each of the session's display settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplayVersions {
+    /// The layers drawn.
+    pub settings: SyncVersion,
+    /// Which ranges each ship shows.
+    pub ranges: SyncVersion,
+    /// Whose trails are hidden.
+    pub trails: SyncVersion,
+}
+
+impl DisplayVersions {
+    pub const NONE: Self = Self { settings: SyncVersion::NONE, ranges: SyncVersion::NONE, trails: SyncVersion::NONE };
+}
+
+/// A ship silhouette as straight RGBA rows.
+#[derive(Clone, Debug)]
+pub struct Silhouette {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
 }
 
 /// What a capture point is called in a session. Its place in a list is not
@@ -1596,5 +1736,71 @@ mod board_tests {
             })
             .collect();
         assert_eq!(said, vec!["opened 42 spaces/13_OC_new_dawn 13", "closed 42"]);
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    fn shown(show_timer: bool) -> CollabRenderOptions {
+        CollabRenderOptions { show_timer, show_torpedoes: true, ..CollabRenderOptions::default() }
+    }
+
+    /// Only the layers that changed are said, each with what it is now.
+    #[test]
+    fn a_toggle_says_only_what_changed() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.send_display_toggles(&shown(true), &shown(false));
+
+        let said: Vec<_> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::DisplayToggle(field, value) => Some((field, value)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(said, vec![(wt_collab_client::protocol::DisplayOptionField::ShowTimer, false)]);
+    }
+
+    /// The host holds what it shows, so a peer's toggle lands on it; the version stays, because
+    /// nobody else changed anything.
+    #[test]
+    fn the_host_holds_what_it_shows() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().role = PeerRole::Host;
+        let (link, _events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.hold_display(&shown(false));
+
+        let held = link.display_settings().expect("the host holds its layers");
+        assert!(!held.value.show_timer && held.value.show_torpedoes);
+        assert_eq!(held.version, SyncVersion::NONE);
+        assert_eq!(link.display_versions(), DisplayVersions::NONE);
+    }
+
+    /// A peer's layers are the host's to send it, not its own to hold.
+    #[test]
+    fn a_peer_holds_nothing() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().role = PeerRole::Peer;
+        let (link, _events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.hold_display(&shown(false));
+
+        assert!(link.display_settings().is_none());
+    }
+
+    /// Outside a session there is nothing to follow.
+    #[test]
+    fn an_inert_link_has_no_settings() {
+        let link = CollabLink::default();
+
+        assert_eq!(link.display_versions(), DisplayVersions::NONE);
+        assert!(link.display_settings().is_none());
+        assert!(link.range_overrides().is_none());
+        assert!(link.trail_overrides().is_none());
     }
 }

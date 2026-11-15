@@ -112,9 +112,7 @@ fn OptionsGear(session: RendererSession) -> impl IntoView {
                 LayerList(
                     layers = session.layers,
                     toggles = TOGGLES.iter().collect(),
-                    set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| {
-                        session.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
-                    })
+                    set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| session.toggle_layer(toggle, on))
                 )
                 ExportSettingsSection(session = session)
                 SaveDefaultsButton(session = session)

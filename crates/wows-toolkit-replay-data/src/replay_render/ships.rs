@@ -156,6 +156,16 @@ impl ShipChoices {
         self.ship_ranges = drawn.iter().map(|name| (name.clone(), ALL_RANGES)).collect();
         options.show_ship_config = true;
     }
+
+    /// Puts `ranges` in place of every ship's ranges.
+    pub fn replace_ranges(&mut self, ranges: HashMap<String, ShipConfigFilter>) {
+        self.ship_ranges = ranges;
+    }
+
+    /// Puts `hidden` in place of whose trails are hidden.
+    pub fn replace_trail_hidden(&mut self, hidden: HashSet<String>) {
+        self.trail_hidden = hidden;
+    }
 }
 
 /// The ship drawn nearest `at`, a map point, if one is close enough to have
@@ -210,6 +220,21 @@ pub fn self_player(frames: &[Vec<DrawCommand>]) -> Option<String> {
         | DrawCommand::DeadShip { is_self: true, player_name, .. } => player_name.clone(),
         _ => None,
     })
+}
+
+/// Each ship drawn anywhere in `frames`, by entity, with its player's name.
+pub fn ship_names(frames: &[Vec<DrawCommand>]) -> HashMap<EntityId, String> {
+    let mut names = HashMap::new();
+    for command in frames.iter().flatten() {
+        let (DrawCommand::Ship { entity_id, player_name: Some(name), .. }
+        | DrawCommand::DeadShip { entity_id, player_name: Some(name), .. }) = command
+        else {
+            continue;
+        };
+        names.entry(*entity_id).or_insert_with(|| name.clone());
+    }
+
+    names
 }
 
 /// Whether the reader has asked for this ship's trail or this range.

@@ -1,15 +1,23 @@
 //! What a playback says to a collab session, and how a peer's pings are
 //! drawn over it.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedReplay;
+use wows_toolkit_services::collab::Silhouette;
 use wt_collab_client::peer::FrameBroadcast;
 
 use crate::load::GameDataCache;
+use crate::replay_render::ships::NO_RANGES;
+use crate::replay_render::ships::ShipChoices;
 use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 
@@ -85,13 +93,31 @@ pub fn ping_ring(age: Duration) -> Option<PingRing> {
 /// Draw commands rather than pixels, so each peer draws the battle with its
 /// own art at its own size.
 pub fn frame_broadcast(replay_id: ReplayId, track: &Track, at: FrameIndex, commands: &[DrawCommand]) -> FrameBroadcast {
+    broadcast_of(replay_id, track, at, commands.to_vec())
+}
+
+/// [`frame_broadcast`] with the trails `options` ask for drawn behind the frame. A watcher has no
+/// track to read trails from, and a baked frame holds none, so they travel with it as the egui
+/// host sends them. Every ship's trail is sent; a watcher hides the ones the session hides.
+pub fn frame_broadcast_with_trails(
+    replay_id: ReplayId,
+    track: &Track,
+    at: FrameIndex,
+    commands: &[DrawCommand],
+    options: &RenderOptions,
+) -> FrameBroadcast {
+    let trails = track.trails.trails_at(GameClock(track.seconds_at(at)), options);
+    broadcast_of(replay_id, track, at, trails.into_iter().chain(commands.iter().cloned()).collect())
+}
+
+fn broadcast_of(replay_id: ReplayId, track: &Track, at: FrameIndex, commands: Vec<DrawCommand>) -> FrameBroadcast {
     FrameBroadcast {
         replay_id: replay_id.raw(),
         clock: track.seconds_at(at),
         frame_index: at.get() as u32,
         total_frames: track.len() as u32,
         game_duration: track.duration_seconds(),
-        commands: commands.to_vec(),
+        commands,
     }
 }
 
@@ -127,4 +153,61 @@ pub fn shared_replay(
         game_version: track.version.to_path(),
         art_png,
     })
+}
+
+/// The ranges each ship shows, as a session is told them: by entity, leaving out the ships that
+/// show none and the players `names` has no ship for.
+pub fn range_overrides(choices: &ShipChoices, names: &HashMap<EntityId, String>) -> Vec<(EntityId, ShipConfigFilter)> {
+    let mut overrides: Vec<(EntityId, ShipConfigFilter)> = names
+        .iter()
+        .map(|(entity_id, name)| (*entity_id, choices.ranges_for(name)))
+        .filter(|(_, filter)| *filter != NO_RANGES)
+        .collect();
+    // In one order, so the same choices always read the same on the wire.
+    overrides.sort_by_key(|(entity_id, _)| *entity_id);
+
+    overrides
+}
+
+/// The ranges a session says each ship shows, by the player names the commands carry. An entity
+/// `names` has no ship for has nothing drawn to show them on.
+pub fn ranges_by_player(
+    overrides: &[(EntityId, ShipConfigFilter)],
+    names: &HashMap<EntityId, String>,
+) -> HashMap<String, ShipConfigFilter> {
+    overrides.iter().filter_map(|(entity_id, filter)| Some((names.get(entity_id)?.clone(), *filter))).collect()
+}
+
+/// Takes up the ranges a session says each ship shows, in place of every ship's own. The range
+/// layer goes on when any ship shows one, as the egui renderer does.
+pub fn adopt_range_overrides(
+    overrides: &[(EntityId, ShipConfigFilter)],
+    names: &HashMap<EntityId, String>,
+    choices: &mut ShipChoices,
+    options: &mut RenderOptions,
+) {
+    choices.replace_ranges(ranges_by_player(overrides, names));
+    if !overrides.is_empty() {
+        options.show_ship_config = true;
+    }
+}
+
+/// Takes up whose trails a session hides. The trail layer goes on when some are hidden, since
+/// the rest are still meant to be drawn, as the egui renderer does.
+pub fn adopt_trail_overrides(hidden: &[String], choices: &mut ShipChoices, options: &mut RenderOptions) {
+    choices.replace_trail_hidden(hidden.iter().cloned().collect());
+    if !hidden.is_empty() {
+        options.show_trails = true;
+    }
+}
+
+/// The recording player's ship silhouette as a track's stats panel draws it, for a web client
+/// that has no game files to read it from. `None` for a track baked without one.
+pub fn track_silhouette(track: &Track) -> Option<Silhouette> {
+    let image = track.frames.iter().flatten().find_map(|command| match command {
+        DrawCommand::StatsSilhouette { silhouette: Some(silhouette), .. } => Some(silhouette),
+        _ => None,
+    })?;
+
+    Some(Silhouette { width: image.width(), height: image.height(), rgba: image.as_raw().clone() })
 }

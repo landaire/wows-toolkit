@@ -20,20 +20,27 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::toggles::TOGGLES;
 use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::viewport::MapViewport;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap_preview::layout_for;
 use wows_toolkit_replay_data::minimap_preview::render_map;
 use wows_toolkit_replay_data::minimap_preview::render_map_art;
+use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
+use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
+use wows_toolkit_replay_data::replay_render::collab::ranges_by_player;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::raster::shown_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
+use wows_toolkit_replay_data::replay_render::ships::ship_names;
 use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::DisplayVersions;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedWindow;
 use wt_collab_client::PlaybackFrame;
@@ -159,6 +166,11 @@ struct WatchRun {
     latest: Option<Vec<DrawCommand>>,
     /// Whose ranges and trails are drawn: nobody's ranges until asked for, as in the renderer.
     choices: ShipChoices,
+    /// The ranges the session says each ship shows, by entity. Matched to players frame by
+    /// frame, since a frame names only the ships in it.
+    range_overrides: Vec<(EntityId, ShipConfigFilter)>,
+    /// The versions of the session's display settings this window has taken up.
+    display_seen: DisplayVersions,
     sink: FrameSink,
     /// One raster at a time: frames arrive faster than a map-sized image is drawn on a fast
     /// playback. A frame that arrives during one is drawn when it finishes.
@@ -199,6 +211,8 @@ impl WatchSession {
                 frames,
                 latest: None,
                 choices: ShipChoices::new(),
+                range_overrides: Vec::new(),
+                display_seen: DisplayVersions::NONE,
                 sink: FrameSink::new(),
                 rasterising: false,
                 stale: false,
@@ -238,8 +252,11 @@ impl WatchSession {
         self.run
             .try_with_value(|run| {
                 let latest = run.latest.as_ref()?;
+                let mut choices = run.choices.clone();
+                let names = ship_names(std::slice::from_ref(latest));
+                choices.replace_ranges(ranges_by_player(&run.range_overrides, &names));
                 let shown = self.layers.with_untracked(|layers| {
-                    shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &run.choices)
+                    shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &choices)
                 });
                 Some(shown)
             })
@@ -251,6 +268,58 @@ impl WatchSession {
     pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
         let mut layers = self.layers.get_untracked();
         apply(&mut layers);
+        self.layers.set(layers);
+        self.redraw();
+    }
+
+    /// Turns one of the display toggles on or off, and tells the session which layers changed,
+    /// as an egui peer does from the same toggles. Refused while the host has locked the
+    /// settings, since the host drops the change.
+    pub fn toggle_layer(self, toggle: &'static Toggle, on: bool) {
+        if self.run.try_with_value(|run| run.link.settings_locked()) != Some(false) {
+            return;
+        }
+        let was = self.layers.with_untracked(Layers::collab_display);
+        self.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
+        let now = self.layers.with_untracked(Layers::collab_display);
+        self.run.try_with_value(|run| run.link.send_display_toggles(&was, &now));
+    }
+
+    /// Takes up the display settings the session holds where they have changed since last
+    /// looked at, over whatever was chosen here, as an egui peer does.
+    pub fn follow_session_display(self) {
+        let Some((link, seen)) = self.run.try_with_value(|run| (run.link.clone(), run.display_seen)) else { return };
+        let versions = link.display_versions();
+        if versions == seen {
+            return;
+        }
+        let mut layers = self.layers.get_untracked();
+        let mut taken = seen;
+
+        if versions.settings > seen.settings
+            && let Some(settings) = link.display_settings()
+        {
+            settings.value.apply_to(&mut layers.options, &mut layers.show_dead_ships);
+            taken.settings = settings.version;
+        }
+        let ranges = (versions.ranges > seen.ranges).then(|| link.range_overrides()).flatten();
+        let trails = (versions.trails > seen.trails).then(|| link.trail_overrides()).flatten();
+        self.run.update_value(|run| {
+            if let Some(ranges) = ranges {
+                // Before any frame there are no ships to name; `shown` matches them per frame.
+                let names =
+                    run.latest.as_ref().map(|latest| ship_names(std::slice::from_ref(latest))).unwrap_or_default();
+                adopt_range_overrides(&ranges.value, &names, &mut run.choices, &mut layers.options);
+                run.range_overrides = ranges.value;
+                taken.ranges = ranges.version;
+            }
+            if let Some(trails) = trails {
+                adopt_trail_overrides(&trails.value, &mut run.choices, &mut layers.options);
+                taken.trails = trails.version;
+            }
+            run.display_seen = taken;
+        });
+
         self.layers.set(layers);
         self.redraw();
     }
@@ -344,7 +413,11 @@ pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView 
 #[component]
 pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    let drain = set_interval(DRAIN, move || watch.take_frames());
+    watch.follow_session_display();
+    let drain = set_interval(DRAIN, move || {
+        watch.follow_session_display();
+        watch.take_frames();
+    });
     on_cleanup_local(move || {
         drop(drain);
         watch.stop();
@@ -403,9 +476,7 @@ fn WatchedLayers(watch: WatchSession) -> impl IntoView {
     install_stylesheet(options::SHEET, options::CSS);
     let label = t!("ui.renderer.settings.title").into_owned();
     let named = label.clone();
-    let set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| {
-        watch.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
-    });
+    let set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| watch.toggle_layer(toggle, on));
 
     view! {
         Popover {

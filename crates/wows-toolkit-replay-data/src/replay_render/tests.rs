@@ -43,6 +43,7 @@ use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::push_ping_aged;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
@@ -69,6 +70,10 @@ use crate::replay_render::armor::ArmorFollow;
 use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
+use crate::replay_render::collab::adopt_range_overrides;
+use crate::replay_render::collab::adopt_trail_overrides;
+use crate::replay_render::collab::frame_broadcast_with_trails;
+use crate::replay_render::collab::range_overrides;
 use crate::replay_render::export::BatchStep;
 use crate::replay_render::export::EXPORT_FRAME_COUNT;
 use crate::replay_render::export::ExportFrames;
@@ -100,6 +105,7 @@ use crate::replay_render::ships::ShipMenu;
 use crate::replay_render::ships::per_ship_allows;
 use crate::replay_render::ships::self_player;
 use crate::replay_render::ships::ship_at;
+use crate::replay_render::ships::ship_names;
 use crate::replay_render::timeline::BattleEvents;
 use crate::replay_render::track::BAKE_INTERVAL;
 use crate::replay_render::track::DEFAULT_MAP_ORIGIN;
@@ -432,6 +438,67 @@ fn drawn_ship(entity: u32, player: &str, x: f32, is_self: bool) -> DrawCommand {
         is_disconnected: false,
         name_color: None,
     }
+}
+
+/// The ranges one end chooses reach another by entity and land on the same players there, and
+/// the range layer goes on to draw them.
+#[test]
+fn range_choices_travel_by_entity_and_land_by_player() {
+    let frames = vec![vec![drawn_ship(7, "seven", 10.0, false), drawn_ship(9, "nine", 20.0, true)]];
+    let names = ship_names(&frames);
+    let mut sent = ShipChoices::new();
+    let mut options = RenderOptions { show_ship_config: false, ..RenderOptions::default() };
+    sent.set_every_range_for("nine", true, &mut options);
+    sent.set_every_range_for("seven", false, &mut options);
+
+    let overrides = range_overrides(&sent, &names);
+    assert_eq!(overrides, vec![(EntityId::from(9u32), ALL_RANGES)], "a ship showing none is left out");
+
+    let mut taken = ShipChoices::new();
+    taken.set_every_range_for("seven", true, &mut options);
+    let mut their_options = RenderOptions { show_ship_config: false, ..RenderOptions::default() };
+    adopt_range_overrides(&overrides, &names, &mut taken, &mut their_options);
+
+    assert_eq!(taken.ranges_for("nine"), ALL_RANGES);
+    assert_eq!(taken.ranges_for("seven"), NO_RANGES, "every ship's own choice is replaced");
+    assert!(their_options.show_ship_config, "and the range layer is drawn");
+}
+
+/// Hidden trails land as they were sent, and the trail layer goes on to draw the rest.
+#[test]
+fn hidden_trails_land_and_the_rest_are_drawn() {
+    let mut choices = ShipChoices::new();
+    let mut options = RenderOptions { show_trails: false, ..RenderOptions::default() };
+
+    adopt_trail_overrides(&["seven".to_owned()], &mut choices, &mut options);
+
+    assert!(!choices.trail_shown("seven"));
+    assert!(choices.trail_shown("nine"));
+    assert!(options.show_trails);
+}
+
+/// A watcher is sent the trails up to the frame's clock, behind the frame, and none while the
+/// trail layer is off.
+#[test]
+fn a_watched_frame_carries_the_trails_the_layers_ask_for() {
+    let mut track = track(vec![0.0, 10.0, 20.0]);
+    track.frames[1] = vec![drawn_ship(1, "me", 100.0, true)];
+    track.trails = recorded_trail(&[(0.0, 0.0), (10.0, 100.0), (20.0, 200.0)]);
+    let commands = track.commands(FrameIndex::new(1)).expect("a frame").to_vec();
+    let on = RenderOptions { show_trails: true, ..playback_options_hidden() };
+
+    let sent = frame_broadcast_with_trails(ReplayId::from_raw(1), &track, FrameIndex::new(1), &commands, &on);
+
+    let DrawCommand::PositionTrail { points, .. } = &sent.commands[0] else {
+        panic!("the trail goes first: {:?}", sent.commands)
+    };
+    assert_eq!(points.iter().map(|(pos, _)| pos.x).collect::<Vec<_>>(), [0.0, 100.0]);
+    assert_eq!(sent.commands.len(), commands.len() + 1);
+    assert!(matches!(sent.commands[1], DrawCommand::Ship { .. }), "the frame follows");
+    let off = RenderOptions { show_trails: false, ..on };
+    let sent = frame_broadcast_with_trails(ReplayId::from_raw(1), &track, FrameIndex::new(1), &commands, &off);
+    assert_eq!(sent.commands.len(), commands.len());
+    assert!(!sent.commands.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. })));
 }
 
 /// The bracket keys widen and narrow the nib, within the range the egui

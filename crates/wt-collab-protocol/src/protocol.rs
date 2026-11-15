@@ -3,6 +3,9 @@
 //! All messages are serialized with rkyv, zlib-compressed, and framed as
 //! `[u32 compressed_length][zlib(rkyv payload)]` on a QUIC bidirectional stream.
 
+use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::SavedRenderOptions;
+
 use crate::types::Annotation;
 
 // Re-export types from external crates used in the protocol.
@@ -454,6 +457,114 @@ pub struct CollabRenderOptions {
 }
 
 impl CollabRenderOptions {
+    /// The settings saved as a viewer's defaults, self ranges included.
+    pub fn from_saved(saved: &SavedRenderOptions) -> Self {
+        Self {
+            show_hp_bars: saved.show_hp_bars,
+            show_tracers: saved.show_tracers,
+            show_torpedoes: saved.show_torpedoes,
+            show_planes: saved.show_planes,
+            show_smoke: saved.show_smoke,
+            show_score: saved.show_score,
+            show_timer: saved.show_timer,
+            show_kill_feed: saved.show_kill_feed,
+            show_player_names: saved.show_player_names,
+            show_ship_names: saved.show_ship_names,
+            show_capture_points: saved.show_capture_points,
+            show_buildings: saved.show_buildings,
+            show_camera_direction: saved.show_camera_direction,
+            show_consumables: saved.show_consumables,
+            show_dead_ships: saved.show_dead_ships,
+            show_dead_ship_names: saved.show_dead_ship_names,
+            show_armament: saved.show_armament,
+            show_trails: saved.show_trails,
+            show_dead_trails: saved.show_dead_trails,
+            show_speed_trails: saved.show_speed_trails,
+            show_battle_result: saved.show_battle_result,
+            show_buffs: saved.show_buffs,
+            show_ship_config: saved.show_ship_config,
+            show_chat: saved.show_chat,
+            show_advantage: saved.show_advantage,
+            show_score_timer: saved.show_score_timer,
+            show_self_detection_range: saved.show_self_detection_range,
+            show_self_main_battery_range: saved.show_self_main_battery_range,
+            show_self_secondary_range: saved.show_self_secondary_range,
+            show_self_torpedo_range: saved.show_self_torpedo_range,
+            show_self_radar_range: saved.show_self_radar_range,
+            show_self_hydro_range: saved.show_self_hydro_range,
+        }
+    }
+
+    /// What a viewer drawing `options` shows. The self ranges are per ship there and travel as
+    /// range overrides, so they are off here.
+    pub fn from_render_options(options: &RenderOptions, show_dead_ships: bool) -> Self {
+        Self {
+            show_hp_bars: options.show_hp_bars,
+            show_tracers: options.show_tracers,
+            show_torpedoes: options.show_torpedoes,
+            show_planes: options.show_planes,
+            show_smoke: options.show_smoke,
+            show_score: options.show_score,
+            show_timer: options.show_timer,
+            show_kill_feed: options.show_kill_feed,
+            show_player_names: options.show_player_names,
+            show_ship_names: options.show_ship_names,
+            show_capture_points: options.show_capture_points,
+            show_buildings: options.show_buildings,
+            show_camera_direction: options.show_camera_direction,
+            show_consumables: options.show_consumables,
+            show_dead_ships,
+            show_dead_ship_names: options.show_dead_ship_names,
+            show_armament: options.show_armament,
+            show_trails: options.show_trails,
+            show_dead_trails: options.show_dead_trails,
+            show_speed_trails: options.show_speed_trails,
+            show_battle_result: options.show_battle_result,
+            show_buffs: options.show_buffs,
+            show_ship_config: options.show_ship_config,
+            show_chat: options.show_chat,
+            show_advantage: options.show_advantage,
+            show_score_timer: options.show_score_timer,
+            show_self_detection_range: false,
+            show_self_main_battery_range: false,
+            show_self_secondary_range: false,
+            show_self_torpedo_range: false,
+            show_self_radar_range: false,
+            show_self_hydro_range: false,
+        }
+    }
+
+    /// Draws what these settings say on a viewer's `options` and dead-ship switch. The self
+    /// ranges are left alone: a viewer takes them from the range overrides.
+    pub fn apply_to(&self, options: &mut RenderOptions, show_dead_ships: &mut bool) {
+        options.show_hp_bars = self.show_hp_bars;
+        options.show_tracers = self.show_tracers;
+        options.show_torpedoes = self.show_torpedoes;
+        options.show_planes = self.show_planes;
+        options.show_smoke = self.show_smoke;
+        options.show_score = self.show_score;
+        options.show_timer = self.show_timer;
+        options.show_kill_feed = self.show_kill_feed;
+        options.show_player_names = self.show_player_names;
+        options.show_ship_names = self.show_ship_names;
+        options.show_capture_points = self.show_capture_points;
+        options.show_buildings = self.show_buildings;
+        options.show_camera_direction = self.show_camera_direction;
+        options.show_consumables = self.show_consumables;
+        options.show_armament = self.show_armament;
+        options.show_trails = self.show_trails;
+        options.show_dead_trails = self.show_dead_trails;
+        options.show_speed_trails = self.show_speed_trails;
+        options.show_ship_config = self.show_ship_config;
+        options.show_dead_ship_names = self.show_dead_ship_names;
+        options.show_battle_result = self.show_battle_result;
+        options.show_buffs = self.show_buffs;
+        options.show_chat = self.show_chat;
+        options.show_advantage = self.show_advantage;
+        options.show_score_timer = self.show_score_timer;
+        *show_dead_ships = self.show_dead_ships;
+    }
+
     /// Return the list of `(field, value)` pairs that differ between `self` and `other`.
     pub fn diff(&self, other: &Self) -> Vec<(DisplayOptionField, bool)> {
         let mut out = Vec::new();
@@ -759,5 +870,45 @@ mod tests {
         let token1 = encode_token(&key1.public());
         let token2 = encode_token(&key2.public());
         assert_ne!(token1, token2);
+    }
+
+    /// A viewer that takes up another's settings draws what that viewer draws.
+    #[test]
+    fn applied_settings_draw_what_the_sender_draws() {
+        let sender =
+            RenderOptions { show_timer: false, show_trails: true, show_ship_config: true, ..RenderOptions::default() };
+        let sent = CollabRenderOptions::from_render_options(&sender, false);
+
+        let mut options = RenderOptions::default();
+        let mut show_dead_ships = true;
+        sent.apply_to(&mut options, &mut show_dead_ships);
+
+        assert!(CollabRenderOptions::from_render_options(&options, show_dead_ships).diff(&sent).is_empty());
+        assert!(!show_dead_ships);
+    }
+
+    /// The layers a viewer keeps to itself are not touched by another's settings.
+    #[test]
+    fn applied_settings_leave_the_canvas_layers_alone() {
+        let sent = CollabRenderOptions::from_saved(&SavedRenderOptions::default());
+        let mut options =
+            RenderOptions { show_team_rosters: true, show_stats_panel: false, ..RenderOptions::default() };
+        let mut show_dead_ships = true;
+
+        sent.apply_to(&mut options, &mut show_dead_ships);
+
+        assert!(options.show_team_rosters && !options.show_stats_panel);
+    }
+
+    /// Turning one layer off says only that layer changed.
+    #[test]
+    fn one_toggle_is_one_change() {
+        let was = RenderOptions::default();
+        let now = RenderOptions { show_timer: !was.show_timer, ..RenderOptions::default() };
+
+        let changes = CollabRenderOptions::from_render_options(&was, true)
+            .diff(&CollabRenderOptions::from_render_options(&now, true));
+
+        assert_eq!(changes, vec![(DisplayOptionField::ShowTimer, now.show_timer)]);
     }
 }

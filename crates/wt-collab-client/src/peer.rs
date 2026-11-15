@@ -680,13 +680,22 @@ async fn host_main(
                             };
                             broadcast_to_mesh(&mesh, &msg);
                         }
+                        // Held without a version bump, since this end already shows it, so a
+                        // peer joining later is sent what the host shows now.
                         LocalEvent::DisplayToggle(field, value) => {
+                            ui_state
+                                .lock()
+                                .current_render_options
+                                .get_or_insert_with(|| params.initial_render_options.clone())
+                                .set_field(field, value);
                             broadcast_to_mesh(&mesh, &PeerMessage::ToggleDisplayOption { field, value });
                         }
                         LocalEvent::RangeOverrides(overrides) => {
+                            ui_state.lock().current_range_overrides = Some(overrides.clone());
                             broadcast_to_mesh(&mesh, &PeerMessage::ShipRangeOverrides { overrides });
                         }
                         LocalEvent::TrailOverrides(hidden) => {
+                            ui_state.lock().current_trail_hidden = Some(hidden.clone());
                             broadcast_to_mesh(&mesh, &PeerMessage::ShipTrailOverrides { hidden });
                         }
                         LocalEvent::Ping(pos) => {
@@ -948,10 +957,20 @@ async fn host_accept_peer(
             return false;
         }
 
-        // Send current render options.
-        let opts_msg = PeerMessage::RenderOptions(initial_render_options.clone());
-        if write_peer_message(&mut send, &opts_msg).await.is_err() {
-            return false;
+        // Send what the host shows now, which differs from what the session started with once
+        // anyone has changed a layer or a ship's ranges or trail.
+        let display_msgs: Vec<_> = {
+            let s = ui_state.lock();
+            let options = s.current_render_options.clone().unwrap_or_else(|| initial_render_options.clone());
+            std::iter::once(PeerMessage::RenderOptions(options))
+                .chain(s.current_range_overrides.clone().map(|overrides| PeerMessage::ShipRangeOverrides { overrides }))
+                .chain(s.current_trail_hidden.clone().map(|hidden| PeerMessage::ShipTrailOverrides { hidden }))
+                .collect()
+        };
+        for msg in display_msgs {
+            if write_peer_message(&mut send, &msg).await.is_err() {
+                return false;
+            }
         }
 
         // Send current replay-context annotations if any.
