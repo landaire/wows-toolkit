@@ -1,0 +1,23 @@
+// The WGC version installed with the 15.10 client. wgc_api.dll rejects older
+// versions and executables without a version resource.
+1 VERSIONINFO
+FILEVERSION 26,6,1,4064
+PRODUCTVERSION 26,6,1,4064
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "WoWs Toolkit"
+      VALUE "FileDescription", "WGC version placeholder for the WoWs Toolkit launcher"
+      VALUE "FileVersion", "26.6.1.4064"
+      VALUE "ProductVersion", "26.6.1.4064"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

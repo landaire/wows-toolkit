@@ -1,0 +1,334 @@
+---
+source: crates/wgc-ipc/tests/codec.rs
+expression: decoded
+---
+[
+    (
+        "run3_check_api_version.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        1,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "EAECCFD61CFDE5E9DF948898E39D7E7D",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: CheckApiVersion(
+                        CheckApiVersion {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\wows-root",
+                            api_version: "22.1.0.8738",
+                            compatible: false,
+                            send_stat_event: Some(
+                                false,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "run4_check_api_version.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        1,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "B1DBA5E4DE9CDE3747936A8D21742BA5",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: CheckApiVersion(
+                        CheckApiVersion {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\wows-root",
+                            api_version: "22.1.0.8738",
+                            compatible: false,
+                            send_stat_event: Some(
+                                false,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "run4_get_overlay_params.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        3,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "03861BBC70ECD413BC16C6461B468551",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: GetOverlayParams(
+                        GetOverlayParams {
+                            client_app_dir: "Z:\\var\\mnt\\build\\launch-research\\wows-root",
+                            x64: true,
+                            overlay_lib_path: "",
+                            graphics_api: Some(
+                                GraphicsApi(
+                                    0,
+                                ),
+                            ),
+                            auto_connect: Some(
+                                false,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_verify_game_imported.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        0,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "45FAC9C5EB640469790EA2A333746008",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: VerifyGameImported(
+                        VerifyGameImported {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            status: Status(
+                                0,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_get_game_installation_state.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        0,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "31E40F77505D4D7A64A800132D531489",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: GetGameInstallationState(
+                        GetGameInstallationState {
+                            status: Status(
+                                0,
+                            ),
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            can_start: false,
+                            parts: [],
+                            client_type: "",
+                            app_type: "",
+                            dlc: [
+                                [],
+                                [],
+                            ],
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_check_login_is_enabled.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        0,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "30FBE1B08AA2D4A3E7438A8347470112",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: CheckLoginIsEnabled(
+                        CheckLoginIsEnabled {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            enabled: false,
+                            result: LoginCheckResult(
+                                3,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_verify_login.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        3,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "205E4FB89B99F53433CA2EC2F958BF75",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: VerifyLogin(
+                        Verification {
+                            verification_type: VerificationType(
+                                1,
+                            ),
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            status: Status(
+                                0,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_get_authentication_option_realm.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        0,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "572F6A11824F00C7CF0E63DEB3D9F206",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: GetAuthenticationOption(
+                        GetAuthenticationOption {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            key: "client_realm",
+                            value: "",
+                            status: Status(
+                                0,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_get_authentication_option_build.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        0,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "810744B9FD955F0D529F3F07D17FDA97",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: GetAuthenticationOption(
+                        GetAuthenticationOption {
+                            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            key: "build_type",
+                            value: "",
+                            status: Status(
+                                0,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+    (
+        "client_get_login_info.bin",
+        Message {
+            commands: [
+                CommandFrame {
+                    class_version: ClassVersion(
+                        3,
+                    ),
+                    base_class_version: ClassVersion(
+                        0,
+                    ),
+                    uid: CommandUid(
+                        "7403889044A7822ADF3ABB041BBCCD19",
+                    ),
+                    flags: CommandFlags(
+                        0,
+                    ),
+                    command: GetLoginInfo(
+                        GetLoginInfo {
+                            account_realm: "",
+                            user_name: "",
+                            spa_id: "",
+                            status: Status(
+                                0,
+                            ),
+                            game_folder: Some(
+                                "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+                            ),
+                            unnamed: Some(
+                                "",
+                            ),
+                            account_complete: Some(
+                                false,
+                            ),
+                        },
+                    ),
+                },
+            ],
+        },
+    ),
+]

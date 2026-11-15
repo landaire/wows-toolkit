@@ -1,0 +1,131 @@
+---
+source: crates/wgc-ipc/tests/server.rs
+expression: "answer_each(&FakeResponder::signed_out()).await"
+---
+[
+    VerifyGameImported(
+        VerifyGameImported {
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            status: Status(
+                1,
+            ),
+        },
+    ),
+    GetGameInstallationState(
+        GetGameInstallationState {
+            status: Status(
+                1,
+            ),
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            can_start: true,
+            parts: [],
+            client_type: "high",
+            app_type: "high",
+            dlc: [
+                [],
+                [],
+            ],
+        },
+    ),
+    CheckLoginIsEnabled(
+        CheckLoginIsEnabled {
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            enabled: true,
+            result: LoginCheckResult(
+                0,
+            ),
+        },
+    ),
+    VerifyLogin(
+        Verification {
+            verification_type: VerificationType(
+                1,
+            ),
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            status: Status(
+                1,
+            ),
+        },
+    ),
+    GetAuthenticationOption(
+        GetAuthenticationOption {
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            key: "client_realm",
+            value: "na",
+            status: Status(
+                1,
+            ),
+        },
+    ),
+    GetAuthenticationOption(
+        GetAuthenticationOption {
+            game_folder: "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            key: "build_type",
+            value: "prod",
+            status: Status(
+                1,
+            ),
+        },
+    ),
+    GetLoginInfo(
+        GetLoginInfo {
+            account_realm: "",
+            user_name: "",
+            spa_id: "",
+            status: Status(
+                3,
+            ),
+            game_folder: Some(
+                "Z:\\var\\mnt\\build\\launch-research\\lr-linuxruntime\\data\\game-runtime\\installs\\WoWs-World_of_Warships-5be47e570d27a77d\\merged",
+            ),
+            unnamed: Some(
+                "",
+            ),
+            account_complete: Some(
+                false,
+            ),
+        },
+    ),
+    VerifyLegalDocsAccepted(
+        Verification {
+            verification_type: VerificationType(
+                1,
+            ),
+            game_folder: "Z:\\games\\World_of_Warships",
+            status: Status(
+                1,
+            ),
+        },
+    ),
+    GetGameLanguage(
+        GetGameLanguage {
+            language: "en",
+            status: Status(
+                1,
+            ),
+            game_folder: "Z:\\games\\World_of_Warships",
+        },
+    ),
+    LoadSpaToken2(
+        SpaToken2 {
+            game_folder: "Z:\\games\\World_of_Warships",
+            spa_id: "",
+            token2: SecretText(0 chars),
+            description: "",
+            status: Status(
+                5,
+            ),
+        },
+    ),
+    QuerySpaToken1(
+        QuerySpaToken1 {
+            game_folder: "Z:\\games\\World_of_Warships",
+            spa_id: "",
+            token1: SecretText(0 chars),
+            status: Status(
+                5,
+            ),
+            login_dialog_allowed: true,
+        },
+    ),
+]

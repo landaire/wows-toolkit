@@ -1,0 +1,26 @@
+[package]
+name = "wgc-relay"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Serves the WGC IPC pipe inside a Wine prefix and relays it to the WoWs Toolkit launcher"
+
+[[bin]]
+name = "wgc-relay"
+path = "src/main.rs"
+
+[dependencies]
+wgc-relay-protocol = { workspace = true }
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+] }

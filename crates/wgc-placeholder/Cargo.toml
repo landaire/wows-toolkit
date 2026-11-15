@@ -1,0 +1,13 @@
+[package]
+name = "wgc-placeholder"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Stands in for wgc.exe in the WoWs Toolkit launcher's Wine prefix"
+
+[[bin]]
+name = "wgc-placeholder"
+path = "src/main.rs"
+
+[build-dependencies]
+winresource = "0.1.31"

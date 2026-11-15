@@ -248,6 +248,16 @@ jobs:
           cp "$rel" dist/wows_toolkit
           chmod +w dist/wows_toolkit
 
+      # The launcher runs these inside the game's Wine prefix and looks for them
+      # beside wows_toolkit.
+      - name: Build the Wine helpers
+        run: |
+          out=$(nix develop --command buck2 build -m release --show-output //crates/wgc-relay:wgc_relay_bin //crates/wgc-placeholder:wgc_placeholder_bin)
+          echo "$out"
+          cp "$(echo "$out" | awk '$NF ~ /\/wgc_relay\.exe$/ { print $NF }' | tail -1)" dist/wgc-relay.exe
+          cp "$(echo "$out" | awk '$NF ~ /\/wgc_placeholder\.exe$/ { print $NF }' | tail -1)" dist/wgc-placeholder.exe
+          chmod +w dist/wgc-relay.exe dist/wgc-placeholder.exe
+
       # Buck links the GUI against the host's loader, but the dev shell's
       # NIX_LDFLAGS adds a runpath to the checkout, which the Flatpak runtime
       # does not have.
@@ -273,7 +283,7 @@ jobs:
           flatpak build-init build-dir "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform 24.08
 
           mkdir -p build-dir/files/bin
-          cp dist/wows_toolkit build-dir/files/bin/
+          cp dist/wows_toolkit dist/wgc-relay.exe dist/wgc-placeholder.exe build-dir/files/bin/
           cp -r crates/wt-translations/translations build-dir/files/bin/translations
 
           mkdir -p build-dir/files/share/applications

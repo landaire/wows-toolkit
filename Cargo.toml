@@ -34,6 +34,10 @@ members = [
     "crates/wgc-download",
     "crates/wgc-launch",
     "crates/wgc-auth",
+    "crates/wgc-ipc",
+    "crates/wgc-relay",
+    "crates/wgc-relay-protocol",
+    "crates/wgc-placeholder",
     "crates/wows-battle-world",
     "crates/wows-query",
     "crates/wows-ship-stats",
@@ -86,6 +90,8 @@ wgc-download = { version = "0.1.0", path = "crates/wgc-download", default-featur
 wgc-launch = { version = "0.1.0", path = "crates/wgc-launch", default-features = false }
 wgc-auth = { version = "0.1.0", path = "crates/wgc-auth", default-features = false }
 wows-game-settings = { version = "0.1.0", path = "crates/wows-game-settings" }
+wgc-ipc = { version = "0.1.0", path = "crates/wgc-ipc", default-features = false }
+wgc-relay-protocol = { version = "0.1.0", path = "crates/wgc-relay-protocol", default-features = false }
 steamroom = "0.3"
 steamroom-client = "0.3"
 # Shared UI dependencies

@@ -1,0 +1,9 @@
+[package]
+name = "wgc-relay-protocol"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Link between wgc-relay.exe under Wine and the WoWs Toolkit launcher"
+
+[dependencies]
+thiserror = "2"

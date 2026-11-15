@@ -1,0 +1,19 @@
+[package]
+name = "wgc-ipc"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "WGC Game Center IPC server that signs World of Warships in for the WoWs Toolkit launcher"
+
+[dependencies]
+wgc-auth = { workspace = true }
+wgc-relay-protocol = { workspace = true }
+rand = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tracing = "0.1"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+insta = { workspace = true }

@@ -1,0 +1,22 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+WGC_RELAY_PROTOCOL_DEPS = [
+    "//third-party/rust:thiserror",
+]
+
+workspace_library(
+    name = "wgc-relay-protocol",
+    crate = "wgc_relay_protocol",
+    package = "wgc-relay-protocol",
+    version = "0.1.0",
+    deps = WGC_RELAY_PROTOCOL_DEPS,
+)
+
+workspace_test(
+    name = "wgc_relay_protocol_test",
+    crate = "wgc_relay_protocol",
+    crate_root = "src/lib.rs",
+    package = "wgc-relay-protocol",
+    version = "0.1.0",
+    deps = WGC_RELAY_PROTOCOL_DEPS,
+)

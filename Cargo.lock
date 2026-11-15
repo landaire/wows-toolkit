@@ -15374,6 +15374,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "wgc-ipc"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "rand 0.10.3",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wgc-auth",
+ "wgc-relay-protocol",
+ "zeroize",
+]
+
+[[package]]
 name = "wgc-launch"
 version = "0.1.0"
 dependencies = [
@@ -15385,6 +15400,29 @@ dependencies = [
  "tracing",
  "wgc-core",
  "wgc-install",
+]
+
+[[package]]
+name = "wgc-placeholder"
+version = "0.1.0"
+dependencies = [
+ "winresource",
+]
+
+[[package]]
+name = "wgc-relay"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "wgc-relay-protocol",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "wgc-relay-protocol"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
 ]
 
 [[package]]

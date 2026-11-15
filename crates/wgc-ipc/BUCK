@@ -1,0 +1,28 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library")
+
+WGC_IPC_DEPS = [
+    "//crates/wgc-auth:wgc-auth",
+    "//crates/wgc-relay-protocol:wgc-relay-protocol",
+    "//third-party/rust:rand",
+    "//third-party/rust:tempfile",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+    "//third-party/rust:zeroize",
+]
+
+workspace_library(
+    name = "wgc-ipc",
+    crate = "wgc_ipc",
+    package = "wgc-ipc",
+    version = "0.1.0",
+    deps = WGC_IPC_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wgc-ipc",
+    version = "0.1.0",
+    library = ":wgc-ipc",
+    deps = WGC_IPC_DEPS,
+    test_deps = ["//third-party/rust:insta"],
+)

@@ -1,0 +1,20 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary")
+load("@toolchains//:hermetic_rust.bzl", "windows_cross_compatible_with")
+
+# A Windows executable for the Wine prefix the Linux launcher drives. It is
+# built for x86_64-pc-windows-gnu from whatever platform it is asked for, and
+# only where the Windows cross toolchain exists.
+workspace_binary(
+    name = "wgc_relay_bin",
+    crate = "wgc_relay",
+    package = "wgc-relay",
+    version = "0.1.0",
+    crate_root = "src/main.rs",
+    incoming_transition = "//build-support/buck/windows_cross:transition",
+    target_compatible_with = windows_cross_compatible_with(),
+    deps = [
+        "//crates/wgc-relay-protocol:wgc-relay-protocol",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:windows-sys",
+    ],
+)
