@@ -100,7 +100,7 @@ const PLAY_CSS: &str = zgui::css!(
         height: 12px;
         flex: none;
     }
-    .wt-account-popover {
+    .zui-popover.wt-account-popover {
         width: 400px;
     }"
 );

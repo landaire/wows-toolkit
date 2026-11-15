@@ -514,6 +514,131 @@ fn accounts_cannot_be_switched_while_the_game_runs() {
     assert_eq!(launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().default_account), Some(eu()));
 }
 
+/// Six accounts in every row state, the default one with a nickname far wider than the popover.
+/// Returns the rows' test ids.
+fn crowded(launcher: &mut LauncherWindow) -> Vec<String> {
+    let key = |realm, id| AccountKey { realm, account_id: wgc_auth::AccountId::new(id) };
+    let ready = key(wgc_auth::AccountRealm::Na, 1_034_874_630);
+    let unencrypted = key(wgc_auth::AccountRealm::Asia, 2_051_681_179);
+    let expired = key(wgc_auth::AccountRealm::Eu, 697_769_786);
+    let locked = key(wgc_auth::AccountRealm::Eu, 697_769_787);
+    let memory_only = key(wgc_auth::AccountRealm::Asia, 2_051_681_180);
+    let long = "gapedd_with_a_nickname_far_too_long_for_any_popover_row";
+
+    let settings = launcher.enabled_settings(&[
+        (eu(), long),
+        (ready, "Ishmael"),
+        (unencrypted, "Starbuck"),
+        (expired, "Queequeg"),
+        (locked, "Tashtego"),
+    ]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+    launcher.set_session(eu(), TestSession::SignedIn(long.into()));
+    launcher.set_session(ready, TestSession::SignedIn("Ishmael".into()));
+    launcher.set_session(unencrypted, TestSession::SignedInUnencrypted("Starbuck".into()));
+    launcher.set_session(expired, TestSession::Expired);
+    launcher.set_session(locked, TestSession::KeyringLocked);
+    launcher.model.update_launcher(|launcher| launcher.reset_login(wows_toolkit_launcher::LoginTarget::NewAccount));
+    let session = test_support::session(memory_only, "Flask");
+    launcher.model.apply(test_support::signed_in(session, wows_toolkit_launcher::SessionStorage::MemoryOnly));
+    launcher.settle();
+
+    [("eu", eu()), ("na", ready), ("asia", unencrypted), ("eu", expired), ("eu", locked), ("asia", memory_only)]
+        .into_iter()
+        .map(|(realm, key)| format!("launcher-account-{realm}-{}", key.account_id.get()))
+        .collect()
+}
+
+/// Where every row's status and menu fall outside the popover, as messages.
+fn outside_the_popover(launcher: &LauncherWindow, rows: &[String]) -> Vec<String> {
+    let bounds = |id: &str| {
+        let element = launcher.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        launcher.window.bounds(element).unwrap_or_else(|| panic!("{id} has a box"))
+    };
+    let popover = bounds("launcher-popover");
+
+    rows.iter()
+        .flat_map(|row| [format!("{row}-status"), format!("{row}-actions")])
+        .filter_map(|id| {
+            let part = bounds(&id);
+            let inside = part.size.width.0 > 0.0 && popover.contains_rect(part);
+            (!inside).then(|| format!("{id} at {part:?} is outside the popover at {popover:?}"))
+        })
+        .collect()
+}
+
+#[test]
+fn each_account_row_keeps_its_status_and_menu_inside_the_popover() {
+    let mut launcher = LauncherWindow::open();
+    let rows = crowded(&mut launcher);
+    launcher.press("launcher-play-menu");
+
+    let mut outside = outside_the_popover(&launcher, &rows);
+    // The longest statuses are German, Russian and Polish.
+    let locale = launcher.shell.services().locale;
+    for code in ["de", "ru", "pl"] {
+        locale.choose(crate::i18n::LanguageCode::new(code));
+        launcher.settle();
+        outside.extend(outside_the_popover(&launcher, &rows).into_iter().map(|said| format!("{code}: {said}")));
+    }
+    locale.choose(crate::i18n::LanguageCode::new("en"));
+
+    assert!(outside.is_empty(), "{outside:#?}");
+}
+
+#[test]
+fn the_account_menu_makes_an_account_the_default_and_removes_one() {
+    let mut launcher = ready();
+    launcher.press("launcher-play-menu");
+
+    launcher.press("launcher-account-na-1034874630-actions");
+    launcher.press("launcher-account-na-1034874630-make-default");
+    assert_eq!(launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().default_account), Some(na()));
+
+    launcher.press("launcher-account-eu-697769785-actions");
+    launcher.press("launcher-account-eu-697769785-forget");
+    let saved = launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().accounts.clone());
+    assert_eq!(saved.iter().map(|account| account.key).collect::<Vec<_>>(), [na()]);
+}
+
+#[test]
+fn without_an_install_the_popover_opens_the_setup_on_its_game_step() {
+    let mut launcher = LauncherWindow::open();
+    let mut settings = launcher.enabled_settings(&[]);
+    settings.accounts.clear();
+    launcher.adopt(settings);
+    launcher.model.apply(test_support::installs_found(Vec::new()));
+    launcher.settle();
+    launcher.press("launcher-play-menu");
+    assert!(launcher.has("launcher-install-none"));
+
+    launcher.press("launcher-install-set-up");
+
+    assert!(!launcher.has("launcher-popover"), "the popover closes");
+    assert!(launcher.has("launcher-setup-game"));
+    assert!(launcher.has("launcher-setup-choose-folder"));
+}
+
+#[test]
+fn without_an_install_the_popover_adds_a_folder() {
+    let mut launcher = LauncherWindow::open();
+    let mut settings = launcher.enabled_settings(&[]);
+    settings.accounts.clear();
+    launcher.adopt(settings);
+    launcher.model.apply(test_support::installs_found(Vec::new()));
+    launcher.settle();
+    launcher.press("launcher-play-menu");
+
+    let folder = launcher.install.path().to_path_buf();
+    wows_toolkit_services::dialog::pick_next(folder.clone());
+    launcher.press("launcher-install-add");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    let manual = launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().manual_installs.clone());
+    assert_eq!(manual, [folder]);
+}
+
 #[test]
 fn the_realm_picker_offers_eu_na_and_asia_only() {
     let mut launcher = ready();
@@ -892,5 +1017,43 @@ fn the_launcher_surfaces_render() {
         crate::launcher::opt_in::ask_to_enable(launcher.shell, launcher.model);
         launcher.settle();
         save(&mut launcher, "opt-in", suffix);
+    }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the account popover"]
+fn the_account_popover_renders() {
+    let shots = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots");
+    let save = |launcher: &mut LauncherWindow, name: &str, suffix: &str| {
+        let path = shots.join(format!("launcher-popover-{name}-{suffix}.png"));
+        launcher.window.save_png(&path).expect("the window is drawn");
+        println!("{}", path.display());
+    };
+    for (appearance, suffix) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+        let mut launcher = LauncherWindow::open_drawn(appearance);
+        crowded(&mut launcher);
+        launcher.press("launcher-play-menu");
+        save(&mut launcher, "accounts", suffix);
+
+        launcher.press("launcher-account-na-1034874630-actions");
+        save(&mut launcher, "menu", suffix);
+        launcher.window.press_key(NamedKey::Escape, Modifiers::NONE);
+        launcher.settle();
+
+        let locale = launcher.shell.services().locale;
+        locale.choose(crate::i18n::LanguageCode::new("de"));
+        launcher.settle();
+        save(&mut launcher, "accounts-de", suffix);
+        locale.choose(crate::i18n::LanguageCode::new("en"));
+        drop(launcher);
+
+        let mut launcher = LauncherWindow::open_drawn(appearance);
+        let mut settings = launcher.enabled_settings(&[]);
+        settings.accounts.clear();
+        launcher.adopt(settings);
+        launcher.model.apply(test_support::installs_found(Vec::new()));
+        launcher.settle();
+        launcher.press("launcher-play-menu");
+        save(&mut launcher, "no-install", suffix);
     }
 }
