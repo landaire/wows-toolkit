@@ -30,6 +30,8 @@ pub enum LauncherError {
 pub enum PlayError {
     #[error("the game is already running")]
     GameRunning,
+    #[error("checking whether the game is still running; try again in a moment")]
+    CheckingForGame,
     #[error("this account is not saved")]
     UnknownAccount { key: AccountKey },
     #[error("sign in to this account first")]
@@ -73,6 +75,8 @@ pub enum LaunchFailure {
 pub enum ReplayLaunchError {
     #[error("the game is already running; close it to watch a replay")]
     GameRunning,
+    #[error("checking whether the game is still running; try again in a moment")]
+    CheckingForGame,
     #[error("no install has game build {build}")]
     NoInstallForBuild { build: GameBuild },
     #[error("no game install is set")]

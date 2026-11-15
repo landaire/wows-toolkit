@@ -7,11 +7,15 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::RwLockReadGuard;
 
+use wgc_launch::GameHandle;
+
 use crate::accounts::AccountSession;
 use crate::error::LaunchFailure;
 use crate::error::NativeReplayError;
 use crate::error::PlayError;
 use crate::error::ReplayLaunchError;
+use crate::launcher::Event;
+use crate::launcher::EventSender;
 use crate::launcher::Launcher;
 use crate::launcher::LauncherEnv;
 use crate::play::LaunchPlan;
@@ -106,6 +110,12 @@ impl GameGate {
         true
     }
 
+    /// Marks the game active once any save holding the gate finishes. Blocks meanwhile.
+    fn activate(&self) {
+        let mut state = self.0.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *state = GameActivityState::Active;
+    }
+
     fn stop(&self) {
         // A poisoned lock still holds the state; the panic that poisoned it is reported where it
         // happened.
@@ -158,6 +168,15 @@ pub(crate) enum GameEvent {
     /// WGNI refused the account's session when the client asked for a token1.
     SessionRejected {
         key: AccountKey,
+    },
+    /// A session an earlier toolkit process started is running from `install`.
+    Adopted {
+        launch: LaunchId,
+        install: PathBuf,
+    },
+    /// The scan for a session an earlier toolkit process started found none to follow.
+    NothingAdopted {
+        launch: LaunchId,
     },
     Exited {
         launch: LaunchId,
@@ -214,6 +233,9 @@ impl Launcher {
         env: &LauncherEnv,
         prepare: impl FnOnce(&mut std::process::Command) + Send + 'static,
     ) -> Result<(), PlayError> {
+        if self.adopting {
+            return Err(PlayError::CheckingForGame);
+        }
         if !self.game.is_idle() {
             return Err(PlayError::GameRunning);
         }
@@ -270,6 +292,9 @@ impl Launcher {
         env: &LauncherEnv,
         prepare: impl FnOnce(&mut std::process::Command) + Send + 'static,
     ) -> Result<(), ReplayLaunchError> {
+        if self.adopting {
+            return Err(ReplayLaunchError::CheckingForGame);
+        }
         if !self.game.is_idle() {
             return Err(ReplayLaunchError::GameRunning);
         }
@@ -339,6 +364,20 @@ impl Launcher {
                 }
             }
             GameEvent::SessionRejected { key } => self.expire_session(key),
+            GameEvent::Adopted { launch, install } => {
+                if launch != self.launch || !self.adopting {
+                    return;
+                }
+                self.adopting = false;
+                self.game = GameState::Running { account: None, install };
+            }
+            GameEvent::NothingAdopted { launch } => {
+                if launch != self.launch || !self.adopting {
+                    return;
+                }
+                self.adopting = false;
+                self.gate.stop();
+            }
             GameEvent::Exited { launch, exit } => {
                 if launch != self.launch {
                     return;
@@ -349,6 +388,37 @@ impl Launcher {
                 self.last_exit = Some(exit);
                 // The game may have updated itself; its catalog state is stale.
                 self.catalog.remove(&install);
+            }
+        }
+    }
+
+    /// Looks for a game session an earlier toolkit process left running and follows it to its
+    /// exit, so Play reports the game running instead of failing at launch. Play and game settings
+    /// saves wait for the answer.
+    pub fn start_session_adoption(&mut self, env: &LauncherEnv) {
+        if !self.game.is_idle() || self.adopting {
+            return;
+        }
+
+        let launch = self.next_launch();
+        let sender = self.sender(env);
+        // A save holding the gate now is waited for off the UI thread, before the scan.
+        let closed = self.gate.try_activate();
+        let gate = self.gate.clone();
+        let scanning = crate::play::spawn_detached("game-session-adoption", move || {
+            if !closed {
+                gate.activate();
+            }
+            follow_adopted(launch, &sender);
+        });
+
+        match scanning {
+            Ok(()) => self.adopting = true,
+            Err(err) => {
+                tracing::warn!("could not start looking for a running game session: {err}");
+                if closed {
+                    self.gate.stop();
+                }
             }
         }
     }
@@ -393,7 +463,91 @@ pub fn open_replay_natively(
     Ok(())
 }
 
+/// Reports a running session left by an earlier toolkit process as `launch`, then its exit, or
+/// that there is none to follow.
+fn follow_adopted(launch: LaunchId, sender: &EventSender) {
+    let Some((handle, install)) = adoptable_session() else {
+        sender.send(Event::Game(GameEvent::NothingAdopted { launch }));
+        return;
+    };
+
+    sender.send(Event::Game(GameEvent::Adopted { launch, install: install.clone() }));
+    handle.wait_exit();
+    sender.send(Event::Game(GameEvent::Exited { launch, exit: GameExit { install, status: None } }));
+}
+
+fn adoptable_session() -> Option<(GameHandle, PathBuf)> {
+    let handle = match GameHandle::find_running() {
+        Ok(handle) => handle?,
+        Err(err) => {
+            tracing::warn!("could not look for a running game session: {err}");
+            return None;
+        }
+    };
+    // Game sessions name their install. Prefix setup does not, and is left to the session lock,
+    // which refuses a launch while it runs.
+    let Some(install) = handle.install().map(Path::to_path_buf) else {
+        tracing::warn!("game session {} names no install; not following it", handle.session().as_str());
+        return None;
+    };
+
+    Some((handle, install))
+}
+
 /// Whether the install at `path` keeps `bin/<build>`.
 fn has_build(path: &Path, build: GameBuild) -> bool {
     path.join("bin").join(build.to_string()).is_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_game_settings::GameActivity;
+
+    use super::*;
+    use crate::launcher::test_env;
+
+    fn key() -> AccountKey {
+        AccountKey { realm: wgc_auth::AccountRealm::Eu, account_id: wgc_auth::AccountId::new(697_769_785) }
+    }
+
+    #[test]
+    fn an_adopted_session_blocks_play_until_it_exits() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = test_env(&runtime);
+        let settings = LauncherSettings::default();
+        let install = PathBuf::from("/games/World_of_Warships");
+        let (mut launcher, _events) = Launcher::new();
+        launcher.start_session_adoption(&env);
+        let launch = launcher.launch;
+
+        launcher.apply_game(GameEvent::Adopted { launch, install: install.clone() });
+        assert_eq!(launcher.game_state(), &GameState::Running { account: None, install: install.clone() });
+        assert!(launcher.game_gate().hold_stopped().is_none());
+        let played = launcher.play(key(), None, false, &settings, &env, |_| {});
+        assert!(matches!(played, Err(PlayError::GameRunning)));
+
+        launcher.apply_game(GameEvent::Exited { launch, exit: GameExit { install, status: None } });
+        assert!(launcher.game_state().is_idle());
+        assert!(launcher.game_gate().hold_stopped().is_some());
+    }
+
+    #[test]
+    fn play_and_saves_wait_for_the_running_session_scan() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = test_env(&runtime);
+        let settings = LauncherSettings::default();
+        let (mut launcher, _events) = Launcher::new();
+
+        launcher.start_session_adoption(&env);
+        let launch = launcher.launch;
+        assert!(launcher.game_gate().hold_stopped().is_none());
+        let played = launcher.play(key(), None, false, &settings, &env, |_| {});
+        assert!(matches!(played, Err(PlayError::CheckingForGame)));
+
+        launcher.apply_game(GameEvent::NothingAdopted { launch });
+        assert!(launcher.game_state().is_idle());
+        assert!(launcher.game_gate().hold_stopped().is_some());
+        let played = launcher.play(key(), None, false, &settings, &env, |_| {});
+        assert!(matches!(played, Err(PlayError::UnknownAccount { .. })));
+    }
 }

@@ -168,6 +168,9 @@ pub struct Launcher {
 
     pub(crate) game: GameState,
     pub(crate) gate: GameGate,
+    /// Whether the scan for a session an earlier toolkit process left running is out. The gate
+    /// stays closed meanwhile.
+    pub(crate) adopting: bool,
     pub(crate) launch: LaunchId,
     pub(crate) last_exit: Option<GameExit>,
     pub(crate) launch_failure: Option<LaunchFailure>,
@@ -202,6 +205,7 @@ impl Launcher {
             keyring_probing: false,
             game: GameState::Idle,
             gate: GameGate::new(),
+            adopting: false,
             launch: LaunchId::default(),
             last_exit: None,
             launch_failure: None,

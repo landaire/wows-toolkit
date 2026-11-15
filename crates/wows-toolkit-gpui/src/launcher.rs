@@ -179,6 +179,7 @@ impl LauncherView {
         // them may prompt to unlock the system keyring.
         if enabled {
             self.op(cx, |launcher, settings, env| {
+                launcher.start_session_adoption(env);
                 launcher.start_install_discovery(settings, env);
                 false
             });

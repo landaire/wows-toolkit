@@ -114,8 +114,9 @@ impl LauncherModel {
         self.state.update(|state| state.settings = Some(settings));
     }
 
-    /// Looks for installs and the runner, once, while the launcher is enabled. Sessions wait for
-    /// [`Self::ensure_sessions`], since reading them may prompt to unlock the system keyring.
+    /// Looks for installs and the runner and follows a game session an earlier run left behind,
+    /// once, while the launcher is enabled. Sessions wait for [`Self::ensure_sessions`], since
+    /// reading them may prompt to unlock the system keyring.
     fn start_work(self) {
         if self.working.get_value() || !self.with_untracked(LauncherState::is_enabled) {
             return;
@@ -123,6 +124,7 @@ impl LauncherModel {
         self.working.set_value(true);
 
         self.op(|launcher, settings, env| {
+            launcher.start_session_adoption(env);
             launcher.start_install_discovery(settings, env);
             launcher.start_runner_probe(settings, env);
             launcher.start_available_games_check(env);
