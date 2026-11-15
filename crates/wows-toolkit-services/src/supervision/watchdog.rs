@@ -551,6 +551,19 @@ mod tests {
         }
     }
 
+    /// Waits for `toy` to be told it was given up on. The watchdog publishes the report that
+    /// says so before it makes that call.
+    fn wait_for_give_up(toy: &Toy) {
+        for _ in 0..200 {
+            if toy.gave_up.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(PERIOD);
+        }
+
+        panic!("the worker was not given up on");
+    }
+
     /// A stopped worker is found on a check, its work failed with the panic, and it is started
     /// again after the policy's first delay.
     #[test]
@@ -590,7 +603,7 @@ mod tests {
             shared.with_entry(0, |entry| entry.restart_at = entry.restart_at.map(|_| Instant::now()));
             wait_for(&mut reports, |health| matches!(health, WorkerHealth::Running | WorkerHealth::GaveUp { .. }));
         }
-        assert!(toy.gave_up.load(Ordering::SeqCst), "the worker was given up on");
+        wait_for_give_up(&toy);
 
         watchdog.restart(&WorkerName::new("toy"));
         wait_for(&mut reports, |health| *health == WorkerHealth::Running);
@@ -624,7 +637,7 @@ mod tests {
             std::thread::sleep(PERIOD);
         }
 
-        assert!(toy.gave_up.load(Ordering::SeqCst), "the worker was given up on and its work failed");
+        wait_for_give_up(&toy);
     }
 
     /// A quiet heartbeat is reported as a stall, which clears when it beats again.
