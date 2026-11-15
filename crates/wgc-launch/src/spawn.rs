@@ -11,6 +11,7 @@ use crate::dirs::InstallKey;
 use crate::env::GameEnv;
 use crate::error::SpawnError;
 use crate::host::HostEnv;
+use crate::lock::SessionLock;
 use crate::overlay::FuseMount;
 use crate::overlay::OverlayLayers;
 use crate::overlay::OverlayTools;
@@ -20,6 +21,7 @@ use crate::runner::Runner;
 use crate::session;
 use crate::session::GameProcess;
 use crate::session::SessionId;
+use crate::session::SessionMarker;
 use crate::view::InstallView;
 
 /// WoWs on Steam. Proton and umu select per-game fixes by this id.
@@ -71,6 +73,8 @@ pub fn dos_path(path: &Path) -> OsString {
 }
 
 pub struct LaunchSpec<'a> {
+    /// Held by the session until it ends.
+    pub lock: SessionLock,
     pub runner: &'a ResolvedRunner,
     pub view: &'a InstallView,
     pub program: WindowsProgram,
@@ -81,25 +85,16 @@ pub struct LaunchSpec<'a> {
 /// Starts the program through the runner inside the view. `prepare`
 /// decorates the command last, for process hardening.
 pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result<GameProcess, SpawnError> {
-    // One shared prefix and one game client: a second session would join
-    // the first one's wineserver and see the wrong install.
-    if cfg!(target_os = "linux") {
-        let running = session::running_session_pids().map_err(SpawnError::Scan)?;
-        if !running.is_empty() {
-            return Err(SpawnError::SessionRunning { pids: running });
-        }
-    }
-
     for dir in spec.runner.owned_dirs() {
         std::fs::create_dir_all(&dir).map_err(|source| SpawnError::CreateDir { path: dir, source })?;
     }
 
+    let install_root = match spec.view {
+        InstallView::Direct { root } => root,
+        InstallView::Overlay(overlay) => &overlay.layers().lower,
+    };
     let mut program = spec.program;
     if !matches!(spec.runner.runner(), Runner::Native) {
-        let install_root = match spec.view {
-            InstallView::Direct { root } => root,
-            InstallView::Overlay(overlay) => &overlay.layers().lower,
-        };
         let cache = spec.runner.dirs().install_state(install_root).shader_cache();
         std::fs::create_dir_all(&cache).map_err(|source| SpawnError::CreateDir { path: cache.clone(), source })?;
         program.env.push((SHADER_CACHE_ENV.into(), dos_path(&cache)));
@@ -125,9 +120,9 @@ pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result
             }
         }
     };
+    let marker = SessionMarker { id: session, install: Some(install_root.clone()) };
 
-    let plan =
-        CommandPlan::for_runner(spec.runner, &plan_view, &program, spec.args, &HostEnv::from_env(), Some(&session));
+    let plan = CommandPlan::for_runner(spec.runner, &plan_view, &program, spec.args, &HostEnv::from_env(), &marker);
     tracing::info!("launching {:?} {:?}", plan.program, plan.args);
 
     let mut command = plan.command();
@@ -138,7 +133,7 @@ pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result
     prepare(&mut command);
 
     match command.spawn() {
-        Ok(child) => Ok(GameProcess::new(child, session, mount)),
+        Ok(child) => Ok(GameProcess::new(child, marker, mount, spec.lock)),
         Err(source) => {
             if let Some(mount) = mount
                 && let Err(e) = mount.unmount()
@@ -184,7 +179,7 @@ impl CommandPlan {
         program: &WindowsProgram,
         args: &LaunchArgs,
         host: &HostEnv,
-        session: Option<&SessionId>,
+        session: &SessionMarker,
     ) -> Self {
         let game_root = view.game_root();
         let dirs = runner.dirs();
@@ -244,8 +239,9 @@ impl CommandPlan {
                 argv.push(umu_run.clone().into_os_string());
             }
         }
-        if let Some(session) = session {
-            env.set(session::SESSION_ENV, session.as_str());
+        env.set(session::SESSION_ENV, session.id.as_str());
+        if let Some(install) = &session.install {
+            env.set(session::SESSION_INSTALL_ENV, install);
         }
 
         argv.push(program.exe.clone().into_os_string());
@@ -374,7 +370,7 @@ mod tests {
             &relay(),
             &launch_args(),
             &host_env(),
-            Some(&SessionId::new("wows")),
+            &SessionMarker { id: SessionId::new("wows"), install: Some(layers().lower) },
         );
 
         let mut snap = snapshot(&plan);
@@ -396,8 +392,20 @@ mod tests {
             &relay(),
             &launch_args(),
             &host_env(),
-            Some(&SessionId::new("wows")),
+            &SessionMarker { id: SessionId::new("wows"), install: Some(PathBuf::from("/games/World_of_Warships")) },
         );
+
+        insta::assert_yaml_snapshot!(snapshot(&plan));
+    }
+
+    #[test]
+    fn umu_prefix_setup() {
+        let runner = ResolvedRunner::new(
+            Runner::Umu { umu_run: PathBuf::from("/usr/bin/umu-run"), proton: None },
+            RuntimeDirs::new(Path::new("/data")),
+        );
+        let plan =
+            runner.prefix_setup_plan(&host_env(), &SessionMarker { id: SessionId::new("prefix-setup"), install: None });
 
         insta::assert_yaml_snapshot!(snapshot(&plan));
     }

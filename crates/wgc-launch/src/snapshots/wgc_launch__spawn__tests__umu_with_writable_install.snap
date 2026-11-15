@@ -25,6 +25,7 @@ env:
   WGC_RELAY_ADDR: "127.0.0.1:40000"
   WGC_RELAY_TOKEN: secret
   WINEPREFIX: /data/game-runtime/umu/prefix
+  WOWS_TOOLKIT_GAME_INSTALL: /games/World_of_Warships
   WOWS_TOOLKIT_GAME_SESSION: wows
   XDG_CACHE_HOME: /data/game-runtime/umu/cache
   XDG_RUNTIME_DIR: /run/user/1000

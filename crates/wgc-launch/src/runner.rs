@@ -13,6 +13,13 @@ use crate::host::HostEnv;
 use crate::host::HostSearch;
 use crate::host::ProtonInstall;
 use crate::host::SteamRuntime;
+use crate::lock::SessionLock;
+use crate::session::GameHandle;
+use crate::session::SessionId;
+use crate::session::SessionMarker;
+use crate::spawn::CommandPlan;
+use crate::spawn::PlanView;
+use crate::spawn::WindowsProgram;
 
 /// The persisted runner preference.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,25 +165,14 @@ impl ResolvedRunner {
 
     /// Creates the Wine prefix by running `wineboot -u` through the runner.
     /// Blocking; takes seconds with Steam's Proton and minutes when umu downloads.
-    pub fn initialize_prefix(&self) -> Result<(), PrefixInitError> {
+    /// The lock keeps a session or another setup from using the prefix meanwhile.
+    pub fn initialize_prefix(&self, _lock: &SessionLock) -> Result<(), PrefixInitError> {
         let Some(root) = self.prefix.root() else {
             return Ok(());
         };
 
-        let program = crate::spawn::WindowsProgram {
-            exe: PathBuf::from("wineboot"),
-            args: vec!["-u".into()],
-            env: Vec::new(),
-            shared_dirs: Vec::new(),
-        };
-        let plan = crate::spawn::CommandPlan::for_runner(
-            self,
-            &crate::spawn::PlanView::Direct { root: self.dirs.root().to_path_buf() },
-            &program,
-            &crate::LaunchArgs::default(),
-            &HostEnv::from_env(),
-            None,
-        );
+        let marker = SessionMarker { id: SessionId::new("prefix-setup"), install: None };
+        let plan = self.prefix_setup_plan(&HostEnv::from_env(), &marker);
 
         for dir in self.owned_dirs() {
             std::fs::create_dir_all(&dir).map_err(|source| PrefixInitError::CreateDir { path: dir, source })?;
@@ -187,6 +183,8 @@ impl ResolvedRunner {
         let status = command
             .status()
             .map_err(|source| PrefixInitError::Spawn { program: plan.program().to_path_buf(), source })?;
+        // wineserver outlives wineboot. A game started meanwhile would join it under the setup marker.
+        GameHandle::from_marker(marker, None).wait_exit();
         if !status.success() {
             return Err(PrefixInitError::Failed { status });
         }
@@ -195,6 +193,26 @@ impl ResolvedRunner {
         }
 
         Ok(())
+    }
+
+    /// `wineboot -u` through the runner. `marker` lets a later toolkit process see setup's Wine
+    /// processes after this one exits.
+    pub(crate) fn prefix_setup_plan(&self, host: &HostEnv, marker: &SessionMarker) -> CommandPlan {
+        let program = WindowsProgram {
+            exe: PathBuf::from("wineboot"),
+            args: vec!["-u".into()],
+            env: Vec::new(),
+            shared_dirs: Vec::new(),
+        };
+
+        CommandPlan::for_runner(
+            self,
+            &PlanView::Direct { root: self.dirs.root().to_path_buf() },
+            &program,
+            &crate::LaunchArgs::default(),
+            host,
+            marker,
+        )
     }
 
     /// Directories the runner requires to exist before it starts.

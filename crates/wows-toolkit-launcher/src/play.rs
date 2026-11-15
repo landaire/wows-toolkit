@@ -20,6 +20,7 @@ use wgc_launch::LaunchSpec;
 use wgc_launch::ResolvedRunner;
 use wgc_launch::RunnerChoice;
 use wgc_launch::RuntimeDirs;
+use wgc_launch::SessionLock;
 use wgc_launch::WindowsProgram;
 
 use crate::error::LaunchFailure;
@@ -57,8 +58,10 @@ pub(crate) struct SignIn {
     pub(crate) credentials: wgc_auth::CredentialStore,
 }
 
-/// The runner, view and prefix work, which blocks for seconds on a first launch.
+/// The runner, view and prefix work, which blocks for seconds on a first launch, done under the
+/// session lock that the spawned session keeps.
 struct Prepared {
+    lock: SessionLock,
     runner: ResolvedRunner,
     view: InstallView,
     /// The relay's copy inside the prefix, for a sign-in.
@@ -126,7 +129,7 @@ async fn start(
     let LaunchPlan { launch, runner, dirs, install, args, program } = plan;
 
     let signs_in = matches!(program, Program::SignIn(_));
-    let Prepared { runner, view, relay_exe } =
+    let Prepared { lock, runner, view, relay_exe } =
         tokio::task::spawn_blocking(move || prepare_launch(&runner, &dirs, &install, signs_in)).await??;
 
     let (program, serving) = match program {
@@ -155,7 +158,7 @@ async fn start(
     };
 
     let spawned = tokio::task::spawn_blocking(move || {
-        wgc_launch::spawn(LaunchSpec { runner: &runner, view: &view, program, args: &args }, prepare)
+        wgc_launch::spawn(LaunchSpec { lock, runner: &runner, view: &view, program, args: &args }, prepare)
     })
     .await;
     let spawned = match spawned {
@@ -180,9 +183,11 @@ fn prepare_launch(
     install: &Path,
     signs_in: bool,
 ) -> Result<Prepared, LaunchFailure> {
+    let lock = SessionLock::acquire(dirs)?;
+
     let runner = wgc_launch::Runner::detect(choice, dirs)?;
     if runner.first_run_work().prefix_creation {
-        runner.initialize_prefix()?;
+        runner.initialize_prefix(&lock)?;
     }
 
     let view = InstallView::prepare(install, dirs)?;
@@ -195,7 +200,7 @@ fn prepare_launch(
         None
     };
 
-    Ok(Prepared { runner, view, relay_exe })
+    Ok(Prepared { lock, runner, view, relay_exe })
 }
 
 fn account_responder(

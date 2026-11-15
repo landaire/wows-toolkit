@@ -39,5 +39,6 @@ env:
   WAYLAND_DISPLAY: wayland-1
   WGC_RELAY_ADDR: "127.0.0.1:40000"
   WGC_RELAY_TOKEN: secret
+  WOWS_TOOLKIT_GAME_INSTALL: /mnt/games/World_of_Warships
   WOWS_TOOLKIT_GAME_SESSION: wows
   XDG_RUNTIME_DIR: /run/user/1000

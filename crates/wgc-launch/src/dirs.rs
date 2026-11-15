@@ -40,6 +40,11 @@ impl RuntimeDirs {
         self.root.join("umu").join("cache")
     }
 
+    /// Locked by the toolkit process that prepares the prefix and an overlay and runs a session.
+    pub fn session_lock(&self) -> PathBuf {
+        self.root.join("session.lock")
+    }
+
     /// Per-install overlay state for the install at `canonical_root`.
     pub fn install_state(&self, canonical_root: &Path) -> InstallStateDir {
         let key = InstallKey::from_canonical_root(canonical_root);

@@ -45,6 +45,7 @@ use wgc_launch::LaunchSpec;
 use wgc_launch::Runner;
 use wgc_launch::RunnerChoice;
 use wgc_launch::RuntimeDirs;
+use wgc_launch::SessionLock;
 use wgc_launch::WindowsProgram;
 use wows_game_settings::GameSettingsStore;
 use wows_game_settings::SettingsFiles;
@@ -115,6 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tracking_id = TrackingId::parse(&args.tracking_id)?;
 
     let dirs = RuntimeDirs::new(&args.data);
+    let lock = SessionLock::acquire(&dirs)?;
     let choice = match args.runner {
         RunnerArg::Auto => RunnerChoice::Auto,
         RunnerArg::Umu => RunnerChoice::Umu { umu_run: None, proton_dir: None },
@@ -123,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(runner = ?runner.runner(), first_run = ?runner.first_run_work(), "runner resolved");
     if !runner.prefix().is_initialized() {
         let started = Instant::now();
-        runner.initialize_prefix()?;
+        runner.initialize_prefix(&lock)?;
         info!(elapsed = ?started.elapsed(), "prefix initialized");
     }
 
@@ -154,7 +156,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         launch_args.env.push(("PROTON_LOG".into(), "1".into()));
         launch_args.env.push(("PROTON_LOG_DIR".into(), dir.display().to_string()));
     }
-    let process = wgc_launch::spawn(LaunchSpec { runner: &runner, view: &view, program, args: &launch_args }, |_| {})?;
+    let spec = LaunchSpec { lock, runner: &runner, view: &view, program, args: &launch_args };
+    let process = wgc_launch::spawn(spec, |_| {})?;
     let handle = process.handle();
     info!(runner_pid = ?handle.runner_pid(), "game started");
 

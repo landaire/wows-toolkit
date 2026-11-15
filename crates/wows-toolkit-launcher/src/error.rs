@@ -48,6 +48,8 @@ pub enum PlayError {
 /// returned, once the background work fails.
 #[derive(Debug, Error)]
 pub enum LaunchFailure {
+    #[error("could not start the game: {0}")]
+    Lock(#[from] wgc_launch::SessionLockError),
     #[error(transparent)]
     Runner(#[from] wgc_launch::RunnerError),
     #[error("could not create the Wine prefix: {0}")]

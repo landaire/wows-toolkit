@@ -1,0 +1,25 @@
+---
+source: crates/wgc-launch/src/spawn.rs
+expression: snapshot(&plan)
+---
+argv:
+  - /usr/bin/umu-run
+  - wineboot
+  - "-u"
+cwd: /data/game-runtime
+env:
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+  DISPLAY: ":0"
+  GAMEID: umu-552990
+  HOME: /home/u
+  LC_TIME: en_GB.UTF-8
+  PATH: "/home/u/.local/bin:/usr/bin"
+  PRESSURE_VESSEL_FILESYSTEMS_RW: /data/game-runtime
+  STEAM_COMPAT_INSTALL_PATH: /data/game-runtime
+  UMU_FOLDERS_PATH: /data/game-runtime/umu/folders
+  USER: u
+  WAYLAND_DISPLAY: wayland-1
+  WINEPREFIX: /data/game-runtime/umu/prefix
+  WOWS_TOOLKIT_GAME_SESSION: prefix-setup
+  XDG_CACHE_HOME: /data/game-runtime/umu/cache
+  XDG_RUNTIME_DIR: /run/user/1000

@@ -313,7 +313,11 @@ pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
         }
         LaunchFailure::View(_) => shell.settings_drawer.open_at(Setting::GameInstalls),
         // Nothing in the settings changes these.
-        LaunchFailure::RelayPrefix(_) | LaunchFailure::Relay(_) | LaunchFailure::Spawn(_) | LaunchFailure::Task(_) => {}
+        LaunchFailure::Lock(_)
+        | LaunchFailure::RelayPrefix(_)
+        | LaunchFailure::Relay(_)
+        | LaunchFailure::Spawn(_)
+        | LaunchFailure::Task(_) => {}
     }
 }
 

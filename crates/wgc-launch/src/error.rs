@@ -87,11 +87,35 @@ pub enum MountError {
 }
 
 #[derive(Debug, Error)]
-pub enum SpawnError {
+pub enum SessionLockError {
+    #[error("another toolkit process is starting or running the game")]
+    Held { path: PathBuf },
     #[error("a game session is already running")]
     SessionRunning { pids: Vec<ProcessId> },
     #[error("could not list running processes")]
     Scan(#[source] std::io::Error),
+    #[error("could not create {path}")]
+    CreateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not open {path}")]
+    Open {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not lock {path}")]
+    Lock {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum SpawnError {
     #[error(transparent)]
     Mount(#[from] MountError),
     #[error("could not create {path}")]
@@ -113,8 +137,6 @@ pub enum SpawnError {
 pub enum WaitError {
     #[error("could not wait for the runner")]
     Runner(#[source] std::io::Error),
-    #[error("could not list running processes")]
-    Scan(#[source] std::io::Error),
     #[error("could not unmount the game overlay")]
     Unmount(#[source] MountError),
 }
@@ -123,6 +145,12 @@ pub enum WaitError {
 pub enum KillError {
     #[error("could not list running processes")]
     Scan(#[source] std::io::Error),
+    #[error("could not kill game process {pid:?}")]
+    Signal {
+        pid: ProcessId,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("game processes survived the kill: {pids:?}")]
     Survivors { pids: Vec<ProcessId> },
 }
