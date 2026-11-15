@@ -158,9 +158,9 @@ pub fn export_settings_of(saved: &SavedRenderOptions) -> ExportSettings {
     }
 }
 
-/// The file name a save dialog suggests for a replay titled `title`.
-pub fn suggested_name(title: &str) -> String {
-    format!("{title}.mp4")
+/// The file name a save dialog suggests for a track whose video is called `video_stem`.
+pub fn suggested_name(video_stem: &str) -> String {
+    format!("{video_stem}.mp4")
 }
 
 /// The frames an export of `track` writes.
@@ -308,11 +308,6 @@ pub fn batch_export(
     for (index, path) in paths.into_iter().enumerate() {
         let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
         report(BatchStep { done: index, total, replay: named });
-        let Some(stem) = path.file_stem() else {
-            outcome.failed.push(path);
-            continue;
-        };
-        let output = out_dir.join(stem).with_extension("mp4");
 
         let (track, renderer) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
             Ok(baked) => baked,
@@ -322,6 +317,7 @@ pub fn batch_export(
                 continue;
             }
         };
+        let output = out_dir.join(suggested_name(&track.video_stem));
 
         // The bake holds every layer it could; which of them are drawn is
         // what the saved defaults decide, as they do in a viewport.

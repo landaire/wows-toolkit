@@ -472,6 +472,7 @@ impl ReplayRendererPanel {
             space_size: 1400.0,
             version: wowsunpack::data::Version::base(99, 0, 0),
             space: String::new(),
+            video_stem: String::new(),
             map_origin: DEFAULT_MAP_ORIGIN,
         };
         Self::build(

@@ -1393,7 +1393,6 @@ pub use video_export::batch_render_to_clipboard;
 pub use video_export::batch_render_to_folder;
 use video_export::execute_video_export;
 pub use video_export::replay_render_input;
-pub use video_export::video_file_stem;
 
 mod shapes;
 use shapes::*;

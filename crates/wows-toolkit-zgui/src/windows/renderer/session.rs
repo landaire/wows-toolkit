@@ -1340,13 +1340,11 @@ impl RendererSession {
             self.playback.update(Playback::stop);
             return;
         };
-        let Some((title, services, cancel)) =
-            self.run.try_with_value(|run| (run.title.clone(), run.services, Arc::clone(&run.cancel)))
-        else {
+        let Some((services, cancel)) = self.run.try_with_value(|run| (run.services, Arc::clone(&run.cancel))) else {
             return;
         };
         let duration = export_duration(frames.len());
-        let suggested = suggested_name(&title);
+        let suggested = suggested_name(&track.video_stem);
         let total = frames.len() as u64;
 
         self.run.update_value(|run| run.ticker = None);

@@ -70,6 +70,8 @@ pub struct Track {
     pub map_origin: (f32, f32),
     /// The map's space name, which a peer watching this playback loads art by.
     pub space: String,
+    /// What an exported video of this battle is called, without its extension.
+    pub video_stem: String,
 }
 
 impl Track {
@@ -191,6 +193,7 @@ pub fn bake(
         version: baked.version,
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
         space: baked.map_name,
+        video_stem: baked.video_stem,
     };
 
     Ok((track, baked.renderer))

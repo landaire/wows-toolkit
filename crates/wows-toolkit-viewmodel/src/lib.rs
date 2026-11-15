@@ -57,3 +57,4 @@ pub mod twitch;
 pub mod unpacker;
 pub mod update;
 pub mod upload;
+pub mod video_name;

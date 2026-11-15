@@ -3631,7 +3631,7 @@ impl ToolkitTabViewer<'_> {
                         .as_ref()
                         .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()));
                     let replay_name = if let Some(stem) = &source_stem { format!("{} - {}", base, stem) } else { base };
-                    let video_file_stem = crate::replay::renderer::video_file_stem(
+                    let video_file_stem = wows_toolkit_viewmodel::video_name::video_file_stem(
                         &replay_file.replay_file.meta,
                         &translated_map,
                         source_stem.as_deref(),
